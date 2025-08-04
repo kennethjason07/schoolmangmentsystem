@@ -1,0 +1,118 @@
+-- Teachers List (admin dashboard, teachers screen/card)
+SELECT id, name, qualification, age, salary_type, salary_amount, address, is_class_teacher, assigned_class_id
+FROM teachers
+ORDER BY name;
+
+-- Teacher Details (admin dashboard, teacher details screen/card)
+SELECT id, name, qualification, age, salary_type, salary_amount, address, is_class_teacher, assigned_class_id
+FROM teachers
+WHERE id = :teacher_id;
+
+-- Teacher Subjects and Classes (admin dashboard, teacher details subjects/classes card)
+SELECT ts.teacher_id, s.name AS subject_name, c.class_name
+FROM teacher_subjects ts
+JOIN subjects s ON ts.subject_id = s.id
+JOIN classes c ON s.class_id = c.id
+WHERE ts.teacher_id = :teacher_id;
+
+-- Teacher Attendance (admin dashboard, teacher details attendance card)
+SELECT date, status
+FROM teacher_attendance
+WHERE teacher_id = :teacher_id
+ORDER BY date DESC;
+
+-- Students List (admin dashboard, students screen/card)
+SELECT id, admission_no, name, dob, gender, class_id, parent_id
+FROM students
+ORDER BY name;
+
+-- Student Details (admin dashboard, student details screen/card)
+SELECT *
+FROM students
+WHERE id = :student_id;
+
+-- Student Attendance (admin dashboard, student details attendance card)
+SELECT date, status
+FROM student_attendance
+WHERE student_id = :student_id
+ORDER BY date DESC;
+
+-- Student Marks (admin dashboard, student details marks card)
+SELECT m.*, e.name AS exam_name, s.name AS subject_name
+FROM marks m
+JOIN exams e ON m.exam_id = e.id
+JOIN subjects s ON m.subject_id = s.id
+WHERE m.student_id = :student_id
+ORDER BY e.start_date DESC;
+
+-- Student Fees (admin dashboard, student details fees card)
+SELECT *
+FROM student_fees
+WHERE student_id = :student_id
+ORDER BY payment_date DESC;
+
+-- Classes List (admin dashboard, classes screen/card)
+SELECT id, class_name, section, academic_year, class_teacher_id
+FROM classes
+ORDER BY class_name, section;
+
+-- Students in Class (admin dashboard, class details students card)
+SELECT id, name, admission_no, roll_no
+FROM students
+WHERE class_id = :class_id
+ORDER BY roll_no;
+
+-- Subjects in Class (admin dashboard, class details subjects card)
+SELECT id, name, is_optional
+FROM subjects
+WHERE class_id = :class_id
+ORDER BY name;
+
+-- Assignments for Class (admin dashboard, assignments screen/card)
+SELECT a.*, s.name AS subject_name
+FROM assignments a
+JOIN subjects s ON a.subject_id = s.id
+WHERE a.class_id = :class_id
+ORDER BY due_date DESC;
+
+-- Exams for Class (admin dashboard, exams screen/card)
+SELECT *
+FROM exams
+WHERE class_id = :class_id
+ORDER BY start_date DESC;
+
+-- Fee Structure for Class (admin dashboard, fees screen/card)
+SELECT *
+FROM fee_structure
+WHERE class_id = :class_id
+ORDER BY fee_component;
+
+-- Notifications (admin dashboard, notifications screen/card)
+SELECT *
+FROM notifications
+ORDER BY sent_at DESC;
+
+-- Messages (admin dashboard, messages screen/card)
+SELECT *
+FROM messages
+ORDER BY sent_at DESC;
+
+-- Timetable for Class (admin dashboard, timetable screen/card)
+SELECT te.*, s.name AS subject_name, t.name AS teacher_name
+FROM timetable_entries te
+JOIN subjects s ON te.subject_id = s.id
+JOIN teachers t ON te.teacher_id = t.id
+WHERE te.class_id = :class_id
+ORDER BY day_of_week, period_number;
+
+-- Users List (admin dashboard, users management screen)
+SELECT id, email, role_id, full_name, phone
+FROM users
+ORDER BY full_name;
+
+-- Roles List (admin dashboard, dropdowns/role management)
+SELECT id, role_name
+FROM roles
+ORDER BY role_name;
+
+-- Add more queries as needed for additional features/cards.

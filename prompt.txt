@@ -1,0 +1,112 @@
+Certainly! Here's a comprehensive list of screen/page prompts for each feature in your School Management System, designed to help you (or your developers or AI UI tools like Figma/GPT-4o) build the full user interface, categorized by role.
+
+🎓 School Management System – Page Prompts (by Role)
+
+🧑‍💼 Admin Portal
+
+1. Dashboard
+   Prompt: Design an admin dashboard showing total students, total teachers, attendance summary (today), fee summary (paid/unpaid), and top performers chart.
+
+2. Manage Classes
+   Prompt: Create a class management page where admin can create, edit, or delete classes with academic year, section, and assigned class teacher.
+
+3. Manage Students
+   Prompt: Build a student management page to view, add, update, or promote students, assign roll numbers per class, and link parent accounts.
+
+4. Manage Teachers
+   Prompt: Design a teacher management interface where admin can create/edit teacher profiles, assign subjects and class-teacher roles, and view attendance/salary.
+
+5. Subjects & Timetable
+   Prompt: Create a page to assign subjects to each class and teacher, and manage a weekly timetable (day-wise, period-wise) for each class.
+
+6. Exams & Marks Entry
+   Prompt: Create an exam and marks entry portal where admin/teacher can schedule exams, enter subject-wise marks for students, and view result summary.
+
+7. Attendance Management
+   Prompt: Design a page where admin or teachers can mark attendance (student or teacher), view daily/monthly reports, and send absentee notifications.
+
+8. Fee Management
+   Prompt: Create a fee management screen to define fee structure by class/year and track payments by student with filters (paid/unpaid).
+
+9. Analytics & Reports
+   Prompt: Design a reporting dashboard showing graphs for attendance %, fee collection, top performers, exam result trends, and student grade distribution.
+
+10. Notification Management
+    Prompt: Create a screen to send custom notifications (absentee, exam, general) to parents/students via in-app, WhatsApp, or SMS.
+
+👩‍🏫 Teacher Portal
+
+1. Teacher Dashboard
+   Prompt: Design a dashboard for teachers showing today’s timetable, their assigned classes/subjects, attendance status, and pending homework review.
+
+2. Take Attendance
+   Prompt: Create a responsive UI for teachers to select a class and date, mark present/absent for each student with quick mark-all options.
+
+3. Marks Entry
+   Prompt: Design a form to enter marks for students per subject & exam, auto-calculate grade, and validate maximum marks.
+
+4. Upload Homework/Assignment
+   Prompt: Build a form to assign homework with file upload, due date, and select class & subject.
+
+5. View Student Info
+   Prompt: Show a student list with filters by class/roll number and a profile page with photo, attendance %, marks summary, and fee status.
+
+👨‍👩‍👧 Parent Portal
+
+1. Parent Dashboard
+   Prompt: Design a parent dashboard showing their child’s attendance %, fee due status, upcoming exams, notifications, and latest messages.
+
+2. View Report Card
+   Prompt: Create a page where parents can select an exam and view subject-wise marks, grade, and teacher remarks.
+
+3. Attendance Summary
+   Prompt: Show a monthly calendar view of child’s attendance with stats like total present/absent and percentage.
+
+4. Fee Payment
+   Prompt: Display a fee breakdown for the academic year, total paid, total due, and link to pay online or confirm payment.
+
+5. Notifications
+   Prompt: Show a timeline/list of notifications received from the school with category (Exam, Absentee, Announcement).
+
+6. Chat with Teacher
+   Prompt: Build a chat interface for parent to send/receive messages with assigned class teacher or subject teachers.
+
+🎓 Student Portal
+
+1. Student Dashboard
+   Prompt: Design a dashboard showing today’s schedule, upcoming homework, attendance summary, recent marks, and messages.
+
+2. View Assignments
+   Prompt: List of homework/assignments by subject, with due dates and file download links.
+
+3. Attendance & Marks
+   Prompt: Display personal attendance graph and subject-wise marks for each exam with grade chart.
+
+4. Notifications
+   Prompt: List all in-app notifications (exam alerts, absentee notes, homework reminders).
+
+5. Chat with Teacher
+   Prompt: Enable 1:1 secure chat interface with subject teachers or class teacher.
+
+📱 Universal
+
+1. Login Page
+   Prompt: Design a role-based login page for Admin, Teacher, Student, and Parent with email/password and forgot-password flow.
+
+2. Forgot Password / Reset
+   Prompt: Simple reset flow with email verification and new password input.
+
+3. Profile Page
+   Prompt: Editable user profile with photo upload, name, contact, and linked user (for parents/students).
+
+4. Settings
+   Prompt: Notification preferences (email, SMS, WhatsApp), language settings, and theme (dark/light).
+
+Would you like:
+
+* These exported as a .docx or .txt file?
+* UI mockups (Figma-style) generated for specific pages?
+* These turned into a user story set or task list for developers?
+* Ready-to-use frontend code (HTML/React)?
+
+Let me know how you want to proceed!

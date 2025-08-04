@@ -1,0 +1,101 @@
+16. Add view report card screen for parents
+- View/download child's report card for each exam/term
+- Show subject-wise marks, grades, and teacher comments
+- Display overall performance summary and rank
+- Option to print or export report card (PDF)
+- Show previous years' report cards
+- Responsive and user-friendly UI for report card viewing
+
+17. Add attendance summary screen for parents
+- Show child's attendance record (calendar and summary view)
+- Filter attendance by month, term, or subject
+- Show days present, absent, late, and excused
+- Display attendance percentage and trends
+- Option to download or print attendance summary
+- Responsive and user-friendly UI for attendance summary
+
+18. Add fee payment screen for parents
+- View fee structure and payment status for the child
+- Show outstanding dues and payment history
+- Option to pay fees online (integrate payment gateway)
+- Download fee receipts and invoices
+- Show fee reminders and due dates
+- Responsive and user-friendly UI for fee payment
+
+19. Add notifications screen for parents
+- List all notifications sent to the parent
+- Filter and search notifications by date, type, or sender
+- Mark notifications as read/unread
+- Show notification details in a modal or separate screen
+- Responsive and user-friendly UI for notifications
+
+20. Add chat with teacher screen for parents
+- List all teachers assigned to the child
+- Start new chat or continue existing conversation with a teacher
+- Send and receive messages (text, images, files)
+- Show chat history and timestamps
+- Notifications for new messages
+- Responsive and user-friendly chat UI
+
+21. Create student dashboard
+- Show summary of assignments, attendance, marks, and notifications
+- Display upcoming deadlines and events
+- Quick links to view assignments, attendance, marks, and chat
+- Show recent notifications and messages
+- Responsive and user-friendly UI for student dashboard
+
+22. Add view assignments screen for students
+- List all assignments/homework for each subject
+- Show assignment details (title, description, due date, files)
+- Mark assignments as submitted/completed
+- Upload assignment files (PDF, images, documents)
+- Show submission status and feedback from teachers
+- Responsive and user-friendly UI for assignments
+
+23. Add attendance and marks screen for students
+- Show student's attendance record (calendar and summary view)
+- Display marks for each subject and exam
+- Show performance trends and analytics
+- Option to download or print attendance/marks summary
+- Responsive and user-friendly UI for attendance and marks
+
+24. Add notifications screen for students
+- List all notifications sent to the student
+- Filter and search notifications by date, type, or sender
+- Mark notifications as read/unread
+- Show notification details in a modal or separate screen
+- Responsive and user-friendly UI for notifications
+
+25. Add chat with teacher screen for students
+- List all teachers assigned to the student
+- Start new chat or continue existing conversation with a teacher
+- Send and receive messages (text, images, files)
+- Show chat history and timestamps
+- Notifications for new messages
+- Responsive and user-friendly chat UI
+
+26. Add profile screen
+- View and edit user profile (name, email, photo, contact info)
+- Change password and update security settings
+- Show linked accounts (parent/student/teacher)
+- Responsive and user-friendly UI for profile management
+
+27. Add settings screen
+- Manage app settings (theme, notifications, language)
+- Set notification preferences for different events
+- Option to log out or delete account
+- Responsive and user-friendly UI for settings
+
+28. Add settings screen
+- (Duplicate of 27, consider removing or merging)
+
+29. Add assign task to teacher screen
+- Admin can create and assign tasks to teachers
+- Select teacher(s) from a list or search
+- Enter task details (title, description, due date, priority)
+- Set task status (pending, in progress, completed)
+- View all assigned tasks and their statuses
+- Edit or delete assigned tasks
+- Notify teachers when a new task is assigned or updated
+- Filter and search tasks by teacher, status, or date
+- Responsive and user-friendly UI for task assignment 

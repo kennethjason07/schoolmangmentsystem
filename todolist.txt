@@ -1,0 +1,219 @@
+Task Assignments:
+1. Hanok - Create admin dashboard (feature/admin-dashboard) (completed: 2024-06-12)
+   - Display key statistics (students, teachers, classes, fees, etc.)
+   - Show recent activity or notifications
+   - Add quick links to manage classes, students, teachers, subjects
+   - Display upcoming events, exams, or deadlines
+   - Show fee collection summary and outstanding dues
+   - Add analytics charts (attendance trends, marks distribution, etc.)
+   - Provide access to reports (attendance, marks, fees, etc.)
+   - Add section for admin messages or announcements
+   - Implement responsive and user-friendly layout
+   - Add navigation to other admin features/screens
+2. Hanok - Add manage teachers screen (feature/manage-teachers) (completed: 2024-06-12)
+   - List all teachers with details (name, subjects, classes, contact info)
+   - Add a new teacher (form for name, subjects, classes, contact info)
+   - Edit teacher details (update name, subjects, classes, contact info)
+   - Delete a teacher
+   - Assign or change subjects/classes for a teacher
+   - View teacher's schedule
+   - Search and filter teachers
+   - Responsive and user-friendly UI for teacher management
+4. Hanok - Add attendance management screen (feature/attendance-management) (due: 2024-06-12)
+   - View attendance records for students and teachers
+   - Mark daily attendance for students
+   - Mark daily attendance for teachers
+   - Edit or update attendance records
+   - Filter attendance by date, class, section, or teacher
+   - Show attendance statistics and trends
+   - Export attendance data (CSV/Excel)
+   - Responsive and user-friendly UI for attendance management
+
+2. Abhishek - Add manage classes screen (feature/manage-classes) (completed: 2024-06-12)
+   - List all classes with details (name, section, assigned teacher, etc.)
+   - Add a new class (form for class name, section, assign teacher)
+   - Edit class details (update name, section, teacher)
+   - Delete a class
+   - Assign or change class teacher
+   - View students in a class
+   - Move students between classes/sections
+   - Search and filter classes
+   - Display number of students per class
+   - Responsive and user-friendly UI for class management
+3. Abhishek - Add subjects and timetable screen (feature/subjects-timetable) (completed: 2024-06-12)
+   - List all subjects with details (name, code, assigned teacher, etc.)
+   - Add a new subject (form for name, code, assign teacher)
+   - Edit subject details (update name, code, teacher)
+   - Delete a subject
+   - Create and edit class timetables
+   - Assign subjects to classes/sections
+   - View and edit timetable for each class/section
+   - Responsive and user-friendly UI for timetable management
+4. Abhishek - Add fee management screen (feature/fee-management) (completed: 2024-06-12)
+   - View fee structure for all classes
+   - Add or edit fee structure for a class
+   - View student fee payment status
+   - Record fee payments
+   - View outstanding dues and payment history
+   - Generate fee reports
+   - Send fee reminders/notifications
+   - Export fee data (CSV/Excel)
+   - Responsive and user-friendly UI for fee management
+
+3. Arsahd - Add manage students screen (feature/manage-students) (completed: 2024-06-12)
+   - List all students with details (name, class, section, parent info, etc.)
+   - Add a new student (form for name, class, section, parent, contact info)
+   - Edit student details (update name, class, section, parent, etc.)
+   - Delete a student
+   - Assign or change class/section for a student
+   - View detailed student profile (attendance, marks, fees, etc.)
+   - Search and filter students by name, class, section, etc.
+   - Import/export student data (CSV or Excel)
+   - Link student to parent account
+   - Responsive and user-friendly UI for student management
+4. Arsahd - Add exams and marks screen (feature/exams-marks) (completed: 2024-06-12)
+   - List all exams with details (name, date, class, subjects, etc.)
+   - Add a new exam (form for name, date, class, subjects)
+   - Edit exam details (update name, date, class, subjects)
+   - Delete an exam
+   - Enter and view marks for students
+   - Generate and view report cards
+   - Search and filter exams/marks
+   - Responsive and user-friendly UI for exams and marks management
+
+5. Abhishek - Add notification management screen (feature/notification-management) (completed: 2024-06-12)
+   - View all notifications sent to users (list with date, type, recipient, status)
+   - Create and send new notifications to specific roles (admin, teacher, parent, student) or individual users
+   - Support notification types: general, urgent, fee reminder, event, homework, attendance, etc.
+   - Edit or delete existing notifications
+   - Schedule notifications for future dates/times
+   - Filter and search notifications by date, type, recipient, or status
+   - Mark notifications as read/unread and show read status
+   - UI for selecting users/roles (dropdown, multi-select, etc.)
+   - Responsive and user-friendly UI for notification management
+   - Integrate with other modules (e.g., send notification after fee update, attendance, homework upload)
+   - Show notification details in a modal or separate screen
+   - Option to resend or duplicate notifications
+
+5. Arsahd - Create teacher dashboard (feature/teacher-dashboard) (completed: 2024-06-12)
+   - Display teacher's schedule and upcoming classes
+   - Show summary of assigned subjects and classes
+   - List pending tasks (attendance, marks entry, homework upload)
+   - Show recent notifications and messages
+   - Quick links to mark attendance, enter marks, upload homework
+   - View and manage assigned students
+   - Show analytics (attendance rates, marks distribution, etc.)
+   - Responsive and user-friendly UI for teacher dashboard
+
+6. Hanok - Add take attendance screen for teachers (feature/teacher-attendance) (due: 2024-06-12)
+   - List all classes/sections assigned to the teacher
+   - Select class/section to mark attendance
+   - Display list of students for selected class/section
+   - Mark each student as present/absent/late
+   - Mark all as present/absent with one click
+   - Save and update attendance records
+   - View attendance history for each class/section
+   - Filter attendance by date
+   - Show confirmation and error messages for actions
+   - Responsive and user-friendly UI for attendance marking
+   - Integrate with notifications (send notification to parents for absentees)
+   - Export attendance data (CSV/Excel)
+   - Show summary statistics (attendance rate, absentees, etc.)
+
+6. Arsahd - Add marks entry screen for teachers (feature/teacher-marks-entry) (completed: 2024-06-12)
+   - List all classes/subjects assigned to the teacher
+   - Select class/subject to enter marks
+   - Display list of students for selected class/subject
+   - Enter marks for each student (with validation)
+   - Save and update marks records
+   - View and edit previously entered marks
+   - Filter marks by exam, subject, or date
+   - Show confirmation and error messages for actions
+   - Responsive and user-friendly UI for marks entry
+   - Export marks data (CSV/Excel)
+   - Show summary statistics (average, highest, lowest marks)
+
+7. Hanok - Add upload homework screen for teachers (feature/teacher-homework-upload) (completed: 2025-07-19)
+   - List all classes/subjects assigned to the teacher
+   - Select class/subject to upload homework
+   - Enter homework details (title, description, due date, instructions)
+   - Upload files (PDF, images, documents)
+   - Assign homework to specific students or entire class
+   - Set submission deadline and reminders
+   - View and edit previously uploaded homework
+   - Track submission status for each student
+   - Show confirmation and error messages for actions
+   - Responsive and user-friendly UI for homework upload
+   - Integrate with notifications (notify students of new homework)
+   - Export homework data and submission reports
+
+8. Abhishek - Add view student info screen for teachers (feature/teacher-view-student-info) (due: 2025-07-19)
+   - List all students assigned to the teacher's classes/subjects
+   - Search and filter students by name, class, section
+   - View detailed student profile (attendance, marks, homework, contact info)
+   - Show parent/guardian contact details
+   - View student attendance and marks history
+   - Show recent notifications/messages for the student
+   - Responsive and user-friendly UI for viewing student info
+   - Export student info (PDF/CSV)
+
+8. Hanok - Create parent dashboard (feature/parent-dashboard) (due: 2025-07-19)
+   - Show summary of child's attendance, marks, and fee status
+   - Display recent notifications and messages
+   - Quick links to view report card, attendance summary, fee payment, and chat with teachers
+   - Show upcoming events and deadlines
+   - View child's profile and contact info
+   - Show analytics (attendance trends, marks distribution, fee payment history)
+   - Responsive and user-friendly UI for parent dashboard
+
+1. Implement real user login and signup
+2. Create admin dashboard (completed: 2024-06-12)
+3. Add manage classes screen (completed: 2024-06-12)
+4. Add manage students screen (completed: 2024-06-12)
+5. Add manage teachers screen (completed: 2024-06-12)
+6. Add subjects and timetable screen (completed: 2024-06-12)
+7. Add exams and marks screen (completed: 2024-06-12)
+8. Add attendance management screen (due: 2024-06-12)
+9. Add fee management screen (completed: 2024-06-12)
+10. Add notification management screen (completed: 2024-06-12)
+11. Create teacher dashboard (completed: 2024-06-12)
+12. Add marks entry screen for teachers (completed: 2024-06-12)
+13. Add upload homework screen for teachers (completed: 2025-07-19)
+14. Add view student info screen for teachers (due: 2025-07-19)
+15. Create parent dashboard (due: 2025-07-19)
+16. Add view report card screen for parents
+17. Add attendance summary screen for parents
+18. Add fee payment screen for parents
+19. Add notifications screen for parents
+20. Add chat with teacher screen for parents
+21. Create student dashboard
+22. Add view assignments screen for students
+23. Add attendance and marks screen for students
+24. Add notifications screen for students
+25. Add chat with teacher screen for students
+26. Add profile screen
+27. Add settings screen
+28. Add settings screen
+29. Add assign task to teacher screen in admin
+
+Screens Assigned Per Member
+--------------------------
+Hanok:
+- 2. Create admin dashboard
+- 5. Add manage teachers screen
+- 6. Add take attendance screen for teachers
+- 7. Add upload homework screen for teachers
+- 8. Create parent dashboard
+
+Abhishek:
+- 3. Add manage classes screen
+- 6. Add subjects and timetable screen
+- 9. Add fee management screen
+- 10. Add notification management screen
+- 14. Add view student info screen for teachers
+
+Arsahd:
+- 4. Add manage students screen
+- 7. Add exams and marks screen
+- 11. Create teacher dashboard
+- 12. Add marks entry screen for teachers

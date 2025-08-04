@@ -1,0 +1,150 @@
+task:
+Fetch all students who have unpaid fees for the current academic year.
+
+requirement:
+- Return student name, admission_no, class_name, fee_component, amount_paid, payment_date.
+- Only include students with unpaid or partial fees.
+- Filter by academic_year.
+
+example:
+Output: [{"name": "Rahul Sharma", "admission_no": "S123", "class_name": "10A", "fee_component": "Tuition", "amount_paid": 0, "payment_date": null}]
+
+instruction:
+Write a Supabase SQL query joining students, classes, and student_fees, filtering by academic_year and unpaid/partial status.
+
+---
+
+task:
+Get a list of teachers who are class teachers.
+
+requirement:
+- Return teacher name, qualification, assigned_class_id, class_name.
+- Only teachers where is_class_teacher is true.
+
+example:
+Output: [{"name": "Amit Kumar", "qualification": "M.Sc", "assigned_class_id": "c1", "class_name": "10A"}]
+
+instruction:
+Write a Supabase SQL query joining teachers and classes, filtering by is_class_teacher = true.
+
+---
+
+task:
+Fetch all assignments due in the next 7 days for a given class.
+
+requirement:
+- Return assignment title, description, due_date, subject_name.
+- Filter by class_id and due_date within next 7 days.
+
+example:
+Output: [{"title": "Math HW", "description": "Chapter 5", "due_date": "2024-06-10", "subject_name": "Math"}]
+
+instruction:
+Write a Supabase SQL query joining assignments and subjects, filtering by class_id and due_date.
+
+---
+
+task:
+Get attendance summary for a student for the current month.
+
+requirement:
+- Return date, status.
+- Filter by student_id and current month.
+
+example:
+Output: [{"date": "2024-06-01", "status": "Present"}, {"date": "2024-06-02", "status": "Absent"}]
+
+instruction:
+Write a Supabase SQL query to fetch student_attendance for a student_id and current month.
+
+---
+
+task:
+List all subjects for a class, showing which are optional.
+
+requirement:
+- Return subject name, is_optional.
+- Filter by class_id.
+
+example:
+Output: [{"name": "Math", "is_optional": false}, {"name": "Art", "is_optional": true}]
+
+instruction:
+Write a Supabase SQL query to fetch subjects for a class_id, including is_optional.
+
+---
+
+task:
+Fetch exam results for a student, including exam name, subject name, marks_obtained, grade.
+
+requirement:
+- Filter by student_id.
+- Sort by exam start_date descending.
+
+example:
+Output: [{"exam_name": "Midterm", "subject_name": "Math", "marks_obtained": 85, "grade": "A"}]
+
+instruction:
+Write a Supabase SQL query joining marks, exams, and subjects, filtering by student_id.
+
+---
+
+task:
+Get all notifications sent to a parent for their children.
+
+requirement:
+- Return type, message, delivery_status, sent_at.
+- Filter by parent_id.
+
+example:
+Output: [{"type": "General", "message": "Fee due", "delivery_status": "Sent", "sent_at": "2024-06-01T10:00:00Z"}]
+
+instruction:
+Write a Supabase SQL query to fetch notifications for a parent_id.
+
+---
+
+task:
+Show timetable for a class for a specific day.
+
+requirement:
+- Return period_number, start_time, end_time, subject_name, teacher_name.
+- Filter by class_id and day_of_week.
+
+example:
+Output: [{"period_number": 1, "start_time": "09:00", "end_time": "09:45", "subject_name": "Math", "teacher_name": "Amit Kumar"}]
+
+instruction:
+Write a Supabase SQL query joining timetable_entries, subjects, and teachers, filtering by class_id and day_of_week.
+
+---
+
+task:
+Get all messages sent by admin to teachers in the last month.
+
+requirement:
+- Return sender_id, receiver_id, message, sent_at.
+- Only messages where sender is admin and receiver is a teacher.
+- Filter by sent_at in last month.
+
+example:
+Output: [{"sender_id": "admin1", "receiver_id": "teacher1", "message": "Meeting", "sent_at": "2024-05-15T09:00:00Z"}]
+
+instruction:
+Write a Supabase SQL query joining messages and users, filtering by sender admin and receiver teacher, and sent_at.
+
+---
+
+task:
+List all classes with their class teacher's name.
+
+requirement:
+- Return class_name, section, academic_year, teacher_name.
+- Include all classes, even if no class teacher assigned.
+
+example:
+Output: [{"class_name": "10A", "section": "A", "academic_year": "2024-25", "teacher_name": "Amit Kumar"}]
+
+instruction:
+Write a Supabase SQL query joining classes and teachers (left join), returning class and teacher names.
+

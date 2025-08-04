@@ -1,0 +1,144 @@
+
+**AdminDashboard.js Queries:**
+- Get total student count: `supabase.from('students').select('id').count()`
+- Get total teacher count: `supabase.from('teachers').select('id').count()`
+- Get today's attendance: `supabase.from('attendance').select('id').eq('date', format(today, 'yyyy-MM-dd'))`
+- Get fee data for today: `supabase.from('student_fees').select('amount, status').gte('payment_date', format(new Date(), 'yyyy-MM-dd'))`
+- Get recent announcements: `supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(5)`
+- Get upcoming events: `supabase.from('events').select('*').gte('date', format(new Date(), 'yyyy-MM-dd')).order('date', { ascending: true }).limit(5)`
+- Get recent activities: `supabase.from('activities').select('*').order('created_at', { ascending: false }).limit(5)`
+- Update an announcement: `supabase.from('announcements').update({ message: ..., date: ... }).eq('id', ...)`
+- Insert a new announcement: `supabase.from('announcements').insert({ message: ..., date: ..., icon: ..., color: ... })`
+- Update an event: `supabase.from('events').update({ title: ..., date: ..., type: ..., icon: ..., color: ... }).eq('id', ...)`
+- Insert a new event: `supabase.from('events').insert({ title: ..., date: ..., type: ..., icon: ..., color: ... })`
+
+**AnalyticsReports.js Queries:**
+- Get student count within a date range: `supabase.from('students').select('id').gte('created_at', dateRange.start.toISOString()).lte('created_at', dateRange.end.toISOString())`
+- Get teacher count within a date range: `supabase.from('teachers').select('id').gte('created_at', dateRange.start.toISOString()).lte('created_at', dateRange.end.toISOString())`
+- Get attendance data within a date range: `supabase.from('attendance').select('student_id, date').gte('date', dateRange.start.toISOString()).lte('date', dateRange.end.toISOString())`
+- Get fee data within a date range: `supabase.from('student_fees').select('amount, payment_date, status').gte('payment_date', dateRange.start.toISOString()).lte('payment_date', dateRange.end.toISOString())`
+
+**AssignTaskToTeacher.js Queries:**
+- Get all tasks: `supabase.from('tasks').select('*').order('due_date', { ascending: true })`
+- Get all teachers: `supabase.from('teachers').select('*').order('name', { ascending: true })`
+- Update a task: `supabase.from('tasks').update({ ... }).eq('id', editTask.id)`
+- Insert a new task: `supabase.from('tasks').insert({ ... })`
+- Delete a task: `supabase.from('tasks').delete().eq('id', taskId)`
+
+**AttendanceManagement.js Queries:**
+- Get students by class: `dbHelpers.getStudentsByClass(classId)`
+- Get all teachers: `dbHelpers.getTeachers()`
+- Delete student attendance records for a specific class and date: `supabase.from('attendance').delete().eq('class_id', selectedClass).eq('attendance_date', attendanceDate)`
+- Insert student attendance records: `supabase.from('attendance').insert(records)`
+- Delete teacher attendance records for a specific date: `supabase.from('teacher_attendance').delete().eq('attendance_date', attendanceDate)`
+- Insert teacher attendance records: `supabase.from('teacher_attendance').insert(records)`
+- Read subjects for a class: `dbHelpers.read('subjects', { class_id: defaultClassId })`
+- Get timetable for a class: `dbHelpers.getTimetable(defaultClassId, null)`
+
+**ExamsMarks.js Queries:**
+- Get all exams: `supabase.from('exams').select('*')`
+- Get all students: `supabase.from('students').select('*')`
+- Get all exam marks: `supabase.from('exam_marks').select('*')`
+- Insert a new exam: `supabase.from('exams').insert([...])`
+- Update an exam: `supabase.from('exams').update({...}).eq('id', exam.id)`
+- Delete an exam: `supabase.from('exams').delete().eq('id', exam.id)`
+- Upsert (insert or update) exam marks: `supabase.from('exam_marks').upsert(marksData)`
+
+**FeeClassDetails.js Queries:**
+- Get class information by ID: `supabase.from(TABLES.CLASSES).select('*').eq('id', classId).single()`
+- Get students by class: `dbHelpers.getStudentsByClass(classId)`
+- Get fee structure for a class: `dbHelpers.getFeeStructure(classId)`
+- Get student fees with fee structure details: `supabase.from(TABLES.STUDENT_FEES).select('*, fee_structure(*)').in('student_id', studentIds)`
+
+**FeeManagement.js Queries:**
+- Get all classes: `supabase.from(TABLES.CLASSES).select('*')`
+- Get fee structures with class names: `supabase.from(TABLES.FEE_STRUCTURE).select('*, classes(id, class_name)')`
+- Get all students with class names: `supabase.from(TABLES.STUDENTS).select('*, classes(class_name)')`
+- Get all student payments with student and fee structure details: `supabase.from(TABLES.STUDENT_FEES).select('*, students(full_name), fee_structure(*)')`
+- Get fee structure amounts (for stats): `supabase.from(TABLES.FEE_STRUCTURE).select('amount')`
+- Get student payment amounts and statuses (for stats): `supabase.from(TABLES.STUDENT_FEES).select('amount_paid, status')`
+- Get pending fees for a student: `supabase.from(TABLES.STUDENT_FEES).select('*, fee_structure(*)').eq('student_id', studentId).in('status', ['unpaid', 'partial'])`
+- Upsert (insert or update) fee structures: `supabase.from(TABLES.FEE_STRUCTURE).upsert([...])`
+- Update a fee: `supabase.from(TABLES.FEE_STRUCTURE).update({...}).eq('id', feeId)`
+- Check for existing student fee record: `supabase.from(TABLES.STUDENT_FEES).select('*').eq('student_id', studentId).eq('fee_id', feeId).single()`
+- Get fee structure amount by ID: `supabase.from(TABLES.FEE_STRUCTURE).select('amount').eq('id', feeId).single()`
+- Update student fee record: `supabase.from(TABLES.STUDENT_FEES).update({...}).eq('id', existingFee.id)`
+- Insert new student fee record: `supabase.from(TABLES.STUDENT_FEES).insert([...])`
+- Check for associated student fees before deleting fee structure: `supabase.from(TABLES.STUDENT_FEES).select('id').eq('fee_id', feeId)`
+- Delete fee structure: `supabase.from(TABLES.FEE_STRUCTURE).delete().eq('id', feeId)`
+- Delete a fee: `supabase.from(TABLES.FEE_STRUCTURE).delete().eq('id', fee.id)`
+- Insert a new fee structure: `supabase.from(TABLES.FEE_STRUCTURE).insert({...})`
+
+**ManageClasses.js Queries:**
+- Get all classes: `supabase.from('classes').select('*').order('name', { ascending: true })`
+- Get all teachers: `supabase.from('teachers').select('*').order('name', { ascending: true })`
+- Insert a new class: `supabase.from('classes').insert({...})`
+- Update a class: `supabase.from('classes').update({...}).eq('id', selectedClass.id)`
+- Delete a class: `supabase.from('classes').delete().eq('id', classId)`
+
+**ManageStudents.js Queries:**
+- Get all students: `dbHelpers.getStudentsByClass(null, null)`
+- Get academic years: `supabase.from('academic_years').select('*')`
+- Get student attendance history: `supabase.from('attendance').select('*').eq('student_id', studentId).order('attendance_date', { ascending: false })`
+- Get student marks history: `supabase.from('marks').select('*').eq('student_id', studentId).order('exam_date', { ascending: false })`
+- Get student documents: `supabase.from('documents').select('*').eq('student_id', studentId)`
+- Get student achievements: `supabase.from('achievements').select('*').eq('student_id', studentId).order('date', { ascending: false })`
+- Get student communication history: `supabase.from('communication_history').select('*').eq('student_id', studentId).order('date', { ascending: false })`
+- Get all classes: `dbHelpers.getClasses()`
+- Get all sections: `dbHelpers.getSectionsByClass(null)`
+- Insert a new student: `supabase.from('students').insert({...})`
+- Delete a student: `supabase.from('students').delete().eq('id', id)`
+- Update a student: `supabase.from('students').update({...}).eq('id', selectedStudent.id)`
+
+**ManageTeachers.js Queries:**
+- Get all teachers: `dbHelpers.getTeachers()`
+- Get all classes: `dbHelpers.getClasses()`
+- Get all subjects: `supabase.from(TABLES.SUBJECTS).select('*')`
+- Get subjects assigned to a teacher: `dbHelpers.getTeacherSubjects(teacher.id)`
+- Insert a new teacher: `supabase.from(TABLES.TEACHERS).insert(teacherData)`
+- Update a teacher: `supabase.from(TABLES.TEACHERS).update(teacherData).eq('id', selectedTeacher.id)`
+- Get existing teacher-subject assignments: `supabase.from(TABLES.TEACHER_SUBJECTS).select('*').eq('teacher_id', teacherId)`
+- Delete teacher-subject assignments: `supabase.from(TABLES.TEACHER_SUBJECTS).delete().eq('teacher_id', teacherId)`
+- Get subject ID by name: `supabase.from(TABLES.SUBJECTS).select('id').eq('name', subjectName).single()`
+- Get class ID by name: `supabase.from(TABLES.CLASSES).select('id').eq('class_name', className).single()`
+- Insert teacher-subject assignments: `supabase.from(TABLES.TEACHER_SUBJECTS).insert(assignments)`
+- Delete teacher-subject assignments for a teacher: `supabase.from(TABLES.TEACHER_SUBJECTS).delete().eq('teacher_id', teacher.id)`
+- Delete a teacher: `supabase.from(TABLES.TEACHERS).delete().eq('id', teacher.id)`
+
+**MarksManagement.js Queries:**
+- Get all classes: `supabase.from('classes').select('*')`
+- Get all subjects: `supabase.from('subjects').select('*')`
+- Get all students: `supabase.from('students').select('*')`
+- Get all marks: `supabase.from('marks').select('*')`
+- Insert new marks: `supabase.from('marks').insert({...})`
+- Update marks: `supabase.from('marks').update({...}).eq('id', markId)`
+- Delete marks: `supabase.from('marks').delete().eq('id', markId)`
+
+**NotificationManagement.js Queries:**
+- Get all notifications: `supabase.from('notifications').select('*').order('created_at', { ascending: false })`
+- Get users (for recipients): `supabase.from('users').select('id, full_name, email, role_id')`
+- Get students (for recipients): `supabase.from('students').select('id, name')`
+- Insert a new notification: `supabase.from('notifications').insert({...})`
+- Update a notification: `supabase.from('notifications').update({...}).eq('id', notification.id)`
+- Delete a notification: `supabase.from('notifications').delete().eq('id', notification.id)`
+
+**StudentDetails.js Queries:**
+- Get student details by ID: `dbHelpers.getStudentById(student.id)`
+- Get student fees by student ID: `dbHelpers.getStudentFees(student.id)`
+
+**StudentList.js Queries:**
+- Get students by class ID: `dbHelpers.getStudentsByClass(classId)`
+
+**SubjectsTimetable.js Queries:**
+- Get all classes: `dbHelpers.getClasses()`
+- Get all teachers: `dbHelpers.getTeachers()`
+- Read subjects for a class: `dbHelpers.read('subjects', { class_id: defaultClassId })`
+- Get timetable for a class: `dbHelpers.getTimetable(defaultClassId, null)`
+- Update a subject: `dbHelpers.update('subjects', editSubject.id, { ... })`
+- Create a new subject: `dbHelpers.create('subjects', { ... })`
+- Delete a subject: `dbHelpers.delete('subjects', id)`
+
+**TeacherDetails.js Queries:**
+- Get all teachers: `dbHelpers.getTeachers()`
+- Get subjects assigned to a teacher: `dbHelpers.getTeacherSubjects(teacher.id)`
+///comment
