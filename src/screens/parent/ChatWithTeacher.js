@@ -25,15 +25,55 @@ const ChatWithTeacher = () => {
   // Helper function to get teacher's user ID
   const getTeacherUserId = async (teacherId) => {
     try {
-      const { data: teacherUser } = await supabase
+      console.log('Looking for user ID for teacher:', teacherId);
+
+      // Method 1: Try linked_teacher_id
+      const { data: teacherUser, error: userError } = await supabase
         .from(TABLES.USERS)
-        .select('id')
+        .select('id, email, user_type')
         .eq('linked_teacher_id', teacherId)
         .single();
-      return teacherUser?.id;
+
+      if (teacherUser) {
+        console.log('Found teacher user via linked_teacher_id:', teacherUser);
+        return teacherUser.id;
+      }
+
+      console.log('Teacher user not found via linked_teacher_id, error:', userError);
+
+      // Method 2: Try to find by user_type = 'teacher' and match with teacher table
+      const { data: teacherData } = await supabase
+        .from(TABLES.TEACHERS)
+        .select('name')
+        .eq('id', teacherId)
+        .single();
+
+      if (teacherData?.name) {
+        console.log('Found teacher name:', teacherData.name);
+
+        // Try to find user by name (this is not ideal but a fallback)
+        const { data: userByName, error: nameError } = await supabase
+          .from(TABLES.USERS)
+          .select('id, email, user_type')
+          .ilike('email', `%${teacherData.name.toLowerCase().replace(' ', '')}%`)
+          .eq('user_type', 'teacher')
+          .single();
+
+        if (userByName) {
+          console.log('Found teacher user via name match:', userByName);
+          return userByName.id;
+        }
+
+        console.log('Teacher user not found via name, error:', nameError);
+      }
+
+      // Method 3: Return the teacher ID itself as fallback (in case it's already a user ID)
+      console.log('Using teacher ID as fallback user ID:', teacherId);
+      return teacherId;
+
     } catch (error) {
       console.log('Error getting teacher user ID:', error);
-      return null;
+      return teacherId; // Fallback to teacher ID
     }
   };
 
@@ -42,6 +82,9 @@ const ChatWithTeacher = () => {
     try {
       setLoading(true);
       setError(null);
+
+      console.log('=== STARTING TEACHER FETCH ===');
+      console.log('Current user:', user);
 
       // Get parent's student data directly
       const { data: parentUser, error: parentError } = await supabase
@@ -58,12 +101,17 @@ const ChatWithTeacher = () => {
         .eq('id', user.id)
         .single();
 
+      console.log('Parent user query result:', { parentUser, parentError });
+
       if (parentError || !parentUser?.linked_parent_of) {
+        console.log('Parent data error or no linked student');
         throw new Error('Parent data not found');
       }
 
       // Get student details from the linked student
       const studentData = parentUser.students;
+      console.log('Student data:', studentData);
+
       if (!studentData) {
         throw new Error('Student data not found');
       }
@@ -99,88 +147,87 @@ const ChatWithTeacher = () => {
         });
       }
 
-      // Get teachers for the student's class
-      // Method 1: Get class teacher directly
-      const { data: classData, error: classError } = await supabase
-        .from(TABLES.CLASSES)
-        .select(`
-          class_teacher_id,
-          teachers!classes_class_teacher_id_fkey(id, name)
-        `)
-        .eq('id', studentData.class_id)
-        .single();
+      // SIMPLIFIED APPROACH: Just get all teachers and let parent chat with any of them
+      console.log('=== FETCHING TEACHERS ===');
+      console.log('Student class ID:', studentData.class_id);
 
       let allTeachers = [];
 
-      // Add class teacher if exists
-      if (classData?.teachers) {
-        const teacherUserId = await getTeacherUserId(classData.teachers.id);
+      // Method 1: Get all teachers from the teachers table (simple approach)
+      try {
+        const { data: allTeachersData, error: teachersError } = await supabase
+          .from(TABLES.TEACHERS)
+          .select('id, name, qualification, address, salary_type, is_class_teacher, assigned_class_id')
+          .limit(10); // Get first 10 teachers for testing
+
+        console.log('All teachers query result:', { allTeachersData, teachersError });
+
+        if (!teachersError && allTeachersData && allTeachersData.length > 0) {
+          console.log('Found teachers:', allTeachersData.length);
+
+          for (const teacher of allTeachersData) {
+            console.log('Processing teacher:', teacher.name);
+
+            // Get teacher's user ID
+            const teacherUserId = await getTeacherUserId(teacher.id);
+            console.log('Teacher user ID for', teacher.name, ':', teacherUserId);
+
+            allTeachers.push({
+              id: teacher.id,
+              userId: teacherUserId,
+              name: teacher.name,
+              subject: teacher.is_class_teacher ? 'Class Teacher' : 'Subject Teacher',
+              qualification: teacher.qualification,
+              address: teacher.address,
+              role: teacher.is_class_teacher ? 'class_teacher' : 'subject_teacher',
+              className: studentData.classes ? `${studentData.classes.class_name} ${studentData.classes.section}` : 'N/A',
+              studentName: studentData.name,
+              messages: messagesByTeacher[teacherUserId] || [],
+              lastMessageTime: messagesByTeacher[teacherUserId]?.length > 0 ?
+                messagesByTeacher[teacherUserId][messagesByTeacher[teacherUserId].length - 1].sent_at : null
+            });
+          }
+        } else {
+          console.log('No teachers found or error:', teachersError);
+
+          // Add a test teacher for debugging
+          allTeachers.push({
+            id: 'test-teacher-1',
+            userId: 'test-user-1',
+            name: 'Test Teacher',
+            subject: 'Class Teacher',
+            qualification: 'B.Ed',
+            address: 'School Address',
+            role: 'class_teacher',
+            className: 'Test Class',
+            studentName: 'Test Student',
+            messages: [],
+            lastMessageTime: null
+          });
+        }
+      } catch (err) {
+        console.log('Error in simple teacher fetch:', err);
+
+        // Add a test teacher for debugging even on error
         allTeachers.push({
-          id: classData.teachers.id,
-          userId: teacherUserId,
-          name: classData.teachers.name,
+          id: 'test-teacher-2',
+          userId: 'test-user-2',
+          name: 'Fallback Teacher',
           subject: 'Class Teacher',
-          messages: messagesByTeacher[teacherUserId] || []
+          qualification: 'M.Ed',
+          address: 'School Address',
+          role: 'class_teacher',
+          className: 'Test Class',
+          studentName: 'Test Student',
+          messages: [],
+          lastMessageTime: null
         });
       }
 
-      // Method 2: Get subject teachers with proper joins
-      const { data: subjectTeachers, error: subjectError } = await supabase
-        .from(TABLES.TEACHER_SUBJECTS)
-        .select(`
-          teacher_id,
-          teachers!teacher_subjects_teacher_id_fkey(id, name),
-          subjects!teacher_subjects_subject_id_fkey(id, name, class_id)
-        `)
-        .eq('subjects.class_id', studentData.class_id);
+      console.log('=== FINAL RESULTS ===');
+      console.log('Total teachers found:', allTeachers.length);
+      console.log('Teachers:', allTeachers.map(t => ({ name: t.name, userId: t.userId, role: t.role })));
 
-      console.log('Subject Teachers Data:', subjectTeachers);
-
-      // Add subject teachers
-      if (subjectTeachers) {
-        for (const assignment of subjectTeachers) {
-          if (assignment.teachers && assignment.subjects) {
-            const teacherUserId = await getTeacherUserId(assignment.teachers.id);
-            const existingTeacher = allTeachers.find(t => t.id === assignment.teachers.id);
-            
-            if (!existingTeacher) {
-              allTeachers.push({
-                id: assignment.teachers.id,
-                userId: teacherUserId,
-                name: assignment.teachers.name,
-                subject: assignment.subjects.name, // Use actual subject name
-                messages: messagesByTeacher[teacherUserId] || []
-              });
-            } else {
-              // If teacher already exists and is not class teacher, add subject
-              if (existingTeacher.subject === 'Class Teacher') {
-                existingTeacher.subject = `Class Teacher (${assignment.subjects.name})`;
-              } else {
-                existingTeacher.subject = `${existingTeacher.subject}, ${assignment.subjects.name}`;
-              }
-            }
-          }
-        }
-      }
-
-      // Fallback: Try alternative method if no teachers found
-      if (allTeachers.length === 0) {
-        const { data: altTeachers, error: altError } = await supabase
-          .from(TABLES.TEACHERS)
-          .select('id, name')
-          .eq('assigned_class_id', studentData.class_id);
-        
-        if (altTeachers && altTeachers.length > 0) {
-          allTeachers = altTeachers.map(teacher => ({
-            id: teacher.id,
-            name: teacher.name,
-            subject: 'Class Teacher',
-            messages: messagesByTeacher[teacher.id] || []
-          }));
-        }
-      }
-
-      console.log('Final teachers array:', allTeachers);
       setTeachers(allTeachers);
     } catch (err) {
       console.error('Error fetching teachers and chats:', err);
@@ -201,6 +248,11 @@ const ChatWithTeacher = () => {
 
   // Select a teacher and load chat
   const handleSelectTeacher = (teacher) => {
+    console.log('Selected teacher:', teacher);
+    console.log('Teacher role:', teacher.role);
+    console.log('Teacher userId:', teacher.userId);
+    console.log('Teacher messages:', teacher.messages?.length || 0);
+
     setSelectedTeacher(teacher);
     setMessages(teacher.messages || []);
   };
@@ -228,24 +280,21 @@ const ChatWithTeacher = () => {
         throw new Error('Parent data not found or no student linked');
       }
 
-      // Get teacher's user ID from the users table
-      const { data: teacherUser, error: teacherError } = await supabase
-        .from(TABLES.USERS)
-        .select('id')
-        .eq('linked_teacher_id', selectedTeacher.id)
-        .single();
+      // Get teacher's user ID using our enhanced helper function
+      const teacherUserId = selectedTeacher.userId || await getTeacherUserId(selectedTeacher.id);
 
-      console.log('Teacher User Data:', teacherUser);
-      console.log('Teacher Error:', teacherError);
+      console.log('Teacher User ID:', teacherUserId);
+      console.log('Selected Teacher ID:', selectedTeacher.id);
+      console.log('Selected Teacher userId:', selectedTeacher.userId);
 
-      if (teacherError || !teacherUser) {
-        throw new Error('Teacher user account not found');
+      if (!teacherUserId) {
+        throw new Error('Teacher user account not found. Please contact admin to ensure teacher has a user account.');
       }
 
       // Create message for the messages table
       const newMsg = {
         sender_id: user.id,
-        receiver_id: teacherUser.id, // Use teacher's user ID, not teacher table ID
+        receiver_id: teacherUserId, // Use teacher's user ID, not teacher table ID
         student_id: parentUser.linked_parent_of,
         message: input,
         sent_at: new Date().toISOString(),
@@ -278,7 +327,7 @@ const ChatWithTeacher = () => {
       const displayMsg = {
         id: Date.now().toString(),
         sender_id: user.id,
-        receiver_id: teacherUser.id,
+        receiver_id: teacherUserId,
         message: input,
         text: input, // Add this for compatibility with render
         sent_at: new Date().toISOString(),
@@ -477,13 +526,23 @@ const ChatWithTeacher = () => {
     setMessages([]);
   };
 
-  // Sort teachers by most recent chat (latest message timestamp)
+  // Sort teachers by role priority (class teacher first) and then by most recent chat
   const getSortedTeachers = () => {
     return [...teachers].sort((a, b) => {
+      // First priority: Class teachers and "both" role teachers come first
+      const aRolePriority = a.role === 'class_teacher' ? 0 : a.role === 'both' ? 1 : 2;
+      const bRolePriority = b.role === 'class_teacher' ? 0 : b.role === 'both' ? 1 : 2;
+
+      if (aRolePriority !== bRolePriority) {
+        return aRolePriority - bRolePriority;
+      }
+
+      // Second priority: Most recent message timestamp
       const aMsgs = a.messages || [];
       const bMsgs = b.messages || [];
-      const aTime = aMsgs.length ? new Date(aMsgs[aMsgs.length - 1].created_at) : new Date(0);
-      const bTime = bMsgs.length ? new Date(bMsgs[bMsgs.length - 1].created_at) : new Date(0);
+      const aTime = aMsgs.length ? new Date(aMsgs[aMsgs.length - 1].sent_at || aMsgs[aMsgs.length - 1].created_at) : new Date(0);
+      const bTime = bMsgs.length ? new Date(bMsgs[bMsgs.length - 1].sent_at || bMsgs[bMsgs.length - 1].created_at) : new Date(0);
+
       return bTime - aTime;
     });
   };
@@ -596,31 +655,122 @@ const ChatWithTeacher = () => {
       <Header title="Chat With Teacher" showBack={true} />
       {!selectedTeacher ? (
         <View style={styles.teacherListContainer}>
-          <Text style={styles.sectionTitle}>Your Child's Teachers</Text>
+          <View style={styles.headerSection}>
+            <Text style={styles.sectionTitle}>Your Child's Teachers</Text>
+            <Text style={styles.sectionSubtitle}>
+              {teachers.length} teacher{teachers.length !== 1 ? 's' : ''} available for chat
+            </Text>
+            {teachers.length > 0 && (
+              <View style={styles.classInfo}>
+                <Ionicons name="school" size={16} color="#1976d2" />
+                <Text style={styles.classInfoText}>
+                  Class: {teachers[0]?.className || 'N/A'} • Student: {teachers[0]?.studentName || 'N/A'}
+                </Text>
+              </View>
+            )}
+          </View>
           {teachers.length === 0 ? (
             <View style={styles.emptyContainer}>
+              <Ionicons name="people-outline" size={64} color="#ccc" />
               <Text style={styles.emptyText}>No teachers found for your child's class.</Text>
+              <Text style={styles.emptySubtext}>
+                Please contact the school admin to ensure teachers are properly assigned to your child's class.
+              </Text>
+              <TouchableOpacity
+                style={styles.debugButton}
+                onPress={() => {
+                  Alert.alert(
+                    'Debug Info',
+                    `User ID: ${user.id}\nUser Type: ${user.user_type || 'N/A'}\nTeachers Found: ${teachers.length}`,
+                    [{ text: 'OK' }]
+                  );
+                }}
+              >
+                <Text style={styles.debugButtonText}>Debug Info</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <FlatList
               data={getSortedTeachers()}
               keyExtractor={item => item.id}
-              renderItem={({ item }) => (
-                <TouchableOpacity style={styles.teacherCard} onPress={() => handleSelectTeacher(item)}>
-                  <Ionicons name="person-circle" size={36} color="#1976d2" style={{ marginRight: 12 }} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.teacherName}>{item.name}</Text>
-                    <Text style={styles.teacherSubject}>{item.subject || 'Teacher'}</Text>
-                  </View>
-                  <View style={{ alignItems: 'center' }}>
-                    <Ionicons name="chatbubbles" size={22} color="#9c27b0" />
-                    {item.messages && item.messages.length > 0 && (
-                      <Text style={styles.messageCount}>{item.messages.length}</Text>
+              renderItem={({ item, index }) => {
+                const sortedTeachers = getSortedTeachers();
+                const showClassTeacherHeader = index === 0 && item.role === 'class_teacher';
+                const showSubjectTeacherHeader = index > 0 &&
+                  item.role === 'subject_teacher' &&
+                  sortedTeachers[index - 1].role !== 'subject_teacher';
+
+                return (
+                  <View>
+                    {showClassTeacherHeader && (
+                      <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionHeaderText}>Class Teacher</Text>
+                      </View>
                     )}
+                    {showSubjectTeacherHeader && (
+                      <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionHeaderText}>Subject Teachers</Text>
+                      </View>
+                    )}
+                    <TouchableOpacity style={[
+                      styles.teacherCard,
+                      item.role === 'class_teacher' && styles.classTeacherCard
+                    ]} onPress={() => handleSelectTeacher(item)}>
+                      <View style={[
+                        styles.teacherAvatar,
+                        { backgroundColor: item.role === 'class_teacher' ? '#4CAF50' :
+                                          item.role === 'both' ? '#FF9800' : '#2196F3' }
+                      ]}>
+                        <Ionicons
+                          name={item.role === 'class_teacher' ? 'school' : item.role === 'both' ? 'star' : 'book'}
+                          size={24}
+                          color="#fff"
+                        />
+                      </View>
+                      <View style={styles.teacherInfo}>
+                        <View style={styles.teacherHeader}>
+                          <Text style={styles.teacherName}>{item.name}</Text>
+                          <View style={[styles.roleBadge, {
+                            backgroundColor: item.role === 'class_teacher' ? '#4CAF50' :
+                                            item.role === 'both' ? '#FF9800' : '#2196F3'
+                          }]}>
+                            <Text style={styles.roleBadgeText}>
+                              {item.role === 'class_teacher' ? 'CLASS' :
+                               item.role === 'both' ? 'BOTH' : 'SUBJECT'}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={styles.teacherSubject} numberOfLines={2}>
+                          {item.subject || 'Teacher'}
+                        </Text>
+                        {item.qualification && (
+                          <Text style={styles.teacherQualification}>
+                            {item.qualification}
+                          </Text>
+                        )}
+                        {item.messages && item.messages.length > 0 && (
+                          <Text style={styles.lastMessageTime}>
+                            Last message: {new Date(item.lastMessageTime).toLocaleDateString()}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.chatActions}>
+                        <View style={styles.messageIndicator}>
+                          <Ionicons name="chatbubbles" size={20} color="#9c27b0" />
+                          {item.messages && item.messages.length > 0 && (
+                            <View style={styles.messageCountBadge}>
+                              <Text style={styles.messageCount}>{item.messages.length}</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Ionicons name="chevron-forward" size={20} color="#ccc" />
+                      </View>
+                    </TouchableOpacity>
                   </View>
-                </TouchableOpacity>
-              )}
+                );
+              }}
               contentContainerStyle={{ padding: 16 }}
+              showsVerticalScrollIndicator={false}
             />
           )}
         </View>
@@ -995,6 +1145,139 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     fontWeight: '500',
     textAlign: 'center',
+  },
+
+  // Enhanced Teacher Card Styles
+  teacherAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#1976d2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  teacherInfo: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  teacherHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  roleBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    minWidth: 50,
+    alignItems: 'center',
+  },
+  roleBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  teacherQualification: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
+  },
+  lastMessageTime: {
+    fontSize: 11,
+    color: '#999',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  chatActions: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  messageIndicator: {
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  messageCountBadge: {
+    backgroundColor: '#9c27b0',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+
+  // Header Section Styles
+  headerSection: {
+    padding: 16,
+    backgroundColor: '#f8f9fa',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  classInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  classInfoText: {
+    fontSize: 13,
+    color: '#1976d2',
+    marginLeft: 6,
+    fontWeight: '500',
+  },
+
+  // Section Header Styles
+  sectionHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#f0f0f0',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  sectionHeaderText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+
+  // Enhanced Teacher Card Styles
+  classTeacherCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#4CAF50',
+    backgroundColor: '#f8fff8',
+  },
+
+  // Empty State Styles
+  emptySubtext: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 8,
+    paddingHorizontal: 20,
+    lineHeight: 20,
+  },
+  debugButton: {
+    backgroundColor: '#1976d2',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  debugButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });
 

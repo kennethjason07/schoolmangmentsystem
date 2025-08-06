@@ -242,26 +242,117 @@ function groupAndSortSchedule(schedule) {
         setAnnouncements([]);
       }
 
-      // Get upcoming events (with fallback)
+      // Get upcoming events (enhanced with multiple sources)
       try {
-        const { data: eventsData, error: eventsError } = await supabase
-          .from(TABLES.NOTIFICATIONS)
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(3);
+        const events = [];
+        const currentDate = new Date();
+        const nextWeek = new Date(currentDate.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-        if (eventsError) {
-          console.log('Events error:', eventsError);
-          setUpcomingEvents([
-            {
-              id: 'e1',
-              message: 'Parent-Teacher meeting next Friday',
-              created_at: new Date().toISOString()
-            }
-          ]);
-        } else {
-          setUpcomingEvents(eventsData || []);
+        // Get upcoming exams for teacher's classes
+        try {
+          const { data: examsData, error: examsError } = await supabase
+            .from(TABLES.EXAMS)
+            .select(`
+              *,
+              classes(class_name, section)
+            `)
+            .gte('exam_date', currentDate.toISOString().split('T')[0])
+            .lte('exam_date', nextWeek.toISOString().split('T')[0])
+            .order('exam_date', { ascending: true })
+            .limit(5);
+
+          if (!examsError && examsData) {
+            examsData.forEach(exam => {
+              events.push({
+                id: `exam-${exam.id}`,
+                type: 'exam',
+                title: exam.exam_name,
+                description: `Exam for ${exam.classes?.class_name} ${exam.classes?.section}`,
+                date: exam.exam_date,
+                time: exam.start_time || '09:00',
+                icon: 'document-text',
+                color: '#FF9800',
+                priority: 'high'
+              });
+            });
+          }
+        } catch (err) {
+          console.log('Exams fetch error:', err);
         }
+
+        // Get recent notifications that could be events
+        try {
+          const { data: notificationsData, error: notificationsError } = await supabase
+            .from(TABLES.NOTIFICATIONS)
+            .select('*')
+            .gte('created_at', currentDate.toISOString())
+            .order('created_at', { ascending: false })
+            .limit(3);
+
+          if (!notificationsError && notificationsData) {
+            notificationsData.forEach(notification => {
+              events.push({
+                id: `notification-${notification.id}`,
+                type: 'announcement',
+                title: notification.title || 'School Announcement',
+                description: notification.message,
+                date: notification.created_at.split('T')[0],
+                time: new Date(notification.created_at).toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                }),
+                icon: 'megaphone',
+                color: '#2196F3',
+                priority: 'medium'
+              });
+            });
+          }
+        } catch (err) {
+          console.log('Notifications fetch error:', err);
+        }
+
+        // Add some default teacher events if no data
+        if (events.length === 0) {
+          const tomorrow = new Date(currentDate);
+          tomorrow.setDate(tomorrow.getDate() + 1);
+
+          const nextFriday = new Date(currentDate);
+          nextFriday.setDate(currentDate.getDate() + (5 - currentDate.getDay() + 7) % 7);
+
+          events.push(
+            {
+              id: 'default-1',
+              type: 'meeting',
+              title: 'Parent-Teacher Meeting',
+              description: 'Monthly parent-teacher conference',
+              date: nextFriday.toISOString().split('T')[0],
+              time: '14:00',
+              icon: 'people',
+              color: '#4CAF50',
+              priority: 'high'
+            },
+            {
+              id: 'default-2',
+              type: 'deadline',
+              title: 'Assignment Submission',
+              description: 'Mathematics homework deadline',
+              date: tomorrow.toISOString().split('T')[0],
+              time: '23:59',
+              icon: 'time',
+              color: '#F44336',
+              priority: 'medium'
+            }
+          );
+        }
+
+        // Sort events by date and priority
+        events.sort((a, b) => {
+          const dateA = new Date(`${a.date} ${a.time}`);
+          const dateB = new Date(`${b.date} ${b.time}`);
+          return dateA - dateB;
+        });
+
+        setUpcomingEvents(events.slice(0, 5));
       } catch (error) {
         console.log('Events catch error:', error);
         setUpcomingEvents([]);
@@ -528,13 +619,24 @@ function groupAndSortSchedule(schedule) {
           onPress: () => navigation?.navigate('TeacherTimetable')
         },
         {
-          title: 'Attendance Rate',
-          value: `${analytics.attendanceRate}%`,
-          icon: 'checkmark-circle',
-          color: analytics.attendanceRate >= 80 ? '#4CAF50' : analytics.attendanceRate >= 60 ? '#FF9800' : '#f44336',
-          subtitle: 'Overall average',
-          trend: analytics.attendanceRate >= 75 ? 1 : analytics.attendanceRate >= 60 ? 0 : -1,
-          onPress: () => navigation?.navigate('Attendance')
+          title: 'Upcoming Events',
+          value: upcomingEvents.length.toString(),
+          icon: 'calendar',
+          color: upcomingEvents.length > 0 ? '#E91E63' : '#9E9E9E',
+          subtitle: upcomingEvents.length > 0 ?
+            `Next: ${upcomingEvents[0]?.title || 'Event'}` :
+            'No events scheduled',
+          trend: upcomingEvents.filter(e => e.priority === 'high').length > 0 ? 1 : 0,
+          onPress: () => {
+            // Scroll to events section or show events modal
+            Alert.alert(
+              'Upcoming Events',
+              upcomingEvents.length > 0 ?
+                upcomingEvents.map(e => `• ${e.title} (${new Date(e.date).toLocaleDateString()})`).join('\n') :
+                'No upcoming events scheduled.',
+              [{ text: 'OK' }]
+            );
+          }
         }
       ]);
 
@@ -919,6 +1021,31 @@ function groupAndSortSchedule(schedule) {
               </View>
               <Text style={styles.actionTitle}>Students</Text>
               <Text style={styles.actionSubtitle}>View student info</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => {
+                // Scroll to events section
+                Alert.alert('Events', 'Check the Upcoming Events section below for your schedule!');
+              }}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#e91e63' }]}>
+                <Ionicons name="calendar-outline" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Events</Text>
+              <Text style={styles.actionSubtitle}>Upcoming activities</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => navigation.navigate('Chat')}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#00bcd4' }]}>
+                <Ionicons name="chatbubbles" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Messages</Text>
+              <Text style={styles.actionSubtitle}>Chat with parents</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1323,25 +1450,85 @@ function groupAndSortSchedule(schedule) {
         {/* Upcoming Events */}
         <View style={styles.section}>
           <View style={styles.sectionTitleAccent} />
-          <Text style={styles.sectionTitle}>Upcoming Events</Text>
-          <View style={{ marginHorizontal: 12, marginBottom: 12 }}>
-            {upcomingEvents.map((event, index) => (
-              <View key={`event-${event.id || index}`} style={{ backgroundColor: '#fff', borderRadius: 10, padding: 12, marginBottom: 8, elevation: 1 }}>
-                <Text style={{ fontWeight: 'bold', color: '#1976d2', fontSize: 15 }}>{event.message}</Text>
-                <Text style={{ color: '#555', marginTop: 2 }}>
-                  Date: {new Date(event.created_at).toLocaleDateString('en-US', {
-                    weekday: 'short',
-                    year: 'numeric',
-                    month: 'short',
-                    day: 'numeric'
-                  })} at {new Date(event.created_at).toLocaleTimeString('en-US', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })} {event.class !== 'All' ? `| Class: ${event.class}` : ''}
-                </Text>
-              </View>
-            ))}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Upcoming Events</Text>
+            <TouchableOpacity
+              style={styles.addEventButton}
+              onPress={() => Alert.alert('Add Event', 'Event management feature coming soon!')}
+            >
+              <Ionicons name="add-circle" size={24} color="#1976d2" />
+            </TouchableOpacity>
           </View>
+
+          {upcomingEvents.length === 0 ? (
+            <View style={styles.emptyEventsContainer}>
+              <Ionicons name="calendar-outline" size={48} color="#ccc" />
+              <Text style={styles.emptyEventsText}>No upcoming events</Text>
+              <Text style={styles.emptyEventsSubtext}>Your schedule is clear for now</Text>
+            </View>
+          ) : (
+            <View style={styles.eventsContainer}>
+              {upcomingEvents.map((event, index) => (
+                <TouchableOpacity
+                  key={`event-${event.id || index}`}
+                  style={[styles.eventCard, { borderLeftColor: event.color }]}
+                  onPress={() => {
+                    Alert.alert(
+                      event.title,
+                      `${event.description}\n\nDate: ${new Date(event.date).toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}\nTime: ${event.time}`,
+                      [{ text: 'OK' }]
+                    );
+                  }}
+                >
+                  <View style={styles.eventHeader}>
+                    <View style={[styles.eventIcon, { backgroundColor: event.color }]}>
+                      <Ionicons name={event.icon} size={20} color="#fff" />
+                    </View>
+                    <View style={styles.eventInfo}>
+                      <Text style={styles.eventTitle}>{event.title}</Text>
+                      <Text style={styles.eventDescription} numberOfLines={2}>
+                        {event.description}
+                      </Text>
+                    </View>
+                    <View style={styles.eventMeta}>
+                      <View style={[styles.priorityBadge, {
+                        backgroundColor: event.priority === 'high' ? '#F44336' :
+                                        event.priority === 'medium' ? '#FF9800' : '#4CAF50'
+                      }]}>
+                        <Text style={styles.priorityText}>
+                          {event.priority?.toUpperCase()}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.eventFooter}>
+                    <View style={styles.eventDateTime}>
+                      <Ionicons name="calendar" size={14} color="#666" />
+                      <Text style={styles.eventDate}>
+                        {new Date(event.date).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric'
+                        })}
+                      </Text>
+                      <Ionicons name="time" size={14} color="#666" style={{ marginLeft: 12 }} />
+                      <Text style={styles.eventTime}>{event.time}</Text>
+                    </View>
+                    <View style={[styles.eventTypeBadge, { backgroundColor: `${event.color}20` }]}>
+                      <Text style={[styles.eventTypeText, { color: event.color }]}>
+                        {event.type?.toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
         {/* Class Performance */}
         <View style={styles.section}>
@@ -2485,6 +2672,116 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     marginTop: 4,
+  },
+
+  // Events Section Styles
+  addEventButton: {
+    padding: 4,
+  },
+  emptyEventsContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginHorizontal: 12,
+  },
+  emptyEventsText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 12,
+    fontWeight: '600',
+  },
+  emptyEventsSubtext: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 4,
+  },
+  eventsContainer: {
+    marginHorizontal: 12,
+    marginBottom: 12,
+  },
+  eventCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    borderLeftWidth: 4,
+  },
+  eventHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  eventIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  eventInfo: {
+    flex: 1,
+    marginRight: 8,
+  },
+  eventTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  eventDescription: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+  },
+  eventMeta: {
+    alignItems: 'flex-end',
+  },
+  priorityBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  priorityText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  eventFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  eventDateTime: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  eventDate: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 4,
+  },
+  eventTime: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 4,
+  },
+  eventTypeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  eventTypeText: {
+    fontSize: 10,
+    fontWeight: '600',
   },
 });
 

@@ -24,6 +24,8 @@ const ParentDashboard = ({ navigation }) => {
   const [exams, setExams] = useState([]);
   const [events, setEvents] = useState([]);
   const [attendance, setAttendance] = useState([]);
+  const [marks, setMarks] = useState([]);
+  const [fees, setFees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -110,6 +112,45 @@ const ParentDashboard = ({ navigation }) => {
           setAttendance([]);
         }
 
+        // Get student marks
+        try {
+          const { data: marksData, error: marksError } = await supabase
+            .from(TABLES.MARKS)
+            .select(`
+              *,
+              subjects(name),
+              exams(exam_name, exam_date)
+            `)
+            .eq('student_id', studentDetails.id)
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+          if (marksError && marksError.code !== '42P01') {
+            console.log('Marks error:', marksError);
+          }
+          setMarks(marksData || []);
+        } catch (err) {
+          console.log('Marks fetch error:', err);
+          setMarks([]);
+        }
+
+        // Get fee information
+        try {
+          const { data: feesData, error: feesError } = await supabase
+            .from(TABLES.FEES)
+            .select('*')
+            .eq('student_id', studentDetails.id)
+            .order('due_date', { ascending: true });
+
+          if (feesError && feesError.code !== '42P01') {
+            console.log('Fees error:', feesError);
+          }
+          setFees(feesData || []);
+        } catch (err) {
+          console.log('Fees fetch error:', err);
+          setFees([]);
+        }
+
       } catch (err) {
         console.error('Error fetching dashboard data:', err);
         setError(err.message);
@@ -140,14 +181,57 @@ const ParentDashboard = ({ navigation }) => {
 
   // Get fee status
   const getFeeStatus = () => {
-    // This would need to be implemented based on your fee structure
-    return '₹5,000'; // Placeholder
+    if (fees.length === 0) return 'No fees';
+
+    const pendingFees = fees.filter(fee => fee.status === 'pending');
+    if (pendingFees.length === 0) return 'All paid';
+
+    const totalPending = pendingFees.reduce((sum, fee) => sum + (fee.amount || 0), 0);
+    return `₹${totalPending.toLocaleString()}`;
+  };
+
+  // Get fee subtitle
+  const getFeeSubtitle = () => {
+    if (fees.length === 0) return 'No fees due';
+
+    const pendingFees = fees.filter(fee => fee.status === 'pending');
+    if (pendingFees.length === 0) return 'All fees paid';
+
+    const nextDue = pendingFees.sort((a, b) => new Date(a.due_date) - new Date(b.due_date))[0];
+    const daysUntilDue = Math.ceil((new Date(nextDue.due_date) - new Date()) / (1000 * 60 * 60 * 24));
+
+    if (daysUntilDue < 0) return 'Overdue';
+    if (daysUntilDue === 0) return 'Due today';
+    return `Due in ${daysUntilDue} days`;
   };
 
   // Get average marks
   const getAverageMarks = () => {
-    // This would need to be implemented based on your marks structure
-    return '85%'; // Placeholder
+    if (marks.length === 0) return 'No marks';
+
+    const totalMarks = marks.reduce((sum, mark) => sum + (mark.marks_obtained || 0), 0);
+    const totalMaxMarks = marks.reduce((sum, mark) => sum + (mark.total_marks || 0), 0);
+
+    if (totalMaxMarks === 0) return 'No marks';
+
+    const percentage = Math.round((totalMarks / totalMaxMarks) * 100);
+    return `${percentage}%`;
+  };
+
+  // Get marks subtitle
+  const getMarksSubtitle = () => {
+    if (marks.length === 0) return 'No exams taken';
+
+    const recentMarks = marks.slice(0, 3);
+    const avgRecent = recentMarks.reduce((sum, mark) => {
+      const percentage = (mark.marks_obtained / mark.total_marks) * 100;
+      return sum + percentage;
+    }, 0) / recentMarks.length;
+
+    if (avgRecent >= 90) return 'Excellent performance';
+    if (avgRecent >= 75) return 'Good performance';
+    if (avgRecent >= 60) return 'Average performance';
+    return 'Needs improvement';
   };
 
   // Find the next upcoming event
@@ -155,15 +239,37 @@ const ParentDashboard = ({ navigation }) => {
 
   // Update childStats for the event card
   const childStats = [
-    { title: 'Attendance', value: `${attendancePercentage}%`, icon: 'checkmark-circle', color: '#4CAF50', subtitle: 'This month' },
-    { title: 'Fee Due', value: getFeeStatus(), icon: 'card', color: '#FF9800', subtitle: 'Due in 5 days' },
-    { title: 'Average Marks', value: getAverageMarks(), icon: 'document-text', color: '#2196F3', subtitle: 'This semester' },
-    { 
-      title: 'Upcoming Events', 
-      value: String(events.length), 
-      icon: 'calendar', 
-      color: '#9C27B0', 
-      subtitle: nextEvent ? `${nextEvent.title} (${nextEvent.event_date})` : 'No upcoming event',
+    {
+      title: 'Attendance',
+      value: `${attendancePercentage}%`,
+      icon: 'checkmark-circle',
+      color: attendancePercentage >= 75 ? '#4CAF50' : attendancePercentage >= 60 ? '#FF9800' : '#F44336',
+      subtitle: `${presentCount}/${attendance.length} days present`,
+      onPress: () => navigation.navigate('Attendance')
+    },
+    {
+      title: 'Fee Status',
+      value: getFeeStatus(),
+      icon: 'card',
+      color: fees.filter(f => f.status === 'pending').length > 0 ? '#FF9800' : '#4CAF50',
+      subtitle: getFeeSubtitle(),
+      onPress: () => navigation.navigate('Fees')
+    },
+    {
+      title: 'Average Marks',
+      value: getAverageMarks(),
+      icon: 'document-text',
+      color: '#2196F3',
+      subtitle: getMarksSubtitle(),
+      onPress: () => navigation.navigate('Report Card')
+    },
+    {
+      title: 'Upcoming Exams',
+      value: String(exams.length),
+      icon: 'calendar',
+      color: '#9C27B0',
+      subtitle: exams.length > 0 ? `Next: ${exams[0]?.exam_name || 'TBA'}` : 'No upcoming exams',
+      onPress: () => setShowExamsModal(true)
     },
   ];
 
@@ -306,7 +412,12 @@ const ParentDashboard = ({ navigation }) => {
         {/* Stats Cards */}
         <View style={styles.statsContainer}>
           {childStats.map((stat, index) => (
-            <View key={index} style={styles.statCardWrapper}>
+            <TouchableOpacity
+              key={index}
+              style={styles.statCardWrapper}
+              onPress={stat.onPress}
+              activeOpacity={0.7}
+            >
               <StatCard
                 title={stat.title}
                 value={stat.value}
@@ -314,7 +425,7 @@ const ParentDashboard = ({ navigation }) => {
                 color={stat.color}
                 subtitle={stat.subtitle}
               />
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
 
@@ -351,6 +462,76 @@ const ParentDashboard = ({ navigation }) => {
             </View>
           </View>
         </View>
+
+        {/* Recent Marks */}
+        {marks.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recent Marks</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Report Card')}>
+                <Text style={styles.viewAllText}>View All</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.marksContainer}>
+              {marks.slice(0, 3).map((mark, index) => (
+                <View key={index} style={styles.markCard}>
+                  <View style={styles.markHeader}>
+                    <Text style={styles.markSubject}>{mark.subjects?.name || 'Subject'}</Text>
+                    <View style={[
+                      styles.markGrade,
+                      { backgroundColor: (mark.marks_obtained / mark.total_marks) >= 0.9 ? '#4CAF50' :
+                                        (mark.marks_obtained / mark.total_marks) >= 0.75 ? '#FF9800' : '#F44336' }
+                    ]}>
+                      <Text style={styles.markGradeText}>
+                        {Math.round((mark.marks_obtained / mark.total_marks) * 100)}%
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.markDetails}>
+                    {mark.marks_obtained}/{mark.total_marks} marks
+                  </Text>
+                  <Text style={styles.markExam}>
+                    {mark.exams?.exam_name || 'Exam'} • {new Date(mark.exams?.exam_date || mark.created_at).toLocaleDateString()}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Fee Summary */}
+        {fees.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Fee Summary</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Fees')}>
+                <Text style={styles.viewAllText}>View All</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.feesContainer}>
+              {fees.slice(0, 3).map((fee, index) => (
+                <View key={index} style={styles.feeCard}>
+                  <View style={styles.feeHeader}>
+                    <Text style={styles.feeType}>{fee.fee_type || 'Fee'}</Text>
+                    <View style={[
+                      styles.feeStatus,
+                      { backgroundColor: fee.status === 'paid' ? '#4CAF50' :
+                                        fee.status === 'pending' ? '#FF9800' : '#F44336' }
+                    ]}>
+                      <Text style={styles.feeStatusText}>
+                        {fee.status?.toUpperCase() || 'PENDING'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.feeAmount}>₹{fee.amount?.toLocaleString() || '0'}</Text>
+                  <Text style={styles.feeDueDate}>
+                    Due: {new Date(fee.due_date).toLocaleDateString()}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
 
         {/* Upcoming Events */}
         <View style={styles.section}>
@@ -960,6 +1141,105 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+
+  // Marks Section Styles
+  marksContainer: {
+    paddingHorizontal: 4,
+  },
+  markCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  markHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  markSubject: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    flex: 1,
+  },
+  markGrade: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  markGradeText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  markDetails: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  markExam: {
+    fontSize: 12,
+    color: '#999',
+  },
+
+  // Fee Section Styles
+  feesContainer: {
+    paddingHorizontal: 4,
+  },
+  feeCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  feeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  feeType: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    flex: 1,
+  },
+  feeStatus: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  feeStatusText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  feeAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1976d2',
+    marginBottom: 4,
+  },
+  feeDueDate: {
+    fontSize: 12,
+    color: '#999',
   },
 });
 
