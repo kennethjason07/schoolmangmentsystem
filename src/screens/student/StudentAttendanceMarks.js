@@ -41,13 +41,9 @@ const getAttendanceIcon = (status) => {
   }
 };
 
-const SCHOOL_INFO = {
-  name: 'Springfield Public School',
-  address: '123 Main St, Springfield, USA',
-  logoUrl: '',
-};
+// School info will be loaded dynamically from database
 
-export default function StudentAttendanceMarks() {
+export default function StudentAttendanceMarks({ route, navigation }) {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('attendance');
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[0].value);
@@ -55,10 +51,20 @@ export default function StudentAttendanceMarks() {
   const [selectedStat, setSelectedStat] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
   const [attendanceData, setAttendanceData] = useState({});
+  const [attendanceDetails, setAttendanceDetails] = useState({});
   const [marksData, setMarksData] = useState([]);
   const [studentInfo, setStudentInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [monthlyAttendanceStats, setMonthlyAttendanceStats] = useState({});
+  const [classAverages, setClassAverages] = useState({});
+  const [upcomingExams, setUpcomingExams] = useState([]);
+  const [classSubjects, setClassSubjects] = useState([]);
+  const [schoolInfo, setSchoolInfo] = useState({
+    name: 'Springfield Public School',
+    address: '123 Main St, Springfield, USA',
+    logoUrl: '',
+  });
 
   // Fetch attendance and marks from Supabase
   const fetchStudentData = async () => {
@@ -89,15 +95,31 @@ export default function StudentAttendanceMarks() {
         profilePicUrl: '',
       });
 
-      // Get attendance records
+      // Get attendance records with additional details
       const { data: attendance, error: attendanceError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
-        .select('*')
-        .eq('student_id', studentId);
-      if (attendanceError) throw attendanceError;
+        .select(`
+          *,
+          classes(
+            id,
+            class_name,
+            section
+          ),
+          users!student_attendance_marked_by_fkey(
+            full_name
+          )
+        `)
+        .eq('student_id', studentId)
+        .order('date', { ascending: false });
 
-      // Group attendance by date string
+      if (attendanceError) {
+        console.error('Attendance error:', attendanceError);
+        throw attendanceError;
+      }
+
+      // Group attendance by date string with additional metadata
       const attendanceMap = {};
+      const attendanceDetailsMap = {};
       attendance.forEach(a => {
         const dateStr = a.date;
         let status = 'present';
@@ -105,17 +127,206 @@ export default function StudentAttendanceMarks() {
         else if (a.status === 'Absent') status = 'absent';
         else if (a.status === 'Late') status = 'late';
         else if (a.status === 'Excused') status = 'excused';
+
         attendanceMap[dateStr] = status;
+        attendanceDetailsMap[dateStr] = {
+          status,
+          markedBy: a.users?.full_name || 'System',
+          className: a.classes?.class_name || student.classes?.class_name,
+          section: a.classes?.section || student.classes?.section,
+          createdAt: a.created_at
+        };
       });
       setAttendanceData(attendanceMap);
+      setAttendanceDetails(attendanceDetailsMap);
 
-      // Get marks records
+      // Get marks records with subject and exam details
       const { data: marks, error: marksError } = await supabase
         .from(TABLES.MARKS)
-        .select('*')
-        .eq('student_id', studentId);
-      if (marksError) throw marksError;
-      setMarksData(marks);
+        .select(`
+          *,
+          subjects(
+            id,
+            name,
+            class_id,
+            is_optional
+          ),
+          exams(
+            id,
+            name,
+            start_date,
+            end_date,
+            class_id
+          )
+        `)
+        .eq('student_id', studentId)
+        .order('created_at', { ascending: false });
+
+      if (marksError) {
+        console.error('Marks error:', marksError);
+        throw marksError;
+      }
+
+      // Process marks data to include subject and exam names
+      const processedMarks = marks.map(mark => ({
+        ...mark,
+        subject_name: mark.subjects?.name || 'Unknown Subject',
+        exam_name: mark.exams?.name || 'Unknown Exam',
+        exam_date: mark.exams?.start_date,
+        total_marks: mark.max_marks || 100,
+        percentage: mark.marks_obtained && mark.max_marks ?
+          Math.round((mark.marks_obtained / mark.max_marks) * 100) : 0
+      }));
+
+      setMarksData(processedMarks);
+
+      // Get class average for comparison (optional enhancement)
+      try {
+        const { data: classMarks, error: classMarksError } = await supabase
+          .from(TABLES.MARKS)
+          .select(`
+            marks_obtained,
+            max_marks,
+            subject_id,
+            exam_id,
+            students!inner(class_id)
+          `)
+          .eq('students.class_id', student.class_id);
+
+        if (!classMarksError && classMarks) {
+          // Calculate class averages by subject and exam
+          const classAverages = {};
+          classMarks.forEach(mark => {
+            const key = `${mark.subject_id}-${mark.exam_id}`;
+            if (!classAverages[key]) {
+              classAverages[key] = { total: 0, count: 0, maxMarks: mark.max_marks };
+            }
+            classAverages[key].total += mark.marks_obtained || 0;
+            classAverages[key].count += 1;
+          });
+
+          // Add class average to processed marks
+          const marksWithClassAvg = processedMarks.map(mark => {
+            const key = `${mark.subject_id}-${mark.exam_id}`;
+            const classAvg = classAverages[key];
+            return {
+              ...mark,
+              classAverage: classAvg ? Math.round((classAvg.total / classAvg.count / classAvg.maxMarks) * 100) : null
+            };
+          });
+          setMarksData(marksWithClassAvg);
+        }
+      } catch (classErr) {
+        console.log('Class average calculation error:', classErr);
+        // Continue without class averages
+      }
+
+      // Get attendance statistics for the current academic year
+      try {
+        const currentYear = new Date().getFullYear();
+        const academicYearStart = `${currentYear}-04-01`; // Assuming academic year starts in April
+        const academicYearEnd = `${currentYear + 1}-03-31`;
+
+        const { data: yearlyAttendance, error: yearlyError } = await supabase
+          .from(TABLES.STUDENT_ATTENDANCE)
+          .select('date, status')
+          .eq('student_id', studentId)
+          .gte('date', academicYearStart)
+          .lte('date', academicYearEnd)
+          .order('date', { ascending: true });
+
+        if (!yearlyError && yearlyAttendance) {
+          // Calculate monthly attendance trends
+          const monthlyStats = {};
+          yearlyAttendance.forEach(record => {
+            const month = record.date.substring(0, 7); // YYYY-MM format
+            if (!monthlyStats[month]) {
+              monthlyStats[month] = { present: 0, absent: 0, total: 0 };
+            }
+            monthlyStats[month].total += 1;
+            if (record.status === 'Present') {
+              monthlyStats[month].present += 1;
+            } else {
+              monthlyStats[month].absent += 1;
+            }
+          });
+
+          // Store monthly stats for potential use in charts
+          setMonthlyAttendanceStats(monthlyStats);
+          console.log('Monthly attendance stats:', monthlyStats);
+        }
+      } catch (yearlyErr) {
+        console.log('Yearly attendance calculation error:', yearlyErr);
+      }
+
+      // Get upcoming exams for this student's class
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const { data: upcomingExams, error: examsError } = await supabase
+          .from(TABLES.EXAMS)
+          .select(`
+            id,
+            name,
+            start_date,
+            end_date,
+            remarks,
+            class_id
+          `)
+          .eq('class_id', student.class_id)
+          .gte('start_date', today)
+          .order('start_date', { ascending: true })
+          .limit(5);
+
+        if (!examsError && upcomingExams) {
+          setUpcomingExams(upcomingExams);
+          console.log('Upcoming exams:', upcomingExams);
+        }
+      } catch (examsErr) {
+        console.log('Upcoming exams fetch error:', examsErr);
+      }
+
+      // Get subjects for this student's class
+      try {
+        const { data: subjects, error: subjectsError } = await supabase
+          .from(TABLES.SUBJECTS)
+          .select(`
+            id,
+            name,
+            is_optional,
+            class_id
+          `)
+          .eq('class_id', student.class_id);
+
+        if (!subjectsError && subjects) {
+          setClassSubjects(subjects);
+          console.log('Class subjects:', subjects);
+        }
+      } catch (subjectsErr) {
+        console.log('Subjects fetch error:', subjectsErr);
+      }
+
+      // Get school details
+      try {
+        const { data: schoolDetails, error: schoolError } = await supabase
+          .from(TABLES.SCHOOL_DETAILS)
+          .select('*')
+          .limit(1)
+          .single();
+
+        if (!schoolError && schoolDetails) {
+          setSchoolInfo({
+            name: schoolDetails.name || 'School Management System',
+            address: schoolDetails.address || 'School Address',
+            logoUrl: schoolDetails.logo_url || '',
+            phone: schoolDetails.phone || '',
+            email: schoolDetails.email || '',
+            website: schoolDetails.website || '',
+            principalName: schoolDetails.principal_name || ''
+          });
+        }
+      } catch (schoolErr) {
+        console.log('School details fetch error:', schoolErr);
+      }
 
     } catch (err) {
       setError(err.message);
@@ -125,9 +336,17 @@ export default function StudentAttendanceMarks() {
     }
   };
 
+  // SIMPLE SOLUTION - Handle tab changes
+  useEffect(() => {
+    if (route?.params?.activeTab) {
+      console.log('Setting activeTab to:', route.params.activeTab);
+      setActiveTab(route.params.activeTab);
+    }
+  }, [route?.params?.activeTab]);
+
   useEffect(() => {
     fetchStudentData();
-    // Real-time subscriptions
+    // Enhanced real-time subscriptions
     const attendanceSub = supabase
       .channel('student-attendance-marks-attendance')
       .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.STUDENT_ATTENDANCE }, fetchStudentData)
@@ -136,9 +355,25 @@ export default function StudentAttendanceMarks() {
       .channel('student-attendance-marks-marks')
       .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.MARKS }, fetchStudentData)
       .subscribe();
+    const examsSub = supabase
+      .channel('student-attendance-marks-exams')
+      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.EXAMS }, fetchStudentData)
+      .subscribe();
+    const subjectsSub = supabase
+      .channel('student-attendance-marks-subjects')
+      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.SUBJECTS }, fetchStudentData)
+      .subscribe();
+    const studentsSub = supabase
+      .channel('student-attendance-marks-students')
+      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.STUDENTS }, fetchStudentData)
+      .subscribe();
+
     return () => {
       attendanceSub.unsubscribe();
       marksSub.unsubscribe();
+      examsSub.unsubscribe();
+      subjectsSub.unsubscribe();
+      studentsSub.unsubscribe();
     };
   }, []);
 
@@ -276,8 +511,8 @@ export default function StudentAttendanceMarks() {
         <div class="school-header">
           <div class="school-logo"></div>
           <div>
-            <h1 style="margin:0;">${SCHOOL_INFO.name}</h1>
-            <p style="margin:0;">${SCHOOL_INFO.address}</p>
+            <h1 style="margin:0;">${schoolInfo.name}</h1>
+            <p style="margin:0;">${schoolInfo.address}</p>
           </div>
         </div>
         <div class="student-info">
@@ -452,12 +687,43 @@ export default function StudentAttendanceMarks() {
                   </Animated.View>
                 </View>
               </View>
-              {/* Day Tooltip/Modal */}
+              {/* Enhanced Day Tooltip/Modal */}
               <Modal visible={!!selectedDay} transparent animationType="fade" onRequestClose={() => setSelectedDay(null)}>
                 <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.18)', justifyContent: 'center', alignItems: 'center' }}>
-                  <View style={{ backgroundColor: '#fff', borderRadius: 18, padding: 28, minWidth: 200, alignItems: 'center', elevation: 6 }}>
-                    <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#FF9800', marginBottom: 10 }}>Day {selectedDay?.day}</Text>
-                    <Text style={{ fontSize: 16, color: '#444', textAlign: 'center', marginBottom: 18 }}>{selectedDay?.status ? selectedDay.status.charAt(0).toUpperCase() + selectedDay.status.slice(1) : 'No data'}</Text>
+                  <View style={{ backgroundColor: '#fff', borderRadius: 18, padding: 28, minWidth: 280, alignItems: 'center', elevation: 6 }}>
+                    <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#FF9800', marginBottom: 10 }}>
+                      {selectedDay?.dateStr ? new Date(selectedDay.dateStr).toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      }) : `Day ${selectedDay?.day}`}
+                    </Text>
+                    <View style={{ alignItems: 'center', marginBottom: 18 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                        <Ionicons
+                          name={getAttendanceIcon(selectedDay?.status)}
+                          size={24}
+                          color={getAttendanceColor(selectedDay?.status)}
+                          style={{ marginRight: 8 }}
+                        />
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: getAttendanceColor(selectedDay?.status) }}>
+                          {selectedDay?.status ? selectedDay.status.charAt(0).toUpperCase() + selectedDay.status.slice(1) : 'No data'}
+                        </Text>
+                      </View>
+                      {selectedDay?.dateStr && attendanceDetails[selectedDay.dateStr] && (
+                        <View style={{ alignItems: 'center' }}>
+                          <Text style={{ fontSize: 14, color: '#666', marginBottom: 4 }}>
+                            Marked by: {attendanceDetails[selectedDay.dateStr].markedBy}
+                          </Text>
+                          {attendanceDetails[selectedDay.dateStr].createdAt && (
+                            <Text style={{ fontSize: 12, color: '#888' }}>
+                              Time: {new Date(attendanceDetails[selectedDay.dateStr].createdAt).toLocaleTimeString()}
+                            </Text>
+                          )}
+                        </View>
+                      )}
+                    </View>
                     <TouchableOpacity onPress={() => setSelectedDay(null)} style={{ backgroundColor: '#FF9800', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 24 }}>
                       <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Close</Text>
                     </TouchableOpacity>
@@ -544,8 +810,8 @@ export default function StudentAttendanceMarks() {
                       <div class="school-header">
                         <div class="school-logo"></div>
                         <div>
-                          <h1 style="margin:0;">${SCHOOL_INFO.name}</h1>
-                          <p style="margin:0;">${SCHOOL_INFO.address}</p>
+                          <h1 style="margin:0;">${schoolInfo.name}</h1>
+                          <p style="margin:0;">${schoolInfo.address}</p>
                         </div>
                       </div>
                       <div class="student-info">
@@ -584,6 +850,37 @@ export default function StudentAttendanceMarks() {
             </>
           ) : (
             <>
+              {/* Upcoming Exams Section */}
+              {upcomingExams.length > 0 && (
+                <>
+                  <Text style={styles.sectionTitle}>Upcoming Exams</Text>
+                  <View style={{ backgroundColor: '#fff', borderRadius: 12, marginBottom: 18, elevation: 1 }}>
+                    {upcomingExams.map((exam, index) => (
+                      <View key={exam.id} style={{
+                        padding: 16,
+                        borderBottomWidth: index < upcomingExams.length - 1 ? 1 : 0,
+                        borderBottomColor: '#f0f0f0'
+                      }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                          <Ionicons name="school" size={20} color="#1976d2" style={{ marginRight: 8 }} />
+                          <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#333', flex: 1 }}>{exam.name}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                          <Ionicons name="calendar" size={16} color="#666" style={{ marginRight: 8 }} />
+                          <Text style={{ fontSize: 14, color: '#666' }}>
+                            {new Date(exam.start_date).toLocaleDateString()}
+                            {exam.end_date !== exam.start_date && ` - ${new Date(exam.end_date).toLocaleDateString()}`}
+                          </Text>
+                        </View>
+                        {exam.remarks && (
+                          <Text style={{ fontSize: 13, color: '#888', marginTop: 4 }}>{exam.remarks}</Text>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                </>
+              )}
+
               <Text style={styles.sectionTitle}>Marks Summary</Text>
               {/* Marks Table by Exam Type */}
               {marksByExam.map(({ type, marks }) => (
@@ -595,15 +892,38 @@ export default function StudentAttendanceMarks() {
                       <Text style={styles.marksHeader}>Score</Text>
                       <Text style={styles.marksHeader}>Max</Text>
                       <Text style={styles.marksHeader}>%</Text>
+                      <Text style={styles.marksHeader}>Grade</Text>
                     </View>
-                    {marks.map((m, i) => (
-                      <View key={i} style={styles.marksRow}>
-                        <Text style={styles.marksCell}>{m.subject_name}</Text>
-                        <Text style={styles.marksCell}>{m.marks_obtained}</Text>
-                        <Text style={styles.marksCell}>{m.total_marks}</Text>
-                        <Text style={styles.marksPercentage}>{Math.round((m.marks_obtained / (m.total_marks || 100)) * 100)}%</Text>
-                      </View>
-                    ))}
+                    {marks.map((m, i) => {
+                      const percentage = Math.round((m.marks_obtained / (m.total_marks || 100)) * 100);
+                      const grade = m.grade || (
+                        percentage >= 90 ? 'A+' :
+                        percentage >= 80 ? 'A' :
+                        percentage >= 70 ? 'B+' :
+                        percentage >= 60 ? 'B' :
+                        percentage >= 50 ? 'C' :
+                        percentage >= 40 ? 'D' : 'F'
+                      );
+                      return (
+                        <View key={i} style={styles.marksRow}>
+                          <Text style={styles.marksCell}>{m.subject_name}</Text>
+                          <Text style={styles.marksCell}>{m.marks_obtained}</Text>
+                          <Text style={styles.marksCell}>{m.total_marks}</Text>
+                          <Text style={[styles.marksPercentage, {
+                            color: percentage >= 60 ? '#4CAF50' : percentage >= 40 ? '#FF9800' : '#F44336'
+                          }]}>{percentage}%</Text>
+                          <Text style={[styles.marksCell, {
+                            fontWeight: 'bold',
+                            color: percentage >= 60 ? '#4CAF50' : percentage >= 40 ? '#FF9800' : '#F44336'
+                          }]}>{grade}</Text>
+                          {m.classAverage && (
+                            <Text style={[styles.marksCell, { fontSize: 12, color: '#666' }]}>
+                              Class Avg: {m.classAverage}%
+                            </Text>
+                          )}
+                        </View>
+                      );
+                    })}
                   </View>
                   {/* Average for this exam type */}
                   <View style={styles.marksAvgRow}>
@@ -718,8 +1038,8 @@ export default function StudentAttendanceMarks() {
                       <div class="school-header">
                         <div class="school-logo"></div>
                         <div>
-                          <h1 style="margin:0;">${SCHOOL_INFO.name}</h1>
-                          <p style="margin:0;">${SCHOOL_INFO.address}</p>
+                          <h1 style="margin:0;">${schoolInfo.name}</h1>
+                          <p style="margin:0;">${schoolInfo.address}</p>
                         </div>
                       </div>
                       <div class="student-info">
