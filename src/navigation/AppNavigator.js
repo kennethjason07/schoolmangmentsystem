@@ -64,6 +64,7 @@ import ChatWithTeacher from '../screens/parent/ChatWithTeacher';
 import StudentDashboard from '../screens/student/StudentDashboard';
 import ViewAssignments from '../screens/student/ViewAssignments';
 import StudentAttendanceMarks from '../screens/student/StudentAttendanceMarks';
+import StudentMarks from '../screens/student/StudentMarks';
 import StudentNotifications from '../screens/student/StudentNotifications';
 import StudentChatWithTeacher from '../screens/student/StudentChatWithTeacher';
 
@@ -172,10 +173,10 @@ function ParentTabNavigator() {
           let iconName;
           if (route.name === 'ParentDashboard') {
             iconName = focused ? 'home' : 'home-outline';
-          } else if (route.name === 'Report Card') {
-            iconName = focused ? 'document-text' : 'document-text-outline';
           } else if (route.name === 'Attendance') {
             iconName = focused ? 'calendar' : 'calendar-outline';
+          } else if (route.name === 'Marks') {
+            iconName = focused ? 'document-text' : 'document-text-outline';
           } else if (route.name === 'Fees') {
             iconName = focused ? 'card' : 'card-outline';
           } else if (route.name === 'Chat') {
@@ -193,8 +194,8 @@ function ParentTabNavigator() {
         component={ParentDashboard}
         options={{ tabBarLabel: 'Dashboard' }}
       />
-      <Tab.Screen name="Report Card" component={ViewReportCard} />
       <Tab.Screen name="Attendance" component={AttendanceSummary} />
+      <Tab.Screen name="Marks" component={ViewReportCard} options={{ tabBarLabel: 'Marks' }} />
       <Tab.Screen name="Fees" component={FeePayment} />
       <Tab.Screen name="Chat" component={ChatWithTeacher} />
     </Tab.Navigator>
@@ -212,6 +213,8 @@ function StudentTabNavigator() {
             iconName = focused ? 'home' : 'home-outline';
           } else if (route.name === 'Assignments') {
             iconName = focused ? 'library' : 'library-outline';
+          } else if (route.name === 'Attendance') {
+            iconName = focused ? 'calendar' : 'calendar-outline';
           } else if (route.name === 'Marks') {
             iconName = focused ? 'document-text' : 'document-text-outline';
           } else if (route.name === 'Chat') {
@@ -230,7 +233,12 @@ function StudentTabNavigator() {
         options={{ tabBarLabel: 'Dashboard' }}
       />
       <Tab.Screen name="Assignments" component={ViewAssignments} />
-      <Tab.Screen name="Marks" component={StudentAttendanceMarks} />
+      <Tab.Screen
+        name="Attendance"
+        component={StudentAttendanceMarks}
+        initialParams={{ defaultTab: 'attendance' }}
+      />
+      <Tab.Screen name="Marks" component={StudentMarks} />
       <Tab.Screen name="Chat" component={StudentChatWithTeacher} />
     </Tab.Navigator>
   );

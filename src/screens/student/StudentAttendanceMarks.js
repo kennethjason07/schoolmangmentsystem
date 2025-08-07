@@ -180,7 +180,8 @@ const handleSupabaseError = (error, context) => {
 
 export default function StudentAttendanceMarks({ route, navigation }) {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('attendance');
+  // Default to attendance tab, but can be overridden by route params
+  const [activeTab, setActiveTab] = useState(route?.params?.defaultTab || 'attendance');
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[0].value);
   const [fadeAnim] = useState(new Animated.Value(1));
   const [selectedStat, setSelectedStat] = useState(null);
@@ -1288,7 +1289,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                       <View style={[styles.statIndicator, { backgroundColor: '#4CAF50' }]} />
                       <View style={styles.statCardContent}>
                         <View style={[styles.statIconCircleEnhanced, { backgroundColor: '#E8F5E8' }]}>
-                          <Ionicons name="checkmark-circle" size={28} color="#4CAF50" />
+                          <Ionicons name="checkmark-circle" size={22} color="#4CAF50" />
                         </View>
                         <Text style={[styles.statNumberEnhanced, { color: '#4CAF50' }]}>{stats.present || 0}</Text>
                       </View>
@@ -1314,7 +1315,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                       <View style={[styles.statIndicator, { backgroundColor: '#F44336' }]} />
                       <View style={styles.statCardContent}>
                         <View style={[styles.statIconCircleEnhanced, { backgroundColor: '#FFEBEE' }]}>
-                          <Ionicons name="close-circle" size={28} color="#F44336" />
+                          <Ionicons name="close-circle" size={22} color="#F44336" />
                         </View>
                         <Text style={[styles.statNumberEnhanced, { color: '#F44336' }]}>{stats.absent || 0}</Text>
                       </View>
@@ -1340,7 +1341,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                       <View style={[styles.statIndicator, { backgroundColor: '#FF9800' }]} />
                       <View style={styles.statCardContent}>
                         <View style={[styles.statIconCircleEnhanced, { backgroundColor: '#FFF3E0' }]}>
-                          <Ionicons name="time" size={24} color="#FF9800" />
+                          <Ionicons name="time" size={22} color="#FF9800" />
                         </View>
                         <Text style={[styles.statNumberEnhanced, { color: '#FF9800' }]}>{stats.late || 0}</Text>
                       </View>
@@ -1366,7 +1367,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                       <View style={[styles.statIndicator, { backgroundColor: '#9C27B0' }]} />
                       <View style={styles.statCardContent}>
                         <View style={[styles.statIconCircleEnhanced, { backgroundColor: '#F3E5F5' }]}>
-                          <Ionicons name="medical" size={24} color="#9C27B0" />
+                          <Ionicons name="medical" size={22} color="#9C27B0" />
                         </View>
                         <Text style={[styles.statNumberEnhanced, { color: '#9C27B0' }]}>{stats.excused || 0}</Text>
                       </View>
@@ -2172,7 +2173,7 @@ const styles = StyleSheet.create({
   },
   statsGrid: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     justifyContent: 'space-between',
     marginBottom: 16,
     paddingHorizontal: 2,
@@ -2180,9 +2181,9 @@ const styles = StyleSheet.create({
   statCardEnhanced: {
     backgroundColor: '#fff',
     borderRadius: 18,
-    padding: 16,
-    width: '48%',
-    height: 240,
+    padding: 14,
+    width: '24%',
+    height: 220,
     marginBottom: 12,
     elevation: 4,
     shadowColor: '#000',
@@ -2193,8 +2194,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     position: 'relative',
     overflow: 'visible',
-    paddingTop: 8,
-    paddingBottom: 8,
+    paddingTop: 10,
+    paddingBottom: 10,
   },
   statCardContent: {
     flex: 1,
@@ -2212,9 +2213,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statIconCircleEnhanced: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 45,
+    height: 45,
+    borderRadius: 22.5,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
@@ -2226,7 +2227,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
   },
   statLetterEnhanced: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 4,
     marginTop: 8,
@@ -2235,8 +2236,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
-    minHeight: 40,
-    lineHeight: 32,
+    minHeight: 32,
+    lineHeight: 28,
   },
   statNumberEnhanced: {
     fontSize: 20,
@@ -2265,13 +2266,13 @@ const styles = StyleSheet.create({
     overflow: 'visible',
   },
   statLabelEnhanced: {
-    fontSize: 13,
-    color: '#555',
-    fontWeight: '600',
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '700',
     textAlign: 'center',
-    marginTop: 2,
-    minHeight: 18,
-    lineHeight: 18,
+    marginTop: 4,
+    minHeight: 20,
+    lineHeight: 20,
   },
   statIndicator: {
     position: 'absolute',
