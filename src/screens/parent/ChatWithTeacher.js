@@ -7,6 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { useMessageStatus } from '../../utils/useMessageStatus';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Animatable from 'react-native-animatable';
 
@@ -21,6 +22,7 @@ const ChatWithTeacher = () => {
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const flatListRef = useRef(null);
   const { user } = useAuth();
+  const { markMessagesAsRead } = useMessageStatus();
 
   // Helper function to get teacher's user ID
   const getTeacherUserId = async (teacherId) => {
@@ -255,6 +257,11 @@ const ChatWithTeacher = () => {
 
     setSelectedTeacher(teacher);
     setMessages(teacher.messages || []);
+    
+    // Mark messages from this teacher as read
+    if (teacher.userId && teacher.userId !== user.id) {
+      markMessagesAsRead(teacher.userId);
+    }
   };
 
   // Send a message

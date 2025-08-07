@@ -74,7 +74,7 @@ const ParentDashboard = ({ navigation }) => {
             .from(TABLES.EXAMS)
             .select('*')
             .eq('class_id', studentDetails.class_id)
-            .order('date', { ascending: true })
+            .order('start_date', { ascending: true })
             .limit(5);
 
           if (examsError && examsError.code !== '42P01') {
@@ -106,8 +106,27 @@ const ParentDashboard = ({ navigation }) => {
 
           // Filter to current month records
           const currentMonthRecords = (allAttendanceData || []).filter(record => {
-            const recordYear = parseInt(record.date.split('-')[0]);
-            const recordMonth = parseInt(record.date.split('-')[1]);
+            // Safety check for valid date format
+            if (!record.date || typeof record.date !== 'string') {
+              console.warn('Invalid date format in attendance record:', record.date);
+              return false;
+            }
+            
+            const dateParts = record.date.split('-');
+            if (dateParts.length < 2) {
+              console.warn('Date does not contain expected format (YYYY-MM-DD):', record.date);
+              return false;
+            }
+            
+            const recordYear = parseInt(dateParts[0], 10);
+            const recordMonth = parseInt(dateParts[1], 10);
+            
+            // Check if parsing was successful (not NaN)
+            if (isNaN(recordYear) || isNaN(recordMonth)) {
+              console.warn('Failed to parse date components:', record.date, 'year:', dateParts[0], 'month:', dateParts[1]);
+              return false;
+            }
+            
             return recordYear === year && recordMonth === month;
           });
 
@@ -136,7 +155,7 @@ const ParentDashboard = ({ navigation }) => {
             .select(`
               *,
               subjects(name),
-              exams(exam_name, exam_date)
+              exams(name, start_date)
             `)
             .eq('student_id', studentDetails.id)
             .order('created_at', { ascending: false })
@@ -234,7 +253,7 @@ const ParentDashboard = ({ navigation }) => {
     if (marks.length === 0) return 'No marks';
 
     const totalMarks = marks.reduce((sum, mark) => sum + (mark.marks_obtained || 0), 0);
-    const totalMaxMarks = marks.reduce((sum, mark) => sum + (mark.total_marks || 0), 0);
+    const totalMaxMarks = marks.reduce((sum, mark) => sum + (mark.max_marks || 0), 0);
 
     if (totalMaxMarks === 0) return 'No marks';
 
@@ -248,7 +267,7 @@ const ParentDashboard = ({ navigation }) => {
 
     const recentMarks = marks.slice(0, 3);
     const avgRecent = recentMarks.reduce((sum, mark) => {
-      const percentage = (mark.marks_obtained / mark.total_marks) * 100;
+      const percentage = (mark.marks_obtained / mark.max_marks) * 100;
       return sum + percentage;
     }, 0) / recentMarks.length;
 
@@ -292,7 +311,7 @@ const ParentDashboard = ({ navigation }) => {
       value: String(exams.length),
       icon: 'calendar',
       color: '#9C27B0',
-      subtitle: exams.length > 0 ? `Next: ${exams[0]?.exam_name || 'TBA'}` : 'No upcoming exams',
+      subtitle: exams.length > 0 ? `Next: ${exams[0]?.name || 'TBA'}` : 'No upcoming exams',
       onPress: () => setShowExamsModal(true)
     },
   ];
@@ -503,19 +522,19 @@ const ParentDashboard = ({ navigation }) => {
                     <Text style={styles.markSubject}>{mark.subjects?.name || 'Subject'}</Text>
                     <View style={[
                       styles.markGrade,
-                      { backgroundColor: (mark.marks_obtained / mark.total_marks) >= 0.9 ? '#4CAF50' :
-                                        (mark.marks_obtained / mark.total_marks) >= 0.75 ? '#FF9800' : '#F44336' }
+                      { backgroundColor: (mark.marks_obtained / mark.max_marks) >= 0.9 ? '#4CAF50' :
+                                        (mark.marks_obtained / mark.max_marks) >= 0.75 ? '#FF9800' : '#F44336' }
                     ]}>
                       <Text style={styles.markGradeText}>
-                        {Math.round((mark.marks_obtained / mark.total_marks) * 100)}%
+                        {Math.round((mark.marks_obtained / mark.max_marks) * 100)}%
                       </Text>
                     </View>
                   </View>
                   <Text style={styles.markDetails}>
-                    {mark.marks_obtained}/{mark.total_marks} marks
+                    {mark.marks_obtained}/{mark.max_marks} marks
                   </Text>
                   <Text style={styles.markExam}>
-                    {mark.exams?.exam_name || 'Exam'} • {new Date(mark.exams?.exam_date || mark.created_at).toLocaleDateString()}
+                    {mark.exams?.name || 'Exam'} • {new Date(mark.exams?.start_date || mark.created_at).toLocaleDateString()}
                   </Text>
                 </View>
               ))}
