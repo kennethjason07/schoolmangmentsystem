@@ -41,6 +41,141 @@ const getAttendanceIcon = (status) => {
   }
 };
 
+// Helper function to normalize attendance status (handles both database formats)
+const normalizeAttendanceStatus = (status) => {
+  if (!status) return 'absent';
+  const normalizedStatus = status.toLowerCase().trim();
+
+  // Map various status formats to standard format
+  switch (normalizedStatus) {
+    case 'present':
+    case 'p':
+      return 'present';
+    case 'absent':
+    case 'a':
+      return 'absent';
+    case 'late':
+    case 'l':
+      return 'late';
+    case 'excused':
+    case 'e':
+      return 'excused';
+    default:
+      console.warn(`Unknown attendance status: ${status}, defaulting to absent`);
+      return 'absent';
+  }
+};
+
+// Helper function to check if status counts as "attended"
+const isAttendedStatus = (status) => {
+  const normalizedStatus = normalizeAttendanceStatus(status);
+  return ['present', 'late', 'excused'].includes(normalizedStatus);
+};
+
+// Helper function to calculate attendance percentage with consistent logic
+const calculateAttendancePercentage = (attendanceData, startDate, endDate, countMethod = 'attended') => {
+  let attended = 0, total = 0;
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const dateStr = d.toISOString().split('T')[0];
+    if (attendanceData[dateStr]) {
+      total++;
+      const status = attendanceData[dateStr];
+
+      if (countMethod === 'present_only') {
+        // Only count 'present' as attended (for dashboard consistency)
+        if (normalizeAttendanceStatus(status) === 'present') {
+          attended++;
+        }
+      } else {
+        // Count 'present', 'late', and 'excused' as attended (default)
+        if (isAttendedStatus(status)) {
+          attended++;
+        }
+      }
+    }
+  }
+
+  return total > 0 ? Math.round((attended / total) * 100) : 0;
+};
+
+// Helper function to get grade color
+const getGradeColor = (percentage) => {
+  if (percentage >= 90) return '#4CAF50'; // Green for A+
+  if (percentage >= 80) return '#8BC34A'; // Light green for A
+  if (percentage >= 70) return '#FFC107'; // Yellow for B+
+  if (percentage >= 60) return '#FF9800'; // Orange for B
+  if (percentage >= 50) return '#FF5722'; // Deep orange for C
+  if (percentage >= 40) return '#F44336'; // Red for D
+  return '#9E9E9E'; // Grey for F
+};
+
+// Helper function to format date for display
+const formatDateForDisplay = (dateString) => {
+  if (!dateString) return 'N/A';
+  try {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  } catch (error) {
+    return 'Invalid Date';
+  }
+};
+
+// Helper function to validate and sanitize data
+const validateAndSanitizeData = (data, type) => {
+  if (!data) return null;
+
+  switch (type) {
+    case 'attendance':
+      return {
+        ...data,
+        status: (data.status || '').toLowerCase(),
+        date: data.date || new Date().toISOString().split('T')[0],
+        student_id: data.student_id || null,
+        marked_by: data.marked_by || null
+      };
+    case 'marks':
+      return {
+        ...data,
+        marks_obtained: parseFloat(data.marks_obtained) || 0,
+        max_marks: parseFloat(data.max_marks) || 100,
+        percentage: data.max_marks > 0 ?
+          Math.round((parseFloat(data.marks_obtained) || 0) / (parseFloat(data.max_marks) || 100) * 100) : 0
+      };
+    case 'student':
+      return {
+        ...data,
+        name: data.name || 'Unknown Student',
+        roll_no: data.roll_no || 'N/A',
+        class_id: data.class_id || null
+      };
+    default:
+      return data;
+  }
+};
+
+// Helper function to handle Supabase errors
+const handleSupabaseError = (error, context) => {
+  console.error(`Supabase error in ${context}:`, error);
+
+  if (error.code === 'PGRST116') {
+    return `No data found for ${context}`;
+  } else if (error.code === 'PGRST301') {
+    return `Multiple records found for ${context}`;
+  } else if (error.message?.includes('JWT')) {
+    return 'Authentication error. Please login again.';
+  } else if (error.message?.includes('permission')) {
+    return 'Permission denied. Contact administrator.';
+  } else {
+    return `Error loading ${context}: ${error.message}`;
+  }
+};
+
 // School info will be loaded dynamically from database
 
 export default function StudentAttendanceMarks({ route, navigation }) {
@@ -50,6 +185,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
   const [fadeAnim] = useState(new Animated.Value(1));
   const [selectedStat, setSelectedStat] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
+  const [showOverallAttendance, setShowOverallAttendance] = useState(false);
   const [attendanceData, setAttendanceData] = useState({});
   const [attendanceDetails, setAttendanceDetails] = useState({});
   const [marksData, setMarksData] = useState([]);
@@ -60,10 +196,23 @@ export default function StudentAttendanceMarks({ route, navigation }) {
   const [classAverages, setClassAverages] = useState({});
   const [upcomingExams, setUpcomingExams] = useState([]);
   const [classSubjects, setClassSubjects] = useState([]);
+  const [recentHomework, setRecentHomework] = useState([]);
+  const [performanceTrend, setPerformanceTrend] = useState([]);
+  const [attendancePercentageByMonth, setAttendancePercentageByMonth] = useState({});
   const [schoolInfo, setSchoolInfo] = useState({
     name: 'Springfield Public School',
     address: '123 Main St, Springfield, USA',
     logoUrl: '',
+  });
+
+  // Animation values for enhanced stats cards
+  const [statsAnimValue] = useState(new Animated.Value(0));
+  const [pulseAnim] = useState(new Animated.Value(1));
+  const [cardScaleValues] = useState({
+    present: new Animated.Value(1),
+    absent: new Animated.Value(1),
+    late: new Animated.Value(1),
+    excused: new Animated.Value(1),
   });
 
   // Fetch attendance and marks from Supabase
@@ -73,27 +222,62 @@ export default function StudentAttendanceMarks({ route, navigation }) {
       setError(null);
 
       // Get student id from user context
+      if (!user?.id) {
+        throw new Error('User not authenticated');
+      }
+
       // Get student data using the helper function
       const { data: studentUserData, error: studentError } = await dbHelpers.getStudentByUserId(user.id);
-      if (studentError || !studentUserData) {
-        throw new Error('Student data not found');
+      if (studentError) {
+        console.error('Student fetch error:', studentError);
+        throw new Error(`Failed to fetch student data: ${studentError.message}`);
+      }
+
+      if (!studentUserData) {
+        throw new Error('Student data not found. Please contact administrator.');
       }
 
       // Get student details from the linked student
       const student = studentUserData.students;
       if (!student) {
-        throw new Error('Student profile not found');
+        throw new Error('Student profile not found. Please contact administrator.');
       }
 
       const studentId = student.id;
+      console.log('Fetching data for student:', studentId, student.name);
 
       setStudentInfo({
-        name: student.name,
+        name: student.name || 'Unknown Student',
         class: student.classes?.class_name || 'N/A',
-        rollNo: student.roll_no,
+        rollNo: student.roll_no || 'N/A',
         section: student.classes?.section || '',
         profilePicUrl: '',
+        admissionNo: student.admission_no || 'N/A',
+        dob: student.dob ? formatDateForDisplay(student.dob) : 'N/A',
+        gender: student.gender || 'N/A',
+        address: student.address || 'N/A'
       });
+
+      // Get parent information for the student
+      try {
+        const { data: parentInfo, error: parentError } = await supabase
+          .from(TABLES.PARENTS)
+          .select(`
+            id,
+            name,
+            relation,
+            phone,
+            email
+          `)
+          .eq('student_id', studentId);
+
+        if (!parentError && parentInfo && parentInfo.length > 0) {
+          console.log('Parent information:', parentInfo);
+          // Store parent info if needed for display
+        }
+      } catch (parentErr) {
+        console.log('Parent info fetch error:', parentErr);
+      }
 
       // Get attendance records with additional details
       const { data: attendance, error: attendanceError } = await supabase
@@ -117,28 +301,49 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         throw attendanceError;
       }
 
-      // Group attendance by date string with additional metadata
+      // Group attendance by date string with standardized status handling
       const attendanceMap = {};
       const attendanceDetailsMap = {};
       attendance.forEach(a => {
         const dateStr = a.date;
-        let status = 'present';
-        if (a.status === 'Present') status = 'present';
-        else if (a.status === 'Absent') status = 'absent';
-        else if (a.status === 'Late') status = 'late';
-        else if (a.status === 'Excused') status = 'excused';
 
-        attendanceMap[dateStr] = status;
+        // Use standardized status normalization
+        const normalizedStatus = normalizeAttendanceStatus(a.status);
+
+        attendanceMap[dateStr] = normalizedStatus;
         attendanceDetailsMap[dateStr] = {
-          status,
+          status: normalizedStatus,
+          originalStatus: a.status, // Keep original for debugging
           markedBy: a.users?.full_name || 'System',
           className: a.classes?.class_name || student.classes?.class_name,
           section: a.classes?.section || student.classes?.section,
-          createdAt: a.created_at
+          createdAt: a.created_at,
+          markedAt: a.created_at ? new Date(a.created_at).toLocaleString() : 'Unknown',
+          isAttended: isAttendedStatus(a.status) // Add attended flag for easy checking
         };
       });
       setAttendanceData(attendanceMap);
       setAttendanceDetails(attendanceDetailsMap);
+
+      // Debug: Log attendance data for comparison with dashboard
+      console.log('=== ATTENDANCE DEBUG INFO ===');
+      console.log('Total attendance records:', attendance.length);
+      console.log('Attendance map sample:', Object.keys(attendanceMap).slice(0, 5).map(date => ({
+        date,
+        status: attendanceMap[date],
+        original: attendance.find(a => a.date === date)?.status
+      })));
+
+      // Calculate overall attendance percentage for debugging
+      const totalRecords = Object.keys(attendanceMap).length;
+      const attendedRecords = Object.values(attendanceMap).filter(status => isAttendedStatus(status)).length;
+      const presentOnlyRecords = Object.values(attendanceMap).filter(status => normalizeAttendanceStatus(status) === 'present').length;
+
+      console.log('Overall attendance stats:');
+      console.log('- Total records:', totalRecords);
+      console.log('- Attended (present/late/excused):', attendedRecords, `(${totalRecords > 0 ? Math.round((attendedRecords/totalRecords)*100) : 0}%)`);
+      console.log('- Present only:', presentOnlyRecords, `(${totalRecords > 0 ? Math.round((presentOnlyRecords/totalRecords)*100) : 0}%)`);
+      console.log('==============================');
 
       // Get marks records with subject and exam details
       const { data: marks, error: marksError } = await supabase
@@ -167,20 +372,37 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         throw marksError;
       }
 
-      // Process marks data to include subject and exam names
-      const processedMarks = marks.map(mark => ({
-        ...mark,
-        subject_name: mark.subjects?.name || 'Unknown Subject',
-        exam_name: mark.exams?.name || 'Unknown Exam',
-        exam_date: mark.exams?.start_date,
-        total_marks: mark.max_marks || 100,
-        percentage: mark.marks_obtained && mark.max_marks ?
-          Math.round((mark.marks_obtained / mark.max_marks) * 100) : 0
-      }));
+      // Process marks data to include subject and exam names with better validation
+      const processedMarks = marks.map(mark => {
+        const marksObtained = parseFloat(mark.marks_obtained) || 0;
+        const maxMarks = parseFloat(mark.max_marks) || 100;
+        const percentage = maxMarks > 0 ? Math.round((marksObtained / maxMarks) * 100) : 0;
+
+        return {
+          ...mark,
+          subject_name: mark.subjects?.name || 'Unknown Subject',
+          exam_name: mark.exams?.name || 'Unknown Exam',
+          exam_date: mark.exams?.start_date,
+          total_marks: maxMarks,
+          marks_obtained: marksObtained,
+          percentage,
+          grade: mark.grade || (
+            percentage >= 90 ? 'A+' :
+            percentage >= 80 ? 'A' :
+            percentage >= 70 ? 'B+' :
+            percentage >= 60 ? 'B' :
+            percentage >= 50 ? 'C' :
+            percentage >= 40 ? 'D' : 'F'
+          ),
+          performance_level: percentage >= 80 ? 'Excellent' :
+                           percentage >= 60 ? 'Good' :
+                           percentage >= 40 ? 'Average' : 'Needs Improvement'
+        };
+      });
 
       setMarksData(processedMarks);
 
-      // Get class average for comparison (optional enhancement)
+      // Get class average for comparison with improved error handling
       try {
         const { data: classMarks, error: classMarksError } = await supabase
           .from(TABLES.MARKS)
@@ -193,67 +415,78 @@ export default function StudentAttendanceMarks({ route, navigation }) {
           `)
           .eq('students.class_id', student.class_id);
 
-        if (!classMarksError && classMarks) {
+        if (!classMarksError && classMarks && classMarks.length > 0) {
           // Calculate class averages by subject and exam
-          const classAverages = {};
+          const classAveragesMap = {};
           classMarks.forEach(mark => {
             const key = `${mark.subject_id}-${mark.exam_id}`;
-            if (!classAverages[key]) {
-              classAverages[key] = { total: 0, count: 0, maxMarks: mark.max_marks };
+            if (!classAveragesMap[key]) {
+              classAveragesMap[key] = { total: 0, count: 0, maxMarks: mark.max_marks || 100 };
             }
-            classAverages[key].total += mark.marks_obtained || 0;
-            classAverages[key].count += 1;
+            classAveragesMap[key].total += parseFloat(mark.marks_obtained) || 0;
+            classAveragesMap[key].count += 1;
           });
 
           // Add class average to processed marks
           const marksWithClassAvg = processedMarks.map(mark => {
             const key = `${mark.subject_id}-${mark.exam_id}`;
-            const classAvg = classAverages[key];
+            const classAvg = classAveragesMap[key];
             return {
               ...mark,
-              classAverage: classAvg ? Math.round((classAvg.total / classAvg.count / classAvg.maxMarks) * 100) : null
+              classAverage: classAvg && classAvg.count > 0 ?
+                Math.round((classAvg.total / classAvg.count / classAvg.maxMarks) * 100) : null,
+              classAverageRaw: classAvg ? Math.round(classAvg.total / classAvg.count) : null,
+              classSize: classAvg ? classAvg.count : null
             };
           });
           setMarksData(marksWithClassAvg);
+          setClassAverages(classAveragesMap);
+          console.log('Class averages calculated:', classAveragesMap);
+        } else {
+          // No class data available, use processed marks as is
+          setMarksData(processedMarks);
+          console.log('No class average data available');
         }
       } catch (classErr) {
         console.log('Class average calculation error:', classErr);
         // Continue without class averages
+        setMarksData(processedMarks);
       }
 
-      // Get attendance statistics for the current academic year
+      // Get attendance statistics using standardized utility
       try {
         const currentYear = new Date().getFullYear();
         const academicYearStart = `${currentYear}-04-01`; // Assuming academic year starts in April
         const academicYearEnd = `${currentYear + 1}-03-31`;
 
-        const { data: yearlyAttendance, error: yearlyError } = await supabase
-          .from(TABLES.STUDENT_ATTENDANCE)
-          .select('date, status')
-          .eq('student_id', studentId)
-          .gte('date', academicYearStart)
-          .lte('date', academicYearEnd)
-          .order('date', { ascending: true });
+        // Use the new standardized attendance utility
+        const { data: attendanceStats, error: statsError } = await dbHelpers.getStudentAttendanceStats(studentId, {
+          startDate: academicYearStart,
+          endDate: academicYearEnd,
+          countMethod: 'attended',
+          groupBy: 'month'
+        });
 
-        if (!yearlyError && yearlyAttendance) {
-          // Calculate monthly attendance trends
-          const monthlyStats = {};
-          yearlyAttendance.forEach(record => {
-            const month = record.date.substring(0, 7); // YYYY-MM format
-            if (!monthlyStats[month]) {
-              monthlyStats[month] = { present: 0, absent: 0, total: 0 };
-            }
-            monthlyStats[month].total += 1;
-            if (record.status === 'Present') {
-              monthlyStats[month].present += 1;
-            } else {
-              monthlyStats[month].absent += 1;
-            }
+        if (!statsError && attendanceStats) {
+          // Store monthly stats from the standardized utility
+          setMonthlyAttendanceStats(attendanceStats.breakdown);
+
+          // Convert breakdown to percentage format for compatibility
+          const monthlyPercentages = {};
+          Object.keys(attendanceStats.breakdown).forEach(month => {
+            monthlyPercentages[month] = attendanceStats.breakdown[month].attendancePercentage;
           });
+          setAttendancePercentageByMonth(monthlyPercentages);
 
-          // Store monthly stats for potential use in charts
-          setMonthlyAttendanceStats(monthlyStats);
-          console.log('Monthly attendance stats:', monthlyStats);
+          console.log('=== STANDARDIZED ATTENDANCE STATS ===');
+          console.log('Overall stats:', {
+            totalDays: attendanceStats.totalDays,
+            attendedDays: attendanceStats.attendedDays,
+            attendancePercentage: attendanceStats.attendancePercentage,
+            presentOnlyPercentage: attendanceStats.presentOnlyPercentage
+          });
+          console.log('Monthly breakdown:', attendanceStats.breakdown);
+          console.log('=====================================');
         }
       } catch (yearlyErr) {
         console.log('Yearly attendance calculation error:', yearlyErr);
@@ -328,6 +561,219 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         console.log('School details fetch error:', schoolErr);
       }
 
+      // Get student's recent homework assignments
+      try {
+        const { data: recentHomework, error: homeworkError } = await supabase
+          .from(TABLES.HOMEWORKS)
+          .select(`
+            id,
+            title,
+            description,
+            due_date,
+            created_at,
+            subjects(name),
+            teachers!homeworks_teacher_id_fkey(name)
+          `)
+          .eq('class_id', student.class_id)
+          .gte('due_date', new Date().toISOString().split('T')[0])
+          .order('due_date', { ascending: true })
+          .limit(5);
+
+        if (!homeworkError && recentHomework) {
+          setRecentHomework(recentHomework);
+          console.log('Recent homework:', recentHomework);
+        }
+      } catch (homeworkErr) {
+        console.log('Recent homework fetch error:', homeworkErr);
+      }
+
+      // Get student's assignments for this class
+      try {
+        const { data: assignments, error: assignmentsError } = await supabase
+          .from(TABLES.ASSIGNMENTS)
+          .select(`
+            id,
+            title,
+            description,
+            due_date,
+            assigned_date,
+            subjects(name),
+            teachers!assignments_assigned_by_fkey(name)
+          `)
+          .eq('class_id', student.class_id)
+          .gte('due_date', new Date().toISOString().split('T')[0])
+          .order('due_date', { ascending: true })
+          .limit(5);
+
+        if (!assignmentsError && assignments) {
+          console.log('Recent assignments:', assignments);
+          // Store assignments data if needed
+        }
+      } catch (assignmentsErr) {
+        console.log('Assignments fetch error:', assignmentsErr);
+      }
+
+      // Get student's performance trend (last 6 months)
+      try {
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+        const { data: performanceTrend, error: trendError } = await supabase
+          .from(TABLES.MARKS)
+          .select(`
+            marks_obtained,
+            max_marks,
+            created_at,
+            subjects(name),
+            exams(name, start_date)
+          `)
+          .eq('student_id', studentId)
+          .gte('created_at', sixMonthsAgo.toISOString())
+          .order('created_at', { ascending: true });
+
+        if (!trendError && performanceTrend) {
+          setPerformanceTrend(performanceTrend);
+          console.log('Performance trend:', performanceTrend);
+
+          // Calculate monthly averages for trend analysis
+          const monthlyPerformance = {};
+          performanceTrend.forEach(mark => {
+            const month = mark.created_at.substring(0, 7); // YYYY-MM
+            if (!monthlyPerformance[month]) {
+              monthlyPerformance[month] = { total: 0, count: 0, maxTotal: 0 };
+            }
+            monthlyPerformance[month].total += mark.marks_obtained || 0;
+            monthlyPerformance[month].maxTotal += mark.max_marks || 100;
+            monthlyPerformance[month].count += 1;
+          });
+
+          // Calculate percentage for each month
+          const monthlyPercentages = {};
+          Object.keys(monthlyPerformance).forEach(month => {
+            const data = monthlyPerformance[month];
+            monthlyPercentages[month] = data.maxTotal > 0 ?
+              Math.round((data.total / data.maxTotal) * 100) : 0;
+          });
+
+          console.log('Monthly performance percentages:', monthlyPercentages);
+        }
+      } catch (trendErr) {
+        console.log('Performance trend fetch error:', trendErr);
+      }
+
+      // Get student's fee status for current academic year
+      try {
+        const currentYear = new Date().getFullYear();
+        const academicYear = `${currentYear}-${currentYear + 1}`;
+
+        const { data: feeStatus, error: feeError } = await supabase
+          .from(TABLES.STUDENT_FEES)
+          .select(`
+            id,
+            fee_component,
+            amount_paid,
+            payment_date,
+            payment_mode,
+            remarks
+          `)
+          .eq('student_id', studentId)
+          .eq('academic_year', academicYear)
+          .order('payment_date', { ascending: false });
+
+        if (!feeError && feeStatus) {
+          console.log('Fee status:', feeStatus);
+          // Calculate total fees paid
+          const totalPaid = feeStatus.reduce((sum, fee) => sum + (parseFloat(fee.amount_paid) || 0), 0);
+          console.log('Total fees paid:', totalPaid);
+        }
+      } catch (feeErr) {
+        console.log('Fee status fetch error:', feeErr);
+      }
+
+      // Get student's timetable for current day
+      try {
+        const today = new Date();
+        const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
+
+        const { data: todayTimetable, error: timetableError } = await supabase
+          .from(TABLES.TIMETABLE)
+          .select(`
+            id,
+            period_number,
+            start_time,
+            end_time,
+            subjects(name),
+            teachers(name)
+          `)
+          .eq('class_id', student.class_id)
+          .eq('day_of_week', dayOfWeek)
+          .order('period_number', { ascending: true });
+
+        if (!timetableError && todayTimetable) {
+          console.log('Today\'s timetable:', todayTimetable);
+        }
+      } catch (timetableErr) {
+        console.log('Timetable fetch error:', timetableErr);
+      }
+
+      // Get recent notifications for the student
+      try {
+        const { data: notifications, error: notificationsError } = await supabase
+          .from(TABLES.NOTIFICATION_RECIPIENTS)
+          .select(`
+            id,
+            is_read,
+            sent_at,
+            read_at,
+            notifications(
+              id,
+              type,
+              message,
+              delivery_mode,
+              created_at
+            )
+          `)
+          .eq('recipient_id', user.id)
+          .eq('recipient_type', 'Student')
+          .order('sent_at', { ascending: false })
+          .limit(10);
+
+        if (!notificationsError && notifications) {
+          console.log('Recent notifications:', notifications);
+          const unreadCount = notifications.filter(n => !n.is_read).length;
+          console.log('Unread notifications:', unreadCount);
+        }
+      } catch (notificationsErr) {
+        console.log('Notifications fetch error:', notificationsErr);
+      }
+
+      // Get recent messages for the student
+      try {
+        const { data: messages, error: messagesError } = await supabase
+          .from(TABLES.MESSAGES)
+          .select(`
+            id,
+            message,
+            sent_at,
+            is_read,
+            message_type,
+            file_url,
+            file_name,
+            users!messages_sender_id_fkey(full_name)
+          `)
+          .eq('receiver_id', user.id)
+          .order('sent_at', { ascending: false })
+          .limit(5);
+
+        if (!messagesError && messages) {
+          console.log('Recent messages:', messages);
+          const unreadMessages = messages.filter(m => !m.is_read).length;
+          console.log('Unread messages:', unreadMessages);
+        }
+      } catch (messagesErr) {
+        console.log('Messages fetch error:', messagesErr);
+      }
+
     } catch (err) {
       setError(err.message);
       console.error('StudentAttendanceMarks error:', err);
@@ -344,52 +790,207 @@ export default function StudentAttendanceMarks({ route, navigation }) {
     }
   }, [route?.params?.activeTab]);
 
+  // Comprehensive data refresh function
+  const refreshData = async (showLoading = false) => {
+    if (showLoading) {
+      setLoading(true);
+    }
+    try {
+      await fetchStudentData();
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+      setError('Failed to refresh data. Please try again.');
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      }
+    }
+  };
+
+  // Animation functions for card interactions
+  const animateCardPress = (cardType) => {
+    Animated.sequence([
+      Animated.timing(cardScaleValues[cardType], {
+        toValue: 0.95,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(cardScaleValues[cardType], {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
   useEffect(() => {
     fetchStudentData();
-    // Enhanced real-time subscriptions
-    const attendanceSub = supabase
-      .channel('student-attendance-marks-attendance')
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.STUDENT_ATTENDANCE }, fetchStudentData)
-      .subscribe();
-    const marksSub = supabase
-      .channel('student-attendance-marks-marks')
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.MARKS }, fetchStudentData)
-      .subscribe();
-    const examsSub = supabase
-      .channel('student-attendance-marks-exams')
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.EXAMS }, fetchStudentData)
-      .subscribe();
-    const subjectsSub = supabase
-      .channel('student-attendance-marks-subjects')
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.SUBJECTS }, fetchStudentData)
-      .subscribe();
-    const studentsSub = supabase
-      .channel('student-attendance-marks-students')
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.STUDENTS }, fetchStudentData)
-      .subscribe();
+
+    // Animate stats cards on load
+    Animated.timing(statsAnimValue, {
+      toValue: 1,
+      duration: 800,
+      useNativeDriver: true,
+    }).start();
+
+    // Start pulse animation for attendance percentage
+    const startPulseAnimation = () => {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.05,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    };
+
+    // Start pulse animation after a delay
+    setTimeout(startPulseAnimation, 1000);
+
+    // Enhanced real-time subscriptions with better error handling
+    const subscriptions = [];
+
+    try {
+      const attendanceSub = supabase
+        .channel('student-attendance-marks-attendance')
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: TABLES.STUDENT_ATTENDANCE
+        }, (payload) => {
+          console.log('Attendance change detected:', payload);
+          refreshData(false);
+        })
+        .subscribe();
+      subscriptions.push(attendanceSub);
+
+      const marksSub = supabase
+        .channel('student-attendance-marks-marks')
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: TABLES.MARKS
+        }, (payload) => {
+          console.log('Marks change detected:', payload);
+          refreshData(false);
+        })
+        .subscribe();
+      subscriptions.push(marksSub);
+
+      const examsSub = supabase
+        .channel('student-attendance-marks-exams')
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: TABLES.EXAMS
+        }, (payload) => {
+          console.log('Exams change detected:', payload);
+          refreshData(false);
+        })
+        .subscribe();
+      subscriptions.push(examsSub);
+
+      const homeworkSub = supabase
+        .channel('student-attendance-marks-homework')
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: TABLES.HOMEWORKS
+        }, (payload) => {
+          console.log('Homework change detected:', payload);
+          refreshData(false);
+        })
+        .subscribe();
+      subscriptions.push(homeworkSub);
+
+      const notificationsSub = supabase
+        .channel('student-attendance-marks-notifications')
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: TABLES.NOTIFICATIONS
+        }, (payload) => {
+          console.log('Notifications change detected:', payload);
+          // Only refresh if it's relevant to this student
+          refreshData(false);
+        })
+        .subscribe();
+      subscriptions.push(notificationsSub);
+
+    } catch (subscriptionError) {
+      console.error('Error setting up real-time subscriptions:', subscriptionError);
+    }
 
     return () => {
-      attendanceSub.unsubscribe();
-      marksSub.unsubscribe();
-      examsSub.unsubscribe();
-      subjectsSub.unsubscribe();
-      studentsSub.unsubscribe();
+      subscriptions.forEach(sub => {
+        try {
+          sub.unsubscribe();
+        } catch (error) {
+          console.error('Error unsubscribing:', error);
+        }
+      });
     };
   }, []);
 
-  // Attendance summary for selected month
-  const stats = { present: 0, absent: 0, late: 0, excused: 0 };
+  // SIMPLE ATTENDANCE CALCULATION - GUARANTEED TO WORK
   const [year, month] = selectedMonth.split('-').map(Number);
-  const firstDay = new Date(year, month - 1, 1);
-  const lastDay = new Date(year, month, 0);
-  const daysInMonth = lastDay.getDate();
-  for (let day = 1; day <= daysInMonth; day++) {
-    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const s = attendanceData[dateStr];
-    if (stats[s] !== undefined) stats[s]++;
-  }
-  const total = Object.values(stats).reduce((a, b) => a + b, 0);
-  const percentage = total ? Math.round((stats.present / total) * 100) : 0;
+
+  // Get all attendance records for this month
+  const monthlyRecords = Object.keys(attendanceData)
+    .filter(date => {
+      const recordYear = parseInt(date.split('-')[0]);
+      const recordMonth = parseInt(date.split('-')[1]);
+      return recordYear === year && recordMonth === month;
+    })
+    .map(date => ({
+      date,
+      status: attendanceData[date]
+    }));
+
+  // Count statuses
+  const stats = { present: 0, absent: 0, late: 0, excused: 0 };
+  monthlyRecords.forEach(record => {
+    const status = (record.status || 'absent').toLowerCase();
+    if (status === 'present') stats.present++;
+    else if (status === 'absent') stats.absent++;
+    else if (status === 'late') stats.late++;
+    else if (status === 'excused') stats.excused++;
+    else stats.absent++; // default unknown to absent
+  });
+
+  // Calculate MONTHLY percentage - ONLY count 'present' as attended (to match other screens)
+  const total = monthlyRecords.length;
+  const monthlyPercentage = total > 0 ? Math.round((stats.present / total) * 100) : 0;
+
+  // Calculate OVERALL percentage (like dashboard) - for comparison
+  const allRecords = Object.keys(attendanceData);
+  const allPresentCount = allRecords.filter(date =>
+    attendanceData[date] && attendanceData[date].toLowerCase() === 'present'
+  ).length;
+  const overallPercentage = allRecords.length > 0 ? Math.round((allPresentCount / allRecords.length) * 100) : 0;
+
+  // Use monthly percentage for display (current behavior)
+  const percentage = monthlyPercentage;
+
+  // Debug logging
+  console.log('=== ATTENDANCE CALCULATION COMPARISON ===');
+  console.log('Selected month:', selectedMonth);
+  console.log('Monthly records found:', monthlyRecords.length);
+  console.log('Monthly present:', stats.present);
+  console.log('Monthly percentage:', monthlyPercentage + '%');
+  console.log('---');
+  console.log('Overall records found:', allRecords.length);
+  console.log('Overall present:', allPresentCount);
+  console.log('Overall percentage (like dashboard):', overallPercentage + '%');
+  console.log('Records:', monthlyRecords.map(r => `${r.date}: ${r.status}`));
+  console.log('=========================================');
 
   // Stat card details
   const statDetails = {
@@ -539,19 +1140,19 @@ export default function StudentAttendanceMarks({ route, navigation }) {
   return (
     <View style={styles.container}>
       {loading ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' }}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5', paddingTop: 20 }}>
           <ActivityIndicator size="large" color="#1976d2" />
           <Text style={{ marginTop: 10, color: '#555' }}>Loading data...</Text>
         </View>
       ) : error ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' }}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5', paddingTop: 20 }}>
           <Text style={{ fontSize: 18, color: '#F44336', textAlign: 'center', padding: 20 }}>{error}</Text>
           <TouchableOpacity onPress={fetchStudentData} style={{ backgroundColor: '#1976d2', borderRadius: 8, paddingVertical: 12, paddingHorizontal: 24, marginTop: 20 }}>
             <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>Retry</Text>
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 16 }}>
+        <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 40 }}>
           {/* Tab Selector */}
           <View style={{ flexDirection: 'row', backgroundColor: '#fff', borderRadius: 16, marginBottom: 12, alignSelf: 'center', padding: 4 }}>
             <TouchableOpacity
@@ -584,52 +1185,271 @@ export default function StudentAttendanceMarks({ route, navigation }) {
             </TouchableOpacity>
           </View>
           {activeTab === 'attendance' ? (
-            <>
-              {/* Stats Cards at the Top */}
-              <View style={{ marginBottom: 16 }}>
-                {/* First row: Attendance % only */}
-                <View style={{ flexDirection: 'row', marginBottom: 8 }}>
-                  <View style={[styles.statCard, { flex: 1 }]}>
-                    <Ionicons name="trending-up" size={28} color="#2196F3" style={styles.statIcon} />
-                    <Text style={[styles.statNumber, { color: '#2196F3' }]}>{percentage}%</Text>
-                    <Text style={styles.statLabel}>Attendance</Text>
-                  </View>
+            <View style={styles.attendanceTabContainer}>
+              {/* Attendance Section Header */}
+              <View style={styles.attendanceSectionHeader}>
+                <View style={styles.headerIconContainer}>
+                  <Ionicons name="calendar-outline" size={24} color="#2196F3" />
                 </View>
-                {/* Second row: Present and Absent */}
-                <View style={{ flexDirection: 'row', marginBottom: 8 }}>
-                  <View style={[styles.statCard, { flex: 1, marginRight: 6 }]}>
-                    <Ionicons name="checkmark-circle" size={28} color="#4CAF50" style={styles.statIcon} />
-                    <Text style={[styles.statNumber, { color: '#4CAF50' }]}>{stats.present}</Text>
-                    <Text style={styles.statLabel}>Present</Text>
-                  </View>
-                  <View style={[styles.statCard, { flex: 1, marginLeft: 6 }]}>
-                    <Ionicons name="close-circle" size={28} color="#F44336" style={styles.statIcon} />
-                    <Text style={[styles.statNumber, { color: '#F44336' }]}>{stats.absent}</Text>
-                    <Text style={styles.statLabel}>Absent</Text>
-                  </View>
+                <View style={styles.headerTextContainer}>
+                  <Text style={styles.sectionHeaderTitle}>Attendance Overview</Text>
+                  <Text style={styles.sectionHeaderSubtitle}>
+                    {showOverallAttendance ? 'Overall attendance across all months' : `Monthly attendance for ${selectedMonth.split('-')[1]}/${selectedMonth.split('-')[0]}`}
+                  </Text>
                 </View>
-                {/* Third row: Late and Excused */}
-                <View style={{ flexDirection: 'row' }}>
-                  <View style={[styles.statCard, { flex: 1, marginRight: 6 }]}>
-                    <Ionicons name="time" size={28} color="#FF9800" style={styles.statIcon} />
-                    <Text style={[styles.statNumber, { color: '#FF9800' }]}>{stats.late}</Text>
-                    <Text style={styles.statLabel}>Late</Text>
+                <TouchableOpacity
+                  style={styles.toggleButton}
+                  onPress={() => setShowOverallAttendance(!showOverallAttendance)}
+                >
+                  <Text style={styles.toggleButtonText}>
+                    {showOverallAttendance ? 'Monthly' : 'Overall'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Enhanced Stats Cards */}
+              <View style={styles.statsContainer}>
+                {/* Animated Main Attendance Card - Featured */}
+                <Animated.View style={[styles.mainAttendanceCard, {
+                  opacity: statsAnimValue,
+                  transform: [{
+                    translateY: statsAnimValue.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [30, 0],
+                    }),
+                  }],
+                }]}>
+                  <View style={styles.attendanceCardHeader}>
+                    <View style={[styles.attendanceIconWrapper, { backgroundColor: percentage >= 75 ? '#E8F5E8' : percentage >= 60 ? '#FFF3E0' : '#FFEBEE' }]}>
+                      <Ionicons
+                        name="trending-up"
+                        size={32}
+                        color={percentage >= 75 ? '#4CAF50' : percentage >= 60 ? '#FF9800' : '#F44336'}
+                      />
+                    </View>
+                    <View style={styles.attendanceTextWrapper}>
+                      <Animated.Text style={[styles.attendancePercentage, {
+                        transform: [{ scale: pulseAnim }]
+                      }]}>{showOverallAttendance ? overallPercentage : percentage}%</Animated.Text>
+                      <Text style={styles.attendanceLabel}>
+                        {showOverallAttendance ? 'Overall Attendance' : 'Monthly Attendance'}
+                      </Text>
+                      <Text style={styles.attendanceSubLabel}>
+                        {showOverallAttendance
+                          ? `All time • ${allPresentCount}/${allRecords.length} days`
+                          : `${selectedMonth.split('-')[1]}/${selectedMonth.split('-')[0]} • Overall: ${overallPercentage}%`
+                        }
+                      </Text>
+                      <View style={styles.attendanceProgressBar}>
+                        <View
+                          style={[
+                            styles.attendanceProgress,
+                            {
+                              width: `${showOverallAttendance ? overallPercentage : percentage}%`,
+                              backgroundColor: (showOverallAttendance ? overallPercentage : percentage) >= 75 ? '#4CAF50' : (showOverallAttendance ? overallPercentage : percentage) >= 60 ? '#FF9800' : '#F44336'
+                            }
+                          ]}
+                        />
+                      </View>
+                    </View>
                   </View>
-                  <View style={[styles.statCard, { flex: 1, marginLeft: 6 }]}>
-                    <Ionicons name="medical" size={28} color="#9C27B0" style={styles.statIcon} />
-                    <Text style={[styles.statNumber, { color: '#9C27B0' }]}>{stats.excused}</Text>
-                    <Text style={styles.statLabel}>Excused</Text>
-                  </View>
+                  <Text style={styles.attendanceSubtext}>
+                    {(showOverallAttendance ? overallPercentage : percentage) >= 75
+                      ? `Excellent ${showOverallAttendance ? 'overall' : 'monthly'} attendance! Keep it up!`
+                      : (showOverallAttendance ? overallPercentage : percentage) >= 60
+                      ? `Good ${showOverallAttendance ? 'overall' : 'monthly'} attendance, aim for 75%+`
+                      : `${showOverallAttendance ? 'Overall' : 'Monthly'} attendance needs improvement`}
+                  </Text>
+                </Animated.View>
+
+                {/* Animated Stats Grid */}
+                <Animated.View style={[styles.statsGrid, {
+                  opacity: statsAnimValue,
+                  transform: [{
+                    translateY: statsAnimValue.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [20, 0],
+                    }),
+                  }],
+                }]}>
+                  {/* Present Card */}
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      animateCardPress('present');
+                      setSelectedStat('present');
+                    }}
+                  >
+                    <Animated.View style={[
+                      styles.statCardEnhanced,
+                      styles.presentCard,
+                      { transform: [{ scale: cardScaleValues.present }] }
+                    ]}>
+                      <View style={[styles.statIndicator, { backgroundColor: '#4CAF50' }]} />
+                      <View style={styles.statCardContent}>
+                        <View style={[styles.statIconCircleEnhanced, { backgroundColor: '#E8F5E8' }]}>
+                          <Ionicons name="checkmark-circle" size={28} color="#4CAF50" />
+                        </View>
+                        <Text style={[styles.statNumberEnhanced, { color: '#4CAF50' }]}>{stats.present || 0}</Text>
+                      </View>
+                      <View style={styles.statNameContainer}>
+                        <Text style={[styles.statNameEnhanced, { color: '#4CAF50' }]}>Present</Text>
+                      </View>
+                    </Animated.View>
+                  </TouchableOpacity>
+
+                  {/* Absent Card */}
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      animateCardPress('absent');
+                      setSelectedStat('absent');
+                    }}
+                  >
+                    <Animated.View style={[
+                      styles.statCardEnhanced,
+                      styles.absentCard,
+                      { transform: [{ scale: cardScaleValues.absent }] }
+                    ]}>
+                      <View style={[styles.statIndicator, { backgroundColor: '#F44336' }]} />
+                      <View style={styles.statCardContent}>
+                        <View style={[styles.statIconCircleEnhanced, { backgroundColor: '#FFEBEE' }]}>
+                          <Ionicons name="close-circle" size={28} color="#F44336" />
+                        </View>
+                        <Text style={[styles.statNumberEnhanced, { color: '#F44336' }]}>{stats.absent || 0}</Text>
+                      </View>
+                      <View style={styles.statNameContainer}>
+                        <Text style={[styles.statNameEnhanced, { color: '#F44336' }]}>Absent</Text>
+                      </View>
+                    </Animated.View>
+                  </TouchableOpacity>
+
+                  {/* Late Card */}
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      animateCardPress('late');
+                      setSelectedStat('late');
+                    }}
+                  >
+                    <Animated.View style={[
+                      styles.statCardEnhanced,
+                      styles.lateCard,
+                      { transform: [{ scale: cardScaleValues.late }] }
+                    ]}>
+                      <View style={[styles.statIndicator, { backgroundColor: '#FF9800' }]} />
+                      <View style={styles.statCardContent}>
+                        <View style={[styles.statIconCircleEnhanced, { backgroundColor: '#FFF3E0' }]}>
+                          <Ionicons name="time" size={24} color="#FF9800" />
+                        </View>
+                        <Text style={[styles.statNumberEnhanced, { color: '#FF9800' }]}>{stats.late || 0}</Text>
+                      </View>
+                      <View style={styles.statNameContainer}>
+                        <Text style={[styles.statNameEnhanced, { color: '#FF9800' }]}>Late</Text>
+                      </View>
+                    </Animated.View>
+                  </TouchableOpacity>
+
+                  {/* Excused Card */}
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      animateCardPress('excused');
+                      setSelectedStat('excused');
+                    }}
+                  >
+                    <Animated.View style={[
+                      styles.statCardEnhanced,
+                      styles.excusedCard,
+                      { transform: [{ scale: cardScaleValues.excused }] }
+                    ]}>
+                      <View style={[styles.statIndicator, { backgroundColor: '#9C27B0' }]} />
+                      <View style={styles.statCardContent}>
+                        <View style={[styles.statIconCircleEnhanced, { backgroundColor: '#F3E5F5' }]}>
+                          <Ionicons name="medical" size={24} color="#9C27B0" />
+                        </View>
+                        <Text style={[styles.statNumberEnhanced, { color: '#9C27B0' }]}>{stats.excused || 0}</Text>
+                      </View>
+                      <View style={styles.statNameContainer}>
+                        <Text style={[styles.statNameEnhanced, { color: '#9C27B0' }]}>Excused</Text>
+                      </View>
+                    </Animated.View>
+                  </TouchableOpacity>
+                </Animated.View>
+
+                {/* Quick Summary */}
+                <View style={styles.quickSummary}>
+                  <Text style={styles.summaryText}>
+                    Total Days: <Text style={styles.summaryNumber}>{total}</Text> •
+                    Attended: <Text style={styles.summaryNumber}>{stats.present + stats.late + stats.excused}</Text>
+                  </Text>
                 </View>
               </View>
-              {/* Stat Details Modal */}
-              <Modal visible={!!selectedStat} transparent animationType="fade" onRequestClose={() => setSelectedStat(null)}>
-                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'center', alignItems: 'center' }}>
-                  <View style={{ backgroundColor: '#fff', borderRadius: 18, padding: 28, minWidth: 240, alignItems: 'center', elevation: 6 }}>
-                    <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#FF9800', marginBottom: 10 }}>{selectedStat && statDetails[selectedStat] ? statDetails[selectedStat].split(' ')[0] : ''}</Text>
-                    <Text style={{ fontSize: 16, color: '#444', textAlign: 'center', marginBottom: 18 }}>{selectedStat && statDetails[selectedStat]}</Text>
-                    <TouchableOpacity onPress={() => setSelectedStat(null)} style={{ backgroundColor: '#FF9800', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 24 }}>
-                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Close</Text>
+              {/* Enhanced Stat Details Modal */}
+              <Modal visible={!!selectedStat} transparent animationType="slide" onRequestClose={() => setSelectedStat(null)}>
+                <View style={styles.modalOverlay}>
+                  <View style={styles.modalContent}>
+                    <View style={styles.modalHeader}>
+                      <View style={[
+                        styles.modalIconWrapper,
+                        { backgroundColor:
+                          selectedStat === 'present' ? '#E8F5E8' :
+                          selectedStat === 'absent' ? '#FFEBEE' :
+                          selectedStat === 'late' ? '#FFF3E0' :
+                          selectedStat === 'excused' ? '#F3E5F5' : '#E3F2FD'
+                        }
+                      ]}>
+                        <Ionicons
+                          name={
+                            selectedStat === 'present' ? 'checkmark-circle' :
+                            selectedStat === 'absent' ? 'close-circle' :
+                            selectedStat === 'late' ? 'time' :
+                            selectedStat === 'excused' ? 'medical' : 'information-circle'
+                          }
+                          size={32}
+                          color={
+                            selectedStat === 'present' ? '#4CAF50' :
+                            selectedStat === 'absent' ? '#F44336' :
+                            selectedStat === 'late' ? '#FF9800' :
+                            selectedStat === 'excused' ? '#9C27B0' : '#2196F3'
+                          }
+                        />
+                      </View>
+                      <TouchableOpacity onPress={() => setSelectedStat(null)} style={styles.modalCloseButton}>
+                        <Ionicons name="close" size={24} color="#666" />
+                      </TouchableOpacity>
+                    </View>
+
+                    <Text style={styles.modalTitle}>
+                      {selectedStat ? selectedStat.charAt(0).toUpperCase() + selectedStat.slice(1) : ''} Days
+                    </Text>
+
+                    <Text style={[styles.modalNumber, {
+                      color: selectedStat === 'present' ? '#4CAF50' :
+                             selectedStat === 'absent' ? '#F44336' :
+                             selectedStat === 'late' ? '#FF9800' :
+                             selectedStat === 'excused' ? '#9C27B0' : '#2196F3'
+                    }]}>
+                      {selectedStat ? stats[selectedStat] : 0}
+                    </Text>
+
+                    <Text style={styles.modalDescription}>
+                      {selectedStat === 'present' && 'Days when you were present and on time for classes.'}
+                      {selectedStat === 'absent' && 'Days when you were not present in school.'}
+                      {selectedStat === 'late' && 'Days when you arrived late to school.'}
+                      {selectedStat === 'excused' && 'Days when your absence was excused (medical, etc.).'}
+                    </Text>
+
+                    <View style={styles.modalStats}>
+                      <Text style={styles.modalStatsText}>
+                        Percentage of total: <Text style={styles.modalStatsNumber}>
+                          {total > 0 ? Math.round((stats[selectedStat] / total) * 100) : 0}%
+                        </Text>
+                      </Text>
+                    </View>
+
+                    <TouchableOpacity onPress={() => setSelectedStat(null)} style={styles.modalButton}>
+                      <Text style={styles.modalButtonText}>Got it</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -657,32 +1477,42 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                   </View>
                   <Animated.View style={{ opacity: fadeAnim }}>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                      {/* Empty cells before the 1st */}
-                      {[...Array(firstDay.getDay())].map((_, i) => (
-                        <View key={'empty'+i} style={{ width: `${100/7}%`, aspectRatio: 1, borderRightWidth: (i % 7 !== 6) ? 1 : 0, borderBottomWidth: 1, borderColor: '#FFE0B2' }} />
-                      ))}
-                      {[...Array(daysInMonth)].map((_, i) => {
-                        const day = i + 1;
-                        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                        const status = attendanceData[dateStr];
-                        const isToday = dateStr === new Date().toISOString().slice(0, 10);
+                      {(() => {
+                        // Calculate calendar layout
+                        const firstDay = new Date(year, month - 1, 1);
+                        const daysInMonth = new Date(year, month, 0).getDate();
+
                         return (
-                          <TouchableOpacity
-                            key={day}
-                            style={{ width: `${100/7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRightWidth: ((firstDay.getDay() + i) % 7 !== 6) ? 1 : 0, borderBottomWidth: 1, borderColor: '#FFE0B2' }}
-                            onPress={() => setSelectedDay({ day, status, dateStr })}
-                            activeOpacity={0.7}
-                            accessibilityLabel={`Day ${day}, ${status || 'No data'}`}
-                          >
-                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-                              <Text style={{ fontSize: 16, color: '#222', fontWeight: isToday ? 'bold' : 'normal' }}>{day}</Text>
-                              {status && (
-                                <Ionicons name={getAttendanceIcon(status)} size={14} color={getAttendanceColor(status)} style={{ marginLeft: 2 }} />
-                              )}
-                            </View>
-                          </TouchableOpacity>
+                          <>
+                            {/* Empty cells before the 1st */}
+                            {[...Array(firstDay.getDay())].map((_, i) => (
+                              <View key={'empty'+i} style={{ width: `${100/7}%`, aspectRatio: 1, borderRightWidth: (i % 7 !== 6) ? 1 : 0, borderBottomWidth: 1, borderColor: '#FFE0B2' }} />
+                            ))}
+                            {[...Array(daysInMonth)].map((_, i) => {
+                              const day = i + 1;
+                              const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                              const status = attendanceData[dateStr];
+                              const isToday = dateStr === new Date().toISOString().slice(0, 10);
+                              return (
+                                <TouchableOpacity
+                                  key={day}
+                                  style={{ width: `${100/7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRightWidth: ((firstDay.getDay() + i) % 7 !== 6) ? 1 : 0, borderBottomWidth: 1, borderColor: '#FFE0B2' }}
+                                  onPress={() => setSelectedDay({ day, status, dateStr })}
+                                  activeOpacity={0.7}
+                                  accessibilityLabel={`Day ${day}, ${status || 'No data'}`}
+                                >
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Text style={{ fontSize: 16, color: '#222', fontWeight: isToday ? 'bold' : 'normal' }}>{day}</Text>
+                                    {status && (
+                                      <Ionicons name={getAttendanceIcon(status)} size={14} color={getAttendanceColor(status)} style={{ marginLeft: 2 }} />
+                                    )}
+                                  </View>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </>
                         );
-                      })}
+                      })()}
                     </View>
                   </Animated.View>
                 </View>
@@ -847,9 +1677,45 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                 <Ionicons name="download" size={18} color="#fff" />
                 <Text style={styles.downloadBtnText}>Download Attendance</Text>
               </TouchableOpacity>
-            </>
+            </View>
           ) : (
             <>
+              {/* Recent Homework Section */}
+              {recentHomework.length > 0 && (
+                <>
+                  <Text style={styles.sectionTitle}>Recent Homework</Text>
+                  <View style={{ backgroundColor: '#fff', borderRadius: 12, marginBottom: 18, elevation: 1 }}>
+                    {recentHomework.map((homework, index) => (
+                      <View key={homework.id} style={{
+                        padding: 16,
+                        borderBottomWidth: index < recentHomework.length - 1 ? 1 : 0,
+                        borderBottomColor: '#f0f0f0'
+                      }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                          <Ionicons name="book" size={20} color="#FF9800" style={{ marginRight: 8 }} />
+                          <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#333', flex: 1 }}>{homework.title}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                          <Ionicons name="calendar" size={16} color="#666" style={{ marginRight: 8 }} />
+                          <Text style={{ fontSize: 14, color: '#666' }}>
+                            Due: {new Date(homework.due_date).toLocaleDateString()}
+                          </Text>
+                        </View>
+                        {homework.subjects?.name && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                            <Ionicons name="library" size={16} color="#666" style={{ marginRight: 8 }} />
+                            <Text style={{ fontSize: 14, color: '#666' }}>Subject: {homework.subjects.name}</Text>
+                          </View>
+                        )}
+                        {homework.description && (
+                          <Text style={{ fontSize: 13, color: '#888', marginTop: 4 }}>{homework.description}</Text>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                </>
+              )}
+
               {/* Upcoming Exams Section */}
               {upcomingExams.length > 0 && (
                 <>
@@ -1149,9 +2015,394 @@ const styles = StyleSheet.create({
   improvementGraphBarLabel: { fontSize: 13, color: '#222', fontWeight: 'bold', marginBottom: 4 },
   improvementGraphBarValue: { fontSize: 13, color: '#888', marginTop: 6, textAlign: 'center' },
   calendarCard: { backgroundColor: '#fff', borderRadius: 18, padding: 12, marginBottom: 12, elevation: 2, shadowColor: '#FF9800', shadowOpacity: 0.08, shadowRadius: 8 },
-  calendarDayToday: { borderWidth: 2.5, borderColor: '#FF9800', backgroundColor: '#fffbe7' },
+  calendarDayToday: { borderWidth: 2.5, borderColor: '#e8b10cff', backgroundColor: '#fffbe7' },
   calendarDayText: { fontSize: 18, fontWeight: 'bold', color: '#333' },
   noDataDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#bbb', marginTop: 2 },
   attendanceIconCircle: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginTop: 2, alignSelf: 'center' },
   statNumber: { fontSize: 26, fontWeight: 'bold', color: '#1976d2', marginTop: 4 },
+
+  // Attendance Tab Container
+  attendanceTabContainer: {
+    backgroundColor: '#FAFBFC',
+    borderRadius: 20,
+    padding: 12,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+
+  // Attendance Section Header Styles
+  attendanceSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    elevation: 3,
+    shadowColor: '#2196F3',
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196F3',
+  },
+  headerIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#E3F2FD',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  headerTextContainer: {
+    flex: 1,
+  },
+  sectionHeaderTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2196F3',
+    marginBottom: 2,
+  },
+  sectionHeaderSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+  },
+  toggleButton: {
+    backgroundColor: '#E3F2FD',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+  },
+  toggleButtonText: {
+    fontSize: 12,
+    color: '#2196F3',
+    fontWeight: 'bold',
+  },
+
+  // Enhanced Stats Cards Styles
+  statsContainer: {
+    marginTop: 20,
+    marginBottom: 20,
+    paddingHorizontal: 4,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 16,
+    padding: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  mainAttendanceCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    marginTop: 8,
+    marginBottom: 20,
+    elevation: 8,
+    shadowColor: '#2196F3',
+    shadowOpacity: 0.2,
+    shadowRadius: 15,
+    shadowOffset: { width: 0, height: 8 },
+    borderLeftWidth: 6,
+    borderLeftColor: '#2196F3',
+    borderTopWidth: 2,
+    borderTopColor: '#E3F2FD',
+    borderRightWidth: 1,
+    borderRightColor: '#E3F2FD',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E3F2FD',
+  },
+  attendanceCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  attendanceIconWrapper: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  attendanceTextWrapper: {
+    flex: 1,
+  },
+  attendancePercentage: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: '#2196F3',
+    marginBottom: 4,
+    textShadowColor: 'rgba(33, 150, 243, 0.3)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  attendanceLabel: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 4,
+    fontWeight: '500',
+  },
+  attendanceSubLabel: {
+    fontSize: 12,
+    color: '#888',
+    marginBottom: 8,
+    fontStyle: 'italic',
+  },
+  attendanceProgressBar: {
+    height: 6,
+    backgroundColor: '#E3F2FD',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  attendanceProgress: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  attendanceSubtext: {
+    fontSize: 14,
+    color: '#888',
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    paddingHorizontal: 2,
+  },
+  statCardEnhanced: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 16,
+    width: '48%',
+    height: 240,
+    marginBottom: 12,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    position: 'relative',
+    overflow: 'visible',
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
+  statCardContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 16,
+    paddingBottom: 36,
+    paddingHorizontal: 8,
+  },
+  statNameContainer: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    right: 8,
+    alignItems: 'center',
+  },
+  statIconCircleEnhanced: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+    marginTop: 8,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  statLetterEnhanced: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 4,
+    marginTop: 8,
+    textAlign: 'center',
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    minHeight: 40,
+    lineHeight: 32,
+  },
+  statNumberEnhanced: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 6,
+    marginTop: 6,
+    textAlign: 'center',
+    minHeight: 24,
+    lineHeight: 24,
+  },
+  statNameEnhanced: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    minHeight: 24,
+    lineHeight: 18,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    overflow: 'visible',
+  },
+  statLabelEnhanced: {
+    fontSize: 13,
+    color: '#555',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 2,
+    minHeight: 18,
+    lineHeight: 18,
+  },
+  statIndicator: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+  },
+  presentCard: {
+    borderColor: '#E8F5E8',
+    borderWidth: 1,
+  },
+  absentCard: {
+    borderColor: '#FFEBEE',
+    borderWidth: 1,
+  },
+  lateCard: {
+    borderColor: '#FFF3E0',
+    borderWidth: 1,
+  },
+  excusedCard: {
+    borderColor: '#F3E5F5',
+    borderWidth: 1,
+  },
+  quickSummary: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 16,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E3F2FD',
+    marginTop: 4,
+  },
+  summaryText: {
+    fontSize: 15,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  summaryNumber: {
+    fontWeight: 'bold',
+    color: '#2196F3',
+    fontSize: 16,
+  },
+
+  // Enhanced Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: 24,
+    width: '100%',
+    maxWidth: 320,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalIconWrapper: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F5F5F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  modalNumber: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  modalDescription: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 20,
+  },
+  modalStats: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 20,
+  },
+  modalStatsText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+  },
+  modalStatsNumber: {
+    fontWeight: 'bold',
+    color: '#2196F3',
+  },
+  modalButton: {
+    backgroundColor: '#2196F3',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
 });
