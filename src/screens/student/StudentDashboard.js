@@ -96,15 +96,23 @@ const StudentDashboard = ({ navigation }) => {
         assignmentsCount = 0;
       }
 
-      // Get attendance percentage
+      // Get attendance percentage (FIXED: consistent calculation)
       const { data: attendanceData, error: attendanceError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
         .select('*')
         .eq('student_id', studentData.id);
       if (attendanceError) throw attendanceError;
+
       const totalDays = attendanceData.length;
       const presentDays = attendanceData.filter(a => a.status === 'Present').length;
       const attendancePercent = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+
+      console.log('=== STUDENT DASHBOARD ATTENDANCE DEBUG ===');
+      console.log('Total attendance records:', totalDays);
+      console.log('Present days:', presentDays);
+      console.log('Attendance percentage:', attendancePercent);
+      console.log('Recent records:', attendanceData.slice(0, 3).map(r => `${r.date}: ${r.status}`));
+      console.log('==========================================');
 
       // Get marks percentage (average percentage of all marks)
       let marksPercent = 0;

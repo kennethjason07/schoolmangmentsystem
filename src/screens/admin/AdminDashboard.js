@@ -102,9 +102,17 @@ const AdminDashboard = ({ navigation }) => {
       const totalTeachers = teacherCount || 0;
       const totalClasses = classesCount || 0;
 
-      // Calculate attendance percentage
+      // Calculate attendance percentage (FIXED: with debugging)
       const presentToday = studentAttendance?.filter(att => att.status === 'Present').length || 0;
       const attendancePercentage = totalStudents > 0 ? Math.round((presentToday / totalStudents) * 100) : 0;
+
+      console.log('=== ADMIN DASHBOARD ATTENDANCE DEBUG ===');
+      console.log('Today:', new Date().toISOString().split('T')[0]);
+      console.log('Total students in system:', totalStudents);
+      console.log('Students marked present today:', presentToday);
+      console.log('Total attendance records today:', studentAttendance?.length || 0);
+      console.log('Today\'s attendance percentage:', attendancePercentage);
+      console.log('========================================');
 
       // Calculate fee collection for current month
       const monthlyFeeCollection = feeData?.reduce((sum, fee) => sum + (fee.amount_paid || 0), 0) || 0;

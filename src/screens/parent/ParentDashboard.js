@@ -89,19 +89,36 @@ const ParentDashboard = ({ navigation }) => {
         // Set empty events for now (no events table in schema)
         setEvents([]);
 
-        // Get attendance for current month
+        // SIMPLE ATTENDANCE CALCULATION - MATCHES StudentAttendanceMarks
         const currentDate = new Date();
-        const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-        const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1; // getMonth() returns 0-11, so add 1
 
         try {
-          const { data: attendanceData, error: attendanceError } = await supabase
+          // Get ALL attendance records for this student
+          const { data: allAttendanceData, error: attendanceError } = await supabase
             .from(TABLES.STUDENT_ATTENDANCE)
             .select('*')
             .eq('student_id', studentDetails.id)
-            .gte('date', monthStart.toISOString().split('T')[0])
-            .lte('date', monthEnd.toISOString().split('T')[0])
             .order('date', { ascending: false });
+
+          if (attendanceError) throw attendanceError;
+
+          // Filter to current month records
+          const currentMonthRecords = (allAttendanceData || []).filter(record => {
+            const recordYear = parseInt(record.date.split('-')[0]);
+            const recordMonth = parseInt(record.date.split('-')[1]);
+            return recordYear === year && recordMonth === month;
+          });
+
+          console.log('=== PARENT DASHBOARD SIMPLE CALCULATION ===');
+          console.log('Current month:', `${year}-${String(month).padStart(2, '0')}`);
+          console.log('Current month records:', currentMonthRecords.length);
+          console.log('Records:', currentMonthRecords.map(r => `${r.date}: ${r.status}`));
+          console.log('==========================================');
+
+          // Use the filtered records
+          const attendanceData = currentMonthRecords;
 
           if (attendanceError && attendanceError.code !== '42P01') {
             console.log('Attendance error:', attendanceError);
@@ -169,15 +186,22 @@ const ParentDashboard = ({ navigation }) => {
   const unreadCount = notifications.filter(notification => !notification.is_read).length;
 
   // Calculate attendance data for pie chart
-  const presentCount = attendance.filter(item => item.status === 'Present').length;
   const absentCount = attendance.filter(item => item.status === 'Absent').length;
   const attendancePieData = [
-    { name: 'Present', population: presentCount, color: '#4CAF50', legendFontColor: '#333', legendFontSize: 14 },
+    { name: 'Present', population: presentOnlyCount, color: '#4CAF50', legendFontColor: '#333', legendFontSize: 14 },
     { name: 'Absent', population: absentCount, color: '#F44336', legendFontColor: '#333', legendFontSize: 14 },
   ];
 
-  // Calculate attendance percentage
-  const attendancePercentage = attendance.length > 0 ? Math.round((presentCount / attendance.length) * 100) : 0;
+  // Calculate attendance percentage - SIMPLE METHOD (only count 'Present' as attended)
+  const totalRecords = attendance.length;
+  const presentOnlyCount = attendance.filter(a => a.status === 'Present').length;
+  const attendancePercentage = totalRecords > 0 ? Math.round((presentOnlyCount / totalRecords) * 100) : 0;
+
+  console.log('=== PARENT DASHBOARD PERCENTAGE CALCULATION ===');
+  console.log('Total records:', totalRecords);
+  console.log('Present records:', presentOnlyCount);
+  console.log('Calculated percentage:', attendancePercentage);
+  console.log('===============================================');
 
   // Get fee status
   const getFeeStatus = () => {
@@ -244,7 +268,7 @@ const ParentDashboard = ({ navigation }) => {
       value: `${attendancePercentage}%`,
       icon: 'checkmark-circle',
       color: attendancePercentage >= 75 ? '#4CAF50' : attendancePercentage >= 60 ? '#FF9800' : '#F44336',
-      subtitle: `${presentCount}/${attendance.length} days present`,
+      subtitle: `${presentOnlyCount}/${attendance.length} days present`,
       onPress: () => navigation.navigate('Attendance')
     },
     {
@@ -457,7 +481,7 @@ const ParentDashboard = ({ navigation }) => {
             />
             <View style={styles.chartSummary}>
               <Text style={styles.chartSummaryText}>
-                Present: {presentCount} days | Absent: {absentCount} days
+                Present: {presentOnlyCount} days | Absent: {absentCount} days
               </Text>
             </View>
           </View>

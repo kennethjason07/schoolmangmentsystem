@@ -1278,6 +1278,167 @@ export const dbHelpers = {
     }
   },
 
+  // Standardized attendance utilities
+  normalizeAttendanceStatus(status) {
+    if (!status) return 'absent';
+    const normalizedStatus = status.toLowerCase().trim();
+
+    switch (normalizedStatus) {
+      case 'present':
+      case 'p':
+        return 'present';
+      case 'absent':
+      case 'a':
+        return 'absent';
+      case 'late':
+      case 'l':
+        return 'late';
+      case 'excused':
+      case 'e':
+        return 'excused';
+      default:
+        console.warn(`Unknown attendance status: ${status}, defaulting to absent`);
+        return 'absent';
+    }
+  },
+
+  isAttendedStatus(status) {
+    const normalizedStatus = this.normalizeAttendanceStatus(status);
+    return ['present', 'late', 'excused'].includes(normalizedStatus);
+  },
+
+  // Get standardized attendance statistics for a student
+  async getStudentAttendanceStats(studentId, options = {}) {
+    try {
+      const {
+        startDate = null,
+        endDate = null,
+        countMethod = 'attended', // 'attended' or 'present_only'
+        groupBy = null // 'month', 'week', 'day', or null
+      } = options;
+
+      let query = supabase
+        .from(TABLES.STUDENT_ATTENDANCE)
+        .select('date, status')
+        .eq('student_id', studentId)
+        .order('date', { ascending: true });
+
+      if (startDate) {
+        query = query.gte('date', startDate);
+      }
+      if (endDate) {
+        query = query.lte('date', endDate);
+      }
+
+      const { data: attendanceRecords, error } = await query;
+      if (error) return { data: null, error };
+
+      if (!attendanceRecords || attendanceRecords.length === 0) {
+        return {
+          data: {
+            totalDays: 0,
+            attendedDays: 0,
+            presentDays: 0,
+            absentDays: 0,
+            lateDays: 0,
+            excusedDays: 0,
+            attendancePercentage: 0,
+            presentOnlyPercentage: 0,
+            breakdown: {}
+          },
+          error: null
+        };
+      }
+
+      // Process records with standardized status
+      const processedRecords = attendanceRecords.map(record => ({
+        ...record,
+        normalizedStatus: this.normalizeAttendanceStatus(record.status),
+        isAttended: this.isAttendedStatus(record.status)
+      }));
+
+      // Calculate basic stats
+      const totalDays = processedRecords.length;
+      const attendedDays = processedRecords.filter(r => r.isAttended).length;
+      const presentDays = processedRecords.filter(r => r.normalizedStatus === 'present').length;
+      const absentDays = processedRecords.filter(r => r.normalizedStatus === 'absent').length;
+      const lateDays = processedRecords.filter(r => r.normalizedStatus === 'late').length;
+      const excusedDays = processedRecords.filter(r => r.normalizedStatus === 'excused').length;
+
+      const attendancePercentage = totalDays > 0 ? Math.round((attendedDays / totalDays) * 100) : 0;
+      const presentOnlyPercentage = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+
+      // Group by period if requested
+      let breakdown = {};
+      if (groupBy) {
+        processedRecords.forEach(record => {
+          let key;
+          const date = new Date(record.date);
+
+          switch (groupBy) {
+            case 'month':
+              key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+              break;
+            case 'week':
+              const weekStart = new Date(date);
+              weekStart.setDate(date.getDate() - date.getDay());
+              key = weekStart.toISOString().split('T')[0];
+              break;
+            case 'day':
+              key = record.date;
+              break;
+            default:
+              key = 'all';
+          }
+
+          if (!breakdown[key]) {
+            breakdown[key] = {
+              totalDays: 0,
+              attendedDays: 0,
+              presentDays: 0,
+              absentDays: 0,
+              lateDays: 0,
+              excusedDays: 0
+            };
+          }
+
+          breakdown[key].totalDays++;
+          breakdown[key][`${record.normalizedStatus}Days`]++;
+          if (record.isAttended) {
+            breakdown[key].attendedDays++;
+          }
+        });
+
+        // Calculate percentages for each group
+        Object.keys(breakdown).forEach(key => {
+          const group = breakdown[key];
+          group.attendancePercentage = group.totalDays > 0 ?
+            Math.round((group.attendedDays / group.totalDays) * 100) : 0;
+          group.presentOnlyPercentage = group.totalDays > 0 ?
+            Math.round((group.presentDays / group.totalDays) * 100) : 0;
+        });
+      }
+
+      return {
+        data: {
+          totalDays,
+          attendedDays,
+          presentDays,
+          absentDays,
+          lateDays,
+          excusedDays,
+          attendancePercentage,
+          presentOnlyPercentage,
+          breakdown,
+          records: processedRecords
+        },
+        error: null
+      };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
   async updateSchoolDetails(schoolData) {
     try {
       // First check if school details exist
