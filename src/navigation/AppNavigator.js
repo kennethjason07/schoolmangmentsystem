@@ -214,8 +214,6 @@ function StudentTabNavigator() {
             iconName = focused ? 'library' : 'library-outline';
           } else if (route.name === 'Marks') {
             iconName = focused ? 'document-text' : 'document-text-outline';
-          } else if (route.name === 'Notifications') {
-            iconName = focused ? 'notifications' : 'notifications-outline';
           } else if (route.name === 'Chat') {
             iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
           }
@@ -233,7 +231,6 @@ function StudentTabNavigator() {
       />
       <Tab.Screen name="Assignments" component={ViewAssignments} />
       <Tab.Screen name="Marks" component={StudentAttendanceMarks} />
-      <Tab.Screen name="Notifications" component={StudentNotifications} />
       <Tab.Screen name="Chat" component={StudentChatWithTeacher} />
     </Tab.Navigator>
   );
@@ -296,11 +293,14 @@ export default function AppNavigator() {
             {userType === 'parent' && (
               <>
               <Stack.Screen name="ParentTabs" component={ParentTabNavigator} />
-                <Stack.Screen name="Notifications" component={Notifications} />
+                <Stack.Screen name="ParentNotifications" component={Notifications} />
               </>
             )}
             {userType === 'student' && (
-              <Stack.Screen name="StudentDashboard" component={StudentTabNavigator} />
+              <>
+                <Stack.Screen name="StudentDashboard" component={StudentTabNavigator} />
+                <Stack.Screen name="StudentNotifications" component={StudentNotifications} />
+              </>
             )}
             
             {/* Universal Screens */}

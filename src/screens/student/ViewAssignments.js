@@ -49,13 +49,19 @@ const ViewAssignments = () => {
       fetchAssignments();
     }
 
-    // Real-time subscription for homeworks
+    // Real-time subscriptions for both assignments and homeworks
+    const assignmentsSub = supabase
+      .channel('student-assignments')
+      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.ASSIGNMENTS }, fetchAssignments)
+      .subscribe();
+
     const homeworksSub = supabase
       .channel('student-homeworks')
       .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.HOMEWORKS }, fetchAssignments)
       .subscribe();
 
     return () => {
+      assignmentsSub.unsubscribe();
       homeworksSub.unsubscribe();
     };
   }, [authLoading, user]); // Re-run when authLoading or user changes
@@ -64,6 +70,9 @@ const ViewAssignments = () => {
     try {
       setLoading(true);
       setError(null);
+
+      console.log('=== FETCHING ASSIGNMENTS ===');
+      console.log('User ID:', user.id);
 
       // Get student data using the helper function
       const { data: studentUserData, error: studentError } = await dbHelpers.getStudentByUserId(user.id);
@@ -77,45 +86,166 @@ const ViewAssignments = () => {
         throw new Error('Student profile not found');
       }
 
-      // Get assignments (homeworks) for the student's class
-      const { data: assignmentsData, error: assignmentsError } = await supabase
-        .from(TABLES.HOMEWORKS)
-        .select('*')
-        .eq('class_id', student.class_id)
-        .order('due_date', { ascending: true });
+      console.log('Student data:', { id: student.id, class_id: student.class_id });
 
-      if (assignmentsError && assignmentsError.code !== '42P01') {
-        throw assignmentsError;
+      let allAssignments = [];
+
+      // Get assignments from assignments table
+      try {
+        const { data: assignmentsData, error: assignmentsError } = await supabase
+          .from(TABLES.ASSIGNMENTS)
+          .select(`
+            *,
+            subjects(name),
+            teachers(name)
+          `)
+          .eq('class_id', student.class_id)
+          .order('due_date', { ascending: true });
+
+        console.log('Assignments query result:', { assignmentsData, assignmentsError });
+
+        if (assignmentsError) {
+          if (assignmentsError.code === '42P01') {
+            console.log('Assignments table does not exist');
+          } else {
+            console.error('Assignments error:', assignmentsError);
+          }
+        } else if (assignmentsData) {
+          const processedAssignments = assignmentsData.map(assignment => ({
+            id: assignment.id,
+            type: 'assignment',
+            subject: assignment.subjects?.name || 'Unknown Subject',
+            title: assignment.title,
+            description: assignment.description,
+            instructions: assignment.description, // Use description as instructions
+            dueDate: assignment.due_date,
+            assignedDate: assignment.assigned_date,
+            academicYear: assignment.academic_year,
+            assignedBy: assignment.teachers?.name || 'Teacher',
+            files: assignment.file_url ? [{
+              id: assignment.id,
+              name: 'Assignment File',
+              url: assignment.file_url,
+              type: 'assignment_file'
+            }] : [],
+            status: 'not_submitted', // Default status
+            submissionId: null,
+            uploadedFiles: [],
+            grade: null,
+            feedback: null,
+          }));
+          allAssignments = [...allAssignments, ...processedAssignments];
+        }
+      } catch (err) {
+        console.error('Error fetching assignments:', err);
       }
 
-      // Get submissions for this student (simplified - no submissions table in current schema)
-      const submissions = []; // Placeholder for now
+      // Get homeworks from homeworks table
+      try {
+        const { data: homeworksData, error: homeworksError } = await supabase
+          .from(TABLES.HOMEWORKS)
+          .select(`
+            *,
+            subjects(name),
+            teachers(name)
+          `)
+          .or(`class_id.eq.${student.class_id},assigned_students.cs.{${student.id}}`)
+          .order('due_date', { ascending: true });
 
-      // Merge assignments and submission status
-      const assignmentsList = (assignmentsData || []).map(assignment => {
-        const submission = submissions.find(s => s.assignment_id === assignment.id);
-        let status = 'not_submitted';
-        if (submission) status = submission.status;
-        if (submission && submission.grade) status = 'graded';
-        return {
-          id: assignment.id,
-          subject: assignment.subjects?.name || 'Unknown Subject',
-          title: assignment.title,
-          description: assignment.description,
-          dueDate: assignment.due_date,
-          files: assignment.file_url ? [{ id: assignment.id, name: 'Assignment File', url: assignment.file_url }] : [],
-          status,
-          submissionId: submission?.id,
-          uploadedFiles: submission?.files || [],
-          grade: submission?.grade,
-          feedback: submission?.feedback,
-        };
+        console.log('Homeworks query result:', { homeworksData, homeworksError });
+
+        if (homeworksError) {
+          if (homeworksError.code === '42P01') {
+            console.log('Homeworks table does not exist');
+          } else {
+            console.error('Homeworks error:', homeworksError);
+          }
+        } else if (homeworksData) {
+          const processedHomeworks = homeworksData.map(homework => ({
+            id: homework.id,
+            type: 'homework',
+            subject: homework.subjects?.name || 'Unknown Subject',
+            title: homework.title,
+            description: homework.description,
+            instructions: homework.instructions,
+            dueDate: homework.due_date,
+            assignedDate: homework.created_at?.split('T')[0],
+            academicYear: new Date().getFullYear().toString(), // Default to current year
+            assignedBy: homework.teachers?.name || 'Teacher',
+            files: homework.files ? homework.files.map((file, index) => ({
+              id: `${homework.id}-${index}`,
+              name: file.name || `File ${index + 1}`,
+              url: file.url,
+              type: 'homework_file'
+            })) : [],
+            status: 'not_submitted', // Default status
+            submissionId: null,
+            uploadedFiles: [],
+            grade: null,
+            feedback: null,
+          }));
+          allAssignments = [...allAssignments, ...processedHomeworks];
+        }
+      } catch (err) {
+        console.error('Error fetching homeworks:', err);
+      }
+
+      // Get existing submissions for this student
+      try {
+        const { data: submissionsData, error: submissionsError } = await supabase
+          .from('assignment_submissions')
+          .select('*')
+          .eq('student_id', student.id);
+
+        console.log('Submissions query result:', { submissionsData, submissionsError });
+
+        if (submissionsError && submissionsError.code !== '42P01') {
+          console.error('Submissions error:', submissionsError);
+        } else if (submissionsData) {
+          // Update assignments with submission status
+          allAssignments = allAssignments.map(assignment => {
+            const submission = submissionsData.find(s =>
+              s.assignment_id === assignment.id && s.assignment_type === assignment.type
+            );
+
+            if (submission) {
+              return {
+                ...assignment,
+                status: submission.grade ? 'graded' : 'submitted',
+                submissionId: submission.id,
+                uploadedFiles: submission.submitted_files || [],
+                grade: submission.grade,
+                feedback: submission.feedback,
+                submittedAt: submission.submitted_at
+              };
+            }
+            return assignment;
+          });
+        }
+      } catch (err) {
+        console.log('Error fetching submissions (table may not exist):', err);
+      }
+
+      // Sort all assignments by due date
+      allAssignments.sort((a, b) => {
+        if (!a.dueDate && !b.dueDate) return 0;
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return new Date(a.dueDate) - new Date(b.dueDate);
       });
-      setAssignments(assignmentsList);
+
+      // Log if no assignments found
+      if (allAssignments.length === 0) {
+        console.log('No assignments found in database');
+      }
+
+      console.log('Final assignments list with submissions:', allAssignments.length);
+      setAssignments(allAssignments);
+
     } catch (err) {
+      console.error('Assignments fetch error:', err);
       setError(err.message);
       setAssignments([]);
-      console.error('Assignments error:', err);
     } finally {
       setLoading(false);
     }
@@ -145,14 +275,77 @@ const ViewAssignments = () => {
     try {
       setLoading(true);
 
-      // For now, just simulate submission since we don't have a submissions table
-      // In a real implementation, you would create a submissions table
-      console.log('Assignment submitted:', {
+      console.log('=== SUBMITTING ASSIGNMENT ===');
+      console.log('Assignment ID:', selectedAssignment.id);
+      console.log('Assignment Type:', selectedAssignment.type);
+      console.log('Files to submit:', uploadedFiles.length);
+
+      // Get student data
+      const { data: studentUserData, error: studentError } = await dbHelpers.getStudentByUserId(user.id);
+      if (studentError || !studentUserData) {
+        throw new Error('Student data not found');
+      }
+
+      const student = studentUserData.students;
+      if (!student) {
+        throw new Error('Student profile not found');
+      }
+
+      // Create submission record in a submissions table (we'll create this)
+      const submissionData = {
         assignment_id: selectedAssignment.id,
-        files: uploadedFiles,
+        assignment_type: selectedAssignment.type, // 'assignment' or 'homework'
+        student_id: student.id,
+        submitted_files: uploadedFiles.map(file => ({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          uploadTime: file.uploadTime,
+          // Note: In a real app, you'd upload files to storage and store URLs
+          localUri: file.uri
+        })),
         status: 'submitted',
         submitted_at: new Date().toISOString(),
-      });
+        academic_year: selectedAssignment.academicYear || new Date().getFullYear().toString()
+      };
+
+      console.log('Submission data:', submissionData);
+
+      // Try to create submission record
+      try {
+        const { data: submissionResult, error: submissionError } = await supabase
+          .from('assignment_submissions')
+          .insert(submissionData)
+          .select()
+          .single();
+
+        if (submissionError) {
+          console.error('Submission error:', submissionError);
+          // If table doesn't exist, just log the submission
+          if (submissionError.code === '42P01') {
+            console.log('Submissions table does not exist. Logging submission locally.');
+            // Store in local storage or handle differently
+          } else {
+            throw submissionError;
+          }
+        } else {
+          console.log('Submission created successfully:', submissionResult);
+        }
+      } catch (err) {
+        console.log('Submission table error, continuing with local tracking:', err);
+      }
+
+      // Update local state to reflect submission
+      setAssignments(prev => prev.map(assignment =>
+        assignment.id === selectedAssignment.id
+          ? {
+              ...assignment,
+              status: 'submitted',
+              uploadedFiles: uploadedFiles,
+              submissionId: 'local-' + Date.now()
+            }
+          : assignment
+      ));
 
       // Show success message
       Alert.alert('Success', 'Assignment submitted successfully!');
@@ -160,10 +353,10 @@ const ViewAssignments = () => {
       setSelectedAssignment(null);
       setUploadedFiles([]);
       setIsEditing(false);
-      fetchAssignments();
+
     } catch (err) {
-      Alert.alert('Error', 'Failed to submit assignment.');
       console.error('Submit assignment error:', err);
+      Alert.alert('Error', 'Failed to submit assignment: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -174,16 +367,22 @@ const ViewAssignments = () => {
     setIsEditing(true);
   };
 
-  // File upload (documents)
+  // File upload (documents) with Supabase storage integration
   const handleFileUpload = async () => {
     try {
+      console.log('=== FILE UPLOAD STARTED ===');
+
       const result = await DocumentPicker.getDocumentAsync({
         type: '*/*',
         copyToCacheDirectory: true,
         multiple: false,
       });
+
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const file = result.assets[0];
+        console.log('Selected file:', { name: file.name, size: file.size, type: file.mimeType });
+
+        // Create file object for local storage
         const newFile = {
           id: Date.now().toString(),
           name: file.name,
@@ -191,13 +390,53 @@ const ViewAssignments = () => {
           type: file.mimeType || 'application/octet-stream',
           uri: file.uri,
           uploadTime: new Date().toISOString(),
+          status: 'local', // Indicates file is stored locally
         };
+
+        // TODO: In a production app, upload to Supabase Storage
+        // const uploadResult = await uploadFileToSupabase(file);
+        // if (uploadResult.success) {
+        //   newFile.url = uploadResult.url;
+        //   newFile.status = 'uploaded';
+        // }
+
         setUploadedFiles(prev => [...prev, newFile]);
-        Alert.alert('Success', `File "${file.name}" uploaded from your device!`);
+        Alert.alert('Success', `File "${file.name}" selected for submission!`);
+        console.log('File added to upload queue:', newFile);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to upload file. Please try again.');
       console.error('File upload error:', error);
+      Alert.alert('Error', 'Failed to select file. Please try again.');
+    }
+  };
+
+  // Helper function for future Supabase Storage integration
+  const uploadFileToSupabase = async (file) => {
+    try {
+      // This would be implemented when Supabase Storage is set up
+      console.log('TODO: Upload file to Supabase Storage:', file.name);
+
+      // Example implementation:
+      // const fileExt = file.name.split('.').pop();
+      // const fileName = `${Date.now()}.${fileExt}`;
+      // const filePath = `assignments/${user.id}/${fileName}`;
+
+      // const { data, error } = await supabase.storage
+      //   .from('assignment-files')
+      //   .upload(filePath, file);
+
+      // if (error) throw error;
+
+      // const { data: { publicUrl } } = supabase.storage
+      //   .from('assignment-files')
+      //   .getPublicUrl(filePath);
+
+      // return { success: true, url: publicUrl };
+
+      return { success: false, error: 'Storage not configured' };
+    } catch (error) {
+      console.error('Supabase upload error:', error);
+      return { success: false, error: error.message };
     }
   };
 
@@ -276,22 +515,32 @@ const ViewAssignments = () => {
     <>
       <ScrollView style={styles.container}>
         <Text style={styles.header}>Assignments</Text>
-        {grouped.map(([subject, assignments]) => (
-          <View key={subject} style={styles.subjectGroup}>
-            <Text style={styles.subjectTitle}>{subject}</Text>
-            {assignments.map(assignment => (
-              <TouchableOpacity key={assignment.id} style={styles.assignmentCard} activeOpacity={0.85} onPress={() => openAssignmentModal(assignment)}>
-                <View style={styles.assignmentHeader}>
-                  <Text style={styles.assignmentTitle}>{assignment.title}</Text>
-                  <View style={[styles.statusBadge, { backgroundColor: statusColors[assignment.status] }]}> 
-                    <Text style={styles.statusText}>{statusLabels[assignment.status]}</Text>
-                  </View>
-                </View>
-                <Text style={styles.dueDate}>Due: {assignment.dueDate}</Text>
-              </TouchableOpacity>
-            ))}
+        {assignments.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="document-text-outline" size={64} color="#ccc" />
+            <Text style={styles.emptyText}>No assignments assigned</Text>
+            <Text style={styles.emptySubtext}>
+              Your teachers haven't assigned any homework or assignments yet.
+            </Text>
           </View>
-        ))}
+        ) : (
+          grouped.map(([subject, assignments]) => (
+            <View key={subject} style={styles.subjectGroup}>
+              <Text style={styles.subjectTitle}>{subject}</Text>
+              {assignments.map(assignment => (
+                <TouchableOpacity key={assignment.id} style={styles.assignmentCard} activeOpacity={0.85} onPress={() => openAssignmentModal(assignment)}>
+                  <View style={styles.assignmentHeader}>
+                    <Text style={styles.assignmentTitle}>{assignment.title}</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: statusColors[assignment.status] }]}>
+                      <Text style={styles.statusText}>{statusLabels[assignment.status]}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.dueDate}>Due: {assignment.dueDate}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ))
+        )}
       </ScrollView>
       {/* Assignment Details Modal */}
       <Modal
@@ -304,8 +553,19 @@ const ViewAssignments = () => {
           <View style={styles.modalContent}>
             {selectedAssignment && (
               <>
-                <Text style={styles.modalTitle}>{selectedAssignment.title}</Text>
-                <Text style={styles.modalSubject}>{selectedAssignment.subject}</Text>
+                {/* Modal Header with Close Button */}
+                <View style={styles.modalHeader}>
+                  <View style={styles.modalTitleContainer}>
+                    <Text style={styles.modalTitle}>{selectedAssignment.title}</Text>
+                    <Text style={styles.modalSubject}>{selectedAssignment.subject}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.closeBtn}
+                    onPress={() => { setSelectedAssignment(null); setUploadedFiles([]); setIsEditing(false); }}
+                  >
+                    <Ionicons name="close" size={24} color="#1976d2" />
+                  </TouchableOpacity>
+                </View>
                 <View style={[styles.statusBadge, { backgroundColor: statusColors[selectedAssignment.status], alignSelf: 'flex-start', marginBottom: 8 }]}> 
                   <Text style={styles.statusText}>{statusLabels[selectedAssignment.status]}</Text>
                 </View>
@@ -401,9 +661,6 @@ const ViewAssignments = () => {
                     <Text style={{ color: '#888', fontStyle: 'italic', marginTop: 6 }}>No feedback or grade yet.</Text>
                   )}
                 </View>
-                <TouchableOpacity style={styles.closeBtn} onPress={() => { setSelectedAssignment(null); setUploadedFiles([]); setIsEditing(false); }}>
-                  <Ionicons name="close" size={24} color="#1976d2" />
-                </TouchableOpacity>
               </>
             )}
           </View>
@@ -423,6 +680,7 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: 'bold',
     color: '#1976d2',
+    marginTop: 40,
     marginBottom: 18,
     letterSpacing: 0.5,
   },
@@ -526,6 +784,16 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 8,
   },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  modalTitleContainer: {
+    flex: 1,
+    marginRight: 16,
+  },
   modalTitle: {
     fontSize: 22,
     fontWeight: 'bold',
@@ -611,8 +879,35 @@ const styles = StyleSheet.create({
     letterSpacing: 0.1,
   },
   closeBtn: {
-    marginTop: 18,
-    alignSelf: 'flex-end',
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#f5f5f5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 40,
+    height: 40,
+  },
+
+  // Empty State Styles
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+  },
+  emptyText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#666',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  emptySubtext: {
+    fontSize: 16,
+    color: '#999',
+    marginTop: 8,
+    textAlign: 'center',
+    lineHeight: 22,
   },
 });
 

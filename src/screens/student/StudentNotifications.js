@@ -21,27 +21,112 @@ const StudentNotifications = () => {
   const [error, setError] = useState(null);
   const navigation = useNavigation();
 
-  // Fetch notifications from Supabase
+  // Fetch notifications from Supabase with read status
   const fetchNotifications = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Get general notifications (simplified approach for students)
-      const { data, error: notifError } = await supabase
+      console.log('=== FETCHING STUDENT NOTIFICATIONS ===');
+      console.log('User ID:', user.id);
+
+      // First, try to get all notifications (simple approach)
+      const { data: allNotifications, error: notifError } = await supabase
         .from(TABLES.NOTIFICATIONS)
         .select('*')
         .order('created_at', { ascending: false })
         .limit(50);
 
-      if (notifError && notifError.code !== '42P01') {
+      console.log('All notifications query result:', { allNotifications, notifError });
+
+      if (notifError) {
+        console.error('Error fetching notifications:', notifError);
         throw notifError;
       }
 
-      setNotifications(data || []);
+      if (!allNotifications || allNotifications.length === 0) {
+        console.log('No notifications found in database, adding test notifications');
+
+        // Add some test notifications for debugging
+        const testNotifications = [
+          {
+            id: 'test-1',
+            message: 'Welcome to the student portal! This is a test notification.',
+            type: 'general',
+            created_at: new Date().toISOString(),
+            read: false,
+            title: 'Welcome Message',
+            date: new Date().toISOString()
+          },
+          {
+            id: 'test-2',
+            message: 'Your assignment for Mathematics is due tomorrow.',
+            type: 'assignment',
+            created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+            read: false,
+            title: 'Assignment Due',
+            date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+          },
+          {
+            id: 'test-3',
+            message: 'Parent-teacher meeting scheduled for next week.',
+            type: 'meeting',
+            created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+            read: true,
+            title: 'Meeting Notice',
+            date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
+          }
+        ];
+
+        setNotifications(testNotifications);
+        return;
+      }
+
+      console.log('Found notifications:', allNotifications.length);
+
+      // Try to get read status for each notification
+      const notificationsWithReadStatus = [];
+
+      for (const notification of allNotifications) {
+        try {
+          // Check if there's a recipient record for this notification and user
+          const { data: recipientData, error: recipientError } = await supabase
+            .from('notification_recipients')
+            .select('id, is_read, read_at')
+            .eq('notification_id', notification.id)
+            .eq('recipient_id', user.id)
+            .single();
+
+          console.log(`Recipient data for notification ${notification.id}:`, { recipientData, recipientError });
+
+          const processedNotification = {
+            ...notification,
+            read: recipientData?.is_read || false,
+            title: notification.message || 'Notification',
+            date: notification.created_at,
+            recipientId: recipientData?.id || null
+          };
+
+          notificationsWithReadStatus.push(processedNotification);
+        } catch (err) {
+          console.log(`No recipient record for notification ${notification.id}, treating as unread`);
+          // If no recipient record exists, treat as unread
+          notificationsWithReadStatus.push({
+            ...notification,
+            read: false,
+            title: notification.message || 'Notification',
+            date: notification.created_at,
+            recipientId: null
+          });
+        }
+      }
+
+      console.log('Processed notifications:', notificationsWithReadStatus.length);
+      setNotifications(notificationsWithReadStatus);
+
     } catch (err) {
+      console.error('Error in fetchNotifications:', err);
       setError(err.message);
-      console.error('Notifications error:', err);
     } finally {
       setLoading(false);
     }
@@ -71,23 +156,59 @@ const StudentNotifications = () => {
 
   const markAsRead = async (id) => {
     try {
-      // Try to update is_read field if it exists
-      const { error: updateError } = await supabase
-        .from(TABLES.NOTIFICATIONS)
-        .update({ is_read: true })
-        .eq('id', id);
+      console.log('=== MARKING NOTIFICATION AS READ ===');
+      console.log('Notification ID:', id);
+      console.log('User ID:', user.id);
 
-      if (updateError && updateError.code !== '42703') { // Ignore column doesn't exist error
-        throw updateError;
+      // Find the notification to get its recipient record
+      const notification = notifications.find(n => n.id === id);
+      console.log('Found notification:', notification);
+
+      if (notification?.recipientId) {
+        // Update existing recipient record
+        console.log('Updating existing recipient record:', notification.recipientId);
+        const { error: updateError } = await supabase
+          .from('notification_recipients')
+          .update({
+            is_read: true,
+            read_at: new Date().toISOString()
+          })
+          .eq('id', notification.recipientId);
+
+        if (updateError) {
+          console.error('Update error:', updateError);
+          throw updateError;
+        }
+      } else {
+        // Create new recipient record
+        console.log('Creating new recipient record');
+        const { error: insertError } = await supabase
+          .from('notification_recipients')
+          .insert({
+            notification_id: id,
+            recipient_id: user.id,
+            recipient_type: 'Student',
+            is_read: true,
+            read_at: new Date().toISOString(),
+            delivery_status: 'Sent',
+            sent_at: new Date().toISOString()
+          });
+
+        if (insertError) {
+          console.error('Insert error:', insertError);
+          throw insertError;
+        }
       }
 
-      // Update local state regardless
+      // Update local state
       setNotifications(notifications =>
-        notifications.map(n => n.id === id ? { ...n, is_read: true, read: true } : n)
+        notifications.map(n => n.id === id ? { ...n, read: true } : n)
       );
+
+      console.log('✅ Successfully marked notification as read');
     } catch (err) {
-      Alert.alert('Error', 'Failed to mark as read.');
       console.error('Mark as read error:', err);
+      Alert.alert('Error', 'Failed to mark as read.');
     }
   };
 

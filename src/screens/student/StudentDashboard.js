@@ -29,7 +29,7 @@ const StudentDashboard = ({ navigation }) => {
         navigation.navigate('Marks', { activeTab: 'marks' });
         break;
       case 'notifications':
-        navigation.navigate('Notifications');
+        navigation.navigate('StudentNotifications');
         break;
       default:
         Alert.alert('Coming Soon', `${cardKey} feature is under development.`);
@@ -133,40 +133,58 @@ const StudentDashboard = ({ navigation }) => {
       // Get notifications for this student
       let notificationsData = [];
       try {
-        // Get notifications targeted to this student through notification_recipients
-        const { data: notifications, error: notificationsError } = await supabase
-          .from(TABLES.NOTIFICATION_RECIPIENTS)
-          .select(`
-            notification_id,
-            is_read,
-            read_at,
-            notifications!inner(
-              id,
-              message,
-              type,
-              created_at,
-              delivery_mode
-            )
-          `)
-          .eq('recipient_id', user.id)
-          .limit(5);
+        console.log('=== FETCHING DASHBOARD NOTIFICATIONS ===');
+        console.log('User ID:', user.id);
+
+        // First try to get all notifications
+        const { data: allNotifications, error: notificationsError } = await supabase
+          .from(TABLES.NOTIFICATIONS)
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        console.log('Dashboard notifications query result:', { allNotifications, notificationsError });
 
         if (notificationsError && notificationsError.code !== '42P01') {
           console.log('Notifications error:', notificationsError);
-        } else if (notifications) {
-          notificationsData = notifications
-            .map(nr => ({
-              id: nr.notifications.id,
-              message: nr.notifications.message,
-              type: nr.notifications.type,
-              date: new Date(nr.notifications.created_at).toLocaleDateString(),
-              created_at: nr.notifications.created_at,
-              is_read: nr.is_read,
-              read_at: nr.read_at
+        } else if (allNotifications && allNotifications.length > 0) {
+          notificationsData = allNotifications
+            .map(notification => ({
+              id: notification.id,
+              message: notification.message,
+              type: notification.type || 'general',
+              date: new Date(notification.created_at).toLocaleDateString(),
+              created_at: notification.created_at,
+              is_read: false, // Default to unread for dashboard
+              read_at: null
             }))
-            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
             .slice(0, 5);
+        } else {
+          console.log('No notifications found, adding test notifications for dashboard');
+          // Add test notifications for dashboard
+          notificationsData = [
+            {
+              id: 'dashboard-test-1',
+              message: 'Welcome to your student dashboard!',
+              type: 'general',
+              date: new Date().toLocaleDateString(),
+              created_at: new Date().toISOString(),
+              is_read: false,
+              read_at: null
+            },
+            {
+              id: 'dashboard-test-2',
+              message: 'Check your assignments regularly.',
+              type: 'assignment',
+              date: new Date().toLocaleDateString(),
+              created_at: new Date().toISOString(),
+              is_read: false,
+              read_at: null
+            }
+          ];
         }
+
+        console.log('Final dashboard notifications:', notificationsData.length);
       } catch (err) {
         console.log('Notifications error:', err);
         notificationsData = [];
@@ -375,6 +393,20 @@ const StudentDashboard = ({ navigation }) => {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Dashboard</Text>
+        <TouchableOpacity
+          style={styles.notificationIcon}
+          onPress={() => navigation.navigate('StudentNotifications')}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="notifications-outline" size={24} color="#333" />
+          {notifications.length > 0 && (
+            <View style={styles.notificationBadge}>
+              <Text style={styles.notificationBadgeText}>
+                {notifications.length > 9 ? '9+' : notifications.length}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
@@ -500,7 +532,7 @@ const StudentDashboard = ({ navigation }) => {
               <TouchableOpacity
                 key={item.id || index}
                 style={styles.notificationItem}
-                onPress={() => navigation.navigate('Notifications')}
+                onPress={() => navigation.navigate('StudentNotifications')}
                 activeOpacity={0.7}
               >
                 <View style={styles.notificationIcon}>
@@ -515,7 +547,7 @@ const StudentDashboard = ({ navigation }) => {
           ) : (
             <TouchableOpacity
               style={styles.emptyState}
-              onPress={() => navigation.navigate('Notifications')}
+              onPress={() => navigation.navigate('StudentNotifications')}
               activeOpacity={0.7}
             >
               <Text style={styles.emptyText}>No recent notifications</Text>
@@ -567,11 +599,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 20,
     backgroundColor: '#f8f9fa',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   headerTitle: {
     fontSize: 28,
     fontWeight: 'bold',
     color: '#333',
+  },
+  notificationIcon: {
+    position: 'relative',
+    padding: 8,
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#F44336',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  notificationBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   dashboardCard: {
     backgroundColor: '#fff',

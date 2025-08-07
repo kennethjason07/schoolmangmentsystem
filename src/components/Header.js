@@ -19,7 +19,7 @@ const Header = ({ title, showBack = false, showProfile = true, showNotifications
       <View style={styles.rightSection}>
         {showNotifications && (
           <TouchableOpacity 
-            onPress={onNotificationsPress || (() => navigation.navigate('Notifications'))} 
+            onPress={onNotificationsPress || (() => navigation.navigate('ParentNotifications'))}
             style={styles.notificationButton}
           >
             <Ionicons 
