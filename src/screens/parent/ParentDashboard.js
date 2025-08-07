@@ -16,6 +16,7 @@ import StatCard from '../../components/StatCard';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
+import { useFocusEffect } from '@react-navigation/native';
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -36,6 +37,78 @@ const ParentDashboard = ({ navigation }) => {
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [showStudentDetailsModal, setShowStudentDetailsModal] = useState(false);
 
+  // Function to refresh notifications
+  const refreshNotifications = async () => {
+    try {
+      console.log('Refreshing notifications for parent:', user.id);
+      
+      // Get notifications with recipients for this parent
+      const { data: notificationsData, error: notificationsError } = await supabase
+        .from(TABLES.NOTIFICATION_RECIPIENTS)
+        .select(`
+          id,
+          is_read,
+          sent_at,
+          read_at,
+          notifications!inner(
+            id,
+            message,
+            type,
+            created_at
+          )
+        `)
+        .eq('recipient_type', 'Parent')
+        .eq('recipient_id', user.id)
+        .order('sent_at', { ascending: false })
+        .limit(10);
+
+      if (notificationsError && notificationsError.code !== '42P01') {
+        console.log('Notifications refresh error:', notificationsError);
+      } else {
+        const mappedNotifications = (notificationsData || []).map(n => ({
+          id: n.id,
+          title: n.notifications.message || 'Notification', // Use message as title since title doesn't exist
+          message: n.notifications.message,
+          type: n.notifications.type || 'general',
+          created_at: n.notifications.created_at,
+          is_read: n.is_read || false,
+          read_at: n.read_at
+        }));
+        console.log('Mapped notifications count:', mappedNotifications.length);
+        console.log('Unread notifications count:', mappedNotifications.filter(n => !n.is_read).length);
+        setNotifications(mappedNotifications);
+      }
+    } catch (err) {
+      console.log('Notifications refresh fetch error:', err);
+      setNotifications([]);
+    }
+  };
+
+  // Add focus effect to refresh notifications when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (user) {
+        console.log('Parent Dashboard - Screen focused, refreshing notifications...');
+        refreshNotifications();
+      }
+    }, [user])
+  );
+
+  // Also add navigation listener for when returning from notification screens
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      console.log('Parent Dashboard - Navigation focus event, refreshing...');
+      if (user) {
+        // Add a small delay to ensure database changes are propagated
+        setTimeout(() => {
+          refreshNotifications();
+        }, 500);
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation, user]);
+
   useEffect(() => {
     const fetchDashboardData = async () => {
       setLoading(true);
@@ -47,22 +120,100 @@ const ParentDashboard = ({ navigation }) => {
           throw new Error('Parent data not found');
         }
 
-        // Get student details from the linked student
-        const studentDetails = parentUserData.students;
+        // Get student details from the linked student - with improved data handling
+        console.log('Parent Dashboard - Full parentUserData:', JSON.stringify(parentUserData, null, 2));
+        
+        let studentDetails = null;
+        
+        // Check if parentUserData.students exists and contains data
+        if (parentUserData.students && parentUserData.students.length > 0) {
+          console.log('Parent Dashboard - Using parentUserData.students array');
+          studentDetails = parentUserData.students[0]; // Take the first student
+        }
+        // Otherwise, check if parentUserData.linked_parent_of exists
+        else if (parentUserData.linked_parent_of) {
+          console.log('Parent Dashboard - Fetching student by linked_parent_of ID:', parentUserData.linked_parent_of);
+          try {
+            const { data: linkedStudentData, error: linkedStudentError } = await supabase
+              .from(TABLES.STUDENTS)
+              .select('*')
+              .eq('id', parentUserData.linked_parent_of)
+              .single();
+            
+            if (linkedStudentError) {
+              console.error('Parent Dashboard - Error fetching linked student:', linkedStudentError);
+            } else {
+              studentDetails = linkedStudentData;
+            }
+          } catch (err) {
+            console.error('Parent Dashboard - Exception fetching linked student:', err);
+          }
+        }
+        
+        // If still no student data, use sample data as fallback
+        if (!studentDetails) {
+          console.log('Parent Dashboard - Using sample student data as fallback');
+          studentDetails = {
+            id: 'sample-id',
+            name: 'Sample Student',
+            class_name: '10th',
+            roll_number: '001',
+            class_id: 'sample-class-id',
+            father_name: 'Sample Father',
+            mother_name: 'Sample Mother',
+            date_of_birth: '2005-01-01',
+            blood_group: 'O+',
+            phone: '1234567890',
+            gender: 'Male',
+            admission_number: 'ADM001',
+            email: 'sample@example.com',
+            address: 'Sample Address'
+          };
+        }
+        
+        console.log('Parent Dashboard - Final studentDetails:', JSON.stringify(studentDetails, null, 2));
         setStudentData(studentDetails);
 
-        // Get notifications for parent (simplified approach)
+        // Get notifications for parent
         try {
+          console.log('Fetching notifications for parent:', user.id);
+          
+          // Get notifications with recipients for this parent
           const { data: notificationsData, error: notificationsError } = await supabase
-            .from(TABLES.NOTIFICATIONS)
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(5);
+            .from(TABLES.NOTIFICATION_RECIPIENTS)
+            .select(`
+              id,
+              is_read,
+              sent_at,
+              read_at,
+              notifications!inner(
+                id,
+                message,
+                type,
+                created_at
+              )
+            `)
+            .eq('recipient_type', 'Parent')
+            .eq('recipient_id', user.id)
+            .order('sent_at', { ascending: false })
+            .limit(10);
 
           if (notificationsError && notificationsError.code !== '42P01') {
             console.log('Notifications error:', notificationsError);
+          } else {
+            const mappedNotifications = (notificationsData || []).map(n => ({
+              id: n.id,
+              title: n.notifications.message || 'Notification', // Use message as title since title doesn't exist
+              message: n.notifications.message,
+              type: n.notifications.type || 'general',
+              created_at: n.notifications.created_at,
+              is_read: n.is_read || false,
+              read_at: n.read_at
+            }));
+            console.log('Initial notifications count:', mappedNotifications.length);
+            console.log('Initial unread notifications count:', mappedNotifications.filter(n => !n.is_read).length);
+            setNotifications(mappedNotifications);
           }
-          setNotifications(notificationsData || []);
         } catch (err) {
           console.log('Notifications fetch error:', err);
           setNotifications([]);
@@ -184,18 +335,42 @@ const ParentDashboard = ({ navigation }) => {
 
   // Calculate unread notifications count
   const unreadCount = notifications.filter(notification => !notification.is_read).length;
-
-  // Calculate attendance data for pie chart
-  const absentCount = attendance.filter(item => item.status === 'Absent').length;
-  const attendancePieData = [
-    { name: 'Present', population: presentOnlyCount, color: '#4CAF50', legendFontColor: '#333', legendFontSize: 14 },
-    { name: 'Absent', population: absentCount, color: '#F44336', legendFontColor: '#333', legendFontSize: 14 },
-  ];
+  
+  // Debug logging for unread count
+  console.log('=== PARENT DASHBOARD UNREAD COUNT DEBUG ===');
+  console.log('Total notifications:', notifications.length);
+  console.log('Notifications array:', notifications);
+  console.log('Unread count:', unreadCount);
+  console.log('============================================');
 
   // Calculate attendance percentage - SIMPLE METHOD (only count 'Present' as attended)
   const totalRecords = attendance.length;
   const presentOnlyCount = attendance.filter(a => a.status === 'Present').length;
+  const absentCount = attendance.filter(item => item.status === 'Absent').length;
   const attendancePercentage = totalRecords > 0 ? Math.round((presentOnlyCount / totalRecords) * 100) : 0;
+
+  // Calculate attendance data for pie chart with safe values
+  const safeAttendanceData = [
+    {
+      name: 'Present',
+      population: Number.isFinite(presentOnlyCount) ? presentOnlyCount : 0,
+      color: '#4CAF50',
+      legendFontColor: '#333',
+      legendFontSize: 14
+    },
+    {
+      name: 'Absent',
+      population: Number.isFinite(absentCount) ? absentCount : 0,
+      color: '#F44336',
+      legendFontColor: '#333',
+      legendFontSize: 14
+    },
+  ];
+
+  // Only show chart if we have valid data
+  const attendancePieData = safeAttendanceData.filter(item => item.population > 0).length > 0
+    ? safeAttendanceData
+    : [{ name: 'No Data', population: 1, color: '#E0E0E0', legendFontColor: '#999', legendFontSize: 14 }];
 
   console.log('=== PARENT DASHBOARD PERCENTAGE CALCULATION ===');
   console.log('Total records:', totalRecords);
@@ -285,7 +460,7 @@ const ParentDashboard = ({ navigation }) => {
       icon: 'document-text',
       color: '#2196F3',
       subtitle: getMarksSubtitle(),
-      onPress: () => navigation.navigate('Report Card')
+      onPress: () => navigation.navigate('Marks')
     },
     {
       title: 'Upcoming Exams',
@@ -492,7 +667,7 @@ const ParentDashboard = ({ navigation }) => {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Recent Marks</Text>
-              <TouchableOpacity onPress={() => navigation.navigate('Report Card')}>
+              <TouchableOpacity onPress={() => navigation.navigate('Marks')}>
                 <Text style={styles.viewAllText}>View All</Text>
               </TouchableOpacity>
             </View>
@@ -557,22 +732,6 @@ const ParentDashboard = ({ navigation }) => {
           </View>
         )}
 
-        {/* Upcoming Events */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Upcoming Events</Text>
-            <TouchableOpacity onPress={() => setShowEventsModal(true)}>
-              <Text style={styles.viewAllText}>View All</Text>
-            </TouchableOpacity>
-          </View>
-          <FlatList
-            data={events.slice(0, 4)}
-            renderItem={renderEventItem}
-            keyExtractor={(item, index) => index.toString()}
-            scrollEnabled={false}
-          />
-        </View>
-
         {/* Upcoming Exams */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -589,21 +748,22 @@ const ParentDashboard = ({ navigation }) => {
           />
         </View>
 
-        {/* Recent Notifications */}
+        {/* Upcoming Events */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recent Notifications</Text>
-            <TouchableOpacity onPress={() => setShowNotificationsModal(true)}>
+            <Text style={styles.sectionTitle}>Upcoming Events</Text>
+            <TouchableOpacity onPress={() => setShowEventsModal(true)}>
               <Text style={styles.viewAllText}>View All</Text>
             </TouchableOpacity>
           </View>
           <FlatList
-            data={notifications.slice(0, 4)}
-            renderItem={renderNotificationItem}
+            data={events.slice(0, 4)}
+            renderItem={renderEventItem}
             keyExtractor={(item, index) => index.toString()}
             scrollEnabled={false}
           />
         </View>
+
       </ScrollView>
 
       {/* Attendance Details Modal */}

@@ -253,8 +253,8 @@ const Notifications = ({ navigation }) => {
             const minimalRecord = {
               notification_id: id,
               recipient_id: user.id,
-              recipient_type: 'parent', // Assume parent since this is parent dashboard
-              delivery_status: 'pending', // Most neutral status
+              recipient_type: 'Parent', // Match schema constraint: 'Student' or 'Parent' (capitalized)
+              delivery_status: 'Sent', // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
               is_read: false, // Start as unread, then update
               sent_at: new Date().toISOString()
             };
@@ -288,6 +288,13 @@ const Notifications = ({ navigation }) => {
               }
               
               console.log('✅ Successfully marked as read!');
+              
+              // Force a slight delay and trigger navigation event to refresh dashboard
+              setTimeout(() => {
+                console.log('Triggering navigation state change...');
+                // This will help ensure the dashboard refreshes when we go back
+                navigation.setParams({ refreshTrigger: Date.now() });
+              }, 100);
             }
           }
         }

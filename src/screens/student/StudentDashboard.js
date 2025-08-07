@@ -3,6 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { useFocusEffect } from '@react-navigation/native';
+import Header from '../../components/Header';
 
 const StudentDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -35,6 +37,119 @@ const StudentDashboard = ({ navigation }) => {
         Alert.alert('Coming Soon', `${cardKey} feature is under development.`);
     }
   };
+
+  // Function to refresh notifications for badge count
+  const refreshNotifications = async () => {
+    try {
+      if (!user?.id) {
+        console.log('Student Dashboard - No user ID available');
+        return;
+      }
+      
+      console.log('=== STUDENT DASHBOARD NOTIFICATION DEBUG ===');
+      console.log('User ID:', user.id);
+      console.log('User object:', JSON.stringify(user, null, 2));
+      
+      // First, let's check if there are any notification recipients at all
+      const { data: allRecipients, error: allError } = await supabase
+        .from(TABLES.NOTIFICATION_RECIPIENTS)
+        .select('*')
+        .limit(5);
+      
+      console.log('All notification recipients (first 5):', allRecipients);
+      console.log('All recipients error:', allError);
+      
+      // Now check specifically for this user
+      const { data: userRecipients, error: userError } = await supabase
+        .from(TABLES.NOTIFICATION_RECIPIENTS)
+        .select('*')
+        .eq('recipient_id', user.id);
+      
+      console.log('User recipients (all types):', userRecipients);
+      console.log('User recipients error:', userError);
+      
+      // Check for Student type specifically
+      const { data: studentRecipients, error: studentError } = await supabase
+        .from(TABLES.NOTIFICATION_RECIPIENTS)
+        .select('*')
+        .eq('recipient_type', 'Student')
+        .eq('recipient_id', user.id);
+      
+      console.log('Student recipients:', studentRecipients);
+      console.log('Student recipients error:', studentError);
+      
+      const { data: notificationsData, error } = await supabase
+        .from(TABLES.NOTIFICATION_RECIPIENTS)
+        .select(`
+          id,
+          is_read,
+          sent_at,
+          read_at,
+          notifications!inner(
+            id,
+            message,
+            type,
+            created_at
+          )
+        `)
+        .eq('recipient_type', 'Student')
+        .eq('recipient_id', user.id)
+        .order('sent_at', { ascending: false })
+        .limit(10);
+
+      console.log('Final query result - notificationsData:', notificationsData);
+      console.log('Final query result - error:', error);
+
+      if (error && error.code !== '42P01') {
+        console.log('Student Dashboard - Notifications refresh error:', error);
+        setNotifications([]);
+      } else {
+        const mappedNotifications = (notificationsData || []).map(n => ({
+          id: n.id,
+          title: n.notifications.message || 'Notification', // Use message as title since title doesn't exist
+          message: n.notifications.message,
+          type: n.notifications.type || 'general',
+          date: n.sent_at ? n.sent_at.split('T')[0] : new Date().toISOString().split('T')[0],
+          created_at: n.notifications.created_at,
+          is_read: n.is_read || false,
+          read_at: n.read_at
+        }));
+        console.log('Student Dashboard - Mapped notifications:', mappedNotifications);
+        console.log('Student Dashboard - Mapped notifications count:', mappedNotifications.length);
+        console.log('Student Dashboard - Unread notifications count:', mappedNotifications.filter(n => !n.is_read).length);
+        console.log('============================================');
+        setNotifications(mappedNotifications);
+      }
+    } catch (err) {
+      console.log('Student Dashboard - Notifications refresh fetch error:', err);
+      setNotifications([]);
+    }
+  };
+
+  // Add focus effect to refresh notifications when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('Student Dashboard - Screen focused, refreshing notifications...');
+      refreshNotifications();
+    }, [user?.id])
+  );
+
+  // Also add navigation listener for when returning from notification screens
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      console.log('Student Dashboard - Navigation focus event, refreshing...');
+      if (user?.id) {
+        // Add a small delay to ensure database changes are propagated
+        setTimeout(() => {
+          refreshNotifications();
+          // Also refetch dashboard data to update summary counts
+          fetchDashboardData();
+        }, 500);
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation, user?.id]);
 
   // Fetch student profile and dashboard data
   const fetchDashboardData = async () => {
@@ -144,55 +259,49 @@ const StudentDashboard = ({ navigation }) => {
         console.log('=== FETCHING DASHBOARD NOTIFICATIONS ===');
         console.log('User ID:', user.id);
 
-        // First try to get all notifications
-        const { data: allNotifications, error: notificationsError } = await supabase
-          .from(TABLES.NOTIFICATIONS)
-          .select('*')
-          .order('created_at', { ascending: false })
+        // Get notifications with recipients for this student
+        const { data: studentNotifications, error: notificationsError } = await supabase
+          .from(TABLES.NOTIFICATION_RECIPIENTS)
+          .select(`
+            id,
+            is_read,
+            sent_at,
+            read_at,
+            notifications!inner(
+              id,
+              message,
+              type,
+              created_at
+            )
+          `)
+          .eq('recipient_type', 'Student')
+          .eq('recipient_id', user.id)
+          .order('sent_at', { ascending: false })
           .limit(10);
 
-        console.log('Dashboard notifications query result:', { allNotifications, notificationsError });
+        console.log('Student notifications query result:', { studentNotifications, notificationsError });
 
         if (notificationsError && notificationsError.code !== '42P01') {
           console.log('Notifications error:', notificationsError);
-        } else if (allNotifications && allNotifications.length > 0) {
-          notificationsData = allNotifications
-            .map(notification => ({
-              id: notification.id,
-              message: notification.message,
-              type: notification.type || 'general',
-              date: new Date(notification.created_at).toLocaleDateString(),
-              created_at: notification.created_at,
-              is_read: false, // Default to unread for dashboard
-              read_at: null
-            }))
-            .slice(0, 5);
+          notificationsData = [];
+        } else if (studentNotifications && studentNotifications.length > 0) {
+          notificationsData = studentNotifications.map(notification => ({
+            id: notification.id,
+            title: notification.notifications.message || 'Notification', // Use message as title since title doesn't exist
+            message: notification.notifications.message,
+            type: notification.notifications.type || 'general',
+            date: new Date(notification.notifications.created_at).toLocaleDateString(),
+            created_at: notification.notifications.created_at,
+            is_read: notification.is_read || false,
+            read_at: notification.read_at
+          }));
         } else {
-          console.log('No notifications found, adding test notifications for dashboard');
-          // Add test notifications for dashboard
-          notificationsData = [
-            {
-              id: 'dashboard-test-1',
-              message: 'Welcome to your student dashboard!',
-              type: 'general',
-              date: new Date().toLocaleDateString(),
-              created_at: new Date().toISOString(),
-              is_read: false,
-              read_at: null
-            },
-            {
-              id: 'dashboard-test-2',
-              message: 'Check your assignments regularly.',
-              type: 'assignment',
-              date: new Date().toLocaleDateString(),
-              created_at: new Date().toISOString(),
-              is_read: false,
-              read_at: null
-            }
-          ];
+          console.log('No notifications found for this student');
+          notificationsData = [];
         }
 
         console.log('Final dashboard notifications:', notificationsData.length);
+        console.log('Unread notifications:', notificationsData.filter(n => !n.is_read).length);
       } catch (err) {
         console.log('Notifications error:', err);
         notificationsData = [];
@@ -325,7 +434,7 @@ const StudentDashboard = ({ navigation }) => {
         { key: 'attendance', label: 'Attendance', value: attendancePercent + '%', icon: 'checkmark-circle', color: '#48bb78' },
         { key: 'marks', label: 'Marks', value: marksPercent + '%', icon: 'trending-up', color: '#ed8936' },
         { key: 'assignments', label: 'Assignments', value: assignmentsCount, icon: 'book-outline', color: '#667eea' },
-        { key: 'notifications', label: 'Notifications', value: notificationsData.length, icon: 'notifications', color: '#9f7aea' },
+        { key: 'notifications', label: 'Notifications', value: notificationsData.filter(n => !n.is_read).length, icon: 'notifications', color: '#9f7aea' },
       ]);
       setDeadlines(deadlinesData.map(item => ({
         id: item.id,
@@ -393,29 +502,22 @@ const StudentDashboard = ({ navigation }) => {
 
   // This code is no longer needed as we're using the new design
 
+  // Calculate unread notifications count
+  const unreadCount = notifications.filter(notification => !notification.is_read).length;
+
   // Render the new dashboard design
   const renderDashboard = () => (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
-
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Dashboard</Text>
-        <TouchableOpacity
-          style={styles.notificationIcon}
-          onPress={() => navigation.navigate('StudentNotifications')}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="notifications-outline" size={24} color="#333" />
-          {notifications.length > 0 && (
-            <View style={styles.notificationBadge}>
-              <Text style={styles.notificationBadgeText}>
-                {notifications.length > 9 ? '9+' : notifications.length}
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </View>
+      
+      <Header 
+        title="Student Dashboard" 
+        showBack={false} 
+        showNotifications={true}
+        showProfile={false}
+        unreadCount={unreadCount}
+        onNotificationsPress={() => navigation.navigate('StudentNotifications')}
+      />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Student Dashboard Card */}

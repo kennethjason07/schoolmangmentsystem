@@ -187,10 +187,10 @@ const StudentNotifications = () => {
           .insert({
             notification_id: id,
             recipient_id: user.id,
-            recipient_type: 'Student',
+            recipient_type: 'Student', // Valid values: 'Student', 'Parent' (capitalized)
             is_read: true,
             read_at: new Date().toISOString(),
-            delivery_status: 'Sent',
+            delivery_status: 'Sent', // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
             sent_at: new Date().toISOString()
           });
 
@@ -206,6 +206,13 @@ const StudentNotifications = () => {
       );
 
       console.log('✅ Successfully marked notification as read');
+      
+      // Force a slight delay and trigger navigation event to refresh dashboard
+      setTimeout(() => {
+        console.log('Triggering navigation state change...');
+        // This will help ensure the dashboard refreshes when we go back
+        navigation.setParams({ refreshTrigger: Date.now() });
+      }, 100);
     } catch (err) {
       console.error('Mark as read error:', err);
       Alert.alert('Error', 'Failed to mark as read.');

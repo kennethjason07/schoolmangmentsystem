@@ -144,7 +144,7 @@ const NotificationManagement = () => {
       const { error: updateError } = await supabase
         .from('notification_recipients')
         .update({ 
-          delivery_status: 'Sent',
+          delivery_status: 'Sent', // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
           sent_at: new Date().toISOString()
         })
         .eq('notification_id', notification.id);
@@ -155,7 +155,7 @@ const NotificationManagement = () => {
       const { error: notifUpdateError } = await supabase
         .from(TABLES.NOTIFICATIONS)
         .update({ 
-          delivery_status: 'Sent',
+          delivery_status: 'Sent', // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
           sent_at: new Date().toISOString()
         })
         .eq('id', notification.id);
@@ -183,7 +183,7 @@ const NotificationManagement = () => {
         message: notification.message,
         sent_to_role: notification.sent_to_role,
         sent_to_id: notification.sent_to_id,
-        delivery_status: 'Scheduled',
+        delivery_status: 'Pending', // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
         created_at: new Date().toISOString()
       };
       
@@ -251,8 +251,8 @@ const NotificationManagement = () => {
         .map(user => ({
           notification_id: notificationResult.id,
           recipient_id: user.id,
-          recipient_type: user.role_id === 2 ? 'Student' : 'Parent',
-          delivery_status: 'Pending'
+          recipient_type: user.role_id === 2 ? 'Student' : 'Parent', // Valid values: 'Student', 'Parent' (capitalized)
+          delivery_status: 'Pending' // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
         }));
       
       // Step 4: Insert into notification_recipients table

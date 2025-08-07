@@ -60,6 +60,11 @@ import FeePayment from '../screens/parent/FeePayment';
 import Notifications from '../screens/parent/Notifications';
 import ChatWithTeacher from '../screens/parent/ChatWithTeacher';
 
+// Payment Screens
+import CardPayment from '../screens/parent/CardPayment';
+import OnlineBankingPayment from '../screens/parent/OnlineBankingPayment';
+import UPIPayment from '../screens/parent/UPIPayment';
+
 // Student Screens
 import StudentDashboard from '../screens/student/StudentDashboard';
 import ViewAssignments from '../screens/student/ViewAssignments';
@@ -300,8 +305,11 @@ export default function AppNavigator() {
             )}
             {userType === 'parent' && (
               <>
-              <Stack.Screen name="ParentTabs" component={ParentTabNavigator} />
+                <Stack.Screen name="ParentTabs" component={ParentTabNavigator} />
                 <Stack.Screen name="ParentNotifications" component={Notifications} />
+                <Stack.Screen name="CardPayment" component={CardPayment} />
+                <Stack.Screen name="OnlineBankingPayment" component={OnlineBankingPayment} />
+                <Stack.Screen name="UPIPayment" component={UPIPayment} />
               </>
             )}
             {userType === 'student' && (

@@ -1002,6 +1002,24 @@ const ManageStudents = () => {
                 </Picker>
               </View>
 
+              <Text style={styles.inputLabel}>Class</Text>
+              <View style={styles.pickerContainer}>
+                <Picker
+                  selectedValue={form.class_id}
+                  style={styles.picker}
+                  onValueChange={(value) => handleFormChange('class_id', value)}
+                >
+                  <Picker.Item label="Select Class" value="" />
+                  {classes.map(cls => (
+                    <Picker.Item
+                      key={cls.id}
+                      label={`${cls.class_name} - ${cls.section}`}
+                      value={cls.id}
+                    />
+                  ))}
+                </Picker>
+              </View>
+
               {/* Personal Details */}
               <Text style={styles.sectionTitle}>Personal Details</Text>
 
