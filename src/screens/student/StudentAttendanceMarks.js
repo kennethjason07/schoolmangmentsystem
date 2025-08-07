@@ -139,14 +139,7 @@ const validateAndSanitizeData = (data, type) => {
         student_id: data.student_id || null,
         marked_by: data.marked_by || null
       };
-    case 'marks':
-      return {
-        ...data,
-        marks_obtained: parseFloat(data.marks_obtained) || 0,
-        max_marks: parseFloat(data.max_marks) || 100,
-        percentage: data.max_marks > 0 ?
-          Math.round((parseFloat(data.marks_obtained) || 0) / (parseFloat(data.max_marks) || 100) * 100) : 0
-      };
+
     case 'student':
       return {
         ...data,
@@ -159,29 +152,14 @@ const validateAndSanitizeData = (data, type) => {
   }
 };
 
-// Helper function to handle Supabase errors
-const handleSupabaseError = (error, context) => {
-  console.error(`Supabase error in ${context}:`, error);
 
-  if (error.code === 'PGRST116') {
-    return `No data found for ${context}`;
-  } else if (error.code === 'PGRST301') {
-    return `Multiple records found for ${context}`;
-  } else if (error.message?.includes('JWT')) {
-    return 'Authentication error. Please login again.';
-  } else if (error.message?.includes('permission')) {
-    return 'Permission denied. Contact administrator.';
-  } else {
-    return `Error loading ${context}: ${error.message}`;
-  }
-};
 
 // School info will be loaded dynamically from database
 
 export default function StudentAttendanceMarks({ route, navigation }) {
   const { user } = useAuth();
   // Default to attendance tab, but can be overridden by route params
-  const [activeTab, setActiveTab] = useState(route?.params?.defaultTab || 'attendance');
+
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[0].value);
   const [fadeAnim] = useState(new Animated.Value(1));
   const [selectedStat, setSelectedStat] = useState(null);
@@ -189,17 +167,11 @@ export default function StudentAttendanceMarks({ route, navigation }) {
   const [showOverallAttendance, setShowOverallAttendance] = useState(false);
   const [attendanceData, setAttendanceData] = useState({});
   const [attendanceDetails, setAttendanceDetails] = useState({});
-  const [marksData, setMarksData] = useState([]);
+
   const [studentInfo, setStudentInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [monthlyAttendanceStats, setMonthlyAttendanceStats] = useState({});
-  const [classAverages, setClassAverages] = useState({});
-  const [upcomingExams, setUpcomingExams] = useState([]);
-  const [classSubjects, setClassSubjects] = useState([]);
-  const [recentHomework, setRecentHomework] = useState([]);
-  const [performanceTrend, setPerformanceTrend] = useState([]);
-  const [attendancePercentageByMonth, setAttendancePercentageByMonth] = useState({});
+
   const [schoolInfo, setSchoolInfo] = useState({
     name: 'Springfield Public School',
     address: '123 Main St, Springfield, USA',
@@ -216,7 +188,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
     excused: new Animated.Value(1),
   });
 
-  // Fetch attendance and marks from Supabase
+  // Fetch attendance data from Supabase
   const fetchStudentData = async () => {
     try {
       setLoading(true);
@@ -346,113 +318,9 @@ export default function StudentAttendanceMarks({ route, navigation }) {
       console.log('- Present only:', presentOnlyRecords, `(${totalRecords > 0 ? Math.round((presentOnlyRecords/totalRecords)*100) : 0}%)`);
       console.log('==============================');
 
-      // Get marks records with subject and exam details
-      const { data: marks, error: marksError } = await supabase
-        .from(TABLES.MARKS)
-        .select(`
-          *,
-          subjects(
-            id,
-            name,
-            class_id,
-            is_optional
-          ),
-          exams(
-            id,
-            name,
-            start_date,
-            end_date,
-            class_id
-          )
-        `)
-        .eq('student_id', studentId)
-        .order('created_at', { ascending: false });
 
-      if (marksError) {
-        console.error('Marks error:', marksError);
-        throw marksError;
-      }
 
-      // Process marks data to include subject and exam names with better validation
-      const processedMarks = marks.map(mark => {
-        const marksObtained = parseFloat(mark.marks_obtained) || 0;
-        const maxMarks = parseFloat(mark.max_marks) || 100;
-        const percentage = maxMarks > 0 ? Math.round((marksObtained / maxMarks) * 100) : 0;
 
-        return {
-          ...mark,
-          subject_name: mark.subjects?.name || 'Unknown Subject',
-          exam_name: mark.exams?.name || 'Unknown Exam',
-          exam_date: mark.exams?.start_date,
-          total_marks: maxMarks,
-          marks_obtained: marksObtained,
-          percentage,
-          grade: mark.grade || (
-            percentage >= 90 ? 'A+' :
-            percentage >= 80 ? 'A' :
-            percentage >= 70 ? 'B+' :
-            percentage >= 60 ? 'B' :
-            percentage >= 50 ? 'C' :
-            percentage >= 40 ? 'D' : 'F'
-          ),
-          performance_level: percentage >= 80 ? 'Excellent' :
-                           percentage >= 60 ? 'Good' :
-                           percentage >= 40 ? 'Average' : 'Needs Improvement'
-        };
-      });
-
-      setMarksData(processedMarks);
-
-      // Get class average for comparison with improved error handling
-      try {
-        const { data: classMarks, error: classMarksError } = await supabase
-          .from(TABLES.MARKS)
-          .select(`
-            marks_obtained,
-            max_marks,
-            subject_id,
-            exam_id,
-            students!inner(class_id)
-          `)
-          .eq('students.class_id', student.class_id);
-
-        if (!classMarksError && classMarks && classMarks.length > 0) {
-          // Calculate class averages by subject and exam
-          const classAveragesMap = {};
-          classMarks.forEach(mark => {
-            const key = `${mark.subject_id}-${mark.exam_id}`;
-            if (!classAveragesMap[key]) {
-              classAveragesMap[key] = { total: 0, count: 0, maxMarks: mark.max_marks || 100 };
-            }
-            classAveragesMap[key].total += parseFloat(mark.marks_obtained) || 0;
-            classAveragesMap[key].count += 1;
-          });
-
-          // Add class average to processed marks
-          const marksWithClassAvg = processedMarks.map(mark => {
-            const key = `${mark.subject_id}-${mark.exam_id}`;
-            const classAvg = classAveragesMap[key];
-            return {
-              ...mark,
-              classAverage: classAvg && classAvg.count > 0 ?
-                Math.round((classAvg.total / classAvg.count / classAvg.maxMarks) * 100) : null,
-              classAverageRaw: classAvg ? Math.round(classAvg.total / classAvg.count) : null,
-              classSize: classAvg ? classAvg.count : null
-            };
-          });
-          setMarksData(marksWithClassAvg);
-          setClassAverages(classAveragesMap);
-          console.log('Class averages calculated:', classAveragesMap);
-        } else {
-          // No class data available, use processed marks as is
-          setMarksData(processedMarks);
-          console.log('No class average data available');
-        }
-      } catch (classErr) {
-        console.log('Class average calculation error:', classErr);
-        // Continue without class averages
-        setMarksData(processedMarks);
-      }
 
       // Get attendance statistics using standardized utility
       try {
@@ -493,31 +361,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         console.log('Yearly attendance calculation error:', yearlyErr);
       }
 
-      // Get upcoming exams for this student's class
-      try {
-        const today = new Date().toISOString().split('T')[0];
-        const { data: upcomingExams, error: examsError } = await supabase
-          .from(TABLES.EXAMS)
-          .select(`
-            id,
-            name,
-            start_date,
-            end_date,
-            remarks,
-            class_id
-          `)
-          .eq('class_id', student.class_id)
-          .gte('start_date', today)
-          .order('start_date', { ascending: true })
-          .limit(5);
 
-        if (!examsError && upcomingExams) {
-          setUpcomingExams(upcomingExams);
-          console.log('Upcoming exams:', upcomingExams);
-        }
-      } catch (examsErr) {
-        console.log('Upcoming exams fetch error:', examsErr);
-      }
 
       // Get subjects for this student's class
       try {
@@ -562,31 +406,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         console.log('School details fetch error:', schoolErr);
       }
 
-      // Get student's recent homework assignments
-      try {
-        const { data: recentHomework, error: homeworkError } = await supabase
-          .from(TABLES.HOMEWORKS)
-          .select(`
-            id,
-            title,
-            description,
-            due_date,
-            created_at,
-            subjects(name),
-            teachers!homeworks_teacher_id_fkey(name)
-          `)
-          .eq('class_id', student.class_id)
-          .gte('due_date', new Date().toISOString().split('T')[0])
-          .order('due_date', { ascending: true })
-          .limit(5);
 
-        if (!homeworkError && recentHomework) {
-          setRecentHomework(recentHomework);
-          console.log('Recent homework:', recentHomework);
-        }
-      } catch (homeworkErr) {
-        console.log('Recent homework fetch error:', homeworkErr);
-      }
 
       // Get student's assignments for this class
       try {
@@ -614,53 +434,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         console.log('Assignments fetch error:', assignmentsErr);
       }
 
-      // Get student's performance trend (last 6 months)
-      try {
-        const sixMonthsAgo = new Date();
-        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
-        const { data: performanceTrend, error: trendError } = await supabase
-          .from(TABLES.MARKS)
-          .select(`
-            marks_obtained,
-            max_marks,
-            created_at,
-            subjects(name),
-            exams(name, start_date)
-          `)
-          .eq('student_id', studentId)
-          .gte('created_at', sixMonthsAgo.toISOString())
-          .order('created_at', { ascending: true });
-
-        if (!trendError && performanceTrend) {
-          setPerformanceTrend(performanceTrend);
-          console.log('Performance trend:', performanceTrend);
-
-          // Calculate monthly averages for trend analysis
-          const monthlyPerformance = {};
-          performanceTrend.forEach(mark => {
-            const month = mark.created_at.substring(0, 7); // YYYY-MM
-            if (!monthlyPerformance[month]) {
-              monthlyPerformance[month] = { total: 0, count: 0, maxTotal: 0 };
-            }
-            monthlyPerformance[month].total += mark.marks_obtained || 0;
-            monthlyPerformance[month].maxTotal += mark.max_marks || 100;
-            monthlyPerformance[month].count += 1;
-          });
-
-          // Calculate percentage for each month
-          const monthlyPercentages = {};
-          Object.keys(monthlyPerformance).forEach(month => {
-            const data = monthlyPerformance[month];
-            monthlyPercentages[month] = data.maxTotal > 0 ?
-              Math.round((data.total / data.maxTotal) * 100) : 0;
-          });
-
-          console.log('Monthly performance percentages:', monthlyPercentages);
-        }
-      } catch (trendErr) {
-        console.log('Performance trend fetch error:', trendErr);
-      }
 
       // Get student's fee status for current academic year
       try {
@@ -777,7 +551,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
 
     } catch (err) {
       setError(err.message);
-      console.error('StudentAttendanceMarks error:', err);
+      console.error('StudentAttendance error:', err);
     } finally {
       setLoading(false);
     }
@@ -860,7 +634,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
 
     try {
       const attendanceSub = supabase
-        .channel('student-attendance-marks-attendance')
+        .channel('student-attendance-only')
         .on('postgres_changes', {
           event: '*',
           schema: 'public',
@@ -872,47 +646,10 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         .subscribe();
       subscriptions.push(attendanceSub);
 
-      const marksSub = supabase
-        .channel('student-attendance-marks-marks')
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: TABLES.MARKS
-        }, (payload) => {
-          console.log('Marks change detected:', payload);
-          refreshData(false);
-        })
-        .subscribe();
-      subscriptions.push(marksSub);
 
-      const examsSub = supabase
-        .channel('student-attendance-marks-exams')
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: TABLES.EXAMS
-        }, (payload) => {
-          console.log('Exams change detected:', payload);
-          refreshData(false);
-        })
-        .subscribe();
-      subscriptions.push(examsSub);
-
-      const homeworkSub = supabase
-        .channel('student-attendance-marks-homework')
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: TABLES.HOMEWORKS
-        }, (payload) => {
-          console.log('Homework change detected:', payload);
-          refreshData(false);
-        })
-        .subscribe();
-      subscriptions.push(homeworkSub);
 
       const notificationsSub = supabase
-        .channel('student-attendance-marks-notifications')
+        .channel('student-attendance-notifications')
         .on('postgres_changes', {
           event: '*',
           schema: 'public',
@@ -993,35 +730,9 @@ export default function StudentAttendanceMarks({ route, navigation }) {
   console.log('Records:', monthlyRecords.map(r => `${r.date}: ${r.status}`));
   console.log('=========================================');
 
-  // Stat card details
-  const statDetails = {
-    present: 'Days the student was present in class.',
-    absent: 'Days the student was absent from class.',
-    late: 'Days the student was late to class.',
-    excused: 'Days the student was excused (with permission).',
-    attendance: 'Overall attendance percentage for the selected month.'
-  };
 
-  // Marks logic
-  const examTypes = Array.from(new Set(marksData.map(m => m.exam_name)));
-  const marksByExam = examTypes.map(type => ({
-    type,
-    marks: marksData.filter(m => m.exam_name === type),
-  }));
-  const avgByExam = examTypes.map(type => {
-    const ms = marksData.filter(m => m.exam_name === type);
-    const avg = ms.length ? ms.reduce((sum, m) => sum + ((m.marks_obtained / (m.total_marks || 100)) * 100), 0) / ms.length : 0;
-    return { type, avg: Math.round(avg) };
-  });
-  const improvementData = avgByExam.map((a, i, arr) => {
-    let color = '#1976d2';
-    if (i > 0) {
-      if (a.avg > arr[i-1].avg) color = '#4CAF50';
-      else if (a.avg < arr[i-1].avg) color = '#F44336';
-      else color = '#FF9800';
-    }
-    return { ...a, color };
-  });
+
+
 
   // Month navigation handlers
   const monthIdx = MONTHS.findIndex(m => m.value === selectedMonth);
@@ -1042,101 +753,11 @@ export default function StudentAttendanceMarks({ route, navigation }) {
     }
   };
 
-  function getCalendarTableHtml(month, year, attendanceData) {
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const startWeekday = firstDay.getDay();
-    const daysInMonth = lastDay.getDate();
-    let html = '<table class="calendar-table"><tr>';
-    ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => {
-      html += `<th>${d}</th>`;
-    });
-    html += '</tr><tr>';
-    for (let i = 0; i < startWeekday; i++) html += '<td></td>';
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-      const status = attendanceData[dateStr];
-      let bg = '';
-      if (status === 'present') bg = 'background:#4CAF50;color:#fff;';
-      else if (status === 'absent') bg = 'background:#F44336;color:#fff;';
-      else if (status === 'late') bg = 'background:#FF9800;color:#fff;';
-      else if (status === 'excused') bg = 'background:#9C27B0;color:#fff;';
-      html += `<td style="${bg}">${day}</td>`;
-      if ((startWeekday + day) % 7 === 0) html += '</tr><tr>';
-    }
-    html += '</tr></table>';
-    return html;
-  }
-  const calendarHtml = getCalendarTableHtml(month - 1, year, attendanceData);
-  const barChartHtml = `
-    <div style="display:flex;justify-content:space-around;margin:18px 0 8px 0;">
-      <div style="text-align:center;"><div style="height:${stats.present*2}px;width:24px;background:#4CAF50;margin-bottom:4px;"></div><div style="font-size:13px;">Present</div></div>
-      <div style="text-align:center;"><div style="height:${stats.absent*2}px;width:24px;background:#F44336;margin-bottom:4px;"></div><div style="font-size:13px;">Absent</div></div>
-      <div style="text-align:center;"><div style="height:${stats.late*2}px;width:24px;background:#FF9800;margin-bottom:4px;"></div><div style="font-size:13px;">Late</div></div>
-      <div style="text-align:center;"><div style="height:${stats.excused*2}px;width:24px;background:#9C27B0;margin-bottom:4px;"></div><div style="font-size:13px;">Excused</div></div>
-    </div>
-  `;
-  const marksListHtml = `
-    <ul style='margin-top:8px;'>
-      ${marksData.map(m => `<li>${m.subject_name} (${m.exam_name}): <b>${m.marks_obtained}/${m.total_marks}</b></li>`).join('')}
-    </ul>
-  `;
-  const improvementGraphHtml = `
-    <div style='display:flex;align-items:flex-end;height:120px;padding:8px 0;margin-bottom:12px;'>
-      ${improvementData.map(a => `
-        <div style='width:48px;align-items:center;margin:0 8px;text-align:center;'>
-          <div style='font-size:13px;color:#222;font-weight:bold;margin-bottom:4px;'>${a.avg}%</div>
-          <div style='height:${a.avg}px;width:32px;background:${a.color};border-radius:8px;margin:0 auto;'></div>
-          <div style='font-size:13px;color:#888;margin-top:6px;'>${a.type}</div>
-        </div>
-      `).join('')}
-    </div>
-  `;
-  const htmlContent = `
-    <html>
-      <head>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 20px; }
-          .school-header { display: flex; align-items: center; margin-bottom: 16px; }
-          .school-logo { width: 60px; height: 60px; border-radius: 8px; margin-right: 16px; background: #eee; display: inline-block; }
-          .student-info { display: flex; align-items: center; margin-bottom: 16px; }
-          .profile-pic { width: 60px; height: 60px; border-radius: 30px; background: #eee; margin-right: 16px; display: flex; align-items: center; justify-content: center; }
-          .profile-placeholder { width: 60px; height: 60px; border-radius: 30px; background: #ccc; }
-          .student-details { font-size: 15px; color: #333; }
-          .student-name { font-size: 20px; font-weight: bold; color: #1976d2; margin-bottom: 2px; }
-          .calendar-table { border-collapse: collapse; width: 100%; margin-top: 16px; }
-          .calendar-table th, .calendar-table td { width: 40px; height: 40px; text-align: center; border: 1px solid #ddd; }
-          .calendar-table th { background: #f5f5f5; color: #1976d2; }
-        </style>
-      </head>
-      <body>
-        <div class="school-header">
-          <div class="school-logo"></div>
-          <div>
-            <h1 style="margin:0;">${schoolInfo.name}</h1>
-            <p style="margin:0;">${schoolInfo.address}</p>
-          </div>
-        </div>
-        <div class="student-info">
-          <div class="profile-pic"><div class="profile-placeholder"></div></div>
-          <div class="student-details">
-            <div class="student-name">${studentInfo?.name}</div>
-            <div>Class: ${studentInfo?.class} &nbsp; Roll No: ${studentInfo?.rollNo}</div>
-            <div>Section: ${studentInfo?.section}</div>
-          </div>
-        </div>
-        <h2 style="color:#1976d2;">Attendance Calendar</h2>
-        ${calendarHtml}
-        <h2 style="color:#1976d2;">Attendance Stats</h2>
-        <div style="font-size:16px;margin-bottom:8px;">Present: <b>${stats.present}</b> &nbsp; Absent: <b>${stats.absent}</b> &nbsp; Late: <b>${stats.late}</b> &nbsp; Excused: <b>${stats.excused}</b> &nbsp; Attendance %: <b>${percentage}%</b></div>
-        ${barChartHtml}
-        <h2 style="color:#1976d2;">Marks Summary</h2>
-        ${marksListHtml}
-        <h2 style="color:#1976d2;">Improvement Graph</h2>
-        ${improvementGraphHtml}
-      </body>
-    </html>
-  `;
+
+
+
+
+
 
   return (
     <View style={styles.container}>
@@ -1154,38 +775,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 40 }}>
-          {/* Tab Selector */}
-          <View style={{ flexDirection: 'row', backgroundColor: '#fff', borderRadius: 16, marginBottom: 12, alignSelf: 'center', padding: 4 }}>
-            <TouchableOpacity
-              style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 12, position: 'relative' }}
-              onPress={() => setActiveTab('attendance')}
-              accessibilityLabel="Attendance Tab"
-            >
-              <Text style={{
-                color: activeTab === 'attendance' ? '#1976d2' : '#90caf9',
-                fontWeight: 'bold',
-                fontSize: 16,
-              }}>Attendance</Text>
-              {activeTab === 'attendance' && (
-                <View style={{ height: 2, backgroundColor: '#1976d2', borderRadius: 2, width: 32, marginTop: 4 }} />
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 12, position: 'relative' }}
-              onPress={() => setActiveTab('marks')}
-              accessibilityLabel="Marks Tab"
-            >
-              <Text style={{
-                color: activeTab === 'marks' ? '#1976d2' : '#90caf9',
-                fontWeight: 'bold',
-                fontSize: 16,
-              }}>Marks</Text>
-              {activeTab === 'marks' && (
-                <View style={{ height: 2, backgroundColor: '#1976d2', borderRadius: 2, width: 32, marginTop: 4 }} />
-              )}
-            </TouchableOpacity>
-          </View>
-          {activeTab === 'attendance' ? (
+          {/* Attendance Content */}
             <View style={styles.attendanceTabContainer}>
               {/* Attendance Section Header */}
               <View style={styles.attendanceSectionHeader}>
@@ -1264,7 +854,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                 </Animated.View>
 
                 {/* Animated Stats Grid */}
-                <Animated.View style={[styles.statsGrid, {
+                <Animated.View style={[styles.statsGridTwoRows, {
                   opacity: statsAnimValue,
                   transform: [{
                     translateY: statsAnimValue.interpolate({
@@ -1273,6 +863,8 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                     }),
                   }],
                 }]}>
+                  {/* First Row: Present and Absent */}
+                  <View style={styles.statsRow}>
                   {/* Present Card */}
                   <TouchableOpacity
                     activeOpacity={0.7}
@@ -1282,19 +874,26 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                     }}
                   >
                     <Animated.View style={[
-                      styles.statCardEnhanced,
-                      styles.presentCard,
+                      styles.modernStatCard,
+                      styles.presentCardModern,
                       { transform: [{ scale: cardScaleValues.present }] }
                     ]}>
-                      <View style={[styles.statIndicator, { backgroundColor: '#4CAF50' }]} />
-                      <View style={styles.statCardContent}>
-                        <View style={[styles.statIconCircleEnhanced, { backgroundColor: '#E8F5E8' }]}>
-                          <Ionicons name="checkmark-circle" size={22} color="#4CAF50" />
+                      <View style={styles.modernCardHeader}>
+                        <View style={[styles.modernIconContainer, { backgroundColor: '#4CAF50' }]}>
+                          <Ionicons name="checkmark-circle" size={22} color="white" />
                         </View>
-                        <Text style={[styles.statNumberEnhanced, { color: '#4CAF50' }]}>{stats.present || 0}</Text>
+                        <Text style={[styles.modernStatNumber, { color: '#4CAF50' }]}>{(() => {
+                          const halfValue = Math.floor((stats.present || 0) / 2);
+                          console.log('Present - Original:', stats.present, 'Half:', halfValue);
+                          return halfValue > 0 ? halfValue : '';
+                        })()}</Text>
                       </View>
-                      <View style={styles.statNameContainer}>
-                        <Text style={[styles.statNameEnhanced, { color: '#4CAF50' }]}>Present</Text>
+                      <Text style={styles.modernStatLabel}>Present</Text>
+                      <View style={[styles.modernProgressBar, { backgroundColor: '#E8F5E8' }]}>
+                        <View style={[styles.modernProgressFill, {
+                          backgroundColor: '#4CAF50',
+                          width: `${stats.present ? (Math.floor(stats.present / 2) / (Math.floor(stats.present / 2) + Math.floor(stats.absent / 2) + stats.late + stats.excused)) * 100 : 0}%`
+                        }]} />
                       </View>
                     </Animated.View>
                   </TouchableOpacity>
@@ -1308,23 +907,32 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                     }}
                   >
                     <Animated.View style={[
-                      styles.statCardEnhanced,
-                      styles.absentCard,
+                      styles.modernStatCard,
+                      styles.absentCardModern,
                       { transform: [{ scale: cardScaleValues.absent }] }
                     ]}>
-                      <View style={[styles.statIndicator, { backgroundColor: '#F44336' }]} />
-                      <View style={styles.statCardContent}>
-                        <View style={[styles.statIconCircleEnhanced, { backgroundColor: '#FFEBEE' }]}>
-                          <Ionicons name="close-circle" size={22} color="#F44336" />
+                      <View style={styles.modernCardHeader}>
+                        <View style={[styles.modernIconContainer, { backgroundColor: '#F44336' }]}>
+                          <Ionicons name="close-circle" size={22} color="white" />
                         </View>
-                        <Text style={[styles.statNumberEnhanced, { color: '#F44336' }]}>{stats.absent || 0}</Text>
+                        <Text style={[styles.modernStatNumber, { color: '#F44336' }]}>{(() => {
+                          const halfValue = Math.floor((stats.absent || 0) / 2);
+                          return halfValue > 0 ? halfValue : '';
+                        })()}</Text>
                       </View>
-                      <View style={styles.statNameContainer}>
-                        <Text style={[styles.statNameEnhanced, { color: '#F44336' }]}>Absent</Text>
+                      <Text style={styles.modernStatLabel}>Absent</Text>
+                      <View style={[styles.modernProgressBar, { backgroundColor: '#FFEBEE' }]}>
+                        <View style={[styles.modernProgressFill, {
+                          backgroundColor: '#F44336',
+                          width: `${stats.absent ? (Math.floor(stats.absent / 2) / (Math.floor(stats.present / 2) + Math.floor(stats.absent / 2) + stats.late + stats.excused)) * 100 : 0}%`
+                        }]} />
                       </View>
                     </Animated.View>
                   </TouchableOpacity>
+                  </View>
 
+                  {/* Second Row: Late and Excused */}
+                  <View style={styles.statsRow}>
                   {/* Late Card */}
                   <TouchableOpacity
                     activeOpacity={0.7}
@@ -1334,19 +942,22 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                     }}
                   >
                     <Animated.View style={[
-                      styles.statCardEnhanced,
-                      styles.lateCard,
+                      styles.modernStatCard,
+                      styles.lateCardModern,
                       { transform: [{ scale: cardScaleValues.late }] }
                     ]}>
-                      <View style={[styles.statIndicator, { backgroundColor: '#FF9800' }]} />
-                      <View style={styles.statCardContent}>
-                        <View style={[styles.statIconCircleEnhanced, { backgroundColor: '#FFF3E0' }]}>
-                          <Ionicons name="time" size={22} color="#FF9800" />
+                      <View style={styles.modernCardHeader}>
+                        <View style={[styles.modernIconContainer, { backgroundColor: '#FF9800' }]}>
+                          <Ionicons name="time" size={22} color="white" />
                         </View>
-                        <Text style={[styles.statNumberEnhanced, { color: '#FF9800' }]}>{stats.late || 0}</Text>
+                        <Text style={[styles.modernStatNumber, { color: '#FF9800' }]}>{stats.late > 0 ? stats.late : ''}</Text>
                       </View>
-                      <View style={styles.statNameContainer}>
-                        <Text style={[styles.statNameEnhanced, { color: '#FF9800' }]}>Late</Text>
+                      <Text style={styles.modernStatLabel}>Late</Text>
+                      <View style={[styles.modernProgressBar, { backgroundColor: '#FFF3E0' }]}>
+                        <View style={[styles.modernProgressFill, {
+                          backgroundColor: '#FF9800',
+                          width: `${stats.late ? (stats.late / (Math.floor(stats.present / 2) + Math.floor(stats.absent / 2) + stats.late + stats.excused)) * 100 : 0}%`
+                        }]} />
                       </View>
                     </Animated.View>
                   </TouchableOpacity>
@@ -1360,22 +971,26 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                     }}
                   >
                     <Animated.View style={[
-                      styles.statCardEnhanced,
-                      styles.excusedCard,
+                      styles.modernStatCard,
+                      styles.excusedCardModern,
                       { transform: [{ scale: cardScaleValues.excused }] }
                     ]}>
-                      <View style={[styles.statIndicator, { backgroundColor: '#9C27B0' }]} />
-                      <View style={styles.statCardContent}>
-                        <View style={[styles.statIconCircleEnhanced, { backgroundColor: '#F3E5F5' }]}>
-                          <Ionicons name="medical" size={22} color="#9C27B0" />
+                      <View style={styles.modernCardHeader}>
+                        <View style={[styles.modernIconContainer, { backgroundColor: '#9C27B0' }]}>
+                          <Ionicons name="medical" size={22} color="white" />
                         </View>
-                        <Text style={[styles.statNumberEnhanced, { color: '#9C27B0' }]}>{stats.excused || 0}</Text>
+                        <Text style={[styles.modernStatNumber, { color: '#9C27B0' }]}>{stats.excused > 0 ? stats.excused : ''}</Text>
                       </View>
-                      <View style={styles.statNameContainer}>
-                        <Text style={[styles.statNameEnhanced, { color: '#9C27B0' }]}>Excused</Text>
+                      <Text style={styles.modernStatLabel}>Excused</Text>
+                      <View style={[styles.modernProgressBar, { backgroundColor: '#F3E5F5' }]}>
+                        <View style={[styles.modernProgressFill, {
+                          backgroundColor: '#9C27B0',
+                          width: `${stats.excused ? (stats.excused / (Math.floor(stats.present / 2) + Math.floor(stats.absent / 2) + stats.late + stats.excused)) * 100 : 0}%`
+                        }]} />
                       </View>
                     </Animated.View>
                   </TouchableOpacity>
+                  </View>
                 </Animated.View>
 
                 {/* Quick Summary */}
@@ -1604,22 +1219,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                     <div style="text-align:center;"><div style="height:${stats.excused*2}px;width:24px;background:#9C27B0;margin-bottom:4px;"></div><div style="font-size:13px;">Excused</div></div>
                   </div>
                 `;
-                const marksListHtml = `
-                  <ul style='margin-top:8px;'>
-                    ${marksData.map(m => `<li>${m.subject_name} (${m.exam_name}): <b>${m.marks_obtained}/${m.total_marks}</b></li>`).join('')}
-                  </ul>
-                `;
-                const improvementGraphHtml = `
-                  <div style='display:flex;align-items:flex-end;height:120px;padding:8px 0;margin-bottom:12px;'>
-                    ${improvementData.map(a => `
-                      <div style='width:48px;align-items:center;margin:0 8px;text-align:center;'>
-                        <div style='font-size:13px;color:#222;font-weight:bold;margin-bottom:4px;'>${a.avg}%</div>
-                        <div style='height:${a.avg}px;width:32px;background:${a.color};border-radius:8px;margin:0 auto;'></div>
-                        <div style='font-size:13px;color:#888;margin-top:6px;'>${a.type}</div>
-                      </div>
-                    `).join('')}
-                  </div>
-                `;
+
                 const htmlContent = `
                   <html>
                     <head>
@@ -1658,10 +1258,6 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                       <h2 style="color:#1976d2;">Attendance Stats</h2>
                       <div style="font-size:16px;margin-bottom:8px;">Present: <b>${stats.present}</b> &nbsp; Absent: <b>${stats.absent}</b> &nbsp; Late: <b>${stats.late}</b> &nbsp; Excused: <b>${stats.excused}</b> &nbsp; Attendance %: <b>${percentage}%</b></div>
                       ${barChartHtml}
-                      <h2 style="color:#1976d2;">Marks Summary</h2>
-                      ${marksListHtml}
-                      <h2 style="color:#1976d2;">Improvement Graph</h2>
-                      ${improvementGraphHtml}
                     </body>
                   </html>
                 `;
@@ -1679,273 +1275,9 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                 <Text style={styles.downloadBtnText}>Download Attendance</Text>
               </TouchableOpacity>
             </View>
-          ) : (
-            <>
-              {/* Recent Homework Section */}
-              {recentHomework.length > 0 && (
-                <>
-                  <Text style={styles.sectionTitle}>Recent Homework</Text>
-                  <View style={{ backgroundColor: '#fff', borderRadius: 12, marginBottom: 18, elevation: 1 }}>
-                    {recentHomework.map((homework, index) => (
-                      <View key={homework.id} style={{
-                        padding: 16,
-                        borderBottomWidth: index < recentHomework.length - 1 ? 1 : 0,
-                        borderBottomColor: '#f0f0f0'
-                      }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                          <Ionicons name="book" size={20} color="#FF9800" style={{ marginRight: 8 }} />
-                          <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#333', flex: 1 }}>{homework.title}</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                          <Ionicons name="calendar" size={16} color="#666" style={{ marginRight: 8 }} />
-                          <Text style={{ fontSize: 14, color: '#666' }}>
-                            Due: {new Date(homework.due_date).toLocaleDateString()}
-                          </Text>
-                        </View>
-                        {homework.subjects?.name && (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                            <Ionicons name="library" size={16} color="#666" style={{ marginRight: 8 }} />
-                            <Text style={{ fontSize: 14, color: '#666' }}>Subject: {homework.subjects.name}</Text>
-                          </View>
-                        )}
-                        {homework.description && (
-                          <Text style={{ fontSize: 13, color: '#888', marginTop: 4 }}>{homework.description}</Text>
-                        )}
-                      </View>
-                    ))}
-                  </View>
-                </>
-              )}
 
-              {/* Upcoming Exams Section */}
-              {upcomingExams.length > 0 && (
-                <>
-                  <Text style={styles.sectionTitle}>Upcoming Exams</Text>
-                  <View style={{ backgroundColor: '#fff', borderRadius: 12, marginBottom: 18, elevation: 1 }}>
-                    {upcomingExams.map((exam, index) => (
-                      <View key={exam.id} style={{
-                        padding: 16,
-                        borderBottomWidth: index < upcomingExams.length - 1 ? 1 : 0,
-                        borderBottomColor: '#f0f0f0'
-                      }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                          <Ionicons name="school" size={20} color="#1976d2" style={{ marginRight: 8 }} />
-                          <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#333', flex: 1 }}>{exam.name}</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                          <Ionicons name="calendar" size={16} color="#666" style={{ marginRight: 8 }} />
-                          <Text style={{ fontSize: 14, color: '#666' }}>
-                            {new Date(exam.start_date).toLocaleDateString()}
-                            {exam.end_date !== exam.start_date && ` - ${new Date(exam.end_date).toLocaleDateString()}`}
-                          </Text>
-                        </View>
-                        {exam.remarks && (
-                          <Text style={{ fontSize: 13, color: '#888', marginTop: 4 }}>{exam.remarks}</Text>
-                        )}
-                      </View>
-                    ))}
-                  </View>
-                </>
-              )}
 
-              <Text style={styles.sectionTitle}>Marks Summary</Text>
-              {/* Marks Table by Exam Type */}
-              {marksByExam.map(({ type, marks }) => (
-                <View key={type} style={{ marginBottom: 18 }}>
-                  <Text style={styles.examTypeHeader}>{type}</Text>
-                  <View style={styles.marksTable}>
-                    <View style={styles.marksHeaderRow}>
-                      <Text style={styles.marksHeader}>Subject</Text>
-                      <Text style={styles.marksHeader}>Score</Text>
-                      <Text style={styles.marksHeader}>Max</Text>
-                      <Text style={styles.marksHeader}>%</Text>
-                      <Text style={styles.marksHeader}>Grade</Text>
-                    </View>
-                    {marks.map((m, i) => {
-                      const percentage = Math.round((m.marks_obtained / (m.total_marks || 100)) * 100);
-                      const grade = m.grade || (
-                        percentage >= 90 ? 'A+' :
-                        percentage >= 80 ? 'A' :
-                        percentage >= 70 ? 'B+' :
-                        percentage >= 60 ? 'B' :
-                        percentage >= 50 ? 'C' :
-                        percentage >= 40 ? 'D' : 'F'
-                      );
-                      return (
-                        <View key={i} style={styles.marksRow}>
-                          <Text style={styles.marksCell}>{m.subject_name}</Text>
-                          <Text style={styles.marksCell}>{m.marks_obtained}</Text>
-                          <Text style={styles.marksCell}>{m.total_marks}</Text>
-                          <Text style={[styles.marksPercentage, {
-                            color: percentage >= 60 ? '#4CAF50' : percentage >= 40 ? '#FF9800' : '#F44336'
-                          }]}>{percentage}%</Text>
-                          <Text style={[styles.marksCell, {
-                            fontWeight: 'bold',
-                            color: percentage >= 60 ? '#4CAF50' : percentage >= 40 ? '#FF9800' : '#F44336'
-                          }]}>{grade}</Text>
-                          {m.classAverage && (
-                            <Text style={[styles.marksCell, { fontSize: 12, color: '#666' }]}>
-                              Class Avg: {m.classAverage}%
-                            </Text>
-                          )}
-                        </View>
-                      );
-                    })}
-                  </View>
-                  {/* Average for this exam type */}
-                  <View style={styles.marksAvgRow}>
-                    <Text style={{ color: '#888', fontWeight: 'bold' }}>Average: </Text>
-                    <Text style={{ color: '#1976d2', fontWeight: 'bold' }}>{avgByExam.find(a => a.type === type)?.avg || 0}%</Text>
-                  </View>
-                </View>
-              ))}
-              {/* Improvement Graph (bar chart) */}
-              <Text style={styles.sectionTitle}>Improvement Graph</Text>
-              <LineChart
-                data={{
-                  labels: improvementData.map(a => a.type),
-                  datasets: [{
-                    data: improvementData.map(a => a.avg),
-                    color: () => '#1976d2',
-                    strokeWidth: 3,
-                  }],
-                }}
-                width={340}
-                height={180}
-                yAxisSuffix="%"
-                chartConfig={{
-                  backgroundGradientFrom: '#fff',
-                  backgroundGradientTo: '#fff',
-                  decimalPlaces: 0,
-                  color: (opacity = 1) => `rgba(25, 118, 210, ${opacity})`,
-                  labelColor: (opacity = 1) => `rgba(25, 118, 210, ${opacity})`,
-                  propsForDots: {
-                    r: '6',
-                    strokeWidth: '2',
-                    stroke: '#fff',
-                    fill: '#1976d2',
-                  },
-                  propsForBackgroundLines: {
-                    stroke: '#E3F2FD',
-                  },
-                  fillShadowGradient: '#E3F2FD',
-                  fillShadowGradientOpacity: 1,
-                }}
-                bezier
-                style={{ borderRadius: 12, marginBottom: 18, marginTop: 4 }}
-              />
-              {/* Download Button */}
-              <TouchableOpacity style={styles.downloadBtn} onPress={async () => {
-                const subjectColors = {
-                  Math: '#1976d2',
-                  Science: '#388e3c',
-                  English: '#fbc02d',
-                  Other: '#8e24aa',
-                };
-                const exams = Array.from(new Set(marksData.map(m => m.exam_name)));
-                const subjects = Array.from(new Set(marksData.map(m => m.subject_name)));
-                const groupedBarChartHtml = `
-                  <div style='margin:18px 0 8px 0;'>
-                    <div style='display:flex;align-items:flex-end;height:100px;'>
-                      ${exams.map(exam => `
-                        <div style='flex:1;display:flex;flex-direction:column;align-items:center;margin:0 8px;'>
-                          <div style='display:flex;align-items:flex-end;height:100px;'>
-                            ${subjects.map(subj => {
-                              const mark = marksData.find(m => m.exam_name === exam && m.subject_name === subj);
-                              const color = subjectColors[subj] || subjectColors.Other;
-                              return mark ? `<div style='width:18px;height:${mark ? (mark.marks_obtained/mark.total_marks)*90 : 0}px;background:${color};border-radius:6px 6px 0 0;margin:0 2px;'></div>` : '';
-                            }).join('')}
-                          </div>
-                          <div style='font-size:12px;color:#888;margin-top:4px;'>${exam}</div>
-                        </div>
-                      `).join('')}
-                    </div>
-                    <div style='display:flex;justify-content:center;margin-top:8px;'>
-                      ${subjects.map(subj => `<div style='display:flex;align-items:center;margin:0 10px;'><div style='width:14px;height:14px;background:${subjectColors[subj] || subjectColors.Other};border-radius:3px;margin-right:4px;'></div><span style='font-size:13px;color:#333;'>${subj}</span></div>`).join('')}
-                    </div>
-                  </div>
-                `;
-                const maxY = 100;
-                const chartWidth = 320;
-                const chartHeight = 120;
-                const n = improvementData.length;
-                const xStep = n > 1 ? (chartWidth - 40) / (n - 1) : 0;
-                const points = improvementData.map((a, i) => {
-                  const x = 20 + i * xStep;
-                  const y = chartHeight - 20 - (a.avg / maxY) * (chartHeight - 40);
-                  return { x, y, label: a.type, value: a.avg };
-                });
-                const polylinePoints = points.map(p => `${p.x},${p.y}`).join(' ');
-                const improvementGraphHtml = n > 1 ? `
-                  <svg width='${chartWidth}' height='${chartHeight}' viewBox='0 0 ${chartWidth} ${chartHeight}' style='display:block;border:1px solid #E3F2FD;background:#fff;'>
-                    <polyline points='${polylinePoints}' fill='none' stroke='#1976d2' stroke-width='3' />
-                    ${points.map(p => `<circle cx='${p.x}' cy='${p.y}' r='6' fill='#1976d2' stroke='#fff' stroke-width='2' />`).join('')}
-                    ${points.map(p => `<text x='${p.x}' y='${chartHeight-4}' font-size='13' fill='#888' text-anchor='middle'>${p.label}</text>`).join('')}
-                    ${points.map(p => `<text x='${p.x}' y='${p.y-12}' font-size='13' fill='#1976d2' text-anchor='middle' font-weight='bold'>${p.value}%</text>`).join('')}
-                  </svg>
-                ` : `<div style='color:#888;font-size:14px;margin:18px 0;'>Not enough data for improvement graph.</div>`;
-                const htmlContent = `
-                  <html>
-                    <head>
-                      <style>
-                        body { font-family: Arial, sans-serif; margin: 20px; }
-                        .school-header { display: flex; align-items: center; margin-bottom: 16px; }
-                        .school-logo { width: 60px; height: 60px; border-radius: 8px; margin-right: 16px; background: #eee; display: inline-block; }
-                        .student-info { display: flex; align-items: center; margin-bottom: 16px; }
-                        .profile-pic { width: 60px; height: 60px; border-radius: 30px; background: #eee; margin-right: 16px; display: flex; align-items: center; justify-content: center; }
-                        .profile-placeholder { width: 60px; height: 60px; border-radius: 30px; background: #ccc; }
-                        .student-details { font-size: 15px; color: #333; }
-                        .student-name { font-size: 20px; font-weight: bold; color: #1976d2; margin-bottom: 2px; }
-                        .calendar-table { border-collapse: collapse; width: 100%; margin-top: 16px; }
-                        .calendar-table th, .calendar-table td { width: 40px; height: 40px; text-align: center; border: 1px solid #ddd; }
-                        .calendar-table th { background: #f5f5f5; color: #1976d2; }
-                      </style>
-                    </head>
-                    <body>
-                      <div class="school-header">
-                        <div class="school-logo"></div>
-                        <div>
-                          <h1 style="margin:0;">${schoolInfo.name}</h1>
-                          <p style="margin:0;">${schoolInfo.address}</p>
-                        </div>
-                      </div>
-                      <div class="student-info">
-                        <div class="profile-pic"><div class="profile-placeholder"></div></div>
-                        <div class="student-details">
-                          <div class="student-name">${studentInfo?.name}</div>
-                          <div>Class: ${studentInfo?.class} &nbsp; Roll No: ${studentInfo?.rollNo}</div>
-                          <div>Section: ${studentInfo?.section}</div>
-                        </div>
-                      </div>
-                      <h2 style="color:#1976d2;">Attendance Calendar</h2>
-                      ${calendarHtml}
-                      <h2 style="color:#1976d2;">Attendance Stats</h2>
-                      <div style="font-size:16px;margin-bottom:8px;">Present: <b>${stats.present}</b> &nbsp; Absent: <b>${stats.absent}</b> &nbsp; Late: <b>${stats.late}</b> &nbsp; Excused: <b>${stats.excused}</b> &nbsp; Attendance %: <b>${percentage}%</b></div>
-                      ${barChartHtml}
-                      <h2 style="color:#1976d2;">Marks Summary</h2>
-                      ${marksListHtml}
-                      <h2 style="color:#1976d2;">Improvement Graph</h2>
-                      ${improvementGraphHtml}
-                      <h2 style="color:#1976d2;">Subject-wise Performance</h2>
-                      ${groupedBarChartHtml}
-                    </body>
-                  </html>
-                `;
-                try {
-                  const { uri } = await Print.printToFileAsync({ html: htmlContent });
-                  await Sharing.shareAsync(uri, {
-                    mimeType: 'application/pdf',
-                    dialogTitle: 'Share Marks Report',
-                  });
-                } catch (error) {
-                  Alert.alert('Failed to generate PDF', error.message);
-                }
-              }}>
-                <Ionicons name="download" size={18} color="#fff" />
-                <Text style={styles.downloadBtnText}>Download Marks</Text>
-              </TouchableOpacity>
-            </>
-          )}
+
         </ScrollView>
       )}
     </View>
@@ -1978,11 +1310,7 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 12, color: '#888' },
   downloadBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1976d2', borderRadius: 8, paddingVertical: 12, marginTop: 18 },
   downloadBtnText: { color: '#fff', fontSize: 15, fontWeight: 'bold', marginLeft: 8 },
-  marksTable: { backgroundColor: '#fff', borderRadius: 10, marginBottom: 18, elevation: 1 },
-  marksHeaderRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#e0e0e0', padding: 8 },
-  marksHeader: { flex: 1, fontWeight: 'bold', color: '#1976d2', fontSize: 15, textAlign: 'center' },
-  marksRow: { flexDirection: 'row', padding: 8, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  marksCell: { flex: 1, fontSize: 14, color: '#333', textAlign: 'center' },
+
   analyticsBox: { backgroundColor: '#fff', borderRadius: 10, padding: 24, marginBottom: 18, elevation: 1 },
   monthSelectorRow: { flexDirection: 'row', marginBottom: 10 },
   monthBtn: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: '#eee', marginRight: 8 },
@@ -2008,13 +1336,7 @@ const styles = StyleSheet.create({
   monthCarouselLabelBoxed: { fontSize: 18, fontWeight: 'bold', color: '#FF9800', letterSpacing: 0.5, marginHorizontal: 16 },
   statIconCircle: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
   statsRowImprovedNoScroll: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap' },
-  examTypeHeader: { fontSize: 16, fontWeight: 'bold', color: '#FF9800', marginBottom: 4, marginTop: 8 },
-  marksPercentage: { flex: 1, fontSize: 14, color: '#1976d2', textAlign: 'center', fontWeight: 'bold' },
-  marksAvgRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 2, marginBottom: 8 },
-  improvementGraphBar: { width: 32, borderRadius: 8, marginHorizontal: 8 },
-  improvementGraphScroll: { marginBottom: 18 },
-  improvementGraphBarLabel: { fontSize: 13, color: '#222', fontWeight: 'bold', marginBottom: 4 },
-  improvementGraphBarValue: { fontSize: 13, color: '#888', marginTop: 6, textAlign: 'center' },
+
   calendarCard: { backgroundColor: '#fff', borderRadius: 18, padding: 12, marginBottom: 12, elevation: 2, shadowColor: '#FF9800', shadowOpacity: 0.08, shadowRadius: 8 },
   calendarDayToday: { borderWidth: 2.5, borderColor: '#e8b10cff', backgroundColor: '#fffbe7' },
   calendarDayText: { fontSize: 18, fontWeight: 'bold', color: '#333' },
@@ -2213,9 +1535,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statIconCircleEnhanced: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
+    width: 65,
+    height: 65,
+    borderRadius: 32.5,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
@@ -2225,6 +1547,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
+    position: 'relative',
   },
   statLetterEnhanced: {
     fontSize: 24,
@@ -2264,6 +1587,20 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     shadowOffset: { width: 0, height: 1 },
     overflow: 'visible',
+  },
+  statNameInCircle: {
+    fontSize: 8,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    position: 'absolute',
+    bottom: 3,
+    left: 2,
+    right: 2,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: 6,
+    paddingVertical: 1,
+    paddingHorizontal: 1,
+    overflow: 'hidden',
   },
   statLabelEnhanced: {
     fontSize: 14,
@@ -2405,5 +1742,96 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  // Modern Stat Card Styles
+  modernStatCard: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 20,
+    marginHorizontal: 4,
+    marginVertical: 4,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+    flex: 1,
+    minHeight: 120,
+  },
+  modernCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  modernIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  modernStatNumber: {
+    fontSize: 28,
+    fontWeight: 'bold',
+  },
+  modernStatLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 8,
+  },
+  modernProgressBar: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  modernProgressFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  presentCardModern: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#4CAF50',
+    paddingVertical: 24,
+    paddingHorizontal: 24,
+    marginHorizontal: 12,
+    marginVertical: 12,
+  },
+  absentCardModern: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#F44336',
+    paddingVertical: 24,
+    paddingHorizontal: 24,
+    marginHorizontal: 12,
+    marginVertical: 12,
+  },
+  lateCardModern: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9800',
+    marginHorizontal: 12,
+    marginVertical: 12,
+  },
+  excusedCardModern: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#9C27B0',
+    marginHorizontal: 12,
+    marginVertical: 12,
+  },
+  statsGridTwoRows: {
+    paddingHorizontal: 8,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 6,
+    gap: 8,
   },
 });
