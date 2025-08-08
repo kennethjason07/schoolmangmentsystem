@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LineChart } from 'react-native-chart-kit';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 
@@ -35,11 +37,61 @@ export default function StudentMarks({ navigation }) {
   const [studentData, setStudentData] = useState(null);
   const [selectedExam, setSelectedExam] = useState(null);
   const [showChart, setShowChart] = useState(false);
+  const [schoolInfo, setSchoolInfo] = useState({
+    name: 'School Management System',
+    address: 'Education Excellence Center'
+  });
 
   useEffect(() => {
     if (user) {
       fetchMarksData();
     }
+  }, [user]);
+
+  // Set up real-time subscriptions for marks updates
+  useEffect(() => {
+    if (!user) return;
+
+    const subscriptions = [];
+
+    // Subscribe to marks changes
+    const marksSubscription = supabase
+      .channel('student-marks-updates')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: TABLES.MARKS
+      }, (payload) => {
+        console.log('Marks change detected:', payload);
+        // Refresh data when marks are updated
+        fetchMarksData();
+      })
+      .subscribe();
+
+    subscriptions.push(marksSubscription);
+
+    // Subscribe to exams changes
+    const examsSubscription = supabase
+      .channel('student-exams-updates')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: TABLES.EXAMS
+      }, (payload) => {
+        console.log('Exams change detected:', payload);
+        // Refresh data when exams are updated
+        fetchMarksData();
+      })
+      .subscribe();
+
+    subscriptions.push(examsSubscription);
+
+    // Cleanup subscriptions
+    return () => {
+      subscriptions.forEach(subscription => {
+        supabase.removeChannel(subscription);
+      });
+    };
   }, [user]);
 
   const fetchMarksData = async () => {
@@ -64,21 +116,23 @@ export default function StudentMarks({ navigation }) {
       setStudentData(student);
       console.log('Student data:', { id: student.id, class_id: student.class_id });
 
-      // Get marks data
+      // Get marks data with correct field names
       const { data: marks, error: marksError } = await supabase
         .from(TABLES.MARKS)
         .select(`
           *,
           exams(
             id,
-            exam_name,
-            exam_date,
-            exam_type,
-            total_marks
+            name,
+            start_date,
+            end_date,
+            class_id
           ),
           subjects(
             id,
-            name
+            name,
+            class_id,
+            is_optional
           )
         `)
         .eq('student_id', student.id)
@@ -91,27 +145,32 @@ export default function StudentMarks({ navigation }) {
         throw marksError;
       }
 
-      // Process marks data
+      // Process marks data according to schema
       let processedMarks = [];
       if (marks && marks.length > 0) {
-        processedMarks = marks.map(mark => ({
-          id: mark.id,
-          examName: mark.exams?.exam_name || 'Unknown Exam',
-          examDate: mark.exams?.exam_date || new Date().toISOString().split('T')[0],
-          examType: mark.exams?.exam_type || 'Test',
-          subject: mark.subjects?.name || 'Unknown Subject',
-          marksObtained: mark.marks_obtained || 0,
-          totalMarks: mark.exams?.total_marks || mark.total_marks || 100,
-          percentage: mark.marks_obtained && mark.total_marks 
-            ? Math.round((mark.marks_obtained / mark.total_marks) * 100)
-            : 0,
-          grade: mark.grade || getLetterGrade(
-            mark.marks_obtained && mark.total_marks 
-              ? Math.round((mark.marks_obtained / mark.total_marks) * 100)
-              : 0
-          ),
-          remarks: mark.remarks || ''
-        }));
+        processedMarks = marks.map(mark => {
+          const marksObtained = parseFloat(mark.marks_obtained) || 0;
+          const maxMarks = parseFloat(mark.max_marks) || 100;
+          const percentage = maxMarks > 0 ? Math.round((marksObtained / maxMarks) * 100) : 0;
+
+          return {
+            id: mark.id,
+            examName: mark.exams?.name || 'Unknown Exam',
+            examDate: mark.exams?.start_date || new Date().toISOString().split('T')[0],
+            examEndDate: mark.exams?.end_date || mark.exams?.start_date,
+            examType: 'Exam', // Schema doesn't have exam_type, using default
+            subject: mark.subjects?.name || 'Unknown Subject',
+            subjectId: mark.subject_id,
+            examId: mark.exam_id,
+            marksObtained: marksObtained,
+            totalMarks: maxMarks,
+            percentage: percentage,
+            grade: mark.grade || getLetterGrade(percentage),
+            remarks: mark.remarks || '',
+            isOptional: mark.subjects?.is_optional || false,
+            academicYear: mark.exams?.academic_year || mark.subjects?.academic_year
+          };
+        });
       } else {
         console.log('No marks found, adding test data');
         // Add test marks data
@@ -169,6 +228,52 @@ export default function StudentMarks({ navigation }) {
 
       setMarksData(processedMarks);
 
+      // Get upcoming exams for this student's class
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const { data: upcomingExams, error: examsError } = await supabase
+          .from(TABLES.EXAMS)
+          .select(`
+            id,
+            name,
+            start_date,
+            end_date,
+            remarks,
+            class_id,
+            academic_year
+          `)
+          .eq('class_id', student.class_id)
+          .gte('start_date', today)
+          .order('start_date', { ascending: true })
+          .limit(5);
+
+        if (!examsError && upcomingExams) {
+          console.log('Upcoming exams:', upcomingExams);
+        }
+      } catch (examsErr) {
+        console.log('Upcoming exams fetch error:', examsErr);
+      }
+
+      // Get class averages for comparison
+      try {
+        const { data: classMarks, error: classMarksError } = await supabase
+          .from(TABLES.MARKS)
+          .select(`
+            marks_obtained,
+            max_marks,
+            subject_id,
+            exam_id,
+            students!inner(class_id)
+          `)
+          .eq('students.class_id', student.class_id);
+
+        if (!classMarksError && classMarks && classMarks.length > 0) {
+          console.log('Class marks for comparison:', classMarks.length, 'records');
+        }
+      } catch (classErr) {
+        console.log('Class average calculation error:', classErr);
+      }
+
     } catch (err) {
       console.error('Marks fetch error:', err);
       setError(err.message);
@@ -214,6 +319,453 @@ export default function StudentMarks({ navigation }) {
 
   const stats = calculateStats();
   const examGroups = groupByExam();
+
+  // Download Report Card Function
+  const downloadReportCard = async () => {
+    try {
+      // Get school information
+      const schoolInfo = {
+        name: "Excellence Academy",
+        address: "123 Education Street, Learning City",
+        phone: "+1 (555) 123-4567",
+        email: "info@excellenceacademy.edu"
+      };
+
+      // Calculate overall grade
+      const overallGrade = getLetterGrade(stats.average);
+      const gradeColor = getGradeColor(stats.average);
+
+      // Group marks by subject for better presentation
+      const subjectGroups = {};
+      marksData.forEach(mark => {
+        if (!subjectGroups[mark.subject]) {
+          subjectGroups[mark.subject] = [];
+        }
+        subjectGroups[mark.subject].push(mark);
+      });
+
+      // Calculate subject averages
+      const subjectAverages = Object.keys(subjectGroups).map(subject => {
+        const marks = subjectGroups[subject];
+        const average = marks.reduce((sum, mark) => sum + mark.percentage, 0) / marks.length;
+        return {
+          subject,
+          average: Math.round(average),
+          grade: getLetterGrade(Math.round(average)),
+          totalMarks: marks.reduce((sum, mark) => sum + mark.marksObtained, 0),
+          maxMarks: marks.reduce((sum, mark) => sum + mark.totalMarks, 0),
+          examCount: marks.length
+        };
+      });
+
+      // Create beautiful HTML report card
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Student Report Card</title>
+          <style>
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
+            }
+
+            body {
+              font-family: 'Arial', sans-serif;
+              line-height: 1.6;
+              color: #333;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              min-height: 100vh;
+              padding: 20px;
+            }
+
+            .report-card {
+              max-width: 800px;
+              margin: 0 auto;
+              background: white;
+              border-radius: 20px;
+              box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+              overflow: hidden;
+            }
+
+            .header {
+              background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+              color: white;
+              padding: 15px;
+              text-align: center;
+              position: relative;
+            }
+
+            .header::before {
+              content: '';
+              position: absolute;
+              top: 0;
+              left: 0;
+              right: 0;
+              bottom: 0;
+              background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="75" cy="75" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="50" cy="10" r="0.5" fill="rgba(255,255,255,0.1)"/><circle cx="10" cy="60" r="0.5" fill="rgba(255,255,255,0.1)"/><circle cx="90" cy="40" r="0.5" fill="rgba(255,255,255,0.1)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+              opacity: 0.3;
+            }
+
+            .school-logo {
+              width: 50px;
+              height: 50px;
+              background: rgba(255,255,255,0.2);
+              border-radius: 50%;
+              margin: 0 auto 10px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 24px;
+              font-weight: bold;
+              position: relative;
+              z-index: 1;
+            }
+
+            .school-name {
+              font-size: 20px;
+              font-weight: bold;
+              margin-bottom: 3px;
+              position: relative;
+              z-index: 1;
+            }
+
+            .school-details {
+              font-size: 12px;
+              opacity: 0.9;
+              position: relative;
+              z-index: 1;
+            }
+
+            .student-info {
+              padding: 15px;
+              background: #f8f9fa;
+              border-bottom: 2px solid #e9ecef;
+            }
+
+            .student-card {
+              display: flex;
+              align-items: center;
+              gap: 20px;
+            }
+
+            .student-avatar {
+              width: 60px;
+              height: 60px;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              color: white;
+              font-size: 24px;
+              font-weight: bold;
+              box-shadow: 0 5px 10px rgba(0,0,0,0.1);
+            }
+
+            .student-details h2 {
+              font-size: 24px;
+              color: #1976d2;
+              margin-bottom: 10px;
+            }
+
+            .student-meta {
+              display: grid;
+              grid-template-columns: repeat(2, 1fr);
+              gap: 10px;
+              font-size: 14px;
+              color: #666;
+            }
+
+            .overall-performance {
+              padding: 30px;
+              text-align: center;
+              background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            }
+
+            .grade-circle {
+              width: 120px;
+              height: 120px;
+              border-radius: 50%;
+              background: ${gradeColor};
+              color: white;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              margin: 0 auto 20px;
+              box-shadow: 0 15px 30px rgba(0,0,0,0.2);
+              position: relative;
+            }
+
+            .grade-circle::before {
+              content: '';
+              position: absolute;
+              top: -5px;
+              left: -5px;
+              right: -5px;
+              bottom: -5px;
+              border-radius: 50%;
+              background: linear-gradient(45deg, transparent, rgba(255,255,255,0.3), transparent);
+            }
+
+            .grade-letter {
+              font-size: 36px;
+              font-weight: bold;
+            }
+
+            .grade-percentage {
+              font-size: 18px;
+              opacity: 0.9;
+            }
+
+            .performance-stats {
+              display: grid;
+              grid-template-columns: repeat(3, 1fr);
+              gap: 20px;
+              margin-top: 20px;
+            }
+
+            .stat-item {
+              text-align: center;
+              padding: 15px;
+              background: white;
+              border-radius: 10px;
+              box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            }
+
+            .stat-value {
+              font-size: 24px;
+              font-weight: bold;
+              color: #1976d2;
+            }
+
+            .stat-label {
+              font-size: 12px;
+              color: #666;
+              margin-top: 5px;
+            }
+
+            .performance-stats {
+              display: grid;
+              grid-template-columns: repeat(3, 1fr);
+              gap: 20px;
+              margin-top: 20px;
+            }
+
+            .stat-item {
+              text-align: center;
+              padding: 15px;
+              background: white;
+              border-radius: 10px;
+              box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            }
+
+            .stat-value {
+              font-size: 24px;
+              font-weight: bold;
+              color: #1976d2;
+            }
+
+            .stat-label {
+              font-size: 12px;
+              color: #666;
+              margin-top: 5px;
+            }
+
+            .section-title {
+              font-size: 20px;
+              font-weight: bold;
+              color: #1976d2;
+              margin-bottom: 20px;
+              text-align: center;
+            }
+
+            .exams-section {
+              padding: 15px;
+              background: #f8f9fa;
+            }
+
+            .exam-table {
+              width: 100%;
+              border-collapse: collapse;
+              background: white;
+              border-radius: 10px;
+              overflow: hidden;
+              box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            }
+
+            .exam-table th {
+              background: #1976d2;
+              color: white;
+              padding: 8px 10px;
+              text-align: left;
+              font-weight: bold;
+              font-size: 14px;
+            }
+
+            .exam-table td {
+              padding: 6px 10px;
+              border-bottom: 1px solid #e9ecef;
+              font-size: 13px;
+            }
+
+            .exam-table tr:last-child td {
+              border-bottom: none;
+            }
+
+            .exam-table tr:nth-child(even) {
+              background: #f8f9fa;
+            }
+
+            .grade-badge {
+              padding: 4px 12px;
+              border-radius: 15px;
+              color: white;
+              font-weight: bold;
+              font-size: 12px;
+            }
+
+            .footer {
+              padding: 10px 15px;
+              background: #1976d2;
+              color: white;
+              text-align: center;
+            }
+
+            .footer-text {
+              font-size: 12px;
+              opacity: 0.9;
+            }
+
+            .print-date {
+              margin-top: 5px;
+              font-size: 10px;
+              opacity: 0.7;
+            }
+
+            @media print {
+              body {
+                background: white;
+                padding: 0;
+              }
+
+              .report-card {
+                box-shadow: none;
+                border-radius: 0;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="report-card">
+            <!-- Header -->
+            <div class="header">
+              <div class="school-logo">🎓</div>
+              <div class="school-name">${schoolInfo.name}</div>
+              <div class="school-details">
+                ${schoolInfo.address}<br>
+                ${schoolInfo.phone} • ${schoolInfo.email}
+              </div>
+            </div>
+
+            <!-- Student Information -->
+            <div class="student-info">
+              <div class="student-card">
+                <div class="student-avatar">
+                  ${studentData?.name ? studentData.name.charAt(0).toUpperCase() : 'S'}
+                </div>
+                <div class="student-details">
+                  <h2>${studentData?.name || 'Student Name'}</h2>
+                  <div class="student-meta">
+                    <div><strong>Admission No:</strong> ${studentData?.admission_no || 'N/A'}</div>
+                    <div><strong>Gender:</strong> ${studentData?.gender || 'N/A'}</div>
+                    <div><strong>DOB:</strong> ${studentData?.dob ? new Date(studentData.dob).toLocaleDateString() : 'N/A'}</div>
+                    <div><strong>Academic Year:</strong> ${new Date().getFullYear()}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+
+
+
+
+            <!-- Detailed Exam Results -->
+            <div class="exams-section">
+              <h3 class="section-title">📋 Detailed Exam Results</h3>
+              <table class="exam-table">
+                <thead>
+                  <tr>
+                    <th>Exam</th>
+                    <th>Subject</th>
+                    <th>Marks Obtained</th>
+                    <th>Total Marks</th>
+                    <th>Percentage</th>
+                    <th>Grade</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${marksData.map(mark => `
+                    <tr>
+                      <td>${mark.examName}</td>
+                      <td>${mark.subject}</td>
+                      <td>${mark.marksObtained}</td>
+                      <td>${mark.totalMarks}</td>
+                      <td>${mark.percentage}%</td>
+                      <td>
+                        <span class="grade-badge" style="background-color: ${getGradeColor(mark.percentage)}">
+                          ${mark.grade}
+                        </span>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+              <div class="footer-text">
+                This report card is generated electronically and contains confidential student information.
+              </div>
+              <div class="print-date">
+                Generated on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
+              </div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      // Generate PDF
+      const { uri } = await Print.printToFileAsync({
+        html: htmlContent,
+        width: 612,
+        height: 792,
+        margins: {
+          left: 20,
+          top: 20,
+          right: 20,
+          bottom: 20,
+        },
+      });
+
+      // Share the PDF
+      await Sharing.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Share Report Card',
+        UTI: 'com.adobe.pdf',
+      });
+
+    } catch (error) {
+      console.error('Error generating report card:', error);
+      Alert.alert('Error', 'Failed to generate report card. Please try again.');
+    }
+  };
 
   if (loading) {
     return (
@@ -322,6 +874,21 @@ export default function StudentMarks({ navigation }) {
             ))
           )}
         </View>
+
+        {/* Download Report Card Button */}
+        {marksData.length > 0 && (
+          <View style={styles.downloadSection}>
+            <TouchableOpacity
+              style={styles.downloadButton}
+              onPress={downloadReportCard}
+            >
+              <View style={styles.downloadButtonContent}>
+                <Ionicons name="download" size={24} color="#fff" />
+                <Text style={styles.downloadButtonText}>Download Report Card</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
 
       {/* Exam Detail Modal */}
@@ -636,5 +1203,31 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  downloadSection: {
+    padding: 20,
+    paddingTop: 10,
+  },
+  downloadButton: {
+    backgroundColor: '#1976d2',
+    borderRadius: 16,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  downloadButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+  },
+  downloadButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 12,
   },
 });
