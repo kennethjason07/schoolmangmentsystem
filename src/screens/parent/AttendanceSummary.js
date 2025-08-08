@@ -21,6 +21,7 @@ import Header from '../../components/Header';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers, isValidUUID, safeQuery } from '../../utils/supabase';
 import { getCurrentMonthAttendance, calculateAttendanceStats, generateSampleAttendanceData } from '../../services/attendanceService';
+import usePullToRefresh from '../../hooks/usePullToRefresh';
 
 const { width } = Dimensions.get('window');
 
@@ -130,11 +131,15 @@ const AttendanceSummary = () => {
   const [attendanceData, setAttendanceData] = useState({});
   const [studentData, setStudentData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   // Add dashboard-style attendance state
   const [dashboardAttendance, setDashboardAttendance] = useState([]);
   const { user } = useAuth();
+
+  // Pull-to-refresh functionality
+  const { refreshing, onRefresh } = usePullToRefresh(async () => {
+    await fetchAttendanceData();
+  });
 
   // Fetch attendance data from Supabase (using same method as ParentDashboard)
   const fetchAttendanceData = async () => {
@@ -786,12 +791,6 @@ const AttendanceSummary = () => {
     }
   };
 
-  // Pull to refresh handler
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await fetchAttendanceData();
-    setRefreshing(false);
-  };
 
   // Get current month attendance data (same calculation as dashboard)
   const getCurrentMonthAttendanceData = () => {

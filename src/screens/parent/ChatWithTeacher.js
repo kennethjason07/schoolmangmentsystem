@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image, ActivityIndicator, Alert, Keyboard, Linking } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image, ActivityIndicator, Alert, Keyboard, Linking, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { useRef } from 'react';
@@ -19,6 +19,7 @@ const ChatWithTeacher = () => {
   const [error, setError] = useState(null);
   const [deletingMessageId, setDeletingMessageId] = useState(null);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const flatListRef = useRef(null);
   const { user } = useAuth();
 
@@ -234,6 +235,59 @@ const ChatWithTeacher = () => {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Pull-to-refresh handler
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await fetchTeachersAndChats();
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Refresh chat messages for selected teacher
+  const refreshChatMessages = async () => {
+    if (!selectedTeacher) return;
+    
+    setRefreshing(true);
+    try {
+      // Get fresh messages for this teacher
+      const { data: freshMessages, error: messagesError } = await supabase
+        .from(TABLES.MESSAGES)
+        .select('*')
+        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+        .or(`sender_id.eq.${selectedTeacher.userId},receiver_id.eq.${selectedTeacher.userId}`)
+        .order('sent_at', { ascending: true });
+
+      if (messagesError) {
+        console.log('Error refreshing messages:', messagesError);
+      } else if (freshMessages) {
+        // Filter messages for the current conversation
+        const conversationMessages = freshMessages.filter(msg => 
+          (msg.sender_id === user.id && msg.receiver_id === selectedTeacher.userId) ||
+          (msg.sender_id === selectedTeacher.userId && msg.receiver_id === user.id)
+        );
+
+        // Format messages for display
+        const formattedMessages = conversationMessages.map(msg => ({
+          ...msg,
+          text: msg.message,
+          timestamp: new Date(msg.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          sender: msg.sender_id === user.id ? 'parent' : 'teacher',
+          type: 'text'
+        }));
+
+        setMessages(formattedMessages);
+      }
+    } catch (error) {
+      console.error('Error refreshing chat messages:', error);
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -771,6 +825,14 @@ const ChatWithTeacher = () => {
               }}
               contentContainerStyle={{ padding: 16 }}
               showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  colors={['#1976d2']}
+                  progressBackgroundColor="#fff"
+                />
+              }
             />
           )}
         </View>
@@ -888,6 +950,14 @@ const ChatWithTeacher = () => {
             )}
             contentContainerStyle={styles.chatList}
             style={{ flex: 1 }}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={refreshChatMessages}
+                colors={['#1976d2']}
+                progressBackgroundColor="#fff"
+              />
+            }
             onContentSizeChange={() => {
               setTimeout(() => {
                 if (flatListRef.current) {

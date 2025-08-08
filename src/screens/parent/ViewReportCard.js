@@ -10,7 +10,8 @@ import {
   Alert,
   Dimensions,
   Platform,
-  ActivityIndicator
+  ActivityIndicator,
+  RefreshControl
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
@@ -19,6 +20,7 @@ import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
+import usePullToRefresh from '../../hooks/usePullToRefresh';
 
 const { width } = Dimensions.get('window');
 
@@ -37,6 +39,11 @@ const ViewReportCard = () => {
   const [subjects, setSubjects] = useState([]);
   const [marks, setMarks] = useState([]);
   const { user } = useAuth();
+
+  // Pull-to-refresh functionality
+  const { refreshing, onRefresh } = usePullToRefresh(async () => {
+    await fetchReportCardData();
+  });
 
   const fetchReportCardData = async () => {
     try {
@@ -980,131 +987,141 @@ const ViewReportCard = () => {
         </View>
       )}
 
-      {reportCardKeys.length === 0 ? (
-        <View style={styles.noDataContainer}>
-          <Ionicons name="document-text-outline" size={64} color="#ccc" />
-          <Text style={styles.noDataText}>No report cards available</Text>
-        </View>
-      ) : (
-        <>
-          <FlatList
-            data={reportCardKeys}
-            renderItem={renderReportCard}
-            keyExtractor={(item) => item}
-            contentContainerStyle={styles.listContainer}
-            showsVerticalScrollIndicator={false}
+      <FlatList
+        data={reportCardKeys}
+        renderItem={renderReportCard}
+        keyExtractor={(item) => item}
+        contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#1976d2']}
+            progressBackgroundColor="#fff"
           />
-          
-          {/* Export Button */}
-          <View style={styles.exportSection}>
-            <TouchableOpacity style={styles.exportButton} onPress={handlePreviewAllPDF}>
-              <Ionicons name="download" size={20} color="#fff" />
-              <Text style={styles.exportButtonText}>Export Report Card</Text>
-            </TouchableOpacity>
+        }
+        ListEmptyComponent={
+          <View style={styles.noDataContainer}>
+            <Ionicons name="document-text-outline" size={64} color="#ccc" />
+            <Text style={styles.noDataText}>No report cards available</Text>
+            <Text style={styles.noDataSubtext}>Pull down to refresh and check for new report cards</Text>
           </View>
-        </>
+        }
+      />
+      
+      {/* Export Button - Only show when there are report cards */}
+      {reportCardKeys.length > 0 && (
+        <View style={styles.exportSection}>
+          <TouchableOpacity style={styles.exportButton} onPress={handlePreviewAllPDF}>
+            <Ionicons name="download" size={20} color="#fff" />
+            <Text style={styles.exportButtonText}>Export Report Card</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       {/* Export Modal - Removed, direct preview */}
 
       {/* Preview Modal */}
-      <Modal
-        visible={showPreviewModal}
-        animationType="slide"
-        onRequestClose={() => setShowPreviewModal(false)}
-      >
-        <View style={styles.previewContainer}>
-          <View style={styles.previewHeader}>
-            <TouchableOpacity 
-              style={styles.previewBackButton}
-              onPress={() => setShowPreviewModal(false)}
-            >
-              <Ionicons name="arrow-back" size={24} color="#fff" />
-              <Text style={styles.previewBackText}>Back</Text>
-            </TouchableOpacity>
-            
-            <Text style={styles.previewTitle}>PDF Preview</Text>
-            
-            <TouchableOpacity 
-              style={styles.previewExportButton}
-              onPress={handleConfirmExport}
-            >
-              <Ionicons name="download" size={20} color="#fff" />
-              <Text style={styles.previewExportText}>Export</Text>
-            </TouchableOpacity>
-          </View>
-          
-          <ScrollView style={styles.previewContent}>
-            <View style={styles.previewWebView}>
-              <Text style={styles.previewNote}>
-                Preview of your PDF report. Scroll down to see all content.
-              </Text>
+      {showPreviewModal && (
+        <Modal
+          visible={showPreviewModal}
+          animationType="slide"
+          onRequestClose={() => setShowPreviewModal(false)}
+        >
+          <View style={styles.previewContainer}>
+            <View style={styles.previewHeader}>
+              <TouchableOpacity 
+                style={styles.previewBackButton}
+                onPress={() => setShowPreviewModal(false)}
+              >
+                <Ionicons name="arrow-back" size={24} color="#fff" />
+                <Text style={styles.previewBackText}>Back</Text>
+              </TouchableOpacity>
               
-              <View style={styles.htmlPreview}>
-                <View style={styles.previewDocument}>
-                  <View style={styles.documentHeader}>
-                    <Text style={styles.schoolName}>ABC School</Text>
-                    <Text style={styles.documentTitle}>
-                      Complete Report Card
-                    </Text>
-                  </View>
-                  
-                  {student && (
-                    <View style={styles.studentInfoPreview}>
-                      <Text style={styles.previewText}>
-                        <Text style={styles.boldText}>Student:</Text> {student.name}
-                      </Text>
-                      <Text style={styles.previewText}>
-                        <Text style={styles.boldText}>Class:</Text> {student.classes?.class_name} {student.classes?.section}
-                      </Text>
-                      <Text style={styles.previewText}>
-                        <Text style={styles.boldText}>Admission No:</Text> {student.admission_no}
+              <Text style={styles.previewTitle}>PDF Preview</Text>
+              
+              <TouchableOpacity 
+                style={styles.previewExportButton}
+                onPress={handleConfirmExport}
+              >
+                <Ionicons name="download" size={20} color="#fff" />
+                <Text style={styles.previewExportText}>Export</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.previewContent}>
+              <View style={styles.previewWebView}>
+                <Text style={styles.previewNote}>
+                  Preview of your PDF report. Scroll down to see all content.
+                </Text>
+                
+                <View style={styles.htmlPreview}>
+                  <View style={styles.previewDocument}>
+                    <View style={styles.documentHeader}>
+                      <Text style={styles.schoolName}>ABC School</Text>
+                      <Text style={styles.documentTitle}>
+                        Complete Report Card
                       </Text>
                     </View>
-                  )}
-                  
-                  {/* All Report Cards Preview */}
-                  {Object.keys(reportCards).map(examId => {
-                    const reportCard = reportCards[examId];
-                    return (
-                      <View key={examId} style={styles.reportPreview}>
-                        <Text style={styles.examTitle}>{reportCard.exam?.name}</Text>
-                        <Text style={styles.examDate}>
-                          {new Date(reportCard.exam?.start_date).toLocaleDateString()} - {new Date(reportCard.exam?.end_date).toLocaleDateString()}
+                    
+                    {student && (
+                      <View style={styles.studentInfoPreview}>
+                        <Text style={styles.previewText}>
+                          <Text style={styles.boldText}>Student:</Text> {student.name}
                         </Text>
-                        
-                        <View style={styles.marksTable}>
-                          <View style={styles.tableHeader}>
-                            <Text style={styles.tableHeaderText}>Subject</Text>
-                            <Text style={styles.tableHeaderText}>Marks</Text>
-                            <Text style={styles.tableHeaderText}>Max</Text>
-                            <Text style={styles.tableHeaderText}>Grade</Text>
-                          </View>
+                        <Text style={styles.previewText}>
+                          <Text style={styles.boldText}>Class:</Text> {student.classes?.class_name} {student.classes?.section}
+                        </Text>
+                        <Text style={styles.previewText}>
+                          <Text style={styles.boldText}>Admission No:</Text> {student.admission_no}
+                        </Text>
+                      </View>
+                    )}
+                    
+                    {/* All Report Cards Preview */}
+                    {Object.keys(reportCards).map(examId => {
+                      const reportCard = reportCards[examId];
+                      return (
+                        <View key={examId} style={styles.reportPreview}>
+                          <Text style={styles.examTitle}>{reportCard.exam?.name}</Text>
+                          <Text style={styles.examDate}>
+                            {new Date(reportCard.exam?.start_date).toLocaleDateString()} - {new Date(reportCard.exam?.end_date).toLocaleDateString()}
+                          </Text>
                           
-                          {reportCard.subjects?.map((subject, index) => (
-                            <View key={index} style={styles.tableRow}>
-                              <Text style={styles.subjectCellText}>{subject.subject?.name}</Text>
-                              <Text style={styles.tableCellText}>{subject.marks_obtained}</Text>
-                              <Text style={styles.tableCellText}>{subject.max_marks}</Text>
-                              <Text style={styles.tableCellText}>{subject.grade}</Text>
+                          <View style={styles.marksTable}>
+                            <View style={styles.tableHeader}>
+                              <Text style={styles.tableHeaderText}>Subject</Text>
+                              <Text style={styles.tableHeaderText}>Marks</Text>
+                              <Text style={styles.tableHeaderText}>Max</Text>
+                              <Text style={styles.tableHeaderText}>Grade</Text>
                             </View>
-                          ))}
-                          
-                          <View style={styles.totalRow}>
-                            <Text style={styles.totalText}>
-                              Total: {reportCard.totalMarks}/{reportCard.totalMaxMarks} ({reportCard.percentage}%)
-                            </Text>
+                            
+                            {reportCard.subjects?.map((subject, index) => (
+                              <View key={index} style={styles.tableRow}>
+                                <Text style={styles.subjectCellText}>{subject.subject?.name}</Text>
+                                <Text style={styles.tableCellText}>{subject.marks_obtained}</Text>
+                                <Text style={styles.tableCellText}>{subject.max_marks}</Text>
+                                <Text style={styles.tableCellText}>{subject.grade}</Text>
+                              </View>
+                            ))}
+                            
+                            <View style={styles.totalRow}>
+                              <Text style={styles.totalText}>
+                                Total: {reportCard.totalMarks}/{reportCard.totalMaxMarks} ({reportCard.percentage}%)
+                              </Text>
+                            </View>
                           </View>
                         </View>
-                      </View>
-                    );
-                  })}
+                      );
+                    })}
+                  </View>
                 </View>
               </View>
-            </View>
-          </ScrollView>
-        </View>
-      </Modal>
+            </ScrollView>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 };
@@ -1189,6 +1206,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#999',
     marginTop: 16,
+    textAlign: 'center',
+  },
+  noDataSubtext: {
+    fontSize: 14,
+    color: '#bbb',
+    marginTop: 8,
     textAlign: 'center',
   },
   listContainer: {

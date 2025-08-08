@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, Modal, Pressable, AccessibilityInfo, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, Modal, Pressable, AccessibilityInfo, ActivityIndicator, Alert, RefreshControl } from 'react-native';
+import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -186,6 +187,11 @@ export default function StudentAttendanceMarks({ route, navigation }) {
     absent: new Animated.Value(1),
     late: new Animated.Value(1),
     excused: new Animated.Value(1),
+  });
+
+  // Pull-to-refresh functionality
+  const { refreshing, onRefresh } = usePullToRefresh(async () => {
+    await fetchStudentData();
   });
 
   // Fetch attendance data from Supabase
@@ -774,7 +780,19 @@ export default function StudentAttendanceMarks({ route, navigation }) {
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 40 }}>
+        <ScrollView 
+          contentContainerStyle={{ padding: 16, paddingTop: 40 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#2196F3', '#4CAF50', '#FF9800']}
+              tintColor="#2196F3"
+              title="Pull to refresh attendance data"
+              titleColor="#666"
+            />
+          }
+        >
           {/* Attendance Content */}
             <View style={styles.attendanceTabContainer}>
               {/* Attendance Section Header */}

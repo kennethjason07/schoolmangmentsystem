@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import * as ImagePicker from 'expo-image-picker';
@@ -7,6 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useMessageStatus } from '../../utils/useMessageStatus';
+import usePullToRefresh from '../../hooks/usePullToRefresh';
 
 const StudentChatWithTeacher = () => {
   const { user } = useAuth();
@@ -22,6 +23,11 @@ const StudentChatWithTeacher = () => {
   const [deletingMessageId, setDeletingMessageId] = useState(null);
   const [unreadCounts, setUnreadCounts] = useState({}); // Track unread messages per teacher
   const flatListRef = useRef(null);
+
+  // Pull-to-refresh functionality
+  const { refreshing, onRefresh } = usePullToRefresh(async () => {
+    await fetchData();
+  });
 
   // Keyboard visibility listeners
   useEffect(() => {
@@ -1053,6 +1059,16 @@ const StudentChatWithTeacher = () => {
               }}
               contentContainerStyle={{ padding: 16 }}
               showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  colors={['#1976d2', '#4CAF50', '#FF9800']}
+                  tintColor="#1976d2"
+                  title="Pull to refresh chat data"
+                  titleColor="#666"
+                />
+              }
             />
           )}
         </View>

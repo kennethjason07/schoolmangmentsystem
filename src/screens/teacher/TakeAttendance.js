@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform, Alert, ActivityIndicator, ScrollView, RefreshControl } from 'react-native';
 import Header from '../../components/Header';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,6 +37,7 @@ const TakeAttendance = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [teacherInfo, setTeacherInfo] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuth();
 
   // Fetch teacher's assigned classes and students
@@ -381,6 +382,24 @@ const TakeAttendance = () => {
     return editMode[studentId] || !attendanceMark[studentId];
   };
 
+  // Handle pull-to-refresh
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      // Refresh all data
+      await Promise.all([
+        fetchClassesAndStudents(),
+        selectedClass ? fetchStudents() : Promise.resolve(),
+        (selectedClass && selectedDate && students.length > 0) ? fetchExistingAttendance() : Promise.resolve()
+      ]);
+    } catch (error) {
+      console.error('Error during refresh:', error);
+      Alert.alert('Error', 'Failed to refresh data. Please try again.');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   if (loading && students.length === 0) {
     return (
       <View style={styles.container}>
@@ -410,7 +429,17 @@ const TakeAttendance = () => {
   return (
     <View style={styles.container}>
       <Header title="Take Attendance" showBack={true} />
-      <ScrollView style={styles.scrollView}>
+      <ScrollView 
+        style={styles.scrollView}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={['#1976d2']}
+            tintColor="#1976d2"
+          />
+        }
+      >
         <View style={{ padding: 20 }}>
           {/* Class and Date Selection */}
           <View style={styles.selectionContainer}>

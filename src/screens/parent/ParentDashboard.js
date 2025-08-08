@@ -9,6 +9,7 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
@@ -17,6 +18,7 @@ import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import { useFocusEffect } from '@react-navigation/native';
+import usePullToRefresh from '../../hooks/usePullToRefresh';
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -108,6 +110,36 @@ const ParentDashboard = ({ navigation }) => {
 
     return unsubscribe;
   }, [navigation, user]);
+
+  // Pull-to-refresh functionality
+  const { refreshing, onRefresh } = usePullToRefresh(async () => {
+    // Fetch all dashboard data when refreshing
+    const { data: parentUserData, error: parentError } = await dbHelpers.getParentByUserId(user.id);
+    if (!parentError && parentUserData) {
+      let studentDetails = null;
+      
+      if (parentUserData.students && parentUserData.students.length > 0) {
+        studentDetails = parentUserData.students[0];
+      } else if (parentUserData.linked_parent_of) {
+        const { data: linkedStudentData, error: linkedStudentError } = await supabase
+          .from(TABLES.STUDENTS)
+          .select('*')
+          .eq('id', parentUserData.linked_parent_of)
+          .single();
+        if (!linkedStudentError) {
+          studentDetails = linkedStudentData;
+        }
+      }
+      
+      if (studentDetails) {
+        // Refresh all data
+        await Promise.all([
+          refreshNotifications(),
+          // Refresh other data as needed
+        ]);
+      }
+    }
+  });
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -614,6 +646,14 @@ const ParentDashboard = ({ navigation }) => {
       <ScrollView 
         style={styles.scrollView} 
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#FF9800']}
+            progressBackgroundColor="#fff"
+          />
+        }
       >
         {/* Student Details Card */}
         <TouchableOpacity style={styles.studentCard} onPress={() => setShowStudentDetailsModal(true)} activeOpacity={0.85}>

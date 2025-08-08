@@ -11,7 +11,8 @@ import {
   Dimensions,
   Platform,
   ActivityIndicator,
-  TextInput
+  TextInput,
+  RefreshControl
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -1315,6 +1316,14 @@ const FeePayment = () => {
               keyExtractor={(item) => item.id}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.feeList}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  colors={['#2196F3']}
+                  progressBackgroundColor="#fff"
+                />
+              }
               ListEmptyComponent={
                 <View style={styles.emptyContainer}>
                   <Ionicons name="card-outline" size={48} color="#ccc" />
@@ -1351,6 +1360,14 @@ const FeePayment = () => {
             keyExtractor={(item) => item.id}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.historyList}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={['#2196F3']}
+                progressBackgroundColor="#fff"
+              />
+            }
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <Ionicons name="receipt-outline" size={48} color="#ccc" />

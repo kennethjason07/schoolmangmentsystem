@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useFocusEffect } from '@react-navigation/native';
 import Header from '../../components/Header';
+import usePullToRefresh from '../../hooks/usePullToRefresh';
 
 const StudentDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -119,6 +120,16 @@ const StudentDashboard = ({ navigation }) => {
         console.log('Student Dashboard - Unread notifications count:', mappedNotifications.filter(n => !n.is_read).length);
         console.log('============================================');
         setNotifications(mappedNotifications);
+        
+        // Update the summary card with new notification count WITHOUT reloading everything
+        const unreadCount = mappedNotifications.filter(n => !n.is_read).length;
+        setSummary(prevSummary => 
+          prevSummary.map(item => 
+            item.key === 'notifications' 
+              ? { ...item, value: unreadCount }
+              : item
+          )
+        );
       }
     } catch (err) {
       console.log('Student Dashboard - Notifications refresh fetch error:', err);
@@ -129,22 +140,20 @@ const StudentDashboard = ({ navigation }) => {
   // Add focus effect to refresh notifications when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      console.log('Student Dashboard - Screen focused, refreshing notifications...');
+      console.log('Student Dashboard - Screen focused, refreshing notifications only...');
+      // Only refresh notifications, don't reload the entire dashboard
       refreshNotifications();
     }, [user?.id])
   );
 
-  // Also add navigation listener for when returning from notification screens
+  // Navigation listener specifically for notification-related screens
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      console.log('Student Dashboard - Navigation focus event, refreshing...');
+      console.log('Student Dashboard - Navigation focus event, checking if notification refresh needed...');
       if (user?.id) {
-        // Add a small delay to ensure database changes are propagated
-        setTimeout(() => {
-          refreshNotifications();
-          // Also refetch dashboard data to update summary counts
-          fetchDashboardData();
-        }, 500);
+        // Only refresh notifications when coming back from notification screens
+        // Don't reload the entire dashboard data
+        refreshNotifications();
       }
     });
 
@@ -478,7 +487,7 @@ const StudentDashboard = ({ navigation }) => {
       .subscribe();
     const notificationsSub = supabase
       .channel('student-dashboard-notifications')
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.NOTIFICATION_RECIPIENTS }, fetchDashboardData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.NOTIFICATION_RECIPIENTS }, refreshNotifications)
       .subscribe();
     const examsSub = supabase
       .channel('student-dashboard-exams')
@@ -500,7 +509,12 @@ const StudentDashboard = ({ navigation }) => {
     };
   }, []);
 
-  // This code is no longer needed as we're using the new design
+  // Pull-to-refresh functionality
+  const { refreshing, onRefresh } = usePullToRefresh(async () => {
+    console.log('Pull-to-refresh triggered on Student Dashboard');
+    await fetchDashboardData();
+    await refreshNotifications();
+  });
 
   // Calculate unread notifications count
   const unreadCount = notifications.filter(notification => !notification.is_read).length;
@@ -519,7 +533,19 @@ const StudentDashboard = ({ navigation }) => {
         onNotificationsPress={() => navigation.navigate('StudentNotifications')}
       />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false} 
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#2196F3']}
+            tintColor="#2196F3"
+            title="Pull to refresh..."
+          />
+        }
+      >
         {/* Student Dashboard Card */}
         <View style={styles.dashboardCard}>
           <View style={styles.dashboardHeader}>

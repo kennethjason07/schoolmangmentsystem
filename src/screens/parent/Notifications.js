@@ -11,12 +11,14 @@ import {
   Alert,
   Dimensions,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
+import usePullToRefresh from '../../hooks/usePullToRefresh';
 
 const { width } = Dimensions.get('window');
 
@@ -27,6 +29,11 @@ const Notifications = ({ navigation }) => {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Pull-to-refresh functionality
+  const { refreshing, onRefresh } = usePullToRefresh(async () => {
+    await fetchNotifications();
+  });
 
   const fetchNotifications = async () => {
     setLoading(true);
@@ -488,6 +495,14 @@ const Notifications = ({ navigation }) => {
             </View>
           }
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#1976d2']}
+              progressBackgroundColor="#fff"
+            />
+          }
         />
       </View>
     </View>

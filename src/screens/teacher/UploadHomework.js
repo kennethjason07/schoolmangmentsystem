@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Alert, Platform, Linking, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Alert, Platform, Linking, ActivityIndicator, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { Picker } from '@react-native-picker/picker';
@@ -30,6 +30,7 @@ const UploadHomework = () => {
   const [editingHomework, setEditingHomework] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [teacherData, setTeacherData] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuth();
 
   // Fetch teacher's assigned classes and subjects
@@ -411,6 +412,18 @@ const UploadHomework = () => {
     return status === 'active' ? '#4CAF50' : '#f44336';
   };
 
+  // Handle pull-to-refresh
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await fetchHomework();
+    } catch (error) {
+      console.error('Error refreshing homework:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -441,7 +454,18 @@ const UploadHomework = () => {
     <View style={styles.container}>
       <Header title="Upload Homework" showBack={true} />
       
-      <ScrollView style={styles.content}>
+      <ScrollView 
+        style={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#1976d2']}
+            tintColor={'#1976d2'}
+            title="Pull to refresh homework list"
+          />
+        }
+      >
         {classes.length === 0 ? (
           <View style={styles.noDataContainer}>
             <Ionicons name="book-outline" size={48} color="#ccc" />

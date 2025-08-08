@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import * as ImagePicker from 'expo-image-picker';
@@ -23,6 +23,8 @@ const TeacherChat = () => {
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState(null);
   const [unreadCounts, setUnreadCounts] = useState({}); // Track unread messages per contact
+  const [refreshingParents, setRefreshingParents] = useState(false);
+  const [refreshingStudents, setRefreshingStudents] = useState(false);
   const flatListRef = useRef(null);
 
   // Keyboard visibility listeners
@@ -969,6 +971,35 @@ const TeacherChat = () => {
     });
   };
 
+  // Handle pull-to-refresh for contact lists
+  const onRefreshParents = async () => {
+    setRefreshingParents(true);
+    try {
+      await Promise.all([
+        fetchParents(),
+        fetchUnreadCounts()
+      ]);
+    } catch (error) {
+      console.error('Error refreshing parents data:', error);
+    } finally {
+      setRefreshingParents(false);
+    }
+  };
+
+  const onRefreshStudents = async () => {
+    setRefreshingStudents(true);
+    try {
+      await Promise.all([
+        fetchStudents(),
+        fetchUnreadCounts()
+      ]);
+    } catch (error) {
+      console.error('Error refreshing students data:', error);
+    } finally {
+      setRefreshingStudents(false);
+    }
+  };
+
   // Debug UI state
   console.log('🖥️ UI RENDER DEBUG:', {
     loading,
@@ -1050,6 +1081,14 @@ const TeacherChat = () => {
                 <FlatList
                   data={getSortedContacts(parents)}
                   keyExtractor={item => item.id}
+                  refreshControl={
+                    <RefreshControl
+                      refreshing={refreshingParents}
+                      onRefresh={onRefreshParents}
+                      colors={['#1976d2']}
+                      tintColor="#1976d2"
+                    />
+                  }
                   renderItem={({ item, index }) => {
                     const sortedParents = getSortedContacts(parents);
                     const showClassParentHeader = index === 0 && item.role === 'class_parent';
@@ -1146,6 +1185,14 @@ const TeacherChat = () => {
                 <FlatList
                   data={getSortedContacts(students)}
                   keyExtractor={item => item.id}
+                  refreshControl={
+                    <RefreshControl
+                      refreshing={refreshingStudents}
+                      onRefresh={onRefreshStudents}
+                      colors={['#1976d2']}
+                      tintColor="#1976d2"
+                    />
+                  }
                   renderItem={({ item, index }) => {
                     const sortedStudents = getSortedContacts(students);
                     const showClassStudentHeader = index === 0 && item.role === 'class_student';

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity, Modal, ScrollView, Button, Platform, Animated, Easing, Pressable, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity, Modal, ScrollView, Button, Platform, Animated, Easing, Pressable, ActivityIndicator, Alert, RefreshControl } from 'react-native';
 import Header from '../../components/Header';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -20,6 +20,7 @@ const ViewStudentInfo = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedClass, setSelectedClass] = useState('All');
   const [classes, setClasses] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuth();
   const navigation = useNavigation();
 
@@ -215,6 +216,18 @@ const ViewStudentInfo = () => {
   useEffect(() => {
     fetchStudents();
   }, []);
+
+  // Pull-to-refresh handler
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await fetchStudents();
+    } catch (error) {
+      console.error('Error refreshing students:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   // Filter students based on search and class
   useEffect(() => {
@@ -707,6 +720,14 @@ const ViewStudentInfo = () => {
             keyExtractor={item => item.id}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listContainer}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={['#1976d2']}
+                tintColor="#1976d2"
+              />
+            }
           />
         )}
       </View>

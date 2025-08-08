@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, FlatList, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, FlatList, TouchableOpacity, TextInput, Alert, ActivityIndicator, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { LineChart } from 'react-native-chart-kit';
@@ -52,6 +52,7 @@ const TeacherDashboard = ({ navigation }) => {
   const [recentActivities, setRecentActivities] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
   const [teacherProfile, setTeacherProfile] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuth();
 
 // Helper to extract class order key
@@ -702,6 +703,18 @@ function groupAndSortSchedule(schedule) {
     };
   }, []);
 
+  // Pull-to-refresh handler
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await fetchDashboardData();
+    } catch (error) {
+      console.error('Error refreshing dashboard:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   async function handleCompletePersonalTask(id) {
     try {
       const { error } = await supabase
@@ -907,7 +920,18 @@ function groupAndSortSchedule(schedule) {
   return (
     <View style={styles.container}>
       <Header title="Teacher Dashboard" />
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.scrollView} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#1976d2']}
+            tintColor="#1976d2"
+          />
+        }
+      >
         {/* Welcome Section at the very top */}
         <View style={styles.welcomeSection}>
           <Text style={styles.welcomeText}>Welcome back, Teacher!</Text>
