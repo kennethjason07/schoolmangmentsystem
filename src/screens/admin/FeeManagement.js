@@ -34,6 +34,14 @@ const FeeManagement = () => {
   const [feeStructures, setFeeStructures] = useState([]);
   const [students, setStudents] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [classPaymentStats, setClassPaymentStats] = useState([]);
+  const [paymentSummary, setPaymentSummary] = useState({
+    totalCollected: 0,
+    totalDue: 0,
+    totalOutstanding: 0,
+    collectionRate: 0
+  });
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [feeModal, setFeeModal] = useState({ 
@@ -88,10 +96,14 @@ const FeeManagement = () => {
     }
   };
 
-  // Safe currency formatting
+  // Safe currency formatting in Indian Rupees
   const formatSafeCurrency = (amount) => {
-    if (!amount || isNaN(amount)) return '₹0';
-    return `₹${parseFloat(amount).toFixed(2)}`;
+    if (!amount || isNaN(amount)) return '₹0.00';
+    const numAmount = parseFloat(amount);
+    return `₹${numAmount.toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })}`;
   };
 
   // Helper function to calculate total fees for a student
@@ -279,6 +291,9 @@ const FeeManagement = () => {
       // Calculate fee statistics
       await calculateFeeStats();
 
+      // Calculate class-wise payment statistics
+      await calculateClassPaymentStats();
+
     } catch (error) {
       console.error('Error loading data:', error);
       Alert.alert('Error', `Failed to load fee data: ${error.message}`);
@@ -287,6 +302,110 @@ const FeeManagement = () => {
       setRefreshing(false);
     }
   };
+
+  // Calculate class-wise payment statistics
+  const calculateClassPaymentStats = async () => {
+    try {
+      // Get all classes with their fee structures and payments
+      const { data: classesWithStats, error } = await supabase
+        .from(TABLES.CLASSES)
+        .select(`
+          id,
+          class_name,
+          section,
+          fee_structure:${TABLES.FEE_STRUCTURE}(
+            id,
+            fee_component,
+            amount,
+            academic_year
+          ),
+          students(
+            id,
+            name,
+            student_fees:${TABLES.STUDENT_FEES}(
+              amount_paid,
+              fee_component,
+              payment_date,
+              academic_year
+            )
+          )
+        `);
+
+      if (error) throw error;
+
+      const currentYear = new Date().getFullYear();
+      const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
+
+      const classStats = classesWithStats.map(classData => {
+        // Calculate total fee structure for this class
+        const totalFeeStructure = classData.fee_structure
+          ?.filter(fee => fee.academic_year === academicYear)
+          ?.reduce((sum, fee) => sum + (parseFloat(fee.amount) || 0), 0) || 0;
+
+        // Calculate total students in class
+        const totalStudents = classData.students?.length || 0;
+
+        // Calculate total expected fees (fee structure × number of students)
+        const totalExpectedFees = totalFeeStructure * totalStudents;
+
+        // Calculate total payments made by students in this class
+        const totalPaid = classData.students?.reduce((classSum, student) => {
+          const studentPayments = student.student_fees
+            ?.filter(payment => payment.academic_year === academicYear)
+            ?.reduce((sum, payment) => sum + (parseFloat(payment.amount_paid) || 0), 0) || 0;
+          return classSum + studentPayments;
+        }, 0) || 0;
+
+        // Calculate outstanding amount
+        const outstanding = totalExpectedFees - totalPaid;
+
+        // Calculate collection rate
+        const collectionRate = totalExpectedFees > 0 ? (totalPaid / totalExpectedFees) * 100 : 0;
+
+        // Count students who have paid vs not paid
+        const studentsWithPayments = classData.students?.filter(student =>
+          student.student_fees?.some(payment => payment.academic_year === academicYear)
+        ).length || 0;
+
+        const studentsWithoutPayments = totalStudents - studentsWithPayments;
+
+        return {
+          classId: classData.id,
+          className: `${classData.class_name}${classData.section ? ` - ${classData.section}` : ''}`,
+          totalStudents,
+          totalExpectedFees,
+          totalPaid,
+          outstanding,
+          collectionRate: Math.round(collectionRate * 100) / 100,
+          studentsWithPayments,
+          studentsWithoutPayments,
+          feeStructureAmount: totalFeeStructure
+        };
+      });
+
+      // Sort by outstanding amount (highest first)
+      classStats.sort((a, b) => b.outstanding - a.outstanding);
+
+      setClassPaymentStats(classStats);
+
+      // Calculate overall payment summary
+      const summary = classStats.reduce((acc, classData) => ({
+        totalCollected: acc.totalCollected + classData.totalPaid,
+        totalDue: acc.totalDue + classData.totalExpectedFees,
+        totalOutstanding: acc.totalOutstanding + classData.outstanding,
+      }), { totalCollected: 0, totalDue: 0, totalOutstanding: 0 });
+
+      summary.collectionRate = summary.totalDue > 0 ?
+        Math.round((summary.totalCollected / summary.totalDue) * 10000) / 100 : 0;
+
+      setPaymentSummary(summary);
+
+    } catch (error) {
+      console.error('Error calculating class payment stats:', error);
+    }
+  };
+
+
 
   // Handle fee operations (add/edit)
   const handleFeeOperation = async (operation, feeData) => {
@@ -735,7 +854,7 @@ const FeeManagement = () => {
 
   return (
     <View style={styles.container}>
-      <Header title="Fee Management" navigation={navigation} />
+      <Header title="Fee Management" showBack={true} />
       
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -831,22 +950,125 @@ const FeeManagement = () => {
             )}
             {tab === 'payments' && (
               <View style={styles.paymentsContent}>
-                <Text style={styles.sectionTitle}>Recent Payments</Text>
-                <FlatList
-                  data={payments}
-                  keyExtractor={(item) => item.id}
-                  renderItem={({ item }) => (
-                    <View style={styles.paymentItem}>
-                      <Text style={styles.paymentStudentName}>{item.students.full_name}</Text>
-                      <Text style={styles.paymentFeeType}>{item.fee_structure.fee_component}</Text>
-                      <Text style={styles.paymentAmount}>{formatSafeCurrency(item.amount_paid)}</Text>
-                      <Text style={styles.paymentDate}>{formatSafeDate(item.payment_date)}</Text>
+                {/* Payment Summary Cards */}
+                <View style={styles.paymentSummaryContainer}>
+                  <Text style={styles.sectionTitle}>Payment Overview</Text>
+                  <View style={styles.summaryCardsRow}>
+                    <View style={[styles.summaryCard, { backgroundColor: '#4CAF50' }]}>
+                      <Text style={styles.summaryCardValue}>{formatSafeCurrency(paymentSummary.totalCollected)}</Text>
+                      <Text style={styles.summaryCardLabel}>Total Collected</Text>
                     </View>
+                    <View style={[styles.summaryCard, { backgroundColor: '#FF9800' }]}>
+                      <Text style={styles.summaryCardValue}>{formatSafeCurrency(paymentSummary.totalOutstanding)}</Text>
+                      <Text style={styles.summaryCardLabel}>Outstanding</Text>
+                    </View>
+                  </View>
+                  <View style={styles.summaryCardsRow}>
+                    <View style={[styles.summaryCard, { backgroundColor: '#2196F3' }]}>
+                      <Text style={styles.summaryCardValue}>{paymentSummary.collectionRate}%</Text>
+                      <Text style={styles.summaryCardLabel}>Collection Rate</Text>
+                    </View>
+                    <View style={[styles.summaryCard, { backgroundColor: '#9C27B0' }]}>
+                      <Text style={styles.summaryCardValue}>{formatSafeCurrency(paymentSummary.totalDue)}</Text>
+                      <Text style={styles.summaryCardLabel}>Total Due</Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Class-wise Payment Statistics */}
+                <View style={styles.classStatsContainer}>
+                  <Text style={styles.sectionTitle}>Class-wise Payment Status</Text>
+                  {classPaymentStats.length === 0 ? (
+                    <Text style={styles.noDataText}>No payment data available</Text>
+                  ) : (
+                    classPaymentStats.map((classData, index) => (
+                      <TouchableOpacity
+                        key={classData.classId}
+                        style={styles.classStatCard}
+                        onPress={() => navigation.navigate('ClassStudentDetails', { classData })}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.classStatHeader}>
+                          <Text style={styles.classStatName}>{classData.className}</Text>
+                          <View style={styles.classStatHeaderRight}>
+                            <View style={[
+                              styles.collectionRateBadge,
+                              { backgroundColor: classData.collectionRate >= 80 ? '#4CAF50' :
+                                classData.collectionRate >= 50 ? '#FF9800' : '#F44336' }
+                            ]}>
+                              <Text style={styles.collectionRateText}>{classData.collectionRate}%</Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={20} color="#666" style={{ marginLeft: 8 }} />
+                          </View>
+                        </View>
+
+                        <View style={styles.classStatDetails}>
+                          <View style={styles.statRow}>
+                            <Text style={styles.statLabel}>Students: {classData.totalStudents}</Text>
+                            <Text style={styles.statValue}>
+                              Paid: {classData.studentsWithPayments} | Pending: {classData.studentsWithoutPayments}
+                            </Text>
+                          </View>
+
+                          <View style={styles.statRow}>
+                            <Text style={styles.statLabel}>Expected Fees:</Text>
+                            <Text style={styles.statValue}>{formatSafeCurrency(classData.totalExpectedFees)}</Text>
+                          </View>
+
+                          <View style={styles.statRow}>
+                            <Text style={styles.statLabel}>Collected:</Text>
+                            <Text style={[styles.statValue, { color: '#4CAF50' }]}>
+                              {formatSafeCurrency(classData.totalPaid)}
+                            </Text>
+                          </View>
+
+                          <View style={styles.statRow}>
+                            <Text style={styles.statLabel}>Outstanding:</Text>
+                            <Text style={[styles.statValue, { color: '#F44336' }]}>
+                              {formatSafeCurrency(classData.outstanding)}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Progress Bar */}
+                        <View style={styles.progressBarContainer}>
+                          <View style={styles.progressBarBackground}>
+                            <View
+                              style={[
+                                styles.progressBarFill,
+                                {
+                                  width: `${Math.min(classData.collectionRate, 100)}%`,
+                                  backgroundColor: classData.collectionRate >= 80 ? '#4CAF50' :
+                                    classData.collectionRate >= 50 ? '#FF9800' : '#F44336'
+                                }
+                              ]}
+                            />
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    ))
                   )}
-                  ListEmptyComponent={() => (
+                </View>
+
+                {/* Recent Payments */}
+                <View style={styles.recentPaymentsContainer}>
+                  <Text style={styles.sectionTitle}>Recent Payments</Text>
+                  {payments.slice(0, 10).map((item, index) => (
+                    <View key={item.id} style={styles.paymentItem}>
+                      <View style={styles.paymentItemLeft}>
+                        <Text style={styles.paymentStudentName}>{item.students?.full_name || 'Unknown Student'}</Text>
+                        <Text style={styles.paymentFeeType}>{item.fee_component}</Text>
+                      </View>
+                      <View style={styles.paymentItemRight}>
+                        <Text style={styles.paymentAmount}>{formatSafeCurrency(item.amount_paid)}</Text>
+                        <Text style={styles.paymentDate}>{formatSafeDate(item.payment_date)}</Text>
+                      </View>
+                    </View>
+                  ))}
+                  {payments.length === 0 && (
                     <Text style={styles.noPaymentsText}>No payments found</Text>
                   )}
-                />
+                </View>
               </View>
             )}
             {tab === 'reports' && (
@@ -1497,6 +1719,538 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
     marginBottom: 2,
+  },
+  // Payment section styles
+  paymentSummaryContainer: {
+    marginBottom: 20,
+  },
+  summaryCardsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  summaryCard: {
+    flex: 1,
+    backgroundColor: '#4CAF50',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 4,
+    alignItems: 'center',
+  },
+  summaryCardValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  summaryCardLabel: {
+    fontSize: 12,
+    color: '#fff',
+    opacity: 0.9,
+    textAlign: 'center',
+  },
+  classStatsContainer: {
+    marginBottom: 20,
+  },
+  classStatCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  classStatHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  classStatName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    flex: 1,
+  },
+  classStatHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  collectionRateBadge: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  collectionRateText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  classStatDetails: {
+    marginBottom: 12,
+  },
+  statRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  statLabel: {
+    fontSize: 14,
+    color: '#666',
+    flex: 1,
+  },
+  statValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'right',
+  },
+  progressBarContainer: {
+    marginTop: 8,
+  },
+  progressBarBackground: {
+    height: 6,
+    backgroundColor: '#E0E0E0',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#4CAF50',
+    borderRadius: 3,
+  },
+  recentPaymentsContainer: {
+    marginBottom: 20,
+  },
+  paymentItem: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  paymentItemLeft: {
+    flex: 1,
+  },
+  paymentItemRight: {
+    alignItems: 'flex-end',
+  },
+  paymentStudentName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 2,
+  },
+  paymentFeeType: {
+    fontSize: 12,
+    color: '#666',
+  },
+  paymentAmount: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+    marginBottom: 2,
+  },
+  paymentDate: {
+    fontSize: 12,
+    color: '#666',
+  },
+  noPaymentsText: {
+    textAlign: 'center',
+    color: '#666',
+    fontSize: 14,
+    fontStyle: 'italic',
+    marginVertical: 20,
+  },
+  noDataText: {
+    textAlign: 'center',
+    color: '#666',
+    fontSize: 14,
+    fontStyle: 'italic',
+    marginVertical: 20,
+  },
+  // Enhanced Class Students Modal Styles
+  enhancedModalHeader: {
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+    paddingBottom: 16,
+  },
+  modalHeaderTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    marginBottom: 16,
+  },
+  modalHeaderLeft: {
+    flex: 1,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  closeButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+  },
+  searchFilterContainer: {
+    paddingHorizontal: 20,
+  },
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F5F5',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+    height: 44,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+    paddingVertical: 0,
+  },
+  clearSearchButton: {
+    padding: 4,
+  },
+  filterSortContainer: {
+    marginBottom: 12,
+  },
+  filterGroup: {
+    marginBottom: 12,
+  },
+  filterLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  filterScrollView: {
+    flexGrow: 0,
+  },
+  filterChip: {
+    backgroundColor: '#F0F0F0',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginRight: 8,
+  },
+  activeFilterChip: {
+    backgroundColor: '#2196F3',
+  },
+  filterChipText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  activeFilterChipText: {
+    color: '#fff',
+  },
+  resultsSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  resultsText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  searchResultsText: {
+    fontSize: 14,
+    color: '#2196F3',
+    fontWeight: '500',
+    marginLeft: 4,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+  },
+  enhancedClassSummaryCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+  },
+  summaryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  classSummaryTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  summaryBadge: {
+    backgroundColor: '#E3F2FD',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  summaryBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1976D2',
+  },
+  classSummaryStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  classSummaryItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  summaryIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  classSummaryValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  classSummaryLabel: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+  },
+  financialSummary: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  financialItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  financialLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  financialValue: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+  },
+  studentsListContainer: {
+    marginBottom: 20,
+  },
+  studentsListHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  clearFiltersButton: {
+    backgroundColor: '#E3F2FD',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  clearFiltersText: {
+    fontSize: 12,
+    color: '#1976D2',
+    fontWeight: '600',
+  },
+  emptyStateContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  resetFiltersButton: {
+    backgroundColor: '#2196F3',
+    borderRadius: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  resetFiltersText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  studentDetailCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 16,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    borderLeftWidth: 4,
+    borderLeftColor: '#E0E0E0',
+  },
+  studentDetailHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  studentInfo: {
+    flex: 1,
+  },
+  studentName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  studentDetails: {
+    fontSize: 12,
+    color: '#666',
+  },
+  paymentStatusBadge: {
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  paymentStatusText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  studentFeeDetails: {
+    marginBottom: 12,
+  },
+  feeDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  feeDetailLabel: {
+    fontSize: 14,
+    color: '#666',
+    flex: 1,
+  },
+  feeDetailValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'right',
+  },
+  studentProgressContainer: {
+    marginBottom: 12,
+  },
+  paymentHistoryContainer: {
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  paymentHistoryTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  paymentHistoryItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  paymentHistoryComponent: {
+    fontSize: 12,
+    color: '#666',
+    flex: 1,
+  },
+  paymentHistoryDetails: {
+    alignItems: 'flex-end',
+  },
+  paymentHistoryAmount: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4CAF50',
+  },
+  paymentHistoryDate: {
+    fontSize: 10,
+    color: '#999',
+  },
+  paymentHistoryMode: {
+    fontSize: 10,
+    color: '#666',
+    fontStyle: 'italic',
+  },
+  morePaymentsText: {
+    fontSize: 12,
+    color: '#2196F3',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  lastPaymentText: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  noStudentsText: {
+    textAlign: 'center',
+    color: '#666',
+    fontSize: 14,
+    fontStyle: 'italic',
+    marginVertical: 20,
   },
 });
 

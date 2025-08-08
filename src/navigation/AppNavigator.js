@@ -21,6 +21,7 @@ import SubjectsTimetable from '../screens/admin/SubjectsTimetable';
 import ExamsMarks from '../screens/admin/ExamsMarks';
 import AttendanceManagement from '../screens/admin/AttendanceManagement';
 import FeeManagement from '../screens/admin/FeeManagement';
+import ClassStudentDetails from '../screens/admin/ClassStudentDetails';
 import AnalyticsReports from '../screens/admin/AnalyticsReports';
 import NotificationManagement from '../screens/admin/NotificationManagement';
 import StudentDetails from '../screens/admin/StudentDetails';
@@ -362,6 +363,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="SubjectsTimetable" component={SubjectsTimetable} />
                 <Stack.Screen name="AttendanceManagement" component={AttendanceManagement} />
                 <Stack.Screen name="FeeManagement" component={FeeManagement} />
+                <Stack.Screen name="ClassStudentDetails" component={ClassStudentDetails} />
                 <Stack.Screen name="FeeClassDetails" component={FeeClassDetails} />
                 <Stack.Screen name="ExamsMarks" component={ExamsMarks} />
                 <Stack.Screen name="NotificationManagement" component={NotificationManagement} />

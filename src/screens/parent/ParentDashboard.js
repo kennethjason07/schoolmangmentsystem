@@ -759,12 +759,12 @@ const ParentDashboard = ({ navigation }) => {
               <Text style={styles.viewAllText}>View All</Text>
             </TouchableOpacity>
           </View>
-          <FlatList
-            data={exams.slice(0, 4)}
-            renderItem={renderExamCard}
-            keyExtractor={(item, index) => index.toString()}
-            scrollEnabled={false}
-          />
+          {/* Replace FlatList with map to avoid VirtualizedList nesting */}
+          {exams.slice(0, 4).map((item, index) => (
+            <View key={index.toString()}>
+              {renderExamCard({ item, index })}
+            </View>
+          ))}
         </View>
 
         {/* Upcoming Events */}
@@ -775,12 +775,12 @@ const ParentDashboard = ({ navigation }) => {
               <Text style={styles.viewAllText}>View All</Text>
             </TouchableOpacity>
           </View>
-          <FlatList
-            data={events.slice(0, 4)}
-            renderItem={renderEventItem}
-            keyExtractor={(item, index) => index.toString()}
-            scrollEnabled={false}
-          />
+          {/* Replace FlatList with map to avoid VirtualizedList nesting */}
+          {events.slice(0, 4).map((item, index) => (
+            <View key={index.toString()}>
+              {renderEventItem({ item, index })}
+            </View>
+          ))}
         </View>
 
       </ScrollView>

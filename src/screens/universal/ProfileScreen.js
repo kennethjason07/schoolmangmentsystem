@@ -47,12 +47,14 @@ const ProfileScreen = () => {
   const loadUserData = async () => {
     try {
       setLoading(true);
-      
+
       if (!authUser) {
         console.log('No authenticated user found');
         return;
       }
-      
+
+      console.log('Loading user data for:', authUser.id);
+
       // Get user profile from users table
       const { data: profileData, error: profileError } = await supabase
         .from('users')
@@ -64,6 +66,13 @@ const ProfileScreen = () => {
         console.error('Profile error:', profileError);
         throw profileError;
       }
+
+      if (!profileData) {
+        Alert.alert('Error', 'User profile not found. Please contact support.');
+        return;
+      }
+
+      console.log('Loaded profile data:', profileData);
 
       // Get user role name
       const { data: roleData, error: roleError } = await supabase
@@ -83,9 +92,15 @@ const ProfileScreen = () => {
         email: profileData?.email || '',
         contact: profileData?.phone || '',
       });
+
+      console.log('Form populated with:', {
+        name: profileData?.full_name || '',
+        email: profileData?.email || '',
+        contact: profileData?.phone || '',
+      });
     } catch (error) {
       console.error('Error loading user data:', error);
-      Alert.alert('Error', 'Failed to load profile data. Please try again.');
+      Alert.alert('Error', `Failed to load profile data: ${error.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -119,24 +134,54 @@ const ProfileScreen = () => {
         return;
       }
 
-      const { error } = await supabase
+      // Validate required fields
+      if (!form.name.trim()) {
+        Alert.alert('Error', 'Name is required');
+        return;
+      }
+
+      if (!form.email.trim()) {
+        Alert.alert('Error', 'Email is required');
+        return;
+      }
+
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(form.email)) {
+        Alert.alert('Error', 'Please enter a valid email address');
+        return;
+      }
+
+      console.log('Updating profile for user ID:', authUser.id);
+      console.log('Update data:', {
+        full_name: form.name.trim(),
+        email: form.email.trim(),
+        phone: form.contact.trim(),
+      });
+
+      const { data, error } = await supabase
         .from('users')
         .update({
-          full_name: form.name,
-          email: form.email,
-          phone: form.contact,
+          full_name: form.name.trim(),
+          email: form.email.trim(),
+          phone: form.contact.trim(),
           updated_at: new Date().toISOString()
         })
-        .eq('id', authUser.id);
+        .eq('id', authUser.id)
+        .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase update error:', error);
+        throw error;
+      }
 
+      console.log('Profile update successful:', data);
       Alert.alert('Success', 'Profile updated successfully');
       setEditing(false);
       loadUserData();
     } catch (error) {
       console.error('Error updating profile:', error);
-      Alert.alert('Error', 'Failed to update profile');
+      Alert.alert('Error', `Failed to update profile: ${error.message || 'Unknown error'}`);
     }
   };
 

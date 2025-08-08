@@ -579,22 +579,22 @@ const StudentOverview = ({ navigation }) => {
             </TouchableOpacity>
           </View>
 
-          <FlatList
-            data={stats.recentEnrollments.slice(0, 5)}
-            keyExtractor={(item) => `${item.id}`}
-            renderItem={renderStudentCard}
-            scrollEnabled={false}
-            showsVerticalScrollIndicator={false}
-            ListEmptyComponent={
-              <View style={styles.emptyContainer}>
-                <Ionicons name="people-outline" size={48} color="#ccc" />
-                <Text style={styles.emptyText}>No students found</Text>
-                <Text style={styles.emptySubtext}>
-                  Try adjusting your filters
-                </Text>
+          {/* Replace FlatList with map to avoid VirtualizedList nesting */}
+          {stats.recentEnrollments.slice(0, 5).length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="people-outline" size={48} color="#ccc" />
+              <Text style={styles.emptyText}>No students found</Text>
+              <Text style={styles.emptySubtext}>
+                Try adjusting your filters
+              </Text>
+            </View>
+          ) : (
+            stats.recentEnrollments.slice(0, 5).map((item) => (
+              <View key={`${item.id}`}>
+                {renderStudentCard({ item })}
               </View>
-            }
-          />
+            ))
+          )}
         </View>
 
         {/* Quick Actions */}

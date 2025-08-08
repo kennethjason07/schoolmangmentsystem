@@ -3,17 +3,21 @@
  */
 
 /**
- * Format a number as currency
+ * Format a number as currency in Indian Rupees
  * @param {number} amount - The amount to format
- * @param {string} currency - The currency symbol (default: '$')
+ * @param {string} currency - The currency symbol (default: '₹')
  * @returns {string} - Formatted currency string
  */
-export const formatCurrency = (amount, currency = '$') => {
+export const formatCurrency = (amount, currency = '₹') => {
   if (amount === null || amount === undefined || isNaN(amount)) {
     return `${currency}0.00`;
   }
-  
-  return `${currency}${Number(amount).toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,')}`;
+
+  const numAmount = Number(amount);
+  return `${currency}${numAmount.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })}`;
 };
 
 /**

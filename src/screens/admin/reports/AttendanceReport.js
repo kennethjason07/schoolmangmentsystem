@@ -529,22 +529,22 @@ const AttendanceReport = ({ navigation }) => {
             </TouchableOpacity>
           </View>
 
-          <FlatList
-            data={attendanceData.slice(0, 20)} // Show latest 20 records
-            keyExtractor={(item) => `${item.id}`}
-            renderItem={renderAttendanceRecord}
-            scrollEnabled={false}
-            showsVerticalScrollIndicator={false}
-            ListEmptyComponent={
-              <View style={styles.emptyContainer}>
-                <Ionicons name="document-text-outline" size={48} color="#ccc" />
-                <Text style={styles.emptyText}>No attendance records found</Text>
-                <Text style={styles.emptySubtext}>
-                  Try adjusting your filters or date range
-                </Text>
+          {/* Replace FlatList with map to avoid VirtualizedList nesting */}
+          {attendanceData.slice(0, 20).length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="document-text-outline" size={48} color="#ccc" />
+              <Text style={styles.emptyText}>No attendance records found</Text>
+              <Text style={styles.emptySubtext}>
+                Try adjusting your filters or date range
+              </Text>
+            </View>
+          ) : (
+            attendanceData.slice(0, 20).map((item) => (
+              <View key={`${item.id}`}>
+                {renderAttendanceRecord({ item })}
               </View>
-            }
-          />
+            ))
+          )}
         </View>
       </ScrollView>
 

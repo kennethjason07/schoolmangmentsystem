@@ -16,19 +16,19 @@ const StudentDashboard = ({ navigation }) => {
   const [notifications, setNotifications] = useState([]);
   // Removed todayClasses as it's not used in the new design
 
-  // Handle navigation for stat cards - SIMPLE SOLUTION
+  // Handle navigation for stat cards - FIXED SOLUTION
   const handleCardNavigation = (cardKey) => {
     switch (cardKey) {
       case 'assignments':
         navigation.navigate('Assignments');
         break;
       case 'attendance':
-        console.log('Navigating to attendance tab');
-        navigation.navigate('Marks', { activeTab: 'attendance' });
+        console.log('Navigating to attendance screen');
+        navigation.navigate('Attendance');
         break;
       case 'marks':
-        console.log('Navigating to marks tab');
-        navigation.navigate('Marks', { activeTab: 'marks' });
+        console.log('Navigating to marks screen');
+        navigation.navigate('Marks');
         break;
       case 'notifications':
         navigation.navigate('StudentNotifications');
