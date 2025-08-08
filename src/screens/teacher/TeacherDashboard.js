@@ -9,6 +9,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Platform } from 'react-native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import MessageBadge from '../../components/MessageBadge';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -1041,8 +1042,9 @@ function groupAndSortSchedule(schedule) {
               style={styles.quickActionCard}
               onPress={() => navigation.navigate('Chat')}
             >
-              <View style={[styles.actionIcon, { backgroundColor: '#00bcd4' }]}>
+              <View style={[styles.actionIcon, { backgroundColor: '#00bcd4', position: 'relative' }]}>
                 <Ionicons name="chatbubbles" size={24} color="#fff" />
+                <MessageBadge userType="teacher" style={{ top: -8, right: -8 }} />
               </View>
               <Text style={styles.actionTitle}>Messages</Text>
               <Text style={styles.actionSubtitle}>Chat with parents</Text>

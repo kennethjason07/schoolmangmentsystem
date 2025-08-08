@@ -1,216 +1,792 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image, ActivityIndicator, Alert, Keyboard, Linking, Modal } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
-import { useRef } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-import * as DocumentPicker from 'expo-document-picker';
-import * as Animatable from 'react-native-animatable';
+import { useMessageStatus } from '../../utils/useMessageStatus';
 
 const TeacherChat = () => {
-  const [selectedParent, setSelectedParent] = useState(null);
+  const { user } = useAuth();
+  const { markMessagesAsRead } = useMessageStatus();
+  const [activeTab, setActiveTab] = useState('parents'); // 'parents' or 'students'
+  const [parents, setParents] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [selectedContact, setSelectedContact] = useState(null); // Can be parent or student
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const [parents, setParents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState(null);
-  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
-  const [showBroadcastModal, setShowBroadcastModal] = useState(false);
-  const [broadcastMessage, setBroadcastMessage] = useState('');
-  const [sendingBroadcast, setSendingBroadcast] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState({}); // Track unread messages per contact
   const flatListRef = useRef(null);
-  const { user } = useAuth();
 
-  // Get teacher user ID from linked_teacher_id
+  // Keyboard visibility listeners
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
+      setKeyboardVisible(true);
+    });
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      keyboardDidShowListener?.remove();
+      keyboardDidHideListener?.remove();
+    };
+  }, []);
+
+  // Helper function to get parent's user ID from student
   const getParentUserId = async (studentId) => {
     try {
-      const { data, error } = await supabase
+      console.log('🔍 Looking for parent user ID for student:', studentId);
+
+      // Method 1: Try via linked_parent_of
+      const { data: parentUser, error: parentError } = await supabase
         .from(TABLES.USERS)
-        .select('id')
+        .select('id, email, full_name')
         .eq('linked_parent_of', studentId)
         .single();
-      
-      if (error) {
-        console.log('Error getting parent user ID:', error);
-        return null;
+
+      if (parentUser && !parentError) {
+        console.log('✅ Found parent user via linked_parent_of:', parentUser);
+        return {
+          id: parentUser.id,
+          name: parentUser.full_name || parentUser.email,
+          email: parentUser.email
+        };
       }
-      return data?.id;
-    } catch (err) {
-      console.log('Error in getParentUserId:', err);
+
+      console.log('❌ Parent user not found via linked_parent_of, error:', parentError);
+
+      // Method 2: Get student data and find parent via parent_id
+      const { data: studentData, error: studentError } = await supabase
+        .from(TABLES.STUDENTS)
+        .select('parent_id')
+        .eq('id', studentId)
+        .single();
+
+      if (!studentError && studentData?.parent_id) {
+        // Get parent user info
+        const { data: parentUserData, error: parentUserError } = await supabase
+          .from(TABLES.USERS)
+          .select('id, email, full_name')
+          .eq('id', studentData.parent_id)
+          .single();
+
+        if (!parentUserError && parentUserData) {
+          console.log('✅ Found parent via student.parent_id:', parentUserData);
+          return {
+            id: parentUserData.id,
+            name: parentUserData.full_name || parentUserData.email,
+            email: parentUserData.email
+          };
+        }
+      }
+
+      console.log('⚠️ No parent found for student:', studentId);
+      return null;
+    } catch (error) {
+      console.log('💥 Error getting parent user ID:', error);
       return null;
     }
   };
 
-  // Fetch parents and chat data
-  const fetchParentsAndChats = async () => {
+  // Reset selection and messages on screen focus
+  useFocusEffect(
+    React.useCallback(() => {
+      setSelectedContact(null);
+      setMessages([]);
+      fetchData();
+    }, [])
+  );
+
+  // Fetch unread message counts for all contacts
+  const fetchUnreadCounts = async () => {
     try {
-      setLoading(true);
-      setError(null);
-
-      // Get teacher info from users table
-      const { data: userInfo, error: userError } = await supabase
-        .from('users')
-        .select('linked_teacher_id')
-        .eq('id', user.id)
-        .single();
-
-      if (userError || !userInfo?.linked_teacher_id) {
-        throw new Error('Teacher information not found');
-      }
-
-      const teacherId = userInfo.linked_teacher_id;
-
-      // Get all messages for this teacher
-      const { data: allMessages, error: messagesError } = await supabase
+      if (!user?.id) return;
+      
+      // Get all unread messages for current user
+      const { data: unreadMessages, error } = await supabase
         .from(TABLES.MESSAGES)
-        .select('*')
-        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-        .order('sent_at', { ascending: true });
-
-      if (messagesError && messagesError.code !== '42P01') {
-        console.log('Messages error:', messagesError);
+        .select('sender_id')
+        .eq('receiver_id', user.id)
+        .eq('is_read', false);
+      
+      if (error && error.code !== '42P01') {
+        console.log('Error fetching unread counts:', error);
+        return;
       }
-
-      // Group messages by parent (sender/receiver)
-      const messagesByParent = {};
-      if (allMessages) {
-        allMessages.forEach(msg => {
-          const parentUserId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
-          if (!messagesByParent[parentUserId]) {
-            messagesByParent[parentUserId] = [];
-          }
-          messagesByParent[parentUserId].push({
-            id: msg.id,
-            message: msg.message,
-            sender_id: msg.sender_id,
-            receiver_id: msg.receiver_id,
-            sent_at: msg.sent_at,
-            student_id: msg.student_id,
-            attachment_url: msg.attachment_url,
-            attachment_type: msg.attachment_type
-          });
+      
+      // Count unique senders
+      const counts = {};
+      if (unreadMessages) {
+        unreadMessages.forEach(msg => {
+          counts[msg.sender_id] = (counts[msg.sender_id] || 0) + 1;
         });
       }
+      
+      console.log('📊 Unread message counts:', counts);
+      setUnreadCounts(counts);
+    } catch (error) {
+      console.log('Error in fetchUnreadCounts:', error);
+    }
+  };
 
-      // Get students from classes this teacher teaches
-      const { data: teacherClasses, error: classError } = await supabase
-        .from('timetable_entries')
-        .select(`
-          class_id,
-          classes(id, class_name, section)
-        `)
-        .eq('teacher_id', teacherId);
-
-      if (classError) {
-        console.log('Class error:', classError);
-      }
-
-      // Get unique class IDs
-      const classIds = [...new Set(teacherClasses?.map(tc => tc.class_id) || [])];
-
-      // Get students from these classes
-      const { data: students, error: studentsError } = await supabase
-        .from('students')
-        .select(`
-          id,
-          name,
-          roll_no,
-          class_id,
-          parent_id,
-          classes(class_name, section)
-        `)
-        .in('class_id', classIds);
-
-      if (studentsError) {
-        console.log('Students error:', studentsError);
-      }
-
-      // Get parent information for each student
-      let allParents = [];
-      if (students) {
-        for (const student of students) {
-          if (student.parent_id) {
-            // Get parent user info
-            const { data: parentUser, error: parentUserError } = await supabase
-              .from('users')
-              .select('id, full_name, email')
-              .eq('id', student.parent_id)
-              .single();
-
-            if (!parentUserError && parentUser) {
-              const existingParent = allParents.find(p => p.userId === parentUser.id);
-              if (existingParent) {
-                // Add student to existing parent
-                existingParent.students.push({
-                  id: student.id,
-                  name: student.name,
-                  roll_no: student.roll_no,
-                  class: `${student.classes?.class_name} ${student.classes?.section}`
-                });
-              } else {
-                // Add new parent
-                allParents.push({
-                  id: student.parent_id,
-                  userId: parentUser.id,
-                  name: parentUser.full_name || parentUser.email,
-                  email: parentUser.email,
-                  students: [{
-                    id: student.id,
-                    name: student.name,
-                    roll_no: student.roll_no,
-                    class: `${student.classes?.class_name} ${student.classes?.section}`
-                  }],
-                  messages: messagesByParent[parentUser.id] || []
-                });
-              }
-            }
-          }
-        }
-      }
-
-      console.log('Final parents array:', allParents);
-      setParents(allParents);
+  // Fetch both parents and students data
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      await Promise.all([
+        fetchParents(),
+        fetchStudents(),
+        fetchUnreadCounts()
+      ]);
     } catch (err) {
-      console.error('Error fetching parents and chats:', err);
+      console.error('Error fetching data:', err);
       setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Reset parent selection and messages on screen focus
-  useFocusEffect(
-    React.useCallback(() => {
-      setSelectedParent(null);
-      setMessages([]);
-      fetchParentsAndChats();
-    }, [])
-  );
+  // Fetch parents of students assigned to the teacher
+  const fetchParents = async () => {
+    try {
+      // Get teacher info from users table
+      const { data: userInfo, error: userError } = await supabase
+        .from(TABLES.USERS)
+        .select('linked_teacher_id')
+        .eq('id', user.id)
+        .single();
 
-  // Select a parent and load chat
-  const handleSelectParent = (parent) => {
-    setSelectedParent(parent);
-    setMessages(parent.messages || []);
+      if (userError || !userInfo?.linked_teacher_id) {
+        throw new Error('Teacher information not found. Please contact administrator.');
+      }
+
+      const teacherId = userInfo.linked_teacher_id;
+
+      // Get students from classes this teacher teaches
+      const uniqueParents = [];
+      const seen = new Set();
+
+      // Method 1: Get students via class assignments (teacher as class teacher)
+      const { data: classTeacherClasses, error: classTeacherError } = await supabase
+        .from(TABLES.CLASSES)
+        .select(`
+          id,
+          class_name,
+          section,
+          students!inner(
+            id,
+            name,
+            roll_no,
+            parent_id
+          )
+        `)
+        .eq('class_teacher_id', teacherId);
+
+      if (!classTeacherError && classTeacherClasses) {
+        console.log('📚 Found classes as class teacher:', classTeacherClasses.length);
+        
+        for (const classInfo of classTeacherClasses) {
+          if (classInfo.students) {
+            for (const student of classInfo.students) {
+              const parentData = await getParentUserId(student.id);
+              
+              if (parentData && !seen.has(parentData.id)) {
+                uniqueParents.push({
+                  id: parentData.id,
+                  name: parentData.name,
+                  email: parentData.email,
+                  students: [{
+                    id: student.id,
+                    name: student.name,
+                    roll_no: student.roll_no,
+                    class: `${classInfo.class_name} ${classInfo.section}`
+                  }],
+                  role: 'class_parent',
+                  canMessage: true
+                });
+                seen.add(parentData.id);
+              }
+            }
+          }
+        }
+      }
+
+      // Method 2: Get students via subject assignments
+      const { data: subjectTeaching, error: subjectError } = await supabase
+        .from(TABLES.TEACHER_SUBJECTS)
+        .select(`
+          subject_id,
+          subjects!inner(
+            id,
+            name,
+            class_id,
+            classes!inner(
+              id,
+              class_name,
+              section,
+              students!inner(
+                id,
+                name,
+                roll_no,
+                parent_id
+              )
+            )
+          )
+        `)
+        .eq('teacher_id', teacherId);
+
+      if (!subjectError && subjectTeaching) {
+        for (const subject of subjectTeaching) {
+          if (subject.subjects?.classes?.students) {
+            for (const student of subject.subjects.classes.students) {
+              const parentData = await getParentUserId(student.id);
+              
+              if (parentData && !seen.has(parentData.id)) {
+                // Check if parent already exists (from class teacher assignments)
+                const existingParent = uniqueParents.find(p => p.id === parentData.id);
+                
+                if (existingParent) {
+                  // Add student to existing parent if not already there
+                  const studentExists = existingParent.students.some(s => s.id === student.id);
+                  if (!studentExists) {
+                    existingParent.students.push({
+                      id: student.id,
+                      name: student.name,
+                      roll_no: student.roll_no,
+                      class: `${subject.subjects.classes.class_name} ${subject.subjects.classes.section}`,
+                      subject: subject.subjects.name
+                    });
+                  }
+                } else {
+                  uniqueParents.push({
+                    id: parentData.id,
+                    name: parentData.name,
+                    email: parentData.email,
+                    students: [{
+                      id: student.id,
+                      name: student.name,
+                      roll_no: student.roll_no,
+                      class: `${subject.subjects.classes.class_name} ${subject.subjects.classes.section}`,
+                      subject: subject.subjects.name
+                    }],
+                    role: 'subject_parent',
+                    canMessage: true
+                  });
+                  seen.add(parentData.id);
+                }
+              }
+            }
+          }
+        }
+      }
+
+
+      setParents(uniqueParents);
+    } catch (err) {
+      console.error('Fetch parents error:', err);
+      throw err;
+    }
   };
+
+  // Fetch students assigned to the teacher
+  const fetchStudents = async () => {
+    try {
+      console.log('🔍 DEBUG: Starting comprehensive teacher data analysis');
+      console.log('Current user:', user);
+      console.log('📍 fetchStudents function called at:', new Date().toISOString());
+      
+      // Check current user's complete info
+      const { data: userInfo, error: userError } = await supabase
+        .from(TABLES.USERS)
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      console.log('👤 Complete user info:', userInfo, 'Error:', userError);
+
+      // Check all teachers in the system
+      const { data: allTeachers, error: teachersError } = await supabase
+        .from(TABLES.TEACHERS)
+        .select('*');
+      
+      console.log('🏫 All teachers in system:', allTeachers, 'Error:', teachersError);
+      
+      // Skip teacher by email check since email column doesn't exist
+      console.log('📧 Skipping teacher email check - email column does not exist in teachers table');
+      const teacherByEmail = null;
+      
+      // Skip users by role check since role column doesn't exist
+      console.log('👨‍🏫 Skipping teacher role check - role column does not exist in users table');
+      const teacherUsers = null;
+      
+      // Find teacher ID - multiple methods
+      let teacherId = null;
+      let useAllStudents = false;
+      
+      // Method 1: From user's linked_teacher_id
+      if (userInfo?.linked_teacher_id) {
+        teacherId = userInfo.linked_teacher_id;
+        console.log('✅ Found teacher ID from linked_teacher_id:', teacherId);
+      }
+      
+      // Method 2: Skip teacher by email (column doesn't exist)
+      // teacherId remains null from this method
+      
+      // Method 3: Use first teacher if only one exists (fallback for testing)
+      if (!teacherId && allTeachers?.length === 1) {
+        teacherId = allTeachers[0].id;
+        console.log('⚠️ Using single teacher ID as fallback:', teacherId);
+      }
+      
+      // Method 4: If still no teacher ID, show all students for now (testing mode)
+      if (!teacherId) {
+        console.log('⚠️ No teacher ID found, using fallback mode to show all students');
+        useAllStudents = true;
+      } else {
+        console.log('🎯 Using teacher ID:', teacherId);
+      }
+      
+      const uniqueStudents = [];
+      const seen = new Set();
+      
+      // If using fallback mode (no teacher ID), get all students
+      if (useAllStudents) {
+        console.log('🔄 FALLBACK MODE: Fetching all students for testing...');
+        
+        const { data: allStudentsData, error: allStudentsError } = await supabase
+          .from(TABLES.STUDENTS)
+          .select(`
+            id,
+            name,
+            roll_no,
+            class_id,
+            classes(
+              class_name,
+              section
+            )
+          `);
+          
+        console.log('📚 All students query result:', {
+          error: allStudentsError,
+          students: allStudentsData?.length || 0,
+          data: allStudentsData?.slice(0, 5) // Show first 5 for debugging
+        });
+        
+        if (!allStudentsError && allStudentsData) {
+          for (const student of allStudentsData) {
+            console.log('👦 Processing fallback student:', student.name, 'Class:', student.classes?.class_name, student.classes?.section);
+            
+            // Check if student has a user account for messaging
+            const { data: studentUser, error: studentUserError } = await supabase
+              .from(TABLES.USERS)
+              .select('id, email, full_name')
+              .eq('linked_student_id', student.id)
+              .single();
+
+            const canMessage = !studentUserError && studentUser;
+            
+            console.log('💬 Fallback student messaging check:', {
+              student: student.name,
+              canMessage,
+              userId: canMessage ? studentUser.id : null,
+              error: studentUserError?.message
+            });
+            
+            const className = student.classes ? `${student.classes.class_name} ${student.classes.section}` : 'Unknown Class';
+            
+            uniqueStudents.push({
+              id: student.id,
+              name: student.name,
+              roll_no: student.roll_no,
+              email: student.email || null, // email might not exist
+              phone: student.phone || null, // phone might not exist
+              class: className,
+              role: 'class_student',
+              canMessage: canMessage,
+              userId: canMessage ? studentUser.id : null
+            });
+          }
+        }
+      } else {
+        // Normal mode with teacher ID
+        // Method 1: Get students from classes this teacher teaches (as class teacher)
+        const { data: classTeacherClasses, error: classTeacherError } = await supabase
+          .from(TABLES.CLASSES)
+          .select(`
+            id,
+            class_name,
+            section,
+            students!inner(
+              id,
+              name,
+              roll_no
+            )
+          `)
+          .eq('class_teacher_id', teacherId);
+
+        console.log('📚 Class teacher query result:', {
+          error: classTeacherError,
+          classes: classTeacherClasses?.length || 0,
+          data: classTeacherClasses
+        });
+        
+        if (!classTeacherError && classTeacherClasses) {
+          console.log('✅ Found', classTeacherClasses.length, 'classes as class teacher');
+          
+          for (const classInfo of classTeacherClasses) {
+            console.log('📝 Processing class:', classInfo.class_name, classInfo.section, 'Students:', classInfo.students?.length || 0);
+            
+            if (classInfo.students) {
+              for (const student of classInfo.students) {
+                console.log('👦 Processing student:', student.name, 'ID:', student.id);
+                
+                if (!seen.has(student.id)) {
+                  // Check if student has a user account for messaging
+                  const { data: studentUser, error: studentUserError } = await supabase
+                    .from(TABLES.USERS)
+                    .select('id, email, full_name')
+                    .eq('linked_student_id', student.id)
+                    .single();
+
+                  const canMessage = !studentUserError && studentUser;
+                  
+                  console.log('💬 Student messaging check:', {
+                    student: student.name,
+                    canMessage,
+                    userId: canMessage ? studentUser.id : null,
+                    error: studentUserError?.message
+                  });
+                  
+                  uniqueStudents.push({
+                    id: student.id,
+                    name: student.name,
+                    roll_no: student.roll_no,
+                    email: student.email || null, // email might not exist
+                    phone: student.phone || null, // phone might not exist
+                    class: `${classInfo.class_name} ${classInfo.section}`,
+                    role: 'class_student',
+                    canMessage: canMessage,
+                    userId: canMessage ? studentUser.id : null
+                  });
+                  seen.add(student.id);
+                }
+              }
+            }
+          }
+        }
+
+        // Method 2: Get students via subject assignments
+        const { data: subjectTeaching, error: subjectError } = await supabase
+          .from(TABLES.TEACHER_SUBJECTS)
+          .select(`
+            subject_id,
+            subjects!inner(
+              id,
+              name,
+              class_id,
+              classes!inner(
+                id,
+                class_name,
+                section,
+                students!inner(
+                  id,
+                  name,
+                  roll_no
+                )
+              )
+            )
+          `)
+          .eq('teacher_id', teacherId);
+      
+        console.log('📖 Subject teaching query result:', {
+          error: subjectError,
+          subjects: subjectTeaching?.length || 0,
+          data: subjectTeaching
+        });
+        
+        if (!subjectError && subjectTeaching) {
+          console.log('✅ Found', subjectTeaching.length, 'subject assignments');
+          
+          for (const subject of subjectTeaching) {
+            console.log('📖 Processing subject:', subject.subjects?.name, 'Class:', subject.subjects?.classes?.class_name, subject.subjects?.classes?.section);
+            
+            if (subject.subjects?.classes?.students) {
+              console.log('👥 Students in this subject:', subject.subjects.classes.students.length);
+              
+              for (const student of subject.subjects.classes.students) {
+                console.log('👦 Processing subject student:', student.name, 'ID:', student.id);
+                
+                if (!seen.has(student.id)) {
+                  // Check if student has a user account for messaging
+                  const { data: studentUser, error: studentUserError } = await supabase
+                    .from(TABLES.USERS)
+                    .select('id, email, full_name')
+                    .eq('linked_student_id', student.id)
+                    .single();
+
+                  const canMessage = !studentUserError && studentUser;
+                  
+                  console.log('💬 Subject student messaging check:', {
+                    student: student.name,
+                    canMessage,
+                    userId: canMessage ? studentUser.id : null,
+                    error: studentUserError?.message
+                  });
+                  
+                  uniqueStudents.push({
+                    id: student.id,
+                    name: student.name,
+                    roll_no: student.roll_no,
+                    email: student.email || null, // email might not exist
+                    phone: student.phone || null, // phone might not exist
+                    class: `${subject.subjects.classes.class_name} ${subject.subjects.classes.section}`,
+                    subject: subject.subjects.name,
+                    role: 'subject_student',
+                    canMessage: canMessage,
+                    userId: canMessage ? studentUser.id : null
+                  });
+                  seen.add(student.id);
+                } else {
+                  // Add subject info to existing student
+                  const existingStudent = uniqueStudents.find(s => s.id === student.id);
+                  if (existingStudent && !existingStudent.subject) {
+                    existingStudent.subject = subject.subjects.name;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } // End of normal mode
+
+      console.log('🏁 Final students result:', {
+        totalStudents: uniqueStudents.length,
+        students: uniqueStudents.map(s => ({
+          name: s.name,
+          class: s.class,
+          role: s.role,
+          canMessage: s.canMessage,
+          userId: s.userId
+        }))
+      });
+      
+      // Special check for Victor and Class 10 students
+      const victorStudents = uniqueStudents.filter(s => s.name.toLowerCase().includes('victor'));
+      const class10Students = uniqueStudents.filter(s => s.class.includes('10'));
+      console.log('👤 Victor students found:', victorStudents);
+      console.log('🔟 Class 10 students found:', class10Students);
+      
+      // Log first 10 students for debugging UI issues
+      console.log('📋 First 10 students for UI debugging:', uniqueStudents.slice(0, 10).map(s => ({
+        id: s.id,
+        name: s.name,
+        class: s.class,
+        canMessage: s.canMessage,
+        userId: s.userId
+      })));
+      
+      console.log('🔧 About to call setStudents with', uniqueStudents.length, 'students');
+      setStudents(uniqueStudents);
+      
+      // Verify state was set
+      setTimeout(() => {
+        console.log('✅ Students state verification - should have', uniqueStudents.length, 'students');
+      }, 100);
+    } catch (err) {
+      console.error('Fetch students error:', err);
+      throw err;
+    }
+  };
+
+  // Fetch chat messages for selected contact (parent or student)
+  const fetchMessages = async (contact) => {
+    try {
+      // Don't set loading if this is a refresh call (contact is already selected)
+      if (!selectedContact) {
+        setLoading(true);
+        setSelectedContact(contact);
+      }
+      setError(null);
+
+      // Get the contact's user ID
+      const contactUserId = contact.userId || contact.id;
+      
+      // Get messages with this contact
+      try {
+        console.log('🔄 Fetching messages for contact:', contact.name, 'User ID:', contactUserId);
+        
+        // Try multiple query approaches for better compatibility
+        let msgs = null;
+        let msgError = null;
+        
+        // Method 1: OR query (preferred)
+        const query1 = await supabase
+          .from(TABLES.MESSAGES)
+          .select('*')
+          .or(`(sender_id.eq.${user.id},receiver_id.eq.${contactUserId}),(sender_id.eq.${contactUserId},receiver_id.eq.${user.id})`)
+          .order('sent_at', { ascending: true });
+          
+        if (!query1.error) {
+          msgs = query1.data;
+        } else {
+          console.log('OR query failed, trying alternative:', query1.error);
+          
+          // Method 2: Two separate queries and combine
+          const [sentMsgs, receivedMsgs] = await Promise.all([
+            supabase
+              .from(TABLES.MESSAGES)
+              .select('*')
+              .eq('sender_id', user.id)
+              .eq('receiver_id', contactUserId),
+            supabase
+              .from(TABLES.MESSAGES)
+              .select('*')
+              .eq('sender_id', contactUserId)
+              .eq('receiver_id', user.id)
+          ]);
+          
+          if (!sentMsgs.error && !receivedMsgs.error) {
+            msgs = [...(sentMsgs.data || []), ...(receivedMsgs.data || [])]
+              .sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
+          } else {
+            msgError = sentMsgs.error || receivedMsgs.error;
+          }
+        }
+
+        console.log('📨 Messages query result:', { msgsCount: msgs?.length || 0, msgError });
+        
+        if (msgs) {
+          msgs.forEach((msg, index) => {
+            console.log(`Message ${index + 1}:`, {
+              id: msg.id,
+              sender_id: msg.sender_id,
+              receiver_id: msg.receiver_id,
+              message: msg.message?.substring(0, 50) + '...',
+              sent_at: msg.sent_at
+            });
+          });
+        }
+
+        if (msgError && msgError.code !== '42P01') {
+          throw msgError;
+        }
+        
+        const formattedMessages = (msgs || []).map(msg => ({
+          ...msg,
+          id: msg.id || msg.created_at || Date.now().toString(),
+          type: msg.type || 'text'
+        }));
+        
+        console.log('✅ Setting formatted messages count:', formattedMessages.length);
+        setMessages(formattedMessages);
+        
+        // Mark messages from this contact as read
+        if (contactUserId !== user.id) {
+          markMessagesAsRead(contactUserId);
+          // Update unread counts to remove this contact
+          setUnreadCounts(prev => {
+            const updated = { ...prev };
+            delete updated[contactUserId];
+            return updated;
+          });
+        }
+        
+        // Scroll to bottom after loading messages
+        if (formattedMessages.length > 0) {
+          setTimeout(() => {
+            try {
+              if (flatListRef.current && flatListRef.current.scrollToEnd) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            } catch (error) {
+              console.log('📜 Scroll to end error (loading messages):', error);
+            }
+          }, 300);
+        }
+        
+      } catch (err) {
+        console.log('❌ Messages fetch error:', err);
+        setMessages([]);
+      }
+    } catch (err) {
+      setError(err.message);
+      setMessages([]);
+      console.error('❌ Fetch messages error:', err);
+    } finally {
+      if (!selectedContact) {
+        setLoading(false);
+      }
+    }
+  };
+
+  // Real-time subscription for messages
+  useEffect(() => {
+    if (!selectedContact) return;
+    let subscription;
+    (async () => {
+      const contactUserId = selectedContact.userId || selectedContact.id;
+      subscription = supabase
+        .channel(`teacher-chat-${user.id}-${contactUserId}-${Date.now()}`)
+        .on('postgres_changes', { 
+          event: '*', 
+          schema: 'public', 
+          table: TABLES.MESSAGES
+        }, (payload) => {
+          console.log('Real-time message update:', payload);
+          
+          // Check if this message is relevant to our chat
+          const isRelevant = (
+            (payload.new?.sender_id === user.id && payload.new?.receiver_id === contactUserId) ||
+            (payload.new?.sender_id === contactUserId && payload.new?.receiver_id === user.id) ||
+            (payload.old?.sender_id === user.id && payload.old?.receiver_id === contactUserId) ||
+            (payload.old?.sender_id === contactUserId && payload.old?.receiver_id === user.id)
+          );
+          
+          if (isRelevant) {
+            console.log('Message is relevant, refreshing chat');
+            setTimeout(() => {
+              fetchMessages(selectedContact);
+            }, 200);
+          }
+        })
+        .subscribe();
+      
+      console.log('Subscribed to real-time updates for chat with:', selectedContact.name);
+    })();
+    return () => {
+      if (subscription) {
+        subscription.unsubscribe();
+        console.log('Unsubscribed from real-time chat updates');
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedContact, user.id]);
 
   // Send a message
   const handleSend = async () => {
-    if (!input.trim() || !selectedParent) return;
+    if (!input.trim() || !selectedContact) return;
+    setSending(true);
     
     try {
       console.log('Starting to send message...');
       console.log('User ID:', user.id);
-      console.log('Selected Parent:', selectedParent);
+      console.log('Selected Contact:', selectedContact);
 
-      // Create message for the messages table
+      const contactUserId = selectedContact.userId || selectedContact.id;
       const newMsg = {
         sender_id: user.id,
-        receiver_id: selectedParent.userId,
-        student_id: selectedParent.students[0]?.id, // Use first student if multiple
+        receiver_id: contactUserId,
+        student_id: selectedContact.students ? selectedContact.students[0]?.id : selectedContact.id, // Parent has students array, student is the student
         message: input,
         sent_at: new Date().toISOString(),
       };
@@ -218,55 +794,66 @@ const TeacherChat = () => {
       console.log('Message to insert:', newMsg);
 
       const { data: insertedMsg, error: sendError } = await supabase
-        .from('messages')
+        .from(TABLES.MESSAGES)
         .insert(newMsg)
         .select();
 
+      console.log('Send error:', sendError);
+      console.log('Inserted message:', insertedMsg);
+
       if (sendError) {
-        console.error('Send error:', sendError);
-        throw sendError;
+        console.error('Supabase error object:', JSON.stringify(sendError, null, 2));
+        throw new Error(`Database error: ${sendError.message || sendError.code || 'Unknown database error'}`);
       }
 
-      console.log('Message sent successfully:', insertedMsg);
-
-      // Create display message
+      // Add message to local state for immediate display
       const displayMsg = {
-        id: insertedMsg[0].id,
-        message: input,
+        id: insertedMsg?.[0]?.id || Date.now().toString(),
         sender_id: user.id,
-        receiver_id: selectedParent.userId,
+        receiver_id: contactUserId,
+        student_id: selectedContact.students ? selectedContact.students[0]?.id : selectedContact.id,
+        message: input,
         sent_at: new Date().toISOString(),
-        student_id: selectedParent.students[0]?.id
+        type: 'text'
       };
 
       setMessages(prev => [...prev, displayMsg]);
       setInput('');
-
+      
+      // Refresh messages from database to ensure consistency
+      setTimeout(() => {
+        fetchMessages(selectedContact);
+      }, 500);
+      
       // Scroll to bottom after sending
       setTimeout(() => {
-        if (flatListRef.current) {
-          flatListRef.current.scrollToEnd({ animated: true });
+        try {
+          if (flatListRef.current && flatListRef.current.scrollToEnd) {
+            flatListRef.current.scrollToEnd({ animated: true });
+          }
+        } catch (error) {
+          console.log('📜 Scroll to end error (after sending):', error);
         }
       }, 100);
     } catch (err) {
       console.error('Error sending message:', err);
+      console.error('Error details:', JSON.stringify(err, null, 2));
       Alert.alert('Error', `Failed to send message: ${err.message || 'Unknown error'}`);
+    } finally {
+      setSending(false);
     }
   };
 
-  // Back to parent list
-  const handleBack = () => {
-    setSelectedParent(null);
-    setMessages([]);
-  };
-
-  // Delete message
-  const handleDeleteMessage = async (messageId) => {
+  // Delete message function
+  const handleDeleteMessage = (messageId) => {
     Alert.alert(
       'Delete Message',
       'Are you sure you want to delete this message?',
       [
-        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
         {
           text: 'Delete',
           style: 'destructive',
@@ -274,13 +861,19 @@ const TeacherChat = () => {
             try {
               setDeletingMessageId(messageId);
               
-              const { error } = await supabase
-                .from('messages')
+              const { error: deleteError } = await supabase
+                .from(TABLES.MESSAGES)
                 .delete()
-                .eq('id', messageId);
-
-              if (error) throw error;
-
+                .eq('id', messageId)
+                .eq('sender_id', user.id); // Only allow deleting own messages
+              
+              if (deleteError) {
+                console.error('Delete error:', deleteError);
+                Alert.alert('Error', 'Failed to delete message');
+                return;
+              }
+              
+              // Remove from local state
               setMessages(prev => prev.filter(msg => msg.id !== messageId));
             } catch (err) {
               console.error('Error deleting message:', err);
@@ -294,233 +887,438 @@ const TeacherChat = () => {
     );
   };
 
-  // Send broadcast message to all parents
-  const handleSendBroadcast = async () => {
-    if (!broadcastMessage.trim() || parents.length === 0) {
-      Alert.alert('Error', 'Please enter a message and ensure you have students assigned.');
-      return;
-    }
-
+  // Attachment handler
+  const handleAttach = async () => {
     try {
-      setSendingBroadcast(true);
-
-      // Create messages for all parents
-      const messagesToSend = parents.map(parent => ({
-        sender_id: user.id,
-        receiver_id: parent.userId,
-        student_id: parent.students[0]?.id, // Use first student if multiple
-        message: broadcastMessage,
-        sent_at: new Date().toISOString(),
-      }));
-
-      // Send all messages
-      const { data: insertedMessages, error: sendError } = await supabase
-        .from('messages')
-        .insert(messagesToSend)
-        .select();
-
-      if (sendError) {
-        console.error('Broadcast send error:', sendError);
-        throw sendError;
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        alert('Permission to access media library is required!');
+        return;
       }
-
-      console.log('Broadcast messages sent successfully:', insertedMessages);
-
-      // Update local state for each parent
-      setParents(prevParents =>
-        prevParents.map(parent => ({
-          ...parent,
-          messages: [
-            ...parent.messages,
-            {
-              id: insertedMessages.find(msg => msg.receiver_id === parent.userId)?.id,
-              message: broadcastMessage,
-              sender_id: user.id,
-              receiver_id: parent.userId,
-              sent_at: new Date().toISOString(),
-              student_id: parent.students[0]?.id
-            }
-          ]
-        }))
-      );
-
-      setBroadcastMessage('');
-      setShowBroadcastModal(false);
-      Alert.alert('Success', `Message sent to ${parents.length} parent(s) successfully!`);
-
-    } catch (err) {
-      console.error('Error sending broadcast message:', err);
-      Alert.alert('Error', `Failed to send broadcast message: ${err.message || 'Unknown error'}`);
-    } finally {
-      setSendingBroadcast(false);
+      let result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        allowsEditing: false,
+        quality: 1,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        const isImage = asset.type && asset.type.startsWith('image');
+        
+        const contactUserId = selectedContact.userId || selectedContact.id;
+        const newMsg = {
+          sender_id: user.id,
+          receiver_id: contactUserId,
+          student_id: selectedContact.students ? selectedContact.students[0]?.id : selectedContact.id,
+          type: isImage ? 'image' : 'file',
+          uri: asset.uri,
+          file_name: asset.fileName || asset.uri.split('/').pop(),
+          sent_at: new Date().toISOString(),
+        };
+        
+        const { error: sendError } = await supabase
+          .from(TABLES.MESSAGES)
+          .insert(newMsg);
+        
+        if (sendError) {
+          console.error('File send error:', sendError);
+          Alert.alert('Error', 'Failed to send file');
+        } else {
+          // Refresh messages to show the new file
+          setTimeout(() => {
+            fetchMessages(selectedContact);
+          }, 500);
+        }
+      }
+    } catch (e) {
+      console.error('File picker error:', e);
+      Alert.alert('Error', 'Failed to pick file: ' + e.message);
     }
   };
 
-  // Format time
-  const formatTime = (timestamp) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // Go back to contact list
+  const handleBack = () => {
+    setSelectedContact(null);
+    setMessages([]);
   };
 
-  // Sort parents by recent messages
-  const getSortedParents = () => {
-    return parents.sort((a, b) => {
-      const aLastMsg = a.messages[a.messages.length - 1];
-      const bLastMsg = b.messages[b.messages.length - 1];
-      
-      if (!aLastMsg && !bLastMsg) return 0;
-      if (!aLastMsg) return 1;
-      if (!bLastMsg) return -1;
-      
-      return new Date(bLastMsg.sent_at) - new Date(aLastMsg.sent_at);
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    if (flatListRef.current && messages.length > 0) {
+      setTimeout(() => {
+        try {
+          if (flatListRef.current && flatListRef.current.scrollToEnd) {
+            flatListRef.current.scrollToEnd({ animated: true });
+          }
+        } catch (error) {
+          console.log('📜 Scroll to end error (messages change):', error);
+        }
+      }, 100);
+    }
+  }, [messages]);
+
+  // Sort contacts by most recent chat
+  const getSortedContacts = (contactList) => {
+    return [...contactList].sort((a, b) => {
+      const aUserId = a.userId || a.id;
+      const bUserId = b.userId || b.id;
+      const aMsgs = messages.filter(m => m.sender_id === aUserId || m.receiver_id === aUserId);
+      const bMsgs = messages.filter(m => m.sender_id === bUserId || m.receiver_id === bUserId);
+      const aTime = aMsgs.length ? new Date(aMsgs[aMsgs.length - 1].sent_at) : new Date(0);
+      const bTime = bMsgs.length ? new Date(bMsgs[bMsgs.length - 1].sent_at) : new Date(0);
+      return bTime - aTime;
     });
   };
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <Header title="Chat With Parents" showBack={true} />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1976d2" />
-          <Text style={styles.loadingText}>Loading chats...</Text>
-        </View>
-      </View>
-    );
-  }
-
-  if (error) {
-    return (
-      <View style={styles.container}>
-        <Header title="Chat With Parents" showBack={true} />
-        <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle" size={48} color="#f44336" />
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={fetchParentsAndChats}>
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
+  // Debug UI state
+  console.log('🖥️ UI RENDER DEBUG:', {
+    loading,
+    error,
+    selectedContact: selectedContact ? selectedContact.name : null,
+    activeTab,
+    studentsLength: students.length,
+    parentsLength: parents.length
+  });
+  
   return (
     <View style={styles.container}>
-      <Header title="Chat With Parents" showBack={true} />
-      {!selectedParent ? (
-        <View style={styles.parentListContainer}>
-          <Text style={styles.sectionTitle}>
-            Student Parents ({parents.length})
-          </Text>
-          {parents.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No parents found for your students.</Text>
+      <Header title="Teacher Chat" showBack={true} />
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color="#1976d2" />
+        </View>
+      ) : error ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <Text style={{ color: '#d32f2f', fontSize: 16, marginBottom: 12, textAlign: 'center' }}>Error: {error}</Text>
+          <TouchableOpacity onPress={fetchData} style={{ backgroundColor: '#1976d2', padding: 12, borderRadius: 8 }}>
+            <Text style={{ color: '#fff', fontWeight: 'bold' }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : !selectedContact ? (
+        <View style={styles.contactListContainer}>
+          {/* Tab Navigation */}
+          <View style={styles.tabContainer}>
+            <TouchableOpacity 
+              style={[styles.tab, activeTab === 'parents' && styles.activeTab]}
+              onPress={() => setActiveTab('parents')}
+            >
+              <Ionicons 
+                name={activeTab === 'parents' ? 'people' : 'people-outline'} 
+                size={20} 
+                color={activeTab === 'parents' ? '#1976d2' : '#666'} 
+              />
+              <Text style={[styles.tabText, activeTab === 'parents' && styles.activeTabText]}>Parents</Text>
+              <View style={styles.tabBadge}>
+                <Text style={styles.tabBadgeText}>{parents.length}</Text>
+              </View>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.tab, activeTab === 'students' && styles.activeTab]}
+              onPress={() => setActiveTab('students')}
+            >
+              <Ionicons 
+                name={activeTab === 'students' ? 'school' : 'school-outline'} 
+                size={20} 
+                color={activeTab === 'students' ? '#1976d2' : '#666'} 
+              />
+              <Text style={[styles.tabText, activeTab === 'students' && styles.activeTabText]}>Students</Text>
+              <View style={styles.tabBadge}>
+                <Text style={styles.tabBadgeText}>{students.length}</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+          
+          {/* Content Area */}
+          {activeTab === 'parents' ? (
+            <View style={styles.contentContainer}>
+              <View style={styles.headerSection}>
+                <Text style={styles.sectionTitle}>Student Parents</Text>
+                <Text style={styles.sectionSubtitle}>
+                  {parents.length} parent{parents.length !== 1 ? 's' : ''} of your students
+                </Text>
+              </View>
+              
+              {parents.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="people-outline" size={64} color="#ccc" />
+                  <Text style={styles.emptyText}>No parents found for your students.</Text>
+                  <Text style={styles.emptySubtext}>
+                    Please contact the school administrator to verify your class assignments.
+                  </Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={getSortedContacts(parents)}
+                  keyExtractor={item => item.id}
+                  renderItem={({ item, index }) => {
+                    const sortedParents = getSortedContacts(parents);
+                    const showClassParentHeader = index === 0 && item.role === 'class_parent';
+                    const showSubjectParentHeader = index > 0 &&
+                      item.role === 'subject_parent' &&
+                      sortedParents[index - 1].role !== 'subject_parent';
+
+                    return (
+                      <View>
+                        {showClassParentHeader && (
+                          <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionHeaderText}>Class Parents</Text>
+                          </View>
+                        )}
+                        {showSubjectParentHeader && (
+                          <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionHeaderText}>Subject Parents</Text>
+                          </View>
+                        )}
+                        <TouchableOpacity 
+                          style={[
+                            styles.contactCard,
+                            item.role === 'class_parent' && styles.classParentCard,
+                            unreadCounts[item.id] && styles.unreadContactCard
+                          ]} 
+                          onPress={() => fetchMessages(item)}
+                        >
+                          <View style={[
+                            styles.contactAvatar,
+                            { backgroundColor: item.role === 'class_parent' ? '#4CAF50' : '#2196F3' }
+                          ]}>
+                            <Ionicons
+                              name={item.role === 'class_parent' ? 'school' : 'book'}
+                              size={24}
+                              color="#fff"
+                            />
+                          </View>
+                          <View style={styles.contactInfo}>
+                            <View style={styles.contactHeader}>
+                              <Text style={styles.contactName}>{item.name}</Text>
+                              <View style={[
+                                styles.roleBadge,
+                                { backgroundColor: item.role === 'class_parent' ? '#4CAF50' : '#2196F3' }
+                              ]}>
+                                <Text style={styles.roleBadgeText}>
+                                  {item.role === 'class_parent' ? 'CLASS' : 'SUBJECT'}
+                                </Text>
+                              </View>
+                            </View>
+                            <Text style={styles.contactSubInfo} numberOfLines={2}>
+                              Children: {item.students.map(s => `${s.name} (${s.class})`).join(', ')}
+                            </Text>
+                          </View>
+                          <View style={styles.chatActions}>
+                            <View style={styles.chatIconContainer}>
+                              <Ionicons name="chatbubbles" size={20} color={unreadCounts[item.id] ? "#f44336" : "#9c27b0"} />
+                              {unreadCounts[item.id] && (
+                                <View style={styles.unreadBadge}>
+                                  <Text style={styles.unreadBadgeText}>
+                                    {unreadCounts[item.id] > 99 ? '99+' : unreadCounts[item.id]}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            <Ionicons name="chevron-forward" size={16} color="#ccc" style={{ marginTop: 2 }} />
+                          </View>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  }}
+                  contentContainerStyle={{ padding: 16 }}
+                  showsVerticalScrollIndicator={false}
+                />
+              )}
             </View>
           ) : (
-            <FlatList
-              data={getSortedParents()}
-              keyExtractor={item => item.userId}
-              renderItem={({ item }) => (
-                <TouchableOpacity style={styles.parentCard} onPress={() => handleSelectParent(item)}>
-                  <Ionicons name="person-circle" size={36} color="#1976d2" style={{ marginRight: 12 }} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.parentName}>{item.name}</Text>
-                    <Text style={styles.studentInfo}>
-                      {item.students.map(s => `${s.name} (${s.class})`).join(', ')}
-                    </Text>
-                  </View>
-                  <View style={{ alignItems: 'center' }}>
-                    <Ionicons name="chatbubbles" size={22} color="#9c27b0" />
-                    {item.messages && item.messages.length > 0 && (
-                      <Text style={styles.messageCount}>{item.messages.length}</Text>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              )}
-              contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
-            />
-          )}
+            <View style={styles.contentContainer}>
+              <View style={styles.headerSection}>
+                <Text style={styles.sectionTitle}>Your Students</Text>
+                <Text style={styles.sectionSubtitle}>
+                  {students.length} student{students.length !== 1 ? 's' : ''} in your classes
+                </Text>
+              </View>
+              
+              {students.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="school-outline" size={64} color="#ccc" />
+                  <Text style={styles.emptyText}>No students found in your classes.</Text>
+                  <Text style={styles.emptySubtext}>
+                    Please contact the school administrator to verify your teaching assignments.
+                  </Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={getSortedContacts(students)}
+                  keyExtractor={item => item.id}
+                  renderItem={({ item, index }) => {
+                    const sortedStudents = getSortedContacts(students);
+                    const showClassStudentHeader = index === 0 && item.role === 'class_student';
+                    const showSubjectStudentHeader = index > 0 &&
+                      item.role === 'subject_student' &&
+                      sortedStudents[index - 1].role !== 'subject_student';
 
-          {/* Floating Action Button for Broadcast Message */}
-          {parents.length > 0 && (
-            <TouchableOpacity
-              style={styles.fab}
-              onPress={() => setShowBroadcastModal(true)}
-            >
-              <Ionicons name="megaphone" size={24} color="#fff" />
-            </TouchableOpacity>
+                    return (
+                      <View>
+                        {showClassStudentHeader && (
+                          <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionHeaderText}>Class Students</Text>
+                          </View>
+                        )}
+                        {showSubjectStudentHeader && (
+                          <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionHeaderText}>Subject Students</Text>
+                          </View>
+                        )}
+                        <TouchableOpacity 
+                          style={[
+                            styles.contactCard,
+                            item.role === 'class_student' && styles.classStudentCard,
+                            !item.canMessage && styles.disabledCard,
+                            unreadCounts[item.userId] && item.canMessage && styles.unreadContactCard
+                          ]} 
+                          onPress={() => item.canMessage ? fetchMessages(item) : Alert.alert('Cannot Message', 'This student does not have a user account for messaging.')}
+                        >
+                          <View style={[
+                            styles.contactAvatar,
+                            { backgroundColor: item.role === 'class_student' ? '#FF9800' : '#9C27B0' }
+                          ]}>
+                            <Ionicons
+                              name={item.role === 'class_student' ? 'school' : 'book'}
+                              size={24}
+                              color="#fff"
+                            />
+                          </View>
+                          <View style={styles.contactInfo}>
+                            <View style={styles.contactHeader}>
+                              <Text style={[styles.contactName, !item.canMessage && styles.disabledText]}>{item.name}</Text>
+                              <View style={styles.badgeContainer}>
+                                <View style={[
+                                  styles.roleBadge,
+                                  { backgroundColor: item.role === 'class_student' ? '#FF9800' : '#9C27B0' }
+                                ]}>
+                                  <Text style={styles.roleBadgeText}>
+                                    {item.role === 'class_student' ? 'CLASS' : 'SUBJECT'}
+                                  </Text>
+                                </View>
+                                {!item.canMessage && (
+                                  <View style={[styles.roleBadge, { backgroundColor: '#f44336', marginLeft: 4 }]}>
+                                    <Text style={styles.roleBadgeText}>NO ACC</Text>
+                                  </View>
+                                )}
+                              </View>
+                            </View>
+                            <Text style={[styles.contactSubInfo, !item.canMessage && styles.disabledText]} numberOfLines={2}>
+                              Roll: {item.roll_no} • Class: {item.class}
+                              {item.subject && ` • Subject: ${item.subject}`}
+                            </Text>
+                            {item.email && (
+                              <Text style={[styles.contactEmail, !item.canMessage && styles.disabledText]} numberOfLines={1}>
+                                {item.email}
+                              </Text>
+                            )}
+                          </View>
+                          <View style={styles.chatActions}>
+                            {item.canMessage ? (
+                              <>
+                                <View style={styles.chatIconContainer}>
+                                  <Ionicons name="chatbubbles" size={20} color={unreadCounts[item.userId] ? "#f44336" : "#9c27b0"} />
+                                  {unreadCounts[item.userId] && (
+                                    <View style={styles.unreadBadge}>
+                                      <Text style={styles.unreadBadgeText}>
+                                        {unreadCounts[item.userId] > 99 ? '99+' : unreadCounts[item.userId]}
+                                      </Text>
+                                    </View>
+                                  )}
+                                </View>
+                                <Ionicons name="chevron-forward" size={16} color="#ccc" style={{ marginTop: 2 }} />
+                              </>
+                            ) : (
+                              <Ionicons name="alert-circle" size={20} color="#f44336" />
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  }}
+                  contentContainerStyle={{ padding: 16 }}
+                  showsVerticalScrollIndicator={false}
+                />
+              )}
+            </View>
           )}
         </View>
       ) : (
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 20}
+          enabled={true}
         >
           <View style={styles.chatHeader}>
             <TouchableOpacity onPress={handleBack} style={{ marginRight: 10 }}>
               <Ionicons name="arrow-back" size={24} color="#1976d2" />
             </TouchableOpacity>
-            <Ionicons name="person-circle" size={32} color="#1976d2" style={{ marginRight: 8 }} />
-            <View>
-              <Text style={styles.parentName}>{selectedParent.name}</Text>
-              <Text style={styles.studentInfo}>
-                {selectedParent.students.map(s => s.name).join(', ')}
+            <Ionicons 
+              name={selectedContact.students ? 'person-circle' : 'school'} 
+              size={32} 
+              color="#1976d2" 
+              style={{ marginRight: 8 }} 
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.contactName}>{selectedContact.name}</Text>
+              <Text style={styles.contactSubInfo}>
+                {selectedContact.students ? 
+                  `Children: ${selectedContact.students.map(s => s.name).join(', ')}` :
+                  `Roll: ${selectedContact.roll_no} • ${selectedContact.class}`
+                }
               </Text>
             </View>
           </View>
-
-          <FlatList
-            ref={flatListRef}
-            data={[...messages]}
-            keyExtractor={item => item.id}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                onLongPress={() => {
-                  if (item.sender_id === user.id) {
-                    handleDeleteMessage(item.id);
-                  }
-                }}
-                delayLongPress={500}
-                activeOpacity={0.7}
-                style={{
-                  opacity: deletingMessageId === item.id ? 0.5 : 1,
-                  transform: [{ scale: deletingMessageId === item.id ? 0.95 : 1 }]
-                }}
-              >
-                <Animatable.View
+          <View style={{ flex: 1 }}>
+            <FlatList
+              ref={flatListRef}
+              data={[...messages]}
+              keyExtractor={item => item.id?.toString() || Math.random().toString()}
+              renderItem={({ item }) => (
+                <TouchableOpacity 
                   style={[styles.messageRow, item.sender_id === user.id ? styles.messageRight : styles.messageLeft]}
-                  animation="fadeInUp"
-                  duration={300}
+                  onLongPress={() => {
+                    if (item.sender_id === user.id) {
+                      handleDeleteMessage(item.id);
+                    }
+                  }}
+                  disabled={deletingMessageId === item.id}
                 >
-                  <View style={[styles.messageBubble, item.sender_id === user.id ? styles.bubbleTeacher : styles.bubbleParent]}>
-                    {deletingMessageId === item.id && (
-                      <Animatable.View
-                        style={styles.deletingOverlay}
-                        animation="fadeIn"
-                        duration={200}
-                      >
-                        <ActivityIndicator size="small" color="#fff" />
-                        <Ionicons name="trash" size={16} color="#fff" style={{ marginLeft: 5 }} />
-                      </Animatable.View>
+                  <View style={[
+                    styles.messageBubble, 
+                    item.sender_id === user.id ? styles.bubbleTeacher : styles.bubbleParent,
+                    deletingMessageId === item.id && styles.deletingMessage
+                  ]}>
+                    {item.type === 'image' && (
+                      <Image source={{ uri: item.uri }} style={styles.chatImage} />
                     )}
-                    <Text style={styles.messageText}>{item.message}</Text>
-                    <Text style={styles.messageTime}>{formatTime(item.sent_at)}</Text>
+                    {item.type === 'file' && (
+                      <View style={styles.fileRow}>
+                        <Ionicons name="document" size={20} color="#1976d2" style={{ marginRight: 6 }} />
+                        <Text style={styles.fileName}>{item.file_name}</Text>
+                      </View>
+                    )}
+                    {(!item.type || item.type === 'text') && (
+                      <Text style={styles.messageText}>{item.message || item.text}</Text>
+                    )}
+                    <Text style={styles.messageTime}>{item.sent_at ? new Date(item.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</Text>
                   </View>
-                </Animatable.View>
-              </TouchableOpacity>
-            )}
-            style={{ flex: 1 }}
-            contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', padding: 16 }}
-            onLayout={() => {
-              setTimeout(() => {
-                if (flatListRef.current && messages.length > 0) {
-                  flatListRef.current.scrollToEnd({ animated: false });
-                }
-              }, 50);
-            }}
-          />
-
-          <View style={styles.inputRow}>
+                </TouchableOpacity>
+              )}
+              contentContainerStyle={styles.chatList}
+              style={{ flex: 1 }}
+              keyboardShouldPersistTaps="handled"
+            />
+          </View>
+          <View style={[styles.inputRow, { 
+            backgroundColor: '#fff', 
+            paddingBottom: Platform.OS === 'ios' ? (isKeyboardVisible ? 20 : 10) : 10,
+            paddingTop: 10
+          }]}>
+            <TouchableOpacity style={styles.attachBtn} onPress={handleAttach} disabled={sending}>
+              <Ionicons name="attach" size={22} color="#1976d2" />
+            </TouchableOpacity>
             <TextInput
               style={styles.input}
               placeholder="Type a message..."
@@ -528,73 +1326,15 @@ const TeacherChat = () => {
               onChangeText={setInput}
               onSubmitEditing={handleSend}
               returnKeyType="send"
+              editable={!sending}
+              multiline={false}
+              blurOnSubmit={true}
             />
-            <TouchableOpacity style={styles.sendBtn} onPress={handleSend}>
+            <TouchableOpacity style={styles.sendBtn} onPress={handleSend} disabled={sending}>
               <Ionicons name="send" size={22} color="#fff" />
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
-      )}
-
-      {/* Broadcast Message Modal */}
-      {showBroadcastModal && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.broadcastModal}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Message All Parents</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setShowBroadcastModal(false);
-                  setBroadcastMessage('');
-                }}
-                style={styles.closeButton}
-              >
-                <Ionicons name="close" size={24} color="#666" />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.broadcastInfo}>
-              This message will be sent to all {parents.length} parent(s) of your students.
-            </Text>
-
-            <TextInput
-              style={styles.broadcastInput}
-              placeholder="Type your message to all parents..."
-              value={broadcastMessage}
-              onChangeText={setBroadcastMessage}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => {
-                  setShowBroadcastModal(false);
-                  setBroadcastMessage('');
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.sendButton, (!broadcastMessage.trim() || sendingBroadcast) && styles.sendButtonDisabled]}
-                onPress={handleSendBroadcast}
-                disabled={!broadcastMessage.trim() || sendingBroadcast}
-              >
-                {sendingBroadcast ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons name="send" size={18} color="#fff" style={{ marginRight: 8 }} />
-                    <Text style={styles.sendButtonText}>Send to All</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
       )}
     </View>
   );
@@ -602,21 +1342,188 @@ const TeacherChat = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { marginTop: 16, fontSize: 16, color: '#666' },
-  errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
-  errorText: { fontSize: 16, color: '#f44336', textAlign: 'center', marginVertical: 16 },
-  retryButton: { backgroundColor: '#1976d2', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
-  retryText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  parentListContainer: { flex: 1 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#1976d2', margin: 16 },
-  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyText: { fontSize: 16, color: '#666', textAlign: 'center' },
-  parentCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, padding: 14, marginBottom: 12, elevation: 2 },
-  parentName: { fontSize: 16, fontWeight: 'bold', color: '#222' },
-  studentInfo: { fontSize: 14, color: '#666' },
-  messageCount: { fontSize: 10, color: '#9c27b0', marginTop: 2, fontWeight: 'bold' },
+  contactListContainer: { flex: 1 },
+  
+  // Tab Navigation Styles
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+  },
+  activeTab: {
+    borderBottomWidth: 3,
+    borderBottomColor: '#1976d2',
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    marginLeft: 8,
+  },
+  activeTabText: {
+    color: '#1976d2',
+  },
+  tabBadge: {
+    backgroundColor: '#e0e0e0',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginLeft: 6,
+    minWidth: 20,
+    alignItems: 'center',
+  },
+  tabBadgeText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#666',
+  },
+  
+  contentContainer: { flex: 1 },
+  
+  // Header Section Styles
+  headerSection: {
+    padding: 16,
+    backgroundColor: '#f8f9fa',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#1976d2', marginBottom: 4 },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: '#666',
+  },
+  
+  // Section Header Styles
+  sectionHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#f0f0f0',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    marginTop: 8,
+  },
+  sectionHeaderText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  
+  // Enhanced Contact Card Styles
+  contactCard: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#fff', 
+    borderRadius: 10, 
+    padding: 16, 
+    marginBottom: 8, 
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  classParentCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#4CAF50',
+    backgroundColor: '#f8fff8',
+  },
+  classStudentCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9800',
+    backgroundColor: '#fff8f0',
+  },
+  disabledCard: {
+    opacity: 0.6,
+    backgroundColor: '#f5f5f5',
+  },
+  
+  contactAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#1976d2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  
+  contactInfo: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  
+  contactHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  
+  badgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  
+  roleBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    minWidth: 50,
+    alignItems: 'center',
+  },
+  
+  roleBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  
+  contactName: { fontSize: 16, fontWeight: 'bold', color: '#222' },
+  contactSubInfo: { fontSize: 14, color: '#666', marginTop: 2 },
+  contactEmail: { fontSize: 12, color: '#888', marginTop: 1 },
+  disabledText: { color: '#999' },
+  
+  chatActions: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  
+  // Empty State Styles
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 16,
+    fontWeight: '600',
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
+  },
+  
+  // Chat Styles
   chatHeader: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 12, borderBottomWidth: 1, borderColor: '#eee' },
+  chatList: { flexGrow: 1, padding: 16 },
   messageRow: { flexDirection: 'row', marginBottom: 10 },
   messageLeft: { justifyContent: 'flex-start' },
   messageRight: { justifyContent: 'flex-end' },
@@ -625,118 +1532,103 @@ const styles = StyleSheet.create({
   bubbleParent: { backgroundColor: '#f1f8e9', alignSelf: 'flex-start' },
   messageText: { fontSize: 15, color: '#222' },
   messageTime: { fontSize: 11, color: '#888', marginTop: 4, textAlign: 'right' },
-  deletingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(244, 67, 54, 0.8)', borderRadius: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  inputRow: { flexDirection: 'row', alignItems: 'center', padding: 10, backgroundColor: '#fff', borderTopWidth: 1, borderColor: '#eee' },
-  input: { flex: 1, borderWidth: 1, borderColor: '#ddd', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, marginRight: 10, fontSize: 16 },
-  sendBtn: { backgroundColor: '#1976d2', borderRadius: 20, padding: 10, justifyContent: 'center', alignItems: 'center' },
-
-  // Floating Action Button
-  fab: {
-    position: 'absolute',
-    right: 20,
-    bottom: 20,
-    backgroundColor: '#4CAF50',
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+  inputRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    padding: 10, 
+    backgroundColor: '#fff', 
+    borderTopWidth: 1, 
+    borderColor: '#eee',
+    minHeight: 60,
+    paddingHorizontal: 12
   },
-
-  // Broadcast Modal Styles
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
+  input: { 
+    flex: 1, 
+    backgroundColor: '#f5f5f5', 
+    borderRadius: 20, 
+    paddingHorizontal: 16, 
+    paddingVertical: 12, 
+    fontSize: 15, 
+    marginRight: 8,
+    minHeight: 40,
+    maxHeight: 100,
+    textAlignVertical: 'center'
   },
-  broadcastModal: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    margin: 20,
-    maxWidth: '90%',
-    width: '100%',
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  closeButton: {
-    padding: 4,
-  },
-  broadcastInfo: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
-    textAlign: 'center',
-    backgroundColor: '#f0f8ff',
+  sendBtn: { 
+    backgroundColor: '#1976d2', 
+    borderRadius: 20, 
     padding: 12,
-    borderRadius: 8,
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center'
   },
-  broadcastInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    minHeight: 120,
-    marginBottom: 20,
-    backgroundColor: '#f9f9f9',
+  deletingMessage: {
+    opacity: 0.5,
   },
-  modalActions: {
+  
+  // Unread message styles
+  unreadContactCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#f44336',
+    backgroundColor: '#fff8f8',
+    shadowColor: '#f44336',
+    shadowOpacity: 0.15,
+    elevation: 3,
+  },
+  
+  // File and image display styles
+  chatImage: {
+    width: 160,
+    height: 120,
+    borderRadius: 10,
+    marginBottom: 6,
+    backgroundColor: '#eee',
+  },
+  
+  fileRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
     alignItems: 'center',
+    marginBottom: 4,
   },
-  cancelButtonText: {
-    fontSize: 16,
-    color: '#666',
-    fontWeight: '600',
+  
+  fileName: {
+    fontSize: 14,
+    color: '#1976d2',
+    textDecorationLine: 'underline',
+    maxWidth: 120,
   },
-  sendButton: {
-    flex: 1,
-    backgroundColor: '#4CAF50',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    flexDirection: 'row',
+  
+  attachBtn: {
+    marginRight: 8,
+    padding: 2,
+  },
+  
+  chatIconContainer: {
+    position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sendButtonDisabled: {
-    backgroundColor: '#ccc',
+  
+  unreadBadge: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#f44336',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
-  sendButtonText: {
-    fontSize: 16,
+  
+  unreadBadgeText: {
     color: '#fff',
-    fontWeight: '600',
+    fontSize: 10,
+    fontWeight: 'bold',
+    lineHeight: 12,
   },
 });
 

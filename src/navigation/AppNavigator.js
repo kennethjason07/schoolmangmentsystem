@@ -4,13 +4,14 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { View, ActivityIndicator } from 'react-native';
-import { useAuth } from '../utils/AuthContext';
 
-// Auth Screens
+// Import screens
 import LoginScreen from '../screens/auth/LoginScreen';
-import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 import SignupScreen from '../screens/auth/SignupScreen';
-
+import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
+import LoadingScreen from '../screens/LoadingScreen';
+import { useAuth } from '../utils/AuthContext';
+import MessageBadge from '../components/MessageBadge';
 // Admin Screens
 import AdminDashboard from '../screens/admin/AdminDashboard';
 import ManageClasses from '../screens/admin/ManageClasses';
@@ -80,15 +81,6 @@ import SettingsScreen from '../screens/universal/SettingsScreen';
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 
-// Loading Screen
-function LoadingScreen() {
-  return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-      <ActivityIndicator size="large" color="#007AFF" />
-    </View>
-  );
-}
-
 // Admin Tab Navigator
 function AdminTabNavigator() {
   return (
@@ -133,6 +125,23 @@ function AdminTabNavigator() {
 
 // Teacher Tab Navigator
 function TeacherTabNavigator() {
+  const [isKeyboardVisible, setKeyboardVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    const { Keyboard } = require('react-native');
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
+      setKeyboardVisible(true);
+    });
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      keyboardDidShowListener?.remove();
+      keyboardDidHideListener?.remove();
+    };
+  }, []);
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -149,11 +158,25 @@ function TeacherTabNavigator() {
           } else if (route.name === 'Chat') {
             iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
           }
-          return <Ionicons name={iconName} size={size} color={color} />;
+          
+          const icon = <Ionicons name={iconName} size={size} color={color} />;
+          
+          // Add badge for Chat tab
+          if (route.name === 'Chat') {
+            return (
+              <View style={{ position: 'relative' }}>
+                {icon}
+                <MessageBadge userType="teacher" />
+              </View>
+            );
+          }
+          
+          return icon;
         },
         tabBarActiveTintColor: '#4CAF50',
         tabBarInactiveTintColor: 'gray',
         headerShown: false,
+        tabBarStyle: isKeyboardVisible ? { display: 'none' } : {},
       })}
     >
       <Tab.Screen
@@ -171,6 +194,23 @@ function TeacherTabNavigator() {
 
 // Parent Tab Navigator
 function ParentTabNavigator() {
+  const [isKeyboardVisible, setKeyboardVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    const { Keyboard } = require('react-native');
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
+      setKeyboardVisible(true);
+    });
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      keyboardDidShowListener?.remove();
+      keyboardDidHideListener?.remove();
+    };
+  }, []);
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -187,11 +227,25 @@ function ParentTabNavigator() {
           } else if (route.name === 'Chat') {
             iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
           }
-          return <Ionicons name={iconName} size={size} color={color} />;
+          
+          const icon = <Ionicons name={iconName} size={size} color={color} />;
+          
+          // Add badge for Chat tab
+          if (route.name === 'Chat') {
+            return (
+              <View style={{ position: 'relative' }}>
+                {icon}
+                <MessageBadge userType="parent" />
+              </View>
+            );
+          }
+          
+          return icon;
         },
         tabBarActiveTintColor: '#FF9800',
         tabBarInactiveTintColor: 'gray',
         headerShown: false,
+        tabBarStyle: isKeyboardVisible ? { display: 'none' } : {},
       })}
     >
       <Tab.Screen
@@ -209,6 +263,23 @@ function ParentTabNavigator() {
 
 // Student Tab Navigator
 function StudentTabNavigator() {
+  const [isKeyboardVisible, setKeyboardVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    const { Keyboard } = require('react-native');
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
+      setKeyboardVisible(true);
+    });
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      keyboardDidShowListener?.remove();
+      keyboardDidHideListener?.remove();
+    };
+  }, []);
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -225,11 +296,25 @@ function StudentTabNavigator() {
           } else if (route.name === 'Chat') {
             iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
           }
-          return <Ionicons name={iconName} size={size} color={color} />;
+          
+          const icon = <Ionicons name={iconName} size={size} color={color} />;
+          
+          // Add badge for Chat tab
+          if (route.name === 'Chat') {
+            return (
+              <View style={{ position: 'relative' }}>
+                {icon}
+                <MessageBadge userType="student" />
+              </View>
+            );
+          }
+          
+          return icon;
         },
         tabBarActiveTintColor: '#9C27B0',
         tabBarInactiveTintColor: 'gray',
         headerShown: false,
+        tabBarStyle: isKeyboardVisible ? { display: 'none' } : {},
       })}
     >
       <Tab.Screen
