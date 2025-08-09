@@ -1,16 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Alert, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LineChart } from 'react-native-chart-kit';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-<<<<<<< HEAD
-import usePullToRefresh from '../../hooks/usePullToRefresh';
-=======
 import Header from '../../components/Header';
->>>>>>> origin/hanokalurecs
 
 // Helper function to get grade color
 const getGradeColor = (percentage) => {
@@ -46,11 +42,6 @@ export default function StudentMarks({ navigation }) {
   const [schoolInfo, setSchoolInfo] = useState({
     name: 'School Management System',
     address: 'Education Excellence Center'
-  });
-
-  // Pull-to-refresh functionality
-  const { refreshing, onRefresh } = usePullToRefresh(async () => {
-    await fetchMarksData();
   });
 
   useEffect(() => {
@@ -847,21 +838,6 @@ export default function StudentMarks({ navigation }) {
 
   return (
     <View style={styles.container}>
-<<<<<<< HEAD
-      <ScrollView 
-        contentContainerStyle={{ padding: 16, paddingTop: 40 }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#9C27B0']}
-            progressBackgroundColor="#fff"
-          />
-        }
-      >
-        {/* Header */}
-        <Text style={styles.header}>Marks & Grades</Text>
-=======
       <Header 
         title="Marks & Grades" 
         showBack={true} 
@@ -870,7 +846,6 @@ export default function StudentMarks({ navigation }) {
         onRefresh={() => refreshData(true)}
       />
       <ScrollView contentContainerStyle={{ padding: 16 }}>
->>>>>>> origin/hanokalurecs
 
         {/* Overall Statistics */}
         <View style={styles.statsContainer}>

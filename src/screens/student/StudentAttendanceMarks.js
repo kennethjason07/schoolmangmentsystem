@@ -788,7 +788,6 @@ export default function StudentAttendanceMarks({ route, navigation }) {
           </TouchableOpacity>
         </View>
       ) : (
-<<<<<<< HEAD
         <ScrollView 
           contentContainerStyle={{ padding: 16, paddingTop: 40 }}
           refreshControl={
@@ -802,9 +801,6 @@ export default function StudentAttendanceMarks({ route, navigation }) {
             />
           }
         >
-=======
-        <ScrollView contentContainerStyle={{ padding: 16 }}>
->>>>>>> origin/hanokalurecs
           {/* Attendance Content */}
             <View style={styles.attendanceTabContainer}>
               {/* Attendance Section Header */}

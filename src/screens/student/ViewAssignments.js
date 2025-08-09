@@ -1,15 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, Modal, Pressable, Linking, Platform, Alert, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, Modal, Pressable, Linking, Platform, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-<<<<<<< HEAD
-import usePullToRefresh from '../../hooks/usePullToRefresh';
-=======
 import Header from '../../components/Header';
->>>>>>> origin/hanokalurecs
 
 const statusColors = {
   not_submitted: '#F44336',
@@ -45,11 +41,6 @@ const ViewAssignments = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
-  // Pull-to-refresh functionality
-  const { refreshing, onRefresh } = usePullToRefresh(async () => {
-    await fetchAssignments();
-  });
 
   useEffect(() => {
     if (authLoading) {
@@ -522,25 +513,9 @@ const ViewAssignments = () => {
   }
 
   return (
-<<<<<<< HEAD
-    <>
-      <ScrollView 
-        style={styles.container}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#1976d2']}
-            progressBackgroundColor="#fff"
-          />
-        }
-      >
-        <Text style={styles.header}>Assignments</Text>
-=======
     <View style={styles.container}>
       <Header title="Assignments" showBack={true} showProfile={true} />
       <ScrollView style={styles.scrollContainer}>
->>>>>>> origin/hanokalurecs
         {assignments.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="document-text-outline" size={64} color="#ccc" />
