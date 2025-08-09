@@ -172,33 +172,124 @@ const ProfileScreen = () => {
         return;
       }
 
-      // Upload to Supabase storage
-      const fileName = `${authUser.id}-${Date.now()}.jpg`;
-      const { error: uploadError } = await supabase.storage
-        .from('profiles')
-        .upload(fileName, uri, {
-          cacheControl: '3600',
-          upsert: true
-        });
+      console.log('Starting photo upload for user:', authUser.id);
+      console.log('Image URI:', uri);
 
-      if (uploadError) throw uploadError;
+      // First, get the current profile image to delete it later
+      let oldImageFileName = null;
+      try {
+        const { data: currentUser } = await supabase
+          .from('users')
+          .select('profile_url')
+          .eq('id', authUser.id)
+          .single();
+        
+        if (currentUser?.profile_url) {
+          // Extract filename from URL
+          const urlParts = currentUser.profile_url.split('/');
+          oldImageFileName = urlParts[urlParts.length - 1];
+          console.log('Found existing image to delete:', oldImageFileName);
+        }
+      } catch (error) {
+        console.log('No existing image to delete or error checking:', error);
+      }
 
-      // Update profile with new photo URL
-      const { error: updateError } = await supabase
+      // Create a file name
+      const timestamp = Date.now();
+      const fileName = `${authUser.id}_${timestamp}.jpg`;
+      
+      console.log('Generated filename:', fileName);
+      
+      // React Native specific file upload approach
+      const formData = new FormData();
+      
+      // Add the file to FormData with proper React Native file object
+      formData.append('', {
+        uri: uri,
+        type: 'image/jpeg',
+        name: fileName,
+      });
+      
+      console.log('FormData created for React Native upload');
+      
+      // Get the authenticated user's session token
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        throw new Error('No authenticated session found');
+      }
+
+      // Upload using direct fetch to Supabase storage API
+      const supabaseUrl = 'https://dmagnsbdjsnzsddxqrwd.supabase.co';
+      
+      const uploadResponse = await fetch(`${supabaseUrl}/storage/v1/object/profiles/${fileName}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          // Don't set Content-Type for FormData - let the browser set it with boundary
+        },
+        body: formData,
+      });
+      
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        console.error('Upload response error:', uploadResponse.status, errorText);
+        throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+      }
+      
+      const uploadData = { path: fileName };
+
+      console.log('Upload successful:', uploadData);
+
+      // Construct the public URL manually
+      const publicUrl = `${supabaseUrl}/storage/v1/object/public/profiles/${fileName}`;
+
+      console.log('Generated public URL:', publicUrl);
+
+      // Update the user's profile in the database
+      const { data: updateData, error: updateError } = await supabase
         .from('users')
         .update({
-          photo_url: `${supabase.storage.getPublicUrl('profiles', fileName).data.publicUrl}`,
-          updated_at: new Date().toISOString()
+          profile_url: publicUrl
         })
-        .eq('id', authUser.id);
+        .eq('id', authUser.id)
+        .select();
 
-      if (updateError) throw updateError;
+      if (updateError) {
+        console.error('Database update error:', updateError);
+        throw new Error(`Database update failed: ${updateError.message}`);
+      }
 
+      console.log('Database update successful:', updateData);
+      
+      // Delete the old image from storage if it exists
+      if (oldImageFileName) {
+        try {
+          console.log('Attempting to delete old image:', oldImageFileName);
+          
+          const deleteResponse = await fetch(`${supabaseUrl}/storage/v1/object/profiles/${oldImageFileName}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+          });
+          
+          if (deleteResponse.ok) {
+            console.log('Old profile image deleted successfully:', oldImageFileName);
+          } else {
+            console.warn('Failed to delete old image (non-critical):', deleteResponse.status);
+          }
+        } catch (deleteError) {
+          console.warn('Error deleting old image (non-critical):', deleteError);
+          // Don't throw here - image upload was successful, deletion is just cleanup
+        }
+      }
+      
       Alert.alert('Success', 'Photo updated successfully');
       loadUserData();
     } catch (error) {
       console.error('Error uploading photo:', error);
-      Alert.alert('Error', 'Failed to upload photo');
+      Alert.alert('Error', `Failed to upload photo: ${error.message || error}`);
     }
   };
 
@@ -342,11 +433,16 @@ const ProfileScreen = () => {
           }}
         >
           <View style={styles.profileHeader}>
-            {user?.photo_url ? (
-              <Image
-                source={{ uri: user.photo_url }}
-                style={styles.profileImage}
-              />
+            {user?.profile_url ? (
+              <TouchableOpacity onPress={handlePickPhoto}>
+                <Image
+                  source={{ uri: user.profile_url }}
+                  style={styles.profileImage}
+                />
+                <View style={styles.imageEditOverlay}>
+                  <Ionicons name="camera" size={20} color="#1976d2" />
+                </View>
+              </TouchableOpacity>
             ) : (
               <View style={styles.imageContainer}>
                 <View style={styles.defaultProfileImage}>
@@ -502,6 +598,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
     borderRadius: 20,
     padding: 8,
+  },
+  imageEditOverlay: {
+    position: 'absolute',
+    bottom: 16,
+    right: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 15,
+    padding: 6,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 4,
   },
   name: {
     fontSize: 24,

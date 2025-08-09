@@ -1,10 +1,67 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useAuth } from '../utils/AuthContext';
+import { supabase } from '../utils/supabase';
 
 const Header = ({ title, showBack = false, showProfile = true, showNotifications = false, onProfilePress, onNotificationsPress, unreadCount = 0 }) => {
   const navigation = useNavigation();
+  const { user: authUser } = useAuth();
+  const [userProfileUrl, setUserProfileUrl] = useState(null);
+
+  // Function to load user profile image
+  const loadUserProfile = async () => {
+    if (!authUser) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('profile_url')
+        .eq('id', authUser.id)
+        .single();
+      
+      if (!error && data?.profile_url) {
+        setUserProfileUrl(data.profile_url);
+      } else {
+        setUserProfileUrl(null);
+      }
+    } catch (error) {
+      console.log('Error loading profile:', error);
+      setUserProfileUrl(null);
+    }
+  };
+
+  // Load profile image when component mounts
+  useEffect(() => {
+    loadUserProfile();
+
+    // Subscribe to profile updates
+    const subscription = supabase
+      .channel('header-profile-updates')
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'users',
+        filter: `id=eq.${authUser?.id}`
+      }, (payload) => {
+        if (payload.new?.profile_url) {
+          setUserProfileUrl(payload.new.profile_url);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [authUser]);
+
+  // Reload profile image when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      loadUserProfile();
+    }, [authUser])
+  );
 
   return (
     <View style={styles.header}>
@@ -41,7 +98,15 @@ const Header = ({ title, showBack = false, showProfile = true, showNotifications
             onPress={onProfilePress || (() => navigation.navigate('Profile'))} 
             style={styles.profileButton}
           >
-            <Ionicons name="person-circle" size={32} color="#2196F3" />
+            {userProfileUrl ? (
+              <Image 
+                source={{ uri: userProfileUrl }} 
+                style={styles.profileImage}
+                onError={() => setUserProfileUrl(null)}
+              />
+            ) : (
+              <Ionicons name="person-circle" size={32} color="#2196F3" />
+            )}
           </TouchableOpacity>
         )}
       </View>
@@ -85,6 +150,13 @@ const styles = StyleSheet.create({
   },
   profileButton: {
     padding: 4,
+  },
+  profileImage: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#2196F3',
   },
   notificationButton: {
     position: 'relative',
