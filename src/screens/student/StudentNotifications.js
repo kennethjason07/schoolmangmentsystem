@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import Header from '../../components/Header';
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -261,7 +262,9 @@ const StudentNotifications = () => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.filterRow}>
+      <Header title="Notifications" showBack={true} showProfile={false} />
+      <View style={styles.contentContainer}>
+        <View style={styles.filterRow}>
         {FILTERS.map(f => (
           <TouchableOpacity
             key={f.key}
@@ -290,6 +293,7 @@ const StudentNotifications = () => {
         ListEmptyComponent={<Text style={{ color: '#888', textAlign: 'center', marginTop: 40 }}>No notifications found.</Text>}
         showsVerticalScrollIndicator={false}
       />
+      </View>
     </View>
   );
 };
@@ -298,6 +302,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f7fa',
+  },
+  contentContainer: {
+    flex: 1,
     padding: 16,
   },
   header: {

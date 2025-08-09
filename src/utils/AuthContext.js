@@ -261,15 +261,51 @@ export const AuthProvider = ({ children }) => {
   const signOut = async () => {
     try {
       setLoading(true);
+      
+      // Check if there's a current session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) {
+        console.log('Session error during logout:', sessionError);
+      }
+      
+      if (!session) {
+        // No session exists, user is already logged out
+        console.log('No active session found, cleaning up local state');
+        setUser(null);
+        setUserType(null);
+        return { error: null };
+      }
+      
+      // Attempt to sign out from Supabase
       const { error } = await authHelpers.signOut();
+      
       if (error) {
+        // If error is about missing session, treat it as success
+        if (error.message?.includes('Auth session missing') || error.name === 'AuthSessionMissingError') {
+          console.log('Session already missing, cleaning up local state');
+          setUser(null);
+          setUserType(null);
+          return { error: null };
+        }
         return { error };
       }
+      
+      // Clear local state
       setUser(null);
       setUserType(null);
       return { error: null };
     } catch (error) {
       console.error('Sign out error:', error);
+      
+      // If it's a session missing error, clear local state and treat as success
+      if (error.message?.includes('Auth session missing') || error.name === 'AuthSessionMissingError') {
+        console.log('Caught AuthSessionMissingError, cleaning up local state');
+        setUser(null);
+        setUserType(null);
+        return { error: null };
+      }
+      
       return { error };
     } finally {
       setLoading(false);

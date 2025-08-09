@@ -115,10 +115,24 @@ const SettingsScreen = ({ navigation }) => {
             style: 'destructive',
             onPress: async () => {
               try {
-                await signOut();
+                const result = await signOut();
+                if (result?.error) {
+                  // Check if it's a session missing error (which means already logged out)
+                  if (result.error.message?.includes('Auth session missing') || result.error.name === 'AuthSessionMissingError') {
+                    console.log('Session already missing during logout, proceeding...');
+                    // Don't show error, this is expected if session expired
+                  } else {
+                    console.error('Logout error:', result.error);
+                    Alert.alert('Error', `Failed to logout: ${result.error.message || 'Unknown error'}`);
+                  }
+                }
+                // AuthContext will handle navigation automatically on successful logout
               } catch (error) {
                 console.error('Logout error:', error);
-                Alert.alert('Error', 'Failed to logout. Please try again.');
+                // Don't show error for session missing issues
+                if (!error.message?.includes('Auth session missing') && error.name !== 'AuthSessionMissingError') {
+                  Alert.alert('Error', 'Failed to logout. Please try again.');
+                }
               }
             },
           },

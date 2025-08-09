@@ -1026,7 +1026,9 @@ const StudentChatWithTeacher = () => {
                       </View>
                       <View style={styles.teacherInfo}>
                         <View style={styles.teacherHeader}>
-                          <Text style={styles.teacherName}>{item.name}</Text>
+                          <Text style={styles.teacherName} numberOfLines={item.name.includes('(No Account)') ? 2 : 1}>
+                            {item.name}
+                          </Text>
                           <View style={[
                             styles.roleBadge,
                             { backgroundColor: item.role === 'class_teacher' ? '#4CAF50' : '#2196F3' }
@@ -1036,7 +1038,7 @@ const StudentChatWithTeacher = () => {
                             </Text>
                           </View>
                         </View>
-                        <Text style={styles.teacherSubject} numberOfLines={1}>
+                        <Text style={styles.teacherSubject} numberOfLines={2}>
                           {item.subject}
                         </Text>
                       </View>
@@ -1214,14 +1216,16 @@ const styles = StyleSheet.create({
   
   teacherInfo: {
     flex: 1,
-    paddingRight: 8,
+    paddingRight: 12,
+    minWidth: 0, // Allow text to shrink
   },
   
   teacherHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 4,
+    flexWrap: 'wrap', // Allow wrapping on small screens
   },
   
   roleBadge: {
@@ -1230,6 +1234,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     minWidth: 50,
     alignItems: 'center',
+    marginLeft: 8, // Add margin to prevent overlap
+    flexShrink: 0, // Prevent badge from shrinking
   },
   
   roleBadgeText: {
@@ -1238,12 +1244,25 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   
-  teacherName: { fontSize: 16, fontWeight: 'bold', color: '#222' },
-  teacherSubject: { fontSize: 14, color: '#666', marginTop: 2 },
+  teacherName: { 
+    fontSize: 16, 
+    fontWeight: 'bold', 
+    color: '#222',
+    flex: 1, // Allow name to take available space
+    marginRight: 8, // Ensure spacing from badge
+  },
+  teacherSubject: { 
+    fontSize: 14, 
+    color: '#666', 
+    marginTop: 2,
+    flexShrink: 1, // Allow subject to shrink if needed
+  },
   
   chatActions: {
     alignItems: 'center',
     justifyContent: 'center',
+    minWidth: 40, // Ensure minimum width for touch target
+    marginLeft: 8, // Add margin to prevent overlap
   },
   
   // Empty State Styles

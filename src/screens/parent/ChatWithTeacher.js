@@ -1,97 +1,138 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image, ActivityIndicator, Alert, Keyboard, Linking, RefreshControl } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Animatable from 'react-native-animatable';
+import * as DocumentPicker from 'expo-document-picker';
 import Header from '../../components/Header';
-import { useRef } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-import * as DocumentPicker from 'expo-document-picker';
-import * as Animatable from 'react-native-animatable';
+import { useMessageStatus, getUnreadCountFromSender } from '../../utils/useMessageStatus';
 
 const ChatWithTeacher = () => {
+  const { user } = useAuth();
+  const { markMessagesAsRead } = useMessageStatus();
+  const [teachers, setTeachers] = useState([]);
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState(null);
+  const [unreadCounts, setUnreadCounts] = useState({}); // Track unread messages per teacher
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  const [messageSubscription, setMessageSubscription] = useState(null);
   const flatListRef = useRef(null);
-  const { user } = useAuth();
 
-  // Helper function to get teacher's user ID
+  // Helper function to get teacher's user ID (exact copy from student logic)
   const getTeacherUserId = async (teacherId) => {
     try {
-      console.log('Looking for user ID for teacher:', teacherId);
+      console.log('🔍 Looking for user ID for teacher:', teacherId);
 
-      // Method 1: Try linked_teacher_id
+      // Method 1: Try linked_teacher_id (most reliable method)
       const { data: teacherUser, error: userError } = await supabase
         .from(TABLES.USERS)
-        .select('id, email, user_type')
+        .select('id, email, full_name, role_id')
         .eq('linked_teacher_id', teacherId)
         .single();
 
-      if (teacherUser) {
-        console.log('Found teacher user via linked_teacher_id:', teacherUser);
+      if (teacherUser && !userError) {
+        console.log('✅ Found teacher user via linked_teacher_id:', teacherUser);
         return teacherUser.id;
       }
 
-      console.log('Teacher user not found via linked_teacher_id, error:', userError);
+      console.log('❌ Teacher user not found via linked_teacher_id, error:', userError);
 
-      // Method 2: Try to find by user_type = 'teacher' and match with teacher table
-      const { data: teacherData } = await supabase
+      // Method 2: Get teacher data and try to find a matching user by name
+      const { data: teacherData, error: teacherError } = await supabase
         .from(TABLES.TEACHERS)
         .select('name')
         .eq('id', teacherId)
         .single();
 
-      if (teacherData?.name) {
-        console.log('Found teacher name:', teacherData.name);
-
-        // Try to find user by name (this is not ideal but a fallback)
-        const { data: userByName, error: nameError } = await supabase
-          .from(TABLES.USERS)
-          .select('id, email, user_type')
-          .ilike('email', `%${teacherData.name.toLowerCase().replace(' ', '')}%`)
-          .eq('user_type', 'teacher')
-          .single();
-
-        if (userByName) {
-          console.log('Found teacher user via name match:', userByName);
-          return userByName.id;
-        }
-
-        console.log('Teacher user not found via name, error:', nameError);
+      if (teacherError || !teacherData?.name) {
+        console.log('❌ Could not get teacher data:', teacherError);
+        throw new Error(`Teacher with ID ${teacherId} not found in teachers table`);
       }
 
-      // Method 3: Return the teacher ID itself as fallback (in case it's already a user ID)
-      console.log('Using teacher ID as fallback user ID:', teacherId);
-      return teacherId;
+      console.log('📝 Found teacher name:', teacherData.name);
+
+      // Try to find user by matching full name
+      const { data: userByName, error: nameError } = await supabase
+        .from(TABLES.USERS)
+        .select('id, email, full_name, linked_teacher_id')
+        .ilike('full_name', `%${teacherData.name}%`)
+        .limit(5); // Get multiple potential matches
+
+      console.log('🔎 Name search results:', userByName, 'Error:', nameError);
+
+      if (!nameError && userByName && userByName.length > 0) {
+        // Try to find the best match
+        const exactMatch = userByName.find(u => 
+          u.full_name?.toLowerCase() === teacherData.name.toLowerCase()
+        );
+        
+        if (exactMatch) {
+          console.log('✅ Found exact name match:', exactMatch);
+          return exactMatch.id;
+        }
+
+        // If no exact match, use the first result
+        const firstMatch = userByName[0];
+        console.log('⚠️ Using first partial match:', firstMatch);
+        return firstMatch.id;
+      }
+
+      // Method 3: Check if the teacherId itself exists in users table (direct check)
+      const { data: directUser, error: directError } = await supabase
+        .from(TABLES.USERS)
+        .select('id, email, full_name')
+        .eq('id', teacherId)
+        .single();
+
+      if (!directError && directUser) {
+        console.log('✅ Teacher ID exists directly in users table:', directUser);
+        return directUser.id;
+      }
+
+      console.log('❌ Direct user lookup failed:', directError);
+
+      // Method 4: Last resort - show available users for debugging
+      console.log('🚨 No user found for teacher. Showing available teacher users for debugging:');
+      const { data: allTeacherUsers } = await supabase
+        .from(TABLES.USERS)
+        .select('id, email, full_name, linked_teacher_id')
+        .not('linked_teacher_id', 'is', null)
+        .limit(10);
+      
+      console.log('Available teacher users:', allTeacherUsers);
+
+      // Throw error instead of returning teacher ID as fallback
+      throw new Error(`No user account found for teacher "${teacherData.name}" (ID: ${teacherId}). This teacher needs a user account to receive messages. Please contact the administrator to create a user account for this teacher.`);
 
     } catch (error) {
-      console.log('Error getting teacher user ID:', error);
-      return teacherId; // Fallback to teacher ID
+      console.log('💥 Error getting teacher user ID:', error);
+      throw error; // Don't swallow the error, let it bubble up
     }
   };
 
-  // Fetch teachers and chat data
+  // Fetch teachers assigned to the student (exact copy of student logic)
   const fetchTeachersAndChats = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      console.log('=== STARTING TEACHER FETCH ===');
-      console.log('Current user:', user);
+      console.log('🚀 === STARTING TEACHER FETCH (PARENT VERSION) ===');
+      console.log('👤 Current user:', user);
 
-      // Get parent's student data directly
-      const { data: parentUser, error: parentError } = await supabase
+      // Step 1: Get parent user data and linked student
+      const { data: parentData, error: parentError } = await supabase
         .from(TABLES.USERS)
         .select(`
-          linked_parent_of,
+          *,
           students!users_linked_parent_of_fkey(
             id,
             name,
@@ -102,192 +143,431 @@ const ChatWithTeacher = () => {
         .eq('id', user.id)
         .single();
 
-      console.log('Parent user query result:', { parentUser, parentError });
+      console.log('👪 Parent query result:', { parentData, parentError });
 
-      if (parentError || !parentUser?.linked_parent_of) {
-        console.log('Parent data error or no linked student');
-        throw new Error('Parent data not found');
+      if (parentError || !parentData?.linked_parent_of) {
+        throw new Error('Parent account is not linked to any student. Please contact the administrator.');
       }
 
-      // Get student details from the linked student
-      const studentData = parentUser.students;
-      console.log('Student data:', studentData);
-
-      if (!studentData) {
-        throw new Error('Student data not found');
+      const student = parentData.students;
+      if (!student) {
+        throw new Error('Student information not found.');
       }
 
-      // First, get all messages for this parent
-      const { data: allMessages, error: messagesError } = await supabase
-        .from(TABLES.MESSAGES)
+      console.log('👦 Student data:', student);
+      console.log('🏫 Student class:', student.classes);
+      console.log('Student class_id:', student.class_id);
+
+      // Step 2: Get all existing messages for this parent user
+      const { data: allMessages, error: msgError } = await supabase
+        .from('messages')
         .select('*')
         .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
         .order('sent_at', { ascending: true });
 
-      if (messagesError && messagesError.code !== '42P01') {
-        console.log('Messages error:', messagesError);
-      }
+      console.log('💬 Messages query:', { count: allMessages?.length, error: msgError });
 
-      // Group messages by teacher (the other participant in the conversation)
-      const messagesByTeacher = {};
-      if (allMessages) {
+      // Step 3: Group messages by teacher user ID (the other participant)
+      const messagesByTeacherUserId = {};
+      if (allMessages && allMessages.length > 0) {
         allMessages.forEach(msg => {
-          const teacherId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
-          if (!messagesByTeacher[teacherId]) {
-            messagesByTeacher[teacherId] = [];
+          const teacherUserId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
+          if (!messagesByTeacherUserId[teacherUserId]) {
+            messagesByTeacherUserId[teacherUserId] = [];
           }
-          // Format message for display
-          const formattedMsg = {
+          messagesByTeacherUserId[teacherUserId].push({
             ...msg,
             text: msg.message,
             timestamp: new Date(msg.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            sender: msg.sender_id === user.id ? 'parent' : 'teacher',
-            type: 'text'
-          };
-          messagesByTeacher[teacherId].push(formattedMsg);
-        });
-      }
-
-      // SIMPLIFIED APPROACH: Just get all teachers and let parent chat with any of them
-      console.log('=== FETCHING TEACHERS ===');
-      console.log('Student class ID:', studentData.class_id);
-
-      let allTeachers = [];
-
-      // Method 1: Get all teachers from the teachers table (simple approach)
-      try {
-        const { data: allTeachersData, error: teachersError } = await supabase
-          .from(TABLES.TEACHERS)
-          .select('id, name, qualification, address, salary_type, is_class_teacher, assigned_class_id')
-          .limit(10); // Get first 10 teachers for testing
-
-        console.log('All teachers query result:', { allTeachersData, teachersError });
-
-        if (!teachersError && allTeachersData && allTeachersData.length > 0) {
-          console.log('Found teachers:', allTeachersData.length);
-
-          for (const teacher of allTeachersData) {
-            console.log('Processing teacher:', teacher.name);
-
-            // Get teacher's user ID
-            const teacherUserId = await getTeacherUserId(teacher.id);
-            console.log('Teacher user ID for', teacher.name, ':', teacherUserId);
-
-            allTeachers.push({
-              id: teacher.id,
-              userId: teacherUserId,
-              name: teacher.name,
-              subject: teacher.is_class_teacher ? 'Class Teacher' : 'Subject Teacher',
-              qualification: teacher.qualification,
-              address: teacher.address,
-              role: teacher.is_class_teacher ? 'class_teacher' : 'subject_teacher',
-              className: studentData.classes ? `${studentData.classes.class_name} ${studentData.classes.section}` : 'N/A',
-              studentName: studentData.name,
-              messages: messagesByTeacher[teacherUserId] || [],
-              lastMessageTime: messagesByTeacher[teacherUserId]?.length > 0 ?
-                messagesByTeacher[teacherUserId][messagesByTeacher[teacherUserId].length - 1].sent_at : null
-            });
-          }
-        } else {
-          console.log('No teachers found or error:', teachersError);
-
-          // Add a test teacher for debugging
-          allTeachers.push({
-            id: 'test-teacher-1',
-            userId: 'test-user-1',
-            name: 'Test Teacher',
-            subject: 'Class Teacher',
-            qualification: 'B.Ed',
-            address: 'School Address',
-            role: 'class_teacher',
-            className: 'Test Class',
-            studentName: 'Test Student',
-            messages: [],
-            lastMessageTime: null
+            sender: msg.sender_id === user.id ? 'parent' : 'teacher'
           });
-        }
-      } catch (err) {
-        console.log('Error in simple teacher fetch:', err);
-
-        // Add a test teacher for debugging even on error
-        allTeachers.push({
-          id: 'test-teacher-2',
-          userId: 'test-user-2',
-          name: 'Fallback Teacher',
-          subject: 'Class Teacher',
-          qualification: 'M.Ed',
-          address: 'School Address',
-          role: 'class_teacher',
-          className: 'Test Class',
-          studentName: 'Test Student',
-          messages: [],
-          lastMessageTime: null
         });
       }
 
-      console.log('=== FINAL RESULTS ===');
-      console.log('Total teachers found:', allTeachers.length);
-      console.log('Teachers:', allTeachers.map(t => ({ name: t.name, userId: t.userId, role: t.role })));
+      console.log('📊 Messages grouped by teacher:', Object.keys(messagesByTeacherUserId).length);
 
-      setTeachers(allTeachers);
+      // Step 4: Get teachers assigned to this specific class (using same logic as student)
+      const uniqueTeachers = [];
+      const seen = new Set();
+      const studentClassId = student.class_id;
+      
+      console.log('🔍 Finding teachers for class:', studentClassId);
+      console.log('🎯 Class:', student.classes?.class_name, student.classes?.section);
+      
+      // Method 1A: Get class teacher from classes table (using class_teacher_id)
+      console.log('Fetching class teacher via classes table for class_id:', student.class_id);
+      const { data: classInfo, error: classInfoError } = await supabase
+        .from(TABLES.CLASSES)
+        .select(`
+          id,
+          class_name,
+          section,
+          class_teacher_id,
+          teachers!classes_class_teacher_id_fkey(
+            id,
+            name,
+            qualification
+          )
+        `)
+        .eq('id', student.class_id)
+        .single();
+      
+      if (!classInfoError && classInfo) {
+        console.log('Found class info:', classInfo);
+        
+        // Add class teacher if available
+        if (classInfo.class_teacher_id && classInfo.teachers && classInfo.teachers.name) {
+          console.log('Found class teacher from classes table:', classInfo.teachers);
+          
+          try {
+            // Get teacher's user ID
+            const teacherUserId = await getTeacherUserId(classInfo.teachers.id);
+            
+            uniqueTeachers.push({
+              id: classInfo.teachers.id,
+              userId: teacherUserId,
+              name: classInfo.teachers.name,
+              subject: 'Class Teacher',
+              role: 'class_teacher',
+              className: `${student.classes.class_name} ${student.classes.section}`,
+              studentName: student.name,
+              messages: messagesByTeacherUserId[teacherUserId] || [],
+              lastMessageTime: messagesByTeacherUserId[teacherUserId]?.length > 0 ?
+                messagesByTeacherUserId[teacherUserId][messagesByTeacherUserId[teacherUserId].length - 1].sent_at : null,
+              canMessage: true
+            });
+            seen.add(classInfo.teachers.id);
+          } catch (userIdError) {
+            console.log('❌ Could not get user ID for class teacher:', userIdError.message);
+            
+            // Still add the teacher but mark as non-messageable
+            uniqueTeachers.push({
+              id: classInfo.teachers.id,
+              userId: null,
+              name: classInfo.teachers.name + ' (No Account)',
+              subject: 'Class Teacher',
+              role: 'class_teacher',
+              className: `${student.classes.class_name} ${student.classes.section}`,
+              studentName: student.name,
+              messages: [],
+              lastMessageTime: null,
+              canMessage: false,
+              hasUserAccount: false,
+              error: 'This teacher does not have a user account for messaging'
+            });
+            seen.add(classInfo.teachers.id);
+          }
+        }
+      } else {
+        console.log('Class info fetch error:', classInfoError);
+      }
+      
+      // Method 1B: Alternative - Get class teacher directly from teachers table
+      if (uniqueTeachers.length === 0) {
+        console.log('Trying direct teacher fetch for class_id:', student.class_id);
+        const { data: directClassTeacher, error: directTeacherError } = await supabase
+          .from(TABLES.TEACHERS)
+          .select('id, name, qualification, is_class_teacher, assigned_class_id')
+          .eq('assigned_class_id', student.class_id)
+          .eq('is_class_teacher', true);
+        
+        if (!directTeacherError && directClassTeacher && directClassTeacher.length > 0) {
+          console.log('Found class teacher directly:', directClassTeacher[0]);
+          const teacher = directClassTeacher[0];
+          if (teacher.name && !seen.has(teacher.id)) {
+            try {
+              const teacherUserId = await getTeacherUserId(teacher.id);
+              uniqueTeachers.push({
+                id: teacher.id,
+                userId: teacherUserId,
+                name: teacher.name,
+                subject: 'Class Teacher',
+                role: 'class_teacher',
+                className: `${student.classes.class_name} ${student.classes.section}`,
+                studentName: student.name,
+                messages: messagesByTeacherUserId[teacherUserId] || [],
+                lastMessageTime: messagesByTeacherUserId[teacherUserId]?.length > 0 ?
+                  messagesByTeacherUserId[teacherUserId][messagesByTeacherUserId[teacherUserId].length - 1].sent_at : null,
+                canMessage: true
+              });
+            } catch (userIdError) {
+              console.log('❌ Could not get user ID for direct class teacher:', userIdError.message);
+              uniqueTeachers.push({
+                id: teacher.id,
+                userId: null,
+                name: teacher.name + ' (No Account)',
+                subject: 'Class Teacher',
+                role: 'class_teacher',
+                className: `${student.classes.class_name} ${student.classes.section}`,
+                studentName: student.name,
+                messages: [],
+                lastMessageTime: null,
+                canMessage: false,
+                hasUserAccount: false
+              });
+            }
+            seen.add(teacher.id);
+          }
+        }
+      }
+      
+      // Method 2A: Get subject teachers via direct teacher_subjects query
+      console.log('Fetching subject teachers for class_id:', student.class_id);
+      
+      // First, get all subjects for this specific class
+      const { data: classSubjects, error: classSubjectsError } = await supabase
+        .from(TABLES.SUBJECTS)
+        .select('id, name')
+        .eq('class_id', student.class_id);
+      
+      console.log('Class subjects:', classSubjects, 'Error:', classSubjectsError);
+      
+      if (!classSubjectsError && classSubjects && classSubjects.length > 0) {
+        // For each subject, find the assigned teachers
+        for (const subject of classSubjects) {
+          console.log('Finding teachers for subject:', subject.name, 'ID:', subject.id);
+          
+          const { data: teacherAssignments, error: teacherError } = await supabase
+            .from(TABLES.TEACHER_SUBJECTS)
+            .select(`
+              teacher_id,
+              teachers!inner(
+                id,
+                name,
+                qualification,
+                is_class_teacher
+              )
+            `)
+            .eq('subject_id', subject.id);
+          
+          console.log('Teacher assignments for', subject.name, ':', teacherAssignments, 'Error:', teacherError);
+          
+          if (!teacherError && teacherAssignments && teacherAssignments.length > 0) {
+            for (const assignment of teacherAssignments) {
+              if (assignment.teachers && 
+                  assignment.teachers.id && 
+                  assignment.teachers.name && 
+                  !seen.has(assignment.teachers.id)) {
+                
+                try {
+                  // Get teacher's user ID
+                  const teacherUserId = await getTeacherUserId(assignment.teachers.id);
+                  
+                  uniqueTeachers.push({
+                    id: assignment.teachers.id,
+                    userId: teacherUserId,
+                    name: assignment.teachers.name,
+                    subject: subject.name,
+                    role: 'subject_teacher',
+                    className: `${student.classes.class_name} ${student.classes.section}`,
+                    studentName: student.name,
+                    messages: messagesByTeacherUserId[teacherUserId] || [],
+                    lastMessageTime: messagesByTeacherUserId[teacherUserId]?.length > 0 ?
+                      messagesByTeacherUserId[teacherUserId][messagesByTeacherUserId[teacherUserId].length - 1].sent_at : null,
+                    canMessage: true
+                  });
+                } catch (userIdError) {
+                  console.log('❌ Could not get user ID for subject teacher:', userIdError.message);
+                  
+                  // Still add the teacher but mark as non-messageable
+                  uniqueTeachers.push({
+                    id: assignment.teachers.id,
+                    userId: null,
+                    name: assignment.teachers.name + ' (No Account)',
+                    subject: subject.name,
+                    role: 'subject_teacher',
+                    className: `${student.classes.class_name} ${student.classes.section}`,
+                    studentName: student.name,
+                    messages: [],
+                    lastMessageTime: null,
+                    canMessage: false,
+                    hasUserAccount: false,
+                    error: 'This teacher does not have a user account for messaging'
+                  });
+                }
+                
+                seen.add(assignment.teachers.id);
+                console.log('Added subject teacher:', assignment.teachers.name, 'for', subject.name);
+              }
+            }
+          }
+        }
+      }
+      
+      // Method 2B: Alternative approach - use join query
+      if (uniqueTeachers.filter(t => t.role === 'subject_teacher').length === 0) {
+        console.log('No subject teachers found via Method 2A, trying join query...');
+        
+        const { data: subjectAssignments, error: subjectError } = await supabase
+          .from(TABLES.TEACHER_SUBJECTS)
+          .select(`
+            teacher_id,
+            subjects!inner(
+              id,
+              name,
+              class_id
+            ),
+            teachers!inner(
+              id,
+              name,
+              qualification
+            )
+          `)
+          .eq('subjects.class_id', student.class_id);
+        
+        console.log('Join query result:', subjectAssignments, 'Error:', subjectError);
+        
+        if (!subjectError && subjectAssignments && subjectAssignments.length > 0) {
+          for (const assignment of subjectAssignments) {
+            console.log('Processing join assignment:', assignment);
+            
+            if (assignment.teachers && 
+                assignment.teachers.id && 
+                assignment.teachers.name && 
+                !seen.has(assignment.teachers.id)) {
+              
+              try {
+                // Get teacher's user ID
+                const teacherUserId = await getTeacherUserId(assignment.teachers.id);
+                
+                uniqueTeachers.push({
+                  id: assignment.teachers.id,
+                  userId: teacherUserId,
+                  name: assignment.teachers.name,
+                  subject: assignment.subjects?.name || 'Subject Teacher',
+                  role: 'subject_teacher',
+                  className: `${student.classes.class_name} ${student.classes.section}`,
+                  studentName: student.name,
+                  messages: messagesByTeacherUserId[teacherUserId] || [],
+                  lastMessageTime: messagesByTeacherUserId[teacherUserId]?.length > 0 ?
+                    messagesByTeacherUserId[teacherUserId][messagesByTeacherUserId[teacherUserId].length - 1].sent_at : null,
+                  canMessage: true
+                });
+              } catch (userIdError) {
+                console.log('❌ Could not get user ID for join subject teacher:', userIdError.message);
+                
+                // Still add the teacher but mark as non-messageable
+                uniqueTeachers.push({
+                  id: assignment.teachers.id,
+                  userId: null,
+                  name: assignment.teachers.name + ' (No Account)',
+                  subject: assignment.subjects?.name || 'Subject Teacher',
+                  role: 'subject_teacher',
+                  className: `${student.classes.class_name} ${student.classes.section}`,
+                  studentName: student.name,
+                  messages: [],
+                  lastMessageTime: null,
+                  canMessage: false,
+                  hasUserAccount: false,
+                  error: 'This teacher does not have a user account for messaging'
+                });
+              }
+              
+              seen.add(assignment.teachers.id);
+              console.log('Added subject teacher via join:', assignment.teachers.name);
+            }
+          }
+        }
+      }
+      
+      // Method 3: If still no teachers, get all teachers assigned to this class (broader search)
+      if (uniqueTeachers.length === 0) {
+        console.log('No teachers found via specific methods, trying broader search');
+        
+        const { data: allClassTeachers, error: allTeachersError } = await supabase
+          .from(TABLES.TEACHERS)
+          .select('id, name, qualification, is_class_teacher, assigned_class_id')
+          .eq('assigned_class_id', student.class_id);
+        
+        if (!allTeachersError && allClassTeachers && allClassTeachers.length > 0) {
+          console.log('Found teachers in broader search:', allClassTeachers);
+          
+          for (const teacher of allClassTeachers) {
+            if (teacher.name && !seen.has(teacher.id)) {
+              try {
+                const teacherUserId = await getTeacherUserId(teacher.id);
+                uniqueTeachers.push({
+                  id: teacher.id,
+                  userId: teacherUserId,
+                  name: teacher.name,
+                  subject: teacher.is_class_teacher ? 'Class Teacher' : 'Subject Teacher',
+                  role: teacher.is_class_teacher ? 'class_teacher' : 'subject_teacher',
+                  className: `${student.classes.class_name} ${student.classes.section}`,
+                  studentName: student.name,
+                  messages: messagesByTeacherUserId[teacherUserId] || [],
+                  lastMessageTime: messagesByTeacherUserId[teacherUserId]?.length > 0 ?
+                    messagesByTeacherUserId[teacherUserId][messagesByTeacherUserId[teacherUserId].length - 1].sent_at : null,
+                  canMessage: true
+                });
+              } catch (userIdError) {
+                console.log('❌ Could not get user ID for broader search teacher:', userIdError.message);
+                uniqueTeachers.push({
+                  id: teacher.id,
+                  userId: null,
+                  name: teacher.name + ' (No Account)',
+                  subject: teacher.is_class_teacher ? 'Class Teacher' : 'Subject Teacher',
+                  role: teacher.is_class_teacher ? 'class_teacher' : 'subject_teacher',
+                  className: `${student.classes.class_name} ${student.classes.section}`,
+                  studentName: student.name,
+                  messages: [],
+                  lastMessageTime: null,
+                  canMessage: false,
+                  hasUserAccount: false
+                });
+              }
+              seen.add(teacher.id);
+            }
+          }
+        }
+      }
+      
+      console.log('Final teachers list:', uniqueTeachers);
+      
+      // If STILL no teachers found, this means the database doesn't have any teachers
+      if (uniqueTeachers.length === 0) {
+        console.log('No teachers found at all in the database for class', student.class_id);
+        
+        // Get class info for debugging
+        const { data: classDebugInfo, error: classDebugError } = await supabase
+          .from(TABLES.CLASSES)
+          .select('*')
+          .eq('id', student.class_id)
+          .single();
+        
+        console.log('Student class debug info:', classDebugInfo, classDebugError);
+        
+        setError(`No teachers found for your child's class. \n\nDebug Info:\nStudent Class ID: ${student.class_id}\nClass Name: ${classDebugInfo?.class_name || 'N/A'}\nSection: ${classDebugInfo?.section || 'N/A'}\nClass Teacher ID: ${classDebugInfo?.class_teacher_id || 'N/A'}\n\nPlease contact the school administrator to assign teachers.`);
+        return;
+      }
+
+      setTeachers(uniqueTeachers)
+      
+      // Step 5: Fetch unread counts for each teacher
+      await fetchUnreadCounts(uniqueTeachers);
+      
     } catch (err) {
-      console.error('Error fetching teachers and chats:', err);
+      console.error('💥 Error in fetchTeachersAndChats:', err);
       setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Pull-to-refresh handler
-  const onRefresh = async () => {
-    setRefreshing(true);
+  // Fetch unread message counts for all teachers
+  const fetchUnreadCounts = async (teachersList) => {
     try {
-      await fetchTeachersAndChats();
-    } catch (error) {
-      console.error('Error refreshing data:', error);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  // Refresh chat messages for selected teacher
-  const refreshChatMessages = async () => {
-    if (!selectedTeacher) return;
-    
-    setRefreshing(true);
-    try {
-      // Get fresh messages for this teacher
-      const { data: freshMessages, error: messagesError } = await supabase
-        .from(TABLES.MESSAGES)
-        .select('*')
-        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-        .or(`sender_id.eq.${selectedTeacher.userId},receiver_id.eq.${selectedTeacher.userId}`)
-        .order('sent_at', { ascending: true });
-
-      if (messagesError) {
-        console.log('Error refreshing messages:', messagesError);
-      } else if (freshMessages) {
-        // Filter messages for the current conversation
-        const conversationMessages = freshMessages.filter(msg => 
-          (msg.sender_id === user.id && msg.receiver_id === selectedTeacher.userId) ||
-          (msg.sender_id === selectedTeacher.userId && msg.receiver_id === user.id)
-        );
-
-        // Format messages for display
-        const formattedMessages = conversationMessages.map(msg => ({
-          ...msg,
-          text: msg.message,
-          timestamp: new Date(msg.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          sender: msg.sender_id === user.id ? 'parent' : 'teacher',
-          type: 'text'
-        }));
-
-        setMessages(formattedMessages);
+      const counts = {};
+      
+      for (const teacher of teachersList) {
+        if (teacher.userId && teacher.userId !== user.id) {
+          const count = await getUnreadCountFromSender(teacher.userId);
+          counts[teacher.userId] = count;
+        }
       }
+      
+      setUnreadCounts(counts);
     } catch (error) {
-      console.error('Error refreshing chat messages:', error);
-    } finally {
-      setRefreshing(false);
+      console.log('Error fetching unread counts:', error);
     }
   };
 
@@ -301,14 +581,40 @@ const ChatWithTeacher = () => {
   );
 
   // Select a teacher and load chat
-  const handleSelectTeacher = (teacher) => {
+  const handleSelectTeacher = async (teacher) => {
     console.log('Selected teacher:', teacher);
     console.log('Teacher role:', teacher.role);
     console.log('Teacher userId:', teacher.userId);
     console.log('Teacher messages:', teacher.messages?.length || 0);
+    console.log('Teacher has user account:', teacher.hasUserAccount !== false);
 
     setSelectedTeacher(teacher);
     setMessages(teacher.messages || []);
+    
+    // Only handle read status if teacher has a user account
+    if (teacher.userId && teacher.userId !== user.id && teacher.hasUserAccount !== false) {
+      await markMessagesAsRead(teacher.userId);
+      
+      // Clear unread count for this teacher immediately
+      setUnreadCounts(prev => ({
+        ...prev,
+        [teacher.userId]: 0
+      }));
+      
+      // Refresh unread counts after a short delay to ensure database is updated
+      setTimeout(() => {
+        fetchUnreadCounts([teacher]);
+      }, 1000);
+    }
+    
+    // Show warning if teacher doesn't have user account
+    if (teacher.hasUserAccount === false) {
+      Alert.alert(
+        'Teacher Account Notice',
+        `${teacher.name} doesn't have a user account yet, so you can't send messages to them. Please contact the school administrator to set up their account.`,
+        [{ text: 'OK' }]
+      );
+    }
   };
 
   // Send a message
@@ -754,6 +1060,23 @@ const ChatWithTeacher = () => {
                   item.role === 'subject_teacher' &&
                   sortedTeachers[index - 1].role !== 'subject_teacher';
 
+                // Get unread count for this teacher
+                const unreadCount = unreadCounts[item.userId] || 0;
+                const hasUnread = unreadCount > 0;
+
+                // Get last message details
+                const lastMessage = item.messages && item.messages.length > 0 ? 
+                  item.messages[item.messages.length - 1] : null;
+                const lastMessageSender = lastMessage ? 
+                  (lastMessage.sender_id === user.id ? 'You' : item.name.split(' ')[0]) : null;
+                const lastMessageText = lastMessage ? 
+                  (lastMessage.text || lastMessage.message || 'Attachment') : 'No messages yet';
+                const lastMessageTime = lastMessage ? 
+                  new Date(lastMessage.sent_at).toLocaleDateString('en-US', { 
+                    month: 'short', day: 'numeric',
+                    ...(new Date(lastMessage.sent_at).getFullYear() !== new Date().getFullYear() && { year: 'numeric' })
+                  }) : null;
+
                 return (
                   <View>
                     {showClassTeacherHeader && (
@@ -768,22 +1091,32 @@ const ChatWithTeacher = () => {
                     )}
                     <TouchableOpacity style={[
                       styles.teacherCard,
-                      item.role === 'class_teacher' && styles.classTeacherCard
+                      item.role === 'class_teacher' && styles.classTeacherCard,
+                      hasUnread && styles.unreadCard
                     ]} onPress={() => handleSelectTeacher(item)}>
                       <View style={[
                         styles.teacherAvatar,
                         { backgroundColor: item.role === 'class_teacher' ? '#4CAF50' :
-                                          item.role === 'both' ? '#FF9800' : '#2196F3' }
+                                          item.role === 'both' ? '#FF9800' : '#2196F3' },
+                        hasUnread && styles.unreadAvatar
                       ]}>
                         <Ionicons
                           name={item.role === 'class_teacher' ? 'school' : item.role === 'both' ? 'star' : 'book'}
                           size={24}
                           color="#fff"
                         />
+                        {hasUnread && (
+                          <View style={styles.unreadDot} />
+                        )}
                       </View>
                       <View style={styles.teacherInfo}>
                         <View style={styles.teacherHeader}>
-                          <Text style={styles.teacherName}>{item.name}</Text>
+                          <Text style={[
+                            styles.teacherName,
+                            hasUnread && styles.unreadText
+                          ]}>
+                            {item.name}
+                          </Text>
                           <View style={[styles.roleBadge, {
                             backgroundColor: item.role === 'class_teacher' ? '#4CAF50' :
                                             item.role === 'both' ? '#FF9800' : '#2196F3'
@@ -794,29 +1127,49 @@ const ChatWithTeacher = () => {
                             </Text>
                           </View>
                         </View>
-                        <Text style={styles.teacherSubject} numberOfLines={2}>
+                        <Text style={styles.teacherSubject} numberOfLines={1}>
                           {item.subject || 'Teacher'}
                         </Text>
-                        {item.qualification && (
-                          <Text style={styles.teacherQualification}>
-                            {item.qualification}
-                          </Text>
-                        )}
-                        {item.messages && item.messages.length > 0 && (
-                          <Text style={styles.lastMessageTime}>
-                            Last message: {new Date(item.lastMessageTime).toLocaleDateString()}
+                        
+                        {/* Last Message Preview */}
+                        {lastMessage ? (
+                          <View style={styles.lastMessageContainer}>
+                            <Text style={[
+                              styles.lastMessageText,
+                              hasUnread && styles.unreadText
+                            ]} numberOfLines={1}>
+                              {lastMessageSender}: {lastMessageText}
+                            </Text>
+                            {lastMessageTime && (
+                              <Text style={[
+                                styles.lastMessageTime,
+                                hasUnread && styles.unreadTime
+                              ]}>
+                                {lastMessageTime}
+                              </Text>
+                            )}
+                          </View>
+                        ) : (
+                          <Text style={styles.noMessagesText}>
+                            Start a conversation
                           </Text>
                         )}
                       </View>
                       <View style={styles.chatActions}>
-                        <View style={styles.messageIndicator}>
-                          <Ionicons name="chatbubbles" size={20} color="#9c27b0" />
-                          {item.messages && item.messages.length > 0 && (
-                            <View style={styles.messageCountBadge}>
+                        {hasUnread ? (
+                          <View style={styles.unreadBadge}>
+                            <Text style={styles.unreadBadgeText}>
+                              {unreadCount > 99 ? '99+' : unreadCount}
+                            </Text>
+                          </View>
+                        ) : (
+                          <View style={styles.messageIndicator}>
+                            <Ionicons name="chatbubble-outline" size={18} color="#9c27b0" />
+                            {item.messages && item.messages.length > 0 && (
                               <Text style={styles.messageCount}>{item.messages.length}</Text>
-                            </View>
-                          )}
-                        </View>
+                            )}
+                          </View>
+                        )}
                         <Ionicons name="chevron-forward" size={20} color="#ccc" />
                       </View>
                     </TouchableOpacity>
@@ -825,14 +1178,6 @@ const ChatWithTeacher = () => {
               }}
               contentContainerStyle={{ padding: 16 }}
               showsVerticalScrollIndicator={false}
-              refreshControl={
-                <RefreshControl
-                  refreshing={refreshing}
-                  onRefresh={onRefresh}
-                  colors={['#1976d2']}
-                  progressBackgroundColor="#fff"
-                />
-              }
             />
           )}
         </View>
@@ -846,10 +1191,25 @@ const ChatWithTeacher = () => {
             <TouchableOpacity onPress={handleBack} style={{ marginRight: 10 }}>
               <Ionicons name="arrow-back" size={24} color="#1976d2" />
             </TouchableOpacity>
-            <Ionicons name="person-circle" size={32} color="#1976d2" style={{ marginRight: 8 }} />
-            <View>
-              <Text style={styles.teacherName}>{selectedTeacher.name}</Text>
-              <Text style={styles.teacherSubject}>{selectedTeacher.subject}</Text>
+            <View style={[
+              styles.teacherAvatar,
+              { backgroundColor: selectedTeacher.role === 'class_teacher' ? '#4CAF50' :
+                                selectedTeacher.role === 'both' ? '#FF9800' : '#2196F3',
+                width: 40, height: 40, borderRadius: 20, marginRight: 12 }
+            ]}>
+              <Ionicons
+                name={selectedTeacher.role === 'class_teacher' ? 'school' : selectedTeacher.role === 'both' ? 'star' : 'book'}
+                size={20}
+                color="#fff"
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.chatHeaderName, { fontSize: 18, fontWeight: 'bold', color: '#222' }]}>
+                {selectedTeacher.name}
+              </Text>
+              <Text style={[styles.chatHeaderSubject, { fontSize: 14, color: '#666' }]}>
+                {selectedTeacher.subject}
+              </Text>
             </View>
           </View>
           
@@ -950,14 +1310,6 @@ const ChatWithTeacher = () => {
             )}
             contentContainerStyle={styles.chatList}
             style={{ flex: 1 }}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={refreshChatMessages}
-                colors={['#1976d2']}
-                progressBackgroundColor="#fff"
-              />
-            }
             onContentSizeChange={() => {
               setTimeout(() => {
                 if (flatListRef.current) {
@@ -1293,6 +1645,7 @@ const styles = StyleSheet.create({
   classInfo: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 8,
     paddingTop: 8,
     borderTopWidth: 1,
@@ -1349,10 +1702,70 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
   },
+
+  // Unread Message Indicators
+  unreadCard: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#f44336',
+    backgroundColor: '#fffef7',
+  },
+  unreadAvatar: {
+    borderWidth: 2,
+    borderColor: '#f44336',
+  },
+  unreadDot: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#f44336',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  unreadText: {
+    fontWeight: 'bold',
+    color: '#222',
+  },
+  unreadTime: {
+    fontWeight: 'bold',
+    color: '#f44336',
+  },
+  unreadBadge: {
+    backgroundColor: '#f44336',
+    borderRadius: 12,
+    minWidth: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  unreadBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+
+  // Last Message Display
+  lastMessageContainer: {
+    marginTop: 4,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  lastMessageText: {
+    fontSize: 13,
+    color: '#666',
+    flex: 1,
+    marginRight: 8,
+  },
+  noMessagesText: {
+    fontSize: 13,
+    color: '#999',
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
 });
 
 export default ChatWithTeacher; 
-
-//fkajlkdjkl
-
-//njkbjhhjv

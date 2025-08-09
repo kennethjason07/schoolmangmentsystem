@@ -6,7 +6,11 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+<<<<<<< HEAD
 import usePullToRefresh from '../../hooks/usePullToRefresh';
+=======
+import Header from '../../components/Header';
+>>>>>>> origin/hanokalurecs
 
 // Helper function to get grade color
 const getGradeColor = (percentage) => {
@@ -38,6 +42,7 @@ export default function StudentMarks({ navigation }) {
   const [studentData, setStudentData] = useState(null);
   const [selectedExam, setSelectedExam] = useState(null);
   const [showChart, setShowChart] = useState(false);
+  const [studentInfo, setStudentInfo] = useState(null);
   const [schoolInfo, setSchoolInfo] = useState({
     name: 'School Management System',
     address: 'Education Excellence Center'
@@ -120,6 +125,17 @@ export default function StudentMarks({ navigation }) {
       }
 
       setStudentData(student);
+      setStudentInfo({
+        name: student.name || 'Unknown Student',
+        class: student.classes?.class_name || 'N/A',
+        rollNo: student.roll_no || 'N/A',
+        section: student.classes?.section || '',
+        profilePicUrl: '',
+        admissionNo: student.admission_no || 'N/A',
+        dob: student.dob ? new Date(student.dob).toLocaleDateString() : 'N/A',
+        gender: student.gender || 'N/A',
+        address: student.address || 'N/A'
+      });
       console.log('Student data:', { id: student.id, class_id: student.class_id });
 
       // Get marks data with correct field names
@@ -325,6 +341,23 @@ export default function StudentMarks({ navigation }) {
 
   const stats = calculateStats();
   const examGroups = groupByExam();
+
+  // Refresh data function for header
+  const refreshData = async (showLoading = false) => {
+    if (showLoading) {
+      setLoading(true);
+    }
+    try {
+      await fetchMarksData();
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+      setError('Failed to refresh data. Please try again.');
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      }
+    }
+  };
 
   // Download Report Card Function
   const downloadReportCard = async () => {
@@ -775,27 +808,46 @@ export default function StudentMarks({ navigation }) {
 
   if (loading) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#9C27B0" />
-        <Text style={styles.loadingText}>Loading marks...</Text>
+      <View style={styles.container}>
+        <Header 
+          title="Marks & Grades" 
+          showBack={true} 
+          showProfile={true}
+          studentInfo={studentInfo}
+          onRefresh={() => refreshData(true)}
+        />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color="#9C27B0" />
+          <Text style={styles.loadingText}>Loading marks...</Text>
+        </View>
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Ionicons name="alert-circle" size={48} color="#F44336" />
-        <Text style={styles.errorText}>Failed to load marks</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={fetchMarksData}>
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
+      <View style={styles.container}>
+        <Header 
+          title="Marks & Grades" 
+          showBack={true} 
+          showProfile={true}
+          studentInfo={studentInfo}
+          onRefresh={() => refreshData(true)}
+        />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <Ionicons name="alert-circle" size={48} color="#F44336" />
+          <Text style={styles.errorText}>Failed to load marks</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={fetchMarksData}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+<<<<<<< HEAD
       <ScrollView 
         contentContainerStyle={{ padding: 16, paddingTop: 40 }}
         refreshControl={
@@ -809,6 +861,16 @@ export default function StudentMarks({ navigation }) {
       >
         {/* Header */}
         <Text style={styles.header}>Marks & Grades</Text>
+=======
+      <Header 
+        title="Marks & Grades" 
+        showBack={true} 
+        showProfile={true}
+        studentInfo={studentInfo}
+        onRefresh={() => refreshData(true)}
+      />
+      <ScrollView contentContainerStyle={{ padding: 16 }}>
+>>>>>>> origin/hanokalurecs
 
         {/* Overall Statistics */}
         <View style={styles.statsContainer}>
@@ -967,14 +1029,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-  },
-  header: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#9C27B0',
-    marginTop: 40,
-    marginBottom: 18,
-    letterSpacing: 0.5,
   },
   sectionTitle: {
     fontSize: 18,

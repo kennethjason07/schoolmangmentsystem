@@ -375,6 +375,8 @@ export default function AppNavigator() {
                 <Stack.Screen name="AcademicPerformance" component={AcademicPerformance} />
                 <Stack.Screen name="FeeCollection" component={FeeCollection} />
                 <Stack.Screen name="StudentOverview" component={StudentOverview} />
+                <Stack.Screen name="Profile" component={ProfileScreen} />
+                <Stack.Screen name="Settings" component={SettingsScreen} />
               </>
             )}
             {userType === 'teacher' && (
@@ -386,6 +388,8 @@ export default function AppNavigator() {
                 <Stack.Screen name="MarksEntryStudentsScreen" component={MarksEntryStudentsScreen} />
                 <Stack.Screen name="StudentAttendanceScreen" component={StudentAttendanceScreen} />
                 <Stack.Screen name="StudentMarksScreen" component={StudentMarksScreen} />
+                <Stack.Screen name="Profile" component={ProfileScreen} />
+                <Stack.Screen name="Settings" component={SettingsScreen} />
               </>
             )}
             {userType === 'parent' && (
@@ -395,20 +399,22 @@ export default function AppNavigator() {
                 <Stack.Screen name="CardPayment" component={CardPayment} />
                 <Stack.Screen name="OnlineBankingPayment" component={OnlineBankingPayment} />
                 <Stack.Screen name="UPIPayment" component={UPIPayment} />
+                <Stack.Screen name="Profile" component={ProfileScreen} />
+                <Stack.Screen name="Settings" component={SettingsScreen} />
               </>
             )}
             {userType === 'student' && (
               <>
                 <Stack.Screen name="StudentDashboard" component={StudentTabNavigator} />
                 <Stack.Screen name="StudentNotifications" component={StudentNotifications} />
+                <Stack.Screen name="Profile" component={ProfileScreen} />
+                <Stack.Screen name="Settings" component={SettingsScreen} />
               </>
             )}
             
             {/* Universal Screens */}
-            <Stack.Screen name="Profile" component={ProfileScreen} />
-            <Stack.Screen name="Settings" component={SettingsScreen} />
             <Stack.Screen name="StudentDetails" component={StudentDetails} />
-                <Stack.Screen name="StudentList" component={StudentList} />
+            <Stack.Screen name="StudentList" component={StudentList} />
           </>
         )}
       </Stack.Navigator>

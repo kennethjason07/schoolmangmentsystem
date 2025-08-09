@@ -934,7 +934,9 @@ function groupAndSortSchedule(schedule) {
       >
         {/* Welcome Section at the very top */}
         <View style={styles.welcomeSection}>
-          <Text style={styles.welcomeText}>Welcome back, Teacher!</Text>
+          <Text style={styles.welcomeText}>
+            Welcome back, {teacherProfile?.name || teacherProfile?.full_name || 'Teacher'}!
+          </Text>
           <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</Text>
         </View>
         {/* Enhanced Stats Cards Section */}
@@ -1001,8 +1003,12 @@ function groupAndSortSchedule(schedule) {
 
         {/* Quick Actions */}
         <View style={styles.section}>
-          <View style={styles.sectionTitleAccent} />
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <View style={styles.sectionTitleContainer}>
+            <View style={styles.sectionIcon}>
+              <Ionicons name="flash" size={20} color="#1976d2" />
+            </View>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+          </View>
           <View style={styles.quickActionsGrid}>
             <TouchableOpacity
               style={styles.quickActionCard}
@@ -1078,8 +1084,12 @@ function groupAndSortSchedule(schedule) {
 
         {/* Today's Schedule below stats */}
         <View style={styles.section}>
-          <View style={styles.sectionTitleAccent} />
-          <Text style={styles.sectionTitle}>Today's Schedule & Upcoming Classes</Text>
+          <View style={styles.sectionTitleContainer}>
+            <View style={styles.sectionIcon}>
+              <Ionicons name="calendar" size={20} color="#1976d2" />
+            </View>
+            <Text style={styles.sectionTitle}>Today's Schedule & Upcoming Classes</Text>
+          </View>
           <View style={{ marginHorizontal: 4, marginTop: 8 }}>
             {schedule.length === 0 ? (
               <View style={styles.emptyScheduleContainer}>
@@ -1096,15 +1106,15 @@ function groupAndSortSchedule(schedule) {
                   {group.items.map((item, index) => (
                     <TouchableOpacity
                       key={`schedule-${group.classKey}-${item.id || index}`}
-                      style={{ backgroundColor: '#fff', borderRadius: 10, padding: 14, marginBottom: 8, flexDirection: 'row', alignItems: 'center', elevation: 2, shadowColor: '#1976d2', shadowOpacity: 0.08, shadowRadius: 4 }}
+                      style={styles.scheduleItem}
                       onPress={() => navigation.navigate('TeacherTimetable')}
                     >
-                      <View style={{ backgroundColor: '#e3f2fd', borderRadius: 20, width: 40, height: 40, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                      <View style={styles.scheduleItemIcon}>
                         <Ionicons name="time" size={20} color="#1976d2" />
                       </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: '#333', fontWeight: 'bold', fontSize: 15 }}>{item.subject}</Text>
-                        <Text style={{ color: '#888', fontSize: 13 }}>
+                      <View style={styles.scheduleItemContent}>
+                        <Text style={styles.scheduleSubjectText}>{item.subject}</Text>
+                        <Text style={styles.scheduleTimeText}>
                           {item.start_time} - {item.end_time} | Period {item.period_number}
                         </Text>
                       </View>
@@ -1118,7 +1128,6 @@ function groupAndSortSchedule(schedule) {
         </View>
         {/* Enhanced Tasks Section */}
         <View style={styles.section}>
-          <View style={styles.sectionTitleAccent} />
           <View style={styles.tasksHeader}>
             <View style={styles.tasksHeaderLeft}>
               <View style={styles.tasksIconContainer}>
@@ -1408,14 +1417,15 @@ function groupAndSortSchedule(schedule) {
         </View>
         {/* Recent Notifications and Messages */}
         <View style={styles.section}>
-          <View style={styles.sectionTitleAccent} />
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, paddingLeft: 12 }}>
-            <Ionicons name="notifications" size={22} color="#1976d2" style={{ marginRight: 8 }} />
-            <Text style={[styles.sectionTitle, { marginTop: 0, marginBottom: 0, paddingLeft: 0 }]}>Recent Notifications & Messages</Text>
+          <View style={styles.sectionTitleContainer}>
+            <View style={styles.sectionIcon}>
+              <Ionicons name="notifications" size={20} color="#1976d2" />
+            </View>
+            <Text style={styles.sectionTitle}>Recent Notifications & Messages</Text>
           </View>
           <View style={{ marginHorizontal: 12, marginBottom: 18 }}>
             {notifications.map((note, index) => (
-              <View key={`notification-${note.id || index}`} style={{ backgroundColor: '#fff', borderRadius: 14, padding: 14, marginBottom: 10, elevation: 2, shadowColor: '#1976d2', shadowOpacity: 0.08, shadowRadius: 4 }}>
+              <View key={`notification-${note.id || index}`} style={styles.notificationCard}>
                 <Text style={{ color: '#1976d2', fontWeight: 'bold', fontSize: 15 }}>{note.message}</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
                   <Ionicons name="calendar" size={14} color="#888" style={{ marginRight: 4 }} />
@@ -1427,13 +1437,14 @@ function groupAndSortSchedule(schedule) {
         </View>
         {/* Analytics */}
         <View style={styles.section}>
-          <View style={styles.sectionTitleAccent} />
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Ionicons name="analytics" size={22} color="#1976d2" style={{ marginLeft: 4, marginRight: 8 }} />
+          <View style={styles.sectionTitleContainer}>
+            <View style={styles.sectionIcon}>
+              <Ionicons name="analytics" size={20} color="#1976d2" />
+            </View>
             <Text style={styles.sectionTitle}>Analytics</Text>
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: 8, marginBottom: 18 }}>
-            <View style={{ borderRadius: 14, padding: 18, margin: 6, minWidth: 160, flex: 1, elevation: 2, shadowColor: '#388e3c', shadowOpacity: 0.08, shadowRadius: 4 }}>
+            <View style={styles.analyticsCard}>
               <Text style={{ fontWeight: 'bold', color: '#388e3c', fontSize: 16 }}>Attendance Rate</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
                 <Ionicons name="checkmark-circle" size={22} color="#388e3c" style={{ marginRight: 6 }} />
@@ -1443,7 +1454,7 @@ function groupAndSortSchedule(schedule) {
                 <View style={{ width: `${analytics.attendanceRate}%`, height: 6, backgroundColor: '#388e3c', borderRadius: 3 }} />
               </View>
             </View>
-            <View style={{ borderRadius: 14, padding: 18, margin: 6, minWidth: 160, flex: 1, elevation: 2, shadowColor: '#ff9800', shadowOpacity: 0.08, shadowRadius: 4 }}>
+            <View style={[styles.analyticsCard, { borderColor: '#fff3e0' }]}>
               <Text style={{ fontWeight: 'bold', color: '#ff9800', fontSize: 16 }}>Marks Distribution</Text>
               {analytics.marksDistribution.map(dist => (
                 <View key={dist.label} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
@@ -1456,11 +1467,15 @@ function groupAndSortSchedule(schedule) {
         </View>
         {/* Assigned Classes & Subjects Summary */}
         <View style={styles.section}>
-          <View style={styles.sectionTitleAccent} />
-          <Text style={styles.sectionTitle}>Assigned Classes & Subjects</Text>
+          <View style={styles.sectionTitleContainer}>
+            <View style={styles.sectionIcon}>
+              <Ionicons name="school" size={20} color="#1976d2" />
+            </View>
+            <Text style={styles.sectionTitle}>Assigned Classes & Subjects</Text>
+          </View>
           <View style={{ marginHorizontal: 12, marginBottom: 12 }}>
             {Object.entries(assignedClasses).map(([className, subjects]) => (
-              <View key={className} style={{ backgroundColor: '#fff', borderRadius: 10, padding: 12, marginBottom: 8, elevation: 1 }}>
+              <View key={className} style={styles.classSubjectCard}>
                 <Text style={{ fontWeight: 'bold', color: '#388e3c', fontSize: 15, marginBottom: 4 }}>Class {className}</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                   {subjects.map((subject, index) => (
@@ -1475,8 +1490,10 @@ function groupAndSortSchedule(schedule) {
         </View>
         {/* Upcoming Events */}
         <View style={styles.section}>
-          <View style={styles.sectionTitleAccent} />
-          <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleContainer}>
+            <View style={styles.sectionIcon}>
+              <Ionicons name="calendar-outline" size={20} color="#1976d2" />
+            </View>
             <Text style={styles.sectionTitle}>Upcoming Events</Text>
             <TouchableOpacity
               style={styles.addEventButton}
@@ -1558,8 +1575,10 @@ function groupAndSortSchedule(schedule) {
         </View>
         {/* Class Performance */}
         <View style={styles.section}>
-          <View style={styles.sectionTitleAccent} />
-          <View style={styles.sectionHeader}>
+          <View style={[styles.sectionTitleContainer, { borderBottomWidth: 0, marginBottom: 8 }]}>
+            <View style={styles.sectionIcon}>
+              <Ionicons name="trophy" size={20} color="#1976d2" />
+            </View>
             <Text style={styles.sectionTitle}>Class Performance</Text>
             <TouchableOpacity style={styles.viewAllButton}>
               <Text style={styles.viewAllText}>View Details</Text>
@@ -1652,8 +1671,10 @@ function groupAndSortSchedule(schedule) {
         </View>
         {/* Marks Trend per Class */}
         <View style={styles.section}>
-          <View style={styles.sectionTitleAccent} />
-          <View style={styles.sectionHeader}>
+          <View style={[styles.sectionTitleContainer, { borderBottomWidth: 0, marginBottom: 8 }]}>
+            <View style={styles.sectionIcon}>
+              <Ionicons name="bar-chart" size={20} color="#1976d2" />
+            </View>
             <Text style={styles.sectionTitle}>Performance Analytics</Text>
             <TouchableOpacity style={styles.viewAllButton}>
               <Text style={styles.viewAllText}>View Reports</Text>
@@ -1731,11 +1752,15 @@ function groupAndSortSchedule(schedule) {
 
         {/* Recent Activities */}
         <View style={styles.section}>
-          <View style={styles.sectionTitleAccent} />
-          <Text style={styles.sectionTitle}>Recent Activities</Text>
+          <View style={styles.sectionTitleContainer}>
+            <View style={styles.sectionIcon}>
+              <Ionicons name="pulse" size={20} color="#1976d2" />
+            </View>
+            <Text style={styles.sectionTitle}>Recent Activities</Text>
+          </View>
           <View style={{ marginHorizontal: 12, marginBottom: 12 }}>
             {recentActivities.map((act, index) => (
-              <View key={`activity-${act.id || index}`} style={{ backgroundColor: '#fff', borderRadius: 10, padding: 12, marginBottom: 8, elevation: 1 }}>
+              <View key={`activity-${act.id || index}`} style={styles.activityCard}>
                 <Text style={{ color: '#333', fontWeight: 'bold' }}>{act.activity}</Text>
                 <Text style={{ color: '#888', marginTop: 2, fontSize: 13 }}>{act.date}</Text>
               </View>
@@ -1744,12 +1769,16 @@ function groupAndSortSchedule(schedule) {
                 </View>
         {/* Announcements */}
         <View style={styles.section}>
-          <View style={styles.sectionTitleAccent} />
-          <Text style={styles.sectionTitle}>Announcements</Text>
+          <View style={styles.sectionTitleContainer}>
+            <View style={styles.sectionIcon}>
+              <Ionicons name="megaphone" size={20} color="#1976d2" />
+            </View>
+            <Text style={styles.sectionTitle}>Announcements</Text>
+          </View>
           <View style={{ marginHorizontal: 12, marginBottom: 18 }}>
             {announcements.map((ann, index) => (
-              <View key={`announcement-${ann.id || index}`} style={{ backgroundColor: '#fff', borderRadius: 10, padding: 12, marginBottom: 8, elevation: 1 }}>
-                <Text style={{ color: '#1976d2', fontWeight: 'bold' }}>{ann.message}</Text>
+              <View key={`announcement-${ann.id || index}`} style={styles.announcementCard}>
+                <Text style={{ color: '#388e3c', fontWeight: 'bold' }}>{ann.message}</Text>
               </View>
             ))}
           </View>
@@ -1978,6 +2007,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     marginHorizontal: 16,
+    marginTop: 20,
     marginBottom: 20,
     elevation: 2,
     shadowColor: '#000',
@@ -2040,35 +2070,45 @@ const styles = StyleSheet.create({
   // Enhanced section title style
   section: {
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 16,
+    padding: 20,
     marginHorizontal: 8,
     marginBottom: 18,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    elevation: 4,
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    borderWidth: 1,
+    borderColor: '#f0f4ff',
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '700',
     color: '#1976d2',
-    marginTop: 22,
-    marginBottom: 10,
-    marginLeft: 0,
-    paddingLeft: 12, // Reduced from 18 to 12 for better alignment
-    position: 'relative',
+    flex: 1,
+    textAlign: 'left',
+    letterSpacing: 0.3,
+    lineHeight: 32,
   },
-  sectionTitleAccent: {
-    position: 'absolute',
-    left: 0,
-    top: '50%',
-    width: 6,
-    height: 28,
-    backgroundColor: '#1976d2',
-    borderRadius: 3,
-    transform: [{ translateY: -14 }],
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 8,
+    borderBottomWidth: 2,
+    borderBottomColor: '#e3f2fd',
+    minHeight: 32,
+  },
+  sectionIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#e3f2fd',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    flexShrink: 0,
   },
   scheduleCard: {
     backgroundColor: '#fff',
@@ -2229,15 +2269,17 @@ const styles = StyleSheet.create({
   taskCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    elevation: 2,
-    shadowColor: '#000',
+    padding: 18,
+    marginBottom: 14,
+    elevation: 3,
+    shadowColor: '#1976d2',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.1,
     shadowRadius: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: '#e0e0e0',
+    borderWidth: 1,
+    borderColor: '#f0f4ff',
+    position: 'relative',
+    overflow: 'hidden',
   },
   taskCardHeader: {
     marginBottom: 12,
@@ -2728,15 +2770,18 @@ const styles = StyleSheet.create({
   },
   eventCard: {
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 14,
+    elevation: 3,
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 2,
-    borderLeftWidth: 4,
+    shadowRadius: 6,
+    borderWidth: 1,
+    borderColor: '#f0f4ff',
+    position: 'relative',
+    overflow: 'hidden',
   },
   eventHeader: {
     flexDirection: 'row',
@@ -2808,6 +2853,124 @@ const styles = StyleSheet.create({
   eventTypeText: {
     fontSize: 10,
     fontWeight: '600',
+  },
+
+  // New card styles to replace blue bars
+  scheduleItem: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    borderWidth: 1,
+    borderColor: '#f0f4ff',
+  },
+
+  scheduleItemIcon: {
+    backgroundColor: '#e3f2fd',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+
+  scheduleItemContent: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+
+  scheduleSubjectText: {
+    color: '#333',
+    fontWeight: 'bold',
+    fontSize: 15,
+    lineHeight: 20,
+  },
+
+  scheduleTimeText: {
+    color: '#888',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 2,
+  },
+
+  notificationCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 3,
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    borderWidth: 1,
+    borderColor: '#f0f4ff',
+  },
+
+  analyticsCard: {
+    borderRadius: 16,
+    padding: 20,
+    margin: 6,
+    minWidth: 160,
+    flex: 1,
+    elevation: 3,
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e8f5e8',
+  },
+
+  classSubjectCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    borderWidth: 1,
+    borderColor: '#f0f4ff',
+  },
+
+  activityCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    borderWidth: 1,
+    borderColor: '#f0f4ff',
+  },
+
+  announcementCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    borderWidth: 1,
+    borderColor: '#f0f4ff',
   },
 });
 

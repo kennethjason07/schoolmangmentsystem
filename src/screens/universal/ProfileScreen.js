@@ -379,16 +379,26 @@ const ProfileScreen = () => {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-            try {
-              const { error } = await signOut();
-              if (error) {
-                Alert.alert('Error', 'Failed to logout');
+              try {
+                const result = await signOut();
+                if (result?.error) {
+                  // Check if it's a session missing error (which means already logged out)
+                  if (result.error.message?.includes('Auth session missing') || result.error.name === 'AuthSessionMissingError') {
+                    console.log('Session already missing during logout, proceeding...');
+                    // Don't show error, this is expected if session expired
+                  } else {
+                    console.error('Logout error:', result.error);
+                    Alert.alert('Error', `Failed to logout: ${result.error.message || 'Unknown error'}`);
+                  }
+                }
+                // AuthContext will handle navigation automatically on successful logout
+              } catch (error) {
+                console.error('Logout error:', error);
+                // Don't show error for session missing issues
+                if (!error.message?.includes('Auth session missing') && error.name !== 'AuthSessionMissingError') {
+                  Alert.alert('Error', 'Failed to logout');
+                }
               }
-              // Remove the navigation.reset call - AuthContext will handle navigation automatically
-            } catch (error) {
-              console.error('Logout error:', error);
-              Alert.alert('Error', 'Failed to logout');
-            }
           },
         },
       ]
@@ -535,17 +545,6 @@ const ProfileScreen = () => {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Scroll indicator - shows when content is scrollable */}
-      {contentHeight > scrollViewHeight && (
-        <View style={styles.scrollIndicator}>
-          <View
-            style={[
-              styles.scrollHint,
-              { opacity: scrollY > 10 ? 0.8 : 0.4 }
-            ]}
-          />
-        </View>
-      )}
     </View>
   );
 };
@@ -561,7 +560,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingTop: 20,
-    paddingBottom: 100,
+    paddingBottom: 20,
     paddingHorizontal: 16,
   },
   loadingContainer: {
@@ -762,7 +761,7 @@ const styles = StyleSheet.create({
   },
   logoutSection: {
     marginTop: 20,
-    marginBottom: 30,
+    marginBottom: 10,
   },
   logoutButton: {
     backgroundColor: '#dc3545',
@@ -787,31 +786,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-  },
-  scrollIndicator: {
-    position: 'absolute',
-    bottom: 10,
-    left: 0,
-    right: 0,
-    height: 30,
-    backgroundColor: 'transparent',
-    justifyContent: 'center',
-    alignItems: 'center',
-    pointerEvents: 'none',
-  },
-  scrollHint: {
-    width: 50,
-    height: 5,
-    backgroundColor: '#1976d2',
-    borderRadius: 3,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    elevation: 2,
   },
   backButton: {
     flexDirection: 'row',

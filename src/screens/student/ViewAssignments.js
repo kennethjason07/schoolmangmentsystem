@@ -5,7 +5,11 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+<<<<<<< HEAD
 import usePullToRefresh from '../../hooks/usePullToRefresh';
+=======
+import Header from '../../components/Header';
+>>>>>>> origin/hanokalurecs
 
 const statusColors = {
   not_submitted: '#F44336',
@@ -518,6 +522,7 @@ const ViewAssignments = () => {
   }
 
   return (
+<<<<<<< HEAD
     <>
       <ScrollView 
         style={styles.container}
@@ -531,6 +536,11 @@ const ViewAssignments = () => {
         }
       >
         <Text style={styles.header}>Assignments</Text>
+=======
+    <View style={styles.container}>
+      <Header title="Assignments" showBack={true} showProfile={true} />
+      <ScrollView style={styles.scrollContainer}>
+>>>>>>> origin/hanokalurecs
         {assignments.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="document-text-outline" size={64} color="#ccc" />
@@ -682,7 +692,7 @@ const ViewAssignments = () => {
           </View>
         </View>
       </Modal>
-    </>
+    </View>
   );
 };
 
@@ -690,6 +700,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f7fa',
+  },
+  scrollContainer: {
     padding: 16,
   },
   header: {

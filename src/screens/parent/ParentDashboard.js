@@ -160,7 +160,43 @@ const ParentDashboard = ({ navigation }) => {
         // Check if parentUserData.students exists and contains data
         if (parentUserData.students && parentUserData.students.length > 0) {
           console.log('Parent Dashboard - Using parentUserData.students array');
-          studentDetails = parentUserData.students[0]; // Take the first student
+          const student = parentUserData.students[0]; // Take the first student
+          
+          // Map database fields to expected field names and include all available fields
+          studentDetails = {
+            ...student,
+            // Map database field names to expected names
+            roll_number: student.roll_no || student.roll_number,
+            admission_number: student.admission_no || student.admission_number,
+            date_of_birth: student.dob || student.date_of_birth,
+            class_id: student.class_id, // Ensure class_id is preserved
+            class_name: student.classes?.class_name || student.class_name,
+            section: student.classes?.section || student.section,
+            full_class_name: student.classes ? `${student.classes.class_name} ${student.classes.section}` : (student.class_name || ''),
+            // Include all other fields from the database schema
+            aadhar_no: student.aadhar_no,
+            place_of_birth: student.place_of_birth,
+            nationality: student.nationality,
+            religion: student.religion,
+            caste: student.caste,
+            pin_code: student.pin_code,
+            mother_tongue: student.mother_tongue,
+            identification_mark_1: student.identification_mark_1,
+            identification_mark_2: student.identification_mark_2,
+            academic_year: student.academic_year,
+            general_behaviour: student.general_behaviour,
+            remarks: student.remarks,
+            parent_id: student.parent_id,
+            school_id: student.school_id,
+            created_at: student.created_at
+          };
+          
+          // Debug class information
+          console.log('Parent Dashboard - Class Debug for student array path:');
+          console.log('  student.class_id:', student.class_id);
+          console.log('  student.classes:', student.classes);
+          console.log('  student.class_name:', student.class_name);
+          console.log('  final full_class_name:', studentDetails.full_class_name);
         }
         // Otherwise, check if parentUserData.linked_parent_of exists
         else if (parentUserData.linked_parent_of) {
@@ -168,14 +204,50 @@ const ParentDashboard = ({ navigation }) => {
           try {
             const { data: linkedStudentData, error: linkedStudentError } = await supabase
               .from(TABLES.STUDENTS)
-              .select('*')
+              .select(`
+                *,
+                classes(id, class_name, section)
+              `)
               .eq('id', parentUserData.linked_parent_of)
               .single();
             
             if (linkedStudentError) {
               console.error('Parent Dashboard - Error fetching linked student:', linkedStudentError);
             } else {
-              studentDetails = linkedStudentData;
+              // Map database fields to expected field names and include all available fields
+              studentDetails = {
+                ...linkedStudentData,
+                // Map database field names to expected names
+                roll_number: linkedStudentData.roll_no || linkedStudentData.roll_number,
+                admission_number: linkedStudentData.admission_no || linkedStudentData.admission_number,
+                date_of_birth: linkedStudentData.dob || linkedStudentData.date_of_birth,
+                class_name: linkedStudentData.classes?.class_name || linkedStudentData.class_name,
+                section: linkedStudentData.classes?.section || linkedStudentData.section,
+                full_class_name: linkedStudentData.classes ? `${linkedStudentData.classes.class_name} ${linkedStudentData.classes.section}` : (linkedStudentData.class_name || ''),
+                // Include all other fields from the database schema
+                aadhar_no: linkedStudentData.aadhar_no,
+                place_of_birth: linkedStudentData.place_of_birth,
+                nationality: linkedStudentData.nationality,
+                religion: linkedStudentData.religion,
+                caste: linkedStudentData.caste,
+                pin_code: linkedStudentData.pin_code,
+                mother_tongue: linkedStudentData.mother_tongue,
+                identification_mark_1: linkedStudentData.identification_mark_1,
+                identification_mark_2: linkedStudentData.identification_mark_2,
+                academic_year: linkedStudentData.academic_year,
+                general_behaviour: linkedStudentData.general_behaviour,
+                remarks: linkedStudentData.remarks,
+                parent_id: linkedStudentData.parent_id,
+                school_id: linkedStudentData.school_id,
+                created_at: linkedStudentData.created_at
+              };
+              
+              // Debug class information for linked student
+              console.log('Parent Dashboard - Class Debug for linked student path:');
+              console.log('  linkedStudentData.class_id:', linkedStudentData.class_id);
+              console.log('  linkedStudentData.classes:', linkedStudentData.classes);
+              console.log('  linkedStudentData.class_name:', linkedStudentData.class_name);
+              console.log('  final full_class_name:', studentDetails.full_class_name);
             }
           } catch (err) {
             console.error('Parent Dashboard - Exception fetching linked student:', err);
@@ -189,6 +261,8 @@ const ParentDashboard = ({ navigation }) => {
             id: 'sample-id',
             name: 'Sample Student',
             class_name: '10th',
+            section: 'A',
+            full_class_name: '10th A',
             roll_number: '001',
             class_id: 'sample-class-id',
             father_name: 'Sample Father',
@@ -661,7 +735,8 @@ const ParentDashboard = ({ navigation }) => {
             <Image source={studentImage} style={styles.studentAvatar} />
             <View style={{ flex: 1 }}>
               <Text style={styles.studentCardName}>{studentData?.name || 'Student Name'}</Text>
-              <Text style={styles.studentCardClass}>Class {studentData?.class_name} • Roll No: {studentData?.roll_number}</Text>
+              <Text style={styles.studentCardClass}>Class {studentData?.full_class_name || studentData?.class_name || 'N/A'} • Roll No: {studentData?.roll_number || 'N/A'}</Text>
+              <Text style={[styles.studentCardClass, { fontSize: 12, color: '#999' }]}>Class ID: {studentData?.class_id || 'N/A'}</Text>
             </View>
             <Ionicons name="chevron-forward" size={28} color="#bbb" />
           </View>
@@ -964,18 +1039,55 @@ const ParentDashboard = ({ navigation }) => {
               <View style={{ alignItems: 'center', marginBottom: 18 }}>
                 <Image source={studentImage} style={styles.studentAvatarLarge} />
               </View>
-              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Name:</Text><Text style={styles.detailsValue}>{studentData?.name}</Text></View>
-              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Father's Name:</Text><Text style={styles.detailsValue}>{studentData?.father_name}</Text></View>
-              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Mother's Name:</Text><Text style={styles.detailsValue}>{studentData?.mother_name}</Text></View>
-              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Class:</Text><Text style={styles.detailsValue}>{studentData?.class_name}</Text></View>
-              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Roll No:</Text><Text style={styles.detailsValue}>{studentData?.roll_number}</Text></View>
-              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>DOB:</Text><Text style={styles.detailsValue}>{studentData?.date_of_birth}</Text></View>
-              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Blood Group:</Text><Text style={styles.detailsValue}>{studentData?.blood_group}</Text></View>
-              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Mobile:</Text><Text style={styles.detailsValue}>{studentData?.phone}</Text></View>
-              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Gender:</Text><Text style={styles.detailsValue}>{studentData?.gender}</Text></View>
-              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Admission No:</Text><Text style={styles.detailsValue}>{studentData?.admission_number}</Text></View>
-              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Email:</Text><Text style={styles.detailsValue}>{studentData?.email}</Text></View>
-              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Address:</Text><Text style={styles.detailsValue}>{studentData?.address}</Text></View>
+              {/* Basic Information */}
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Name:</Text><Text style={styles.detailsValue}>{studentData?.name || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Admission No:</Text><Text style={styles.detailsValue}>{studentData?.admission_number || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Roll No:</Text><Text style={styles.detailsValue}>{studentData?.roll_number || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Class:</Text><Text style={styles.detailsValue}>{studentData?.full_class_name || studentData?.class_name || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Academic Year:</Text><Text style={styles.detailsValue}>{studentData?.academic_year || 'N/A'}</Text></View>
+              
+              {/* Personal Information */}
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>DOB:</Text><Text style={styles.detailsValue}>{studentData?.date_of_birth || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Gender:</Text><Text style={styles.detailsValue}>{studentData?.gender || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Blood Group:</Text><Text style={styles.detailsValue}>{studentData?.blood_group || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Aadhar No:</Text><Text style={styles.detailsValue}>{studentData?.aadhar_no || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Place of Birth:</Text><Text style={styles.detailsValue}>{studentData?.place_of_birth || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Nationality:</Text><Text style={styles.detailsValue}>{studentData?.nationality || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Religion:</Text><Text style={styles.detailsValue}>{studentData?.religion || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Caste:</Text><Text style={styles.detailsValue}>{studentData?.caste || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Mother Tongue:</Text><Text style={styles.detailsValue}>{studentData?.mother_tongue || 'N/A'}</Text></View>
+              
+              {/* Contact Information */}
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Address:</Text><Text style={styles.detailsValue}>{studentData?.address || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Pin Code:</Text><Text style={styles.detailsValue}>{studentData?.pin_code || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Mobile:</Text><Text style={styles.detailsValue}>{studentData?.phone || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Email:</Text><Text style={styles.detailsValue}>{studentData?.email || 'N/A'}</Text></View>
+              
+              {/* Family Information */}
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Father's Name:</Text><Text style={styles.detailsValue}>{studentData?.father_name || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Mother's Name:</Text><Text style={styles.detailsValue}>{studentData?.mother_name || 'N/A'}</Text></View>
+              
+              {/* Physical Characteristics */}
+              {(studentData?.identification_mark_1 || studentData?.identification_mark_2) && (
+                <>
+                  {studentData?.identification_mark_1 && (
+                    <View style={styles.detailsRow}><Text style={styles.detailsLabel}>ID Mark 1:</Text><Text style={styles.detailsValue}>{studentData.identification_mark_1}</Text></View>
+                  )}
+                  {studentData?.identification_mark_2 && (
+                    <View style={styles.detailsRow}><Text style={styles.detailsLabel}>ID Mark 2:</Text><Text style={styles.detailsValue}>{studentData.identification_mark_2}</Text></View>
+                  )}
+                </>
+              )}
+              
+              {/* Behavioral Information */}
+              {studentData?.general_behaviour && (
+                <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Behaviour:</Text><Text style={styles.detailsValue}>{studentData.general_behaviour}</Text></View>
+              )}
+              
+              {/* Additional Notes */}
+              {studentData?.remarks && (
+                <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Remarks:</Text><Text style={styles.detailsValue}>{studentData.remarks}</Text></View>
+              )}
             </ScrollView>
           </View>
         </View>
