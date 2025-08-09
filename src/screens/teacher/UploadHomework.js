@@ -10,6 +10,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { format } from 'date-fns';
 
 const UploadHomework = () => {
   const [classes, setClasses] = useState([]);
@@ -652,7 +653,7 @@ const UploadHomework = () => {
                       {hw.classes?.class_name} - {hw.classes?.section} | {hw.subjects?.name}
                     </Text>
                     <Text style={styles.homeworkDescription}>{hw.description}</Text>
-                    <Text style={styles.homeworkDueDate}>Due: {hw.due_date}</Text>
+                    <Text style={styles.homeworkDueDate}>Due: {format(new Date(hw.due_date), 'dd-MM-yyyy')}</Text>
                     <View style={styles.homeworkStatus}>
                       <Text style={[
                         styles.statusText,
@@ -757,12 +758,15 @@ const UploadHomework = () => {
                 ))}
               </View>
 
+            </ScrollView>
+            
+            <View style={styles.modalFooter}>
               <TouchableOpacity style={styles.submitButton} onPress={handleSubmitHomework}>
                 <Text style={styles.submitButtonText}>
                   {editingHomework ? 'Update Homework' : 'Submit Homework'}
                 </Text>
               </TouchableOpacity>
-            </ScrollView>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1095,18 +1099,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    paddingVertical: 20,
   },
   modalContent: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    width: '90%',
-    maxHeight: '80%',
+    width: '95%',
+    height: '95%',
+    maxHeight: '95%',
+    flexDirection: 'column',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
@@ -1116,17 +1124,22 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   modalBody: {
-    padding: 20,
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 2,
   },
   input: {
     backgroundColor: '#f8f9fa',
     borderRadius: 8,
     padding: 12,
-    marginBottom: 16,
+    marginBottom: 14,
     fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
   },
   textArea: {
-    height: 80,
+    height: 70,
     textAlignVertical: 'top',
   },
   dateButton: {
@@ -1135,7 +1148,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#e3f2fd',
     borderRadius: 8,
     padding: 12,
-    marginBottom: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#bbdefb',
   },
   dateButtonText: {
     marginLeft: 8,
@@ -1143,7 +1158,7 @@ const styles = StyleSheet.create({
     color: '#1976d2',
   },
   fileSection: {
-    marginBottom: 24,
+    marginBottom: 4,
   },
   fileSectionTitle: {
     fontSize: 16,
@@ -1153,7 +1168,7 @@ const styles = StyleSheet.create({
   },
   fileButtons: {
     flexDirection: 'row',
-    marginBottom: 16,
+    marginBottom: 4,
   },
   fileButton: {
     flexDirection: 'row',
@@ -1190,11 +1205,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
   },
+  modalFooter: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    backgroundColor: '#fff',
+  },
   submitButton: {
     backgroundColor: '#1976d2',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   submitButtonText: {
     color: '#fff',

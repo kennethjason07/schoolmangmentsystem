@@ -6,6 +6,7 @@ import * as Sharing from 'expo-sharing';
 import { LineChart } from 'react-native-chart-kit';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import Header from '../../components/Header';
 
 const MONTHS = [
   { label: 'January', value: '2024-01' },
@@ -761,20 +762,27 @@ export default function StudentAttendanceMarks({ route, navigation }) {
 
   return (
     <View style={styles.container}>
+      <Header 
+        title="Attendance Report" 
+        showBack={true} 
+        showProfile={true}
+        studentInfo={studentInfo}
+        onRefresh={() => refreshData(true)}
+      />
       {loading ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5', paddingTop: 20 }}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' }}>
           <ActivityIndicator size="large" color="#1976d2" />
           <Text style={{ marginTop: 10, color: '#555' }}>Loading data...</Text>
         </View>
       ) : error ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5', paddingTop: 20 }}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' }}>
           <Text style={{ fontSize: 18, color: '#F44336', textAlign: 'center', padding: 20 }}>{error}</Text>
           <TouchableOpacity onPress={fetchStudentData} style={{ backgroundColor: '#1976d2', borderRadius: 8, paddingVertical: 12, paddingHorizontal: 24, marginTop: 20 }}>
             <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>Retry</Text>
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 40 }}>
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
           {/* Attendance Content */}
             <View style={styles.attendanceTabContainer}>
               {/* Attendance Section Header */}

@@ -51,8 +51,15 @@ export default function MarksEntry({ navigation }) {
         .from(TABLES.TEACHER_SUBJECTS)
         .select(`
           *,
-          classes(id, class_name),
-          subjects(id, name)
+          subjects(
+            id, 
+            name,
+            classes(
+              id, 
+              class_name, 
+              section
+            )
+          )
         `)
         .eq('teacher_id', teacherData.id);
 
@@ -62,21 +69,25 @@ export default function MarksEntry({ navigation }) {
       const classMap = new Map();
       
       assignedData.forEach(assignment => {
-        const classKey = assignment.classes.id;
+        // Now the class data is nested under subjects
+        const classData = assignment.subjects?.classes;
+        if (!classData) return; // Skip if no class data
+        
+        const classKey = classData.id;
         
         if (!classMap.has(classKey)) {
           classMap.set(classKey, {
-            id: assignment.classes.id,
-            name: `${assignment.classes.class_name} - ${assignment.classes.section}`,
-            classId: assignment.classes.id,
+            id: classData.id,
+            name: `${classData.class_name} - ${classData.section}`,
+            classId: classData.id,
             subjects: [],
             students: []
           });
         }
         
-        const classData = classMap.get(classKey);
-        if (!classData.subjects.find(s => s.id === assignment.subjects.id)) {
-          classData.subjects.push({
+        const classDataMap = classMap.get(classKey);
+        if (!classDataMap.subjects.find(s => s.id === assignment.subjects.id)) {
+          classDataMap.subjects.push({
             id: assignment.subjects.id,
             name: assignment.subjects.name
           });
@@ -154,12 +165,48 @@ export default function MarksEntry({ navigation }) {
       return;
     }
 
-    if (!marksValue || isNaN(marksValue) || marksValue < 0 || marksValue > 100) {
+    // Allow empty string (user is typing) or valid numbers 0-100
+    if (marksValue !== '' && (isNaN(marksValue) || marksValue < 0 || marksValue > 100)) {
       Alert.alert('Error', 'Please enter valid marks (0-100)');
       return;
     }
 
     setMarks(prev => ({ ...prev, [studentId]: marksValue }));
+  };
+
+  // Helper function to calculate grade based on marks
+  const calculateGrade = (marksObtained, maxMarks = 100) => {
+    const percentage = (marksObtained / maxMarks) * 100;
+    
+    if (percentage >= 90) return 'A+';
+    if (percentage >= 80) return 'A';
+    if (percentage >= 70) return 'B+';
+    if (percentage >= 60) return 'B';
+    if (percentage >= 50) return 'C+';
+    if (percentage >= 40) return 'C';
+    if (percentage >= 33) return 'D';
+    return 'F';
+  };
+
+  // Helper function to get grade color
+  const getGradeColor = (grade) => {
+    switch (grade) {
+      case 'A+':
+      case 'A':
+        return '#4CAF50'; // Green
+      case 'B+':
+      case 'B':
+        return '#2196F3'; // Blue
+      case 'C+':
+      case 'C':
+        return '#FF9800'; // Orange
+      case 'D':
+        return '#FF5722'; // Deep Orange
+      case 'F':
+        return '#F44336'; // Red
+      default:
+        return '#9E9E9E'; // Grey
+    }
   };
 
   const handleSaveMarks = async () => {
@@ -175,7 +222,7 @@ export default function MarksEntry({ navigation }) {
     }
 
     const studentsWithMarks = selectedClassData.students.filter(student => 
-      marks[student.id] && marks[student.id] > 0
+      marks[student.id] !== undefined && marks[student.id] !== '' && !isNaN(marks[student.id]) && parseInt(marks[student.id]) >= 0
     );
 
     if (studentsWithMarks.length === 0) {
@@ -186,27 +233,75 @@ export default function MarksEntry({ navigation }) {
     try {
       setSaving(true);
 
-      const marksData = studentsWithMarks.map(student => ({
-        student_id: student.id,
-        subject_id: selectedSubject,
-        marks_obtained: parseInt(marks[student.id]),
-        total_marks: 100,
-        exam_name: 'Class Test',
-        exam_date: format(examDate, 'yyyy-MM-dd'),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }));
+      // First, create or find the exam record
+      const examName = `Class Test - ${format(examDate, 'dd MMM yyyy')}`;
+      const academicYear = new Date().getFullYear() + '-' + (new Date().getFullYear() + 1).toString().slice(-2);
+      
+      let examId = null;
+      
+      // Check if exam already exists
+      const { data: existingExam, error: examSearchError } = await supabase
+        .from(TABLES.EXAMS)
+        .select('id')
+        .eq('name', examName)
+        .eq('class_id', selectedClass)
+        .eq('academic_year', academicYear)
+        .single();
+
+      if (examSearchError && examSearchError.code !== 'PGRST116') {
+        // PGRST116 is "no rows returned", which is expected if exam doesn't exist
+        throw examSearchError;
+      }
+
+      if (existingExam) {
+        examId = existingExam.id;
+      } else {
+        // Create new exam record
+        const { data: newExam, error: examInsertError } = await supabase
+          .from(TABLES.EXAMS)
+          .insert({
+            name: examName,
+            class_id: selectedClass,
+            academic_year: academicYear,
+            start_date: format(examDate, 'yyyy-MM-dd'),
+            end_date: format(examDate, 'yyyy-MM-dd'),
+            remarks: 'Auto-created for marks entry'
+          })
+          .select('id')
+          .single();
+
+        if (examInsertError) throw examInsertError;
+        examId = newExam.id;
+      }
+
+      // Prepare marks data with grade calculation
+      const marksData = studentsWithMarks.map(student => {
+        const marksObtained = parseInt(marks[student.id]);
+        const maxMarks = 100;
+        const grade = calculateGrade(marksObtained, maxMarks);
+        
+        return {
+          student_id: student.id,
+          subject_id: selectedSubject,
+          exam_id: examId,
+          marks_obtained: marksObtained,
+          max_marks: maxMarks,
+          grade: grade,
+          remarks: `Class Test - ${format(examDate, 'dd MMM yyyy')}`,
+          created_at: new Date().toISOString()
+        };
+      });
 
       const { error: upsertError } = await supabase
         .from(TABLES.MARKS)
         .upsert(marksData, { 
-          onConflict: 'student_id,subject_id,exam_name',
+          onConflict: 'student_id,exam_id,subject_id',
           ignoreDuplicates: false 
         });
 
       if (upsertError) throw upsertError;
 
-      Alert.alert('Success', 'Marks saved successfully!');
+      Alert.alert('Success', `Marks saved successfully!\n\nExam: ${examName}\nStudents: ${studentsWithMarks.length}`);
       setMarks({});
       
     } catch (err) {
@@ -340,22 +435,50 @@ export default function MarksEntry({ navigation }) {
               {selectedClass && selectedSubject && (
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>Enter Marks</Text>
-                  {classes.find(c => c.id === selectedClass)?.students.map(student => (
-                    <View key={student.id} style={styles.studentRow}>
-                      <View style={styles.studentInfo}>
-                        <Text style={styles.studentName}>{student.name}</Text>
-                        <Text style={styles.studentRoll}>Roll: {student.roll_no}</Text>
+                  {classes.find(c => c.id === selectedClass)?.students.map(student => {
+                    const studentMarks = marks[student.id];
+                    const hasValidMarks = studentMarks !== '' && !isNaN(studentMarks) && studentMarks >= 0;
+                    const grade = hasValidMarks ? calculateGrade(parseInt(studentMarks)) : null;
+                    const isZeroMark = studentMarks === '0' || studentMarks === 0;
+                    
+                    return (
+                      <View key={student.id} style={styles.studentRowContainer}>
+                        {isZeroMark && (
+                          <View style={styles.warningMessage}>
+                            <Ionicons name="warning" size={14} color="#ff9800" />
+                            <Text style={styles.warningText}>Zero marks - Student was absent or failed</Text>
+                          </View>
+                        )}
+                        <View style={styles.studentRow}>
+                          <View style={styles.studentInfo}>
+                            <Text style={styles.studentName}>{student.name}</Text>
+                            <Text style={styles.studentRoll}>Roll: {student.roll_no}</Text>
+                          </View>
+                          <View style={styles.marksInputContainer}>
+                            <TextInput
+                              style={[
+                                styles.marksInput,
+                                isZeroMark && styles.zeroMarksInput
+                              ]}
+                              value={marks[student.id]?.toString() || ''}
+                              onChangeText={(value) => handleMarksEntry(student.id, value)}
+                              keyboardType="numeric"
+                              maxLength={3}
+                              placeholder="0-100"
+                            />
+                            {grade && (
+                              <View style={[
+                                styles.gradeDisplay,
+                                { backgroundColor: getGradeColor(grade) }
+                              ]}>
+                                <Text style={styles.gradeText}>{grade}</Text>
+                              </View>
+                            )}
+                          </View>
+                        </View>
                       </View>
-                      <TextInput
-                        style={styles.marksInput}
-                        value={marks[student.id]?.toString() || ''}
-                        onChangeText={(value) => handleMarksEntry(student.id, value)}
-                        keyboardType="numeric"
-                        maxLength={3}
-                        placeholder="0-100"
-                      />
-                    </View>
-                  ))}
+                    );
+                  })}
                   
                   <TouchableOpacity
                     style={[styles.saveButton, saving && styles.saveButtonDisabled]}
@@ -491,6 +614,10 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 2,
   },
+  marksInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   marksInput: {
     borderWidth: 1,
     borderColor: '#e0e0e0',
@@ -500,6 +627,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 16,
     backgroundColor: '#fafafa',
+  },
+  gradeDisplay: {
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    minWidth: 35,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gradeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   saveButton: {
     flexDirection: 'row',
@@ -572,5 +713,30 @@ const styles = StyleSheet.create({
     color: '#999',
     marginTop: 4,
     textAlign: 'center',
+  },
+  studentRowContainer: {
+    marginBottom: 8,
+  },
+  warningMessage: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff3e0',
+    borderColor: '#ff9800',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginBottom: 4,
+  },
+  warningText: {
+    fontSize: 12,
+    color: '#ff9800',
+    marginLeft: 6,
+    fontWeight: '500',
+  },
+  zeroMarksInput: {
+    borderColor: '#ff9800',
+    borderWidth: 2,
+    backgroundColor: '#fff3e0',
   },
 });

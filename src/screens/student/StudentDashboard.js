@@ -23,8 +23,8 @@ const StudentDashboard = ({ navigation }) => {
         navigation.navigate('Assignments');
         break;
       case 'attendance':
-        console.log('Navigating to attendance tab');
-        navigation.navigate('Marks', { activeTab: 'attendance' });
+        console.log('Navigating to attendance screen');
+        navigation.navigate('Attendance');
         break;
       case 'marks':
         console.log('Navigating to marks tab');
@@ -514,24 +514,15 @@ const StudentDashboard = ({ navigation }) => {
         title="Student Dashboard" 
         showBack={false} 
         showNotifications={true}
-        showProfile={false}
+        showProfile={true}
         unreadCount={unreadCount}
         onNotificationsPress={() => navigation.navigate('StudentNotifications')}
+        onProfilePress={() => navigation.navigate('Profile')}
       />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Student Dashboard Card */}
         <View style={styles.dashboardCard}>
-          <View style={styles.dashboardHeader}>
-            <Text style={styles.dashboardTitle}>Student Dashboard</Text>
-            <TouchableOpacity
-              style={styles.profileIcon}
-              onPress={() => navigation.navigate('Profile')}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="person-circle" size={32} color="#2196F3" />
-            </TouchableOpacity>
-          </View>
 
           {/* Student Profile */}
           {studentProfile && (
@@ -741,6 +732,7 @@ const styles = StyleSheet.create({
   dashboardCard: {
     backgroundColor: '#fff',
     marginHorizontal: 16,
+    marginTop: 32,
     marginBottom: 20,
     borderRadius: 16,
     padding: 20,
