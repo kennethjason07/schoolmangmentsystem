@@ -134,6 +134,8 @@ const styles = StyleSheet.create({
   leftSection: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    marginRight: 16,
   },
   rightSection: {
     flexDirection: 'row',
@@ -147,9 +149,13 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
+    marginLeft: -8,
+    flexShrink: 1,
   },
   profileButton: {
     padding: 4,
+    marginRight: 12,
+    flexShrink: 0,
   },
   profileImage: {
     width: 32,

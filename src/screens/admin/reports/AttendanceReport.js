@@ -251,6 +251,44 @@ const AttendanceReport = ({ navigation }) => {
     });
   };
 
+  // Calculate class-wise records for recent records section
+  const getClassWiseRecords = () => {
+    const classRecords = {};
+    
+    attendanceData.forEach(record => {
+      const date = record.date;
+      const classKey = `${record.classes?.class_name} ${record.classes?.section}`;
+      const recordKey = `${classKey}-${date}`;
+      
+      if (!classRecords[recordKey]) {
+        classRecords[recordKey] = {
+          id: recordKey,
+          className: classKey,
+          date: date,
+          present: 0,
+          absent: 0,
+          total: 0,
+          class_id: record.class_id
+        };
+      }
+      
+      classRecords[recordKey].total++;
+      if (record.status === 'Present') {
+        classRecords[recordKey].present++;
+      } else if (record.status === 'Absent') {
+        classRecords[recordKey].absent++;
+      }
+    });
+    
+    return Object.values(classRecords)
+      .map(record => ({
+        ...record,
+        attendanceRate: Math.round((record.present / record.total) * 100)
+      }))
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .slice(0, 20); // Show latest 20 class records
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadAttendanceData();
@@ -290,33 +328,39 @@ const AttendanceReport = ({ navigation }) => {
     }
   };
 
-  const renderAttendanceRecord = ({ item }) => (
-    <View style={styles.attendanceCard}>
-      <View style={styles.studentInfo}>
-        <View style={styles.avatarContainer}>
-          <Ionicons name="person" size={20} color="#2196F3" />
+  const renderClassWiseRecord = ({ item }) => (
+    <View style={styles.classWiseCard}>
+      <View style={styles.classWiseInfo}>
+        <View style={styles.classIconContainer}>
+          <Ionicons name="school" size={20} color="#2196F3" />
         </View>
-        <View style={styles.studentDetails}>
-          <Text style={styles.studentName}>{item.students?.name}</Text>
-          <Text style={styles.studentId}>#{item.students?.admission_no}</Text>
-          <Text style={styles.classInfo}>
-            {item.classes?.class_name} {item.classes?.section}
+        <View style={styles.classWiseDetails}>
+          <Text style={styles.classWiseName}>{item.className}</Text>
+          <Text style={styles.classWiseStats}>
+            {item.present} Present • {item.absent} Absent • {item.total} Total
           </Text>
+          <Text style={styles.classWiseDate}>{formatDate(new Date(item.date))}</Text>
         </View>
       </View>
-      <View style={styles.attendanceInfo}>
+      <View style={styles.classWiseAttendanceInfo}>
         <View style={[
-          styles.statusBadge,
-          item.status === 'Present' ? styles.presentBadge : styles.absentBadge
+          styles.classWiseProgressContainer,
+          { backgroundColor: item.attendanceRate >= 80 ? '#E8F5E9' : item.attendanceRate >= 60 ? '#FFF3E0' : '#FFEBEE' }
         ]}>
-          <Ionicons 
-            name={item.status === 'Present' ? 'checkmark-circle' : 'close-circle'} 
-            size={16} 
-            color="#fff" 
-          />
-          <Text style={styles.statusText}>{item.status}</Text>
+          <View style={[
+            styles.classWiseProgressFill,
+            {
+              width: `${item.attendanceRate}%`,
+              backgroundColor: item.attendanceRate >= 80 ? '#4CAF50' : item.attendanceRate >= 60 ? '#FF9800' : '#f44336'
+            }
+          ]} />
         </View>
-        <Text style={styles.dateText}>{formatDate(new Date(item.date))}</Text>
+        <Text style={[
+          styles.classWisePercentage,
+          { color: item.attendanceRate >= 80 ? '#4CAF50' : item.attendanceRate >= 60 ? '#FF9800' : '#f44336' }
+        ]}>
+          {item.attendanceRate}%
+        </Text>
       </View>
     </View>
   );
@@ -530,9 +574,9 @@ const AttendanceReport = ({ navigation }) => {
           </View>
 
           <FlatList
-            data={attendanceData.slice(0, 20)} // Show latest 20 records
-            keyExtractor={(item) => `${item.id}`}
-            renderItem={renderAttendanceRecord}
+            data={getClassWiseRecords()} // Show class-wise records
+            keyExtractor={(item) => item.id}
+            renderItem={renderClassWiseRecord}
             scrollEnabled={false}
             showsVerticalScrollIndicator={false}
             ListEmptyComponent={
@@ -886,6 +930,76 @@ const styles = StyleSheet.create({
   dateText: {
     fontSize: 10,
     color: '#666',
+  },
+
+  // Class-wise Record Card Styles
+  classWiseCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    marginVertical: 6,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  classWiseInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  classIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#E3F2FD',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  classWiseDetails: {
+    flex: 1,
+  },
+  classWiseName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  classWiseStats: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 3,
+  },
+  classWiseDate: {
+    fontSize: 12,
+    color: '#999',
+  },
+  classWiseAttendanceInfo: {
+    alignItems: 'flex-end',
+    width: 80,
+  },
+  classWiseProgressContainer: {
+    width: 60,
+    height: 8,
+    borderRadius: 4,
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  classWiseProgressFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  classWisePercentage: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
 
   // Empty State

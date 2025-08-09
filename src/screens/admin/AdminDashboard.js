@@ -173,25 +173,30 @@ const AdminDashboard = ({ navigation }) => {
         console.error('Error loading notifications:', notificationsError);
       }
 
-      // Load upcoming exams as events
-      const { data: examsData, error: examsError } = await supabase
-        .from('exams')
-        .select('*, classes(class_name, section)')
-        .gte('start_date', format(new Date(), 'yyyy-MM-dd'))
-        .order('start_date', { ascending: true })
-        .limit(5);
+      // Load upcoming events from events table only
+      const { data: eventsData, error: eventsError } = await supabase
+        .from('events')
+        .select('*')
+        .gte('event_date', format(new Date(), 'yyyy-MM-dd'))
+        .order('event_date', { ascending: true })
+        .limit(10);
 
-      if (examsData && !examsError) {
-        setEvents(examsData.map(exam => ({
-          id: exam.id,
-          type: 'Exam',
-          title: `${exam.name} - ${exam.classes?.class_name} ${exam.classes?.section}`,
-          date: exam.start_date,
-          icon: 'document-text',
-          color: '#2196F3'
+      if (eventsData && !eventsError) {
+        setEvents(eventsData.map(event => ({
+          id: event.id,
+          type: event.event_type || 'Event',
+          title: event.title,
+          date: event.event_date,
+          icon: event.icon || 'calendar',
+          color: event.color || '#FF9800'
         })));
+      } else if (eventsError && eventsError.code !== '42P01') {
+        console.error('Error loading events:', eventsError);
+        // Set empty events array if there's an error or no events
+        setEvents([]);
       } else {
-        console.error('Error loading exams:', examsError);
+        // Set empty events array if events table doesn't exist
+        setEvents([]);
       }
 
       // Load recent activities from various sources
@@ -292,6 +297,13 @@ const AdminDashboard = ({ navigation }) => {
       }, () => {
         loadDashboardData();
       })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'events'
+      }, () => {
+        loadDashboardData();
+      })
       .subscribe();
 
     return () => {
@@ -328,16 +340,7 @@ const AdminDashboard = ({ navigation }) => {
     { title: 'Notifications', icon: 'notifications', color: '#E91E63', screen: 'NotificationManagement' }, // Stack screen
   ];
 
-  // State for chart data
-  const [attendanceData, setAttendanceData] = useState({
-    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
-    datasets: [{ data: [0, 0, 0, 0, 0] }],
-  });
-
-  const [classPerformanceData, setClassPerformanceData] = useState({
-    labels: ['Loading...'],
-    datasets: [{ data: [0] }],
-  });
+  // State for chart data (only fee collection data now)
 
   const [feeCollectionData, setFeeCollectionData] = useState([
     { name: 'Collected', population: 0, color: '#4CAF50', legendFontColor: '#333', legendFontSize: 14 },
@@ -347,62 +350,6 @@ const AdminDashboard = ({ navigation }) => {
   // Load chart data
   const loadChartData = async () => {
     try {
-      // Load weekly attendance data
-      const weekDates = [];
-      for (let i = 6; i >= 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        weekDates.push(format(date, 'yyyy-MM-dd'));
-      }
-
-      const attendancePromises = weekDates.map(async (date) => {
-        const { data } = await supabase
-          .from('student_attendance')
-          .select('status')
-          .eq('date', date);
-
-        const present = data?.filter(att => att.status === 'Present').length || 0;
-        const total = data?.length || 0;
-        return total > 0 ? Math.round((present / total) * 100) : 0;
-      });
-
-      const weeklyAttendance = await Promise.all(attendancePromises);
-
-      setAttendanceData({
-        labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-        datasets: [{
-          data: weeklyAttendance,
-          color: (opacity = 1) => `rgba(33, 150, 243, ${opacity})`,
-          strokeWidth: 2,
-        }],
-      });
-
-      // Load class performance data
-      const { data: classesData } = await supabase
-        .from('classes')
-        .select('id, class_name, section');
-
-      if (classesData && classesData.length > 0) {
-        const classPerformancePromises = classesData.slice(0, 5).map(async (cls) => {
-          const { data: attendanceData } = await supabase
-            .from('student_attendance')
-            .select('status')
-            .eq('class_id', cls.id)
-            .gte('date', format(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'));
-
-          const present = attendanceData?.filter(att => att.status === 'Present').length || 0;
-          const total = attendanceData?.length || 0;
-          return total > 0 ? Math.round((present / total) * 100) : 0;
-        });
-
-        const classPerformance = await Promise.all(classPerformancePromises);
-
-        setClassPerformanceData({
-          labels: classesData.slice(0, 5).map(cls => `${cls.class_name}${cls.section}`),
-          datasets: [{ data: classPerformance }],
-        });
-      }
-
       // Load fee collection data
       const currentMonth = format(new Date(), 'yyyy-MM');
       const { data: feeData } = await supabase
@@ -452,12 +399,8 @@ const AdminDashboard = ({ navigation }) => {
 
   const [feeLoading, setFeeLoading] = useState(false);
 
-  // Announcements state
-  const [announcements, setAnnouncements] = useState([
-    { message: 'School will remain closed on 15th August for Independence Day.', date: '2024-08-10', icon: 'megaphone', color: '#2196F3' },
-    { message: 'New library books have arrived. Visit the library for more info.', date: '2024-08-05', icon: 'book', color: '#4CAF50' },
-    { message: 'Annual Sports Day registrations are open till 18th August.', date: '2024-08-01', icon: 'trophy', color: '#FF9800' },
-  ]);
+  // Announcements state - Initialize with empty array, load from database
+  const [announcements, setAnnouncements] = useState([]);
   const [isAnnouncementModalVisible, setIsAnnouncementModalVisible] = useState(false);
   const [announcementInput, setAnnouncementInput] = useState({ message: '', date: '', icon: 'megaphone', color: '#2196F3' });
   const [editIndex, setEditIndex] = useState(null);
@@ -543,22 +486,58 @@ const AdminDashboard = ({ navigation }) => {
     ]);
   };
 
-  // Upcoming Events state
-  const [events, setEvents] = useState([
-    { id: 1, type: 'Event', title: 'Annual Sports Day', date: '2024-08-20', icon: 'trophy', color: '#FF9800' },
-    { id: 2, type: 'Exam', title: 'Mathematics Final Exam', date: '2024-09-05', icon: 'document-text', color: '#2196F3' },
-    { id: 3, type: 'Exam', title: 'Mid Term Exams', date: '2024-10-10', icon: 'school', color: '#9C27B0' },
-    { id: 4, type: 'Event', title: 'Science Exhibition', date: '2024-09-18', icon: 'flask', color: '#4CAF50' },
-    { id: 5, type: 'Event', title: 'Parent-Teacher Meeting', date: '2024-08-30', icon: 'people', color: '#607D8B' },
-    { id: 6, type: 'Event', title: 'Art & Craft Fair', date: '2024-11-15', icon: 'color-palette', color: '#E91E63' },
-  ]);
+  // Upcoming Events state - Initialize with empty array, load from database
+  const [events, setEvents] = useState([]);
   const [isEventModalVisible, setIsEventModalVisible] = useState(false);
-  const [eventInput, setEventInput] = useState({ type: 'Event', title: '', date: '', icon: 'trophy', color: '#FF9800' });
+  const [eventInput, setEventInput] = useState({ 
+    type: 'Event', 
+    title: '', 
+    description: '',
+    date: '', 
+    icon: 'trophy', 
+    color: '#FF9800',
+    isSchoolWide: true,
+    selectedClasses: []
+  });
   const [editEventIndex, setEditEventIndex] = useState(null);
+  const [allClasses, setAllClasses] = useState([]);
+  const [loadingClasses, setLoadingClasses] = useState(false);
+
+  const loadClasses = async () => {
+    try {
+      setLoadingClasses(true);
+      const { data: classesData, error } = await supabase
+        .from('classes')
+        .select('id, class_name, section')
+        .order('class_name', { ascending: true })
+        .order('section', { ascending: true });
+
+      if (error) {
+        console.error('Error loading classes:', error);
+        return;
+      }
+
+      setAllClasses(classesData || []);
+    } catch (error) {
+      console.error('Error loading classes:', error);
+    } finally {
+      setLoadingClasses(false);
+    }
+  };
 
   const openAddEventModal = () => {
-    setEventInput({ type: 'Event', title: '', date: '', icon: 'trophy', color: '#FF9800' });
+    setEventInput({ 
+      type: 'Event', 
+      title: '', 
+      description: '',
+      date: '', 
+      icon: 'trophy', 
+      color: '#FF9800',
+      isSchoolWide: true,
+      selectedClasses: [] 
+    });
     setEditEventIndex(null);
+    loadClasses(); // Load classes when opening modal
     setIsEventModalVisible(true);
   };
 
@@ -575,43 +554,35 @@ const AdminDashboard = ({ navigation }) => {
     }
 
     try {
-      // For now, we'll create a simple exam entry
-      // In a real implementation, you'd want to select a class
-      const { data: firstClass } = await supabase
-        .from('classes')
-        .select('id')
-        .limit(1)
-        .single();
-
-      if (!firstClass) {
-        Alert.alert('Error', 'No classes found. Please create a class first.');
-        return;
-      }
-
       if (editEventIndex !== null) {
-        // Update existing exam
+        // Update existing event
         const { error } = await supabase
-          .from('exams')
+          .from('events')
           .update({
-            name: eventInput.title,
-            start_date: eventInput.date,
-            end_date: eventInput.date,
-            remarks: eventInput.type
+            title: eventInput.title,
+            event_date: eventInput.date,
+            event_type: eventInput.type,
+            icon: eventInput.icon,
+            color: eventInput.color,
+            is_school_wide: true,
+            status: 'Active',
+            updated_at: new Date().toISOString()
           })
           .eq('id', events[editEventIndex].id);
 
         if (error) throw error;
       } else {
-        // Insert new exam
+        // Insert new event
         const { error } = await supabase
-          .from('exams')
+          .from('events')
           .insert({
-            name: eventInput.title,
-            class_id: firstClass.id,
-            academic_year: '2024-25',
-            start_date: eventInput.date,
-            end_date: eventInput.date,
-            remarks: eventInput.type
+            title: eventInput.title,
+            event_date: eventInput.date,
+            event_type: eventInput.type,
+            icon: eventInput.icon,
+            color: eventInput.color,
+            is_school_wide: true,
+            status: 'Active'
           });
 
         if (error) throw error;
@@ -632,7 +603,7 @@ const AdminDashboard = ({ navigation }) => {
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try {
           const { error } = await supabase
-            .from('exams')
+            .from('events')
             .delete()
             .eq('id', id);
 
@@ -773,7 +744,7 @@ const AdminDashboard = ({ navigation }) => {
               icon={stats[2].icon}
               color={stats[2].color}
               subtitle={stats[2].subtitle}
-              onPress={() => navigation.navigate('AttendanceManagement')}
+              onPress={() => navigation.navigate('AttendanceReport')}
             />
           )}
           {stats[3] && (
@@ -843,12 +814,27 @@ const AdminDashboard = ({ navigation }) => {
           >
             <View style={styles.modalOverlay}>
               <View style={styles.modalContainer}>
-                <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>{editEventIndex !== null ? 'Edit Event' : 'Add Event'}</Text>
+                <ScrollView 
+                  style={styles.modalScrollView}
+                  showsVerticalScrollIndicator={true}
+                  bounces={false}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={styles.modalScrollContent}
+                >
+                  <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>{editEventIndex !== null ? 'Edit Event' : 'Add Event'}</Text>
                 <TextInput
                   placeholder="Event title"
                   value={eventInput.title}
                   onChangeText={text => setEventInput({ ...eventInput, title: text })}
                   style={styles.input}
+                />
+                <TextInput
+                  placeholder="Event description (optional)"
+                  value={eventInput.description}
+                  onChangeText={text => setEventInput({ ...eventInput, description: text })}
+                  style={[styles.input, { minHeight: 60 }]}
+                  multiline
+                  numberOfLines={3}
                 />
                 {/* Date Picker Button for Events */}
                 {Platform.OS === 'web' ? (
@@ -887,15 +873,165 @@ const AdminDashboard = ({ navigation }) => {
                   onChangeText={text => setEventInput({ ...eventInput, type: text })}
                   style={styles.input}
                 />
-                {/* Optionally, icon/color pickers can be added here */}
-                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 }}>
-                  <TouchableOpacity onPress={() => setIsEventModalVisible(false)} style={[styles.modalButton, { backgroundColor: '#ccc' }]}> 
-                    <Text style={{ color: '#333', fontWeight: 'bold' }}>Cancel</Text>
+                
+                {/* Class Selection Section */}
+                <View style={{ marginBottom: 16 }}>
+                  <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 8, color: '#333' }}>Who can see this event?</Text>
+                  
+                  {/* School-wide option */}
+                  <TouchableOpacity 
+                    style={[styles.visibilityOption, eventInput.isSchoolWide && styles.visibilityOptionActive]}
+                    onPress={() => {
+                      setEventInput({ 
+                        ...eventInput, 
+                        isSchoolWide: true,
+                        selectedClasses: (allClasses || []).map(c => c.id)
+                      });
+                    }}
+                  >
+                    <View style={styles.radioButton}>
+                      {eventInput.isSchoolWide && <View style={styles.radioButtonInner} />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.visibilityOptionTitle, eventInput.isSchoolWide && styles.visibilityOptionTitleActive]}>
+                        Everyone in the school
+                      </Text>
+                      <Text style={styles.visibilityOptionDesc}>
+                        All students, teachers and parents will see this event
+                      </Text>
+                    </View>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={saveEvent} style={[styles.modalButton, { backgroundColor: '#2196F3', marginLeft: 8 }]}> 
-                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>{editEventIndex !== null ? 'Save' : 'Add'}</Text>
+
+                  {/* Specific classes option */}
+                  <TouchableOpacity 
+                    style={[styles.visibilityOption, !eventInput.isSchoolWide && styles.visibilityOptionActive]}
+                    onPress={() => {
+                      setEventInput({ 
+                        ...eventInput, 
+                        isSchoolWide: false,
+                        selectedClasses: [] 
+                      });
+                    }}
+                  >
+                    <View style={styles.radioButton}>
+                      {!eventInput.isSchoolWide && <View style={styles.radioButtonInner} />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.visibilityOptionTitle, !eventInput.isSchoolWide && styles.visibilityOptionTitleActive]}>
+                        Specific classes only
+                      </Text>
+                      <Text style={styles.visibilityOptionDesc}>
+                        Only selected classes will see this event
+                      </Text>
+                    </View>
                   </TouchableOpacity>
+
+                  {!eventInput.isSchoolWide && (
+                    <View style={styles.classSelectionContainer}>
+                      <View style={styles.instructionContainer}>
+                        <Ionicons name="information-circle" size={16} color="#2196F3" />
+                        <Text style={styles.instructionText}>
+                          Tap the classes you want to include in this event
+                        </Text>
+                      </View>
+                      
+                      {loadingClasses ? (
+                        <View style={{ alignItems: 'center', padding: 20 }}>
+                          <ActivityIndicator color="#2196F3" />
+                          <Text style={{ color: '#666', marginTop: 8 }}>Loading classes...</Text>
+                        </View>
+                      ) : (
+                        <View>
+                          {/* Quick select all button */}
+                          <TouchableOpacity
+                            style={[styles.quickSelectButton]}
+                            onPress={() => {
+                              if ((eventInput.selectedClasses || []).length === (allClasses || []).length) {
+                                setEventInput({ ...eventInput, selectedClasses: [] });
+                              } else {
+                                setEventInput({ ...eventInput, selectedClasses: (allClasses || []).map(c => c.id) });
+                              }
+                            }}
+                          >
+                            <Ionicons 
+                              name={(eventInput.selectedClasses || []).length === (allClasses || []).length ? "checkbox" : "square-outline"} 
+                              size={16} 
+                              color="#2196F3" 
+                            />
+                            <Text style={styles.quickSelectText}>
+                              {(eventInput.selectedClasses || []).length === (allClasses || []).length ? 'Unselect All' : 'Select All Classes'}
+                            </Text>
+                          </TouchableOpacity>
+                          
+                          {/* Class selection area */}
+                          <View style={styles.classGridContainer}>
+                            <Text style={styles.selectionCountText}>
+                              {(eventInput.selectedClasses || []).length} of {(allClasses || []).length} classes selected
+                            </Text>
+                            <ScrollView 
+                              style={styles.classScrollView} 
+                              showsVerticalScrollIndicator={true}
+                              nestedScrollEnabled={true}
+                              bounces={false}
+                              keyboardShouldPersistTaps="handled"
+                              contentContainerStyle={{ paddingBottom: 8 }}
+                            >
+                              {(allClasses || []).map((classItem) => {
+                                const isSelected = (eventInput.selectedClasses || []).includes(classItem.id);
+                                return (
+                                  <TouchableOpacity
+                                    key={classItem.id}
+                                    style={[styles.classChip, isSelected && styles.classChipSelected]}
+                                    onPress={() => {
+                                      if (isSelected) {
+                                        setEventInput({
+                                          ...eventInput,
+                                          selectedClasses: (eventInput.selectedClasses || []).filter(id => id !== classItem.id)
+                                        });
+                                      } else {
+                                        setEventInput({
+                                          ...eventInput,
+                                          selectedClasses: [...(eventInput.selectedClasses || []), classItem.id]
+                                        });
+                                      }
+                                    }}
+                                  >
+                                    <Ionicons 
+                                      name={isSelected ? "checkbox" : "square-outline"} 
+                                      size={16} 
+                                      color={isSelected ? "#2196F3" : "#999"} 
+                                      style={{ marginRight: 8 }}
+                                    />
+                                    <Text style={[styles.classChipText, isSelected && styles.classChipTextSelected]}>
+                                      {classItem.class_name} {classItem.section}
+                                    </Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                              {(allClasses || []).length === 0 && (
+                                <View style={styles.noClassesContainer}>
+                                  <Ionicons name="school-outline" size={24} color="#ccc" />
+                                  <Text style={styles.noClassesText}>No classes found</Text>
+                                </View>
+                              )}
+                            </ScrollView>
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  )}
                 </View>
+
+                  {/* Optionally, icon/color pickers can be added here */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 }}>
+                    <TouchableOpacity onPress={() => setIsEventModalVisible(false)} style={[styles.modalButton, { backgroundColor: '#ccc' }]}> 
+                      <Text style={{ color: '#333', fontWeight: 'bold' }}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={saveEvent} style={[styles.modalButton, { backgroundColor: '#2196F3', marginLeft: 8 }]}> 
+                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>{editEventIndex !== null ? 'Save' : 'Add'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
               </View>
             </View>
           </Modal>
@@ -937,52 +1073,6 @@ const AdminDashboard = ({ navigation }) => {
           </View>
         </View>
 
-        {/* Analytics Charts: Attendance Trends & Marks Distribution */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Class Performance Analysis</Text>
-          {/* Attendance per Class Chart */}
-          <Text style={{ fontWeight: 'bold', marginBottom: 4 }}>Weekly Attendance Trend</Text>
-          <CrossPlatformBarChart
-            data={attendanceData}
-            width={Math.min(width * 0.9, 400)}
-            height={220}
-            yAxisLabel={''}
-            xAxisLabel={'%'}
-            fromZero
-            chartConfig={{
-              ...chartConfig,
-              decimalPlaces: 0,
-              barPercentage: 0.6,
-              backgroundGradientFrom: '#fff',
-              backgroundGradientTo: '#fff',
-              color: (opacity = 1) => `rgba(33, 150, 243, ${opacity})`,
-              labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
-            }}
-            verticalLabelRotation={0}
-            style={{ marginBottom: 32, borderRadius: 12, alignSelf: 'center' }}
-          />
-          {/* Class Performance Chart */}
-          <Text style={{ fontWeight: 'bold', marginBottom: 4 }}>Class Performance (%)</Text>
-          <CrossPlatformBarChart
-            data={classPerformanceData}
-            width={Math.min(width * 0.9, 400)}
-            height={220}
-            yAxisLabel={''}
-            xAxisLabel={'%'}
-            fromZero
-            chartConfig={{
-              ...chartConfig,
-              decimalPlaces: 0,
-              barPercentage: 0.6,
-              backgroundGradientFrom: '#fff',
-              backgroundGradientTo: '#fff',
-              color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`,
-              labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
-            }}
-            verticalLabelRotation={0}
-            style={{ borderRadius: 12, alignSelf: 'center' }}
-          />
-        </View>
 
         {/* Recent Activities - moved to bottom */}
         <View style={styles.section}>
@@ -1044,7 +1134,14 @@ const AdminDashboard = ({ navigation }) => {
           >
             <View style={styles.modalOverlay}>
               <View style={styles.modalContainer}>
-                <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>{editIndex !== null ? 'Edit Announcement' : 'Add Announcement'}</Text>
+                <ScrollView 
+                  style={styles.modalScrollView}
+                  showsVerticalScrollIndicator={true}
+                  bounces={false}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={styles.modalScrollContent}
+                >
+                  <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>{editIndex !== null ? 'Edit Announcement' : 'Add Announcement'}</Text>
                 <TextInput
                   placeholder="Announcement message"
                   value={announcementInput.message}
@@ -1083,15 +1180,16 @@ const AdminDashboard = ({ navigation }) => {
                     }}
                   />
                 )}
-                {/* Optionally, icon/color pickers can be added here */}
-                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 }}>
-                  <TouchableOpacity onPress={() => setIsAnnouncementModalVisible(false)} style={[styles.modalButton, { backgroundColor: '#ccc' }]}> 
-                    <Text style={{ color: '#333', fontWeight: 'bold' }}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={saveAnnouncement} style={[styles.modalButton, { backgroundColor: '#2196F3', marginLeft: 8 }]}> 
-                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>{editIndex !== null ? 'Save' : 'Add'}</Text>
-                  </TouchableOpacity>
-                </View>
+                  {/* Optionally, icon/color pickers can be added here */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 }}>
+                    <TouchableOpacity onPress={() => setIsAnnouncementModalVisible(false)} style={[styles.modalButton, { backgroundColor: '#ccc' }]}> 
+                      <Text style={{ color: '#333', fontWeight: 'bold' }}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={saveAnnouncement} style={[styles.modalButton, { backgroundColor: '#2196F3', marginLeft: 8 }]}> 
+                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>{editIndex !== null ? 'Save' : 'Add'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
               </View>
             </View>
           </Modal>
@@ -1574,16 +1672,33 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   modalContainer: {
-    width: '85%',
+    width: '90%',
+    maxWidth: 500,
+    maxHeight: '85%',
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 20,
     elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+  },
+  modalScrollView: {
+    maxHeight: '100%',
+  },
+  modalScrollContent: {
+    padding: 20,
+    paddingBottom: 30,
+    minHeight: 200,
   },
   input: {
     borderWidth: 1,
@@ -1598,6 +1713,183 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 18,
     borderRadius: 8,
+  },
+  toggleButton: {
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+  },
+  toggleButtonActive: {
+    backgroundColor: '#e3f2fd',
+    borderColor: '#2196F3',
+  },
+  toggleText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+  },
+  toggleTextActive: {
+    color: '#2196F3',
+    fontWeight: 'bold',
+  },
+  classOption: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  classOptionSelected: {
+    backgroundColor: '#e3f2fd',
+    borderColor: '#2196F3',
+  },
+  classOptionText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  classOptionTextSelected: {
+    color: '#2196F3',
+    fontWeight: 'bold',
+  },
+  visibilityOption: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#f8f9fa',
+    marginBottom: 12,
+  },
+  visibilityOptionActive: {
+    borderColor: '#2196F3',
+    backgroundColor: '#e3f2fd',
+  },
+  radioButton: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#ddd',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    marginTop: 2,
+  },
+  radioButtonInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#2196F3',
+  },
+  visibilityOptionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  visibilityOptionTitleActive: {
+    color: '#2196F3',
+  },
+  visibilityOptionDesc: {
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 18,
+  },
+  classSelectionContainer: {
+    marginTop: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  instructionContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e3f2fd',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  instructionText: {
+    fontSize: 14,
+    color: '#1976d2',
+    marginLeft: 8,
+    flex: 1,
+    fontWeight: '500',
+  },
+  quickSelectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+    marginBottom: 12,
+  },
+  quickSelectText: {
+    fontSize: 14,
+    color: '#2196F3',
+    marginLeft: 8,
+    fontWeight: '600',
+  },
+  classGridContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  selectionCountText: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 8,
+    fontWeight: '500',
+  },
+  classScrollView: {
+    maxHeight: 150,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 6,
+    paddingHorizontal: 4,
+  },
+  classChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  classChipSelected: {
+    backgroundColor: '#e3f2fd',
+    borderColor: '#2196F3',
+  },
+  classChipText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  classChipTextSelected: {
+    color: '#2196F3',
+    fontWeight: 'bold',
+  },
+  noClassesContainer: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  noClassesText: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 8,
   },
 
 });
