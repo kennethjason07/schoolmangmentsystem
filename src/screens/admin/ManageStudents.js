@@ -31,6 +31,7 @@ const ManageStudents = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedClass, setSelectedClass] = useState('All');
+  const [selectedSection, setSelectedSection] = useState('All');
   const [selectedGender, setSelectedGender] = useState('All');
   const [selectedAcademicYear, setSelectedAcademicYear] = useState('All');
 
@@ -84,7 +85,7 @@ const ManageStudents = () => {
 
   useEffect(() => {
     loadAllData();
-  }, [selectedClass, selectedGender, selectedAcademicYear]);
+  }, [selectedClass, selectedSection, selectedGender, selectedAcademicYear]);
 
   // Load all data
   const loadAllData = async () => {
@@ -656,6 +657,22 @@ const ManageStudents = () => {
     return 'F';
   };
 
+  // Get unique sections for the selected class
+  const getAvailableSections = () => {
+    if (selectedClass === 'All') {
+      // Return all unique sections from all classes
+      const sections = [...new Set(classes.map(cls => cls.section).filter(Boolean))];
+      return sections.sort();
+    } else {
+      // Return sections only for the selected class
+      const sections = classes
+        .filter(cls => cls.id === selectedClass)
+        .map(cls => cls.section)
+        .filter(Boolean);
+      return [...new Set(sections)].sort();
+    }
+  };
+
   // Filter students based on selected criteria
   const filteredStudents = students.filter(student => {
     const matchesSearch = search === '' ||
@@ -664,13 +681,17 @@ const ManageStudents = () => {
       (student.roll_no && student.roll_no.toString().includes(search));
 
     const matchesClass = selectedClass === 'All' || student.class_id === selectedClass;
+    
+    // Section filter - match based on the student's section
+    const matchesSection = selectedSection === 'All' || student.section === selectedSection;
+    
     const matchesGender = selectedGender === 'All' || student.gender === selectedGender;
     // Make academic year filter more flexible - show all if no academic year is set
     const matchesAcademicYear = selectedAcademicYear === 'All' ||
       !student.academic_year ||
       student.academic_year === selectedAcademicYear;
 
-    return matchesSearch && matchesClass && matchesGender && matchesAcademicYear;
+    return matchesSearch && matchesClass && matchesSection && matchesGender && matchesAcademicYear;
   });
 
 
@@ -832,12 +853,50 @@ const ManageStudents = () => {
             <Text style={[styles.filterLabel, styles.sectionLabel]}>Section</Text>
             <View style={[styles.dropdownContainer, styles.sectionDropdown]}>
               <Picker
+                selectedValue={selectedSection}
+                onValueChange={setSelectedSection}
+                style={styles.picker}
+              >
+                <Picker.Item label="All Sections" value="All" />
+                {getAvailableSections().map(section => (
+                  <Picker.Item
+                    key={section}
+                    label={`Section ${section}`}
+                    value={section}
+                  />
+                ))}
+              </Picker>
+            </View>
+          </View>
+        </View>
+
+        {/* Additional Filters Row */}
+        <View style={styles.filterRow}>
+          <View style={styles.filterDropdown}>
+            <Text style={styles.filterLabel}>Gender</Text>
+            <View style={styles.dropdownContainer}>
+              <Picker
                 selectedValue={selectedGender}
                 onValueChange={setSelectedGender}
                 style={styles.picker}
               >
                 {genderOptions.map(gender => (
-                  <Picker.Item key={gender} label={`All ${gender === 'All' ? 'Sections' : gender}`} value={gender} />
+                  <Picker.Item key={gender} label={gender === 'All' ? 'All Genders' : gender} value={gender} />
+                ))}
+              </Picker>
+            </View>
+          </View>
+
+          <View style={styles.filterDropdown}>
+            <Text style={styles.filterLabel}>Academic Year</Text>
+            <View style={styles.dropdownContainer}>
+              <Picker
+                selectedValue={selectedAcademicYear}
+                onValueChange={setSelectedAcademicYear}
+                style={styles.picker}
+              >
+                {academicYearOptions.map(year => (
+                  <Picker.Item key={year} label={year === 'All' ? 'All Years' : year} value={year} />
                 ))}
               </Picker>
             </View>
@@ -908,6 +967,7 @@ const ManageStudents = () => {
                   onPress={() => {
                     setSearch('');
                     setSelectedClass('All');
+                    setSelectedSection('All');
                     setSelectedGender('All');
                     setSelectedAcademicYear('All');
                   }}

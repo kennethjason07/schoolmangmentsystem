@@ -9,6 +9,8 @@ import {
   Alert,
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -116,13 +118,40 @@ const SchoolDetails = ({ navigation }) => {
         throw error;
       }
 
-      Alert.alert('Success', 'School details saved successfully');
       if (data) {
         setSchoolData(data);
       }
+      
+      // Show success message and navigate back to dashboard
+      Alert.alert(
+        'Success', 
+        'School details saved successfully!',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Navigate back to dashboard
+              navigation.goBack();
+            }
+          }
+        ]
+      );
     } catch (error) {
       console.error('Save exception:', error);
-      Alert.alert('Error', 'Failed to save school details: ' + error.message);
+      // Show error message and navigate back to dashboard
+      Alert.alert(
+        'Error', 
+        'Failed to save school details: ' + error.message,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Navigate back to dashboard even on error
+              navigation.goBack();
+            }
+          }
+        ]
+      );
     } finally {
       setSaving(false);
     }
@@ -144,8 +173,18 @@ const SchoolDetails = ({ navigation }) => {
     <View style={styles.container}>
       <Header title="School Details" showBack={true} onBack={() => navigation.goBack()} />
       
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        <View style={styles.content}>
+      <KeyboardAvoidingView 
+        style={styles.flex1}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView 
+          style={styles.scrollView} 
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          bounces={true}
+        >
+          <View style={styles.content}>
           {/* Logo Section */}
           <View style={styles.logoSection}>
             <Text style={styles.sectionTitle}>Logo</Text>
@@ -344,8 +383,9 @@ const SchoolDetails = ({ navigation }) => {
               </>
             )}
           </TouchableOpacity>
-        </View>
-      </ScrollView>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 };
@@ -365,11 +405,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
+  flex1: {
+    flex: 1,
+  },
   scrollView: {
     flex: 1,
   },
+  scrollContent: {
+    flexGrow: 1,
+  },
   content: {
     padding: 20,
+    paddingBottom: 40, // Extra padding at bottom for better scroll experience
   },
   section: {
     backgroundColor: '#fff',

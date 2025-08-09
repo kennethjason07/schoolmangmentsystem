@@ -183,17 +183,21 @@ const FeePayment = () => {
 
         // Transform fee structure data based on schema
         const transformedFees = feesToProcess.map(fee => {
+          // Safely get fee component name
+          const feeComponent = fee.fee_component || fee.name || 'General Fee';
+          
           // Find payments for this fee component
           const payments = studentPayments?.filter(p =>
-            p.fee_component === fee.fee_component &&
+            p.fee_component === feeComponent &&
             p.academic_year === fee.academic_year
           ) || [];
 
-          const totalPaidAmount = payments.reduce((sum, payment) => sum + Number(payment.amount_paid), 0);
-          const remainingAmount = Number(fee.amount) - totalPaidAmount;
+          const totalPaidAmount = payments.reduce((sum, payment) => sum + Number(payment.amount_paid || 0), 0);
+          const feeAmount = Number(fee.amount || 0);
+          const remainingAmount = feeAmount - totalPaidAmount;
 
           let status = 'unpaid';
-          if (totalPaidAmount >= Number(fee.amount)) {
+          if (totalPaidAmount >= feeAmount) {
             status = 'paid';
           } else if (totalPaidAmount > 0) {
             status = 'partial';
@@ -201,32 +205,34 @@ const FeePayment = () => {
 
           // Determine category based on fee component
           let category = 'general';
-          const component = fee.fee_component.toLowerCase();
-          if (component.includes('tuition') || component.includes('academic')) {
-            category = 'tuition';
-          } else if (component.includes('book') || component.includes('library')) {
-            category = 'books';
-          } else if (component.includes('transport') || component.includes('bus')) {
-            category = 'transport';
-          } else if (component.includes('exam') || component.includes('test')) {
-            category = 'examination';
-          } else if (component.includes('activity') || component.includes('sport')) {
-            category = 'activities';
-          } else if (component.includes('facility') || component.includes('lab')) {
-            category = 'facilities';
+          if (feeComponent) {
+            const component = feeComponent.toLowerCase();
+            if (component.includes('tuition') || component.includes('academic')) {
+              category = 'tuition';
+            } else if (component.includes('book') || component.includes('library')) {
+              category = 'books';
+            } else if (component.includes('transport') || component.includes('bus')) {
+              category = 'transport';
+            } else if (component.includes('exam') || component.includes('test')) {
+              category = 'examination';
+            } else if (component.includes('activity') || component.includes('sport')) {
+              category = 'activities';
+            } else if (component.includes('facility') || component.includes('lab')) {
+              category = 'facilities';
+            }
           }
 
           return {
-            id: fee.id,
-            name: fee.fee_component,
-            amount: Number(fee.amount),
-            dueDate: fee.due_date,
+            id: fee.id || `fee-${Date.now()}-${Math.random()}`,
+            name: feeComponent,
+            amount: feeAmount,
+            dueDate: fee.due_date || new Date().toISOString().split('T')[0],
             status: status,
             paidAmount: totalPaidAmount,
             remainingAmount: remainingAmount,
-            description: `${fee.fee_component} for ${fee.academic_year}`,
+            description: `${feeComponent} for ${fee.academic_year || '2024-25'}`,
             category: category,
-            academicYear: fee.academic_year,
+            academicYear: fee.academic_year || '2024-25',
             isClassFee: fee.class_id ? true : false,
             isIndividualFee: fee.student_id ? true : false,
             payments: payments
@@ -1309,50 +1315,48 @@ const FeePayment = () => {
 
         {/* Content based on selected tab */}
         {selectedTab === 'overview' ? (
-          <View>
-            <FlatList
-              data={feeStructure.fees}
-              renderItem={renderFeeItem}
-              keyExtractor={(item) => item.id}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.feeList}
-              refreshControl={
-                <RefreshControl
-                  refreshing={refreshing}
-                  onRefresh={onRefresh}
-                  colors={['#2196F3']}
-                  progressBackgroundColor="#fff"
-                />
-              }
-              ListEmptyComponent={
-                <View style={styles.emptyContainer}>
-                  <Ionicons name="card-outline" size={48} color="#ccc" />
-                  <Text style={styles.emptyText}>No fees configured</Text>
-                  <Text style={styles.emptySubtext}>Fee structure will be available once configured by the school.</Text>
-                </View>
-              }
-            />
-            
-            {/* Fee Distribution Summary */}
-            <View style={styles.feeDistributionContainer}>
-              <Text style={styles.feeDistributionTitle}>Fee Distribution Summary</Text>
-              
-              <View style={styles.feeDistributionRow}>
-                <View style={styles.feeDistributionItem}>
-                  <Text style={styles.feeDistributionLabel}>Total Academic Fee</Text>
-                  <Text style={[styles.feeDistributionAmount, { color: '#2196F3' }]}>₹{feeStructure.totalDue}</Text>
-                </View>
-                <View style={styles.feeDistributionItem}>
-                  <Text style={styles.feeDistributionLabel}>Total Paid</Text>
-                  <Text style={[styles.feeDistributionAmount, { color: '#4CAF50' }]}>₹{feeStructure.totalPaid}</Text>
-                </View>
-                <View style={styles.feeDistributionItem}>
-                  <Text style={styles.feeDistributionLabel}>Total Outstanding</Text>
-                  <Text style={[styles.feeDistributionAmount, { color: '#F44336' }]}>₹{feeStructure.outstanding}</Text>
+          <FlatList
+            data={feeStructure.fees}
+            renderItem={renderFeeItem}
+            keyExtractor={(item) => item.id}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.feeList}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={['#2196F3']}
+                progressBackgroundColor="#fff"
+              />
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="card-outline" size={48} color="#ccc" />
+                <Text style={styles.emptyText}>No fees configured</Text>
+                <Text style={styles.emptySubtext}>Fee structure will be available once configured by the school.</Text>
+              </View>
+            }
+            ListFooterComponent={
+              <View style={styles.feeDistributionContainer}>
+                <Text style={styles.feeDistributionTitle}>Fee Distribution Summary</Text>
+                
+                <View style={styles.feeDistributionRow}>
+                  <View style={styles.feeDistributionItem}>
+                    <Text style={styles.feeDistributionLabel}>Total Academic Fee</Text>
+                    <Text style={[styles.feeDistributionAmount, { color: '#2196F3' }]}>₹{feeStructure.totalDue}</Text>
+                  </View>
+                  <View style={styles.feeDistributionItem}>
+                    <Text style={styles.feeDistributionLabel}>Total Paid</Text>
+                    <Text style={[styles.feeDistributionAmount, { color: '#4CAF50' }]}>₹{feeStructure.totalPaid}</Text>
+                  </View>
+                  <View style={styles.feeDistributionItem}>
+                    <Text style={styles.feeDistributionLabel}>Total Outstanding</Text>
+                    <Text style={[styles.feeDistributionAmount, { color: '#F44336' }]}>₹{feeStructure.outstanding}</Text>
+                  </View>
                 </View>
               </View>
-            </View>
-          </View>
+            }
+          />
         ) : (
           <FlatList
             data={paymentHistory}

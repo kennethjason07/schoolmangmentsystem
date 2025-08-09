@@ -31,6 +31,7 @@ import StudentAccountManagement from '../screens/admin/StudentAccountManagement'
 import ParentAccountManagement from '../screens/admin/ParentAccountManagement';
 
 import FeeClassDetails from '../screens/admin/FeeClassDetails';
+import ClassStudentDetails from '../screens/admin/ClassStudentDetails';
 import AssignTaskToTeacher from '../screens/admin/AssignTaskToTeacher';
 import SchoolDetails from '../screens/admin/SchoolDetails';
 
@@ -363,6 +364,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="AttendanceManagement" component={AttendanceManagement} />
                 <Stack.Screen name="FeeManagement" component={FeeManagement} />
                 <Stack.Screen name="FeeClassDetails" component={FeeClassDetails} />
+                <Stack.Screen name="ClassStudentDetails" component={ClassStudentDetails} />
                 <Stack.Screen name="ExamsMarks" component={ExamsMarks} />
                 <Stack.Screen name="NotificationManagement" component={NotificationManagement} />
                 <Stack.Screen name="TeacherDetails" component={TeacherDetails} />

@@ -1462,26 +1462,26 @@ export const dbHelpers = {
           .update(schoolData)
           .eq('id', existing.id)
           .select()
-          .limit(1);
+          .single();
 
         if (error) {
           return { data: null, error };
         }
 
-        return { data: data && data.length > 0 ? data[0] : null, error: null };
+        return { data, error: null };
       } else {
         // Create new record
         const { data, error } = await supabase
           .from(TABLES.SCHOOL_DETAILS)
           .insert(schoolData)
           .select()
-          .limit(1);
+          .single();
 
         if (error) {
           return { data: null, error };
         }
 
-        return { data: data && data.length > 0 ? data[0] : null, error: null };
+        return { data, error: null };
       }
     } catch (error) {
       return { data: null, error };

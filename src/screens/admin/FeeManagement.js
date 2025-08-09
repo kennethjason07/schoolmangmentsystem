@@ -34,6 +34,13 @@ const FeeManagement = () => {
   const [feeStructures, setFeeStructures] = useState([]);
   const [students, setStudents] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [classPaymentStats, setClassPaymentStats] = useState([]);
+  const [paymentSummary, setPaymentSummary] = useState({
+    totalCollected: 0,
+    totalDue: 0,
+    totalOutstanding: 0,
+    collectionRate: 0
+  });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [feeModal, setFeeModal] = useState({ 
@@ -164,6 +171,112 @@ const FeeManagement = () => {
     }
   };
 
+  // Calculate class-wise payment statistics
+  const calculateClassPaymentStats = async () => {
+    try {
+      // Get all classes with their fee structures and payments
+      const { data: classesWithStats, error } = await supabase
+        .from(TABLES.CLASSES)
+        .select(`
+          id,
+          class_name,
+          section
+        `);
+
+      if (error) throw error;
+
+      const currentYear = new Date().getFullYear();
+      const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
+
+      const classStats = await Promise.all(classesWithStats.map(async (classData) => {
+        // Get fee structures for this class
+        const { data: feeStructures, error: feeError } = await supabase
+          .from(TABLES.FEE_STRUCTURE)
+          .select('*')
+          .eq('class_id', classData.id)
+          .eq('academic_year', academicYear);
+
+        if (feeError) throw feeError;
+
+        // Get students in this class
+        const { data: studentsInClass, error: studentsError } = await supabase
+          .from(TABLES.STUDENTS)
+          .select('id, name')
+          .eq('class_id', classData.id);
+
+        if (studentsError) throw studentsError;
+
+        // Calculate total fee structure for this class
+        const totalFeeStructure = feeStructures?.reduce((sum, fee) => sum + (parseFloat(fee.amount) || 0), 0) || 0;
+
+        // Calculate total students in class
+        const totalStudents = studentsInClass?.length || 0;
+
+        // Calculate total expected fees (fee structure × number of students)
+        const totalExpectedFees = totalFeeStructure * totalStudents;
+
+        // Get payments for students in this class
+        const studentIds = studentsInClass?.map(s => s.id) || [];
+        let totalPaid = 0;
+        let studentsWithPayments = 0;
+
+        if (studentIds.length > 0) {
+          const { data: paymentsForClass, error: paymentsError } = await supabase
+            .from(TABLES.STUDENT_FEES)
+            .select('student_id, amount_paid, academic_year')
+            .in('student_id', studentIds)
+            .eq('academic_year', academicYear);
+
+          if (paymentsError) throw paymentsError;
+
+          totalPaid = paymentsForClass?.reduce((sum, payment) => sum + (parseFloat(payment.amount_paid) || 0), 0) || 0;
+          studentsWithPayments = new Set(paymentsForClass?.map(p => p.student_id) || []).size;
+        }
+
+        // Calculate outstanding amount
+        const outstanding = totalExpectedFees - totalPaid;
+
+        // Calculate collection rate
+        const collectionRate = totalExpectedFees > 0 ? (totalPaid / totalExpectedFees) * 100 : 0;
+
+        const studentsWithoutPayments = totalStudents - studentsWithPayments;
+
+        return {
+          classId: classData.id,
+          className: `${classData.class_name}${classData.section ? ` - ${classData.section}` : ''}`,
+          totalStudents,
+          totalExpectedFees,
+          totalPaid,
+          outstanding,
+          collectionRate: Math.round(collectionRate * 100) / 100,
+          studentsWithPayments,
+          studentsWithoutPayments,
+          feeStructureAmount: totalFeeStructure
+        };
+      }));
+
+      // Sort by outstanding amount (highest first)
+      classStats.sort((a, b) => b.outstanding - a.outstanding);
+
+      setClassPaymentStats(classStats);
+
+      // Calculate overall payment summary
+      const summary = classStats.reduce((acc, classData) => ({
+        totalCollected: acc.totalCollected + classData.totalPaid,
+        totalDue: acc.totalDue + classData.totalExpectedFees,
+        totalOutstanding: acc.totalOutstanding + classData.outstanding,
+      }), { totalCollected: 0, totalDue: 0, totalOutstanding: 0 });
+
+      summary.collectionRate = summary.totalDue > 0 ?
+        Math.round((summary.totalCollected / summary.totalDue) * 10000) / 100 : 0;
+
+      setPaymentSummary(summary);
+
+    } catch (error) {
+      console.error('Error calculating class payment stats:', error);
+    }
+  };
+
   // Load all data from Supabase
   useEffect(() => {
     loadAllData();
@@ -212,12 +325,12 @@ const FeeManagement = () => {
 
         groupedByClass[fee.class_id].fees.push({
           id: fee.id,
-          type: fee.fee_component,
-          amount: fee.amount,
+          type: fee.fee_component || 'Unknown Fee',
+          amount: fee.amount || 0,
           due_date: fee.due_date, // Make sure due_date is included
           created_at: fee.created_at,
-          description: fee.fee_component,
-          academic_year: fee.academic_year
+          description: fee.fee_component || 'No description',
+          academic_year: fee.academic_year || '2024-25'
         });
       });
       
@@ -278,6 +391,9 @@ const FeeManagement = () => {
 
       // Calculate fee statistics
       await calculateFeeStats();
+
+      // Calculate class-wise payment statistics
+      await calculateClassPaymentStats();
 
     } catch (error) {
       console.error('Error loading data:', error);
@@ -495,10 +611,10 @@ const FeeManagement = () => {
         classId,
         fee: {
           id: fee.id,
-          type: fee.fee_component || fee.type,
-          amount: fee.amount.toString(),
+          type: fee.fee_component || fee.type || 'Unknown Fee',
+          amount: (fee.amount || 0).toString(),
           dueDate: fee.due_date || null,
-          description: fee.description || ''
+          description: fee.description || fee.fee_component || 'No description'
         }
       });
       setEditFeeId(fee.id);
@@ -577,8 +693,8 @@ const FeeManagement = () => {
       const { data: associatedFees, error: checkError } = await supabase
         .from(TABLES.STUDENT_FEES)
         .select('id')
-        .eq('fee_component', feeStructure.fee_component)
-        .eq('academic_year', feeStructure.academic_year);
+        .eq('fee_component', feeStructure?.fee_component || 'Unknown')
+        .eq('academic_year', feeStructure?.academic_year || '2024-25');
       
       if (checkError) throw checkError;
       
@@ -624,8 +740,8 @@ const FeeManagement = () => {
       const { data: associatedFees, error: checkError } = await supabase
         .from(TABLES.STUDENT_FEES)
         .select('id')
-        .eq('fee_component', fee.fee_component || fee.type)
-        .eq('academic_year', fee.academic_year);
+        .eq('fee_component', fee.fee_component || fee.type || 'Unknown')
+        .eq('academic_year', fee.academic_year || '2024-25');
       
       if (checkError) throw checkError;
       
@@ -735,7 +851,7 @@ const FeeManagement = () => {
 
   return (
     <View style={styles.container}>
-      <Header title="Fee Management" navigation={navigation} />
+      <Header title="Fee Management" showBack={true} />
       
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -761,24 +877,16 @@ const FeeManagement = () => {
                 Payments
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tab, tab === 'reports' && styles.activeTab]}
-              onPress={() => setTab('reports')}
-            >
-              <Text style={[styles.tabText, tab === 'reports' && styles.activeTabText]}>
-                Reports
-              </Text>
-            </TouchableOpacity>
           </View>
 
           {/* Content */}
-          <ScrollView 
-            style={styles.contentContainer}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={loadAllData} />
-            }
-          >
-            {tab === 'structure' && (
+          {tab === 'structure' && (
+            <ScrollView 
+              style={styles.contentContainer}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={loadAllData} />
+              }
+            >
               <View style={styles.structureContent}>
                 {feeStructures.map((classData) => (
                   <View key={classData.classId} style={styles.classCard}>
@@ -828,45 +936,140 @@ const FeeManagement = () => {
                   </View>
                 ))}
               </View>
-            )}
-            {tab === 'payments' && (
+            </ScrollView>
+          )}
+          {tab === 'payments' && (
+            <ScrollView 
+              style={styles.contentContainer}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={loadAllData} />
+              }
+            >
               <View style={styles.paymentsContent}>
-                <Text style={styles.sectionTitle}>Recent Payments</Text>
-                <FlatList
-                  data={payments}
-                  keyExtractor={(item) => item.id}
-                  renderItem={({ item }) => (
-                    <View style={styles.paymentItem}>
-                      <Text style={styles.paymentStudentName}>{item.students.full_name}</Text>
-                      <Text style={styles.paymentFeeType}>{item.fee_structure.fee_component}</Text>
-                      <Text style={styles.paymentAmount}>{formatSafeCurrency(item.amount_paid)}</Text>
-                      <Text style={styles.paymentDate}>{formatSafeDate(item.payment_date)}</Text>
+                {/* Payment Summary Cards */}
+                <View style={styles.paymentSummaryContainer}>
+                  <Text style={styles.sectionTitle}>Payment Overview</Text>
+                  <View style={styles.summaryCardsRow}>
+                    <View style={[styles.summaryCard, { backgroundColor: '#4CAF50' }]}>
+                      <Text style={styles.summaryCardValue}>{formatSafeCurrency(paymentSummary.totalCollected)}</Text>
+                      <Text style={styles.summaryCardLabel}>Total Collected</Text>
                     </View>
+                    <View style={[styles.summaryCard, { backgroundColor: '#FF9800' }]}>
+                      <Text style={styles.summaryCardValue}>{formatSafeCurrency(paymentSummary.totalOutstanding)}</Text>
+                      <Text style={styles.summaryCardLabel}>Outstanding</Text>
+                    </View>
+                  </View>
+                  <View style={styles.summaryCardsRow}>
+                    <View style={[styles.summaryCard, { backgroundColor: '#2196F3' }]}>
+                      <Text style={styles.summaryCardValue}>{paymentSummary.collectionRate}%</Text>
+                      <Text style={styles.summaryCardLabel}>Collection Rate</Text>
+                    </View>
+                    <View style={[styles.summaryCard, { backgroundColor: '#9C27B0' }]}>
+                      <Text style={styles.summaryCardValue}>{formatSafeCurrency(paymentSummary.totalDue)}</Text>
+                      <Text style={styles.summaryCardLabel}>Total Due</Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Class-wise Payment Statistics */}
+                <View style={styles.classStatsContainer}>
+                  <Text style={styles.sectionTitle}>Class-wise Payment Status</Text>
+                  {classPaymentStats.length === 0 ? (
+                    <Text style={styles.noDataText}>No payment data available</Text>
+                  ) : (
+                    classPaymentStats.map((classData, index) => (
+                      <TouchableOpacity
+                        key={classData.classId}
+                        style={styles.classStatCard}
+                        onPress={() => {
+                          navigation.navigate('ClassStudentDetails', { classData });
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.classStatHeader}>
+                          <Text style={styles.classStatName}>{classData.className}</Text>
+                          <View style={styles.classStatHeaderRight}>
+                            <View style={[
+                              styles.collectionRateBadge,
+                              { backgroundColor: classData.collectionRate >= 80 ? '#4CAF50' :
+                                classData.collectionRate >= 50 ? '#FF9800' : '#F44336' }
+                            ]}>
+                              <Text style={styles.collectionRateText}>{classData.collectionRate}%</Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={20} color="#666" style={{ marginLeft: 8 }} />
+                          </View>
+                        </View>
+
+                        <View style={styles.classStatDetails}>
+                          <View style={styles.statRow}>
+                            <Text style={styles.statLabel}>Students: {classData.totalStudents}</Text>
+                            <Text style={styles.statValue}>
+                              Paid: {classData.studentsWithPayments} | Pending: {classData.studentsWithoutPayments}
+                            </Text>
+                          </View>
+
+                          <View style={styles.statRow}>
+                            <Text style={styles.statLabel}>Expected Fees:</Text>
+                            <Text style={styles.statValue}>{formatSafeCurrency(classData.totalExpectedFees)}</Text>
+                          </View>
+
+                          <View style={styles.statRow}>
+                            <Text style={styles.statLabel}>Collected:</Text>
+                            <Text style={[styles.statValue, { color: '#4CAF50' }]}>
+                              {formatSafeCurrency(classData.totalPaid)}
+                            </Text>
+                          </View>
+
+                          <View style={styles.statRow}>
+                            <Text style={styles.statLabel}>Outstanding:</Text>
+                            <Text style={[styles.statValue, { color: '#F44336' }]}>
+                              {formatSafeCurrency(classData.outstanding)}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Progress Bar */}
+                        <View style={styles.progressBarContainer}>
+                          <View style={styles.progressBarBackground}>
+                            <View
+                              style={[
+                                styles.progressBarFill,
+                                {
+                                  width: `${Math.min(classData.collectionRate, 100)}%`,
+                                  backgroundColor: classData.collectionRate >= 80 ? '#4CAF50' :
+                                    classData.collectionRate >= 50 ? '#FF9800' : '#F44336'
+                                }
+                              ]}
+                            />
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    ))
                   )}
-                  ListEmptyComponent={() => (
+                </View>
+
+                {/* Recent Payments */}
+                <View style={styles.recentPaymentsContainer}>
+                  <Text style={styles.sectionTitle}>Recent Payments</Text>
+                  {payments.slice(0, 10).map((item, index) => (
+                    <View key={item.id} style={styles.paymentItem}>
+                      <View style={styles.paymentItemLeft}>
+                        <Text style={styles.paymentStudentName}>{item.students?.full_name || 'Unknown Student'}</Text>
+                        <Text style={styles.paymentFeeType}>{item.fee_structure?.fee_component || item.fee_component || 'Unknown Fee'}</Text>
+                      </View>
+                      <View style={styles.paymentItemRight}>
+                        <Text style={styles.paymentAmount}>{formatSafeCurrency(item.amount_paid)}</Text>
+                        <Text style={styles.paymentDate}>{formatSafeDate(item.payment_date)}</Text>
+                      </View>
+                    </View>
+                  ))}
+                  {payments.length === 0 && (
                     <Text style={styles.noPaymentsText}>No payments found</Text>
                   )}
-                />
-              </View>
-            )}
-            {tab === 'reports' && (
-              <View style={styles.reportsContent}>
-                <Text style={styles.sectionTitle}>Fee Statistics</Text>
-                <View style={styles.statisticItem}>
-                  <Text style={styles.statisticLabel}>Total Due</Text>
-                  <Text style={styles.statisticValue}>{formatSafeCurrency(feeStats.totalDue)}</Text>
-                </View>
-                <View style={styles.statisticItem}>
-                  <Text style={styles.statisticLabel}>Total Paid</Text>
-                  <Text style={styles.statisticValue}>{formatSafeCurrency(feeStats.totalPaid)}</Text>
-                </View>
-                <View style={styles.statisticItem}>
-                  <Text style={styles.statisticLabel}>Pending Students</Text>
-                  <Text style={styles.statisticValue}>{feeStats.pendingStudents}</Text>
                 </View>
               </View>
-            )}
-          </ScrollView>
+            </ScrollView>
+          )}
         </View>
       )}
       {tab === 'structure' && (
@@ -1497,6 +1700,211 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
     marginBottom: 2,
+  },
+  // Missing styles for payments tab
+  paymentsContent: {
+    padding: 16,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  paymentItem: {
+    backgroundColor: '#fff',
+    padding: 16,
+    marginVertical: 8,
+    marginHorizontal: 16,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  paymentStudentName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  paymentFeeType: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  paymentAmount: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4CAF50',
+    marginBottom: 4,
+  },
+  paymentDate: {
+    fontSize: 12,
+    color: '#999',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+    minHeight: 200,
+  },
+  noPaymentsText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  // Missing styles for reports tab
+  reportsContent: {
+    padding: 16,
+  },
+  statisticItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: 16,
+    marginVertical: 8,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  statisticLabel: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+  },
+  statisticValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2196F3',
+  },
+  // Payment section styles
+  paymentSummaryContainer: {
+    marginBottom: 20,
+  },
+  summaryCardsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  summaryCard: {
+    flex: 1,
+    backgroundColor: '#4CAF50',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 4,
+    alignItems: 'center',
+  },
+  summaryCardValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  summaryCardLabel: {
+    fontSize: 12,
+    color: '#fff',
+    opacity: 0.9,
+    textAlign: 'center',
+  },
+  classStatsContainer: {
+    marginBottom: 20,
+  },
+  classStatCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  classStatHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  classStatName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    flex: 1,
+  },
+  classStatHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  collectionRateBadge: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  collectionRateText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  classStatDetails: {
+    marginBottom: 12,
+  },
+  statRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  statLabel: {
+    fontSize: 14,
+    color: '#666',
+    flex: 1,
+  },
+  statValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'right',
+  },
+  progressBarContainer: {
+    marginTop: 8,
+  },
+  progressBarBackground: {
+    height: 6,
+    backgroundColor: '#E0E0E0',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#4CAF50',
+    borderRadius: 3,
+  },
+  recentPaymentsContainer: {
+    marginBottom: 20,
+  },
+  paymentItemLeft: {
+    flex: 1,
+  },
+  paymentItemRight: {
+    alignItems: 'flex-end',
+  },
+  noDataText: {
+    textAlign: 'center',
+    color: '#666',
+    fontSize: 14,
+    fontStyle: 'italic',
+    marginVertical: 20,
   },
 });
 
