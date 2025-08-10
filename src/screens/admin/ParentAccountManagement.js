@@ -15,11 +15,14 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 
 const ParentAccountManagement = ({ navigation }) => {
   const [students, setStudents] = useState([]);
+  const [classes, setClasses] = useState([]);
+  const [selectedClass, setSelectedClass] = useState('all');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -48,6 +51,15 @@ const ParentAccountManagement = ({ navigation }) => {
       
       // Test auth connection
       await dbHelpers.testAuthConnection();
+      
+      // Load classes first
+      const { data: classesData, error: classesError } = await supabase
+        .from(TABLES.CLASSES)
+        .select('id, class_name, section')
+        .order('class_name');
+
+      if (classesError) throw classesError;
+      setClasses(classesData || []);
       
       // Load students with their class information and check if they have parent accounts
       const { data: studentsData, error: studentsError } = await supabase
@@ -258,11 +270,19 @@ const ParentAccountManagement = ({ navigation }) => {
     }
   };
 
-  const filteredStudents = students.filter(student =>
-    student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    student.admission_no?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    student.classes?.class_name?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredStudents = students.filter(student => {
+    // First filter by selected class
+    const classMatch = selectedClass === 'all' || student.classes?.id === selectedClass;
+    
+    // Then filter by search query
+    const searchMatch = searchQuery === '' || (
+      student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      student.admission_no?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      student.classes?.class_name?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    
+    return classMatch && searchMatch;
+  });
 
   const renderStudentItem = ({ item }) => {
     // Determine status display based on comprehensive parent status
@@ -400,6 +420,27 @@ const ParentAccountManagement = ({ navigation }) => {
       <Header title="Parent Account Management" showBack={true} onBack={() => navigation.goBack()} />
       
       <View style={styles.content}>
+        {/* Class Selection Dropdown */}
+        <View style={styles.classFilterContainer}>
+          <Ionicons name="school" size={20} color="#666" style={styles.classFilterIcon} />
+          <View style={styles.classPickerContainer}>
+            <Picker
+              selectedValue={selectedClass}
+              onValueChange={(itemValue) => setSelectedClass(itemValue)}
+              style={styles.picker}
+            >
+              <Picker.Item label="All Classes" value="all" />
+              {classes.map((cls) => (
+                <Picker.Item 
+                  key={cls.id} 
+                  label={`${cls.class_name}${cls.section ? ` - ${cls.section}` : ''}`} 
+                  value={cls.id} 
+                />
+              ))}
+            </Picker>
+          </View>
+        </View>
+
         {/* Search Bar */}
         <View style={styles.searchContainer}>
           <Ionicons name="search" size={20} color="#666" />
@@ -732,6 +773,32 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#999',
     marginTop: 16,
+  },
+  classFilterContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  classFilterIcon: {
+    marginRight: 12,
+  },
+  classPickerContainer: {
+    flex: 1,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+  },
+  picker: {
+    height: 50,
+    width: '100%',
   },
 
   // Modal Styles

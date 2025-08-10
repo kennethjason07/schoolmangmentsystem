@@ -20,6 +20,8 @@ import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 
 const TeacherAccountManagement = ({ navigation }) => {
   const [teachers, setTeachers] = useState([]);
+  const [filteredTeachers, setFilteredTeachers] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -38,12 +40,36 @@ const TeacherAccountManagement = ({ navigation }) => {
     loadTeachers();
   }, []);
 
+  // Filter teachers based on search query
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setFilteredTeachers(teachers);
+    } else {
+      const filtered = teachers.filter(teacher => 
+        teacher.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        teacher.qualification?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (teacher.users && teacher.users.length > 0 && 
+         teacher.users[0].email?.toLowerCase().includes(searchQuery.toLowerCase()))
+      );
+      setFilteredTeachers(filtered);
+    }
+  }, [searchQuery, teachers]);
+
+  const handleSearch = (query) => {
+    setSearchQuery(query);
+  };
+
+  const clearSearch = () => {
+    setSearchQuery('');
+  };
+
   const loadTeachers = async () => {
     try {
       setLoading(true);
       const { data, error } = await dbHelpers.getTeachers();
       if (error) throw error;
       setTeachers(data || []);
+      setFilteredTeachers(data || []);
     } catch (error) {
       console.error('Error loading teachers:', error);
       Alert.alert('Error', 'Failed to load teachers');
@@ -275,11 +301,37 @@ const TeacherAccountManagement = ({ navigation }) => {
           </View>
         </View>
 
+        {/* Search Bar */}
+        <View style={styles.searchSection}>
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search teachers by name, email, or qualification..."
+              value={searchQuery}
+              onChangeText={handleSearch}
+              placeholderTextColor="#999"
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={clearSearch} style={styles.clearButton}>
+                <Ionicons name="close-circle" size={20} color="#666" />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
         {/* Teachers List */}
         <View style={styles.teachersSection}>
-          <Text style={styles.sectionTitle}>Teachers</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Teachers</Text>
+            {searchQuery.length > 0 && (
+              <Text style={styles.searchResultsText}>
+                {filteredTeachers.length} of {teachers.length} teachers
+              </Text>
+            )}
+          </View>
           <FlatList
-            data={teachers}
+            data={filteredTeachers}
             keyExtractor={(item) => item.id}
             renderItem={renderTeacherItem}
             scrollEnabled={false}
@@ -287,10 +339,20 @@ const TeacherAccountManagement = ({ navigation }) => {
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <Ionicons name="people-outline" size={48} color="#ccc" />
-                <Text style={styles.emptyText}>No teachers found</Text>
-                <Text style={styles.emptySubtext}>
-                  Add teachers first to create their login accounts
+                <Text style={styles.emptyText}>
+                  {searchQuery.length > 0 ? 'No teachers match your search' : 'No teachers found'}
                 </Text>
+                <Text style={styles.emptySubtext}>
+                  {searchQuery.length > 0 
+                    ? 'Try adjusting your search criteria'
+                    : 'Add teachers first to create their login accounts'
+                  }
+                </Text>
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity style={styles.clearSearchButton} onPress={clearSearch}>
+                    <Text style={styles.clearSearchText}>Clear Search</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             }
           />
@@ -717,6 +779,54 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 
+  // Search Section
+  searchSection: {
+    backgroundColor: '#fff',
+    margin: 16,
+    marginTop: 0,
+    padding: 16,
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+    paddingVertical: 4,
+  },
+  clearButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  searchResultsText: {
+    fontSize: 14,
+    color: '#666',
+    fontStyle: 'italic',
+  },
+
   // Empty State
   emptyContainer: {
     alignItems: 'center',
@@ -732,6 +842,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     textAlign: 'center',
+    marginBottom: 16,
+  },
+  clearSearchButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#2196F3',
+    borderRadius: 6,
+  },
+  clearSearchText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '500',
   },
 });
 
