@@ -19,6 +19,7 @@ import ManageStudents from '../screens/admin/ManageStudents';
 import ManageTeachers from '../screens/admin/ManageTeachers';
 import SubjectsTimetable from '../screens/admin/SubjectsTimetable';
 import ExamsMarks from '../screens/admin/ExamsMarks';
+import AdminMarksEntry from '../screens/admin/MarksEntry';
 import AttendanceManagement from '../screens/admin/AttendanceManagement';
 import FeeManagement from '../screens/admin/FeeManagement';
 import AnalyticsReports from '../screens/admin/AnalyticsReports';
@@ -366,6 +367,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="FeeClassDetails" component={FeeClassDetails} />
                 <Stack.Screen name="ClassStudentDetails" component={ClassStudentDetails} />
                 <Stack.Screen name="ExamsMarks" component={ExamsMarks} />
+                <Stack.Screen name="MarksEntry" component={AdminMarksEntry} />
                 <Stack.Screen name="NotificationManagement" component={NotificationManagement} />
                 <Stack.Screen name="TeacherDetails" component={TeacherDetails} />
                 <Stack.Screen name="TeacherAccountManagement" component={TeacherAccountManagement} />

@@ -877,6 +877,14 @@ const FeeManagement = () => {
                 Payments
               </Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, tab === 'recent' && styles.activeTab]}
+              onPress={() => setTab('recent')}
+            >
+              <Text style={[styles.tabText, tab === 'recent' && styles.activeTabText]}>
+                Recent Payments
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {/* Content */}
@@ -893,14 +901,16 @@ const FeeManagement = () => {
                     {/* Class Header */}
                     <View style={styles.classHeader}>
                       <Text style={styles.className}>{classData.name}</Text>
-                      <TouchableOpacity style={styles.editClassButton}>
-                        <Ionicons name="create-outline" size={20} color="#666" />
-                      </TouchableOpacity>
                     </View>
 
                     {/* Fee Items */}
                     {classData.fees && classData.fees.map((fee, index) => (
-                      <View key={index} style={styles.feeItemCard}>
+                      <TouchableOpacity 
+                        key={index} 
+                        style={styles.feeItemCard}
+                        onPress={() => openFeeModal(classData.classId, fee)}
+                        activeOpacity={0.7}
+                      >
                         <View style={styles.feeItemContent}>
                           <View style={styles.feeItemLeft}>
                             <Text style={styles.feeItemTitle}>
@@ -919,22 +929,21 @@ const FeeManagement = () => {
                           <View style={styles.feeItemActions}>
                             <TouchableOpacity 
                               style={styles.feeActionButton}
-                              onPress={() => openFeeModal(classData.classId, fee)}
-                            >
-                              <Ionicons name="create-outline" size={18} color="#666" />
-                            </TouchableOpacity>
-                            <TouchableOpacity 
-                              style={styles.feeActionButton}
-                              onPress={() => handleDeleteFee(fee)}
+                              onPress={(e) => {
+                                e.stopPropagation();
+                                handleDeleteFee(fee);
+                              }}
                             >
                               <Ionicons name="trash-outline" size={18} color="#FF6B6B" />
                             </TouchableOpacity>
                           </View>
                         </View>
-                      </View>
+                      </TouchableOpacity>
                     ))}
                   </View>
                 ))}
+                {/* Add bottom padding to ensure last card is fully visible */}
+                <View style={styles.bottomSpacer} />
               </View>
             </ScrollView>
           )}
@@ -1048,23 +1057,48 @@ const FeeManagement = () => {
                   )}
                 </View>
 
+              </View>
+            </ScrollView>
+          )}
+          {tab === 'recent' && (
+            <ScrollView 
+              style={styles.contentContainer}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={loadAllData} />
+              }
+            >
+              <View style={styles.paymentsContent}>
                 {/* Recent Payments */}
                 <View style={styles.recentPaymentsContainer}>
                   <Text style={styles.sectionTitle}>Recent Payments</Text>
-                  {payments.slice(0, 10).map((item, index) => (
+                  {payments.slice(0, 20).map((item, index) => (
                     <View key={item.id} style={styles.paymentItem}>
                       <View style={styles.paymentItemLeft}>
                         <Text style={styles.paymentStudentName}>{item.students?.full_name || 'Unknown Student'}</Text>
                         <Text style={styles.paymentFeeType}>{item.fee_structure?.fee_component || item.fee_component || 'Unknown Fee'}</Text>
+                        <Text style={styles.paymentDate}>{formatSafeDate(item.payment_date)}</Text>
                       </View>
                       <View style={styles.paymentItemRight}>
                         <Text style={styles.paymentAmount}>{formatSafeCurrency(item.amount_paid)}</Text>
-                        <Text style={styles.paymentDate}>{formatSafeDate(item.payment_date)}</Text>
+                        <View style={styles.paymentStatus}>
+                          <View style={[
+                            styles.statusDot, 
+                            { backgroundColor: item.status === 'paid' ? '#4CAF50' : 
+                                              item.status === 'partial' ? '#FF9800' : '#F44336' }
+                          ]} />
+                          <Text style={styles.statusText}>
+                            {item.status ? item.status.charAt(0).toUpperCase() + item.status.slice(1) : 'Paid'}
+                          </Text>
+                        </View>
                       </View>
                     </View>
                   ))}
                   {payments.length === 0 && (
-                    <Text style={styles.noPaymentsText}>No payments found</Text>
+                    <View style={styles.emptyContainer}>
+                      <Ionicons name="receipt-outline" size={48} color="#ccc" />
+                      <Text style={styles.noPaymentsText}>No payments found</Text>
+                      <Text style={styles.emptySubtext}>Payment records will appear here when available</Text>
+                    </View>
                   )}
                 </View>
               </View>
@@ -1225,6 +1259,39 @@ const FeeManagement = () => {
               {/* Multiple Class Selection */}
               <Text style={styles.inputLabel}>Select Classes *</Text>
               <Text style={styles.helperText}>Tap classes to select/deselect multiple</Text>
+              
+              {/* All Classes Button */}
+              <View style={styles.allClassesContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.allClassesButton,
+                    selectedClassIds.length === classes.length && styles.allClassesButtonSelected
+                  ]}
+                  onPress={() => {
+                    if (selectedClassIds.length === classes.length) {
+                      // Deselect all
+                      setSelectedClassIds([]);
+                    } else {
+                      // Select all
+                      setSelectedClassIds(classes.map(cls => cls.id));
+                    }
+                  }}
+                >
+                  <Ionicons 
+                    name={selectedClassIds.length === classes.length ? "checkmark-circle" : "ellipse-outline"} 
+                    size={20} 
+                    color={selectedClassIds.length === classes.length ? "#fff" : "#1976d2"} 
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text style={[
+                    styles.allClassesButtonText,
+                    selectedClassIds.length === classes.length && styles.allClassesButtonTextSelected
+                  ]}>
+                    All Classes ({classes.length})
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              
               <View style={styles.classSelectionContainer}>
                 {classes.map((cls) => (
                   <TouchableOpacity
@@ -1256,28 +1323,31 @@ const FeeManagement = () => {
                 ))}
               </View>
 
+              <Text style={styles.inputLabel}>Fee Component *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Fee Component * (e.g., Tuition Fee, Bus Fee, Lab Fee)"
+                placeholder="e.g., Tuition Fee, Bus Fee, Lab Fee"
                 value={newFeeStructure.type}
                 onChangeText={(text) => setNewFeeStructure({ ...newFeeStructure, type: text })}
               />
               
+              <Text style={styles.inputLabel}>Amount *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Amount * (in ₹)"
+                placeholder="Enter amount in ₹"
                 value={newFeeStructure.amount}
                 onChangeText={(text) => setNewFeeStructure({ ...newFeeStructure, amount: text })}
                 keyboardType="numeric"
               />
 
+              <Text style={styles.inputLabel}>Due Date *</Text>
               <TouchableOpacity
                 style={styles.dateButton}
                 onPress={() => setShowDatePicker(true)}
               >
                 <Ionicons name="calendar-outline" size={20} color="#1976d2" />
                 <Text style={[styles.dateButtonText, { color: newFeeStructure.dueDate ? '#333' : '#999' }]}>
-                  {newFeeStructure.dueDate ? formatSafeDate(newFeeStructure.dueDate) : 'Select due date *'}
+                  {newFeeStructure.dueDate ? formatSafeDate(newFeeStructure.dueDate) : 'Select due date'}
                 </Text>
               </TouchableOpacity>
 
@@ -1393,7 +1463,9 @@ const styles = StyleSheet.create({
   tab: {
     flex: 1,
     paddingVertical: 12,
+    paddingHorizontal: 8,
     alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: 6,
   },
   activeTab: {
@@ -1408,6 +1480,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#666',
+    textAlign: 'center',
   },
   activeTabText: {
     color: '#333',
@@ -1611,7 +1684,7 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 20,
-    bottom: 20,
+    bottom: 80,
     backgroundColor: '#1976d2',
     width: 56,
     height: 56,
@@ -1624,6 +1697,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     zIndex: 1000,
+  },
+  bottomSpacer: {
+    height: 100,
+    width: '100%',
   },
   classSelectionContainer: {
     flexDirection: 'row',
@@ -1905,6 +1982,59 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontStyle: 'italic',
     marginVertical: 20,
+  },
+  // All Classes Button Styles
+  allClassesContainer: {
+    marginBottom: 12,
+  },
+  allClassesButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f8f9fa',
+    borderWidth: 2,
+    borderColor: '#1976d2',
+    borderStyle: 'dashed',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  allClassesButtonSelected: {
+    backgroundColor: '#1976d2',
+    borderStyle: 'solid',
+  },
+  allClassesButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1976d2',
+  },
+  allClassesButtonTextSelected: {
+    color: '#fff',
+  },
+  // Recent Payments Tab Specific Styles
+  paymentStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#666',
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
 });
 

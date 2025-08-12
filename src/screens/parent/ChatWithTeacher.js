@@ -1031,22 +1031,26 @@ const ChatWithTeacher = () => {
           </View>
           {teachers.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Ionicons name="people-outline" size={64} color="#ccc" />
-              <Text style={styles.emptyText}>No teachers found for your child's class.</Text>
-              <Text style={styles.emptySubtext}>
-                Please contact the school admin to ensure teachers are properly assigned to your child's class.
+              <View style={styles.noTeachersIcon}>
+                <Ionicons name="people-outline" size={48} color="#9e9e9e" />
+              </View>
+              <Text style={styles.noTeachersTitle}>No Teachers Assigned</Text>
+              <Text style={styles.noTeachersMessage}>
+                Your child's teachers have not been assigned yet. Please contact the school administration for assistance.
               </Text>
               <TouchableOpacity
-                style={styles.debugButton}
+                style={styles.contactButton}
                 onPress={() => {
+                  // You can add functionality to open phone/email app here
                   Alert.alert(
-                    'Debug Info',
-                    `User ID: ${user.id}\nUser Type: ${user.user_type || 'N/A'}\nTeachers Found: ${teachers.length}`,
+                    'Contact Administration',
+                    'Please contact the school office to have teachers assigned to your child\'s class.',
                     [{ text: 'OK' }]
                   );
                 }}
               >
-                <Text style={styles.debugButtonText}>Debug Info</Text>
+                <Ionicons name="call" size={16} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.contactButtonText}>Contact School</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -1690,17 +1694,49 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     lineHeight: 20,
   },
-  debugButton: {
-    backgroundColor: '#1976d2',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    marginTop: 16,
+  // No Teachers Assigned Styles
+  noTeachersIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
   },
-  debugButtonText: {
+  noTeachersTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#424242',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  noTeachersMessage: {
+    fontSize: 14,
+    color: '#757575',
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: 32,
+    marginBottom: 24,
+  },
+  contactButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1976d2',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 24,
+    elevation: 2,
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  contactButtonText: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
 
   // Unread Message Indicators

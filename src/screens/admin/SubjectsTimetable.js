@@ -52,6 +52,10 @@ const SubjectsTimetable = () => {
   const [periodForm, setPeriodForm] = useState({ type: 'subject', subjectId: '', label: '', startTime: '', endTime: '', room: '' });
   const [showTimePicker, setShowTimePicker] = useState({ visible: false, field: '', value: new Date() });
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedDay, setSelectedDay] = useState('Monday');
+  const [copyDayModal, setCopyDayModal] = useState({ visible: false });
+  const [periodSettingsModal, setPeriodSettingsModal] = useState({ visible: false });
+  const [periodSettings, setPeriodSettings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -85,6 +89,9 @@ const SubjectsTimetable = () => {
           .order('name');
         if (subjectError) throw subjectError;
         setSubjects(subjectData || []);
+
+        // Fetch period settings
+        await fetchPeriodSettings();
 
         // Fetch timetable for the default class
         if (defaultClassId) {
@@ -554,6 +561,311 @@ const SubjectsTimetable = () => {
     return days[date.getDay() === 0 ? 6 : date.getDay() - 1]; // 0=Sunday, 1=Monday...
   }
 
+  // Fetch period settings from database
+  const fetchPeriodSettings = async () => {
+    try {
+      const currentYear = new Date().getFullYear();
+      const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
+      
+      const { data: periodData, error: periodError } = await supabase
+        .from('period_settings')
+        .select('*')
+        .eq('academic_year', academicYear)
+        .eq('period_type', 'class')
+        .eq('is_active', true)
+        .order('start_time');
+      
+      if (periodError) {
+        console.error('Error fetching period settings:', periodError);
+        // Use default periods if fetch fails
+        setPeriodSettings(getDefaultPeriods());
+      } else if (periodData && periodData.length > 0) {
+        // Transform database data to component format
+        const transformedPeriods = periodData.map(period => ({
+          id: period.id,
+          number: period.period_number,
+          startTime: period.start_time,
+          endTime: period.end_time,
+          duration: period.duration_minutes,
+          name: period.period_name
+        }));
+        setPeriodSettings(transformedPeriods);
+      } else {
+        // No periods in database, use defaults and save them
+        const defaultPeriods = getDefaultPeriods();
+        setPeriodSettings(defaultPeriods);
+        await savePeriodSettingsToDatabase(defaultPeriods, academicYear);
+      }
+    } catch (error) {
+      console.error('Error in fetchPeriodSettings:', error);
+      setPeriodSettings(getDefaultPeriods());
+    }
+  };
+
+  // Get default period structure
+  const getDefaultPeriods = () => {
+    return [
+      { number: 1, startTime: '08:00', endTime: '08:45', duration: 45, name: 'Period 1' },
+      { number: 2, startTime: '08:45', endTime: '09:30', duration: 45, name: 'Period 2' },
+      { number: 3, startTime: '09:45', endTime: '10:30', duration: 45, name: 'Period 3' },
+      { number: 4, startTime: '10:30', endTime: '11:15', duration: 45, name: 'Period 4' },
+      { number: 5, startTime: '11:30', endTime: '12:15', duration: 45, name: 'Period 5' },
+      { number: 6, startTime: '12:15', endTime: '13:00', duration: 45, name: 'Period 6' },
+      { number: 7, startTime: '14:00', endTime: '14:45', duration: 45, name: 'Period 7' },
+      { number: 8, startTime: '14:45', endTime: '15:30', duration: 45, name: 'Period 8' },
+    ];
+  };
+
+  // Helper to get time slots (now uses database data)
+  const getTimeSlots = () => {
+    return periodSettings.length > 0 ? periodSettings : getDefaultPeriods();
+  };
+
+  // Helper to get subjects for the selected class
+  const getClassSubjects = () => {
+    return subjects.filter(subject => subject.class_id === selectedClass);
+  };
+
+  // Handler for subject change in period slots
+  const handleSubjectChange = async (day, slot, subjectId) => {
+    if (!subjectId) {
+      // Remove subject from this slot if empty
+      const existingPeriod = timetables[selectedClass]?.[day]?.find(
+        p => p.startTime === slot.startTime
+      );
+      if (existingPeriod) {
+        await removePeriod(day, existingPeriod.id);
+      }
+      return;
+    }
+
+    try {
+      // Get teacher for the selected subject
+      let teacherId = null;
+      const { data: teacherSubject, error: teacherError } = await supabase
+        .from('teacher_subjects')
+        .select('teacher_id')
+        .eq('subject_id', subjectId)
+        .single();
+
+      if (!teacherError && teacherSubject) {
+        teacherId = teacherSubject.teacher_id;
+      }
+
+      // Get current academic year
+      const currentYear = new Date().getFullYear();
+      const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
+
+      const timetableData = {
+        class_id: selectedClass,
+        subject_id: subjectId,
+        teacher_id: teacherId,
+        day_of_week: getDayNumber(day),
+        period_number: slot.number,
+        start_time: slot.startTime,
+        end_time: slot.endTime,
+        academic_year: academicYear
+      };
+
+      // Check if period already exists for this slot
+      const existingPeriod = timetables[selectedClass]?.[day]?.find(
+        p => p.startTime === slot.startTime
+      );
+
+      if (existingPeriod) {
+        // Update existing period
+        const { data, error } = await dbHelpers.updateTimetableEntry(existingPeriod.id, timetableData);
+        if (error) throw error;
+      } else {
+        // Create new period
+        const { data, error } = await dbHelpers.createTimetableEntry(timetableData);
+        if (error) throw error;
+      }
+
+      // Refresh timetable data
+      await fetchTimetableForClass(selectedClass);
+    } catch (error) {
+      console.error('Error updating period:', error);
+      Alert.alert('Error', 'Failed to update period');
+    }
+  };
+
+  // Handler to remove a period
+  const removePeriod = async (day, periodId) => {
+    try {
+      const { error } = await dbHelpers.deleteTimetableEntry(periodId);
+      if (error) throw error;
+
+      // Update local state
+      setTimetables(prev => {
+        const classTT = { ...prev[selectedClass] };
+        const dayTT = classTT[day] ? [...classTT[day]] : [];
+        classTT[day] = dayTT.filter(p => p.id !== periodId);
+        return { ...prev, [selectedClass]: classTT };
+      });
+    } catch (error) {
+      console.error('Error removing period:', error);
+      Alert.alert('Error', 'Failed to remove period');
+    }
+  };
+
+  // Handler to clear all periods for the selected day
+  const clearDay = async () => {
+    Alert.alert(
+      'Clear Day Timetable',
+      `Are you sure you want to clear all periods for ${selectedDay}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              const dayPeriods = timetables[selectedClass]?.[selectedDay] || [];
+              
+              // Delete all periods for this day
+              for (const period of dayPeriods) {
+                await dbHelpers.deleteTimetableEntry(period.id);
+              }
+
+              // Update local state
+              setTimetables(prev => {
+                const classTT = { ...prev[selectedClass] };
+                classTT[selectedDay] = [];
+                return { ...prev, [selectedClass]: classTT };
+              });
+
+              Alert.alert('Success', `${selectedDay} timetable cleared successfully`);
+            } catch (error) {
+              console.error('Error clearing day:', error);
+              Alert.alert('Error', 'Failed to clear day timetable');
+            } finally {
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // Handler to save the timetable (refresh data)
+  const saveDayTimetable = async () => {
+    try {
+      setLoading(true);
+      await fetchTimetableForClass(selectedClass);
+      Alert.alert('Success', 'Timetable saved successfully');
+    } catch (error) {
+      console.error('Error saving timetable:', error);
+      Alert.alert('Error', 'Failed to save timetable');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handler to open copy day modal
+  const openCopyDayModal = () => {
+    setCopyDayModal({ visible: true });
+  };
+
+  // Handler to open period settings modal
+  const openPeriodSettingsModal = async () => {
+    // Refresh period settings before opening modal
+    await fetchPeriodSettings();
+    setPeriodSettingsModal({ visible: true });
+  };
+
+  // Handler to add new period slot
+  const addPeriodSlot = () => {
+    const newPeriod = {
+      number: periodSettings.length + 1,
+      startTime: '09:00',
+      endTime: '09:45',
+      duration: 45,
+      name: `Period ${periodSettings.length + 1}`
+    };
+    setPeriodSettings([...periodSettings, newPeriod]);
+  };
+
+  // Handler to remove period slot
+  const removePeriodSlot = (index) => {
+    const updated = periodSettings.filter((_, i) => i !== index);
+    // Renumber periods
+    const renumbered = updated.map((period, i) => ({ ...period, number: i + 1 }));
+    setPeriodSettings(renumbered);
+  };
+
+  // Handler to update period slot
+  const updatePeriodSlot = (index, field, value) => {
+    const updated = [...periodSettings];
+    updated[index] = { ...updated[index], [field]: value };
+    
+    // Calculate duration if start or end time changed
+    if (field === 'startTime' || field === 'endTime') {
+      const { startTime, endTime } = updated[index];
+      updated[index].duration = getDuration(startTime, endTime);
+    }
+    
+    setPeriodSettings(updated);
+  };
+
+  // Save period settings to database
+  const savePeriodSettingsToDatabase = async (periods, academicYear) => {
+    try {
+      // First, delete existing periods for this academic year
+      await supabase
+        .from('period_settings')
+        .delete()
+        .eq('academic_year', academicYear);
+
+      // Insert new period settings
+      const periodsToInsert = periods.map(period => ({
+        period_number: period.number,
+        start_time: period.startTime,
+        end_time: period.endTime,
+        period_name: period.name || `Period ${period.number}`,
+        period_type: 'class',
+        academic_year: academicYear,
+        is_active: true
+      }));
+
+      const { error: insertError } = await supabase
+        .from('period_settings')
+        .insert(periodsToInsert);
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error saving period settings to database:', error);
+      throw error;
+    }
+  };
+
+  // Handler to save period settings
+  const savePeriodSettings = async () => {
+    try {
+      setLoading(true);
+      const currentYear = new Date().getFullYear();
+      const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
+      
+      await savePeriodSettingsToDatabase(periodSettings, academicYear);
+      
+      setPeriodSettingsModal({ visible: false });
+      Alert.alert('Success', 'Period settings saved successfully!');
+      
+      // Refresh period settings to get updated data with IDs
+      await fetchPeriodSettings();
+    } catch (error) {
+      console.error('Error saving period settings:', error);
+      Alert.alert('Error', 'Failed to save period settings. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -638,100 +950,153 @@ const SubjectsTimetable = () => {
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView style={styles.content}>
-          <Text style={styles.title}>Class Timetable</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-            <TouchableOpacity onPress={() => setSelectedDate(d => { const nd = new Date(d); nd.setDate(nd.getDate() - 1); return nd; })}>
-              <Text style={{ fontSize: 28, marginHorizontal: 12 }}>{'<'}</Text>
-            </TouchableOpacity>
-            <Text style={{ fontSize: 18, fontWeight: 'bold', minWidth: 120, textAlign: 'center' }}>{format(selectedDate, 'dd MMM yyyy')}</Text>
-            <TouchableOpacity onPress={() => setSelectedDate(d => { const nd = new Date(d); nd.setDate(nd.getDate() + 1); return nd; })}>
-              <Text style={{ fontSize: 28, marginHorizontal: 12 }}>{'>'}</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={{ marginRight: 8, fontWeight: 'bold', fontSize: 16 }}>Select Class:</Text>
-            <View style={{
-              flex: 1,
-              backgroundColor: '#fff',
-              borderWidth: 1,
-              borderColor: '#ccc',
-              borderRadius: 6,
-              overflow: 'hidden',
-              height: 56,
-              minHeight: 44,
-              alignSelf: 'stretch',
-              justifyContent: 'center',
-              paddingHorizontal: 4,
-            }}>
+        <ScrollView style={styles.timetableContainer} showsVerticalScrollIndicator={false}>
+          {/* Class Selector */}
+          <View style={styles.classSelector}>
+            <View style={styles.selectorHeader}>
+              <Ionicons name="school" size={20} color="#2196F3" />
+              <Text style={styles.selectorLabel}>Select Class</Text>
+            </View>
+            <View style={styles.pickerWrapper}>
               <Picker
                 selectedValue={selectedClass}
-                style={{ color: '#222', backgroundColor: '#fff', width: '100%', height: 56, minHeight: 44, fontSize: 16 }}
+                style={styles.classPicker}
                 onValueChange={setSelectedClass}
               >
                 {classes.map(c => (
-                  <Picker.Item key={c.id} label={`${c.class_name} ${c.section}`} value={c.id} />
+                  <Picker.Item 
+                    key={c.id} 
+                    label={`${c.class_name} - ${c.section}`} 
+                    value={c.id} 
+                  />
                 ))}
               </Picker>
+              <Ionicons name="chevron-down" size={20} color="#666" style={styles.pickerIcon} />
             </View>
           </View>
-          {/* Show only the selected day's timetable */}
-          {(() => {
-            const dayName = getDayNameFromDate(selectedDate);
-            const dayTT = timetables[selectedClass]?.[dayName] ? [...timetables[selectedClass][dayName]] : [];
-            dayTT.sort((a, b) => a.startTime.localeCompare(b.startTime));
-            return (
-              <View key={dayName} style={styles.dayBlock}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={styles.dayTitle}>{dayName}</Text>
-                  <TouchableOpacity style={styles.addPeriodBtn} onPress={() => openAddPeriod(dayName)}>
-                    <Text style={styles.addPeriodBtnText}>+ Add Period</Text>
+
+          {/* Day Selector Tabs */}
+          <View style={styles.dayTabsContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dayTabs}>
+              {days.map((day, index) => {
+                const isSelected = selectedDay === day;
+                const dayPeriods = timetables[selectedClass]?.[day] || [];
+                return (
+                  <TouchableOpacity
+                    key={day}
+                    style={[styles.dayTab, isSelected && styles.selectedDayTab]}
+                    onPress={() => setSelectedDay(day)}
+                  >
+                    <Text style={[styles.dayTabText, isSelected && styles.selectedDayTabText]}>
+                      {day.substring(0, 3)}
+                    </Text>
+                    {dayPeriods.length > 0 && (
+                      <View style={styles.periodIndicator}>
+                        <Text style={styles.periodCount}>{dayPeriods.length}</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+
+          {/* Period Entry List */}
+          <ScrollView style={styles.periodsList} showsVerticalScrollIndicator={false}>
+            <View style={styles.periodsContainer}>
+              <View style={styles.periodsHeader}>
+                <Text style={styles.periodsTitle}>Periods for {selectedDay}</Text>
+                <View style={styles.headerActions}>
+                  <TouchableOpacity 
+                    style={styles.copyDayButton}
+                    onPress={() => openCopyDayModal()}
+                  >
+                    <Ionicons name="copy" size={16} color="#2196F3" />
+                    <Text style={styles.copyDayText}>Copy Day</Text>
                   </TouchableOpacity>
                 </View>
-                {dayTT.length === 0 && <Text style={{ color: '#888', marginVertical: 8 }}>No periods added.</Text>}
-                {dayTT.map(period => {
-                  const duration = getDuration(period.startTime, period.endTime);
-                  let subject, teacherName;
-                  if (period.type === 'subject') {
-                    // Use the subject data from the period if available, otherwise find it
-                    subject = period.subject || subjects.find(s => s.id === period.subjectId);
-                    // Get teacher name from the subject's teacher_subjects relationship
-                    teacherName = subject ? getSubjectTeacher(subject) : '-';
-                  }
-                  return (
-                    <View key={period.id} style={styles.periodCard}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.periodTitle}>
-                            {period.type === 'subject' && subject ?
-                              subject.name :
-                              period.label}
-                          </Text>
-                          <Text style={styles.periodTime}>
-                            {formatTime(period.startTime)} - {formatTime(period.endTime)} ({duration} min)
-                          </Text>
-                          {period.type === 'subject' && (
-                            <Text style={styles.periodTeacher}>
-                              Teacher: {teacherName}
-                              {period.room && ` • Room: ${period.room}`}
-                            </Text>
-                          )}
-                        </View>
-                        <View style={{ flexDirection: 'row' }}>
-                          <TouchableOpacity style={styles.actionBtn} onPress={() => openEditPeriod(dayName, period)}>
-                            <Ionicons name="pencil" size={20} color="#1976d2" />
-                          </TouchableOpacity>
-                          <TouchableOpacity style={styles.deletePeriodBtn} onPress={() => handleDeletePeriod(dayName, period.id)}>
-                            <Ionicons name="trash" size={20} color="#d32f2f" />
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    </View>
-                  );
-                })}
               </View>
-            );
-          })()}
+              
+              {/* Period Settings Button - Below header */}
+              <TouchableOpacity 
+                style={styles.settingsButtonLarge}
+                onPress={() => openPeriodSettingsModal()}
+              >
+                <Ionicons name="settings" size={18} color="#2196F3" />
+                <Text style={styles.settingsTextLarge}>Configure Period Timings</Text>
+                <Ionicons name="chevron-right" size={16} color="#2196F3" />
+              </TouchableOpacity>
+
+              {/* Pre-defined time slots */}
+              {getTimeSlots().map((slot, index) => {
+                const existingPeriod = timetables[selectedClass]?.[selectedDay]?.find(
+                  p => p.startTime === slot.startTime
+                );
+                return (
+                  <View key={index} style={styles.periodSlot}>
+                    <View style={styles.periodTimeSlot}>
+                      <Text style={styles.periodNumber}>Period {slot.number}</Text>
+                      <Text style={styles.periodTime}>
+                        {formatTime(slot.startTime)} - {formatTime(slot.endTime)}
+                      </Text>
+                      <Text style={styles.periodDuration}>({slot.duration} min)</Text>
+                    </View>
+                    <View style={styles.subjectSelector}>
+                      <View style={styles.subjectPickerWrapper}>
+                        <Picker
+                          selectedValue={existingPeriod?.subjectId || ''}
+                          style={styles.subjectPicker}
+                          onValueChange={(subjectId) => handleSubjectChange(selectedDay, slot, subjectId)}
+                        >
+                          <Picker.Item label="Select Subject" value="" />
+                          {getClassSubjects().map(subject => (
+                            <Picker.Item 
+                              key={subject.id} 
+                              label={subject.name} 
+                              value={subject.id} 
+                            />
+                          ))}
+                        </Picker>
+                      </View>
+                      {existingPeriod && (
+                        <TouchableOpacity
+                          style={styles.removeSubjectButton}
+                          onPress={() => removePeriod(selectedDay, existingPeriod.id)}
+                        >
+                          <Ionicons name="trash" size={16} color="#f44336" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
+
+          {/* Action Buttons */}
+          <View style={styles.actionButtons}>
+            <TouchableOpacity 
+              style={styles.clearDayButton}
+              onPress={() => clearDay()}
+            >
+              <Ionicons name="refresh" size={16} color="#666" />
+              <Text style={styles.clearDayText}>Clear Day</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.saveTimetableButton}
+              onPress={() => saveDayTimetable()}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="checkmark" size={16} color="#fff" />
+                  <Text style={styles.saveTimetableText}>Save Timetable</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       )}
 
@@ -814,6 +1179,122 @@ const SubjectsTimetable = () => {
           </View>
         </View>
       </Modal>
+
+      {/* Period Settings Modal */}
+      <Modal visible={periodSettingsModal.visible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, styles.largeModalContent]}>
+            <Text style={styles.modalTitle}>Period Settings</Text>
+            <Text style={styles.modalSubtitle}>Configure period timings for all days</Text>
+            
+            <ScrollView style={styles.periodSettingsList}>
+              {periodSettings.map((period, index) => (
+                <View key={index} style={styles.periodSettingRow}>
+                  <View style={styles.periodSettingHeader}>
+                    <Text style={styles.periodSettingNumber}>Period {period.number}</Text>
+                    <TouchableOpacity
+                      style={styles.removePeriodButton}
+                      onPress={() => removePeriodSlot(index)}
+                    >
+                      <Ionicons name="trash" size={16} color="#f44336" />
+                    </TouchableOpacity>
+                  </View>
+                  
+                  <View style={styles.timeInputRow}>
+                    <TouchableOpacity
+                      style={styles.timeInput}
+                      onPress={() => {
+                        const [h, m] = period.startTime.split(':').map(Number);
+                        const date = new Date();
+                        date.setHours(h, m);
+                        setShowTimePicker({ 
+                          visible: true, 
+                          field: `period_${index}_start`,
+                          value: date 
+                        });
+                      }}
+                    >
+                      <Text style={styles.timeInputText}>{formatTime(period.startTime)}</Text>
+                    </TouchableOpacity>
+                    
+                    <Text style={styles.timeSeparator}>to</Text>
+                    
+                    <TouchableOpacity
+                      style={styles.timeInput}
+                      onPress={() => {
+                        const [h, m] = period.endTime.split(':').map(Number);
+                        const date = new Date();
+                        date.setHours(h, m);
+                        setShowTimePicker({ 
+                          visible: true, 
+                          field: `period_${index}_end`,
+                          value: date 
+                        });
+                      }}
+                    >
+                      <Text style={styles.timeInputText}>{formatTime(period.endTime)}</Text>
+                    </TouchableOpacity>
+                    
+                    <View style={styles.durationDisplay}>
+                      <Text style={styles.durationText}>{period.duration} min</Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+              
+              <TouchableOpacity
+                style={styles.addPeriodButton}
+                onPress={addPeriodSlot}
+              >
+                <Ionicons name="add" size={20} color="#2196F3" />
+                <Text style={styles.addPeriodText}>Add Period</Text>
+              </TouchableOpacity>
+            </ScrollView>
+            
+            {showTimePicker.visible && showTimePicker.field.startsWith('period_') && (
+              <DateTimePicker
+                value={showTimePicker.value}
+                mode="time"
+                is24Hour={true}
+                display="clock"
+                onChange={(event, selectedDate) => {
+                  if (event.type === 'dismissed') {
+                    setShowTimePicker({ ...showTimePicker, visible: false });
+                    return;
+                  }
+                  
+                  const date = selectedDate || showTimePicker.value;
+                  const h = date.getHours().toString().padStart(2, '0');
+                  const m = date.getMinutes().toString().padStart(2, '0');
+                  const time = `${h}:${m}`;
+                  
+                  const [, indexStr, type] = showTimePicker.field.split('_');
+                  const index = parseInt(indexStr);
+                  const field = type === 'start' ? 'startTime' : 'endTime';
+                  
+                  updatePeriodSlot(index, field, time);
+                  setShowTimePicker({ ...showTimePicker, visible: false });
+                }}
+              />
+            )}
+            
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setPeriodSettingsModal({ visible: false })}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.saveButton}
+                onPress={savePeriodSettings}
+              >
+                <Text style={styles.saveButtonText}>Save Settings</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -822,8 +1303,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-    paddingTop: 28, // Increased for mobile header spacing
-    paddingBottom: 8, // Keep lower padding
   },
   tabBar: {
     flexDirection: 'row',
@@ -1009,6 +1488,469 @@ const styles = StyleSheet.create({
   activeTypeBtn: {
     backgroundColor: '#e3f2fd',
     borderColor: '#1976d2',
+  },
+  // New Timetable Styles
+  timetableContainer: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
+  timetableHeader: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  timetableTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#212529',
+    marginBottom: 4,
+  },
+  timetableSubtitle: {
+    fontSize: 16,
+    color: '#6c757d',
+  },
+  classSelector: {
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+    padding: 20,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  selectorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  selectorLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#495057',
+    marginLeft: 8,
+  },
+  pickerWrapper: {
+    position: 'relative',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+  },
+  classPicker: {
+    height: 50,
+    backgroundColor: 'transparent',
+  },
+  pickerIcon: {
+    position: 'absolute',
+    right: 12,
+    top: 15,
+    pointerEvents: 'none',
+  },
+  dayTabsContainer: {
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  dayTabs: {
+    paddingVertical: 16,
+    paddingLeft: 12,
+    paddingRight: 12,
+  },
+  dayTab: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 6,
+    borderRadius: 20,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    alignItems: 'center',
+    minWidth: 72,
+    position: 'relative',
+  },
+  selectedDayTab: {
+    backgroundColor: '#2196F3',
+    borderColor: '#2196F3',
+  },
+  dayTabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6c757d',
+  },
+  selectedDayTabText: {
+    color: '#fff',
+  },
+  periodIndicator: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#28a745',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  periodCount: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  periodsList: {
+    flex: 1,
+    paddingTop: 16,
+  },
+  periodsContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 250,
+  },
+  periodsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  periodsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#495057',
+  },
+  copyDayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#e3f2fd',
+    borderRadius: 16,
+  },
+  copyDayText: {
+    fontSize: 12,
+    color: '#2196F3',
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  periodSlot: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    alignItems: 'center',
+  },
+  periodTimeSlot: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  periodNumber: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#2196F3',
+    marginBottom: 4,
+  },
+  periodTime: {
+    fontSize: 14,
+    color: '#495057',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  periodDuration: {
+    fontSize: 12,
+    color: '#6c757d',
+  },
+  subjectSelector: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  subjectPickerWrapper: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+    marginRight: 8,
+    minHeight: 50,
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  subjectPicker: {
+    height: 50,
+    backgroundColor: 'transparent',
+    color: '#495057',
+    paddingHorizontal: 8,
+  },
+  removeSubjectButton: {
+    padding: 8,
+    backgroundColor: '#ffebee',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionButtons: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 24,
+    paddingBottom: 40,
+    minHeight: 84,
+    borderTopWidth: 1,
+    borderTopColor: '#e9ecef',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    alignItems: 'center',
+  },
+  clearDayButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+    marginRight: 8,
+    minHeight: 48,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  clearDayText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6c757d',
+    marginLeft: 6,
+  },
+  saveTimetableButton: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: '#28a745',
+    borderRadius: 10,
+    marginLeft: 8,
+    minHeight: 48,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+  },
+  saveTimetableText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    marginLeft: 6,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  settingsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#f0f8ff',
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  settingsText: {
+    fontSize: 11,
+    color: '#2196F3',
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  settingsButtonLarge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e3f2fd',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#bbdefb',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  settingsTextLarge: {
+    fontSize: 14,
+    color: '#2196F3',
+    marginLeft: 8,
+    marginRight: 8,
+    fontWeight: '600',
+    flex: 1,
+  },
+  copyDayText: {
+    fontSize: 11,
+    color: '#2196F3',
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  largeModalContent: {
+    width: '90%',
+    height: '80%',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#6c757d',
+    marginBottom: 16,
+  },
+  periodSettingsList: {
+    flex: 1,
+    marginVertical: 8,
+  },
+  periodSettingRow: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  periodSettingHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  periodSettingNumber: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2196F3',
+  },
+  removePeriodButton: {
+    padding: 6,
+    backgroundColor: '#ffebee',
+    borderRadius: 6,
+  },
+  timeInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  timeInput: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  timeInputText: {
+    fontSize: 14,
+    color: '#495057',
+    fontWeight: '500',
+  },
+  timeSeparator: {
+    fontSize: 14,
+    color: '#6c757d',
+    marginHorizontal: 8,
+  },
+  durationDisplay: {
+    backgroundColor: '#e8f5e8',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  durationText: {
+    fontSize: 12,
+    color: '#28a745',
+    fontWeight: '500',
+  },
+  addPeriodButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#e3f2fd',
+    borderRadius: 8,
+    padding: 16,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#bbdefb',
+    borderStyle: 'dashed',
+  },
+  addPeriodText: {
+    fontSize: 14,
+    color: '#2196F3',
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e9ecef',
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+    borderRadius: 6,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  cancelButtonText: {
+    fontSize: 14,
+    color: '#6c757d',
+    fontWeight: '500',
+  },
+  saveButton: {
+    flex: 1,
+    backgroundColor: '#28a745',
+    borderRadius: 6,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  saveButtonText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '600',
   },
 });
 

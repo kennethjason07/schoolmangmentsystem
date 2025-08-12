@@ -8,6 +8,21 @@ import { supabase, TABLES } from '../../utils/supabase';
 const roles = ['teacher', 'parent', 'student', 'admin'];
 const notificationTypes = ['General', 'Urgent', 'Fee Reminder', 'Event', 'Homework', 'Attendance', 'Absentee', 'Exam'];
 
+// Color mapping for notification types
+const getNotificationTypeColor = (type) => {
+  switch (type?.toLowerCase()) {
+    case 'urgent': return '#F44336'; // Red
+    case 'fee reminder': return '#FF9800'; // Orange
+    case 'event': return '#9C27B0'; // Purple
+    case 'homework': return '#2196F3'; // Blue
+    case 'attendance': return '#4CAF50'; // Green
+    case 'absentee': return '#FF5722'; // Deep Orange
+    case 'exam': return '#673AB7'; // Deep Purple
+    case 'general': 
+    default: return '#607D8B'; // Blue Grey
+  }
+};
+
 const NotificationManagement = () => {
   const [notifications, setNotifications] = useState([]);
   const [typeFilter, setTypeFilter] = useState('');
@@ -15,7 +30,8 @@ const NotificationManagement = () => {
   const [createForm, setCreateForm] = useState({ 
     type: notificationTypes[0], 
     message: '', 
-    status: 'Pending' 
+    status: 'Pending',
+    selectedRoles: [] // Array for multiple role selection
   });
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
@@ -63,8 +79,7 @@ const NotificationManagement = () => {
   // Filtering logic
   const filteredNotifications = notifications.filter(n => {
     if (typeFilter && n.type !== typeFilter) return false;
-    if (search && !(n.message?.toLowerCase().includes(search.toLowerCase()) || 
-                   n.title?.toLowerCase().includes(search.toLowerCase()))) 
+    if (search && !n.message?.toLowerCase().includes(search.toLowerCase()))
       return false;
     return true;
   });
@@ -76,19 +91,37 @@ const NotificationManagement = () => {
     // Format the scheduled_at date and time if available
     if (notification.scheduled_at) {
       const dateObj = new Date(notification.scheduled_at);
-      const d = dateObj.toISOString().split('T')[0];
-      const t = dateObj.toTimeString().split(' ')[0].substring(0, 5);
-      setDate(d);
-      setTime(t);
+      // Format as DD-MM-YYYY
+      const dd = String(dateObj.getDate()).padStart(2, '0');
+      const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const yyyy = dateObj.getFullYear();
+      setDate(`${dd}-${mm}-${yyyy}`);
+      
+      // Format as 12-hour time
+      let hours = dateObj.getHours();
+      const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12; // 0 should be 12
+      const displayTime = `${hours}:${minutes} ${ampm}`;
+      setTime(displayTime);
     } else {
       setDate('');
       setTime('');
     }
     
+    // Get selected roles from existing recipients
+    const existingRoles = [];
+    if (notification.notification_recipients) {
+      const recipientTypes = [...new Set(notification.notification_recipients.map(r => r.recipient_type.toLowerCase()))];
+      existingRoles.push(...recipientTypes.map(type => type === 'student' ? 'student' : 'parent'));
+    }
+    
     setCreateForm({
       type: notification.type || notificationTypes[0],
       message: notification.message || '',
-      status: notification.delivery_status || 'Pending'
+      status: notification.delivery_status || 'Pending',
+      selectedRoles: existingRoles
     });
     
     setModal({ visible: true, mode: 'edit', notification });
@@ -100,7 +133,8 @@ const NotificationManagement = () => {
     setCreateForm({ 
       type: notificationTypes[0], 
       message: '', 
-      status: 'Pending' 
+      status: 'Pending',
+      selectedRoles: []
     });
     setModal({ visible: true, mode: 'create', notification: null });
   };
@@ -179,7 +213,6 @@ const NotificationManagement = () => {
       // Create a duplicate notification
       const duplicateNotification = {
         type: notification.type,
-        title: notification.title,
         message: notification.message,
         sent_to_role: notification.sent_to_role,
         sent_to_id: notification.sent_to_id,
@@ -212,12 +245,73 @@ const NotificationManagement = () => {
       return;
     }
     
+    if (createForm.selectedRoles.length === 0) {
+      Alert.alert('Error', 'Please select at least one recipient role');
+      return;
+    }
+    
     try {
       setLoading(true);
       
       let scheduledAt = null;
       if (date && time) {
-        scheduledAt = new Date(`${date}T${time}`).toISOString();
+        try {
+          // Convert DD-MM-YYYY and 12-hour time to ISO string
+          const [dd, mm, yyyy] = date.split('-');
+          let timeFormatted = time;
+          
+          // Validate date parts
+          const dayNum = parseInt(dd, 10);
+          const monthNum = parseInt(mm, 10);
+          const yearNum = parseInt(yyyy, 10);
+          
+          if (isNaN(dayNum) || isNaN(monthNum) || isNaN(yearNum) ||
+              dayNum < 1 || dayNum > 31 || monthNum < 1 || monthNum > 12 || yearNum < 1900) {
+            throw new Error('Invalid date format');
+          }
+          
+          // Convert 12-hour time to 24-hour format for ISO string
+          if (time.includes('AM') || time.includes('PM')) {
+            const [timeStr, ampm] = time.split(' ');
+            const [hours12, minutes] = timeStr.split(':');
+            let hours24 = parseInt(hours12, 10);
+            const minutesNum = parseInt(minutes, 10);
+            
+            if (isNaN(hours24) || isNaN(minutesNum) || hours24 < 1 || hours24 > 12 || minutesNum < 0 || minutesNum > 59) {
+              throw new Error('Invalid time format');
+            }
+            
+            if (ampm === 'PM' && hours24 !== 12) hours24 += 12;
+            if (ampm === 'AM' && hours24 === 12) hours24 = 0;
+            timeFormatted = `${String(hours24).padStart(2, '0')}:${String(minutesNum).padStart(2, '0')}:00`;
+          } else {
+            // Handle 24-hour format if provided
+            const [hours, minutes] = timeFormatted.split(':');
+            const hoursNum = parseInt(hours, 10);
+            const minutesNum = parseInt(minutes, 10);
+            
+            if (isNaN(hoursNum) || isNaN(minutesNum) || hoursNum < 0 || hoursNum > 23 || minutesNum < 0 || minutesNum > 59) {
+              throw new Error('Invalid time format');
+            }
+            
+            timeFormatted = `${String(hoursNum).padStart(2, '0')}:${String(minutesNum).padStart(2, '0')}:00`;
+          }
+          
+          // Create date using Date constructor with separate parameters to avoid parsing issues
+          const scheduleDate = new Date(yearNum, monthNum - 1, dayNum);
+          const [hours, minutes] = timeFormatted.split(':');
+          scheduleDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
+          
+          if (isNaN(scheduleDate.getTime())) {
+            throw new Error('Invalid date/time combination');
+          }
+          
+          scheduledAt = scheduleDate.toISOString();
+        } catch (error) {
+          console.error('Date/time parsing error:', error);
+          Alert.alert('Error', 'Invalid date or time format. Please check your input.');
+          return;
+        }
       }
       
       // Step 1: Create notification record
@@ -238,22 +332,46 @@ const NotificationManagement = () => {
       
       if (notificationError) throw notificationError;
       
-      // Step 2: Get all users to create recipients
+      // Step 2: Get all users to create recipients based on selected roles
       const { data: users, error: usersError } = await supabase
         .from('users')
         .select('id, role_id');
       
       if (usersError) throw usersError;
       
-      // Step 3: Create recipients for students and parents
+      // Map role names to role_ids based on typical school management system structure
+      const roleMap = {
+        'admin': 1,
+        'student': 2,
+        'parent': 3,
+        'teacher': 4
+      };
+      
+      // Get role_ids for selected roles
+      const selectedRoleIds = createForm.selectedRoles.map(role => roleMap[role]).filter(Boolean);
+      
+      // Step 3: Create recipients based on selected roles
+      // Note: Database only supports 'Student' and 'Parent' in notification_recipients table
+      const supportedRoles = createForm.selectedRoles.filter(role => role === 'student' || role === 'parent');
+      const unsupportedRoles = createForm.selectedRoles.filter(role => role === 'teacher' || role === 'admin');
+      
       const recipients = users
-        .filter(user => user.role_id === 2 || user.role_id === 3)
-        .map(user => ({
-          notification_id: notificationResult.id,
-          recipient_id: user.id,
-          recipient_type: user.role_id === 2 ? 'Student' : 'Parent', // Valid values: 'Student', 'Parent' (capitalized)
-          delivery_status: 'Pending' // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
-        }));
+        .filter(user => selectedRoleIds.includes(user.role_id))
+        .map(user => {
+          // Map role_id back to recipient_type (only Student and Parent are valid in notification_recipients)
+          let recipientType = null;
+          if (user.role_id === 3) recipientType = 'Parent';
+          else if (user.role_id === 2) recipientType = 'Student';
+          // Teachers (role_id 4) and Admins (role_id 1) are not supported in notification_recipients table
+          
+          return {
+            notification_id: notificationResult.id,
+            recipient_id: user.id,
+            recipient_type: recipientType,
+            delivery_status: 'Pending'
+          };
+        })
+        .filter(recipient => recipient.recipient_type === 'Student' || recipient.recipient_type === 'Parent');
       
       // Step 4: Insert into notification_recipients table
       if (recipients.length > 0) {
@@ -264,14 +382,38 @@ const NotificationManagement = () => {
         if (recipientsError) throw recipientsError;
       }
       
+      // Create success message with role breakdown
+      let successMessage = `Notification created successfully!\n`;
+      if (supportedRoles.length > 0) {
+        const studentCount = recipients.filter(r => r.recipient_type === 'Student').length;
+        const parentCount = recipients.filter(r => r.recipient_type === 'Parent').length;
+        
+        const roleCounts = [];
+        if (supportedRoles.includes('student') && studentCount > 0) {
+          roleCounts.push(`${studentCount} Student${studentCount > 1 ? 's' : ''}`);
+        }
+        if (supportedRoles.includes('parent') && parentCount > 0) {
+          roleCounts.push(`${parentCount} Parent${parentCount > 1 ? 's' : ''}`);
+        }
+        
+        if (roleCounts.length > 0) {
+          successMessage += `Sent to: ${roleCounts.join(', ')}\n`;
+        }
+      }
+      
+      if (unsupportedRoles.length > 0) {
+        successMessage += `Note: ${unsupportedRoles.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ')} notifications are not yet supported by the system.`;
+      }
+      
       loadNotifications(); // Refresh the list
-      Alert.alert('Success', `Notification created and sent to ${recipients.length} recipients`);
+      Alert.alert('Success', successMessage.trim());
       
       setModal({ visible: false, mode: 'view', notification: null });
       setCreateForm({ 
         type: notificationTypes[0], 
         message: '', 
-        status: 'Pending' 
+        status: 'Pending',
+        selectedRoles: []
       });
       setDate('');
       setTime('');
@@ -293,7 +435,7 @@ const NotificationManagement = () => {
         <View style={styles.searchBarRow}>
           <Ionicons name="search" size={20} color="#888" style={{ marginRight: 8 }} />
           <TextInput
-            placeholder="Search message or title..."
+            placeholder="Search message..."
             value={search}
             onChangeText={setSearch}
             style={styles.filterInput}
@@ -350,9 +492,20 @@ const NotificationManagement = () => {
             </View>
           }
           renderItem={({ item }) => (
-            <TouchableOpacity style={styles.notificationCard} onPress={() => openViewModal(item)}>
+            <TouchableOpacity 
+              style={[
+                styles.notificationCard,
+                { borderLeftWidth: 4, borderLeftColor: getNotificationTypeColor(item.type) }
+              ]} 
+              onPress={() => openViewModal(item)}
+            >
               <View style={{ flex: 1 }}>
-                <Text style={styles.notificationType}>{(item.type || 'general').toUpperCase()}</Text>
+                <Text style={[
+                  styles.notificationType,
+                  { color: getNotificationTypeColor(item.type) }
+                ]}>
+                  {(item.type || 'general').toUpperCase()}
+                </Text>
                 <Text style={styles.notificationMsg}>{item.message}</Text>
                 <Text style={styles.notificationMeta}>
                   Recipients: {item.notification_recipients?.length || 0}
@@ -369,9 +522,6 @@ const NotificationManagement = () => {
               <View style={styles.iconCol}>
                 <TouchableOpacity onPress={() => openEditModal(item)}>
                   <Ionicons name="pencil" size={20} color="#1976d2" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleResend(item)} style={{ marginTop: 8 }}>
-                  <Ionicons name="send" size={20} color="#4caf50" />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => handleDelete(item.id)} style={{ marginTop: 8 }}>
                   <Ionicons name="trash" size={20} color="#f44336" />
@@ -394,7 +544,6 @@ const NotificationManagement = () => {
               <>
                 <Text style={styles.modalTitle}>Notification Details</Text>
                 <Text style={styles.notificationType}>{(modal.notification.type || 'general').toUpperCase()}</Text>
-                <Text style={styles.notificationTitle}>{modal.notification.title || 'No Title'}</Text>
                 <Text style={styles.notificationMsg}>{modal.notification.message}</Text>
                 <Text style={styles.notificationMeta}>To: {modal.notification.sent_to_role || 'Unknown'}</Text>
                 {modal.notification.scheduled_at && (
@@ -425,13 +574,6 @@ const NotificationManagement = () => {
                 </ScrollView>
                 
                 <TextInput
-                  placeholder="Title"
-                  value={createForm.title}
-                  onChangeText={text => setCreateForm(f => ({ ...f, title: text }))}
-                  style={styles.input}
-                />
-                
-                <TextInput
                   placeholder="Message"
                   value={createForm.message}
                   onChangeText={text => setCreateForm(f => ({ ...f, message: text }))}
@@ -439,62 +581,94 @@ const NotificationManagement = () => {
                   multiline
                 />
                 
-                <Text style={{ marginTop: 8 }}>Recipient Role:</Text>
+                <Text style={{ marginTop: 8 }}>Recipient Roles (Multiple Selection):</Text>
                 <ScrollView horizontal style={{ marginBottom: 8 }}>
-                  {roles.map(role => (
-                    <TouchableOpacity
-                      key={role}
-                      style={[styles.recipientBtn, createForm.sent_to_role === role && styles.activeRecipientBtn]}
-                      onPress={() => setCreateForm(f => ({ ...f, sent_to_role: role }))}
-                    >
-                      <Text>{role}</Text>
-                    </TouchableOpacity>
-                  ))}
+                  {roles.map(role => {
+                    const isSelected = createForm.selectedRoles.includes(role);
+                    return (
+                      <TouchableOpacity
+                        key={role}
+                        style={[styles.recipientBtn, isSelected && styles.activeRecipientBtn]}
+                        onPress={() => {
+                          const newRoles = isSelected 
+                            ? createForm.selectedRoles.filter(r => r !== role)
+                            : [...createForm.selectedRoles, role];
+                          setCreateForm(f => ({ ...f, selectedRoles: newRoles }));
+                        }}
+                      >
+                        <Text style={[{ color: isSelected ? '#1976d2' : '#666' }]}>{role}</Text>
+                        {isSelected && <Ionicons name="checkmark" size={16} color="#1976d2" style={{ marginLeft: 4 }} />}
+                      </TouchableOpacity>
+                    );
+                  })}
                 </ScrollView>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <TouchableOpacity
                     style={[styles.input, { flex: 1, flexDirection: 'row', alignItems: 'center' }]}
                     onPress={() => setShowDatePicker(true)}
                   >
-                    <Text style={{ color: date ? '#222' : '#888' }}>{date ? date : 'Date (YYYY-MM-DD)'}</Text>
+                    <Text style={{ color: date ? '#222' : '#888' }}>{date ? date : 'Date (DD-MM-YYYY)'}</Text>
                     <Ionicons name="calendar-outline" size={20} color="#888" style={{ marginLeft: 8 }} />
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.input, { flex: 1, flexDirection: 'row', alignItems: 'center' }]}
                     onPress={() => setShowTimePicker(true)}
                   >
-                    <Text style={{ color: time ? '#222' : '#888' }}>{time ? time : 'Time (HH:mm)'}</Text>
+                    <Text style={{ color: time ? '#222' : '#888' }}>{time ? time : 'Time (12hr format)'}</Text>
                     <Ionicons name="time-outline" size={20} color="#888" style={{ marginLeft: 8 }} />
                   </TouchableOpacity>
                 </View>
                 {showDatePicker && (
                   <DateTimePicker
-                    value={date ? new Date(date) : new Date()}
+                    value={date ? (
+                      // Convert DD-MM-YYYY to Date object
+                      date.includes('-') ? 
+                        (() => {
+                          const [dd, mm, yyyy] = date.split('-');
+                          return new Date(yyyy, mm - 1, dd);
+                        })()
+                      : new Date(date)
+                    ) : new Date()}
                     mode="date"
                     display="calendar"
                     onChange={(event, selectedDate) => {
                       setShowDatePicker(false);
                       if (selectedDate) {
-                        const yyyy = selectedDate.getFullYear();
-                        const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
                         const dd = String(selectedDate.getDate()).padStart(2, '0');
-                        setDate(`${yyyy}-${mm}-${dd}`);
+                        const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                        const yyyy = selectedDate.getFullYear();
+                        setDate(`${dd}-${mm}-${yyyy}`);
                       }
                     }}
                   />
                 )}
                 {showTimePicker && (
                   <DateTimePicker
-                    value={time ? new Date(`1970-01-01T${time}:00`) : new Date()}
+                    value={time ? (
+                      // Convert 12-hour format to Date object for picker
+                      time.includes('AM') || time.includes('PM') ? 
+                        (() => {
+                          const [timeStr, ampm] = time.split(' ');
+                          const [hours12, minutes] = timeStr.split(':');
+                          let hours24 = parseInt(hours12);
+                          if (ampm === 'PM' && hours24 !== 12) hours24 += 12;
+                          if (ampm === 'AM' && hours24 === 12) hours24 = 0;
+                          return new Date(1970, 0, 1, hours24, parseInt(minutes));
+                        })()
+                      : new Date(`1970-01-01T${time}:00`)
+                    ) : new Date()}
                     mode="time"
-                    is24Hour={true}
+                    is24Hour={false}
                     display="clock"
                     onChange={(event, selectedDate) => {
                       setShowTimePicker(false);
                       if (selectedDate) {
-                        const h = selectedDate.getHours().toString().padStart(2, '0');
-                        const m = selectedDate.getMinutes().toString().padStart(2, '0');
-                        setTime(`${h}:${m}`);
+                        let hours = selectedDate.getHours();
+                        const minutes = String(selectedDate.getMinutes()).padStart(2, '0');
+                        const ampm = hours >= 12 ? 'PM' : 'AM';
+                        hours = hours % 12;
+                        hours = hours ? hours : 12; // 0 should be 12
+                        setTime(`${hours}:${minutes} ${ampm}`);
                       }
                     }}
                   />
@@ -564,8 +738,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-    paddingTop: 28, // Increased for mobile header spacing
-    paddingBottom: 8, // Keep lower padding
   },
   tabBar: {
     flexDirection: 'row',

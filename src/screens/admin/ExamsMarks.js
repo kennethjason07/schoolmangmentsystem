@@ -13,6 +13,35 @@ const formatDate = (dateString) => {
   return date.toLocaleDateString();
 };
 
+// Helper function to format date in text format like "16th August"
+const formatDateText = (dateString) => {
+  if (!dateString) return '';
+  
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '';
+    
+    const day = date.getDate();
+    const month = date.toLocaleDateString('en-US', { month: 'long' });
+    
+    // Add ordinal suffix (st, nd, rd, th)
+    const getOrdinalSuffix = (day) => {
+      if (day > 3 && day < 21) return 'th';
+      switch (day % 10) {
+        case 1: return 'st';
+        case 2: return 'nd';
+        case 3: return 'rd';
+        default: return 'th';
+      }
+    };
+    
+    return `${day}${getOrdinalSuffix(day)} ${month}`;
+  } catch (error) {
+    console.error('Date formatting error:', error);
+    return '';
+  }
+};
+
 const formatDateForDb = (date) => {
   if (!date) return '';
   if (typeof date === 'string') return date;
@@ -79,10 +108,24 @@ const ExamsMarks = () => {
     try {
       setLoading(true);
 
-      // Load exams (schema.txt: exams table)
+      // Load exams with class information (schema.txt: exams table with classes join)
       const { data: examsData, error: examsError } = await supabase
         .from('exams')
-        .select('id, name, class_id, academic_year, start_date, end_date, remarks, created_at');
+        .select(`
+          id, 
+          name, 
+          class_id, 
+          academic_year, 
+          start_date, 
+          end_date, 
+          remarks, 
+          created_at,
+          classes!inner(
+            id,
+            class_name,
+            section
+          )
+        `);
 
       if (examsError) throw examsError;
 
@@ -329,8 +372,18 @@ const ExamsMarks = () => {
   };
 
   const openMarksModal = (exam) => {
-    setSelectedExam(exam);
-    setClassSelectionModalVisible(true);
+    // Find the class for this exam
+    const examClass = classes.find(c => c.id === exam.class_id);
+    if (!examClass) {
+      Alert.alert('Error', 'Class not found for this exam');
+      return;
+    }
+    
+    // Navigate to the new MarksEntry screen with exam and class data
+    navigation.navigate('MarksEntry', {
+      exam: exam,
+      examClass: examClass
+    });
   };
 
   const selectClassForMarks = (classItem) => {
@@ -745,19 +798,24 @@ const ExamsMarks = () => {
     const isUpcoming = new Date(exam.start_date) > new Date();
     const isCompleted = new Date(exam.end_date) < new Date();
 
+    // Get class information - first try from joined data, then fallback to manual lookup
+    const classInfo = exam.classes || classes.find(c => c.id === exam.class_id);
+    const className = classInfo?.class_name || 'Unknown Class';
+    const classSection = classInfo?.section || '';
+
     return (
       <View style={styles.examCard}>
         <View style={styles.examHeader}>
           <View style={styles.examInfo}>
             <Text style={styles.examName}>{exam.name}</Text>
             <Text style={styles.examClass}>
-              Class: {exam.classes?.class_name}-{exam.classes?.section}
+              Class: {className}{classSection ? `-${classSection}` : ''}
             </Text>
             <Text style={styles.examDate}>
-              {formatDate(exam.start_date)} - {formatDate(exam.end_date)}
+              {formatDateText(exam.start_date)} - {formatDateText(exam.end_date)}
             </Text>
-            {exam.description && (
-              <Text style={styles.examDescription}>{exam.description}</Text>
+            {exam.remarks && (
+              <Text style={styles.examDescription}>{exam.remarks}</Text>
             )}
           </View>
           <View style={styles.examStats}>
@@ -765,13 +823,10 @@ const ExamsMarks = () => {
               isUpcoming ? styles.upcomingBadge :
               isCompleted ? styles.completedBadge : styles.ongoingBadge
             ]}>
-              <Text style={styles.statusText}>
+            <Text style={styles.statusText}>
                 {isUpcoming ? 'Upcoming' : isCompleted ? 'Completed' : 'Ongoing'}
               </Text>
             </View>
-            <Text style={styles.marksProgress}>
-              Marks: {marksEntered}/{totalStudents} students
-            </Text>
           </View>
         </View>
 
@@ -1082,91 +1137,6 @@ const ExamsMarks = () => {
 
 
 
-      {/* Edit Exam Modal - Similar to Add Modal */}
-      <Modal
-        visible={editExamModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setEditExamModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Edit Exam</Text>
-            <ScrollView>
-              <Text style={styles.inputLabel}>Exam Name *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter exam name"
-                value={examForm.name}
-                onChangeText={text => setExamForm(prev => ({ ...prev, name: text }))}
-              />
-
-              <Text style={styles.inputLabel}>Start Date *</Text>
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => {
-                  setDatePickerType('start');
-                  setShowDatePicker(true);
-                }}
-              >
-                <Text style={styles.dateText}>
-                  {examForm.start_date ? formatDate(examForm.start_date) : 'Select Start Date'}
-                </Text>
-                <Ionicons name="calendar" size={20} color="#666" />
-              </TouchableOpacity>
-
-              <Text style={styles.inputLabel}>End Date</Text>
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => {
-                  setDatePickerType('end');
-                  setShowDatePicker(true);
-                }}
-              >
-                <Text style={styles.dateText}>
-                  {examForm.end_date ? formatDate(examForm.end_date) : 'Select End Date'}
-                </Text>
-                <Ionicons name="calendar" size={20} color="#666" />
-              </TouchableOpacity>
-
-              <Text style={styles.inputLabel}>Description</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="Enter exam description (optional)"
-                value={examForm.description}
-                onChangeText={text => setExamForm(prev => ({ ...prev, description: text }))}
-                multiline
-                numberOfLines={3}
-              />
-
-              {showDatePicker && (
-                <DateTimePicker
-                  value={examForm[datePickerType === 'start' ? 'start_date' : 'end_date']
-                    ? new Date(examForm[datePickerType === 'start' ? 'start_date' : 'end_date'])
-                    : new Date()}
-                  mode="date"
-                  display="default"
-                  onChange={handleDateChange}
-                />
-              )}
-            </ScrollView>
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalButton} onPress={handleEditExam}>
-                <Text style={styles.modalButtonText}>Update Exam</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, { backgroundColor: '#aaa' }]}
-                onPress={() => {
-                  setEditExamModalVisible(false);
-                  setSelectedExam(null);
-                }}
-              >
-                <Text style={styles.modalButtonText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       {/* Marks Entry Modal */}
       <Modal
