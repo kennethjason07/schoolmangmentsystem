@@ -99,6 +99,71 @@ const AttendanceManagement = () => {
   const [viewDate, setViewDate] = useState(new Date());
   const [studentsForClass, setStudentsForClass] = useState([]); // State for filtered students
 
+  // Add Class Modal State
+  const [showAddClassModal, setShowAddClassModal] = useState(false);
+  const [newClassName, setNewClassName] = useState('');
+  const [newClassSection, setNewClassSection] = useState('');
+  const [newAcademicYear, setNewAcademicYear] = useState('2024-25');
+  const [addingClass, setAddingClass] = useState(false);
+
+  // Handle adding new class
+  const handleAddClass = async () => {
+    if (!newClassName.trim()) {
+      Alert.alert('Error', 'Please enter a class name');
+      return;
+    }
+
+    if (!newClassSection.trim()) {
+      Alert.alert('Error', 'Please enter a section');
+      return;
+    }
+
+    if (!newAcademicYear.trim()) {
+      Alert.alert('Error', 'Please enter an academic year');
+      return;
+    }
+
+    try {
+      setAddingClass(true);
+
+      const { data, error } = await supabase
+        .from(TABLES.CLASSES)
+        .insert([
+          {
+            class_name: newClassName.trim(),
+            section: newClassSection.trim(),
+            academic_year: newAcademicYear,
+            created_at: new Date().toISOString()
+          }
+        ])
+        .select();
+
+      if (error) throw error;
+
+      // Refresh classes list
+      await loadAllData();
+
+      // Select the newly created class
+      if (data && data.length > 0) {
+        setSelectedClass(data[0].id);
+      }
+
+      // Reset form and close modal
+      setNewClassName('');
+      setNewClassSection('');
+      setNewAcademicYear('2024-25');
+      setShowAddClassModal(false);
+
+      Alert.alert('Success', 'Class added successfully!');
+
+    } catch (error) {
+      console.error('Error adding class:', error);
+      Alert.alert('Error', `Failed to add class: ${error.message}`);
+    } finally {
+      setAddingClass(false);
+    }
+  };
+
   // Load students when selectedClass changes
   useEffect(() => {
     loadStudentsForClass(selectedClass);
@@ -504,153 +569,272 @@ const AttendanceManagement = () => {
     }
   };
 
-  // Render student attendance item
+  // Render student attendance item with enhanced UI
   const renderStudentItem = ({ item, index }) => {
     const isEditable = canEditStudent(item.id);
     const currentStatus = attendanceMark[item.id];
 
     return (
-      <View style={styles.tableRow}>
-        <Text style={[styles.tableCell, { flex: 0.7 }]}>{item.roll_no || index + 1}</Text>
-        <Text style={[styles.tableCell, { flex: 2 }]}>{item.full_name || item.name}</Text>
-
-        {/* Present Button */}
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <TouchableOpacity
-            style={[
-              styles.attendanceCircle,
-              currentStatus === 'Present' && styles.presentCircle,
-              !isEditable && currentStatus !== 'Present' && styles.disabledCircle
-            ]}
-            onPress={() => toggleStudentAttendance(item.id, 'Present')}
-            disabled={!isEditable && currentStatus !== 'Present'}
-          >
-            <Ionicons
-              name="checkmark"
-              size={16}
-              color={currentStatus === 'Present' ? '#fff' : (isEditable ? '#ccc' : '#ddd')}
-            />
-          </TouchableOpacity>
+      <Animatable.View
+        animation="fadeInUp"
+        delay={index * 50}
+        style={[
+          styles.attendanceCard,
+          currentStatus === 'Present' && styles.presentCard,
+          currentStatus === 'Absent' && styles.absentCard
+        ]}
+      >
+        <View style={styles.studentInfo}>
+          <View style={[
+            styles.studentAvatar,
+            currentStatus === 'Present' && styles.presentAvatar,
+            currentStatus === 'Absent' && styles.absentAvatar
+          ]}>
+            <Text style={styles.avatarText}>
+              {(item.full_name || item.name || '').charAt(0).toUpperCase()}
+            </Text>
+          </View>
+          <View style={styles.studentDetails}>
+            <Text style={styles.studentName}>{item.full_name || item.name}</Text>
+            <View style={styles.studentMetaInfo}>
+              <Text style={styles.studentRoll}>Roll: {item.roll_no || index + 1}</Text>
+              {item.admission_no && (
+                <Text style={styles.studentAdmission}>ID: {item.admission_no}</Text>
+              )}
+            </View>
+            {currentStatus && (
+              <View style={[
+                styles.statusBadge,
+                currentStatus === 'Present' ? styles.presentBadge : styles.absentBadge
+              ]}>
+                <Ionicons
+                  name={currentStatus === 'Present' ? 'checkmark-circle' : 'close-circle'}
+                  size={12}
+                  color="#fff"
+                />
+                <Text style={styles.statusBadgeText}>{currentStatus}</Text>
+              </View>
+            )}
+          </View>
         </View>
 
-        {/* Absent Button */}
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <TouchableOpacity
-            style={[
-              styles.attendanceCircle,
-              currentStatus === 'Absent' && styles.absentCircle,
-              !isEditable && currentStatus !== 'Absent' && styles.disabledCircle
-            ]}
-            onPress={() => toggleStudentAttendance(item.id, 'Absent')}
-            disabled={!isEditable && currentStatus !== 'Absent'}
-          >
-            <Ionicons
-              name="close"
-              size={16}
-              color={currentStatus === 'Absent' ? '#fff' : (isEditable ? '#ccc' : '#ddd')}
-            />
-          </TouchableOpacity>
-        </View>
+        <View style={styles.attendanceActions}>
+          {/* Present Button */}
+          <Animatable.View animation={currentStatus === 'Present' ? 'pulse' : undefined}>
+            <TouchableOpacity
+              style={[
+                styles.attendanceButton,
+                styles.presentButton,
+                currentStatus === 'Present' && styles.presentButtonActive,
+                !isEditable && currentStatus !== 'Present' && styles.disabledButton
+              ]}
+              onPress={() => toggleStudentAttendance(item.id, 'Present')}
+              disabled={!isEditable && currentStatus !== 'Present'}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={currentStatus === 'Present' ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                size={20}
+                color={currentStatus === 'Present' ? '#fff' : '#4CAF50'}
+              />
+              <Text style={[
+                styles.buttonText,
+                currentStatus === 'Present' && styles.activeButtonText
+              ]}>
+                Present
+              </Text>
+            </TouchableOpacity>
+          </Animatable.View>
 
-        {/* Edit Button */}
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <TouchableOpacity
-            style={[
-              styles.editButton,
-              currentStatus && !editMode[item.id] && styles.editButtonActive
-            ]}
-            onPress={() => enableEditMode(item.id)}
-            disabled={!currentStatus}
-          >
-            <Ionicons
-              name="pencil"
-              size={16}
-              color={currentStatus && !editMode[item.id] ? "#1976d2" : "#ccc"}
-            />
-          </TouchableOpacity>
+          {/* Absent Button */}
+          <Animatable.View animation={currentStatus === 'Absent' ? 'pulse' : undefined}>
+            <TouchableOpacity
+              style={[
+                styles.attendanceButton,
+                styles.absentButton,
+                currentStatus === 'Absent' && styles.absentButtonActive,
+                !isEditable && currentStatus !== 'Absent' && styles.disabledButton
+              ]}
+              onPress={() => toggleStudentAttendance(item.id, 'Absent')}
+              disabled={!isEditable && currentStatus !== 'Absent'}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={currentStatus === 'Absent' ? 'close-circle' : 'close-circle-outline'}
+                size={20}
+                color={currentStatus === 'Absent' ? '#fff' : '#F44336'}
+              />
+              <Text style={[
+                styles.buttonText,
+                currentStatus === 'Absent' && styles.activeButtonText
+              ]}>
+                Absent
+              </Text>
+            </TouchableOpacity>
+          </Animatable.View>
+
+          {/* Edit Button */}
+          {currentStatus && (
+            <Animatable.View animation="bounceIn" delay={300}>
+              <TouchableOpacity
+                style={styles.editButtonCard}
+                onPress={() => enableEditMode(item.id)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name="pencil"
+                  size={16}
+                  color="#1976d2"
+                />
+              </TouchableOpacity>
+            </Animatable.View>
+          )}
         </View>
-      </View>
+      </Animatable.View>
     );
   };
 
-  // Render teacher attendance item
+  // Render teacher attendance item with enhanced UI
   const renderTeacherItem = ({ item, index }) => {
     const isEditable = canEditTeacher(item.id);
     const currentStatus = teacherAttendanceMark[item.id];
 
     return (
-      <View style={styles.tableRow}>
-        <Text style={[styles.tableCell, { flex: 0.7 }]}>{index + 1}</Text>
-        <Text style={[styles.tableCell, { flex: 2 }]}>{item.name}</Text>
-
-        {/* Present Button */}
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <TouchableOpacity
-            style={[
-              styles.attendanceCircle,
-              currentStatus === 'Present' && styles.presentCircle,
-              !isEditable && currentStatus !== 'Present' && styles.disabledCircle
-            ]}
-            onPress={() => toggleTeacherAttendance(item.id, 'Present')}
-            disabled={!isEditable && currentStatus !== 'Present'}
-          >
-            <Ionicons
-              name="checkmark"
-              size={16}
-              color={currentStatus === 'Present' ? '#fff' : (isEditable ? '#ccc' : '#ddd')}
-            />
-          </TouchableOpacity>
+      <Animatable.View
+        animation="fadeInUp"
+        delay={index * 50}
+        style={[
+          styles.attendanceCard,
+          currentStatus === 'Present' && styles.presentCard,
+          currentStatus === 'Absent' && styles.absentCard
+        ]}
+      >
+        <View style={styles.studentInfo}>
+          <View style={[
+            styles.studentAvatar,
+            { backgroundColor: '#FF9800' },
+            currentStatus === 'Present' && styles.presentAvatar,
+            currentStatus === 'Absent' && styles.absentAvatar
+          ]}>
+            <Text style={styles.avatarText}>
+              {(item.name || '').charAt(0).toUpperCase()}
+            </Text>
+          </View>
+          <View style={styles.studentDetails}>
+            <Text style={styles.studentName}>{item.name}</Text>
+            <View style={styles.studentMetaInfo}>
+              <Text style={styles.studentRoll}>Teacher ID: {item.teacher_id || index + 1}</Text>
+              {item.subject && (
+                <Text style={styles.studentAdmission}>Subject: {item.subject}</Text>
+              )}
+            </View>
+            {currentStatus && (
+              <View style={[
+                styles.statusBadge,
+                currentStatus === 'Present' ? styles.presentBadge : styles.absentBadge
+              ]}>
+                <Ionicons
+                  name={currentStatus === 'Present' ? 'checkmark-circle' : 'close-circle'}
+                  size={12}
+                  color="#fff"
+                />
+                <Text style={styles.statusBadgeText}>{currentStatus}</Text>
+              </View>
+            )}
+          </View>
         </View>
 
-        {/* Absent Button */}
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <TouchableOpacity
-            style={[
-              styles.attendanceCircle,
-              currentStatus === 'Absent' && styles.absentCircle,
-              !isEditable && currentStatus !== 'Absent' && styles.disabledCircle
-            ]}
-            onPress={() => toggleTeacherAttendance(item.id, 'Absent')}
-            disabled={!isEditable && currentStatus !== 'Absent'}
-          >
-            <Ionicons
-              name="close"
-              size={16}
-              color={currentStatus === 'Absent' ? '#fff' : (isEditable ? '#ccc' : '#ddd')}
-            />
-          </TouchableOpacity>
-        </View>
+        <View style={styles.attendanceActions}>
+          {/* Present Button */}
+          <Animatable.View animation={currentStatus === 'Present' ? 'pulse' : undefined}>
+            <TouchableOpacity
+              style={[
+                styles.attendanceButton,
+                styles.presentButton,
+                currentStatus === 'Present' && styles.presentButtonActive,
+                !isEditable && currentStatus !== 'Present' && styles.disabledButton
+              ]}
+              onPress={() => toggleTeacherAttendance(item.id, 'Present')}
+              disabled={!isEditable && currentStatus !== 'Present'}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={currentStatus === 'Present' ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                size={20}
+                color={currentStatus === 'Present' ? '#fff' : '#4CAF50'}
+              />
+              <Text style={[
+                styles.buttonText,
+                currentStatus === 'Present' && styles.activeButtonText
+              ]}>
+                Present
+              </Text>
+            </TouchableOpacity>
+          </Animatable.View>
 
-        {/* Edit Button */}
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <TouchableOpacity
-            style={[
-              styles.editButton,
-              currentStatus && !teacherEditMode[item.id] && styles.editButtonActive
-            ]}
-            onPress={() => enableTeacherEditMode(item.id)}
-            disabled={!currentStatus}
-          >
-            <Ionicons
-              name="pencil"
-              size={16}
-              color={currentStatus && !teacherEditMode[item.id] ? "#1976d2" : "#ccc"}
-            />
-          </TouchableOpacity>
+          {/* Absent Button */}
+          <Animatable.View animation={currentStatus === 'Absent' ? 'pulse' : undefined}>
+            <TouchableOpacity
+              style={[
+                styles.attendanceButton,
+                styles.absentButton,
+                currentStatus === 'Absent' && styles.absentButtonActive,
+                !isEditable && currentStatus !== 'Absent' && styles.disabledButton
+              ]}
+              onPress={() => toggleTeacherAttendance(item.id, 'Absent')}
+              disabled={!isEditable && currentStatus !== 'Absent'}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={currentStatus === 'Absent' ? 'close-circle' : 'close-circle-outline'}
+                size={20}
+                color={currentStatus === 'Absent' ? '#fff' : '#F44336'}
+              />
+              <Text style={[
+                styles.buttonText,
+                currentStatus === 'Absent' && styles.activeButtonText
+              ]}>
+                Absent
+              </Text>
+            </TouchableOpacity>
+          </Animatable.View>
+
+          {/* Edit Button */}
+          {currentStatus && (
+            <Animatable.View animation="bounceIn" delay={300}>
+              <TouchableOpacity
+                style={styles.editButtonCard}
+                onPress={() => enableTeacherEditMode(item.id)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name="pencil"
+                  size={16}
+                  color="#1976d2"
+                />
+              </TouchableOpacity>
+            </Animatable.View>
+          )}
         </View>
-      </View>
+      </Animatable.View>
     );
   };
 
   // Render header for the list
   const renderHeader = () => (
     <View style={styles.headerContainer}>
-      {/* Tab Navigation */}
+      {/* Enhanced Tab Navigation */}
       <View style={styles.tabContainer}>
         <TouchableOpacity
           style={[styles.tabButton, tab === 'student' && styles.tabActive]}
           onPress={() => setTab('student')}
         >
+          <Ionicons
+            name="school"
+            size={20}
+            color={tab === 'student' ? '#1976d2' : '#666'}
+            style={styles.tabIcon}
+          />
           <Text style={[styles.tabText, tab === 'student' && styles.tabTextActive]}>
             Student Attendance
           </Text>
@@ -659,89 +843,150 @@ const AttendanceManagement = () => {
           style={[styles.tabButton, tab === 'teacher' && styles.tabActive]}
           onPress={() => setTab('teacher')}
         >
+          <Ionicons
+            name="person"
+            size={20}
+            color={tab === 'teacher' ? '#1976d2' : '#666'}
+            style={styles.tabIcon}
+          />
           <Text style={[styles.tabText, tab === 'teacher' && styles.tabTextActive]}>
             Teacher Attendance
           </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Selection Controls */}
+      {/* Enhanced Selection Controls */}
       {tab === 'student' ? (
         <View style={styles.selectionContainer}>
-          <View style={styles.selectionRow}>
-            <View style={styles.pickerContainer}>
-              <Picker
-                selectedValue={selectedClass}
-                onValueChange={(itemValue) => setSelectedClass(itemValue)}
-                style={styles.picker}
-                mode="dropdown"
-              >
-                <Picker.Item label="Select Class" value={null} />
-                {classes.map(cls => (
-                  <Picker.Item key={cls.id} label={`${cls.class_name}${cls.section}`} value={cls.id} />
-                ))}
-              </Picker>
+          <Text style={styles.selectionTitle}>Select Class & Date</Text>
+          <View style={styles.selectionCard}>
+            <View style={styles.inputGroup}>
+              <View style={styles.inputLabelRow}>
+                <Text style={styles.inputLabel}>Class</Text>
+                <TouchableOpacity
+                  style={styles.addClassButton}
+                  onPress={() => setShowAddClassModal(true)}
+                >
+                  <Ionicons name="add-circle-outline" size={16} color="#1976d2" />
+                  <Text style={styles.addClassButtonText}>Add Class</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.pickerWrapper}>
+                <Ionicons name="school-outline" size={20} color="#666" style={styles.inputIcon} />
+                <View style={styles.pickerContainer}>
+                  <Picker
+                    selectedValue={selectedClass}
+                    onValueChange={(itemValue) => setSelectedClass(itemValue)}
+                    style={styles.picker}
+                    mode="dropdown"
+                  >
+                    <Picker.Item label="Select Class" value={null} />
+                    {classes.map(cls => (
+                      <Picker.Item key={cls.id} label={`${cls.class_name}${cls.section}`} value={cls.id} />
+                    ))}
+                  </Picker>
+                </View>
+              </View>
             </View>
-            <TouchableOpacity
-              style={styles.dateInput}
-              onPress={() => setShowDatePicker(true)}
-            >
-              <Text style={styles.dateInputText}>
-                {format(selectedDate, 'dd-MM-yyyy')}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.submitButton}
-              onPress={() => {
-                handleMarkAttendance();
-              }}
-            >
-              <Text style={styles.submitButtonText}>Submit</Text>
-            </TouchableOpacity>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Date</Text>
+              <TouchableOpacity
+                style={styles.dateInputCard}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <Ionicons name="calendar-outline" size={20} color="#1976d2" style={styles.inputIcon} />
+                <Text style={styles.dateInputText}>
+                  {format(selectedDate, 'dd MMM yyyy')}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <Animatable.View animation="fadeInUp" delay={400}>
+              <TouchableOpacity
+                style={[
+                  styles.submitButtonCard,
+                  !selectedClass && styles.disabledSubmitButton
+                ]}
+                onPress={() => {
+                  handleMarkAttendance();
+                }}
+                disabled={!selectedClass}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="save-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.submitButtonText}>
+                  {selectedClass ? 'Load Students' : 'Select Class First'}
+                </Text>
+              </TouchableOpacity>
+            </Animatable.View>
           </View>
         </View>
       ) : (
         <View style={styles.selectionContainer}>
-          <View style={styles.selectionRow}>
-            <TouchableOpacity
-              style={styles.dateInput}
-              onPress={() => setTeacherShowDatePicker(true)}
-            >
-              <Text style={styles.dateInputText}>
-                {format(teacherDate, 'dd-MM-yyyy')}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.submitButton}
-              onPress={() => {
-                handleTeacherMarkAttendance();
-              }}
-            >
-              <Text style={styles.submitButtonText}>Submit</Text>
-            </TouchableOpacity>
+          <Text style={styles.selectionTitle}>Select Date</Text>
+          <View style={styles.selectionCard}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Date</Text>
+              <TouchableOpacity
+                style={styles.dateInputCard}
+                onPress={() => setTeacherShowDatePicker(true)}
+              >
+                <Ionicons name="calendar-outline" size={20} color="#1976d2" style={styles.inputIcon} />
+                <Text style={styles.dateInputText}>
+                  {format(teacherDate, 'dd MMM yyyy')}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <Animatable.View animation="fadeInUp" delay={400}>
+              <TouchableOpacity
+                style={styles.submitButtonCard}
+                onPress={() => {
+                  handleTeacherMarkAttendance();
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="save-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.submitButtonText}>Load Teachers</Text>
+              </TouchableOpacity>
+            </Animatable.View>
           </View>
         </View>
       )}
 
-      {/* Beautiful Attendance Table */}
+      {/* Enhanced Attendance Cards */}
       <View style={styles.tableContainer}>
-        {/* Table Header */}
-        <View style={styles.tableHeader}>
-          <Text style={[styles.tableHeaderCell, { flex: 0.7 }]}>Roll No</Text>
-          <Text style={[styles.tableHeaderCell, { flex: 2 }]}>{
-            tab === 'student' ? 'Student Name' : 'Teacher Name'
-          }</Text>
-          <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Present</Text>
-          <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Absent</Text>
-          <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Edit</Text>
-        </View>
-
-        {/* Table Rows */}
-        {(tab === 'student' ? studentsForClass : teachers).map((item, index) => (
-          <View key={item.id}>
-            {tab === 'student' ? renderStudentItem({ item, index }) : renderTeacherItem({ item, index })}
+        {(tab === 'student' ? studentsForClass : teachers).length > 0 ? (
+          <>
+            <Text style={styles.listTitle}>
+              {tab === 'student' ? 'Students' : 'Teachers'} ({(tab === 'student' ? studentsForClass : teachers).length})
+            </Text>
+            {(tab === 'student' ? studentsForClass : teachers).map((item, index) => (
+              <View key={item.id}>
+                {tab === 'student' ? renderStudentItem({ item, index }) : renderTeacherItem({ item, index })}
+              </View>
+            ))}
+          </>
+        ) : (
+          <View style={styles.emptyState}>
+            <Ionicons
+              name={tab === 'student' ? 'school-outline' : 'people-outline'}
+              size={48}
+              color="#ccc"
+            />
+            <Text style={styles.emptyStateText}>
+              {tab === 'student'
+                ? selectedClass
+                  ? 'No students found in this class'
+                  : 'Please select a class to view students'
+                : 'No teachers found'
+              }
+            </Text>
           </View>
-        ))}
+        )}
       </View>
     </View>
   );
@@ -776,6 +1021,28 @@ const AttendanceManagement = () => {
   return (
     <View style={styles.container}>
       <Header title="Attendance Management" showBack={true} />
+
+      {/* Enhanced Header with Quick Stats */}
+      <View style={styles.quickStatsHeader}>
+        <View style={styles.quickStatItem}>
+          <Ionicons name="calendar-outline" size={18} color="#1976d2" />
+          <Text style={styles.quickStatText}>
+            {format(tab === 'student' ? selectedDate : teacherDate, 'dd MMM yyyy')}
+          </Text>
+        </View>
+        <View style={styles.quickStatItem}>
+          <Ionicons name="people-outline" size={18} color="#4CAF50" />
+          <Text style={styles.quickStatText}>
+            {tab === 'student' ? studentsForClass.length : teachers.length} Total
+          </Text>
+        </View>
+        <View style={styles.quickStatItem}>
+          <Ionicons name="checkmark-circle-outline" size={18} color="#FF9800" />
+          <Text style={styles.quickStatText}>
+            {analytics.present} Present
+          </Text>
+        </View>
+      </View>
 
       <ScrollView
         style={styles.scrollContainer}
@@ -822,66 +1089,106 @@ const AttendanceManagement = () => {
           </View>
         )}
 
-        {/* Attendance Analytics - Centered */}
-        {Platform.OS !== 'web' && (analytics.present > 0 || analytics.absent > 0) && (
+        {/* Enhanced Attendance Analytics */}
+        {(analytics.present > 0 || analytics.absent > 0) && (
           <View style={styles.analyticsContainer}>
-            <Text style={styles.analyticsTitle}>Attendance Analytics</Text>
-            <View style={styles.pieChartWrapper}>
-              <CrossPlatformPieChart
-                    data={[
-                      {
-                        name: 'Present',
-                        value: analytics.present,
-                        color: '#4CAF50'
-                      },
-                      {
-                        name: 'Absent',
-                        value: analytics.absent,
-                        color: '#F44336'
-                      }
-                    ].filter(item => item.value > 0)} // Only show non-zero values
-                    width={Dimensions.get('window').width - 48}
-                    height={220}
-                    chartConfig={{
-                      backgroundColor: '#ffffff',
-                      backgroundGradientFrom: '#f8f9fa',
-                      backgroundGradientTo: '#ffffff',
-                      backgroundGradientFromOpacity: 0.1,
-                      backgroundGradientToOpacity: 0.1,
-                      color: (opacity = 1) => `rgba(33, 150, 243, ${opacity})`,
-                      strokeWidth: 2,
-                      barPercentage: 0.5,
-                      useShadowColorFromDataset: false,
-                    }}
-                    accessor="value"
-                    backgroundColor="transparent"
-                    paddingLeft="20"
-                    center={[0, 0]}
-                    absolute={false}
-                    hasLegend={false}
-                    style={{
-                      borderRadius: 16,
-                    }}
-                  />
+            <View style={styles.analyticsHeader}>
+              <Ionicons name="analytics" size={24} color="#1976d2" />
+              <Text style={styles.analyticsTitle}>Live Attendance Summary</Text>
             </View>
 
-            {/* Summary Below Chart */}
-            <View style={styles.chartSummaryBelow}>
-              <View style={styles.summaryItem}>
-                <View style={[styles.summaryDot, { backgroundColor: '#4CAF50' }]} />
-                <Text style={styles.summaryText}>
-                  <Text style={styles.summaryNumber}>{analytics.present}</Text>
-                  <Text style={styles.summaryLabel}> Present</Text>
-                </Text>
-              </View>
-              <View style={styles.summaryItem}>
-                <View style={[styles.summaryDot, { backgroundColor: '#F44336' }]} />
-                <Text style={styles.summaryText}>
-                  <Text style={styles.summaryNumber}>{analytics.absent}</Text>
-                  <Text style={styles.summaryLabel}> Absent</Text>
-                </Text>
-              </View>
+            {/* Quick Stats Cards */}
+            <View style={styles.quickStatsContainer}>
+              <Animatable.View animation="fadeInLeft" delay={200} style={styles.statCard}>
+                <View style={styles.statIconContainer}>
+                  <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+                </View>
+                <Text style={styles.statNumber}>{analytics.present}</Text>
+                <Text style={styles.statLabel}>Present</Text>
+              </Animatable.View>
+
+              <Animatable.View animation="fadeInRight" delay={400} style={styles.statCard}>
+                <View style={styles.statIconContainer}>
+                  <Ionicons name="close-circle" size={24} color="#F44336" />
+                </View>
+                <Text style={styles.statNumber}>{analytics.absent}</Text>
+                <Text style={styles.statLabel}>Absent</Text>
+              </Animatable.View>
+
+              <Animatable.View animation="fadeInUp" delay={600} style={styles.statCard}>
+                <View style={styles.statIconContainer}>
+                  <Ionicons name="people" size={24} color="#1976d2" />
+                </View>
+                <Text style={styles.statNumber}>{analytics.present + analytics.absent}</Text>
+                <Text style={styles.statLabel}>Total</Text>
+              </Animatable.View>
             </View>
+
+            {/* Attendance Percentage Bar */}
+            {(analytics.present + analytics.absent) > 0 && (
+              <View style={styles.percentageContainer}>
+                <Text style={styles.percentageTitle}>Attendance Rate</Text>
+                <View style={styles.progressBarContainer}>
+                  <View style={styles.progressBarBackground}>
+                    <Animatable.View
+                      animation="slideInLeft"
+                      delay={800}
+                      style={[
+                        styles.progressBarFill,
+                        {
+                          width: `${(analytics.present / (analytics.present + analytics.absent)) * 100}%`
+                        }
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.percentageText}>
+                    {Math.round((analytics.present / (analytics.present + analytics.absent)) * 100)}%
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Pie Chart for larger screens */}
+            {Platform.OS !== 'web' && Dimensions.get('window').width > 400 && (
+              <View style={styles.pieChartWrapper}>
+                <CrossPlatformPieChart
+                      data={[
+                        {
+                          name: 'Present',
+                          value: analytics.present,
+                          color: '#4CAF50'
+                        },
+                        {
+                          name: 'Absent',
+                          value: analytics.absent,
+                          color: '#F44336'
+                        }
+                      ].filter(item => item.value > 0)}
+                      width={Math.min(Dimensions.get('window').width - 48, 300)}
+                      height={200}
+                      chartConfig={{
+                        backgroundColor: '#ffffff',
+                        backgroundGradientFrom: '#f8f9fa',
+                        backgroundGradientTo: '#ffffff',
+                        backgroundGradientFromOpacity: 0.1,
+                        backgroundGradientToOpacity: 0.1,
+                        color: (opacity = 1) => `rgba(33, 150, 243, ${opacity})`,
+                        strokeWidth: 2,
+                        barPercentage: 0.5,
+                        useShadowColorFromDataset: false,
+                      }}
+                      accessor="value"
+                      backgroundColor="transparent"
+                      paddingLeft="20"
+                      center={[0, 0]}
+                      absolute={false}
+                      hasLegend={false}
+                      style={{
+                        borderRadius: 16,
+                      }}
+                    />
+              </View>
+            )}
           </View>
         )}
 
@@ -1051,6 +1358,92 @@ const AttendanceManagement = () => {
           </View>
         </View>
       </Modal>
+
+      {/* Add Class Modal */}
+      <Modal
+        visible={showAddClassModal}
+        onRequestClose={() => setShowAddClassModal(false)}
+        animationType="slide"
+        transparent={true}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.addClassModalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add New Class</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => {
+                  setShowAddClassModal(false);
+                  setNewClassName('');
+                  setNewClassSection('');
+                  setNewAcademicYear('2024-25');
+                }}
+              >
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.addClassModalContent}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Class Name *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={newClassName}
+                  onChangeText={setNewClassName}
+                  placeholder="Enter class name (e.g., 10, 11, 12)"
+                  autoCapitalize="characters"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Section *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={newClassSection}
+                  onChangeText={setNewClassSection}
+                  placeholder="Enter section (e.g., A, B, C)"
+                  autoCapitalize="characters"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Academic Year *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={newAcademicYear}
+                  onChangeText={setNewAcademicYear}
+                  placeholder="Enter academic year (e.g., 2024-25)"
+                />
+              </View>
+
+              <Text style={styles.requiredNote}>* Required fields</Text>
+            </View>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => {
+                  setShowAddClassModal(false);
+                  setNewClassName('');
+                  setNewClassSection('');
+                  setNewAcademicYear('2024-25');
+                }}
+              >
+                <Text style={styles.buttonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={handleAddClass}
+                disabled={addingClass}
+              >
+                <Text style={[styles.buttonText, { color: '#fff' }]}>
+                  {addingClass ? 'Adding...' : 'Add Class'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -1121,30 +1514,79 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: '#fff',
     marginBottom: 16,
+    borderRadius: 12,
+    marginHorizontal: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    overflow: 'hidden',
   },
   tabButton: {
     flex: 1,
-    paddingVertical: 14,
+    paddingVertical: 16,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
   },
   tabActive: {
-    borderBottomWidth: 3,
-    borderBottomColor: '#1976d2',
-    backgroundColor: '#f0f8ff',
+    backgroundColor: '#1976d2',
+  },
+  tabIcon: {
+    marginRight: 8,
   },
   tabText: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#666',
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   tabTextActive: {
-    color: '#1976d2',
+    color: '#fff',
   },
   selectionContainer: {
     backgroundColor: '#fff',
-    padding: 16,
+    marginHorizontal: 16,
     marginBottom: 16,
-    marginTop: 8,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+    overflow: 'hidden',
+  },
+  selectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 8,
+  },
+  selectionCard: {
+    padding: 20,
+  },
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 8,
+  },
+  pickerWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  inputIcon: {
+    marginRight: 12,
   },
   selectionRow: {
     flexDirection: 'row',
@@ -1178,10 +1620,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     justifyContent: 'center',
   },
+  dateInputCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
   dateInputText: {
     fontSize: 16,
     color: '#333',
-    textAlign: 'center',
+    flex: 1,
+    marginLeft: 8,
   },
   submitButton: {
     backgroundColor: '#1976d2',
@@ -1189,16 +1642,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 4,
   },
+  submitButtonCard: {
+    backgroundColor: '#1976d2',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 12,
+    marginTop: 8,
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  disabledSubmitButton: {
+    backgroundColor: '#ccc',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  buttonIcon: {
+    marginRight: 8,
+  },
   submitButtonText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
   },
   tableContainer: {
-    backgroundColor: '#fff',
     marginHorizontal: 16,
     marginBottom: 16,
+  },
+  attendanceCard: {
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginBottom: 12,
     borderRadius: 16,
+    padding: 16,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -1207,7 +1687,116 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 4,
-    overflow: 'hidden',
+    borderLeftWidth: 4,
+    borderLeftColor: '#e9ecef',
+  },
+  presentCard: {
+    borderLeftColor: '#4CAF50',
+    backgroundColor: '#f8fff8',
+  },
+  absentCard: {
+    borderLeftColor: '#F44336',
+    backgroundColor: '#fff8f8',
+  },
+  studentInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  studentAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#1976d2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  studentDetails: {
+    flex: 1,
+  },
+  studentName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 2,
+  },
+  studentRoll: {
+    fontSize: 14,
+    color: '#666',
+  },
+  attendanceActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  attendanceButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  presentButton: {
+    borderColor: '#4CAF50',
+    backgroundColor: '#f8fff8',
+    shadowColor: '#4CAF50',
+  },
+  presentButtonActive: {
+    backgroundColor: '#4CAF50',
+    borderColor: '#4CAF50',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+    transform: [{ scale: 1.02 }],
+  },
+  absentButton: {
+    borderColor: '#F44336',
+    backgroundColor: '#fff8f8',
+    shadowColor: '#F44336',
+  },
+  absentButtonActive: {
+    backgroundColor: '#F44336',
+    borderColor: '#F44336',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+    transform: [{ scale: 1.02 }],
+  },
+  disabledButton: {
+    opacity: 0.5,
+    borderColor: '#e9ecef',
+    backgroundColor: '#f8f9fa',
+  },
+  buttonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  activeButtonText: {
+    color: '#fff',
+  },
+  editButtonCard: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#e3f2fd',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   tableHeader: {
     flexDirection: 'row',
@@ -1306,8 +1895,6 @@ const styles = StyleSheet.create({
   },
   analyticsContainer: {
     backgroundColor: '#fff',
-    paddingVertical: 16,
-    paddingHorizontal: 8,
     marginHorizontal: 16,
     marginBottom: 16,
     borderRadius: 16,
@@ -1319,14 +1906,81 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 4,
+    overflow: 'hidden',
+  },
+  analyticsHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    backgroundColor: '#f8f9fa',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
   },
   analyticsTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '600',
     color: '#333',
-    marginBottom: 16,
+    marginLeft: 8,
+  },
+  quickStatsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    justifyContent: 'space-between',
+  },
+  statCard: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 16,
+    marginHorizontal: 4,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  statIconContainer: {
+    marginBottom: 8,
+  },
+  statNumber: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#1976d2',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  percentageContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  percentageTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
     textAlign: 'center',
+  },
+  progressBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  progressBarBackground: {
+    flex: 1,
+    height: 8,
+    backgroundColor: '#e9ecef',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginRight: 12,
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#4CAF50',
+    borderRadius: 4,
   },
   pieChartWrapper: {
     alignItems: 'center',
@@ -1546,5 +2200,187 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  listTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    marginTop: 8,
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    marginHorizontal: 16,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 16,
+    lineHeight: 24,
+  },
+  percentageText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1976d2',
+  },
+  // Quick stats header styles
+  quickStatsHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    justifyContent: 'space-between',
+  },
+  quickStatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+  },
+  quickStatText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 6,
+  },
+  // Enhanced student/teacher card styles
+  presentAvatar: {
+    backgroundColor: '#4CAF50',
+  },
+  absentAvatar: {
+    backgroundColor: '#F44336',
+  },
+  studentMetaInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+    gap: 12,
+  },
+  studentAdmission: {
+    fontSize: 12,
+    color: '#999',
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    gap: 4,
+  },
+  presentBadge: {
+    backgroundColor: '#4CAF50',
+  },
+  absentBadge: {
+    backgroundColor: '#F44336',
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  // Loading enhancement
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  // Add Class Button and Modal styles
+  inputLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  addClassButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#e3f2fd',
+    borderRadius: 20,
+    gap: 4,
+  },
+  addClassButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1976d2',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addClassModalContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    width: '90%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  addClassModalContent: {
+    padding: 24,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    backgroundColor: '#f8f9fa',
+  },
+  requiredNote: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    marginTop: 16,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    padding: 24,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    gap: 12,
+  },
+  modalButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    minWidth: 100,
+  },
+  cancelButton: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  saveButton: {
+    backgroundColor: '#1976d2',
+  },
+  buttonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+    textAlign: 'center',
   },
 });
