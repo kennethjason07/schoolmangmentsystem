@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
-    marginLeft: -8,
+    marginLeft: 12,
     flexShrink: 1,
   },
   profileButton: {

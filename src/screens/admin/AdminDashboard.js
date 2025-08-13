@@ -586,31 +586,42 @@ const AdminDashboard = ({ navigation }) => {
           />
         }
       >
-        {/* Welcome Section */}
+        {/* Welcome Section - Modern gradient design */}
         <View style={styles.welcomeSection}>
-          <View style={styles.schoolHeader}>
-            {schoolDetails?.logo_url ? (
-              <Image source={{ uri: schoolDetails.logo_url }} style={styles.schoolLogo} />
-            ) : (
-              <View style={styles.logoPlaceholder}>
-                <Ionicons name="school" size={40} color="#2196F3" />
+          {/* Decorative background elements */}
+          <View style={styles.backgroundCircle1} />
+          <View style={styles.backgroundCircle2} />
+          <View style={styles.backgroundPattern} />
+          
+          <View style={styles.welcomeContent}>
+            <View style={styles.schoolHeader}>
+              {schoolDetails?.logo_url ? (
+                <Image source={{ uri: schoolDetails.logo_url }} style={styles.schoolLogo} />
+              ) : (
+                <View style={styles.logoPlaceholder}>
+                  <Ionicons name="school" size={40} color="#fff" />
+                </View>
+              )}
+              <View style={styles.schoolInfo}>
+                <Text style={styles.schoolName}>
+                  {schoolDetails?.name || 'Maximus School'}
+                </Text>
+                <Text style={styles.schoolType}>
+                  {schoolDetails?.type || 'Educational Institution'}
+                </Text>
               </View>
-            )}
-            <View style={styles.schoolInfo}>
-              <Text style={styles.schoolName}>
-                {schoolDetails?.name || 'School Management System'}
-              </Text>
-              <Text style={styles.schoolType}>
-                {schoolDetails?.type || 'Educational Institution'}
-              </Text>
+            </View>
+            
+            <View style={styles.dateContainer}>
+              <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.8)" />
+              <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+              })}</Text>
             </View>
           </View>
-          <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-          })}</Text>
         </View>
 
         {/* Stats Cards - Teacher Dashboard Style */}
@@ -1206,10 +1217,58 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   welcomeSection: {
-    padding: 20,
-    backgroundColor: '#2196F3',
-    marginBottom: 8,
-    borderRadius: 12,
+    marginVertical: 12,
+    marginHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: '#667eea',
+    shadowColor: '#667eea',
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 12,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  backgroundCircle1: {
+    position: 'absolute',
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    top: -50,
+    right: -30,
+  },
+  backgroundCircle2: {
+    position: 'absolute',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    bottom: -20,
+    left: -20,
+  },
+  backgroundPattern: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(118, 75, 162, 0.6)',
+  },
+  welcomeContent: {
+    padding: 24,
+    zIndex: 1,
+  },
+  dateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.2)',
   },
   schoolHeader: {
     flexDirection: 'row',
@@ -1252,7 +1311,9 @@ const styles = StyleSheet.create({
   },
   dateText: {
     fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.9)',
+    color: '#ffffff',
+    marginLeft: 8,
+    fontWeight: '500',
   },
   statsContainer: {
     paddingHorizontal: 16,
