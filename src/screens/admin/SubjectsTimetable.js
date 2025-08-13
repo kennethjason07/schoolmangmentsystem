@@ -38,15 +38,16 @@ function formatTime(t) {
   }
 }
 
-const SubjectsTimetable = () => {
-  const [tab, setTab] = useState('subjects');
+const SubjectsTimetable = ({ route }) => {
+  const { classId } = route?.params || {};
+  const [tab, setTab] = useState(classId ? 'timetable' : 'subjects');
   const [subjects, setSubjects] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [classes, setClasses] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [editSubject, setEditSubject] = useState(null);
   const [subjectForm, setSubjectForm] = useState({ name: '', teacherId: '' });
-  const [selectedClass, setSelectedClass] = useState(null);
+  const [selectedClass, setSelectedClass] = useState(classId || null);
   const [timetables, setTimetables] = useState({});
   const [periodModal, setPeriodModal] = useState({ visible: false, day: '', period: null });
   const [periodForm, setPeriodForm] = useState({ type: 'subject', subjectId: '', label: '', startTime: '', endTime: '', room: '' });
@@ -65,7 +66,7 @@ const SubjectsTimetable = () => {
         if (classError) throw classError;
         setClasses(classData || []);
 
-        const defaultClassId = classData?.[0]?.id || null;
+        const defaultClassId = classId || classData?.[0]?.id || null;
         setSelectedClass(defaultClassId);
 
         // Fetch teachers

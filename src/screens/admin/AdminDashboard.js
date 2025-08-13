@@ -359,8 +359,7 @@ const AdminDashboard = ({ navigation }) => {
 
       const { data: feeStructureData } = await supabase
         .from('fee_structure')
-        .select('amount')
-        .eq('academic_year', '2024-25');
+        .select('amount');
 
       const collected = feeData?.reduce((sum, fee) => sum + (fee.amount_paid || 0), 0) || 0;
       const totalDue = feeStructureData?.reduce((sum, fee) => sum + (fee.amount || 0), 0) || 0;

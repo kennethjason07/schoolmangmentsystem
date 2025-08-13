@@ -1196,117 +1196,47 @@ const ManageStudents = () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Student Profile</Text>
+            <Text style={styles.modalTitle}>Student Details</Text>
+            
             {selectedStudent && (
               <ScrollView style={styles.modalScrollView}>
-                {/* Basic Information */}
-                <View style={styles.profileSection}>
-                  <Text style={styles.profileSectionTitle}>Basic Information</Text>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Name:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.name}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Admission No:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.admission_no}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Roll Number:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.roll_no || 'Not assigned'}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Class:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.className} {selectedStudent.section}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Gender:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.gender}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Date of Birth:</Text>
-                    <Text style={styles.profileValue}>{formatDateForDisplay(selectedStudent.dob)}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Age:</Text>
-                    <Text style={styles.profileValue}>{calculateAge(selectedStudent.dob)} years</Text>
-                  </View>
-                </View>
-
-                {/* Personal Details */}
-                <View style={styles.profileSection}>
-                  <Text style={styles.profileSectionTitle}>Personal Details</Text>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Nationality:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.nationality || 'N/A'}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Religion:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.religion || 'N/A'}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Caste:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.caste || 'N/A'}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Blood Group:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.blood_group || 'N/A'}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Mother Tongue:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.mother_tongue || 'N/A'}</Text>
-                  </View>
-                </View>
-
-                {/* Contact Information */}
-                <View style={styles.profileSection}>
-                  <Text style={styles.profileSectionTitle}>Contact Information</Text>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Parent Name:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.parentName}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Parent Phone:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.parentPhone}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Address:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.address || 'N/A'}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Pin Code:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.pin_code || 'N/A'}</Text>
-                  </View>
-                </View>
-
-                {/* Academic Information */}
-                <View style={styles.profileSection}>
-                  <Text style={styles.profileSectionTitle}>Academic Information</Text>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Academic Year:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.academic_year}</Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Attendance:</Text>
-                    <Text style={[styles.profileValue, { color: '#4CAF50', fontWeight: 'bold' }]}>
-                      {selectedStudent.attendancePercentage}%
-                    </Text>
-                  </View>
-                  <View style={styles.profileRow}>
-                    <Text style={styles.profileLabel}>Behaviour:</Text>
-                    <Text style={styles.profileValue}>{selectedStudent.general_behaviour}</Text>
-                  </View>
-                  {selectedStudent.remarks && (
-                    <View style={styles.profileRow}>
-                      <Text style={styles.profileLabel}>Remarks:</Text>
-                      <Text style={styles.profileValue}>{selectedStudent.remarks}</Text>
-                    </View>
-                  )}
-                </View>
+                <Text style={styles.studentInfoText}>Name: {selectedStudent.name}</Text>
+                <Text style={styles.studentInfoText}>Admission No: {selectedStudent.admission_no || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Gender: {selectedStudent.gender || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Date of Birth: {formatDateForDisplay(selectedStudent.dob) || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Age: {calculateAge(selectedStudent.dob)} years</Text>
+                <Text style={styles.studentInfoText}>Class: {selectedStudent.className || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Section: {selectedStudent.section || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Roll No: {selectedStudent.roll_no || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Academic Year: {selectedStudent.academic_year || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Attendance: {selectedStudent.attendancePercentage || '0'}%</Text>
+                <Text style={styles.studentInfoText}>Nationality: {selectedStudent.nationality || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Religion: {selectedStudent.religion || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Caste: {selectedStudent.caste || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Blood Group: {selectedStudent.blood_group || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Mother Tongue: {selectedStudent.mother_tongue || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Place of Birth: {selectedStudent.place_of_birth || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Aadhar No: {selectedStudent.aadhar_no || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Address: {selectedStudent.address || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Pin Code: {selectedStudent.pin_code || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Parent Name: {selectedStudent.parentName || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Parent Phone: {selectedStudent.parentPhone || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>General Behaviour: {selectedStudent.general_behaviour || 'N/A'}</Text>
+                {selectedStudent.remarks && (
+                  <Text style={styles.studentInfoText}>Remarks: {selectedStudent.remarks}</Text>
+                )}
+                {selectedStudent.identification_mark_1 && (
+                  <Text style={styles.studentInfoText}>Identification Mark 1: {selectedStudent.identification_mark_1}</Text>
+                )}
+                {selectedStudent.identification_mark_2 && (
+                  <Text style={styles.studentInfoText}>Identification Mark 2: {selectedStudent.identification_mark_2}</Text>
+                )}
               </ScrollView>
             )}
+
             <View style={styles.modalActions}>
               <TouchableOpacity
-                style={styles.modalButton}
+                style={[styles.modalButton, { backgroundColor: '#aaa' }]}
                 onPress={() => setViewModalVisible(false)}
               >
                 <Text style={styles.modalButtonText}>Close</Text>
@@ -1890,6 +1820,515 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
+  },
+
+  // Futuristic Modal Styles
+  futuristicModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalBackgroundGradient: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: 'linear-gradient(135deg, rgba(106, 17, 203, 0.1) 0%, rgba(37, 117, 252, 0.1) 100%)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  futuristicModalContainer: {
+    width: '95%',
+    maxWidth: 400,
+    maxHeight: '90%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.3,
+        shadowRadius: 20,
+      },
+      android: {
+        elevation: 20,
+      },
+    }),
+  },
+  glassModalHeader: {
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    paddingTop: 50,
+    paddingBottom: 30,
+    paddingHorizontal: 25,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  avatarSection: {
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  profileAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(103, 126, 234, 0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#667eea',
+        shadowOffset: { width: 0, height: 5 },
+        shadowOpacity: 0.8,
+        shadowRadius: 15,
+      },
+      android: {
+        elevation: 10,
+      },
+    }),
+  },
+  profileAvatarText: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 5,
+  },
+  futuristicModalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 5,
+  },
+  futuristicModalSubtitle: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.8)',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0, 0, 0, 0.2)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 15,
+    right: 15,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  futuristicScrollView: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  glassInfoCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    ...Platform.select({
+      ios: {
+        shadowColor: 'rgba(255, 255, 255, 0.1)',
+        shadowOffset: { width: 0, height: 5 },
+        shadowOpacity: 1,
+        shadowRadius: 10,
+      },
+      android: {
+        elevation: 5,
+      },
+    }),
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 15,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  cardIconContainer: {
+    width: 35,
+    height: 35,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+  },
+  infoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  infoItem: {
+    width: '48%',
+    marginBottom: 12,
+  },
+  infoLabel: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  infoValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0, 0, 0, 0.2)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  performanceStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 20,
+    paddingVertical: 15,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 15,
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  statPercent: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.8)',
+    textAlign: 'center',
+  },
+  remarksSection: {
+    marginTop: 15,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  remarksText: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.9)',
+    lineHeight: 20,
+    fontStyle: 'italic',
+  },
+  addressSection: {
+    marginTop: 15,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  addressText: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.9)',
+    lineHeight: 20,
+  },
+  modalFabContainer: {
+    position: 'absolute',
+    bottom: 25,
+    right: 25,
+    flexDirection: 'row',
+  },
+  modalFab: {
+    marginLeft: 15,
+  },
+  modalFabGradient: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#4ECDC4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#4ECDC4',
+        shadowOffset: { width: 0, height: 5 },
+        shadowOpacity: 0.6,
+        shadowRadius: 15,
+      },
+      android: {
+        elevation: 10,
+      },
+    }),
+  },
+
+  // Clean Modal Styles
+  cleanModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  cleanModalContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    width: '100%',
+    maxWidth: 400,
+    maxHeight: '85%',
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.3,
+    shadowRadius: 15,
+  },
+  cleanModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 25,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+  },
+  cleanAvatarSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  cleanAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#2196F3',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 15,
+    elevation: 3,
+    shadowColor: '#2196F3',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  cleanAvatarText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  cleanHeaderInfo: {
+    flex: 1,
+  },
+  cleanStudentName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  cleanStudentClass: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  cleanCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+  },
+  cleanScrollView: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  cleanInfoCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 15,
+    marginBottom: 15,
+    padding: 20,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    borderWidth: 1,
+    borderColor: '#F5F5F5',
+  },
+  cleanCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 15,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  cleanCardIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  cleanCardTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  cleanInfoGrid: {
+    gap: 12,
+  },
+  cleanInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F8F8F8',
+  },
+  cleanInfoLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    flex: 1,
+  },
+  cleanInfoValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+    flex: 1,
+    textAlign: 'right',
+  },
+  cleanStatsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 15,
+    padding: 15,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+  },
+  cleanStatItem: {
+    alignItems: 'center',
+  },
+  cleanStatCircle: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#E8F5E8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    elevation: 1,
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  cleanStatNumber: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  cleanStatLabel: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  cleanActionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingHorizontal: 5,
+    gap: 15,
+  },
+  cleanActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4CAF50',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    elevation: 3,
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  cleanActionText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginLeft: 8,
+  },
+  
+  // Simple Modal Styles for View Profile
+  studentModalName: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 30,
+    marginTop: 10,
+  },
+  modalIconRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  modalIconButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 15,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  
+  // Simple student info text style
+  studentInfoText: {
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 10,
+    paddingVertical: 4,
   },
 });
 
