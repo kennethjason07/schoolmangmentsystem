@@ -75,3 +75,5 @@ WHERE is_active = true
     AND period_type = 'class'
     AND academic_year = '2024-25'
 ORDER BY start_time;
+
+-- ..
