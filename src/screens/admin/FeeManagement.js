@@ -171,10 +171,17 @@ const FeeManagement = () => {
     }
   };
 
-  // Calculate class-wise payment statistics
+  // Calculate class-wise payment statistics - OPTIMIZED VERSION
   const calculateClassPaymentStats = async () => {
+    const startTime = performance.now(); // 📊 Performance monitoring
+    
     try {
-      // Get all classes with their fee structures and payments
+      console.log('🚀 Calculating class payment stats with optimized queries...');
+      
+      const currentYear = new Date().getFullYear();
+      const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
+
+      // Get all classes in a single query
       const { data: classesWithStats, error } = await supabase
         .from(TABLES.CLASSES)
         .select(`
@@ -185,61 +192,100 @@ const FeeManagement = () => {
 
       if (error) throw error;
 
-      const currentYear = new Date().getFullYear();
-      const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
+      if (!classesWithStats || classesWithStats.length === 0) {
+        setClassPaymentStats([]);
+        setPaymentSummary({ totalCollected: 0, totalDue: 0, totalOutstanding: 0, collectionRate: 0 });
+        return;
+      }
 
-      const classStats = await Promise.all(classesWithStats.map(async (classData) => {
-        // Get fee structures for this class
-        const { data: feeStructures, error: feeError } = await supabase
-          .from(TABLES.FEE_STRUCTURE)
-          .select('*')
-          .eq('class_id', classData.id)
-          .eq('academic_year', academicYear);
+      const classIds = classesWithStats.map(c => c.id);
 
-        if (feeError) throw feeError;
+      // Get all fee structures for all classes in a single query
+      const { data: allFeeStructures } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .select('*')
+        .in('class_id', classIds)
+        .eq('academic_year', academicYear);
 
-        // Get students in this class
-        const { data: studentsInClass, error: studentsError } = await supabase
-          .from(TABLES.STUDENTS)
-          .select('id, name')
-          .eq('class_id', classData.id);
+      // Get all students for all classes in a single query
+      const { data: allStudents } = await supabase
+        .from(TABLES.STUDENTS)
+        .select('id, name, class_id')
+        .in('class_id', classIds);
 
-        if (studentsError) throw studentsError;
+      // Get all student IDs for payment lookup
+      const studentIds = allStudents?.map(s => s.id) || [];
+      
+      // Get all payments for all students in a single query
+      const { data: allPayments } = studentIds.length > 0 ? await supabase
+        .from(TABLES.STUDENT_FEES)
+        .select('student_id, amount_paid, academic_year')
+        .in('student_id', studentIds)
+        .eq('academic_year', academicYear) : { data: [] };
+
+      // Create lookup maps for O(1) access
+      const feeStructureLookup = {};
+      (allFeeStructures || []).forEach(fee => {
+        if (!feeStructureLookup[fee.class_id]) {
+          feeStructureLookup[fee.class_id] = [];
+        }
+        feeStructureLookup[fee.class_id].push(fee);
+      });
+
+      const studentsLookup = {};
+      (allStudents || []).forEach(student => {
+        if (!studentsLookup[student.class_id]) {
+          studentsLookup[student.class_id] = [];
+        }
+        studentsLookup[student.class_id].push(student);
+      });
+
+      const paymentsLookup = {};
+      (allPayments || []).forEach(payment => {
+        if (!paymentsLookup[payment.student_id]) {
+          paymentsLookup[payment.student_id] = [];
+        }
+        paymentsLookup[payment.student_id].push(payment);
+      });
+
+      // Process all classes synchronously using lookup maps
+      const classStats = classesWithStats.map(classData => {
+        const feeStructures = feeStructureLookup[classData.id] || [];
+        const studentsInClass = studentsLookup[classData.id] || [];
 
         // Calculate total fee structure for this class
-        const totalFeeStructure = feeStructures?.reduce((sum, fee) => sum + (parseFloat(fee.amount) || 0), 0) || 0;
+        const totalFeeStructure = feeStructures.reduce((sum, fee) => sum + (parseFloat(fee.amount) || 0), 0);
 
         // Calculate total students in class
-        const totalStudents = studentsInClass?.length || 0;
+        const totalStudents = studentsInClass.length;
 
         // Calculate total expected fees (fee structure × number of students)
         const totalExpectedFees = totalFeeStructure * totalStudents;
 
-        // Get payments for students in this class
-        const studentIds = studentsInClass?.map(s => s.id) || [];
+        // Calculate payments for this class
         let totalPaid = 0;
-        let studentsWithPayments = 0;
+        const studentsWithPaymentsSet = new Set();
 
-        if (studentIds.length > 0) {
-          const { data: paymentsForClass, error: paymentsError } = await supabase
-            .from(TABLES.STUDENT_FEES)
-            .select('student_id, amount_paid, academic_year')
-            .in('student_id', studentIds)
-            .eq('academic_year', academicYear);
+        studentsInClass.forEach(student => {
+          const studentPayments = paymentsLookup[student.id] || [];
+          const studentTotalPaid = studentPayments.reduce((sum, payment) => 
+            sum + (parseFloat(payment.amount_paid) || 0), 0);
+          
+          totalPaid += studentTotalPaid;
+          
+          if (studentTotalPaid > 0) {
+            studentsWithPaymentsSet.add(student.id);
+          }
+        });
 
-          if (paymentsError) throw paymentsError;
-
-          totalPaid = paymentsForClass?.reduce((sum, payment) => sum + (parseFloat(payment.amount_paid) || 0), 0) || 0;
-          studentsWithPayments = new Set(paymentsForClass?.map(p => p.student_id) || []).size;
-        }
+        const studentsWithPayments = studentsWithPaymentsSet.size;
+        const studentsWithoutPayments = totalStudents - studentsWithPayments;
 
         // Calculate outstanding amount
         const outstanding = totalExpectedFees - totalPaid;
 
         // Calculate collection rate
         const collectionRate = totalExpectedFees > 0 ? (totalPaid / totalExpectedFees) * 100 : 0;
-
-        const studentsWithoutPayments = totalStudents - studentsWithPayments;
 
         return {
           classId: classData.id,
@@ -253,7 +299,7 @@ const FeeManagement = () => {
           studentsWithoutPayments,
           feeStructureAmount: totalFeeStructure
         };
-      }));
+      });
 
       // Sort by outstanding amount (highest first)
       classStats.sort((a, b) => b.outstanding - a.outstanding);
@@ -272,8 +318,22 @@ const FeeManagement = () => {
 
       setPaymentSummary(summary);
 
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.log(`✅ Class payment stats calculated successfully in ${loadTime}ms`);
+      console.log(`📈 Performance: ${classStats.length} classes processed`);
+      
+      if (loadTime > 1000) {
+        console.warn('⚠️ Slow calculation detected. Consider adding database indexes.');
+      } else {
+        console.log('🚀 Fast calculation achieved!');
+      }
+
     } catch (error) {
-      console.error('Error calculating class payment stats:', error);
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.error(`❌ Error calculating class payment stats after ${loadTime}ms:`, error);
     }
   };
 
@@ -283,38 +343,51 @@ const FeeManagement = () => {
   }, []);
 
   const loadAllData = async () => {
+    const startTime = performance.now(); // 📊 Performance monitoring
+    
     try {
+      console.log('🚀 Loading fee management data with optimized queries...');
+      
       setLoading(true);
       setRefreshing(true);
 
-      // Load classes
-      const { data: classesData, error: classesError } = await supabase
-        .from(TABLES.CLASSES)
-        .select('*');
-
-      if (classesError) throw classesError;
-      setClasses(classesData || []);
-
-      // Load fee structures with class information - include due_date
-      const { data: feeStructuresData, error: feeStructuresError } = await supabase
-        .from(TABLES.FEE_STRUCTURE)
-        .select(`
+      // Load all data in parallel for better performance
+      const [
+        { data: classesData, error: classesError },
+        { data: feeStructuresData, error: feeStructuresError },
+        { data: studentsData, error: studentsError },
+        { data: paymentsData, error: paymentsError },
+        { data: allFeeStructures, error: allFeeError }
+      ] = await Promise.all([
+        supabase.from(TABLES.CLASSES).select('*'),
+        supabase.from(TABLES.FEE_STRUCTURE).select(`
           *,
           classes:${TABLES.CLASSES}(id, class_name)
-        `);
+        `),
+        supabase.from(TABLES.STUDENTS).select(`
+          *,
+          classes:${TABLES.CLASSES}(class_name)
+        `),
+        supabase.from(TABLES.STUDENT_FEES).select(`
+          *,
+          students(name)
+        `),
+        supabase.from(TABLES.FEE_STRUCTURE).select('*')
+      ]);
 
+      // Check for errors
+      if (classesError) throw classesError;
       if (feeStructuresError) throw feeStructuresError;
+      if (studentsError) throw studentsError;
+      if (paymentsError) throw paymentsError;
+      if (allFeeError) throw allFeeError;
+
+      // Set classes data
+      setClasses(classesData || []);
       
-      console.log('Raw fee structures from DB:', feeStructuresData); // Debug log
-      
-      // Process fee structures to group by class
-      const processedFeeStructures = [];
-      
-      // Group fee structures by class_id and filter out invalid dates
+      // Process fee structures to group by class - optimized
       const groupedByClass = {};
-      feeStructuresData.forEach(fee => {
-        console.log('Processing fee:', fee); // Debug log
-        
+      (feeStructuresData || []).forEach(fee => {
         if (!groupedByClass[fee.class_id]) {
           groupedByClass[fee.class_id] = {
             classId: fee.class_id,
@@ -327,7 +400,7 @@ const FeeManagement = () => {
           id: fee.id,
           type: fee.fee_component || 'Unknown Fee',
           amount: fee.amount || 0,
-          due_date: fee.due_date, // Make sure due_date is included
+          due_date: fee.due_date,
           created_at: fee.created_at,
           description: fee.fee_component || 'No description',
           academic_year: fee.academic_year || '2024-25'
@@ -335,68 +408,55 @@ const FeeManagement = () => {
       });
       
       // Convert grouped object to array
-      Object.values(groupedByClass).forEach(classGroup => {
-        processedFeeStructures.push(classGroup);
-      });
-      
-      console.log('Processed fee structures:', processedFeeStructures); // Debug log
-      setFeeStructures(processedFeeStructures || []);
+      const processedFeeStructures = Object.values(groupedByClass);
+      setFeeStructures(processedFeeStructures);
 
-      // Load students - fix column name
-      const { data: studentsData, error: studentsError } = await supabase
-        .from(TABLES.STUDENTS)
-        .select(`
-          *,
-          classes:${TABLES.CLASSES}(class_name)
-        `);
-
-      if (studentsError) throw studentsError;
-
-      // Map name to full_name for consistency
-      const mappedStudents = studentsData?.map(student => ({
+      // Process students data - optimized mapping
+      const mappedStudents = (studentsData || []).map(student => ({
         ...student,
         full_name: student.name
-      })) || [];
-
+      }));
       setStudents(mappedStudents);
 
-      // Load payments - fix the column name
-      const { data: paymentsData, error: paymentsError } = await supabase
-        .from(TABLES.STUDENT_FEES)
-        .select(`
-          *,
-          students(name)
-        `);
+      // Create fee structure lookup for O(1) access
+      const feeStructureLookup = {};
+      (allFeeStructures || []).forEach(fs => {
+        feeStructureLookup[fs.id] = fs;
+      });
 
-      if (paymentsError) throw paymentsError;
-
-      // Load fee structures separately
-      const { data: allFeeStructures, error: allFeeError } = await supabase
-        .from(TABLES.FEE_STRUCTURE)
-        .select('*');
-
-      if (allFeeError) throw allFeeError;
-
-      // Manually join the data
-      const enrichedPayments = paymentsData?.map(payment => {
-        const feeStructure = allFeeStructures?.find(fs => fs.id === payment.fee_id);
+      // Process payments data with lookup - no async operations
+      const enrichedPayments = (paymentsData || []).map(payment => {
+        const feeStructure = feeStructureLookup[payment.fee_id];
         return {
           ...payment,
-          students: { full_name: payment.students?.name }, // Map name to full_name for consistency
+          students: { full_name: payment.students?.name },
           fee_structure: feeStructure
         };
-      }) || [];
-
+      });
       setPayments(enrichedPayments);
 
-      // Calculate fee statistics
+      // Calculate fee statistics (already optimized with parallel queries)
       await calculateFeeStats();
 
-      // Calculate class-wise payment statistics
+      // Calculate class-wise payment statistics (now optimized)
       await calculateClassPaymentStats();
 
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.log(`✅ Fee management data loaded successfully in ${loadTime}ms`);
+      console.log(`📈 Performance: ${(classesData || []).length} classes, ${(studentsData || []).length} students, ${(paymentsData || []).length} payments`);
+      
+      if (loadTime > 2000) {
+        console.warn('⚠️ Slow loading detected. Consider adding database indexes.');
+      } else {
+        console.log('🚀 Fast loading achieved!');
+      }
+
     } catch (error) {
-      console.error('Error loading data:', error);
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.error(`❌ Error loading fee management data after ${loadTime}ms:`, error);
       Alert.alert('Error', `Failed to load fee data: ${error.message}`);
     } finally {
       setLoading(false);

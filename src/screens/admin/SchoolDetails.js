@@ -11,6 +11,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  ActionSheetIOS,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -20,6 +21,7 @@ import { supabase, dbHelpers } from '../../utils/supabase';
 const SchoolDetails = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [schoolData, setSchoolData] = useState({
     name: '',
     type: 'School', // School or College
@@ -72,7 +74,59 @@ const SchoolDetails = ({ navigation }) => {
     }));
   };
 
-  const pickImage = async () => {
+  const showImagePicker = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancel', 'Take Photo', 'Choose from Gallery'],
+          cancelButtonIndex: 0,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) {
+            pickImageFromCamera();
+          } else if (buttonIndex === 2) {
+            pickImageFromGallery();
+          }
+        }
+      );
+    } else {
+      Alert.alert(
+        'Select Image',
+        'Choose how you want to select an image',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Take Photo', onPress: pickImageFromCamera },
+          { text: 'Choose from Gallery', onPress: pickImageFromGallery },
+        ]
+      );
+    }
+  };
+
+  const pickImageFromCamera = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please grant camera permissions to take a photo.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        await uploadImage(result.assets[0]);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to take photo: ' + error.message);
+    }
+  };
+
+  const pickImageFromGallery = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       
@@ -89,12 +143,67 @@ const SchoolDetails = ({ navigation }) => {
       });
 
       if (!result.canceled && result.assets[0]) {
-        // For now, we'll store the local URI
-        // In production, you'd upload to Supabase storage
-        handleInputChange('logo_url', result.assets[0].uri);
+        await uploadImage(result.assets[0]);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to pick image: ' + error.message);
+    }
+  };
+
+  const uploadImage = async (imageAsset) => {
+    try {
+      setUploading(true);
+      
+      // Create a unique filename
+      const timestamp = Date.now();
+      const fileExt = imageAsset.uri.split('.').pop();
+      const fileName = `school-logo-${timestamp}.${fileExt}`;
+      
+      // Convert image to blob
+      const response = await fetch(imageAsset.uri);
+      const blob = await response.blob();
+      
+      // Delete old logo if exists
+      if (schoolData.logo_url) {
+        try {
+          const oldFileName = schoolData.logo_url.split('/').pop();
+          if (oldFileName && oldFileName !== fileName) {
+            await supabase.storage
+              .from('school-logos')
+              .remove([oldFileName]);
+          }
+        } catch (deleteError) {
+          console.log('Error deleting old logo:', deleteError);
+          // Don't block upload if delete fails
+        }
+      }
+      
+      // Upload to Supabase storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('school-logos')
+        .upload(fileName, blob, {
+          cacheControl: '3600',
+          upsert: false,
+        });
+      
+      if (uploadError) {
+        throw uploadError;
+      }
+      
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('school-logos')
+        .getPublicUrl(fileName);
+      
+      // Update state with new URL
+      handleInputChange('logo_url', publicUrl);
+      
+      Alert.alert('Success', 'Logo uploaded successfully!');
+    } catch (error) {
+      console.error('Upload error:', error);
+      Alert.alert('Upload Failed', error.message || 'Failed to upload logo. Please try again.');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -188,9 +297,23 @@ const SchoolDetails = ({ navigation }) => {
           {/* Logo Section */}
           <View style={styles.logoSection}>
             <Text style={styles.sectionTitle}>Logo</Text>
-            <TouchableOpacity style={styles.logoContainer} onPress={pickImage}>
-              {schoolData.logo_url ? (
-                <Image source={{ uri: schoolData.logo_url }} style={styles.logoImage} />
+            <TouchableOpacity 
+              style={[styles.logoContainer, uploading && styles.logoContainerUploading]} 
+              onPress={showImagePicker}
+              disabled={uploading}
+            >
+              {uploading ? (
+                <View style={styles.logoPlaceholder}>
+                  <ActivityIndicator size="large" color="#2196F3" />
+                  <Text style={styles.logoPlaceholderText}>Uploading...</Text>
+                </View>
+              ) : schoolData.logo_url ? (
+                <>
+                  <Image source={{ uri: schoolData.logo_url }} style={styles.logoImage} />
+                  <View style={styles.logoOverlay}>
+                    <Ionicons name="camera" size={20} color="#fff" />
+                  </View>
+                </>
               ) : (
                 <View style={styles.logoPlaceholder}>
                   <Ionicons name="camera" size={40} color="#999" />
@@ -198,6 +321,9 @@ const SchoolDetails = ({ navigation }) => {
                 </View>
               )}
             </TouchableOpacity>
+            {schoolData.logo_url && !uploading && (
+              <Text style={styles.logoHint}>Tap to change logo</Text>
+            )}
           </View>
 
           {/* Basic Information */}
@@ -455,6 +581,10 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#e0e0e0',
     borderStyle: 'dashed',
+    position: 'relative',
+  },
+  logoContainerUploading: {
+    opacity: 0.7,
   },
   logoImage: {
     width: '100%',
@@ -471,6 +601,23 @@ const styles = StyleSheet.create({
     marginTop: 5,
     fontSize: 12,
     color: '#999',
+    textAlign: 'center',
+  },
+  logoOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 15,
+    width: 30,
+    height: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoHint: {
+    marginTop: 10,
+    fontSize: 12,
+    color: '#666',
     textAlign: 'center',
   },
   inputGroup: {

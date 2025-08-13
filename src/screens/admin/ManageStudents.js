@@ -110,13 +110,28 @@ const ManageStudents = () => {
     setRefreshing(false);
   };
 
-  // Load students with full details
+  // Load students with full details - OPTIMIZED VERSION
   const loadStudents = async () => {
+    const startTime = performance.now(); // 📊 Performance monitoring
     try {
-      // First, try a simple query to see if we can get any students
+      console.log('🚀 Loading students with optimized query...');
+      
+      // Use a single JOIN query to get all student data with related information
       const { data: studentsData, error } = await supabase
         .from(TABLES.STUDENTS)
-        .select('*')
+        .select(`
+          *,
+          classes:class_id (
+            id,
+            class_name,
+            section
+          ),
+          users:parent_id (
+            id,
+            full_name,
+            phone
+          )
+        `)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -135,56 +150,47 @@ const ManageStudents = () => {
         return;
       }
 
-      // Now get related data for each student
-      const studentsWithDetails = await Promise.all(
-        studentsData.map(async (student) => {
-          // Get class information
-          let classInfo = { class_name: 'N/A', section: 'N/A' };
-          if (student.class_id) {
-            const { data: classData } = await supabase
-              .from(TABLES.CLASSES)
-              .select('class_name, section')
-              .eq('id', student.class_id)
-              .single();
-            if (classData) {
-              classInfo = classData;
-            }
-          }
+      // Get attendance data for all students in a single query
+      const studentIds = studentsData.map(s => s.id);
+      const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+        .toISOString().split('T')[0];
+      
+      const { data: allAttendanceData } = await supabase
+        .from(TABLES.STUDENT_ATTENDANCE)
+        .select('student_id, status')
+        .in('student_id', studentIds)
+        .gte('date', startOfMonth);
 
-          // Get parent information
-          let parentInfo = { full_name: 'N/A', phone: 'N/A' };
-          if (student.parent_id) {
-            const { data: parentData } = await supabase
-              .from(TABLES.USERS)
-              .select('full_name, phone')
-              .eq('id', student.parent_id)
-              .single();
-            if (parentData) {
-              parentInfo = parentData;
-            }
-          }
+      // Create attendance lookup map for O(1) access
+      const attendanceLookup = {};
+      (allAttendanceData || []).forEach(record => {
+        if (!attendanceLookup[record.student_id]) {
+          attendanceLookup[record.student_id] = { total: 0, present: 0 };
+        }
+        attendanceLookup[record.student_id].total++;
+        if (record.status === 'Present') {
+          attendanceLookup[record.student_id].present++;
+        }
+      });
 
-          // Calculate attendance
-          const { data: attendanceData } = await supabase
-            .from(TABLES.STUDENT_ATTENDANCE)
-            .select('status')
-            .eq('student_id', student.id)
-            .gte('date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
+      // Process students data - no async operations needed
+      const studentsWithDetails = studentsData.map(student => {
+        const classInfo = student.classes || { class_name: 'N/A', section: 'N/A' };
+        const parentInfo = student.users || { full_name: 'N/A', phone: 'N/A' };
+        const attendance = attendanceLookup[student.id] || { total: 0, present: 0 };
+        const attendancePercentage = attendance.total > 0 
+          ? Math.round((attendance.present / attendance.total) * 100) 
+          : 0;
 
-          const totalDays = attendanceData?.length || 0;
-          const presentDays = attendanceData?.filter(a => a.status === 'Present').length || 0;
-          const attendancePercentage = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
-
-          return {
-            ...student,
-            attendancePercentage,
-            className: classInfo.class_name,
-            section: classInfo.section,
-            parentName: parentInfo.full_name,
-            parentPhone: parentInfo.phone
-          };
-        })
-      );
+        return {
+          ...student,
+          attendancePercentage,
+          className: classInfo.class_name,
+          section: classInfo.section,
+          parentName: parentInfo.full_name,
+          parentPhone: parentInfo.phone
+        };
+      });
 
       setStudents(studentsWithDetails);
 
@@ -204,7 +210,22 @@ const ManageStudents = () => {
         totalClasses: [...new Set(studentsWithDetails.map(s => s.class_id))].filter(Boolean).length
       });
 
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.log(`✅ Students loaded successfully in ${loadTime}ms`);
+      console.log(`📈 Performance: ${totalStudents} students, ${studentsWithDetails.length} processed`);
+      
+      if (loadTime > 1000) {
+        console.warn('⚠️ Slow loading detected. Consider adding more database indexes.');
+      } else {
+        console.log('🚀 Fast loading achieved!');
+      }
+
     } catch (error) {
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.error(`❌ Error loading students after ${loadTime}ms:`, error);
       throw error;
     }
   };

@@ -153,25 +153,6 @@ const AdminDashboard = ({ navigation }) => {
         }
       ]);
 
-      // Load recent notifications as announcements
-      const { data: notificationsData, error: notificationsError } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('type', 'General')
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      if (notificationsData && !notificationsError) {
-        setAnnouncements(notificationsData.map(notification => ({
-          id: notification.id,
-          message: notification.message,
-          date: format(new Date(notification.created_at), 'yyyy-MM-dd'),
-          icon: 'megaphone',
-          color: '#2196F3'
-        })));
-      } else {
-        console.error('Error loading notifications:', notificationsError);
-      }
 
       // Load upcoming events from events table only
       const { data: eventsData, error: eventsError } = await supabase
@@ -399,92 +380,9 @@ const AdminDashboard = ({ navigation }) => {
 
   const [feeLoading, setFeeLoading] = useState(false);
 
-  // Announcements state - Initialize with empty array, load from database
-  const [announcements, setAnnouncements] = useState([]);
-  const [isAnnouncementModalVisible, setIsAnnouncementModalVisible] = useState(false);
-  const [announcementInput, setAnnouncementInput] = useState({ message: '', date: '', icon: 'megaphone', color: '#2196F3' });
-  const [editIndex, setEditIndex] = useState(null);
-
-  // Date picker state for Announcements
-  const [showAnnouncementDatePicker, setShowAnnouncementDatePicker] = useState(false);
   // Date picker state for Events
   const [showEventDatePicker, setShowEventDatePicker] = useState(false);
 
-  const openAddAnnouncementModal = () => {
-    setAnnouncementInput({ message: '', date: '', icon: 'megaphone', color: '#2196F3' });
-    setEditIndex(null);
-    setIsAnnouncementModalVisible(true);
-  };
-
-  const openEditAnnouncementModal = (item, idx) => {
-    setAnnouncementInput(item);
-    setEditIndex(idx);
-    setIsAnnouncementModalVisible(true);
-  };
-
-  const saveAnnouncement = async () => {
-    if (!announcementInput.message || !announcementInput.date) {
-      Alert.alert('Error', 'Please fill in all fields.');
-      return;
-    }
-
-    try {
-      if (editIndex !== null) {
-        // Update existing notification
-        const { error } = await supabase
-          .from('notifications')
-          .update({
-            message: announcementInput.message,
-            scheduled_at: new Date(announcementInput.date).toISOString()
-          })
-          .eq('id', announcements[editIndex].id);
-
-        if (error) throw error;
-      } else {
-        // Insert new notification as general announcement
-        const { error } = await supabase
-          .from('notifications')
-          .insert({
-            type: 'General',
-            message: announcementInput.message,
-            delivery_mode: 'InApp',
-            delivery_status: 'Sent',
-            scheduled_at: new Date(announcementInput.date).toISOString(),
-            sent_at: new Date().toISOString()
-          });
-
-        if (error) throw error;
-      }
-
-      await loadDashboardData();
-      setIsAnnouncementModalVisible(false);
-      Alert.alert('Success', 'Announcement saved successfully!');
-    } catch (error) {
-      console.error('Error saving announcement:', error);
-      Alert.alert('Error', 'Failed to save announcement');
-    }
-  };
-
-  const deleteAnnouncement = (id) => {
-    Alert.alert('Delete Announcement', 'Are you sure you want to delete this announcement?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        try {
-          const { error } = await supabase
-            .from('notifications')
-            .delete()
-            .eq('id', id);
-
-          if (error) throw error;
-          await loadDashboardData();
-          Alert.alert('Success', 'Announcement deleted successfully!');
-        } catch (error) {
-          console.error('Error deleting announcement:', error);
-          Alert.alert('Error', 'Failed to delete announcement');
-        }
-      }},
-    ]);
-  };
 
   // Upcoming Events state - Initialize with empty array, load from database
   const [events, setEvents] = useState([]);
@@ -1095,105 +993,6 @@ const AdminDashboard = ({ navigation }) => {
           </View>
         </View>
 
-        {/* Admin Messages or Announcements */}
-        <View style={styles.section}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={styles.sectionTitle}>Announcements</Text>
-            <TouchableOpacity style={styles.addButton} onPress={openAddAnnouncementModal}>
-              <Ionicons name="add" size={24} color="#fff" />
-            </TouchableOpacity>
-          </View>
-          <View style={styles.announcementsList}>
-            {announcements.slice().sort((a, b) => new Date(a.date) - new Date(b.date)).map((item, idx) => {
-              const originalIdx = announcements.findIndex(a => a.message === item.message && a.date === item.date);
-              return (
-              <View key={idx} style={styles.announcementItem}>
-                <View style={[styles.announcementIcon, { backgroundColor: item.color }]}> 
-                  <Ionicons name={item.icon} size={20} color="#fff" />
-                </View>
-                <View style={styles.announcementContent}>
-                  <Text style={styles.announcementText}>{item.message}</Text>
-                  <Text style={styles.announcementDate}>{(() => { const [y, m, d] = item.date.split('-'); return `${d}-${m}-${y}`; })()}</Text>
-                </View>
-                <TouchableOpacity onPress={() => openEditAnnouncementModal(item, idx)} style={{ marginRight: 8 }}>
-                  <Ionicons name="create-outline" size={20} color="#2196F3" />
-                </TouchableOpacity>
-                  <TouchableOpacity onPress={() => deleteAnnouncement(originalIdx)}>
-                  <Ionicons name="trash" size={20} color="#F44336" />
-                </TouchableOpacity>
-              </View>
-              );
-            })}
-          </View>
-          {/* Announcement Modal */}
-          <Modal
-            visible={isAnnouncementModalVisible}
-            animationType="slide"
-            transparent
-            onRequestClose={() => setIsAnnouncementModalVisible(false)}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContainer}>
-                <ScrollView 
-                  style={styles.modalScrollView}
-                  showsVerticalScrollIndicator={true}
-                  bounces={false}
-                  keyboardShouldPersistTaps="handled"
-                  contentContainerStyle={styles.modalScrollContent}
-                >
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>{editIndex !== null ? 'Edit Announcement' : 'Add Announcement'}</Text>
-                <TextInput
-                  placeholder="Announcement message"
-                  value={announcementInput.message}
-                  onChangeText={text => setAnnouncementInput({ ...announcementInput, message: text })}
-                  style={styles.input}
-                  multiline
-                />
-                {/* Date Picker Button for Announcements */}
-                {Platform.OS === 'web' ? (
-                  <input
-                    type="date"
-                    value={announcementInput.date}
-                    onChange={e => setAnnouncementInput({ ...announcementInput, date: e.target.value })}
-                    style={{ ...styles.input, padding: 10, fontSize: 15, borderRadius: 8, borderWidth: 1, borderColor: '#e0e0e0', marginBottom: 12 }}
-                  />
-                ) : (
-                  <TouchableOpacity style={styles.input} onPress={() => setShowAnnouncementDatePicker(true)}>
-                  <Text style={{ color: announcementInput.date ? '#333' : '#aaa' }}>
-                    {announcementInput.date ? (() => { const [y, m, d] = announcementInput.date.split('-'); return `${d}-${m}-${y}`; })() : 'Select Date'}
-                  </Text>
-                </TouchableOpacity>
-                )}
-                {showAnnouncementDatePicker && (
-                  <DateTimePicker
-                    value={announcementInput.date ? new Date(announcementInput.date) : new Date()}
-                    mode="date"
-                    display="default"
-                    onChange={(event, selectedDate) => {
-                      setShowAnnouncementDatePicker(false);
-                      if (selectedDate) {
-                        const dd = String(selectedDate.getDate()).padStart(2, '0');
-                        const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
-                        const yyyy = selectedDate.getFullYear();
-                        setAnnouncementInput({ ...announcementInput, date: `${yyyy}-${mm}-${dd}` }); // keep storage as yyyy-mm-dd
-                      }
-                    }}
-                  />
-                )}
-                  {/* Optionally, icon/color pickers can be added here */}
-                  <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 }}>
-                    <TouchableOpacity onPress={() => setIsAnnouncementModalVisible(false)} style={[styles.modalButton, { backgroundColor: '#ccc' }]}> 
-                      <Text style={{ color: '#333', fontWeight: 'bold' }}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={saveAnnouncement} style={[styles.modalButton, { backgroundColor: '#2196F3', marginLeft: 8 }]}> 
-                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>{editIndex !== null ? 'Save' : 'Add'}</Text>
-                    </TouchableOpacity>
-                  </View>
-                </ScrollView>
-              </View>
-            </View>
-          </Modal>
-        </View>
       </ScrollView>
     </View>
   );

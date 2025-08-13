@@ -68,12 +68,27 @@ const ManageTeachers = ({ navigation, route }) => {
   
   // Function to load all necessary data
   const loadData = async () => {
+    const startTime = performance.now(); // 📊 Performance monitoring
     setLoading(true);
     setError(null);
     
     try {
-      // Load teachers
-      const { data: teachersData, error: teachersError } = await dbHelpers.getTeachers();
+      console.log('🚀 Loading teachers with optimized query...');
+      
+      // Use a single JOIN query to get all teacher data with related information
+      const { data: teachersData, error: teachersError } = await supabase
+        .from(TABLES.TEACHERS)
+        .select(`
+          *,
+          users(
+            id,
+            full_name,
+            email,
+            phone
+          )
+        `)
+        .order('created_at', { ascending: false });
+      
       if (teachersError) {
         console.error("Supabase error loading teachers:", teachersError);
         throw new Error('Failed to load teachers');
@@ -89,17 +104,45 @@ const ManageTeachers = ({ navigation, route }) => {
         .select('*');
       if (subjectsError) throw new Error('Failed to load subjects');
       
-      // Process teacher data to include subjects and classes
-      const processedTeachers = await Promise.all(teachersData.map(async (teacher) => {
-        // Get teacher subjects using the helper function
-        const { data: teacherSubjects, error: subjectsError } = await dbHelpers.getTeacherSubjects(teacher.id);
-
-        if (subjectsError) console.error('Error loading teacher subjects:', subjectsError);
-
+      if (!teachersData || teachersData.length === 0) {
+        setTeachers([]);
+        setClasses(classesData);
+        setSubjects(subjectsData);
+        return;
+      }
+      
+      // Get all teacher subject assignments in a single query
+      const teacherIds = teachersData.map(t => t.id);
+      const { data: allTeacherSubjects } = await supabase
+        .from(TABLES.TEACHER_SUBJECTS)
+        .select(`
+          teacher_id,
+          subject_id,
+          subjects(
+            id,
+            name,
+            class_id
+          )
+        `)
+        .in('teacher_id', teacherIds);
+      
+      // Create teacher subjects lookup map for O(1) access
+      const teacherSubjectsLookup = {};
+      (allTeacherSubjects || []).forEach(assignment => {
+        if (!teacherSubjectsLookup[assignment.teacher_id]) {
+          teacherSubjectsLookup[assignment.teacher_id] = [];
+        }
+        teacherSubjectsLookup[assignment.teacher_id].push(assignment);
+      });
+      
+      // Process teacher data - no async operations needed
+      const processedTeachers = teachersData.map(teacher => {
+        const teacherSubjects = teacherSubjectsLookup[teacher.id] || [];
+        
         // Extract unique subject IDs and class IDs
         const subjectIds = new Set();
         const classIds = new Set();
-        teacherSubjects?.forEach(ts => {
+        teacherSubjects.forEach(ts => {
           if (ts.subject_id) subjectIds.add(ts.subject_id);
           if (ts.subjects?.class_id) classIds.add(ts.subjects.class_id);
         });
@@ -109,7 +152,7 @@ const ManageTeachers = ({ navigation, route }) => {
           subjects: Array.from(subjectIds),
           classes: Array.from(classIds),
         };
-      }));
+      });
       
       // Update state with loaded data
       setTeachers(processedTeachers);
@@ -118,7 +161,22 @@ const ManageTeachers = ({ navigation, route }) => {
       const uniqueSubjects = Array.from(new Map(subjectsData.map(subject => [subject.id, subject])).values());
       setSubjects(uniqueSubjects);
       
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.log(`✅ Teachers loaded successfully in ${loadTime}ms`);
+      console.log(`📈 Performance: ${processedTeachers.length} teachers processed`);
+      
+      if (loadTime > 1000) {
+        console.warn('⚠️ Slow loading detected. Consider adding more database indexes.');
+      } else {
+        console.log('🚀 Fast loading achieved!');
+      }
+      
     } catch (err) {
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.error(`❌ Error loading teachers after ${loadTime}ms:`, err);
       setError(err.message);
     } finally {
       setLoading(false);
