@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../utils/supabase';
 
 const StudentList = ({ route, navigation }) => {
-  const { classId } = route.params || {};
+  const { classId, className, section } = route.params || {};
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -132,7 +132,7 @@ const StudentList = ({ route, navigation }) => {
         <View style={styles.headerInfo}>
           <Text style={styles.headerTitle}>Total Students: {students.length}</Text>
           <Text style={styles.headerSubtitle}>
-            Class ID: {classId}
+            {className && section ? `Class: ${className} - Section ${section}` : `Class ID: ${classId}`}
           </Text>
         </View>
       </View>

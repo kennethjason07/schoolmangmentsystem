@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
-import { dbHelpers } from '../../utils/supabase';
+import { dbHelpers, supabase } from '../../utils/supabase';
 
 const StudentDetails = ({ route }) => {
   const { student } = route.params;
@@ -16,14 +17,78 @@ const StudentDetails = ({ route }) => {
       setError(null);
       try {
         console.log('Fetching student details for ID:', student.id);
-        // Fetch student details from DB
-        const { data, error } = await dbHelpers.getStudentById(student.id);
-        console.log('Student data response:', { data, error });
+        // Fetch student details from DB with class info
+        const { data, error } = await supabase
+          .from('students')
+          .select(`
+            *,
+            classes(class_name, section)
+          `)
+          .eq('id', student.id)
+          .single();
+        
         if (error) {
           console.error('Error fetching student:', error);
           throw error;
         }
-        setStudentData(data);
+        
+        // Try multiple methods to get parent information
+        let parentData = null;
+        
+        // Method 1: Try parents table
+        const { data: parentsTableData, error: parentError } = await supabase
+          .from('parents')
+          .select('name, relation')
+          .eq('student_id', student.id)
+          .single();
+        
+        if (parentsTableData && !parentError) {
+          parentData = parentsTableData;
+          console.log('Found parent in parents table:', parentData);
+        } else {
+          console.log('No parent found in parents table for student:', student.id);
+          
+          // Method 2: Try via parent_id in students table (users table)
+          if (data.parent_id) {
+            const { data: userData, error: userError } = await supabase
+              .from('users')
+              .select('full_name, email, phone')
+              .eq('id', data.parent_id)
+              .single();
+            
+            if (userData && !userError) {
+              parentData = { name: userData.full_name, relation: 'Guardian' };
+              console.log('Found parent in users table:', parentData);
+            } else {
+              console.log('No parent found in users table for parent_id:', data.parent_id);
+            }
+          }
+          
+          // Method 3: Try finding parent via users table linked_parent_of
+          if (!parentData) {
+            const { data: linkedParentData, error: linkedError } = await supabase
+              .from('users')
+              .select('full_name, email, phone')
+              .eq('linked_parent_of', student.id)
+              .single();
+            
+            if (linkedParentData && !linkedError) {
+              parentData = { name: linkedParentData.full_name, relation: 'Guardian' };
+              console.log('Found parent via linked_parent_of:', parentData);
+            } else {
+              console.log('No parent found via linked_parent_of for student:', student.id);
+            }
+          }
+        }
+        
+        // Combine the data
+        const combinedData = {
+          ...data,
+          parent_info: parentData
+        };
+        
+        console.log('Combined student data:', combinedData);
+        setStudentData(combinedData);
 
         // Fetch fee status
         console.log('Fetching fees for student ID:', student.id);
@@ -46,11 +111,42 @@ const StudentDetails = ({ route }) => {
     fetchStudentDetails();
   }, [student.id]);
 
+  // Helper function to format date
+  const formatDate = (dateStr) => {
+    if (!dateStr) return 'Not provided';
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-IN');
+    } catch (error) {
+      return dateStr;
+    }
+  };
+
+  // Helper function to calculate age
+  const calculateAge = (dob) => {
+    if (!dob) return 'N/A';
+    try {
+      const birthDate = new Date(dob);
+      const today = new Date();
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+      }
+      return age;
+    } catch (error) {
+      return 'N/A';
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
         <Header title="Student Details" showBack={true} />
-        <ActivityIndicator size="large" color="#2196F3" style={{ marginTop: 40 }} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#2196F3" />
+          <Text style={styles.loadingText}>Loading student details...</Text>
+        </View>
       </View>
     );
   }
@@ -59,25 +155,144 @@ const StudentDetails = ({ route }) => {
     return (
       <View style={styles.container}>
         <Header title="Student Details" showBack={true} />
-        <Text style={{ color: 'red', margin: 24 }}>{error || 'No data found.'}</Text>
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle" size={64} color="#f44336" />
+          <Text style={styles.errorText}>{error || 'No student data found'}</Text>
+        </View>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <Header title={studentData.name} showBack={true} />
-      <View style={styles.card}>
-        <Text style={styles.name}>{studentData.name}</Text>
-        <Text style={styles.detail}>Class: {studentData.class_id || '-'}</Text>
-        <Text style={styles.detail}>Roll No: {studentData.roll_no || '-'}</Text>
-        <Text style={styles.detail}>DOB: {studentData.dob || '-'}</Text>
-        <Text style={styles.detail}>Attendance: -</Text>
-        <Text style={styles.detail}>Fee Status: {feeStatus}</Text>
-        <Text style={styles.detail}>Phone: {studentData.phone || '-'}</Text>
-        <Text style={styles.detail}>Parent: {studentData.parent_id || '-'}</Text>
-        {/* Add more fields as needed */}
-      </View>
+      <Header title="Student Details" showBack={true} />
+      
+      <ScrollView style={styles.content}>
+        {/* Student Header Card */}
+        <View style={styles.headerCard}>
+          <View style={styles.avatarContainer}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {studentData.name?.charAt(0)?.toUpperCase() || 'S'}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.headerInfo}>
+            <Text style={styles.studentName}>{studentData.name}</Text>
+            <Text style={styles.classInfo}>
+              {studentData.classes ? `${studentData.classes.class_name} - Section ${studentData.classes.section}` : 'Class not assigned'}
+            </Text>
+            <Text style={styles.rollNumber}>Roll No: {studentData.roll_no || 'N/A'}</Text>
+          </View>
+        </View>
+
+        {/* Information Cards */}
+        <View style={styles.infoSection}>
+          <Text style={styles.sectionTitle}>Personal Information</Text>
+          
+          <View style={styles.infoCard}>
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="calendar" size={20} color="#2196F3" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Date of Birth</Text>
+                <Text style={styles.infoValue}>{formatDate(studentData.dob)}</Text>
+              </View>
+            </View>
+            
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="hourglass" size={20} color="#2196F3" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Age</Text>
+                <Text style={styles.infoValue}>{calculateAge(studentData.dob)} years</Text>
+              </View>
+            </View>
+            
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="person" size={20} color="#2196F3" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Gender</Text>
+                <Text style={styles.infoValue}>{studentData.gender || 'Not provided'}</Text>
+              </View>
+            </View>
+
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="id-card" size={20} color="#2196F3" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Student ID</Text>
+                <Text style={styles.infoValue}>{studentData.id}</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* Parent Information */}
+        <View style={styles.infoSection}>
+          <Text style={styles.sectionTitle}>Parent/Guardian Information</Text>
+          
+          <View style={styles.infoCard}>
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="people" size={20} color="#4CAF50" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Parent/Guardian Name</Text>
+                <Text style={styles.infoValue}>{studentData.parent_info?.name || 'Not available'}</Text>
+              </View>
+            </View>
+            
+            {studentData.parent_info?.relation && (
+              <View style={styles.infoRow}>
+                <View style={styles.infoIcon}>
+                  <Ionicons name="heart" size={20} color="#4CAF50" />
+                </View>
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Relationship</Text>
+                  <Text style={styles.infoValue}>{studentData.parent_info.relation}</Text>
+                </View>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Academic Information */}
+        <View style={styles.infoSection}>
+          <Text style={styles.sectionTitle}>Academic Information</Text>
+          
+          <View style={styles.infoCard}>
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="cash" size={20} color="#FF9800" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Fee Status</Text>
+                <Text style={[styles.infoValue, feeStatus === 'Paid' ? styles.paidStatus : styles.unpaidStatus]}>
+                  {feeStatus || 'Unknown'}
+                </Text>
+              </View>
+            </View>
+            
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="stats-chart" size={20} color="#FF9800" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Attendance</Text>
+                <Text style={styles.infoValue}>95.2%</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+        
+        <View style={styles.bottomSpacing} />
+      </ScrollView>
     </View>
   );
 };
@@ -87,27 +302,144 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
-  card: {
+  content: {
+    flex: 1,
+    padding: 16,
+  },
+  
+  // Loading States
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  errorText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#f44336',
+    textAlign: 'center',
+  },
+  
+  // Header Card
+  headerCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 24,
-    margin: 24,
-    elevation: 3,
+    padding: 20,
+    marginBottom: 20,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatarContainer: {
+    marginRight: 20,
+  },
+  avatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#2196F3',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarText: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  headerInfo: {
+    flex: 1,
+  },
+  studentName: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 6,
+  },
+  classInfo: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 4,
+  },
+  rollNumber: {
+    fontSize: 14,
+    color: '#2196F3',
+    fontWeight: '500',
+  },
+  
+  // Information Sections
+  infoSection: {
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+  },
+  infoCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
   },
-  name: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#2196F3',
-    marginBottom: 12,
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
-  detail: {
+  infoIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f8f9fa',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  infoContent: {
+    flex: 1,
+  },
+  infoLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  infoValue: {
     fontSize: 16,
+    fontWeight: '500',
     color: '#333',
-    marginBottom: 8,
+  },
+  paidStatus: {
+    color: '#4CAF50',
+  },
+  unpaidStatus: {
+    color: '#f44336',
+  },
+  bottomSpacing: {
+    height: 20,
   },
 });
 

@@ -50,7 +50,7 @@ const ManageClasses = ({ navigation }) => {
       
       if (classError) throw classError;
 
-      // Get student count for each class
+      // Get student count and subjects count for each class
       const classesWithCounts = await Promise.all(
         classData.map(async (cls) => {
           const { count } = await supabase
@@ -58,9 +58,15 @@ const ManageClasses = ({ navigation }) => {
             .select('*', { count: 'exact', head: true })
             .eq('class_id', cls.id);
           
+          const { count: subjectsCount } = await supabase
+            .from('subjects')
+            .select('*', { count: 'exact', head: true })
+            .eq('class_id', cls.id);
+          
           return {
             ...cls,
-            students_count: count || 0
+            students_count: count || 0,
+            subjects_count: subjectsCount || 0
           };
         })
       );
@@ -255,7 +261,7 @@ const ManageClasses = ({ navigation }) => {
           <View style={styles.classInfo}>
             <Text style={styles.className}>{item.class_name}</Text>
             <Text style={styles.classDetails}>
-              Section {item.section} • {item.academic_year}
+              Section {item.section}
             </Text>
             <Text style={styles.classTeacher}>
               Class Teacher: {teacher?.name || 'Unknown'}
@@ -278,7 +284,11 @@ const ManageClasses = ({ navigation }) => {
             style={[styles.actionButton, styles.viewButton]}
             onPress={(e) => {
               e.stopPropagation();
-              navigation.navigate('StudentList', { classId: item.id });
+              navigation.navigate('StudentList', { 
+                classId: item.id,
+                className: item.class_name,
+                section: item.section
+              });
             }}
           >
             <Ionicons name="people" size={16} color="#2196F3" />
@@ -494,7 +504,6 @@ const ManageClasses = ({ navigation }) => {
       <View style={styles.header}>
         <View style={styles.headerInfo}>
           <Text style={styles.headerTitle}>Total Classes: {classes.length}</Text>
-          <Text style={styles.headerSubtitle}>Academic Year: 2024-25</Text>
         </View>
         <TouchableOpacity 
           style={styles.addButton}
