@@ -30,6 +30,13 @@ const ClassStudentDetails = ({ route, navigation }) => {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [studentHistoryModal, setStudentHistoryModal] = useState(false);
   const [activeTab, setActiveTab] = useState('students');
+  const [paymentModal, setPaymentModal] = useState(false);
+  const [paymentDate, setPaymentDate] = useState(new Date());
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMode, setPaymentMode] = useState('Cash');
+  const [paymentRemarks, setPaymentRemarks] = useState('');
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   useEffect(() => {
     loadClassStudentDetails();
@@ -86,12 +93,18 @@ const ClassStudentDetails = ({ route, navigation }) => {
 
       if (error) throw error;
 
-      // Get fee structure for this class
+      // Get fee structure for this class (removed academic year filter)
       const { data: feeStructureData, error: feeError } = await supabase
         .from(TABLES.FEE_STRUCTURE)
         .select('*')
-        .eq('class_id', classData.classId)
-        .eq('academic_year', academicYear);
+        .eq('class_id', classData.classId);
+
+      console.log('🏫 ClassStudentDetails Debug Info:');
+      console.log('📚 Class ID:', classData.classId);
+      console.log('🧮 Fee structures found:', feeStructureData?.length || 0);
+      if (feeStructureData && feeStructureData.length > 0) {
+        console.log('💰 Sample fee structure:', feeStructureData[0]);
+      }
 
       if (feeError) throw feeError;
 
@@ -111,15 +124,33 @@ const ClassStudentDetails = ({ route, navigation }) => {
           sum + (parseFloat(payment.amount_paid) || 0), 0);
 
         // Calculate outstanding amount
-        const outstanding = totalFeeStructure - totalPaid;
+        const outstanding = Math.max(0, totalFeeStructure - totalPaid);
 
         // Calculate payment percentage
         const paymentPercentage = totalFeeStructure > 0 ? 
-          (totalPaid / totalFeeStructure) * 100 : 0;
+          Math.min(100, (totalPaid / totalFeeStructure) * 100) : 0;
 
-        // Get payment status
-        const paymentStatus = outstanding <= 0 ? 'Paid' : 
-          totalPaid > 0 ? 'Partial' : 'Pending';
+        // Get payment status - Fixed logic to prevent showing 'Paid' for all students
+        let paymentStatus;
+        if (totalFeeStructure === 0) {
+          paymentStatus = 'Paid'; // No fees required
+        } else if (totalPaid >= totalFeeStructure) {
+          paymentStatus = 'Paid'; // Fully paid
+        } else if (totalPaid > 0) {
+          paymentStatus = 'Partial'; // Partially paid
+        } else {
+          paymentStatus = 'Pending'; // No payments made
+        }
+
+        // Debug logging to trace payment status calculation
+        console.log(`Student: ${student.name}, Fee Structure: ${totalFeeStructure}, Paid: ${totalPaid}, Status: ${paymentStatus}`, {
+          studentId: student.id,
+          totalFeeStructure,
+          totalPaid,
+          outstanding,
+          paymentCount: currentYearPayments.length,
+          paymentStatus
+        });
 
         // Get latest payment date
         const latestPayment = currentYearPayments.length > 0 ? 
@@ -221,6 +252,62 @@ const ClassStudentDetails = ({ route, navigation }) => {
   const handleStudentClick = (student) => {
     setSelectedStudent(student);
     setStudentHistoryModal(true);
+  };
+
+  // Handle mark as paid button click
+  const handleMarkAsPaid = (student) => {
+    setSelectedStudent(student);
+    setPaymentDate(new Date());
+    setPaymentAmount('');
+    setPaymentMode('Cash');
+    setPaymentRemarks('');
+    setPaymentModal(true);
+  };
+
+  // Format date for display
+  const formatDateForDisplay = (date) => {
+    return format(date, 'dd MMM yyyy');
+  };
+
+  // Submit payment record
+  const handlePaymentSubmit = async () => {
+    if (!selectedStudent || !paymentAmount || paymentAmount <= 0) {
+      Alert.alert('Validation Error', 'Please enter a valid payment amount.');
+      return;
+    }
+
+    try {
+      setPaymentLoading(true);
+      
+      const currentYear = new Date().getFullYear();
+      const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
+
+      // Insert payment record
+      const { error } = await supabase
+        .from(TABLES.STUDENT_FEES)
+        .insert({
+          student_id: selectedStudent.id,
+          fee_component: paymentRemarks || 'General Fee Payment',
+          amount_paid: parseFloat(paymentAmount),
+          payment_date: paymentDate.toISOString().split('T')[0],
+          payment_mode: paymentMode,
+          academic_year: academicYear,
+        });
+
+      if (error) throw error;
+
+      Alert.alert('Success', 'Payment recorded successfully!');
+      setPaymentModal(false);
+      
+      // Refresh the data to show updated payment status
+      await loadClassStudentDetails();
+      
+    } catch (error) {
+      console.error('Error recording payment:', error);
+      Alert.alert('Error', 'Failed to record payment. Please try again.');
+    } finally {
+      setPaymentLoading(false);
+    }
   };
 
   if (loading) {
@@ -513,6 +600,23 @@ const ClassStudentDetails = ({ route, navigation }) => {
                     Last payment: {formatSafeDate(student.latestPaymentDate)}
                     {student.latestPaymentMode && ` via ${student.latestPaymentMode}`}
                   </Text>
+                )}
+
+                {/* Mark as Paid Button */}
+                {student.outstanding > 0 && (
+                  <TouchableOpacity
+                    style={styles.markAsPaidButton}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleMarkAsPaid(student);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="card" size={16} color="#fff" style={{ marginRight: 6 }} />
+                    <Text style={styles.markAsPaidButtonText}>
+                      Pay
+                    </Text>
+                  </TouchableOpacity>
                 )}
               </TouchableOpacity>
             ))
@@ -834,6 +938,137 @@ const ClassStudentDetails = ({ route, navigation }) => {
                         </View>
                       ))
                   )}
+                </View>
+              </>
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Payment Recording Modal */}
+      <Modal
+        visible={paymentModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setPaymentModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              Record Payment - {selectedStudent?.name}
+            </Text>
+            <TouchableOpacity
+              onPress={() => setPaymentModal(false)}
+              style={styles.closeButton}
+            >
+              <Ionicons name="close" size={24} color="#666" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent}>
+            {selectedStudent && (
+              <>
+                {/* Student Info */}
+                <View style={styles.paymentFormCard}>
+                  <View style={styles.paymentStudentInfo}>
+                    <Text style={styles.paymentStudentName}>{selectedStudent.name}</Text>
+                    <Text style={styles.paymentStudentDetails}>
+                      Outstanding Amount: {formatSafeCurrency(selectedStudent.outstanding)}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Payment Form */}
+                <View style={styles.paymentFormCard}>
+                  <Text style={styles.paymentFormTitle}>Payment Details</Text>
+                  
+                  {/* Amount Input */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Amount *</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      placeholder="Enter payment amount"
+                      value={paymentAmount}
+                      onChangeText={setPaymentAmount}
+                      keyboardType="numeric"
+                      placeholderTextColor="#999"
+                    />
+                  </View>
+
+                  {/* Payment Date */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Payment Date *</Text>
+                    <TouchableOpacity
+                      style={styles.dateInput}
+                      onPress={() => setShowDatePicker(true)}
+                    >
+                      <Text style={styles.dateInputText}>
+                        {formatDateForDisplay(paymentDate)}
+                      </Text>
+                      <Ionicons name="calendar-outline" size={20} color="#666" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Payment Mode */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Payment Mode *</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      {['Cash', 'Card', 'UPI', 'Bank Transfer', 'Cheque'].map((mode) => (
+                        <TouchableOpacity
+                          key={mode}
+                          style={[
+                            styles.paymentModeChip,
+                            paymentMode === mode && styles.activePaymentModeChip
+                          ]}
+                          onPress={() => setPaymentMode(mode)}
+                        >
+                          <Text style={[
+                            styles.paymentModeChipText,
+                            paymentMode === mode && styles.activePaymentModeChipText
+                          ]}>
+                            {mode}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+
+                  {/* Fee Component / Remarks */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Fee Component / Remarks</Text>
+                    <TextInput
+                      style={[styles.textInput, { height: 80 }]}
+                      placeholder="e.g., Tuition Fee, Books Fee, etc."
+                      value={paymentRemarks}
+                      onChangeText={setPaymentRemarks}
+                      multiline
+                      textAlignVertical="top"
+                      placeholderTextColor="#999"
+                    />
+                  </View>
+
+                  {/* Submit Button */}
+                  <TouchableOpacity
+                    style={[
+                      styles.submitButton,
+                      paymentLoading && styles.submitButtonDisabled
+                    ]}
+                    onPress={handlePaymentSubmit}
+                    disabled={paymentLoading}
+                    activeOpacity={0.8}
+                  >
+                    {paymentLoading ? (
+                      <>
+                        <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+                        <Text style={styles.submitButtonText}>Recording Payment...</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Ionicons name="checkmark-circle" size={20} color="#fff" style={{ marginRight: 8 }} />
+                        <Text style={styles.submitButtonText}>Record Payment</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
                 </View>
               </>
             )}
@@ -1572,6 +1807,136 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#2196F3',
+  },
+  // Mark as Paid Button
+  markAsPaidButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4CAF50',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  markAsPaidButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // Payment Form Styles
+  paymentFormCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  paymentFormTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 20,
+  },
+  paymentStudentInfo: {
+    alignItems: 'center',
+  },
+  paymentStudentName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  paymentStudentDetails: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  inputGroup: {
+    marginBottom: 20,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#333',
+    backgroundColor: '#FAFAFA',
+  },
+  dateInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#FAFAFA',
+  },
+  dateInputText: {
+    fontSize: 16,
+    color: '#333',
+    flex: 1,
+  },
+  paymentModeChip: {
+    backgroundColor: '#F0F0F0',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  activePaymentModeChip: {
+    backgroundColor: '#2196F3',
+  },
+  paymentModeChipText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  activePaymentModeChipText: {
+    color: '#fff',
+  },
+  submitButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4CAF50',
+    borderRadius: 12,
+    paddingVertical: 16,
+    marginTop: 20,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+  },
+  submitButtonDisabled: {
+    opacity: 0.6,
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 

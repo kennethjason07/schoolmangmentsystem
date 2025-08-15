@@ -72,11 +72,22 @@ const AnalyticsReports = ({ navigation }) => {
     }
   };
 
-  // Helper function to format numbers
+  // Helper function to format numbers (for non-currency values)
   const formatNumber = (num) => {
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
     if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
     return num.toString();
+  };
+
+  // Helper function to format currency amounts
+  const formatCurrency = (amount) => {
+    const num = parseFloat(amount) || 0;
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(num);
   };
 
   // Load overview statistics
@@ -269,7 +280,7 @@ const AnalyticsReports = ({ navigation }) => {
     try {
       const dateRange = getDateRange();
 
-      // Load fee payments
+      // Load fee payments for the selected period
       const { data: feePayments } = await supabase
         .from(TABLES.STUDENT_FEES)
         .select(`
@@ -279,21 +290,31 @@ const AnalyticsReports = ({ navigation }) => {
         .gte('payment_date', dateRange.start.toISOString().split('T')[0])
         .lte('payment_date', dateRange.end.toISOString().split('T')[0]);
 
-      // Load fee structure
-      const { data: feeStructure } = await supabase
-        .from(TABLES.FEE_STRUCTURE)
-        .select('*');
+      // Load all student fees to calculate total expected vs total collected (overall performance)
+      const { data: allStudentFees } = await supabase
+        .from(TABLES.STUDENT_FEES)
+        .select(`
+          *,
+          fee_structure(amount)
+        `);
 
       // Calculate financial statistics
       const totalCollected = feePayments?.reduce((sum, payment) =>
         sum + (parseFloat(payment.amount_paid) || 0), 0
       ) || 0;
 
-      const totalExpected = feeStructure?.reduce((sum, fee) =>
-        sum + (parseFloat(fee.amount) || 0), 0
+      // Calculate overall collection efficiency (total collected across all time vs total expected)
+      const totalEverCollected = allStudentFees?.reduce((sum, payment) =>
+        sum + (parseFloat(payment.amount_paid) || 0), 0
       ) || 0;
+      
+      const totalExpectedFromFees = allStudentFees?.reduce((sum, payment) => {
+        const feeAmount = payment.fee_structure?.amount || 0;
+        return sum + parseFloat(feeAmount);
+      }, 0) || 0;
 
-      const collectionRate = totalExpected > 0 ? (totalCollected / totalExpected * 100) : 0;
+      // Collection rate based on overall school performance
+      const collectionRate = totalExpectedFromFees > 0 ? (totalEverCollected / totalExpectedFromFees * 100) : 0;
 
       // Group by payment mode
       const paymentModeDistribution = {};
@@ -311,7 +332,7 @@ const AnalyticsReports = ({ navigation }) => {
 
       setFinancialData({
         totalCollected,
-        totalExpected,
+        totalExpected: totalExpectedFromFees,
         collectionRate: Math.round(collectionRate),
         totalPayments: feePayments?.length || 0,
         paymentModeDistribution,
@@ -468,12 +489,12 @@ const AnalyticsReports = ({ navigation }) => {
           <Text style={styles.sectionTitle}>Financial Overview</Text>
           <View style={styles.financialStats}>
             <View style={styles.financialCard}>
-              <Text style={styles.financialAmount}>₹{formatNumber(financialData.totalCollected || 0)}</Text>
+              <Text style={styles.financialAmount}>{formatCurrency(financialData.totalCollected || 0)}</Text>
               <Text style={styles.financialLabel}>Total Collected</Text>
               <Text style={styles.financialSubtext}>{financialData.collectionRate || 0}% collection rate</Text>
             </View>
             <View style={styles.financialCard}>
-              <Text style={styles.financialAmount}>₹{formatNumber(overviewStats.totalSalaryExpense || 0)}</Text>
+              <Text style={styles.financialAmount}>{formatCurrency(overviewStats.totalSalaryExpense || 0)}</Text>
               <Text style={styles.financialLabel}>Monthly Salary Expense</Text>
               <Text style={styles.financialSubtext}>Teacher salaries</Text>
             </View>
@@ -526,7 +547,7 @@ const AnalyticsReports = ({ navigation }) => {
               <View style={styles.reportContent}>
                 <Text style={styles.reportTitle}>Fee Collection</Text>
                 <Text style={styles.reportSubtitle}>
-                  ₹{formatNumber(financialData.totalCollected || 0)} collected • {financialData.collectionRate || 0}% rate
+                  {formatCurrency(financialData.totalCollected || 0)} collected • {financialData.collectionRate || 0}% rate
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#666" />
@@ -543,6 +564,22 @@ const AnalyticsReports = ({ navigation }) => {
                 <Text style={styles.reportTitle}>Student Overview</Text>
                 <Text style={styles.reportSubtitle}>
                   {overviewStats.totalStudents || 0} students • {overviewStats.avgStudentsPerClass || 0} avg per class
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#666" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.reportItem}
+              onPress={() => navigation.navigate('ReportCardGeneration')}
+            >
+              <View style={[styles.reportIcon, { backgroundColor: '#E91E63' }]}>
+                <Ionicons name="document-text" size={24} color="#fff" />
+              </View>
+              <View style={styles.reportContent}>
+                <Text style={styles.reportTitle}>Report Card Generation</Text>
+                <Text style={styles.reportSubtitle}>
+                  Generate and download student report cards by class and exam
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#666" />

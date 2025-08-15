@@ -40,6 +40,7 @@ const TeacherDetails = ({ route, navigation }) => {
   const [allClasses, setAllClasses] = useState([]);
   const [saving, setSaving] = useState(false);
   const [sections, setSections] = useState([]);
+  const [classSubjectMap, setClassSubjectMap] = useState(new Map());
 
   const loadFormData = async () => {
     try {
@@ -175,7 +176,11 @@ const TeacherDetails = ({ route, navigation }) => {
         setTeacherData(t);
         // Fetch teacher subjects/classes
         const { data: teacherSubjects, error: tsError } = await dbHelpers.getTeacherSubjects(teacher.id);
-        if (tsError) throw tsError;
+        
+        if (tsError) {
+          console.error('Error fetching teacher subjects:', tsError);
+          throw tsError;
+        }
 
         // Fetch class teacher info
         const { data: classTeacherData, error: ctError } = await dbHelpers.read('classes', { class_teacher_id: teacher.id });
@@ -184,32 +189,36 @@ const TeacherDetails = ({ route, navigation }) => {
           setClassTeacherOf(classTeacherData[0]);
         }
 
-        // Extract unique subjects and classes from teacher assignments
+        // Process teacher assignments to group subjects by class
+        const classSubjectMap = new Map(); // Map of className -> [subjects]
         const uniqueSubjects = new Set();
         const uniqueClasses = new Set();
         
-        console.log('Processing teacher subjects:', teacherSubjects);
-        
-        teacherSubjects?.forEach(ts => {
-          // Get subject name from the subjects relation
-          if (ts.subjects?.name) {
-            uniqueSubjects.add(ts.subjects.name);
-            console.log('Added subject:', ts.subjects.name);
-          }
-          
-          // Get class name from the nested classes relation within subjects
-          if (ts.subjects?.classes?.class_name) {
-            const fullClassName = `${ts.subjects.classes.class_name}${ts.subjects.classes.section ? ' ' + ts.subjects.classes.section : ''}`;
-            uniqueClasses.add(fullClassName);
-            console.log('Added class:', fullClassName);
-          }
-        });
+        if (teacherSubjects && teacherSubjects.length > 0) {
+          teacherSubjects.forEach((ts) => {
+            // Get subject name from the subjects relation
+            if (ts.subjects?.name && ts.subjects?.classes?.class_name) {
+              const subjectName = ts.subjects.name;
+              const fullClassName = `${ts.subjects.classes.class_name}${ts.subjects.classes.section ? ' ' + ts.subjects.classes.section : ''}`;
+              
+              // Add to unique sets
+              uniqueSubjects.add(subjectName);
+              uniqueClasses.add(fullClassName);
+              
+              // Group subjects by class
+              if (!classSubjectMap.has(fullClassName)) {
+                classSubjectMap.set(fullClassName, []);
+              }
+              classSubjectMap.get(fullClassName).push(subjectName);
+            }
+          });
+        }
 
         const subjectsArray = Array.from(uniqueSubjects);
         const classesArray = Array.from(uniqueClasses);
         
-        console.log('Final subjects:', subjectsArray);
-        console.log('Final classes:', classesArray);
+        // Store the class-subject mapping for use in the UI
+        setClassSubjectMap(classSubjectMap);
         
         setSubjects(subjectsArray);
         setClasses(classesArray);
@@ -294,8 +303,8 @@ const TeacherDetails = ({ route, navigation }) => {
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
-                <Text style={{ fontSize: 20, color: '#FF9800', fontWeight: 'bold' }}>₹</Text>
-                <Text style={styles.statNumber}>
+                <MaterialIcons name="attach_money" size={20} color="#FF9800" />
+                <Text style={[styles.statNumber, styles.salaryText]} numberOfLines={1} adjustsFontSizeToFit={true}>
                   {teacherData?.salary_amount ? `₹${parseFloat(teacherData.salary_amount).toFixed(2)}` : 'N/A'}
                 </Text>
                 <Text style={styles.statLabel}>Salary</Text>
@@ -380,14 +389,14 @@ const TeacherDetails = ({ route, navigation }) => {
                           </View>
                         </View>
                         <View style={styles.subjectsList}>
-                          {subjects.slice(0, 3).map((subject, subIdx) => (
+                          {(classSubjectMap.get(cls) || []).slice(0, 3).map((subject, subIdx) => (
                             <View key={`${subject}-${subIdx}`} style={styles.subjectChip}>
                               <MaterialIcons name="book" size={14} color="#4CAF50" />
                               <Text style={styles.subjectChipText}>{subject}</Text>
                             </View>
                           ))}
-                          {subjects.length > 3 && (
-                            <Text style={styles.moreSubjectsText}>+{subjects.length - 3} more</Text>
+                          {(classSubjectMap.get(cls) || []).length > 3 && (
+                            <Text style={styles.moreSubjectsText}>+{(classSubjectMap.get(cls) || []).length - 3} more</Text>
                           )}
                         </View>
                       </View>
@@ -779,6 +788,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     textAlign: 'center',
+  },
+  salaryText: {
+    textAlign: 'center',
+    minWidth: 80,
+    maxWidth: 120,
   },
   statDivider: {
     width: 1,

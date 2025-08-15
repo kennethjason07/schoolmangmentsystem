@@ -56,13 +56,6 @@ const ExportModal = ({
       description: 'Copy data for pasting elsewhere',
       icon: 'copy',
       color: '#9C27B0'
-    },
-    {
-      key: EXPORT_FORMATS.CLIPBOARD,
-      label: 'Copy to Clipboard',
-      description: 'Copy data for pasting elsewhere',
-      icon: 'copy',
-      color: '#9C27B0'
     }
   ];
 

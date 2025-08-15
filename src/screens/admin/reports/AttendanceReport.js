@@ -16,7 +16,7 @@ import { Picker } from '@react-native-picker/picker';
 import Header from '../../../components/Header';
 import ExportModal from '../../../components/ExportModal';
 import { supabase, TABLES } from '../../../utils/supabase';
-import { exportAttendanceData, EXPORT_FORMATS } from '../../../utils/exportUtils';
+import { exportAttendanceData, exportIndividualAttendanceRecord, EXPORT_FORMATS } from '../../../utils/exportUtils';
 import { LineChart, BarChart } from 'react-native-chart-kit';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
@@ -328,8 +328,17 @@ const AttendanceReport = ({ navigation }) => {
     }
   };
 
+  // Handle navigation to detail screen
+  const handleRecordPress = (record) => {
+    navigation.navigate('AttendanceRecordDetail', { record });
+  };
+
   const renderClassWiseRecord = ({ item }) => (
-    <View style={styles.classWiseCard}>
+    <TouchableOpacity 
+      style={styles.classWiseCard} 
+      onPress={() => handleRecordPress(item)}
+      activeOpacity={0.7}
+    >
       <View style={styles.classWiseInfo}>
         <View style={styles.classIconContainer}>
           <Ionicons name="school" size={20} color="#2196F3" />
@@ -361,8 +370,14 @@ const AttendanceReport = ({ navigation }) => {
         ]}>
           {item.attendanceRate}%
         </Text>
+        
+        {/* Tap to View Details Indicator */}
+        <View style={styles.viewDetailsIndicator}>
+          <Ionicons name="chevron-forward" size={16} color="#999" />
+          <Text style={styles.tapToViewText}>Tap to view</Text>
+        </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   if (loading) {
@@ -524,53 +539,11 @@ const AttendanceReport = ({ navigation }) => {
           </View>
         )}
 
-        {/* Class-wise Attendance */}
-        {stats.classWiseAttendance.length > 0 && (
-          <View style={styles.classSection}>
-            <Text style={styles.sectionTitle}>Class-wise Attendance</Text>
-            {stats.classWiseAttendance.map((item, index) => (
-              <View key={index} style={styles.classCard}>
-                <View style={styles.classInfo}>
-                  <Text style={styles.className}>{item.className}</Text>
-                  <Text style={styles.classStats}>
-                    {item.present}/{item.total} students
-                  </Text>
-                </View>
-                <View style={styles.progressContainer}>
-                  <View style={styles.progressBar}>
-                    <View
-                      style={[
-                        styles.progressFill,
-                        {
-                          width: `${item.rate}%`,
-                          backgroundColor: item.rate >= 80 ? '#4CAF50' : item.rate >= 60 ? '#FF9800' : '#f44336'
-                        }
-                      ]}
-                    />
-                  </View>
-                  <Text style={[
-                    styles.percentageText,
-                    { color: item.rate >= 80 ? '#4CAF50' : item.rate >= 60 ? '#FF9800' : '#f44336' }
-                  ]}>
-                    {item.rate}%
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
 
         {/* Recent Attendance Records */}
         <View style={styles.recordsSection}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Recent Records</Text>
-            <TouchableOpacity
-              style={styles.exportButton}
-              onPress={() => setShowExportModal(true)}
-            >
-              <Ionicons name="download" size={16} color="#2196F3" />
-              <Text style={styles.exportText}>Export</Text>
-            </TouchableOpacity>
           </View>
 
           <FlatList
@@ -983,7 +956,7 @@ const styles = StyleSheet.create({
   },
   classWiseAttendanceInfo: {
     alignItems: 'flex-end',
-    width: 80,
+    minWidth: 120,
   },
   classWiseProgressContainer: {
     width: 60,
@@ -1000,6 +973,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     textAlign: 'center',
+    marginBottom: 8,
+  },
+
+  // View Details Indicator
+  viewDetailsIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  tapToViewText: {
+    fontSize: 10,
+    color: '#999',
+    marginLeft: 4,
   },
 
   // Empty State

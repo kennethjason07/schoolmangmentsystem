@@ -308,8 +308,6 @@ const AdminDashboard = ({ navigation }) => {
 
   const quickActions = [
     { title: 'School Details', icon: 'business', color: '#673AB7', screen: 'SchoolDetails' }, // Stack screen
-    { title: 'Manage Classes', icon: 'school', color: '#2196F3', screen: 'Classes' }, // Tab name
-    { title: 'Manage Students', icon: 'people', color: '#4CAF50', screen: 'Students' }, // Tab name
     { title: 'Manage Teachers', icon: 'person', color: '#FF9800', screen: 'Teachers' }, // Tab name
     { title: 'Teacher Accounts', icon: 'person-add', color: '#3F51B5', screen: 'TeacherAccountManagement' }, // Stack screen
     { title: 'Student Accounts', icon: 'people-circle', color: '#8BC34A', screen: 'StudentAccountManagement' }, // Stack screen
@@ -318,7 +316,8 @@ const AdminDashboard = ({ navigation }) => {
     { title: 'Attendance', icon: 'checkmark-circle', color: '#009688', screen: 'AttendanceManagement' }, // Stack screen
     { title: 'Fee Management', icon: 'card', color: '#9C27B0', screen: 'FeeManagement' }, // Stack screen
     { title: 'Exams & Marks', icon: 'document-text', color: '#795548', screen: 'ExamsMarks' }, // Stack screen
-    { title: 'Notifications', icon: 'notifications', color: '#E91E63', screen: 'NotificationManagement' }, // Stack screen
+    { title: 'Report Cards', icon: 'document-text', color: '#E91E63', screen: 'ReportCardGeneration' }, // Stack screen
+    { title: 'Notifications', icon: 'notifications', color: '#FF5722', screen: 'NotificationManagement' }, // Stack screen
   ];
 
   // State for chart data (only fee collection data now)

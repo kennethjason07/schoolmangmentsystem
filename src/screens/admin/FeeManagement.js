@@ -16,7 +16,7 @@ import {
   Pressable,
 } from 'react-native';
 import Header from '../../components/Header';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
@@ -102,36 +102,37 @@ const FeeManagement = () => {
   };
 
   // Helper function to calculate total fees for a student
-  // Calculate fee statistics
-  const calculateFeeStats = async () => {
-    try {
-      const { data: feeStructures, error: feeError } = await supabase
-        .from(TABLES.FEE_STRUCTURE)
-        .select('amount');
+      // Calculate fee statistics
+      const calculateFeeStats = async () => {
+        try {
+          const { data: feeStructures, error: feeError } = await supabase
+            .from(TABLES.FEE_STRUCTURE)
+            .select('amount');
 
-      if (feeError) throw feeError;
+          if (feeError) throw feeError;
 
-      const { data: studentFees, error: paymentError } = await supabase
-        .from(TABLES.STUDENT_FEES)
-        .select('amount_paid, student_id');
+          const { data: studentFees, error: paymentError } = await supabase
+            .from(TABLES.STUDENT_FEES)
+            .select('amount_paid, student_id');
 
-      if (paymentError) throw paymentError;
+          if (paymentError) throw paymentError;
 
-      const { data: allStudents, error: studentsError } = await supabase
-        .from(TABLES.STUDENTS)
-        .select('id');
+          const { data: allStudents, error: studentsError } = await supabase
+            .from(TABLES.STUDENTS)
+            .select('id');
 
-      if (studentsError) throw studentsError;
+          if (studentsError) throw studentsError;
 
-      // Calculate totals
-      const totalDue = feeStructures.reduce((sum, fee) => sum + Number(fee.amount), 0);
-      const totalPaid = studentFees.reduce((sum, payment) => sum + Number(payment.amount_paid), 0);
-      
-      // Calculate pending students - students who have no payments at all
-      const studentsWithPayments = new Set(studentFees.map(fee => fee.student_id));
-      const pendingStudents = (allStudents?.length || 0) - studentsWithPayments.size;
+          // Calculate totals
+          const totalDue = feeStructures.reduce((sum, fee) => sum + Number(fee.amount), 0);
+          const totalPaid = studentFees.reduce((sum, payment) => sum + Number(payment.amount_paid || 0), 0);
+          
+          // Calculate pending students - students who have no payments at all
+          const studentsWithPayments = new Set(studentFees.map(fee => fee.student_id));
+          const pendingStudents = (allStudents?.length || 0) - studentsWithPayments.size;
 
-      setFeeStats({ totalDue, totalPaid, pendingStudents });
+          console.log('Fee Stats - Total Paid Amount:', totalPaid);
+          setFeeStats({ totalDue, totalPaid, pendingStudents });
     } catch (error) {
       console.error('Error calculating fee statistics:', error);
       setFeeStats({ totalDue: 0, totalPaid: 0, pendingStudents: 0 });
@@ -180,6 +181,7 @@ const FeeManagement = () => {
       
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
+      console.log('📅 Academic year being used:', academicYear);
 
       // Get all classes in a single query
       const { data: classesWithStats, error } = await supabase
@@ -191,8 +193,10 @@ const FeeManagement = () => {
         `);
 
       if (error) throw error;
+      console.log('📊 Classes found:', classesWithStats?.length || 0);
 
       if (!classesWithStats || classesWithStats.length === 0) {
+        console.log('❌ No classes found, setting empty stats');
         setClassPaymentStats([]);
         setPaymentSummary({ totalCollected: 0, totalDue: 0, totalOutstanding: 0, collectionRate: 0 });
         return;
@@ -200,12 +204,16 @@ const FeeManagement = () => {
 
       const classIds = classesWithStats.map(c => c.id);
 
-      // Get all fee structures for all classes in a single query
+      // Get all fee structures for all classes in a single query (removed academic year filter)
       const { data: allFeeStructures } = await supabase
         .from(TABLES.FEE_STRUCTURE)
         .select('*')
-        .in('class_id', classIds)
-        .eq('academic_year', academicYear);
+        .in('class_id', classIds);
+
+      console.log('💰 Fee structures found:', allFeeStructures?.length || 0);
+      if (allFeeStructures && allFeeStructures.length > 0) {
+        console.log('💰 Sample fee structure:', allFeeStructures[0]);
+      }
 
       // Get all students for all classes in a single query
       const { data: allStudents } = await supabase
@@ -213,15 +221,67 @@ const FeeManagement = () => {
         .select('id, name, class_id')
         .in('class_id', classIds);
 
+      console.log('👥 Students found:', allStudents?.length || 0);
+
       // Get all student IDs for payment lookup
       const studentIds = allStudents?.map(s => s.id) || [];
+      console.log('🎯 Student IDs from classes query:', studentIds.length > 0 ? studentIds.slice(0, 5) : 'No students found');
       
-      // Get all payments for all students in a single query
-      const { data: allPayments } = studentIds.length > 0 ? await supabase
+      // Debug the table reference issue
+      console.log('🔍 Table reference being used:', TABLES.STUDENT_FEES);
+      
+      // First, let's check what student IDs actually exist in the payments table
+      // Fix: Remove fee_id as it doesn't exist in the schema
+      const { data: allPaymentsCheck, error: checkError } = await supabase
         .from(TABLES.STUDENT_FEES)
-        .select('student_id, amount_paid, academic_year')
-        .in('student_id', studentIds)
-        .eq('academic_year', academicYear) : { data: [] };
+        .select('student_id, amount_paid')
+        .limit(5);
+      
+      if (checkError) {
+        console.error('🚨 Error checking payments table:', checkError);
+      }
+      
+      console.log('🎯 Sample payment student IDs from database:', allPaymentsCheck?.map(p => p.student_id) || 'No payments in DB');
+      
+      // Also try getting ALL payments without filtering to see if there's a mismatch
+      const { data: allPaymentsUnfiltered, error: unfilteredError } = await supabase
+        .from(TABLES.STUDENT_FEES)
+        .select('student_id, amount_paid');
+        
+      if (unfilteredError) {
+        console.error('🚨 Error getting unfiltered payments:', unfilteredError);
+      }
+        
+      console.log('🎯 Total payments in database (unfiltered):', allPaymentsUnfiltered?.length || 0);
+      if (allPaymentsUnfiltered && allPaymentsUnfiltered.length > 0) {
+        console.log('🎯 Sample unfiltered payment:', allPaymentsUnfiltered[0]);
+        const totalFromUnfiltered = allPaymentsUnfiltered.reduce((sum, p) => sum + (parseFloat(p.amount_paid || 0)), 0);
+        console.log('🎯 Total amount from unfiltered payments:', totalFromUnfiltered);
+      }
+      
+      // Get all payments for all students in a single query (removed academic year filter)
+      // Fix: Remove fee_id as it doesn't exist in the schema
+      const { data: allPayments, error: paymentsError } = studentIds.length > 0 ? await supabase
+        .from(TABLES.STUDENT_FEES)
+        .select('student_id, amount_paid')
+        .in('student_id', studentIds) : { data: [], error: null };
+        
+      if (paymentsError) {
+        console.error('🚨 Error getting filtered payments:', paymentsError);
+      }
+
+      console.log('💳 Payments found:', allPayments?.length || 0);
+      console.log('💳 Raw payments data:', allPayments);
+      if (allPayments && allPayments.length > 0) {
+        console.log('💳 Sample payment:', allPayments[0]);
+        console.log('💳 All payment amounts:', allPayments.map(p => p.amount_paid));
+        const totalFromAllPayments = allPayments.reduce((sum, p) => {
+          const amount = parseFloat(p.amount_paid || 0);
+          console.log(`Payment ${p.student_id}: ${p.amount_paid} -> parsed: ${amount}`);
+          return sum + amount;
+        }, 0);
+        console.log('💳 Total payments amount:', totalFromAllPayments);
+      }
 
       // Create lookup maps for O(1) access
       const feeStructureLookup = {};
@@ -247,6 +307,11 @@ const FeeManagement = () => {
         }
         paymentsLookup[payment.student_id].push(payment);
       });
+      
+      // Debug total payments
+      console.log('Class Payment Stats - Total payments:', allPayments?.length || 0);
+      const totalPaymentsAmount = (allPayments || []).reduce((sum, p) => sum + (parseFloat(p.amount_paid || 0)), 0);
+      console.log('Class Payment Stats - Total payments amount:', totalPaymentsAmount);
 
       // Process all classes synchronously using lookup maps
       const classStats = classesWithStats.map(classData => {
@@ -263,20 +328,32 @@ const FeeManagement = () => {
         const totalExpectedFees = totalFeeStructure * totalStudents;
 
         // Calculate payments for this class
-        let totalPaid = 0;
-        const studentsWithPaymentsSet = new Set();
+          let totalPaid = 0;
+          const studentsWithPaymentsSet = new Set();
 
-        studentsInClass.forEach(student => {
-          const studentPayments = paymentsLookup[student.id] || [];
-          const studentTotalPaid = studentPayments.reduce((sum, payment) => 
-            sum + (parseFloat(payment.amount_paid) || 0), 0);
+          studentsInClass.forEach(student => {
+            const studentPayments = paymentsLookup[student.id] || [];
+            const studentTotalPaid = studentPayments.reduce((sum, payment) => 
+              sum + (parseFloat(payment.amount_paid || 0)), 0);
+            
+            totalPaid += studentTotalPaid;
+            
+            if (studentTotalPaid > 0) {
+              studentsWithPaymentsSet.add(student.id);
+            }
+          });
           
-          totalPaid += studentTotalPaid;
+          console.log(`Class ${classData.class_name} - Students: ${studentsInClass.length}, Total Paid: ${totalPaid}`);
           
-          if (studentTotalPaid > 0) {
-            studentsWithPaymentsSet.add(student.id);
-          }
-        });
+          // Debug each student's payments
+          studentsInClass.forEach(student => {
+            const studentPayments = paymentsLookup[student.id] || [];
+            const studentTotalPaid = studentPayments.reduce((sum, payment) => 
+              sum + (parseFloat(payment.amount_paid || 0)), 0);
+            if (studentTotalPaid > 0) {
+              console.log(`  Student ${student.name} (${student.id}): ${studentTotalPaid} from ${studentPayments.length} payments`);
+            }
+          });
 
         const studentsWithPayments = studentsWithPaymentsSet.size;
         const studentsWithoutPayments = totalStudents - studentsWithPayments;
@@ -306,16 +383,34 @@ const FeeManagement = () => {
 
       setClassPaymentStats(classStats);
 
+      console.log('📈 Class stats before summary calculation:', classStats);
+      
       // Calculate overall payment summary
-      const summary = classStats.reduce((acc, classData) => ({
-        totalCollected: acc.totalCollected + classData.totalPaid,
-        totalDue: acc.totalDue + classData.totalExpectedFees,
-        totalOutstanding: acc.totalOutstanding + classData.outstanding,
-      }), { totalCollected: 0, totalDue: 0, totalOutstanding: 0 });
+      const summary = classStats.reduce((acc, classData) => {
+        console.log(`📊 Processing class ${classData.className}: collected=${classData.totalPaid}, due=${classData.totalExpectedFees}, outstanding=${classData.outstanding}`);
+        
+        return {
+          totalCollected: acc.totalCollected + (classData.totalPaid || 0),
+          totalDue: acc.totalDue + (classData.totalExpectedFees || 0),
+          totalOutstanding: acc.totalOutstanding + (classData.outstanding || 0),
+        };
+      }, { totalCollected: 0, totalDue: 0, totalOutstanding: 0 });
+      
+      console.log('💰 Final payment summary calculation:', summary);
+      console.log('💰 Total collected from all classes (sum):', classStats.reduce((sum, c) => sum + (c.totalPaid || 0), 0));
+      console.log('💰 Direct total from all payments query:', totalPaymentsAmount);
+
+      // Override with direct calculation if available
+      if (totalPaymentsAmount > 0 && summary.totalCollected === 0) {
+        console.log('🔧 Using direct payment total instead of class aggregation');
+        summary.totalCollected = totalPaymentsAmount;
+        summary.totalOutstanding = summary.totalDue - totalPaymentsAmount;
+      }
 
       summary.collectionRate = summary.totalDue > 0 ?
         Math.round((summary.totalCollected / summary.totalDue) * 10000) / 100 : 0;
 
+      console.log('💰 Final payment summary (after override):', summary);
       setPaymentSummary(summary);
 
       // 📊 Performance monitoring
@@ -337,10 +432,30 @@ const FeeManagement = () => {
     }
   };
 
-  // Load all data from Supabase
+  // Load all data from Supabase on component mount
   useEffect(() => {
     loadAllData();
   }, []);
+
+  // Add focus effect to refresh data when screen comes into focus
+  // Only refresh once per focus event to prevent continuous refreshing
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('FeeManagement - Screen focused');
+      // Use a ref to track if we've already refreshed on this focus
+      const shouldRefresh = !loading && !refreshing;
+      
+      if (shouldRefresh) {
+        console.log('FeeManagement - Refreshing data due to screen focus');
+        loadAllData();
+      } else {
+        console.log('FeeManagement - Skipping refresh (already loading or refreshing)');
+      }
+    }, []) // Remove dependencies to prevent continuous calls
+  );
+
+  // Remove the tab change effect as it's causing continuous refreshing
+  // The useFocusEffect and pull-to-refresh should be sufficient for real-time updates
 
   const loadAllData = async () => {
     const startTime = performance.now(); // 📊 Performance monitoring

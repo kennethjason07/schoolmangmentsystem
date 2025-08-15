@@ -466,7 +466,7 @@ const ProfileScreen = () => {
                 </TouchableOpacity>
               </View>
             )}
-            <Text style={styles.name}>{user?.name || 'No Name'}</Text>
+            <Text style={styles.name}>{user?.full_name || 'No Name'}</Text>
             <Text style={styles.email}>{user?.email || 'No Email'}</Text>
           </View>
           <View style={styles.rolesContainer}>

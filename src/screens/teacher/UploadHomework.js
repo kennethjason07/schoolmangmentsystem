@@ -708,30 +708,39 @@ const UploadHomework = () => {
             </View>
             
             <ScrollView style={styles.modalBody}>
-              <TextInput
-                style={styles.input}
-                placeholder="Homework Title"
-                value={homeworkTitle}
-                onChangeText={setHomeworkTitle}
-              />
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Homework Title:</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter homework title"
+                  value={homeworkTitle}
+                  onChangeText={setHomeworkTitle}
+                />
+              </View>
               
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="Description"
-                value={homeworkDescription}
-                onChangeText={setHomeworkDescription}
-                multiline
-                numberOfLines={3}
-              />
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Description:</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="Enter homework description"
+                  value={homeworkDescription}
+                  onChangeText={setHomeworkDescription}
+                  multiline
+                  numberOfLines={3}
+                />
+              </View>
               
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="Instructions"
-                value={homeworkInstructions}
-                onChangeText={setHomeworkInstructions}
-                multiline
-                numberOfLines={3}
-              />
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Instructions:</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="Enter homework instructions"
+                  value={homeworkInstructions}
+                  onChangeText={setHomeworkInstructions}
+                  multiline
+                  numberOfLines={3}
+                />
+              </View>
 
               <TouchableOpacity
                 style={styles.dateButton}
@@ -1153,11 +1162,20 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 2,
   },
+  inputGroup: {
+    marginBottom: 14,
+  },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 6,
+  },
   input: {
     backgroundColor: '#f8f9fa',
     borderRadius: 8,
     padding: 12,
-    marginBottom: 14,
+    marginBottom: 0,
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#e9ecef',

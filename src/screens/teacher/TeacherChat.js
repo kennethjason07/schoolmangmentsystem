@@ -158,7 +158,7 @@ const TeacherChat = () => {
     }
   };
 
-  // Fetch parents of students assigned to the teacher
+  // Fetch parents of students assigned to the teacher - SUPER OPTIMIZED
   const fetchParents = async () => {
     try {
       // Get teacher info from users table
@@ -173,125 +173,136 @@ const TeacherChat = () => {
       }
 
       const teacherId = userInfo.linked_teacher_id;
-
-      // Get students from classes this teacher teaches
       const uniqueParents = [];
       const seen = new Set();
 
-      // Method 1: Get students via class assignments (teacher as class teacher)
-      const { data: classTeacherClasses, error: classTeacherError } = await supabase
-        .from(TABLES.CLASSES)
-        .select(`
-          id,
-          class_name,
-          section,
-          students!inner(
+      // SUPER OPTIMIZATION: Execute both queries in parallel for maximum speed
+      const [classParentResult, subjectParentResult] = await Promise.all([
+        // Query 1: Get class teacher students and their parents
+        supabase
+          .from(TABLES.STUDENTS)
+          .select(`
             id,
             name,
             roll_no,
-            parent_id
-          )
-        `)
-        .eq('class_teacher_id', teacherId);
+            parent_id,
+            class_id,
+            classes!inner (
+              id,
+              class_name,
+              section,
+              class_teacher_id
+            ),
+            users!students_parent_id_fkey (
+              id,
+              email,
+              full_name
+            )
+          `)
+          .eq('classes.class_teacher_id', teacherId),
+          
+        // Query 2: Get subject teaching students and their parents
+        supabase
+          .from(TABLES.TEACHER_SUBJECTS)
+          .select(`
+            subjects!inner (
+              id,
+              name,
+              classes!inner (
+                id,
+                class_name,
+                section,
+                students!inner (
+                  id,
+                  name,
+                  roll_no,
+                  parent_id,
+                  users!students_parent_id_fkey (
+                    id,
+                    email,
+                    full_name
+                  )
+                )
+              )
+            )
+          `)
+          .eq('teacher_id', teacherId)
+      ]);
 
-      if (!classTeacherError && classTeacherClasses) {
-        console.log('📚 Found classes as class teacher:', classTeacherClasses.length);
-        
-        for (const classInfo of classTeacherClasses) {
-          if (classInfo.students) {
-            for (const student of classInfo.students) {
-              const parentData = await getParentUserId(student.id);
-              
-              if (parentData && !seen.has(parentData.id)) {
-                uniqueParents.push({
-                  id: parentData.id,
-                  name: parentData.name,
-                  email: parentData.email,
-                  students: [{
-                    id: student.id,
-                    name: student.name,
-                    roll_no: student.roll_no,
-                    class: `${classInfo.class_name} ${classInfo.section}`
-                  }],
-                  role: 'class_parent',
-                  canMessage: true
-                });
-                seen.add(parentData.id);
-              }
+      // Process class teacher students and parents
+      if (!classParentResult.error && classParentResult.data) {
+        for (const student of classParentResult.data) {
+          if (student.users && !seen.has(student.users.id)) {
+            uniqueParents.push({
+              id: student.users.id,
+              name: student.users.full_name || student.users.email,
+              email: student.users.email,
+              students: [{
+                id: student.id,
+                name: student.name,
+                roll_no: student.roll_no,
+                class: `${student.classes.class_name} ${student.classes.section}`
+              }],
+              role: 'class_parent',
+              canMessage: true
+            });
+            seen.add(student.users.id);
+          } else if (student.users) {
+            // Add student to existing parent
+            const existingParent = uniqueParents.find(p => p.id === student.users.id);
+            if (existingParent) {
+              existingParent.students.push({
+                id: student.id,
+                name: student.name,
+                roll_no: student.roll_no,
+                class: `${student.classes.class_name} ${student.classes.section}`
+              });
             }
           }
         }
       }
 
-      // Method 2: Get students via subject assignments
-      const { data: subjectTeaching, error: subjectError } = await supabase
-        .from(TABLES.TEACHER_SUBJECTS)
-        .select(`
-          subject_id,
-          subjects!inner(
-            id,
-            name,
-            class_id,
-            classes!inner(
-              id,
-              class_name,
-              section,
-              students!inner(
-                id,
-                name,
-                roll_no,
-                parent_id
-              )
-            )
-          )
-        `)
-        .eq('teacher_id', teacherId);
-
-      if (!subjectError && subjectTeaching) {
-        for (const subject of subjectTeaching) {
-          if (subject.subjects?.classes?.students) {
-            for (const student of subject.subjects.classes.students) {
-              const parentData = await getParentUserId(student.id);
-              
-              if (parentData && !seen.has(parentData.id)) {
-                // Check if parent already exists (from class teacher assignments)
-                const existingParent = uniqueParents.find(p => p.id === parentData.id);
-                
+      // Process subject teaching students and parents
+      if (!subjectParentResult.error && subjectParentResult.data) {
+        for (const teacherSubject of subjectParentResult.data) {
+          if (teacherSubject.subjects?.classes?.students) {
+            for (const student of teacherSubject.subjects.classes.students) {
+              if (student.users && !seen.has(student.users.id)) {
+                uniqueParents.push({
+                  id: student.users.id,
+                  name: student.users.full_name || student.users.email,
+                  email: student.users.email,
+                  students: [{
+                    id: student.id,
+                    name: student.name,
+                    roll_no: student.roll_no,
+                    class: `${teacherSubject.subjects.classes.class_name} ${teacherSubject.subjects.classes.section}`,
+                    subject: teacherSubject.subjects.name
+                  }],
+                  role: 'subject_parent',
+                  canMessage: true
+                });
+                seen.add(student.users.id);
+              } else if (student.users) {
+                // Add student to existing parent
+                const existingParent = uniqueParents.find(p => p.id === student.users.id);
                 if (existingParent) {
-                  // Add student to existing parent if not already there
                   const studentExists = existingParent.students.some(s => s.id === student.id);
                   if (!studentExists) {
                     existingParent.students.push({
                       id: student.id,
                       name: student.name,
                       roll_no: student.roll_no,
-                      class: `${subject.subjects.classes.class_name} ${subject.subjects.classes.section}`,
-                      subject: subject.subjects.name
+                      class: `${teacherSubject.subjects.classes.class_name} ${teacherSubject.subjects.classes.section}`,
+                      subject: teacherSubject.subjects.name
                     });
                   }
-                } else {
-                  uniqueParents.push({
-                    id: parentData.id,
-                    name: parentData.name,
-                    email: parentData.email,
-                    students: [{
-                      id: student.id,
-                      name: student.name,
-                      roll_no: student.roll_no,
-                      class: `${subject.subjects.classes.class_name} ${subject.subjects.classes.section}`,
-                      subject: subject.subjects.name
-                    }],
-                    role: 'subject_parent',
-                    canMessage: true
-                  });
-                  seen.add(parentData.id);
                 }
               }
             }
           }
         }
       }
-
 
       setParents(uniqueParents);
     } catch (err) {
@@ -300,207 +311,56 @@ const TeacherChat = () => {
     }
   };
 
-  // Fetch students assigned to the teacher
+  // Fetch students assigned to the teacher - SUPER OPTIMIZED
   const fetchStudents = async () => {
     try {
-      console.log('🔍 DEBUG: Starting comprehensive teacher data analysis');
-      console.log('Current user:', user);
-      console.log('📍 fetchStudents function called at:', new Date().toISOString());
-      
-      // Check current user's complete info
+      // Get teacher info from users table
       const { data: userInfo, error: userError } = await supabase
         .from(TABLES.USERS)
-        .select('*')
+        .select('linked_teacher_id')
         .eq('id', user.id)
         .single();
 
-      console.log('👤 Complete user info:', userInfo, 'Error:', userError);
+      if (userError || !userInfo?.linked_teacher_id) {
+        throw new Error('Teacher information not found. Please contact administrator.');
+      }
 
-      // Check all teachers in the system
-      const { data: allTeachers, error: teachersError } = await supabase
-        .from(TABLES.TEACHERS)
-        .select('*');
-      
-      console.log('🏫 All teachers in system:', allTeachers, 'Error:', teachersError);
-      
-      // Skip teacher by email check since email column doesn't exist
-      console.log('📧 Skipping teacher email check - email column does not exist in teachers table');
-      const teacherByEmail = null;
-      
-      // Skip users by role check since role column doesn't exist
-      console.log('👨‍🏫 Skipping teacher role check - role column does not exist in users table');
-      const teacherUsers = null;
-      
-      // Find teacher ID - multiple methods
-      let teacherId = null;
-      let useAllStudents = false;
-      
-      // Method 1: From user's linked_teacher_id
-      if (userInfo?.linked_teacher_id) {
-        teacherId = userInfo.linked_teacher_id;
-        console.log('✅ Found teacher ID from linked_teacher_id:', teacherId);
-      }
-      
-      // Method 2: Skip teacher by email (column doesn't exist)
-      // teacherId remains null from this method
-      
-      // Method 3: Use first teacher if only one exists (fallback for testing)
-      if (!teacherId && allTeachers?.length === 1) {
-        teacherId = allTeachers[0].id;
-        console.log('⚠️ Using single teacher ID as fallback:', teacherId);
-      }
-      
-      // Method 4: If still no teacher ID, show all students for now (testing mode)
-      if (!teacherId) {
-        console.log('⚠️ No teacher ID found, using fallback mode to show all students');
-        useAllStudents = true;
-      } else {
-        console.log('🎯 Using teacher ID:', teacherId);
-      }
-      
+      const teacherId = userInfo.linked_teacher_id;
       const uniqueStudents = [];
       const seen = new Set();
-      
-      // If using fallback mode (no teacher ID), get all students
-      if (useAllStudents) {
-        console.log('🔄 FALLBACK MODE: Fetching all students for testing...');
-        
-        const { data: allStudentsData, error: allStudentsError } = await supabase
+      const studentUserMap = new Map(); // Cache for student user accounts
+
+      // SUPER OPTIMIZATION 1: Single query to get ALL students and user accounts at once
+      const [classStudentResult, subjectStudentResult, allStudentUsersResult] = await Promise.all([
+        // Get class students
+        supabase
           .from(TABLES.STUDENTS)
           .select(`
             id,
             name,
             roll_no,
             class_id,
-            classes(
-              class_name,
-              section
-            )
-          `);
-          
-        console.log('📚 All students query result:', {
-          error: allStudentsError,
-          students: allStudentsData?.length || 0,
-          data: allStudentsData?.slice(0, 5) // Show first 5 for debugging
-        });
-        
-        if (!allStudentsError && allStudentsData) {
-          for (const student of allStudentsData) {
-            console.log('👦 Processing fallback student:', student.name, 'Class:', student.classes?.class_name, student.classes?.section);
-            
-            // Check if student has a user account for messaging
-            const { data: studentUser, error: studentUserError } = await supabase
-              .from(TABLES.USERS)
-              .select('id, email, full_name')
-              .eq('linked_student_id', student.id)
-              .single();
-
-            const canMessage = !studentUserError && studentUser;
-            
-            console.log('💬 Fallback student messaging check:', {
-              student: student.name,
-              canMessage,
-              userId: canMessage ? studentUser.id : null,
-              error: studentUserError?.message
-            });
-            
-            const className = student.classes ? `${student.classes.class_name} ${student.classes.section}` : 'Unknown Class';
-            
-            uniqueStudents.push({
-              id: student.id,
-              name: student.name,
-              roll_no: student.roll_no,
-              email: student.email || null, // email might not exist
-              phone: student.phone || null, // phone might not exist
-              class: className,
-              role: 'class_student',
-              canMessage: canMessage,
-              userId: canMessage ? studentUser.id : null
-            });
-          }
-        }
-      } else {
-        // Normal mode with teacher ID
-        // Method 1: Get students from classes this teacher teaches (as class teacher)
-        const { data: classTeacherClasses, error: classTeacherError } = await supabase
-          .from(TABLES.CLASSES)
-          .select(`
-            id,
-            class_name,
-            section,
-            students!inner(
+            classes!inner (
               id,
-              name,
-              roll_no
+              class_name,
+              section,
+              class_teacher_id
             )
           `)
-          .eq('class_teacher_id', teacherId);
-
-        console.log('📚 Class teacher query result:', {
-          error: classTeacherError,
-          classes: classTeacherClasses?.length || 0,
-          data: classTeacherClasses
-        });
-        
-        if (!classTeacherError && classTeacherClasses) {
-          console.log('✅ Found', classTeacherClasses.length, 'classes as class teacher');
+          .eq('classes.class_teacher_id', teacherId),
           
-          for (const classInfo of classTeacherClasses) {
-            console.log('📝 Processing class:', classInfo.class_name, classInfo.section, 'Students:', classInfo.students?.length || 0);
-            
-            if (classInfo.students) {
-              for (const student of classInfo.students) {
-                console.log('👦 Processing student:', student.name, 'ID:', student.id);
-                
-                if (!seen.has(student.id)) {
-                  // Check if student has a user account for messaging
-                  const { data: studentUser, error: studentUserError } = await supabase
-                    .from(TABLES.USERS)
-                    .select('id, email, full_name')
-                    .eq('linked_student_id', student.id)
-                    .single();
-
-                  const canMessage = !studentUserError && studentUser;
-                  
-                  console.log('💬 Student messaging check:', {
-                    student: student.name,
-                    canMessage,
-                    userId: canMessage ? studentUser.id : null,
-                    error: studentUserError?.message
-                  });
-                  
-                  uniqueStudents.push({
-                    id: student.id,
-                    name: student.name,
-                    roll_no: student.roll_no,
-                    email: student.email || null, // email might not exist
-                    phone: student.phone || null, // phone might not exist
-                    class: `${classInfo.class_name} ${classInfo.section}`,
-                    role: 'class_student',
-                    canMessage: canMessage,
-                    userId: canMessage ? studentUser.id : null
-                  });
-                  seen.add(student.id);
-                }
-              }
-            }
-          }
-        }
-
-        // Method 2: Get students via subject assignments
-        const { data: subjectTeaching, error: subjectError } = await supabase
+        // Get subject students
+        supabase
           .from(TABLES.TEACHER_SUBJECTS)
           .select(`
-            subject_id,
-            subjects!inner(
+            subjects!inner (
               id,
               name,
-              class_id,
-              classes!inner(
+              classes!inner (
                 id,
                 class_name,
                 section,
-                students!inner(
+                students!inner (
                   id,
                   name,
                   roll_no
@@ -508,102 +368,82 @@ const TeacherChat = () => {
               )
             )
           `)
-          .eq('teacher_id', teacherId);
-      
-        console.log('📖 Subject teaching query result:', {
-          error: subjectError,
-          subjects: subjectTeaching?.length || 0,
-          data: subjectTeaching
-        });
-        
-        if (!subjectError && subjectTeaching) {
-          console.log('✅ Found', subjectTeaching.length, 'subject assignments');
+          .eq('teacher_id', teacherId),
           
-          for (const subject of subjectTeaching) {
-            console.log('📖 Processing subject:', subject.subjects?.name, 'Class:', subject.subjects?.classes?.class_name, subject.subjects?.classes?.section);
-            
-            if (subject.subjects?.classes?.students) {
-              console.log('👥 Students in this subject:', subject.subjects.classes.students.length);
-              
-              for (const student of subject.subjects.classes.students) {
-                console.log('👦 Processing subject student:', student.name, 'ID:', student.id);
-                
-                if (!seen.has(student.id)) {
-                  // Check if student has a user account for messaging
-                  const { data: studentUser, error: studentUserError } = await supabase
-                    .from(TABLES.USERS)
-                    .select('id, email, full_name')
-                    .eq('linked_student_id', student.id)
-                    .single();
+        // Get ALL student user accounts in one query
+        supabase
+          .from(TABLES.USERS)
+          .select('id, email, full_name, linked_student_id')
+          .not('linked_student_id', 'is', null)
+      ]);
 
-                  const canMessage = !studentUserError && studentUser;
-                  
-                  console.log('💬 Subject student messaging check:', {
-                    student: student.name,
-                    canMessage,
-                    userId: canMessage ? studentUser.id : null,
-                    error: studentUserError?.message
-                  });
-                  
-                  uniqueStudents.push({
-                    id: student.id,
-                    name: student.name,
-                    roll_no: student.roll_no,
-                    email: student.email || null, // email might not exist
-                    phone: student.phone || null, // phone might not exist
-                    class: `${subject.subjects.classes.class_name} ${subject.subjects.classes.section}`,
-                    subject: subject.subjects.name,
-                    role: 'subject_student',
-                    canMessage: canMessage,
-                    userId: canMessage ? studentUser.id : null
-                  });
-                  seen.add(student.id);
-                } else {
-                  // Add subject info to existing student
-                  const existingStudent = uniqueStudents.find(s => s.id === student.id);
-                  if (existingStudent && !existingStudent.subject) {
-                    existingStudent.subject = subject.subjects.name;
-                  }
+      // Build student-user mapping for instant lookups
+      if (!allStudentUsersResult.error && allStudentUsersResult.data) {
+        allStudentUsersResult.data.forEach(user => {
+          if (user.linked_student_id) {
+            studentUserMap.set(user.linked_student_id, user);
+          }
+        });
+      }
+
+      // Process class students
+      if (!classStudentResult.error && classStudentResult.data) {
+        for (const student of classStudentResult.data) {
+          if (!seen.has(student.id)) {
+            const studentUser = studentUserMap.get(student.id);
+            const canMessage = !!studentUser;
+            
+            uniqueStudents.push({
+              id: student.id,
+              name: student.name,
+              roll_no: student.roll_no,
+              email: canMessage ? studentUser.email : null,
+              phone: student.phone || null,
+              class: `${student.classes.class_name} ${student.classes.section}`,
+              role: 'class_student',
+              canMessage: canMessage,
+              userId: canMessage ? studentUser.id : null
+            });
+            seen.add(student.id);
+          }
+        }
+      }
+
+      // Process subject students
+      if (!subjectStudentResult.error && subjectStudentResult.data) {
+        for (const teacherSubject of subjectStudentResult.data) {
+          if (teacherSubject.subjects?.classes?.students) {
+            for (const student of teacherSubject.subjects.classes.students) {
+              if (!seen.has(student.id)) {
+                const studentUser = studentUserMap.get(student.id);
+                const canMessage = !!studentUser;
+                
+                uniqueStudents.push({
+                  id: student.id,
+                  name: student.name,
+                  roll_no: student.roll_no,
+                  email: canMessage ? studentUser.email : null,
+                  phone: student.phone || null,
+                  class: `${teacherSubject.subjects.classes.class_name} ${teacherSubject.subjects.classes.section}`,
+                  subject: teacherSubject.subjects.name,
+                  role: 'subject_student',
+                  canMessage: canMessage,
+                  userId: canMessage ? studentUser.id : null
+                });
+                seen.add(student.id);
+              } else {
+                // Add subject info to existing student
+                const existingStudent = uniqueStudents.find(s => s.id === student.id);
+                if (existingStudent && !existingStudent.subject) {
+                  existingStudent.subject = teacherSubject.subjects.name;
                 }
               }
             }
           }
         }
-      } // End of normal mode
-
-      console.log('🏁 Final students result:', {
-        totalStudents: uniqueStudents.length,
-        students: uniqueStudents.map(s => ({
-          name: s.name,
-          class: s.class,
-          role: s.role,
-          canMessage: s.canMessage,
-          userId: s.userId
-        }))
-      });
+      }
       
-      // Special check for Victor and Class 10 students
-      const victorStudents = uniqueStudents.filter(s => s.name.toLowerCase().includes('victor'));
-      const class10Students = uniqueStudents.filter(s => s.class.includes('10'));
-      console.log('👤 Victor students found:', victorStudents);
-      console.log('🔟 Class 10 students found:', class10Students);
-      
-      // Log first 10 students for debugging UI issues
-      console.log('📋 First 10 students for UI debugging:', uniqueStudents.slice(0, 10).map(s => ({
-        id: s.id,
-        name: s.name,
-        class: s.class,
-        canMessage: s.canMessage,
-        userId: s.userId
-      })));
-      
-      console.log('🔧 About to call setStudents with', uniqueStudents.length, 'students');
       setStudents(uniqueStudents);
-      
-      // Verify state was set
-      setTimeout(() => {
-        console.log('✅ Students state verification - should have', uniqueStudents.length, 'students');
-      }, 100);
     } catch (err) {
       console.error('Fetch students error:', err);
       throw err;
@@ -1016,6 +856,12 @@ const TeacherChat = () => {
       {loading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           <ActivityIndicator size="large" color="#1976d2" />
+          <Text style={{ marginTop: 16, fontSize: 16, color: '#666', textAlign: 'center' }}>
+            Loading your students and parents...
+          </Text>
+          <Text style={{ marginTop: 8, fontSize: 14, color: '#999', textAlign: 'center' }}>
+            This may take a moment
+          </Text>
         </View>
       ) : error ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
