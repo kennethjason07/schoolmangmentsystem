@@ -184,23 +184,35 @@ const TeacherDetails = ({ route, navigation }) => {
           setClassTeacherOf(classTeacherData[0]);
         }
 
-        // Deduplicate subject-class combinations
-        const subjectClassPairs = new Set();
-        const dedupedSubjects = [];
-        const dedupedClasses = [];
+        // Extract unique subjects and classes from teacher assignments
+        const uniqueSubjects = new Set();
+        const uniqueClasses = new Set();
+        
+        console.log('Processing teacher subjects:', teacherSubjects);
+        
         teacherSubjects?.forEach(ts => {
-          const subjectName = ts.subjects?.name || '';
-          const className = ts.classes?.class_name || '';
-          const key = `${subjectName}|${className}`;
-          if (subjectName && className && !subjectClassPairs.has(key)) {
-            subjectClassPairs.add(key);
-            dedupedSubjects.push(subjectName);
-            dedupedClasses.push(className);
+          // Get subject name from the subjects relation
+          if (ts.subjects?.name) {
+            uniqueSubjects.add(ts.subjects.name);
+            console.log('Added subject:', ts.subjects.name);
+          }
+          
+          // Get class name from the nested classes relation within subjects
+          if (ts.subjects?.classes?.class_name) {
+            const fullClassName = `${ts.subjects.classes.class_name}${ts.subjects.classes.section ? ' ' + ts.subjects.classes.section : ''}`;
+            uniqueClasses.add(fullClassName);
+            console.log('Added class:', fullClassName);
           }
         });
 
-        setSubjects(dedupedSubjects);
-        setClasses(dedupedClasses);
+        const subjectsArray = Array.from(uniqueSubjects);
+        const classesArray = Array.from(uniqueClasses);
+        
+        console.log('Final subjects:', subjectsArray);
+        console.log('Final classes:', classesArray);
+        
+        setSubjects(subjectsArray);
+        setClasses(classesArray);
       } catch (err) {
         setError('Failed to load teacher details.');
       } finally {
@@ -282,9 +294,9 @@ const TeacherDetails = ({ route, navigation }) => {
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
-                <MaterialIcons name="account_balance_wallet" size={20} color="#FF9800" />
+                <Text style={{ fontSize: 20, color: '#FF9800', fontWeight: 'bold' }}>₹</Text>
                 <Text style={styles.statNumber}>
-                  {teacherData?.salary_amount ? `₹${(teacherData.salary_amount / 1000).toFixed(0)}K` : 'N/A'}
+                  {teacherData?.salary_amount ? `₹${parseFloat(teacherData.salary_amount).toFixed(2)}` : 'N/A'}
                 </Text>
                 <Text style={styles.statLabel}>Salary</Text>
               </View>
@@ -320,7 +332,7 @@ const TeacherDetails = ({ route, navigation }) => {
                 <View style={styles.infoItem}>
                   <Text style={styles.infoLabel}>Salary</Text>
                   <Text style={styles.infoValue}>
-                    {teacherData?.salary_amount ? `₹${parseFloat(teacherData.salary_amount).toLocaleString()}` : 'N/A'}
+                    {teacherData?.salary_amount ? `₹${parseFloat(teacherData.salary_amount).toFixed(2)}` : 'N/A'}
                   </Text>
                 </View>
               </View>
@@ -355,22 +367,53 @@ const TeacherDetails = ({ route, navigation }) => {
             </View>
 
             <View style={styles.cardContent}>
-              {classes.length > 0 ? (
+              {subjects.length > 0 || classes.length > 0 ? (
                 <View style={styles.assignmentsContainer}>
-                  {classes.map((cls, idx) => (
-                    <View key={cls + idx} style={styles.assignmentItem}>
-                      <View style={styles.assignmentHeader}>
-                        <View style={styles.classChip}>
-                          <MaterialIcons name="class" size={16} color="#2196F3" />
-                          <Text style={styles.classChipText}>{cls}</Text>
+                  {/* Display subjects grouped by class if classes exist */}
+                  {classes.length > 0 ? (
+                    classes.map((cls, idx) => (
+                      <View key={cls + idx} style={styles.assignmentItem}>
+                        <View style={styles.assignmentHeader}>
+                          <View style={styles.classChip}>
+                            <MaterialIcons name="class" size={16} color="#2196F3" />
+                            <Text style={styles.classChipText}>{cls}</Text>
+                          </View>
+                        </View>
+                        <View style={styles.subjectsList}>
+                          {subjects.slice(0, 3).map((subject, subIdx) => (
+                            <View key={`${subject}-${subIdx}`} style={styles.subjectChip}>
+                              <MaterialIcons name="book" size={14} color="#4CAF50" />
+                              <Text style={styles.subjectChipText}>{subject}</Text>
+                            </View>
+                          ))}
+                          {subjects.length > 3 && (
+                            <Text style={styles.moreSubjectsText}>+{subjects.length - 3} more</Text>
+                          )}
                         </View>
                       </View>
-                      <View style={styles.subjectChip}>
-                        <MaterialIcons name="book" size={16} color="#4CAF50" />
-                        <Text style={styles.subjectChipText}>{subjects[idx] || 'No subject assigned'}</Text>
+                    ))
+                  ) : (
+                    /* Display subjects only if no classes */
+                    <View style={styles.assignmentItem}>
+                      <View style={styles.assignmentHeader}>
+                        <View style={styles.classChip}>
+                          <MaterialIcons name="book" size={16} color="#4CAF50" />
+                          <Text style={styles.classChipText}>Assigned Subjects</Text>
+                        </View>
+                      </View>
+                      <View style={styles.subjectsList}>
+                        {subjects.slice(0, 6).map((subject, subIdx) => (
+                          <View key={`${subject}-${subIdx}`} style={styles.subjectChip}>
+                            <MaterialIcons name="book" size={14} color="#4CAF50" />
+                            <Text style={styles.subjectChipText}>{subject}</Text>
+                          </View>
+                        ))}
+                        {subjects.length > 6 && (
+                          <Text style={styles.moreSubjectsText}>+{subjects.length - 6} more</Text>
+                        )}
                       </View>
                     </View>
-                  ))}
+                  )}
                 </View>
               ) : (
                 <View style={styles.emptyState}>
@@ -860,6 +903,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#2e7d32',
     marginLeft: 6,
+  },
+  subjectsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  moreSubjectsText: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    marginTop: 4,
   },
   // Empty State
   emptyState: {

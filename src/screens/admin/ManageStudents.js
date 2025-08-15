@@ -152,24 +152,107 @@ const ManageStudents = () => {
 
       // Get attendance data for all students in a single query
       const studentIds = studentsData.map(s => s.id);
-      const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-        .toISOString().split('T')[0];
       
-      const { data: allAttendanceData } = await supabase
+      // Use last 3 months for more comprehensive attendance data
+      const threeMonthsAgo = new Date();
+      threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+      const startDate = threeMonthsAgo.toISOString().split('T')[0];
+      
+      console.log(`🔍 Fetching attendance data from ${startDate} for ${studentIds.length} students...`);
+      console.log(`📋 Student IDs:`, studentIds.slice(0, 3), '... (showing first 3)');
+      
+      const { data: allAttendanceData, error: attendanceError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
-        .select('student_id, status')
+        .select('student_id, status, date')
         .in('student_id', studentIds)
-        .gte('date', startOfMonth);
+        .gte('date', startDate)
+        .order('date', { ascending: false });
+      
+      console.log(`📊 Attendance query result:`, {
+        error: attendanceError,
+        recordCount: allAttendanceData?.length || 0,
+        sampleData: allAttendanceData?.slice(0, 3) || []
+      });
+
+      // Get fees data for all students
+      const { data: allFeesData } = await supabase
+        .from(TABLES.STUDENT_FEES)
+        .select('student_id, amount_paid, academic_year')
+        .in('student_id', studentIds);
+
+      // Get academic marks data for all students
+      const { data: allMarksData } = await supabase
+        .from('marks')
+        .select('student_id, marks, subject_id')
+        .in('student_id', studentIds);
 
       // Create attendance lookup map for O(1) access
       const attendanceLookup = {};
-      (allAttendanceData || []).forEach(record => {
+      console.log(`📋 Processing ${allAttendanceData?.length || 0} attendance records...`);
+      
+      (allAttendanceData || []).forEach((record, index) => {
+        if (index < 5) { // Log first 5 records
+          console.log(`Record ${index}:`, record);
+        }
+        
         if (!attendanceLookup[record.student_id]) {
           attendanceLookup[record.student_id] = { total: 0, present: 0 };
         }
         attendanceLookup[record.student_id].total++;
         if (record.status === 'Present') {
           attendanceLookup[record.student_id].present++;
+        }
+      });
+      
+      console.log(`📊 Attendance lookup summary:`, {
+        studentsWithAttendance: Object.keys(attendanceLookup).length,
+        sampleCalculations: Object.keys(attendanceLookup).slice(0, 3).map(studentId => ({
+          studentId,
+          ...attendanceLookup[studentId],
+          percentage: Math.round((attendanceLookup[studentId].present / attendanceLookup[studentId].total) * 100)
+        }))
+      });
+
+      // Create fees lookup map for O(1) access
+      const feesLookup = {};
+      (allFeesData || []).forEach(record => {
+        if (!feesLookup[record.student_id]) {
+          feesLookup[record.student_id] = { records: [], totalPaid: 0, latestStatus: 'Unpaid' };
+        }
+        feesLookup[record.student_id].records.push(record);
+        // Add to total amount paid
+        if (record.amount_paid) {
+          feesLookup[record.student_id].totalPaid += parseFloat(record.amount_paid);
+        }
+      });
+
+      // Determine fee status based on total amount paid
+      Object.keys(feesLookup).forEach(studentId => {
+        const totalPaid = feesLookup[studentId].totalPaid;
+        // If student has paid any amount, consider it as 'Paid'
+        // You can modify this logic based on your requirements
+        // For example, you might want to check against a minimum fee amount
+        feesLookup[studentId].latestStatus = totalPaid > 0 ? 'Paid' : 'Unpaid';
+      });
+
+      // Create academic marks lookup map for O(1) access
+      const marksLookup = {};
+      (allMarksData || []).forEach(record => {
+        if (!marksLookup[record.student_id]) {
+          marksLookup[record.student_id] = { marks: [], totalMarks: 0, subjectCount: 0, average: 0 };
+        }
+        if (record.marks != null) {
+          marksLookup[record.student_id].marks.push(record.marks);
+          marksLookup[record.student_id].totalMarks += parseFloat(record.marks);
+          marksLookup[record.student_id].subjectCount++;
+        }
+      });
+
+      // Calculate academic average for each student
+      Object.keys(marksLookup).forEach(studentId => {
+        const studentMarks = marksLookup[studentId];
+        if (studentMarks.subjectCount > 0) {
+          studentMarks.average = Math.round(studentMarks.totalMarks / studentMarks.subjectCount);
         }
       });
 
@@ -181,6 +264,15 @@ const ManageStudents = () => {
         const attendancePercentage = attendance.total > 0 
           ? Math.round((attendance.present / attendance.total) * 100) 
           : 0;
+        
+        // Get fees status for the student
+        const feesInfo = feesLookup[student.id] || { latestStatus: 'Unpaid' };
+        const feesStatus = feesInfo.latestStatus;
+
+        // Get academic marks data
+        const academicInfo = marksLookup[student.id] || { average: 0, subjectCount: 0 };
+        const academicPercentage = academicInfo.average;
+        const hasMarks = academicInfo.subjectCount > 0;
 
         return {
           ...student,
@@ -188,11 +280,23 @@ const ManageStudents = () => {
           className: classInfo.class_name,
           section: classInfo.section,
           parentName: parentInfo.full_name,
-          parentPhone: parentInfo.phone
+          parentPhone: parentInfo.phone,
+          feesStatus: feesStatus,
+          academicPercentage,
+          hasMarks
         };
       });
 
-      setStudents(studentsWithDetails);
+      // Sort students by academic percentage (highest to lowest)
+      // Students with no marks will appear at the end
+      const sortedStudents = studentsWithDetails.sort((a, b) => {
+        if (!a.hasMarks && !b.hasMarks) return 0; // Both have no marks, keep original order
+        if (!a.hasMarks) return 1; // a has no marks, move to end
+        if (!b.hasMarks) return -1; // b has no marks, move to end
+        return b.academicPercentage - a.academicPercentage; // Sort by academic percentage descending
+      });
+
+      setStudents(sortedStudents);
 
       // Calculate statistics
       const totalStudents = studentsWithDetails.length;
@@ -577,8 +681,8 @@ const ManageStudents = () => {
   };
 
   const handleViewProfile = (student) => {
-    setSelectedStudent(student);
-    setViewModalVisible(true);
+    // Navigate to StudentDetails screen instead of showing modal
+    navigation.navigate('StudentDetails', { student });
   };
 
   const handleViewDocuments = (student) => {
@@ -733,11 +837,16 @@ const ManageStudents = () => {
   const bloodGroupOptions = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
   const renderStudent = ({ item, index }) => {
-    const isTopStudent = index === 0;
+    // Only show top student badge if the student has marks and is first in the sorted list
+    const isTopStudent = index === 0 && item.hasMarks && item.academicPercentage > 0;
     const cardStyle = isTopStudent ? [styles.studentCard, styles.topStudentCard] : styles.studentCard;
 
     return (
-      <View style={cardStyle}>
+      <TouchableOpacity 
+        style={cardStyle}
+        onPress={() => handleViewProfile(item)}
+        activeOpacity={0.7}
+      >
         {/* Top Student Badge */}
         {isTopStudent && (
           <View style={styles.topStudentBadge}>
@@ -768,23 +877,26 @@ const ManageStudents = () => {
               </View>
 
               <Text style={styles.parentText}>
-                Parent: {item.parentName || 'Rajesh Sharma'}
+                Parent: {item.parentName || 'Not Assigned'}
               </Text>
               <Text style={styles.contactText}>
-                Contact: {item.parent_phone || '9876543210'}
+                Contact: {item.parentPhone || 'Not Available'}
               </Text>
               <Text style={styles.feesText}>
-                Fees: <Text style={item.fees_status === 'Paid' ? styles.paidText : styles.unpaidText}>
-                  {item.fees_status || 'Paid'}
+                Fees: <Text style={item.feesStatus === 'Paid' ? styles.paidText : styles.unpaidText}>
+                  {item.feesStatus || 'Unpaid'}
                 </Text>
               </Text>
             </View>
           </View>
 
           <View style={styles.rightSection}>
-            <View style={styles.attendanceContainer}>
-              <Text style={styles.attendancePercentage}>{item.attendancePercentage || '95'}%</Text>
-              <Text style={styles.attendanceLabel}>Attendance</Text>
+            <View style={styles.academicContainer}>
+              <Text style={[
+                styles.academicPercentage,
+                { color: item.academicPercentage >= 80 ? '#4CAF50' : item.academicPercentage >= 60 ? '#FF9800' : '#f44336' }
+              ]}>{item.hasMarks ? item.academicPercentage : '0'}%</Text>
+              <Text style={styles.academicLabel}>Academic</Text>
             </View>
           </View>
         </View>
@@ -815,7 +927,7 @@ const ManageStudents = () => {
             <Text style={styles.deleteText}>Delete</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -834,17 +946,25 @@ const ManageStudents = () => {
 
   return (
     <View style={styles.container}>
-      {/* Header Section */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Students</Text>
-      </View>
-
-      {/* Manage Students Card */}
-      <View style={styles.manageCard}>
-        <Text style={styles.manageTitle}>Manage Students</Text>
-        <TouchableOpacity style={styles.profileIcon}>
-          <Ionicons name="person-circle" size={32} color="#2196F3" />
-        </TouchableOpacity>
+      {/* Single Header with back button, title, and profile */}
+      <View style={styles.consolidatedHeader}>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity 
+            onPress={() => navigation.goBack()} 
+            style={styles.backButton}
+          >
+            <Ionicons name="arrow-back" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Manage Students</Text>
+        </View>
+        <View style={styles.headerRight}>
+          <TouchableOpacity 
+            style={styles.profileButton}
+            onPress={() => navigation.navigate('Profile')}
+          >
+            <Ionicons name="person-circle" size={32} color="#2196F3" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Filters Section */}
@@ -1230,6 +1350,7 @@ const ManageStudents = () => {
                 <Text style={styles.studentInfoText}>Section: {selectedStudent.section || 'N/A'}</Text>
                 <Text style={styles.studentInfoText}>Roll No: {selectedStudent.roll_no || 'N/A'}</Text>
                 <Text style={styles.studentInfoText}>Academic Year: {selectedStudent.academic_year || 'N/A'}</Text>
+                <Text style={styles.studentInfoText}>Academic Performance: {selectedStudent.hasMarks ? selectedStudent.academicPercentage : '0'}%</Text>
                 <Text style={styles.studentInfoText}>Attendance: {selectedStudent.attendancePercentage || '0'}%</Text>
                 <Text style={styles.studentInfoText}>Nationality: {selectedStudent.nationality || 'N/A'}</Text>
                 <Text style={styles.studentInfoText}>Religion: {selectedStudent.religion || 'N/A'}</Text>
@@ -1295,18 +1416,48 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
   },
-  // New Header Styles
-  header: {
-    backgroundColor: '#fff',
+  // Consolidated Header Styles
+  consolidatedHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 15,
+    paddingVertical: 16,
+    backgroundColor: '#f8f9fa',
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: '#dee2e6',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    paddingTop: Platform.OS === 'android' ? 48 : 24,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 16,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButton: {
+    marginRight: 12,
+    padding: 4,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
+    marginLeft: 12,
+    flexShrink: 1,
+  },
+  profileButton: {
+    padding: 4,
+    marginRight: 4,
+    flexShrink: 0,
   },
   // Manage Students Card
   manageCard: {
@@ -1504,9 +1655,17 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 2,
   },
+  behaviorText: {
+    fontSize: 12,
+    color: '#666',
+  },
   feesText: {
     fontSize: 12,
     color: '#666',
+  },
+  normalBehavior: {
+    color: '#4CAF50',
+    fontWeight: '600',
   },
   paidText: {
     color: '#4CAF50',
@@ -1530,6 +1689,33 @@ const styles = StyleSheet.create({
   attendanceLabel: {
     fontSize: 10,
     color: '#666',
+    marginTop: 2,
+  },
+  academicContainer: {
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  academicPercentage: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  academicLabel: {
+    fontSize: 10,
+    color: '#666',
+    marginTop: 2,
+  },
+  secondaryContainer: {
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  secondaryPercentage: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#999',
+  },
+  secondaryLabel: {
+    fontSize: 8,
+    color: '#999',
     marginTop: 2,
   },
   // Action Buttons

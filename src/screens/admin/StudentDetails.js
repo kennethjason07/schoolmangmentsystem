@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import Header from '../../components/Header';
 import { dbHelpers, supabase } from '../../utils/supabase';
 
 const StudentDetails = ({ route }) => {
+  const navigation = useNavigation();
   const { student } = route.params;
   const [studentData, setStudentData] = useState(null);
   const [feeStatus, setFeeStatus] = useState('');
@@ -94,13 +96,23 @@ const StudentDetails = ({ route }) => {
         console.log('Fetching fees for student ID:', student.id);
         const { data: fees, error: feeError } = await dbHelpers.getStudentFees(student.id);
         console.log('Fees data response:', { fees, feeError });
+        
+        let calculatedFeeStatus = 'Unpaid';
         if (feeError) {
           console.error('Error fetching fees:', feeError);
-          // Don't throw error for fees, just log it
           console.warn('Fee fetch failed, continuing without fee data');
+        } else if (fees && fees.length > 0) {
+          // Calculate total amount paid
+          const totalPaid = fees.reduce((sum, fee) => {
+            return sum + (fee.amount_paid ? parseFloat(fee.amount_paid) : 0);
+          }, 0);
+          
+          // If student has paid any amount, consider it as 'Paid'
+          calculatedFeeStatus = totalPaid > 0 ? 'Paid' : 'Unpaid';
+          console.log(`Fee calculation: Total paid = ${totalPaid}, Status = ${calculatedFeeStatus}`);
         }
-        // Determine fee status (simple: if any paid, show Paid, else Unpaid)
-        setFeeStatus(fees && fees.length > 0 ? 'Paid' : 'Unpaid');
+        
+        setFeeStatus(calculatedFeeStatus);
       } catch (err) {
         console.error('Full error in fetchStudentDetails:', err);
         setError(`Failed to load student details: ${err.message || err}`);
@@ -165,25 +177,34 @@ const StudentDetails = ({ route }) => {
 
   return (
     <View style={styles.container}>
-      <Header title="Student Details" showBack={true} />
+      {/* Custom Header with Student Profile */}
+      <View style={styles.customHeader}>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity 
+            onPress={() => navigation.goBack()} 
+            style={styles.backButton}
+          >
+            <Ionicons name="arrow-back" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Student Profile</Text>
+        </View>
+        <View style={styles.headerRight}>
+          <View style={styles.headerAvatar}>
+            <Text style={styles.headerAvatarText}>
+              {studentData.name?.charAt(0)?.toUpperCase() || 'S'}
+            </Text>
+          </View>
+        </View>
+      </View>
       
       <ScrollView style={styles.content}>
-        {/* Student Header Card */}
-        <View style={styles.headerCard}>
-          <View style={styles.avatarContainer}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {studentData.name?.charAt(0)?.toUpperCase() || 'S'}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.headerInfo}>
-            <Text style={styles.studentName}>{studentData.name}</Text>
-            <Text style={styles.classInfo}>
-              {studentData.classes ? `${studentData.classes.class_name} - Section ${studentData.classes.section}` : 'Class not assigned'}
-            </Text>
-            <Text style={styles.rollNumber}>Roll No: {studentData.roll_no || 'N/A'}</Text>
-          </View>
+        {/* Student Info Summary Card */}
+        <View style={styles.summaryCard}>
+          <Text style={styles.studentName}>{studentData.name}</Text>
+          <Text style={styles.classInfo}>
+            {studentData.classes ? `${studentData.classes.class_name} - Section ${studentData.classes.section}` : 'Class not assigned'}
+          </Text>
+          <Text style={styles.rollNumber}>Roll No: {studentData.roll_no || 'N/A'}</Text>
         </View>
 
         {/* Information Cards */}
@@ -269,12 +290,12 @@ const StudentDetails = ({ route }) => {
           <View style={styles.infoCard}>
             <View style={styles.infoRow}>
               <View style={styles.infoIcon}>
-                <Ionicons name="cash" size={20} color="#FF9800" />
+                <Ionicons name="school" size={20} color="#4CAF50" />
               </View>
               <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Fee Status</Text>
-                <Text style={[styles.infoValue, feeStatus === 'Paid' ? styles.paidStatus : styles.unpaidStatus]}>
-                  {feeStatus || 'Unknown'}
+                <Text style={styles.infoLabel}>Academic Performance</Text>
+                <Text style={[styles.infoValue, styles.academicPercentage]}>
+                  {student.hasMarks ? `${student.academicPercentage}%` : '0%'}
                 </Text>
               </View>
             </View>
@@ -285,7 +306,19 @@ const StudentDetails = ({ route }) => {
               </View>
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Attendance</Text>
-                <Text style={styles.infoValue}>95.2%</Text>
+                <Text style={styles.infoValue}>{student.attendancePercentage || 0}%</Text>
+              </View>
+            </View>
+            
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="cash" size={20} color="#2196F3" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Fee Status</Text>
+                <Text style={[styles.infoValue, feeStatus === 'Paid' ? styles.paidStatus : styles.unpaidStatus]}>
+                  {feeStatus || 'Unknown'}
+                </Text>
               </View>
             </View>
           </View>
@@ -438,9 +471,86 @@ const styles = StyleSheet.create({
   unpaidStatus: {
     color: '#f44336',
   },
+  academicPercentage: {
+    color: '#4CAF50',
+    fontWeight: '700',
+  },
   bottomSpacing: {
     height: 20,
   },
+  
+  // Custom Header Styles
+  customHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#f8f9fa',
+    borderBottomWidth: 1,
+    borderBottomColor: '#dee2e6',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    paddingTop: Platform.OS === 'android' ? 48 : 24,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 16,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButton: {
+    marginRight: 12,
+    padding: 4,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginLeft: 12,
+    flexShrink: 1,
+  },
+  headerAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#2196F3',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+    elevation: 2,
+    shadowColor: '#2196F3',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  headerAvatarText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  
+  // Summary Card Styles
+  summaryCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 20,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    alignItems: 'center',
+  },
 });
 
-export default StudentDetails; 
+export default StudentDetails;
