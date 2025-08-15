@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated, RefreshControl, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
@@ -15,7 +15,45 @@ const StudentDashboard = ({ navigation }) => {
   const [summary, setSummary] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [schoolDetails, setSchoolDetails] = useState(null);
   // Removed todayClasses as it's not used in the new design
+
+  // Utility function to format date from yyyy-mm-dd to dd-mm-yyyy
+  const formatDateToDDMMYYYY = (dateString) => {
+    if (!dateString) return 'N/A';
+    
+    try {
+      // Handle different date formats
+      let date;
+      if (dateString.includes('T')) {
+        // ISO date format (2024-01-15T00:00:00.000Z)
+        date = new Date(dateString);
+      } else if (dateString.includes('-') && dateString.split('-').length === 3) {
+        // yyyy-mm-dd format
+        const [year, month, day] = dateString.split('-');
+        date = new Date(year, month - 1, day); // month is 0-indexed
+      } else {
+        // Fallback to Date constructor
+        date = new Date(dateString);
+      }
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return dateString; // Return original if invalid
+      }
+      
+      // Format to dd-mm-yyyy
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      
+      return `${day}-${month}-${year}`;
+    } catch (error) {
+      console.warn('Error formatting date:', dateString, error);
+      return dateString; // Return original if error
+    }
+  };
 
   // Handle navigation for stat cards - SIMPLE SOLUTION
   const handleCardNavigation = (cardKey) => {
@@ -33,6 +71,12 @@ const StudentDashboard = ({ navigation }) => {
         break;
       case 'notifications':
         navigation.navigate('StudentNotifications');
+        break;
+      case 'events':
+        Alert.alert('Events', events.length > 0 ? 
+          events.map(e => `• ${e.title} (${formatDateToDDMMYYYY(e.date)})`).join('\n') :
+          'No upcoming events scheduled.'
+        );
         break;
       default:
         Alert.alert('Coming Soon', `${cardKey} feature is under development.`);
@@ -165,6 +209,10 @@ const StudentDashboard = ({ navigation }) => {
     try {
       setLoading(true);
       setError(null);
+
+      // Load school details
+      const { data: schoolData } = await dbHelpers.getSchoolDetails();
+      setSchoolDetails(schoolData);
 
       // Get student data using the helper function
       const { data: studentUserData, error: studentError } = await dbHelpers.getStudentByUserId(user.id);
@@ -439,16 +487,93 @@ const StudentDashboard = ({ navigation }) => {
       // Removed today's timetable code as not needed for this design
       // Removed today's classes and messages code as not needed for this design
 
+      // Get upcoming events from the events table - ENHANCED VERSION WITH DEBUG LOGGING
+      let mappedEvents = [];
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        console.log('🔍 Student Dashboard - Fetching upcoming events from date:', today);
+        
+        // FIRST: Try to get ALL active events to see what's available
+        console.log('🔍 Step 1: Checking all active events in database...');
+        const { data: allActiveEvents, error: allActiveError } = await supabase
+          .from('events')
+          .select('*')
+          .eq('status', 'Active')
+          .order('event_date', { ascending: true });
+          
+        console.log('📊 All active events in database:', allActiveEvents?.length || 0);
+        if (allActiveEvents && allActiveEvents.length > 0) {
+          console.log('📋 Active events details:');
+          allActiveEvents.forEach((event, index) => {
+            console.log(`   ${index + 1}. "${event.title}" - Date: ${event.event_date}, School-wide: ${event.is_school_wide}`);
+          });
+        }
+        
+        // SECOND: Try to get upcoming events (today and future)
+        console.log('🔍 Step 2: Checking upcoming events (today and future)...');
+        const { data: upcomingEventsData, error: upcomingError } = await supabase
+          .from('events')
+          .select('*')
+          .eq('status', 'Active')
+          .gte('event_date', today)
+          .order('event_date', { ascending: true });
+          
+        console.log('📊 Upcoming events found:', upcomingEventsData?.length || 0);
+        if (upcomingEventsData && upcomingEventsData.length > 0) {
+          console.log('📋 Upcoming events details:');
+          upcomingEventsData.forEach((event, index) => {
+            console.log(`   ${index + 1}. "${event.title}" - Date: ${event.event_date}, School-wide: ${event.is_school_wide}`);
+          });
+        }
+        
+        // THIRD: For now, let's show ALL upcoming events to the student (we can filter later if needed)
+        console.log('🔍 Step 3: Using upcoming events for student dashboard...');
+        
+        if (upcomingError) {
+          console.error('❌ Events query error:', upcomingError);
+        }
+        
+        // Map the events to the format expected by the UI
+        mappedEvents = (upcomingEventsData || []).map(event => ({
+          id: event.id,
+          type: event.event_type || 'Event',
+          title: event.title,
+          description: event.description || '',
+          date: event.event_date,
+          startTime: event.start_time || '09:00',
+          endTime: event.end_time || '17:00',
+          location: event.location,
+          organizer: event.organizer,
+          icon: event.icon || 'calendar',
+          color: event.color || '#FF9800'
+        }));
+        
+        console.log('✅ Student Dashboard - Mapped events for dashboard:', mappedEvents.length);
+        
+        if (mappedEvents.length > 0) {
+          console.log('🎉 Student Dashboard - SUCCESS: Events will be shown on dashboard!');
+        } else {
+          console.log('⚠️  Student Dashboard - WARNING: No events to show on dashboard!');
+        }
+        
+        setEvents(mappedEvents.slice(0, 10)); // Show top 10 events
+      } catch (err) {
+        console.log('❌ Student Dashboard - Events fetch error:', err);
+        mappedEvents = [];
+        setEvents([]);
+      }
+
       setSummary([
         { key: 'attendance', label: 'Attendance', value: attendancePercent + '%', icon: 'checkmark-circle', color: '#48bb78' },
         { key: 'marks', label: 'Marks', value: marksPercent + '%', icon: 'trending-up', color: '#ed8936' },
         { key: 'assignments', label: 'Assignments', value: assignmentsCount, icon: 'book-outline', color: '#667eea' },
         { key: 'notifications', label: 'Notifications', value: notificationsData.filter(n => !n.is_read).length, icon: 'notifications', color: '#9f7aea' },
+        { key: 'events', label: 'Events', value: mappedEvents.length, icon: 'calendar', color: '#ff6b35' },
       ]);
       setDeadlines(deadlinesData.map(item => ({
         id: item.id,
         title: item.title || item.name,
-        date: item.due_date || item.start_date,
+        date: formatDateToDDMMYYYY(item.due_date || item.start_date),
         type: item.type || 'homework',
         name: item.name,
         start_date: item.start_date
@@ -456,7 +581,7 @@ const StudentDashboard = ({ navigation }) => {
       setNotifications(notificationsData.map(n => ({
         id: n.id,
         message: n.message,
-        date: n.created_at ? n.created_at.split('T')[0] : new Date().toISOString().split('T')[0]
+        date: formatDateToDDMMYYYY(n.created_at ? n.created_at.split('T')[0] : new Date().toISOString().split('T')[0])
       })));
     } catch (err) {
       setError(err.message);
@@ -497,6 +622,10 @@ const StudentDashboard = ({ navigation }) => {
       .channel('student-dashboard-fees')
       .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.STUDENT_FEES }, fetchDashboardData)
       .subscribe();
+    const eventsSub = supabase
+      .channel('student-dashboard-events')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, fetchDashboardData)
+      .subscribe();
 
     return () => {
       homeworkSub.unsubscribe();
@@ -506,6 +635,7 @@ const StudentDashboard = ({ navigation }) => {
       notificationsSub.unsubscribe();
       examsSub.unsubscribe();
       feesSub.unsubscribe();
+      eventsSub.unsubscribe();
     };
   }, []);
 
@@ -547,6 +677,44 @@ const StudentDashboard = ({ navigation }) => {
           />
         }
       >
+        {/* Welcome Section - Modern gradient design */}
+        <View style={styles.welcomeSection}>
+          {/* Decorative background elements */}
+          <View style={styles.backgroundCircle1} />
+          <View style={styles.backgroundCircle2} />
+          <View style={styles.backgroundPattern} />
+          
+          <View style={styles.welcomeContent}>
+            <View style={styles.schoolHeader}>
+              {schoolDetails?.logo_url ? (
+                <Image source={{ uri: schoolDetails.logo_url }} style={styles.schoolLogo} />
+              ) : (
+                <View style={styles.logoPlaceholder}>
+                  <Ionicons name="school" size={40} color="#fff" />
+                </View>
+              )}
+              <View style={styles.schoolInfo}>
+                <Text style={styles.schoolName}>
+                  {schoolDetails?.name || 'Maximus School'}
+                </Text>
+                <Text style={styles.schoolType}>
+                  {schoolDetails?.type || 'Educational Institution'}
+                </Text>
+              </View>
+            </View>
+            
+            <View style={styles.dateContainer}>
+              <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.8)" />
+              <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+              })}</Text>
+            </View>
+          </View>
+        </View>
+
         {/* Student Dashboard Card */}
         <View style={styles.dashboardCard}>
 
@@ -616,6 +784,20 @@ const StudentDashboard = ({ navigation }) => {
                 <Text style={styles.cardLabel}>Notifications</Text>
               </TouchableOpacity>
             </View>
+
+            {/* Third Row */}
+            <View style={styles.summaryRow}>
+              {/* Events Card */}
+              <TouchableOpacity
+                style={[styles.summaryCard, { backgroundColor: '#ff6b35', width: '100%' }]}
+                onPress={() => handleCardNavigation('events')}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="calendar" size={28} color="#fff" style={styles.cardIcon} />
+                <Text style={styles.cardValue}>{summary.find(s => s.key === 'events')?.value || '0'}</Text>
+                <Text style={styles.cardLabel}>Upcoming Events</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -679,6 +861,49 @@ const StudentDashboard = ({ navigation }) => {
             >
               <Text style={styles.emptyText}>No recent notifications</Text>
               <Text style={styles.emptySubtext}>Tap to view all notifications</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Upcoming Events Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Upcoming Events</Text>
+          {events.length > 0 ? (
+            events.slice(0, 5).map((item, index) => (
+              <TouchableOpacity
+                key={item.id || index}
+                style={styles.eventItem}
+                onPress={() => Alert.alert(
+                  item.title,
+                  `Date: ${formatDateToDDMMYYYY(item.date)}\nTime: ${item.startTime}${item.endTime ? ' - ' + item.endTime : ''}${item.location ? '\nLocation: ' + item.location : ''}${item.description ? '\n\n' + item.description : ''}`
+                )}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.eventItemIcon, { backgroundColor: item.color || '#FF9800' }]}>
+                  <Ionicons name={item.icon || 'calendar'} size={20} color="#fff" />
+                </View>
+                <View style={styles.eventContent}>
+                  <Text style={styles.eventTitle}>{item.title}</Text>
+                  <Text style={styles.eventDate}>
+                    {formatDateToDDMMYYYY(item.date)} • {item.startTime}
+                    {item.location ? ` • ${item.location}` : ''}
+                  </Text>
+                  {item.description && (
+                    <Text style={styles.eventDescription} numberOfLines={2}>
+                      {item.description}
+                    </Text>
+                  )}
+                </View>
+              </TouchableOpacity>
+            ))
+          ) : (
+            <TouchableOpacity
+              style={styles.emptyState}
+              onPress={() => handleCardNavigation('events')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.emptyText}>No upcoming events</Text>
+              <Text style={styles.emptySubtext}>Tap to view all events</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -979,6 +1204,139 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  eventItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  eventItemIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  eventContent: {
+    flex: 1,
+  },
+  eventTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  eventDate: {
+    fontSize: 13,
+    color: '#888',
+    marginBottom: 2,
+  },
+  eventDescription: {
+    fontSize: 12,
+    color: '#999',
+    lineHeight: 16,
+  },
+  welcomeSection: {
+    marginVertical: 12,
+    marginHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: '#667eea',
+    shadowColor: '#667eea',
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 12,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  backgroundCircle1: {
+    position: 'absolute',
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    top: -50,
+    right: -30,
+  },
+  backgroundCircle2: {
+    position: 'absolute',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    bottom: -20,
+    left: -20,
+  },
+  backgroundPattern: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(118, 75, 162, 0.6)',
+  },
+  welcomeContent: {
+    padding: 24,
+    zIndex: 1,
+  },
+  dateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  schoolHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  schoolLogo: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginRight: 15,
+  },
+  logoPlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 15,
+  },
+  schoolInfo: {
+    flex: 1,
+  },
+  schoolName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  schoolType: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  dateText: {
+    fontSize: 16,
+    color: '#ffffff',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
 });
 
-export default StudentDashboard; 
+export default StudentDashboard;

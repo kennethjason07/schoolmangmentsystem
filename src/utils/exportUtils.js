@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
+import * as Print from 'expo-print';
 import { Alert, Platform } from 'react-native';
 
 // Export formats
@@ -245,6 +246,9 @@ export const exportAcademicData = async (data, stats, format = EXPORT_FORMATS.CS
         mimeType = 'application/json';
         break;
 
+      case EXPORT_FORMATS.PDF:
+        return await generateAcademicPerformancePDF(data, stats);
+
       case EXPORT_FORMATS.CLIPBOARD:
         const clipboardData = data.map(record => ({
           'Student Name': record.students?.name || 'N/A',
@@ -452,4 +456,474 @@ const calculateAge = (dob) => {
     age--;
   }
   return age;
+};
+
+// Generate PDF for Academic Performance Report
+export const generateAcademicPerformancePDF = async (data, stats) => {
+  try {
+    const htmlContent = generateAcademicPerformanceHTML(data, stats);
+    
+    const { uri } = await Print.printToFileAsync({
+      html: htmlContent,
+      base64: false
+    });
+
+    const fileName = `Academic_Performance_Report_${new Date().toISOString().split('T')[0]}.pdf`;
+    
+    if (Platform.OS === 'android') {
+      try {
+        const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+        if (!permissions.granted) {
+          Alert.alert('Permission Required', 'Please grant storage permission to save the PDF file.');
+          return false;
+        }
+
+        const destUri = await FileSystem.StorageAccessFramework.createFileAsync(
+          permissions.directoryUri,
+          fileName,
+          'application/pdf'
+        );
+
+        const fileData = await FileSystem.readAsStringAsync(uri, { 
+          encoding: FileSystem.EncodingType.Base64 
+        });
+        await FileSystem.writeAsStringAsync(destUri, fileData, { 
+          encoding: FileSystem.EncodingType.Base64 
+        });
+
+        Alert.alert('PDF Saved Successfully', `Academic performance report saved as ${fileName}`);
+        return true;
+      } catch (error) {
+        console.error('Android save error:', error);
+        return await sharePDF(uri, fileName);
+      }
+    } else {
+      return await sharePDF(uri, fileName);
+    }
+  } catch (error) {
+    console.error('PDF generation error:', error);
+    Alert.alert('Error', 'Failed to generate PDF report. Please try again.');
+    return false;
+  }
+};
+
+// Generate PDF with preview functionality
+export const generateAcademicPerformancePDFWithPreview = async (data, stats) => {
+  try {
+    const htmlContent = generateAcademicPerformanceHTML(data, stats);
+    return { success: true, htmlContent };
+  } catch (error) {
+    console.error('PDF preview generation error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Share PDF file
+const sharePDF = async (uri, fileName) => {
+  try {
+    const canShare = await checkSharingAvailability();
+    if (canShare) {
+      await Sharing.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Academic Performance Report',
+        UTI: 'com.adobe.pdf'
+      });
+      Alert.alert('Export Successful', `Report exported as ${fileName}`);
+      return true;
+    } else {
+      Alert.alert('Export Complete', `Report generated successfully as ${fileName}`);
+      return true;
+    }
+  } catch (error) {
+    console.error('Error sharing PDF:', error);
+    Alert.alert('Share Error', 'Failed to share PDF. File has been generated successfully.');
+    return false;
+  }
+};
+
+// Generate HTML content for Academic Performance PDF
+export const generateAcademicPerformanceHTML = (data, stats) => {
+  const currentDate = new Date().toLocaleDateString('en-IN', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Academic Performance Report</title>
+        <style>
+          body { 
+            font-family: 'Arial', sans-serif; 
+            margin: 20px; 
+            line-height: 1.6;
+            color: #333;
+          }
+          
+          .header { 
+            text-align: center; 
+            margin-bottom: 30px; 
+            border-bottom: 3px solid #2196F3;
+            padding-bottom: 20px;
+          }
+          
+          .school-name { 
+            font-size: 28px; 
+            font-weight: bold; 
+            color: #2196F3; 
+            margin-bottom: 5px;
+          }
+          
+          .report-title {
+            font-size: 22px;
+            color: #1976D2;
+            margin: 10px 0;
+          }
+          
+          .report-date {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 20px;
+          }
+          
+          .summary-section {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            border-left: 5px solid #2196F3;
+          }
+          
+          .summary-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2196F3;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+          }
+          
+          .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+          }
+          
+          .summary-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+          }
+          
+          .summary-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 5px;
+          }
+          
+          .summary-label {
+            color: #666;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          
+          .grade-section {
+            margin-bottom: 25px;
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #e0e0e0;
+          }
+          
+          .section-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2196F3;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #f0f0f0;
+          }
+          
+          .grade-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+          }
+          
+          .grade-card {
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 2px solid;
+          }
+          
+          .grade-a { border-color: #4CAF50; background: rgba(76, 175, 80, 0.1); }
+          .grade-b { border-color: #8BC34A; background: rgba(139, 195, 74, 0.1); }
+          .grade-c { border-color: #FF9800; background: rgba(255, 152, 0, 0.1); }
+          .grade-d { border-color: #FF5722; background: rgba(255, 87, 34, 0.1); }
+          .grade-f { border-color: #f44336; background: rgba(244, 67, 54, 0.1); }
+          
+          .grade-name {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 8px;
+          }
+          
+          .grade-count {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 5px;
+          }
+          
+          .grade-percentage {
+            font-size: 12px;
+            color: #666;
+          }
+          
+          .subject-section {
+            margin-bottom: 25px;
+          }
+          
+          table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin: 15px 0;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+          }
+          
+          th, td { 
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+          }
+          
+          th { 
+            background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+            color: white;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+          }
+          
+          tr:nth-child(even) {
+            background: #f8f9fa;
+          }
+          
+          tr:hover {
+            background: #e3f2fd;
+          }
+          
+          .performance-bar {
+            background: #e0e0e0;
+            border-radius: 10px;
+            height: 8px;
+            margin: 5px 0;
+          }
+          
+          .performance-fill {
+            height: 100%;
+            border-radius: 10px;
+          }
+          
+          .performers-section {
+            margin-bottom: 25px;
+          }
+          
+          .performer-card {
+            display: flex;
+            align-items: center;
+            padding: 10px 15px;
+            margin-bottom: 8px;
+            background: white;
+            border-radius: 8px;
+            border-left: 4px solid #2196F3;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+          }
+          
+          .rank-badge {
+            background: #2196F3;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+          }
+          
+          .performer-info {
+            flex: 1;
+          }
+          
+          .performer-name {
+            font-weight: bold;
+            margin-bottom: 3px;
+          }
+          
+          .performer-details {
+            color: #666;
+            font-size: 12px;
+          }
+          
+          .performer-score {
+            font-size: 18px;
+            font-weight: bold;
+            color: #4CAF50;
+          }
+          
+          .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+          }
+          
+          @media print {
+            .grade-section, .subject-section, .performers-section {
+              page-break-inside: avoid;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <!-- Header -->
+        <div class="header">
+          <div class="school-name">ABC School</div>
+          <h1 class="report-title">Academic Performance Report</h1>
+          <p class="report-date">Generated on ${currentDate}</p>
+        </div>
+
+        <!-- Performance Summary -->
+        <div class="summary-section">
+          <h2 class="summary-title">📊 Performance Overview</h2>
+          <div class="summary-grid">
+            <div class="summary-card">
+              <div class="summary-value" style="color: #2196F3;">${stats.totalStudents}</div>
+              <div class="summary-label">Total Students</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-value" style="color: #4CAF50;">${stats.averagePercentage}%</div>
+              <div class="summary-label">Average Performance</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-value" style="color: #FF9800;">${stats.highestScore}%</div>
+              <div class="summary-label">Highest Score</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-value" style="color: #f44336;">${stats.lowestScore}%</div>
+              <div class="summary-label">Lowest Score</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Grade Distribution -->
+        <div class="grade-section">
+          <h2 class="section-title">🎯 Grade Distribution Analysis</h2>
+          <div class="grade-grid">
+            ${stats.gradeDistribution.map(grade => {
+              const totalStudents = stats.gradeDistribution.reduce((sum, g) => sum + g.population, 0);
+              const percentage = totalStudents > 0 ? Math.round((grade.population / totalStudents) * 100) : 0;
+              const gradeClass = grade.name.includes('A') ? 'grade-a' : 
+                                grade.name.includes('B') ? 'grade-b' : 
+                                grade.name.includes('C') ? 'grade-c' : 
+                                grade.name.includes('D') ? 'grade-d' : 'grade-f';
+              
+              return `
+                <div class="grade-card ${gradeClass}">
+                  <div class="grade-name">${grade.name}</div>
+                  <div class="grade-count">${grade.population}</div>
+                  <div class="grade-percentage">${percentage}% of students</div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Subject Performance -->
+        ${stats.subjectPerformance.length > 0 ? `
+        <div class="subject-section">
+          <h2 class="section-title">📚 Subject-wise Performance</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Subject</th>
+                <th>Students Evaluated</th>
+                <th>Average Performance</th>
+                <th>Performance Bar</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${stats.subjectPerformance.map(subject => {
+                const performanceColor = subject.percentage >= 90 ? '#4CAF50' : 
+                                        subject.percentage >= 80 ? '#8BC34A' : 
+                                        subject.percentage >= 70 ? '#FF9800' : 
+                                        subject.percentage >= 60 ? '#FF5722' : '#f44336';
+                
+                return `
+                  <tr>
+                    <td><strong>${subject.subject}</strong></td>
+                    <td>${subject.count}</td>
+                    <td><strong style="color: ${performanceColor}">${subject.percentage}%</strong></td>
+                    <td>
+                      <div class="performance-bar">
+                        <div class="performance-fill" style="width: ${subject.percentage}%; background: ${performanceColor};"></div>
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+
+        <!-- Top Performers -->
+        ${stats.topPerformers.length > 0 ? `
+        <div class="performers-section">
+          <h2 class="section-title">🏆 Top Performers</h2>
+          ${stats.topPerformers.slice(0, 10).map((performer, index) => {
+            const scoreColor = performer.percentage >= 90 ? '#4CAF50' : 
+                              performer.percentage >= 80 ? '#8BC34A' : 
+                              performer.percentage >= 70 ? '#FF9800' : 
+                              performer.percentage >= 60 ? '#FF5722' : '#f44336';
+            
+            return `
+              <div class="performer-card">
+                <div class="rank-badge">${index + 1}</div>
+                <div class="performer-info">
+                  <div class="performer-name">${performer.name}</div>
+                  <div class="performer-details">#${performer.admissionNo} • ${performer.count} subjects</div>
+                </div>
+                <div class="performer-score" style="color: ${scoreColor}">${performer.percentage}%</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+        ` : ''}
+
+        <!-- Footer -->
+        <div class="footer">
+          <p>This report was generated automatically by the School Management System</p>
+          <p>Report Date: ${currentDate} | Total Records Analyzed: ${data.length}</p>
+        </div>
+      </body>
+    </html>
+  `;
 };

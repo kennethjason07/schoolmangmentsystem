@@ -40,6 +40,8 @@ export const TABLES = {
   PERSONAL_TASKS: 'personal_tasks',
   SCHOOL_DETAILS: 'school_details',
   MESSAGES: 'messages',
+  EVENTS: 'events',
+  FEES: 'fees',
 };
 
 // Authentication helper functions

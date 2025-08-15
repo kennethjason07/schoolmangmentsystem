@@ -103,25 +103,47 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
     if (students.length === 0 || subjects.length === 0) return;
 
     try {
+      console.log('Fetching existing marks for students:', students.length, 'subjects:', subjects.length);
+      
       const { data: existingMarks, error: marksError } = await supabase
         .from(TABLES.MARKS)
-        .select('*')
+        .select('student_id, subject_id, marks_obtained, max_marks, grade, created_at')
         .in('subject_id', subjects.map(s => s.id))
-        .in('student_id', students.map(s => s.id));
+        .in('student_id', students.map(s => s.id))
+        .order('created_at', { ascending: false }); // Get latest marks first
 
-      if (marksError) throw marksError;
+      if (marksError) {
+        console.error('Error fetching marks:', marksError);
+        throw marksError;
+      }
 
+      console.log('Found existing marks:', existingMarks?.length || 0);
+      
       const marksMap = {};
-      existingMarks.forEach(mark => {
-        const cellKey = `${mark.student_id}-${mark.subject_id}`;
-        marksMap[cellKey] = mark.marks_obtained.toString();
-      });
+      if (existingMarks && existingMarks.length > 0) {
+        // Group by student-subject combination to get the latest entry
+        const latestMarks = {};
+        existingMarks.forEach(mark => {
+          const cellKey = `${mark.student_id}-${mark.subject_id}`;
+          if (!latestMarks[cellKey] || new Date(mark.created_at) > new Date(latestMarks[cellKey].created_at)) {
+            latestMarks[cellKey] = mark;
+          }
+        });
+        
+        // Convert to display format
+        Object.entries(latestMarks).forEach(([cellKey, mark]) => {
+          marksMap[cellKey] = mark.marks_obtained?.toString() || '';
+        });
+        
+        console.log('Processed marks map:', Object.keys(marksMap).length, 'entries');
+      }
 
       setMarks(marksMap);
       updateProgress(marksMap);
 
     } catch (err) {
       console.error('Error fetching existing marks:', err);
+      // Don't throw error, just log it so the screen doesn't break
     }
   };
   
@@ -204,6 +226,9 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
       });
       
       if (marksToSave.length > 0) {
+        console.log('Saving marks:', marksToSave.length, 'entries');
+        
+        // Use upsert with proper conflict resolution
         const { error: upsertError } = await supabase
           .from(TABLES.MARKS)
           .upsert(marksToSave, {
@@ -211,7 +236,38 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
             ignoreDuplicates: false
           });
 
-        if (upsertError) throw upsertError;
+        if (upsertError) {
+          console.error('Upsert error:', upsertError);
+          throw upsertError;
+        }
+        
+        console.log('Successfully saved marks');
+        
+        // Also try a simple update/insert approach as fallback
+        /* Alternative approach if upsert doesn't work:
+        for (const markData of marksToSave) {
+          const { error: updateError } = await supabase
+            .from(TABLES.MARKS)
+            .update({
+              marks_obtained: markData.marks_obtained,
+              max_marks: markData.max_marks,
+              created_at: markData.created_at
+            })
+            .eq('student_id', markData.student_id)
+            .eq('subject_id', markData.subject_id);
+            
+          if (updateError && updateError.code === 'PGRST116') {
+            // Record doesn't exist, insert it
+            const { error: insertError } = await supabase
+              .from(TABLES.MARKS)
+              .insert(markData);
+              
+            if (insertError) throw insertError;
+          } else if (updateError) {
+            throw updateError;
+          }
+        }
+        */
         
         if (showAlert) {
           Alert.alert('Success', `Saved ${marksToSave.length} marks successfully!`);
@@ -340,12 +396,7 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
                         inputRefs.current[cellKey] = ref;
                       }
                     }}
-                    style={[
-                      styles.cellInput,
-                      isChanged && styles.changedCell,
-                      isInvalid && styles.invalidCell,
-                      value === '0' && styles.zeroCell
-                    ]}
+                    style={styles.cellInput}
                     placeholder=""
                     value={value}
                     onChangeText={(newValue) => handleMarkChange(student.id, subject.id, newValue)}
@@ -355,10 +406,6 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
                     onSubmitEditing={() => focusNextInput(studentIndex, subjectIndex)}
                     selectTextOnFocus
                   />
-                  {/* Visual indicators */}
-                  {isChanged && !isInvalid && (
-                    <View style={styles.changedDot} />
-                  )}
                 </View>
               );
             })}

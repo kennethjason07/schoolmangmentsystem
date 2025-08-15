@@ -983,7 +983,7 @@ const AdminDashboard = ({ navigation }) => {
 
 
         {/* Recent Activities - moved to bottom */}
-        <View style={styles.section}>
+        <View style={[styles.section, styles.recentActivitiesSection]}>
           <Text style={styles.sectionTitle}>Recent Activities</Text>
           <View style={styles.activitiesList}>
             {activities.map((activity, index) => (
@@ -1749,6 +1749,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     marginTop: 8,
+  },
+  recentActivitiesSection: {
+    paddingBottom: 20,
   },
 
 });

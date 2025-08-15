@@ -24,6 +24,13 @@ const ViewStudentInfo = () => {
   const { user } = useAuth();
   const navigation = useNavigation();
 
+  // State for teacher statistics
+  const [teacherStats, setTeacherStats] = useState({
+    classTeacherCount: 0,
+    subjectTeacherCount: 0,
+    totalStudents: 0
+  });
+
   // Fetch teacher's students
   const fetchStudents = async () => {
     try {
@@ -72,6 +79,18 @@ const ViewStudentInfo = () => {
       if (classTeacherError) throw classTeacherError;
 
       console.log('ViewStudentInfo: Class teacher data:', classTeacherData);
+
+      // Calculate teacher statistics
+      const classTeacherCount = classTeacherData?.length || 0;
+      
+      // Count unique subjects the teacher teaches
+      const uniqueSubjects = new Set();
+      assignedData.forEach(assignment => {
+        if (assignment.subjects?.name) {
+          uniqueSubjects.add(assignment.subjects.name);
+        }
+      });
+      const subjectTeacherCount = uniqueSubjects.size;
 
       // Combine all unique classes
       const subjectClasses = assignedData
@@ -158,6 +177,15 @@ const ViewStudentInfo = () => {
       console.log('ViewStudentInfo: Final unique students:', uniqueStudents.length);
       setStudents(uniqueStudents);
       setFilteredStudents(uniqueStudents);
+
+      // Update teacher statistics
+      setTeacherStats({
+        classTeacherCount,
+        subjectTeacherCount,
+        totalStudents: uniqueStudents.length
+      });
+
+      console.log('ViewStudentInfo: Teacher Stats - Class Teacher:', classTeacherCount, 'Subject Teacher:', subjectTeacherCount, 'Total Students:', uniqueStudents.length);
 
     } catch (err) {
       setError(err.message);
@@ -606,7 +634,7 @@ const ViewStudentInfo = () => {
                   <Ionicons name="school" size={20} color="#fff" />
                 </View>
                 <Text style={styles.summaryNumber}>
-                  {students.filter(s => s.teacherRole === 'class_teacher').length}
+                  {teacherStats.classTeacherCount}
                 </Text>
                 <Text style={styles.summaryLabel}>Class Teacher</Text>
               </View>
@@ -615,7 +643,7 @@ const ViewStudentInfo = () => {
                   <Ionicons name="book" size={20} color="#fff" />
                 </View>
                 <Text style={styles.summaryNumber}>
-                  {students.filter(s => s.teacherRole === 'subject').length}
+                  {teacherStats.subjectTeacherCount}
                 </Text>
                 <Text style={styles.summaryLabel}>Subject Teacher</Text>
               </View>
@@ -623,7 +651,7 @@ const ViewStudentInfo = () => {
                 <View style={[styles.summaryIcon, { backgroundColor: '#FF9800' }]}>
                   <Ionicons name="people" size={20} color="#fff" />
                 </View>
-                <Text style={styles.summaryNumber}>{students.length}</Text>
+                <Text style={styles.summaryNumber}>{teacherStats.totalStudents}</Text>
                 <Text style={styles.summaryLabel}>Total Students</Text>
               </View>
             </View>
@@ -724,8 +752,8 @@ const ViewStudentInfo = () => {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={onRefresh}
-                colors={['#1976d2']}
                 tintColor="#1976d2"
+                {...(Platform.OS === 'android' && { colors: ['#1976d2'] })}
               />
             }
           />
@@ -749,7 +777,7 @@ const ViewStudentInfo = () => {
             </View>
             
             {selectedStudent && (
-              <ScrollView style={styles.modalBody}>
+              <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
                 <View style={styles.detailSection}>
                   <Text style={styles.detailTitle}>Personal Information</Text>
                   <View style={styles.detailRow}>
@@ -1126,6 +1154,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     marginTop: 20,
+    marginBottom: 30,
+    paddingBottom: 20,
   },
   actionButton: {
     flexDirection: 'row',

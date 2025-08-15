@@ -40,7 +40,6 @@ import SchoolDetails from '../screens/admin/SchoolDetails';
 import AttendanceReport from '../screens/admin/reports/AttendanceReport';
 import AcademicPerformance from '../screens/admin/reports/AcademicPerformance';
 import FeeCollection from '../screens/admin/reports/FeeCollection';
-import StudentOverview from '../screens/admin/reports/StudentOverview';
 
 // Teacher Screens
 import TeacherDashboard from '../screens/teacher/TeacherDashboard';
@@ -378,7 +377,6 @@ export default function AppNavigator() {
                 <Stack.Screen name="AttendanceReport" component={AttendanceReport} />
                 <Stack.Screen name="AcademicPerformance" component={AcademicPerformance} />
                 <Stack.Screen name="FeeCollection" component={FeeCollection} />
-                <Stack.Screen name="StudentOverview" component={StudentOverview} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
               </>

@@ -414,19 +414,6 @@ const FeeCollection = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {/* Search Bar */}
-        <View style={styles.searchSection}>
-          <View style={styles.searchContainer}>
-            <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search by student name or admission number"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-          </View>
-        </View>
-
         {/* Filters Section */}
         <View style={styles.filtersSection}>
           <Text style={styles.sectionTitle}>Filters</Text>
@@ -779,7 +766,6 @@ const styles = StyleSheet.create({
   filtersSection: {
     backgroundColor: '#fff',
     margin: 16,
-    marginTop: 0,
     padding: 16,
     borderRadius: 12,
     elevation: 2,
@@ -1049,30 +1035,33 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     margin: 16,
     marginTop: 0,
-    padding: 16,
+    padding: 20,
     borderRadius: 12,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    marginBottom: 30,
+  },
+  actionButtons: {
+    flexDirection: 'column',
+    gap: 12,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderWidth: 2,
+    borderRadius: 12,
+    backgroundColor: '#fff',
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    backgroundColor: '#f8f9fa',
-    marginBottom: 8,
-    minWidth: '30%',
   },
   actionButtonText: {
     fontSize: 12,

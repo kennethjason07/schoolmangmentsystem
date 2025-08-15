@@ -133,6 +133,10 @@ export default function MarksEntry({ navigation }) {
         table: TABLES.MARKS
       }, () => {
         loadTeacherData();
+        // Reload marks if class and subject are already selected
+        if (selectedClass && selectedSubject) {
+          loadExistingMarks(selectedClass, selectedSubject);
+        }
       })
       .subscribe();
 
@@ -140,6 +144,13 @@ export default function MarksEntry({ navigation }) {
       subscription.unsubscribe();
     };
   }, []);
+
+  // Load existing marks when both class and subject are selected (including on reload)
+  useEffect(() => {
+    if (selectedClass && selectedSubject && classes.length > 0) {
+      loadExistingMarks(selectedClass, selectedSubject);
+    }
+  }, [selectedClass, selectedSubject, classes]);
 
   const handleClassSelect = (classId) => {
     setSelectedClass(classId);
@@ -149,7 +160,58 @@ export default function MarksEntry({ navigation }) {
 
   const handleSubjectSelect = (subjectId) => {
     setSelectedSubject(subjectId);
-    setMarks({});
+    setMarks({}); // Clear marks first, they will be loaded by useEffect
+  };
+  
+  // Load existing marks for the selected class and subject
+  const loadExistingMarks = async (classId, subjectId) => {
+    if (!classId || !subjectId) return;
+    
+    try {
+      const selectedClassData = classes.find(c => c.id === classId);
+      if (!selectedClassData || !selectedClassData.students) return;
+      
+      const studentIds = selectedClassData.students.map(s => s.id);
+      
+      console.log('Loading existing marks for class:', classId, 'subject:', subjectId, 'students:', studentIds.length);
+      
+      // Get existing marks for this specific subject and students
+      const { data: existingMarks, error: marksError } = await supabase
+        .from(TABLES.MARKS)
+        .select('student_id, marks_obtained, created_at')
+        .eq('subject_id', subjectId)
+        .in('student_id', studentIds)
+        .order('created_at', { ascending: false });
+        
+      if (marksError) {
+        console.error('Error loading existing marks:', marksError);
+        return;
+      }
+      
+      console.log('Found existing marks:', existingMarks?.length || 0);
+      
+      if (existingMarks && existingMarks.length > 0) {
+        // Get the latest marks for each student (in case there are multiple entries)
+        const latestMarks = {};
+        existingMarks.forEach(mark => {
+          if (!latestMarks[mark.student_id] || new Date(mark.created_at) > new Date(latestMarks[mark.student_id].created_at)) {
+            latestMarks[mark.student_id] = mark;
+          }
+        });
+        
+        // Convert to the format expected by the UI
+        const marksMap = {};
+        Object.entries(latestMarks).forEach(([studentId, mark]) => {
+          marksMap[studentId] = mark.marks_obtained?.toString() || '';
+        });
+        
+        console.log('Setting marks for students:', Object.keys(marksMap).length);
+        setMarks(marksMap);
+      }
+      
+    } catch (err) {
+      console.error('Error loading existing marks:', err);
+    }
   };
 
   const handleExamDateChange = (event, selectedDate) => {
@@ -456,10 +518,7 @@ export default function MarksEntry({ navigation }) {
                           </View>
                           <View style={styles.marksInputContainer}>
                             <TextInput
-                              style={[
-                                styles.marksInput,
-                                isZeroMark && styles.zeroMarksInput
-                              ]}
+                              style={styles.marksInput}
                               value={marks[student.id]?.toString() || ''}
                               onChangeText={(value) => handleMarksEntry(student.id, value)}
                               keyboardType="numeric"
@@ -738,5 +797,24 @@ const styles = StyleSheet.create({
     borderColor: '#ff9800',
     borderWidth: 2,
     backgroundColor: '#fff3e0',
+  },
+  hasExistingMarks: {
+    borderColor: '#4CAF50',
+    borderWidth: 2,
+    backgroundColor: '#f1f8e9',
+  },
+  existingMarksIndicator: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#4CAF50',
+    borderRadius: 8,
+    width: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#fff',
+    elevation: 2,
   },
 });

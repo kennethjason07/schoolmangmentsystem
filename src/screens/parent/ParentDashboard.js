@@ -31,6 +31,43 @@ const ParentDashboard = ({ navigation }) => {
   const [fees, setFees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [schoolDetails, setSchoolDetails] = useState(null);
+
+  // Utility function to format date from yyyy-mm-dd to dd-mm-yyyy
+  const formatDateToDDMMYYYY = (dateString) => {
+    if (!dateString) return 'N/A';
+    
+    try {
+      // Handle different date formats
+      let date;
+      if (dateString.includes('T')) {
+        // ISO date format (2024-01-15T00:00:00.000Z)
+        date = new Date(dateString);
+      } else if (dateString.includes('-') && dateString.split('-').length === 3) {
+        // yyyy-mm-dd format
+        const [year, month, day] = dateString.split('-');
+        date = new Date(year, month - 1, day); // month is 0-indexed
+      } else {
+        // Fallback to Date constructor
+        date = new Date(dateString);
+      }
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return dateString; // Return original if invalid
+      }
+      
+      // Format to dd-mm-yyyy
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      
+      return `${day}-${month}-${year}`;
+    } catch (error) {
+      console.warn('Error formatting date:', dateString, error);
+      return dateString; // Return original if error
+    }
+  };
 
   // Modal states
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
@@ -343,8 +380,57 @@ const ParentDashboard = ({ navigation }) => {
           setExams([]);
         }
 
-        // Set empty events for now (no events table in schema)
-        setEvents([]);
+        // Get upcoming events from the events table
+        try {
+          const today = new Date().toISOString().split('T')[0];
+          console.log('🔍 Parent Dashboard - Fetching upcoming events from date:', today);
+          
+          // Get all upcoming events (today and future) that are active
+          const { data: upcomingEventsData, error: eventsError } = await supabase
+            .from('events')
+            .select('*')
+            .eq('status', 'Active')
+            .gte('event_date', today)
+            .order('event_date', { ascending: true });
+            
+          console.log('📊 Parent Dashboard - Upcoming events found:', upcomingEventsData?.length || 0);
+          if (upcomingEventsData && upcomingEventsData.length > 0) {
+            console.log('📋 Parent Dashboard - Upcoming events details:');
+            upcomingEventsData.forEach((event, index) => {
+              console.log(`   ${index + 1}. "${event.title}" - Date: ${event.event_date}, School-wide: ${event.is_school_wide}`);
+            });
+          }
+          
+          if (eventsError) {
+            console.error('❌ Parent Dashboard - Events query error:', eventsError);
+          }
+          
+          // Map the events to the format expected by the UI
+          const mappedEvents = (upcomingEventsData || []).map(event => ({
+            id: event.id,
+            title: event.title,
+            description: event.description || '',
+            event_date: event.event_date,
+            event_time: event.start_time || '09:00',
+            icon: event.icon || 'calendar',
+            color: event.color || '#FF9800',
+            location: event.location,
+            organizer: event.organizer
+          }));
+          
+          console.log('✅ Parent Dashboard - Mapped events for dashboard:', mappedEvents.length);
+          
+          if (mappedEvents.length > 0) {
+            console.log('🎉 Parent Dashboard - SUCCESS: Events will be shown on dashboard!');
+          } else {
+            console.log('⚠️  Parent Dashboard - WARNING: No events to show on dashboard!');
+          }
+          
+          setEvents(mappedEvents.slice(0, 5)); // Show top 5 events
+        } catch (err) {
+          console.log('❌ Parent Dashboard - Events fetch error:', err);
+          setEvents([]);
+        }
 
         // SIMPLE ATTENDANCE CALCULATION - MATCHES StudentAttendanceMarks
         const currentDate = new Date();
@@ -442,6 +528,17 @@ const ParentDashboard = ({ navigation }) => {
         } catch (err) {
           console.log('Fees fetch error:', err);
           setFees([]);
+        }
+
+        // Get school details
+        try {
+          const schoolData = await dbHelpers.getSchoolDetails();
+          if (schoolData && schoolData.data) {
+            setSchoolDetails(schoolData.data);
+          }
+        } catch (err) {
+          console.log('School details fetch error:', err);
+          setSchoolDetails(null);
         }
 
       } catch (err) {
@@ -604,7 +701,7 @@ const ParentDashboard = ({ navigation }) => {
       </View>
       <View style={styles.examInfo}>
         <Text style={styles.examSubject}>{item.subject_name}</Text>
-        <Text style={styles.examDetails}>{item.exam_date} • {item.exam_time}</Text>
+        <Text style={styles.examDetails}>{formatDateToDDMMYYYY(item.exam_date)} • {item.exam_time}</Text>
         <Text style={styles.examClass}>{item.class_name}</Text>
       </View>
       <TouchableOpacity style={styles.examAction}>
@@ -620,7 +717,7 @@ const ParentDashboard = ({ navigation }) => {
       </View>
       <View style={styles.eventInfo}>
         <Text style={styles.eventTitle}>{item.title}</Text>
-        <Text style={styles.eventDetails}>{item.event_date} • {item.event_time}</Text>
+        <Text style={styles.eventDetails}>{formatDateToDDMMYYYY(item.event_date)} • {item.event_time}</Text>
         <Text style={styles.eventDescription}>{item.description}</Text>
       </View>
     </View>
@@ -634,7 +731,7 @@ const ParentDashboard = ({ navigation }) => {
       <View style={styles.notificationContent}>
         <Text style={styles.notificationTitle}>{item.title}</Text>
         <Text style={styles.notificationMessage}>{item.message}</Text>
-        <Text style={styles.notificationTime}>{new Date(item.created_at).toLocaleDateString()}</Text>
+        <Text style={styles.notificationTime}>{formatDateToDDMMYYYY(item.created_at)}</Text>
       </View>
     </View>
   );
@@ -672,7 +769,7 @@ const ParentDashboard = ({ navigation }) => {
       </View>
       <View style={styles.eventInfo}>
         <Text style={styles.eventTitle}>{item.subject_name} Exam</Text>
-        <Text style={styles.eventDetails}>{item.exam_date} • {item.exam_time}</Text>
+        <Text style={styles.eventDetails}>{formatDateToDDMMYYYY(item.exam_date)} • {item.exam_time}</Text>
         <Text style={styles.eventDescription}>{item.description || 'Exam scheduled'}</Text>
       </View>
     </View>
@@ -729,6 +826,46 @@ const ParentDashboard = ({ navigation }) => {
           />
         }
       >
+        {/* Welcome Section - Modern gradient design */}
+        {schoolDetails && (
+          <View style={styles.welcomeSection}>
+            {/* Decorative background elements */}
+            <View style={styles.backgroundCircle1} />
+            <View style={styles.backgroundCircle2} />
+            <View style={styles.backgroundPattern} />
+            
+            <View style={styles.welcomeContent}>
+              <View style={styles.schoolHeader}>
+                {schoolDetails?.logo_url ? (
+                  <Image source={{ uri: schoolDetails.logo_url }} style={styles.schoolLogo} />
+                ) : (
+                  <View style={styles.logoPlaceholder}>
+                    <Ionicons name="school" size={40} color="#fff" />
+                  </View>
+                )}
+                <View style={styles.schoolInfo}>
+                  <Text style={styles.schoolName}>
+                    {schoolDetails?.name || 'Maximus School'}
+                  </Text>
+                  <Text style={styles.schoolType}>
+                    {schoolDetails?.type || 'Educational Institution'}
+                  </Text>
+                </View>
+              </View>
+              
+              <View style={styles.dateContainer}>
+                <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.8)" />
+                <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })}</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Student Details Card */}
         <TouchableOpacity style={styles.studentCard} onPress={() => setShowStudentDetailsModal(true)} activeOpacity={0.85}>
           <View style={styles.studentCardRow}>
@@ -824,7 +961,7 @@ const ParentDashboard = ({ navigation }) => {
                     {mark.marks_obtained}/{mark.max_marks} marks
                   </Text>
                   <Text style={styles.markExam}>
-                    {mark.exams?.name || 'Exam'} • {new Date(mark.exams?.start_date || mark.created_at).toLocaleDateString()}
+                    {mark.exams?.name || 'Exam'} • {formatDateToDDMMYYYY(mark.exams?.start_date || mark.created_at)}
                   </Text>
                 </View>
               ))}
@@ -858,7 +995,7 @@ const ParentDashboard = ({ navigation }) => {
                   </View>
                   <Text style={styles.feeAmount}>₹{fee.amount?.toLocaleString() || '0'}</Text>
                   <Text style={styles.feeDueDate}>
-                    Due: {new Date(fee.due_date).toLocaleDateString()}
+                    Due: {formatDateToDDMMYYYY(fee.due_date)}
                   </Text>
                 </View>
               ))}
@@ -923,7 +1060,7 @@ const ParentDashboard = ({ navigation }) => {
               </View>
               {attendance.map((item, idx) => (
                 <View key={idx} style={styles.attendanceTableRow}>
-                  <Text style={styles.attendanceTableCol}>{item.date}</Text>
+                  <Text style={styles.attendanceTableCol}>{formatDateToDDMMYYYY(item.date)}</Text>
                   <Text style={styles.attendanceTableCol}>{new Date(item.date).toLocaleDateString('en-US', { weekday: 'long' })}</Text>
                   <Text style={[styles.attendanceTableCol, { color: item.status === 'present' ? '#4CAF50' : '#F44336', fontWeight: 'bold' }]}>{item.status}</Text>
                 </View>
@@ -956,7 +1093,7 @@ const ParentDashboard = ({ navigation }) => {
                   </View>
                   <View style={styles.modalEventInfo}>
                     <Text style={styles.modalEventTitle}>{item.title}</Text>
-                    <Text style={styles.modalEventDetails}>{item.event_date} • {item.event_time}</Text>
+                    <Text style={styles.modalEventDetails}>{formatDateToDDMMYYYY(item.event_date)} • {item.event_time}</Text>
                     <Text style={styles.modalEventDescription}>{item.description}</Text>
                   </View>
                 </View>
@@ -989,7 +1126,7 @@ const ParentDashboard = ({ navigation }) => {
                   </View>
                   <View style={styles.modalEventInfo}>
                     <Text style={styles.modalEventTitle}>{item.subject_name} Exam</Text>
-                    <Text style={styles.modalEventDetails}>{item.exam_date} • {item.exam_time}</Text>
+                    <Text style={styles.modalEventDetails}>{formatDateToDDMMYYYY(item.exam_date)} • {item.exam_time}</Text>
                     <Text style={styles.modalEventDescription}>{item.description || 'Exam scheduled'}</Text>
                   </View>
                 </View>
@@ -1596,6 +1733,101 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999',
   },
+
+  // Welcome Section - AdminDashboard Style
+  welcomeSection: {
+    marginVertical: 12,
+    marginHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: '#667eea',
+    shadowColor: '#667eea',
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 12,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  backgroundCircle1: {
+    position: 'absolute',
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    top: -50,
+    right: -30,
+  },
+  backgroundCircle2: {
+    position: 'absolute',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    bottom: -20,
+    left: -20,
+  },
+  backgroundPattern: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(118, 75, 162, 0.6)',
+  },
+  welcomeContent: {
+    padding: 24,
+    zIndex: 1,
+  },
+  schoolHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  schoolLogo: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginRight: 15,
+  },
+  logoPlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 15,
+  },
+  schoolInfo: {
+    flex: 1,
+  },
+  schoolName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  schoolType: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  dateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  dateText: {
+    fontSize: 16,
+    color: '#ffffff',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
 });
 
-export default ParentDashboard; 
+export default ParentDashboard;

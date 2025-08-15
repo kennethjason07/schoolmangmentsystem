@@ -83,7 +83,6 @@ const AttendanceManagement = () => {
   const [attendanceRecords, setAttendanceRecords] = useState({});
   const [teacherAttendanceRecords, setTeacherAttendanceRecords] = useState({});
   const [teacherAttendanceMark, setTeacherAttendanceMark] = useState({});
-  const [teacherEditMode, setTeacherEditMode] = useState({});
   const [teacherDate, setTeacherDate] = useState(new Date());
   const [teacherShowDatePicker, setTeacherShowDatePicker] = useState(false);
   const [teacherViewModalVisible, setTeacherViewModalVisible] = useState(false);
@@ -93,7 +92,6 @@ const AttendanceManagement = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [attendanceMark, setAttendanceMark] = useState({});
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [editMode, setEditMode] = useState({});
   const [viewModalVisible, setViewModalVisible] = useState(false);
   const [viewClass, setViewClass] = useState(null);
   const [viewDate, setViewDate] = useState(new Date());
@@ -344,14 +342,7 @@ const AttendanceManagement = () => {
         [key]: { ...attendanceMark },
       });
 
-      // Reset edit modes - enable editing for all students after successful submit
-      const newEditMode = {};
-      studentsForClass.forEach(student => {
-        if (attendanceMark[student.id]) {
-          newEditMode[student.id] = false; // Allow editing after submit
-        }
-      });
-      setEditMode(newEditMode);
+      // Direct editing enabled - no edit mode needed
 
       // Show confirmation popup
       Alert.alert('Success', 'Attendance saved successfully! You can now edit individual records using the pencil icon.');
@@ -398,14 +389,7 @@ const AttendanceManagement = () => {
         [key]: { ...teacherAttendanceMark },
       });
 
-      // Reset edit modes - enable editing for all teachers after successful submit
-      const newEditMode = {};
-      teachers.forEach(teacher => {
-        if (teacherAttendanceMark[teacher.id]) {
-          newEditMode[teacher.id] = false; // Allow editing after submit
-        }
-      });
-      setTeacherEditMode(newEditMode);
+      // Direct editing enabled - no edit mode needed
 
       // Show confirmation popup
       Alert.alert('Success', 'Teacher attendance saved successfully! You can now edit individual records using the pencil icon.');
@@ -433,66 +417,18 @@ const AttendanceManagement = () => {
 
   // Toggle attendance status for a student
   const toggleStudentAttendance = (studentId, status) => {
-    // Check if student is in edit mode or if no attendance is marked yet
-    const isInEditMode = editMode[studentId] || !attendanceMark[studentId];
-
-    if (isInEditMode) {
-      setAttendanceMark(prev => ({
-        ...prev,
-        [studentId]: status
-      }));
-
-      // After marking attendance, disable edit mode for this student
-      setEditMode(prev => ({
-        ...prev,
-        [studentId]: false
-      }));
-    }
-  };
-
-  // Enable edit mode for a specific student
-  const enableEditMode = (studentId) => {
-    setEditMode(prev => ({
+    setAttendanceMark(prev => ({
       ...prev,
-      [studentId]: true
+      [studentId]: status
     }));
-  };
-
-  // Check if student can be edited (either in edit mode or no attendance marked)
-  const canEditStudent = (studentId) => {
-    return editMode[studentId] || !attendanceMark[studentId];
   };
 
   // Toggle attendance status for a teacher
   const toggleTeacherAttendance = (teacherId, status) => {
-    // Check if teacher is in edit mode or if no attendance is marked yet
-    const isInEditMode = teacherEditMode[teacherId] || !teacherAttendanceMark[teacherId];
-
-    if (isInEditMode) {
-      setTeacherAttendanceMark(prev => ({
-        ...prev,
-        [teacherId]: status
-      }));
-
-      // After marking attendance, disable edit mode for this teacher
-      setTeacherEditMode(prev => ({
-        ...prev,
-        [teacherId]: false
-      }));
-    }
-  };
-
-  // Enable edit mode for a specific teacher
-  const enableTeacherEditMode = (teacherId) => {
-    setTeacherEditMode(prev => ({
+    setTeacherAttendanceMark(prev => ({
       ...prev,
-      [teacherId]: true
+      [teacherId]: status
     }));
-  };
-
-  // Check if teacher can be edited (either in edit mode or no attendance marked)
-  const canEditTeacher = (teacherId) => {
-    return teacherEditMode[teacherId] || !teacherAttendanceMark[teacherId];
   };
 
   // Export to PDF function
@@ -571,7 +507,6 @@ const AttendanceManagement = () => {
 
   // Render student attendance item with enhanced UI
   const renderStudentItem = ({ item, index }) => {
-    const isEditable = canEditStudent(item.id);
     const currentStatus = attendanceMark[item.id];
 
     return (
@@ -625,11 +560,9 @@ const AttendanceManagement = () => {
               style={[
                 styles.attendanceButton,
                 styles.presentButton,
-                currentStatus === 'Present' && styles.presentButtonActive,
-                !isEditable && currentStatus !== 'Present' && styles.disabledButton
+                currentStatus === 'Present' && styles.presentButtonActive
               ]}
               onPress={() => toggleStudentAttendance(item.id, 'Present')}
-              disabled={!isEditable && currentStatus !== 'Present'}
               activeOpacity={0.8}
             >
               <Ionicons
@@ -652,11 +585,9 @@ const AttendanceManagement = () => {
               style={[
                 styles.attendanceButton,
                 styles.absentButton,
-                currentStatus === 'Absent' && styles.absentButtonActive,
-                !isEditable && currentStatus !== 'Absent' && styles.disabledButton
+                currentStatus === 'Absent' && styles.absentButtonActive
               ]}
               onPress={() => toggleStudentAttendance(item.id, 'Absent')}
-              disabled={!isEditable && currentStatus !== 'Absent'}
               activeOpacity={0.8}
             >
               <Ionicons
@@ -673,22 +604,6 @@ const AttendanceManagement = () => {
             </TouchableOpacity>
           </Animatable.View>
 
-          {/* Edit Button */}
-          {currentStatus && (
-            <Animatable.View animation="bounceIn" delay={300}>
-              <TouchableOpacity
-                style={styles.editButtonCard}
-                onPress={() => enableEditMode(item.id)}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name="pencil"
-                  size={16}
-                  color="#1976d2"
-                />
-              </TouchableOpacity>
-            </Animatable.View>
-          )}
         </View>
       </Animatable.View>
     );
@@ -696,7 +611,6 @@ const AttendanceManagement = () => {
 
   // Render teacher attendance item with enhanced UI
   const renderTeacherItem = ({ item, index }) => {
-    const isEditable = canEditTeacher(item.id);
     const currentStatus = teacherAttendanceMark[item.id];
 
     return (
@@ -751,11 +665,9 @@ const AttendanceManagement = () => {
               style={[
                 styles.attendanceButton,
                 styles.presentButton,
-                currentStatus === 'Present' && styles.presentButtonActive,
-                !isEditable && currentStatus !== 'Present' && styles.disabledButton
+                currentStatus === 'Present' && styles.presentButtonActive
               ]}
               onPress={() => toggleTeacherAttendance(item.id, 'Present')}
-              disabled={!isEditable && currentStatus !== 'Present'}
               activeOpacity={0.8}
             >
               <Ionicons
@@ -799,22 +711,6 @@ const AttendanceManagement = () => {
             </TouchableOpacity>
           </Animatable.View>
 
-          {/* Edit Button */}
-          {currentStatus && (
-            <Animatable.View animation="bounceIn" delay={300}>
-              <TouchableOpacity
-                style={styles.editButtonCard}
-                onPress={() => enableTeacherEditMode(item.id)}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name="pencil"
-                  size={16}
-                  color="#1976d2"
-                />
-              </TouchableOpacity>
-            </Animatable.View>
-          )}
         </View>
       </Animatable.View>
     );
