@@ -27,8 +27,8 @@ const TakeAttendance = () => {
   const [selectedClass, setSelectedClass] = useState(null);
   const [selectedSection, setSelectedSection] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [displayDate, setDisplayDate] = useState(formatDateDMY(new Date().toISOString().split('T')[0]));
   const [attendanceMark, setAttendanceMark] = useState({});
-  const [editMode, setEditMode] = useState({});
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [viewModalVisible, setViewModalVisible] = useState(false);
   const [viewClass, setViewClass] = useState(null);
@@ -112,11 +112,11 @@ const TakeAttendance = () => {
         .select(`
           id,
           name,
-          roll_no,
+          admission_no,
           classes(class_name, section)
         `)
         .eq('class_id', selectedClass)
-        .order('roll_no');
+        .order('admission_no');
 
       if (studentsError) throw studentsError;
       setStudents(studentsData || []);
@@ -255,7 +255,7 @@ const TakeAttendance = () => {
       // Get students for the view class
       const { data: viewStudents } = await supabase
         .from(TABLES.STUDENTS)
-        .select('id, name, roll_no')
+        .select('id, name, admission_no')
         .eq('class_id', viewClass);
 
       if (!viewStudents || viewStudents.length === 0) {
@@ -273,7 +273,7 @@ const TakeAttendance = () => {
         .from(TABLES.STUDENT_ATTENDANCE)
         .select(`
           *,
-          students(name, roll_no)
+          students(name, admission_no)
         `)
         .eq('date', viewDate)
         .in('student_id', viewStudents.map(s => s.id));
@@ -286,7 +286,7 @@ const TakeAttendance = () => {
         return {
           student_id: student.id,
           student_name: student.name,
-          roll_number: student.roll_no,
+          roll_number: student.admission_no,
           date: viewDate,
           status: attendance ? attendance.status : 'Not Marked'
         };
@@ -318,20 +318,20 @@ const TakeAttendance = () => {
         
         <h4 style="text-align:center; color: #4CAF50;">Present Students (${present.length})</h4>
         <table border="1" style="border-collapse:collapse;width:100%;margin-bottom:20px;">
-          <tr style="background-color:#f5f5f5;"><th style="text-align:center;padding:8px;">Roll No</th><th style="text-align:center;padding:8px;">Student Name</th></tr>
+          <tr style="background-color:#f5f5f5;"><th style="text-align:center;padding:8px;">Admission No</th><th style="text-align:center;padding:8px;">Student Name</th></tr>
           ${present.map(r => `<tr><td style="text-align:center;padding:8px;">${r.roll_number || '-'}</td><td style="text-align:center;padding:8px;">${r.student_name || '-'}</td></tr>`).join('') || '<tr><td style="text-align:center;padding:8px;">-</td><td style="text-align:center;padding:8px;">-</td></tr>'}
         </table>
         
         <h4 style="text-align:center; color: #F44336;">Absent Students (${absent.length})</h4>
         <table border="1" style="border-collapse:collapse;width:100%;margin-bottom:20px;">
-          <tr style="background-color:#f5f5f5;"><th style="text-align:center;padding:8px;">Roll No</th><th style="text-align:center;padding:8px;">Student Name</th></tr>
+          <tr style="background-color:#f5f5f5;"><th style="text-align:center;padding:8px;">Admission No</th><th style="text-align:center;padding:8px;">Student Name</th></tr>
           ${absent.map(r => `<tr><td style="text-align:center;padding:8px;">${r.roll_number || '-'}</td><td style="text-align:center;padding:8px;">${r.student_name || '-'}</td></tr>`).join('') || '<tr><td style="text-align:center;padding:8px;">-</td><td style="text-align:center;padding:8px;">-</td></tr>'}
         </table>
         
         ${notMarked.length > 0 ? `
         <h4 style="text-align:center; color: #FF9800;">Not Marked (${notMarked.length})</h4>
         <table border="1" style="border-collapse:collapse;width:100%;margin-bottom:20px;">
-          <tr style="background-color:#f5f5f5;"><th style="text-align:center;padding:8px;">Roll No</th><th style="text-align:center;padding:8px;">Student Name</th></tr>
+          <tr style="background-color:#f5f5f5;"><th style="text-align:center;padding:8px;">Admission No</th><th style="text-align:center;padding:8px;">Student Name</th></tr>
           ${notMarked.map(r => `<tr><td style="text-align:center;padding:8px;">${r.roll_number || '-'}</td><td style="text-align:center;padding:8px;">${r.student_name || '-'}</td></tr>`).join('')}
         </table>
         ` : ''}
@@ -352,34 +352,10 @@ const TakeAttendance = () => {
 
   // Toggle attendance status for a student
   const toggleStudentAttendance = (studentId, status) => {
-    // Check if student is in edit mode or if no attendance is marked yet
-    const isInEditMode = editMode[studentId] || !attendanceMark[studentId];
-
-    if (isInEditMode) {
-      setAttendanceMark(prev => ({
-        ...prev,
-        [studentId]: status
-      }));
-
-      // After marking attendance, disable edit mode for this student
-      setEditMode(prev => ({
-        ...prev,
-        [studentId]: false
-      }));
-    }
-  };
-
-  // Enable edit mode for a specific student
-  const enableEditMode = (studentId) => {
-    setEditMode(prev => ({
+    setAttendanceMark(prev => ({
       ...prev,
-      [studentId]: true
+      [studentId]: status
     }));
-  };
-
-  // Check if student can be edited (either in edit mode or no attendance marked)
-  const canEditStudent = (studentId) => {
-    return editMode[studentId] || !attendanceMark[studentId];
   };
 
   // Handle pull-to-refresh
@@ -474,7 +450,7 @@ const TakeAttendance = () => {
                 onPress={() => setShowDatePicker(true)}
               >
                 <Text style={styles.dateButtonText}>
-                  {selectedDate}
+                  {displayDate || formatDateDMY(selectedDate)}
                 </Text>
                 <Ionicons name="calendar-outline" size={20} color="#666" />
               </TouchableOpacity>
@@ -516,9 +492,12 @@ const TakeAttendance = () => {
                   const dd = String(selected.getDate()).padStart(2, '0'); 
                   const mm = String(selected.getMonth() + 1).padStart(2, '0'); 
                   const yyyy = selected.getFullYear(); 
-                  setSelectedDate(`${yyyy}-${mm}-${dd}`); 
+                  const isoDate = `${yyyy}-${mm}-${dd}`;
+                  const displayDate = `${dd}-${mm}-${yyyy}`;
+                  setSelectedDate(isoDate); 
+                  setDisplayDate(displayDate);
                 } 
-              }} 
+              }}
             />
           )}
 
@@ -526,20 +505,18 @@ const TakeAttendance = () => {
           {students.length > 0 ? (
             <View style={styles.studentsContainer}>
               <View style={styles.tableHeader}>
-                <Text style={[styles.headerCell, { flex: 1 }]}>Roll No</Text>
+                <Text style={[styles.headerCell, { flex: 1 }]}>Admission No</Text>
                 <Text style={[styles.headerCell, { flex: 2.5 }]}>Student Name</Text>
                 <Text style={[styles.headerCell, { flex: 1 }]}>Present</Text>
                 <Text style={[styles.headerCell, { flex: 1 }]}>Absent</Text>
-                <Text style={[styles.headerCell, { flex: 0.8 }]}>Edit</Text>
               </View>
               
               {students.map(student => {
-                const isEditable = canEditStudent(student.id);
                 const currentStatus = attendanceMark[student.id];
                 
                 return (
                   <View key={student.id} style={styles.studentRow}>
-                    <Text style={[styles.studentCell, { flex: 1 }]}>{student.roll_no}</Text>
+                    <Text style={[styles.studentCell, { flex: 1 }]}>{student.admission_no}</Text>
                     <Text style={[styles.studentCell, { flex: 2.5 }]}>{student.name}</Text>
                     
                     {/* Present Button */}
@@ -547,16 +524,14 @@ const TakeAttendance = () => {
                       <TouchableOpacity
                         style={[
                           styles.attendanceCircle,
-                          currentStatus === 'Present' && styles.presentCircle,
-                          !isEditable && currentStatus !== 'Present' && styles.disabledCircle
+                          currentStatus === 'Present' && styles.presentCircle
                         ]}
                         onPress={() => toggleStudentAttendance(student.id, 'Present')}
-                        disabled={!isEditable && currentStatus !== 'Present'}
                       >
                         <Ionicons
                           name="checkmark"
                           size={16}
-                          color={currentStatus === 'Present' ? '#fff' : (isEditable ? '#ccc' : '#ddd')}
+                          color={currentStatus === 'Present' ? '#fff' : '#ccc'}
                         />
                       </TouchableOpacity>
                     </View>
@@ -566,34 +541,14 @@ const TakeAttendance = () => {
                       <TouchableOpacity
                         style={[
                           styles.attendanceCircle,
-                          currentStatus === 'Absent' && styles.absentCircle,
-                          !isEditable && currentStatus !== 'Absent' && styles.disabledCircle
+                          currentStatus === 'Absent' && styles.absentCircle
                         ]}
                         onPress={() => toggleStudentAttendance(student.id, 'Absent')}
-                        disabled={!isEditable && currentStatus !== 'Absent'}
                       >
                         <Ionicons
                           name="close"
                           size={16}
-                          color={currentStatus === 'Absent' ? '#fff' : (isEditable ? '#ccc' : '#ddd')}
-                        />
-                      </TouchableOpacity>
-                    </View>
-
-                    {/* Edit Button */}
-                    <View style={{ flex: 0.8, alignItems: 'center' }}>
-                      <TouchableOpacity
-                        style={[
-                          styles.editButton,
-                          currentStatus && !editMode[student.id] && styles.editButtonActive
-                        ]}
-                        onPress={() => enableEditMode(student.id)}
-                        disabled={!currentStatus}
-                      >
-                        <Ionicons
-                          name="pencil"
-                          size={14}
-                          color={currentStatus && !editMode[student.id] ? "#1976d2" : "#ccc"}
+                          color={currentStatus === 'Absent' ? '#fff' : '#ccc'}
                         />
                       </TouchableOpacity>
                     </View>
@@ -696,7 +651,7 @@ const TakeAttendance = () => {
 
             <ScrollView style={styles.modalScrollView}>
               <View style={styles.modalTableHeader}>
-                <Text style={styles.modalHeaderCell}>Roll No</Text>
+                <Text style={styles.modalHeaderCell}>Admission No</Text>
                 <Text style={styles.modalHeaderCell}>Student Name</Text>
                 <Text style={styles.modalHeaderCell}>Status</Text>
               </View>

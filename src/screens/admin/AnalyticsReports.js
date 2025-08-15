@@ -502,7 +502,7 @@ const AnalyticsReports = ({ navigation }) => {
         </View>
 
         {/* Quick Reports */}
-        <View style={styles.section}>
+        <View style={[styles.section, styles.quickReportsSection]}>
           <Text style={styles.sectionTitle}>Quick Reports</Text>
           <View style={styles.reportsList}>
             <TouchableOpacity
@@ -553,37 +553,6 @@ const AnalyticsReports = ({ navigation }) => {
               <Ionicons name="chevron-forward" size={20} color="#666" />
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.reportItem}
-              onPress={() => navigation.navigate('StudentOverview')}
-            >
-              <View style={[styles.reportIcon, { backgroundColor: '#FF9800' }]}>
-                <Ionicons name="people" size={24} color="#fff" />
-              </View>
-              <View style={styles.reportContent}>
-                <Text style={styles.reportTitle}>Student Overview</Text>
-                <Text style={styles.reportSubtitle}>
-                  {overviewStats.totalStudents || 0} students • {overviewStats.avgStudentsPerClass || 0} avg per class
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#666" />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.reportItem}
-              onPress={() => navigation.navigate('ReportCardGeneration')}
-            >
-              <View style={[styles.reportIcon, { backgroundColor: '#E91E63' }]}>
-                <Ionicons name="document-text" size={24} color="#fff" />
-              </View>
-              <View style={styles.reportContent}>
-                <Text style={styles.reportTitle}>Report Card Generation</Text>
-                <Text style={styles.reportSubtitle}>
-                  Generate and download student report cards by class and exam
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#666" />
-            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
@@ -756,6 +725,11 @@ const styles = StyleSheet.create({
   financialSubtext: {
     fontSize: 12,
     color: '#666',
+  },
+  // Quick Reports Section
+  quickReportsSection: {
+    marginBottom: 30,
+    paddingBottom: 30,
   },
   // Reports
   reportsList: {

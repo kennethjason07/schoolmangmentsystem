@@ -46,11 +46,13 @@ const TERMS = generateTerms();
 
 
 
-// Generate months dynamically for current and next year
+// Generate months dynamically up to current month only
 const generateMonths = () => {
   const months = [];
-  const currentYear = new Date().getFullYear();
-  const years = [currentYear - 1, currentYear, currentYear + 1]; // Previous, current, and next year
+  const currentDate = new Date();
+  const currentYear = currentDate.getFullYear();
+  const currentMonth = currentDate.getMonth(); // 0-indexed (0 = January)
+  const years = [currentYear - 1, currentYear]; // Previous and current year only
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -59,11 +61,14 @@ const generateMonths = () => {
 
   years.forEach(year => {
     monthNames.forEach((monthName, index) => {
-      const monthValue = `${year}-${String(index + 1).padStart(2, '0')}`;
-      months.push({
-        label: `${monthName} ${year}`,
-        value: monthValue
-      });
+      // Only include months up to current month
+      if (year < currentYear || (year === currentYear && index <= currentMonth)) {
+        const monthValue = `${year}-${String(index + 1).padStart(2, '0')}`;
+        months.push({
+          label: `${monthName} ${year}`,
+          value: monthValue
+        });
+      }
     });
   });
 
@@ -1614,97 +1619,107 @@ const AttendanceSummary = () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.downloadModalContent}>
-            <Text style={styles.downloadModalTitle}>Select Month</Text>
-            {MONTHS.map(m => (
-              <TouchableOpacity
-                key={m.value}
-                style={styles.downloadOption}
-                onPress={() => {
-                  setShowMonthSelect(false);
-                  setTimeout(async () => {
-                    // School and student info
-                    const schoolName = 'Springfield Public School';
-                    const schoolLogoUrl = '';
-                    const studentName = 'John Doe';
-                    const profilePicUrl = '';
-                    const monthLabel = m.label;
-                    // Attendance data for the selected month
-                    const [year, month] = m.value.split('-').map(Number);
-                    const monthData = attendanceData[m.value] || {};
-                    const firstDay = new Date(year, month - 1, 1);
-                    const lastDay = new Date(year, month, 0);
-                    const startWeekday = firstDay.getDay();
-                    const daysInMonth = lastDay.getDate();
-                    let calendarTable = '<table border="1"><tr>';
-                    ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => { calendarTable += `<th>${d}</th>`; });
-                    calendarTable += '</tr><tr>';
-                    for (let i = 0; i < startWeekday; i++) calendarTable += '<td></td>';
-                    for (let day = 1; day <= daysInMonth; day++) {
-                      const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-                      const att = monthData[dateStr];
-                      const statusClass = att ? att.status : '';
-                      calendarTable += `<td class="${statusClass}">${day}</td>`;
-                      if ((startWeekday + day) % 7 === 0) calendarTable += '</tr><tr>';
-                    }
-                    calendarTable += '</tr></table>';
-                    // Legend HTML
-                    const legendHtml = `
-                      <div style="display:flex;gap:16px;margin-top:16px;align-items:center;justify-content:center;">
-                        <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#4CAF50;border-radius:4px;margin-right:6px;"></span>Present</span>
-                        <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#F44336;border-radius:4px;margin-right:6px;"></span>Absent</span>
-                        <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#FF9800;border-radius:4px;margin-right:6px;"></span>Late</span>
-                        <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#9C27B0;border-radius:4px;margin-right:6px;"></span>Excused</span>
-                      </div>
-                    `;
-                    // Profile picture HTML
-                    const profilePic = profilePicUrl
-                      ? `<img src="${profilePicUrl}" style="width:60px;height:60px;border-radius:30px;margin-right:16px;" />`
-                      : `<div style="width:60px;height:60px;border-radius:30px;background:#ccc;margin-right:16px;display:inline-block;"></div>`;
-                    // School logo HTML with placeholder
-                    const schoolLogo = schoolLogoUrl
-                      ? `<img src="${schoolLogoUrl}" style="width:60px;height:60px;border-radius:8px;margin-right:16px;" />`
-                      : `<div style="width:60px;height:60px;border-radius:8px;background:#eee;margin-right:16px;display:inline-block;"></div>`;
-                    const htmlContent = `
-                      <html>
-                        <head>
-                          <style>
-                            .present { background: #4CAF50; color: #fff; }
-                            .absent { background: #F44336; color: #fff; }
-                            .late { background: #FF9800; color: #fff; }
-                            .excused { background: #9C27B0; color: #fff; }
-                          </style>
-                        </head>
-                        <body>
-                          <h1>Attendance Report</h1>
-                          <div style="display:flex;align-items:center;margin-bottom:16px;">
-                            ${schoolLogo}
-                            ${profilePic}
-                            <div>
-                              <strong>School:</strong> ${schoolName}<br/>
-                              <strong>Student:</strong> ${studentName}<br/>
-                              <strong>Month:</strong> ${monthLabel}
-                            </div>
-                          </div>
-                          ${calendarTable}
-                          ${legendHtml}
-                        </body>
-                      </html>
-                    `;
-                    try {
-                      const { uri } = await Print.printToFileAsync({ html: htmlContent });
-                      await Sharing.shareAsync(uri, {
-                        mimeType: 'application/pdf',
-                        dialogTitle: 'Share Attendance Report',
-                      });
-                    } catch (error) {
-                      Alert.alert('Error', 'Failed to generate PDF');
-                    }
-                  }, 300);
-                }}
-              >
-                <Text style={styles.downloadOptionText}>{m.label}</Text>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Month for Report</Text>
+              <TouchableOpacity onPress={() => setShowMonthSelect(false)}>
+                <Ionicons name="close" size={24} color="#666" />
               </TouchableOpacity>
-            ))}
+            </View>
+            <FlatList
+              data={MONTHS}
+              keyExtractor={(item) => item.value}
+              showsVerticalScrollIndicator={true}
+              style={styles.monthScrollList}
+              renderItem={({ item: m }) => (
+                <TouchableOpacity
+                  style={styles.downloadOption}
+                  onPress={() => {
+                    setShowMonthSelect(false);
+                    setTimeout(async () => {
+                      // School and student info
+                      const schoolName = 'Springfield Public School';
+                      const schoolLogoUrl = '';
+                      const studentName = 'John Doe';
+                      const profilePicUrl = '';
+                      const monthLabel = m.label;
+                      // Attendance data for the selected month
+                      const [year, month] = m.value.split('-').map(Number);
+                      const monthData = attendanceData[m.value] || {};
+                      const firstDay = new Date(year, month - 1, 1);
+                      const lastDay = new Date(year, month, 0);
+                      const startWeekday = firstDay.getDay();
+                      const daysInMonth = lastDay.getDate();
+                      let calendarTable = '<table border="1"><tr>';
+                      ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => { calendarTable += `<th>${d}</th>`; });
+                      calendarTable += '</tr><tr>';
+                      for (let i = 0; i < startWeekday; i++) calendarTable += '<td></td>';
+                      for (let day = 1; day <= daysInMonth; day++) {
+                        const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                        const att = monthData[dateStr];
+                        const statusClass = att ? att.status : '';
+                        calendarTable += `<td class="${statusClass}">${day}</td>`;
+                        if ((startWeekday + day) % 7 === 0) calendarTable += '</tr><tr>';
+                      }
+                      calendarTable += '</tr></table>';
+                      // Legend HTML
+                      const legendHtml = `
+                        <div style="display:flex;gap:16px;margin-top:16px;align-items:center;justify-content:center;">
+                          <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#4CAF50;border-radius:4px;margin-right:6px;"></span>Present</span>
+                          <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#F44336;border-radius:4px;margin-right:6px;"></span>Absent</span>
+                          <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#FF9800;border-radius:4px;margin-right:6px;"></span>Late</span>
+                          <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#9C27B0;border-radius:4px;margin-right:6px;"></span>Excused</span>
+                        </div>
+                      `;
+                      // Profile picture HTML
+                      const profilePic = profilePicUrl
+                        ? `<img src="${profilePicUrl}" style="width:60px;height:60px;border-radius:30px;margin-right:16px;" />`
+                        : `<div style="width:60px;height:60px;border-radius:30px;background:#ccc;margin-right:16px;display:inline-block;"></div>`;
+                      // School logo HTML with placeholder
+                      const schoolLogo = schoolLogoUrl
+                        ? `<img src="${schoolLogoUrl}" style="width:60px;height:60px;border-radius:8px;margin-right:16px;" />`
+                        : `<div style="width:60px;height:60px;border-radius:8px;background:#eee;margin-right:16px;display:inline-block;"></div>`;
+                      const htmlContent = `
+                        <html>
+                          <head>
+                            <style>
+                              .present { background: #4CAF50; color: #fff; }
+                              .absent { background: #F44336; color: #fff; }
+                              .late { background: #FF9800; color: #fff; }
+                              .excused { background: #9C27B0; color: #fff; }
+                            </style>
+                          </head>
+                          <body>
+                            <h1>Attendance Report</h1>
+                            <div style="display:flex;align-items:center;margin-bottom:16px;">
+                              ${schoolLogo}
+                              ${profilePic}
+                              <div>
+                                <strong>School:</strong> ${schoolName}<br/>
+                                <strong>Student:</strong> ${studentName}<br/>
+                                <strong>Month:</strong> ${monthLabel}
+                              </div>
+                            </div>
+                            ${calendarTable}
+                            ${legendHtml}
+                          </body>
+                        </html>
+                      `;
+                      try {
+                        const { uri } = await Print.printToFileAsync({ html: htmlContent });
+                        await Sharing.shareAsync(uri, {
+                          mimeType: 'application/pdf',
+                          dialogTitle: 'Share Attendance Report',
+                        });
+                      } catch (error) {
+                        Alert.alert('Error', 'Failed to generate PDF');
+                      }
+                    }, 300);
+                  }}
+                >
+                  <Text style={styles.downloadOptionText}>{m.label}</Text>
+                </TouchableOpacity>
+              )}
+            />
             <TouchableOpacity
               style={styles.downloadCancel}
               onPress={() => setShowMonthSelect(false)}
@@ -2095,7 +2110,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '70%',
+    maxHeight: '80%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -2150,7 +2165,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
-    maxHeight: '70%',
+    maxHeight: '80%',
+    height: 600,
   },
   downloadModalTitle: {
     fontSize: 20,
@@ -2212,6 +2228,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  monthScrollList: {
+    maxHeight: 500,
+    flex: 1,
+  },
 });
 
-export default AttendanceSummary; 
+export default AttendanceSummary;

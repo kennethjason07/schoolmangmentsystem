@@ -946,26 +946,8 @@ const ManageStudents = () => {
 
   return (
     <View style={styles.container}>
-      {/* Single Header with back button, title, and profile */}
-      <View style={styles.consolidatedHeader}>
-        <View style={styles.headerLeft}>
-          <TouchableOpacity 
-            onPress={() => navigation.goBack()} 
-            style={styles.backButton}
-          >
-            <Ionicons name="arrow-back" size={24} color="#333" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Manage Students</Text>
-        </View>
-        <View style={styles.headerRight}>
-          <TouchableOpacity 
-            style={styles.profileButton}
-            onPress={() => navigation.navigate('Profile')}
-          >
-            <Ionicons name="person-circle" size={32} color="#2196F3" />
-          </TouchableOpacity>
-        </View>
-      </View>
+      {/* Use the proper Header component for consistent profile photo loading */}
+      <Header title="Manage Students" showBack={true} />
 
       {/* Filters Section */}
       <View style={styles.filtersSection}>
@@ -1415,49 +1397,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
-  },
-  // Consolidated Header Styles
-  consolidatedHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#f8f9fa',
-    borderBottomWidth: 1,
-    borderBottomColor: '#dee2e6',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    paddingTop: Platform.OS === 'android' ? 48 : 24,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    marginRight: 16,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: {
-    marginRight: 12,
-    padding: 4,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginLeft: 12,
-    flexShrink: 1,
-  },
-  profileButton: {
-    padding: 4,
-    marginRight: 4,
-    flexShrink: 0,
   },
   // Manage Students Card
   manageCard: {

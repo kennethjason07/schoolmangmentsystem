@@ -535,12 +535,7 @@ const MarksEntry = () => {
                             inputRefs.current[cellKey] = ref;
                           }
                         }}
-                        style={[
-                          styles.cellInput,
-                          isChanged && styles.changedCell,
-                          isInvalid && styles.invalidCell,
-                          value === '0' && styles.zeroCell
-                        ]}
+                        style={styles.cellInput}
                         placeholder=""
                         value={value}
                         onChangeText={(newValue) => handleMarksChangeImproved(student.id, subject.id, newValue)}
@@ -556,10 +551,6 @@ const MarksEntry = () => {
                         blurOnSubmit={false}
                         underlineColorAndroid="transparent"
                       />
-                      {/* Visual indicators */}
-                      {isChanged && !isInvalid && (
-                        <View style={styles.changedDot} />
-                      )}
                     </View>
                   );
                 })}

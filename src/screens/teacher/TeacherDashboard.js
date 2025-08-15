@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, FlatList, TouchableOpacity, TextInput, Alert, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, FlatList, TouchableOpacity, TextInput, Alert, ActivityIndicator, RefreshControl, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { LineChart } from 'react-native-chart-kit';
@@ -13,24 +13,6 @@ import MessageBadge from '../../components/MessageBadge';
 
 const screenWidth = Dimensions.get('window').width;
 
-// Helper functions for performance metrics
-const getPerformanceGrade = (avgMarks) => {
-  if (avgMarks >= 90) return 'A+';
-  if (avgMarks >= 80) return 'A';
-  if (avgMarks >= 70) return 'B+';
-  if (avgMarks >= 60) return 'B';
-  if (avgMarks >= 50) return 'C';
-  return 'D';
-};
-
-const getPerformanceColor = (avgMarks) => {
-  if (avgMarks >= 90) return '#4caf50'; // Green
-  if (avgMarks >= 80) return '#8bc34a'; // Light Green
-  if (avgMarks >= 70) return '#ffeb3b'; // Yellow
-  if (avgMarks >= 60) return '#ff9800'; // Orange
-  if (avgMarks >= 50) return '#ff5722'; // Deep Orange
-  return '#f44336'; // Red
-};
 
 const TeacherDashboard = ({ navigation }) => {
   const [personalTasks, setPersonalTasks] = useState([]);
@@ -47,12 +29,11 @@ const TeacherDashboard = ({ navigation }) => {
   const [analytics, setAnalytics] = useState({ attendanceRate: 0, marksDistribution: [] });
   const [assignedClasses, setAssignedClasses] = useState([]);
   const [upcomingEvents, setUpcomingEvents] = useState([]);
-  const [classPerformance, setClassPerformance] = useState([]);
-  const [marksTrend, setMarksTrend] = useState({});
   const [recentActivities, setRecentActivities] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
-  const [teacherProfile, setTeacherProfile] = useState(null);
+const [teacherProfile, setTeacherProfile] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [schoolDetails, setSchoolDetails] = useState(null);
   const { user } = useAuth();
 
 // Helper to extract class order key
@@ -93,6 +74,10 @@ function groupAndSortSchedule(schedule) {
       // Declare variables at function level to avoid scope issues
       let currentNotifications = [];
       let currentAdminTasks = [];
+
+      // Get school details
+      const { data: schoolData } = await dbHelpers.getSchoolDetails();
+      setSchoolDetails(schoolData);
 
       // Get teacher info using the new helper function
       const { data: teacherData, error: teacherError } = await dbHelpers.getTeacherByUserId(user.id);
@@ -244,122 +229,90 @@ function groupAndSortSchedule(schedule) {
         setAnnouncements([]);
       }
 
-      // Get upcoming events (enhanced with multiple sources)
+      // Get upcoming events from public.events table - SIMPLIFIED VERSION FOR DEBUGGING
       try {
-        const events = [];
-        const currentDate = new Date();
-        const nextWeek = new Date(currentDate.getTime() + 7 * 24 * 60 * 60 * 1000);
-
-        // Get upcoming exams for teacher's classes
-        try {
-          const { data: examsData, error: examsError } = await supabase
-            .from(TABLES.EXAMS)
-            .select(`
-              *,
-              classes(class_name, section)
-            `)
-            .gte('exam_date', currentDate.toISOString().split('T')[0])
-            .lte('exam_date', nextWeek.toISOString().split('T')[0])
-            .order('exam_date', { ascending: true })
-            .limit(5);
-
-          if (!examsError && examsData) {
-            examsData.forEach(exam => {
-              events.push({
-                id: `exam-${exam.id}`,
-                type: 'exam',
-                title: exam.exam_name,
-                description: `Exam for ${exam.classes?.class_name} ${exam.classes?.section}`,
-                date: exam.exam_date,
-                time: exam.start_time || '09:00',
-                icon: 'document-text',
-                color: '#FF9800',
-                priority: 'high'
-              });
-            });
+        const today = new Date().toISOString().split('T')[0];
+        console.log('🔍 Fetching events for teacher:', teacher.id, 'Date:', today);
+        
+        // Get teacher's assigned classes to filter relevant events
+        const assignedClassIds = [];
+        assignedSubjects.forEach(subject => {
+          if (subject.subjects?.class_id && !assignedClassIds.includes(subject.subjects.class_id)) {
+            assignedClassIds.push(subject.subjects.class_id);
           }
-        } catch (err) {
-          console.log('Exams fetch error:', err);
-        }
-
-        // Get recent notifications that could be events
-        try {
-          const { data: notificationsData, error: notificationsError } = await supabase
-            .from(TABLES.NOTIFICATIONS)
-            .select('*')
-            .gte('created_at', currentDate.toISOString())
-            .order('created_at', { ascending: false })
-            .limit(3);
-
-          if (!notificationsError && notificationsData) {
-            notificationsData.forEach(notification => {
-              events.push({
-                id: `notification-${notification.id}`,
-                type: 'announcement',
-                title: notification.title || 'School Announcement',
-                description: notification.message,
-                date: notification.created_at.split('T')[0],
-                time: new Date(notification.created_at).toLocaleTimeString('en-US', {
-                  hour: '2-digit',
-                  minute: '2-digit'
-                }),
-                icon: 'megaphone',
-                color: '#2196F3',
-                priority: 'medium'
-              });
-            });
-          }
-        } catch (err) {
-          console.log('Notifications fetch error:', err);
-        }
-
-        // Add some default teacher events if no data
-        if (events.length === 0) {
-          const tomorrow = new Date(currentDate);
-          tomorrow.setDate(tomorrow.getDate() + 1);
-
-          const nextFriday = new Date(currentDate);
-          nextFriday.setDate(currentDate.getDate() + (5 - currentDate.getDay() + 7) % 7);
-
-          events.push(
-            {
-              id: 'default-1',
-              type: 'meeting',
-              title: 'Parent-Teacher Meeting',
-              description: 'Monthly parent-teacher conference',
-              date: nextFriday.toISOString().split('T')[0],
-              time: '14:00',
-              icon: 'people',
-              color: '#4CAF50',
-              priority: 'high'
-            },
-            {
-              id: 'default-2',
-              type: 'deadline',
-              title: 'Assignment Submission',
-              description: 'Mathematics homework deadline',
-              date: tomorrow.toISOString().split('T')[0],
-              time: '23:59',
-              icon: 'time',
-              color: '#F44336',
-              priority: 'medium'
-            }
-          );
-        }
-
-        // Sort events by date and priority
-        events.sort((a, b) => {
-          const dateA = new Date(`${a.date} ${a.time}`);
-          const dateB = new Date(`${b.date} ${b.time}`);
-          return dateA - dateB;
         });
-
-        setUpcomingEvents(events.slice(0, 5));
+        
+        console.log('📚 Teacher assigned class IDs:', assignedClassIds);
+        
+        // FIRST: Try to get ALL active events to see what's available
+        console.log('🔍 Step 1: Checking all active events in database...');
+        const { data: allActiveEvents, error: allActiveError } = await supabase
+          .from('events')
+          .select('*')
+          .eq('status', 'Active')
+          .order('event_date', { ascending: true });
+          
+        console.log('📊 All active events in database:', allActiveEvents?.length || 0);
+        if (allActiveEvents && allActiveEvents.length > 0) {
+          console.log('📋 Active events details:');
+          allActiveEvents.forEach((event, index) => {
+            console.log(`   ${index + 1}. "${event.title}" - Date: ${event.event_date}, School-wide: ${event.is_school_wide}`);
+          });
+        }
+        
+        // SECOND: Try to get upcoming events (today and future)
+        console.log('🔍 Step 2: Checking upcoming events (today and future)...');
+        const { data: upcomingEventsData, error: upcomingError } = await supabase
+          .from('events')
+          .select('*')
+          .eq('status', 'Active')
+          .gte('event_date', today)
+          .order('event_date', { ascending: true });
+          
+        console.log('📊 Upcoming events found:', upcomingEventsData?.length || 0);
+        if (upcomingEventsData && upcomingEventsData.length > 0) {
+          console.log('📋 Upcoming events details:');
+          upcomingEventsData.forEach((event, index) => {
+            console.log(`   ${index + 1}. "${event.title}" - Date: ${event.event_date}, School-wide: ${event.is_school_wide}`);
+          });
+        }
+        
+        // THIRD: For now, let's just show ALL upcoming events to the teacher (we'll filter later)
+        console.log('🔍 Step 3: Using upcoming events for teacher dashboard...');
+        
+        if (upcomingError) {
+          console.error('❌ Events query error:', upcomingError);
+          console.log('Query details - assignedClassIds:', assignedClassIds, 'today:', today);
+        }
+        
+        const mappedEvents = (upcomingEventsData || []).map(event => ({
+          id: event.id,
+          type: event.event_type || 'Event',
+          title: event.title,
+          description: event.description || '',
+          date: event.event_date,
+          time: event.start_time || '09:00',
+          icon: event.icon || 'calendar',
+          color: event.color || '#FF9800',
+          priority: event.event_type === 'Exam' ? 'high' : 'medium',
+          location: event.location,
+          organizer: event.organizer
+        }));
+        
+        console.log('✅ Mapped events for dashboard:', mappedEvents.length);
+        console.log('📊 Setting upcoming events count to:', mappedEvents.length);
+        
+        if (mappedEvents.length > 0) {
+          console.log('🎉 SUCCESS: Events will be shown on dashboard!');
+        } else {
+          console.log('⚠️  WARNING: No events to show on dashboard!');
+        }
+        
+        setUpcomingEvents(mappedEvents.slice(0, 5));
       } catch (error) {
-        console.log('Events catch error:', error);
+        console.error('❌ Events catch error:', error);
         setUpcomingEvents([]);
       }
-
       // Get admin tasks assigned to this teacher (using existing tasks table)
       try {
         const { data: adminTasksData, error: adminTasksError } = await supabase
@@ -427,109 +380,41 @@ function groupAndSortSchedule(schedule) {
         setPersonalTasks([]);
       }
 
-      // Calculate analytics
+      // Calculate simplified analytics for attendance only
       let totalAttendance = 0, totalDays = 0;
       const marksDist = { Excellent: 0, Good: 0, Average: 0, Poor: 0 };
-      const perfArr = [];
-      const marksTrendObj = {};
 
-      for (const className of Object.keys(classMap)) {
-        // Get students for this class
-        const { data: studentsData } = await supabase
-          .from(TABLES.STUDENTS)
-          .select('id, full_name, roll_no')
-          .eq('class_name', className);
+      // Basic attendance calculation (simplified)
+      try {
+        for (const className of Object.keys(classMap)) {
+          const { data: studentsData } = await supabase
+            .from(TABLES.STUDENTS)
+            .select('id')
+            .eq('class_name', className);
 
-        if (studentsData && studentsData.length > 0) {
-          let classAttendance = 0, classDays = 0, classMarksSum = 0, classMarksCount = 0;
-          const trendLabels = [], trendData = [];
+          if (studentsData && studentsData.length > 0) {
+            for (const student of studentsData) {
+              const { data: attendanceData } = await supabase
+                .from(TABLES.STUDENT_ATTENDANCE)
+                .select('status')
+                .eq('student_id', student.id)
+                .limit(20); // Limit to recent records for performance
 
-          for (const student of studentsData) {
-            // Get attendance for this student
-            const { data: attendanceData } = await supabase
-              .from(TABLES.STUDENT_ATTENDANCE)
-              .select('*')
-              .eq('student_id', student.id);
-
-            if (attendanceData) {
-              classAttendance += attendanceData.filter(a => a.status === 'Present').length;
-              classDays += attendanceData.length;
-            }
-
-            // Get marks for this student
-            const { data: marksData } = await supabase
-              .from(TABLES.MARKS)
-              .select('*')
-              .eq('student_id', student.id);
-
-            if (marksData) {
-              marksData.forEach(m => {
-                classMarksSum += m.marks_obtained || 0;
-                classMarksCount++;
-                
-                // Distribution
-                if (m.marks_obtained >= 90) marksDist.Excellent++;
-                else if (m.marks_obtained >= 75) marksDist.Good++;
-                else if (m.marks_obtained >= 50) marksDist.Average++;
-                else marksDist.Poor++;
-                
-                // Trend
-                if (!trendLabels.includes(m.exam_name)) trendLabels.push(m.exam_name);
-              });
-            }
-          }
-
-          const avgMarks = classMarksCount ? Math.round(classMarksSum / classMarksCount) : 0;
-          const attendancePct = classDays ? Math.round((classAttendance / classDays) * 100) : 0;
-
-          // Calculate additional metrics
-          const topPerformers = studentsData.filter(student => {
-            // Count students with marks >= 80% as top performers
-            const studentMarks = marksData?.filter(m => m.student_id === student.id) || [];
-            const studentAvg = studentMarks.length ?
-              studentMarks.reduce((sum, m) => sum + (m.marks_obtained || 0), 0) / studentMarks.length : 0;
-            return studentAvg >= 80;
-          }).length;
-
-          // Calculate improvement (mock data for now - would need historical data)
-          const improvement = Math.floor(Math.random() * 10) - 5; // Random between -5 and +5
-
-          // Find top student based on average marks
-          let topStudent = 'N/A';
-          let topAvg = 0;
-          for (const student of studentsData) {
-            const studentMarks = marksData?.filter(m => m.student_id === student.id) || [];
-            if (studentMarks.length > 0) {
-              const studentAvg = studentMarks.reduce((sum, m) => sum + (m.marks_obtained || 0), 0) / studentMarks.length;
-              if (studentAvg > topAvg) {
-                topAvg = studentAvg;
-                topStudent = student.full_name || student.name || 'N/A';
+              if (attendanceData) {
+                totalAttendance += attendanceData.filter(a => a.status === 'Present').length;
+                totalDays += attendanceData.length;
               }
             }
           }
-
-          perfArr.push({
-            class: className,
-            avgMarks,
-            attendance: attendancePct,
-            topStudent,
-            totalStudents: studentsData.length,
-            topPerformers,
-            improvement: improvement > 0 ? `+${improvement}` : improvement.toString()
-          });
-          
-          marksTrendObj[className] = { labels: trendLabels, data: trendData };
-          totalAttendance += classAttendance;
-          totalDays += classDays;
         }
+      } catch (error) {
+        console.log('Error calculating attendance analytics:', error);
       }
 
       setAnalytics({ 
         attendanceRate: totalDays ? Math.round((totalAttendance / totalDays) * 100) : 0, 
         marksDistribution: Object.entries(marksDist).map(([label, value]) => ({ label, value })) 
       });
-      setClassPerformance(perfArr);
-      setMarksTrend(marksTrendObj);
 
       // Recent activities (using function-level variables with unique IDs)
       const recentActivities = [
@@ -694,6 +579,14 @@ function groupAndSortSchedule(schedule) {
         table: TABLES.MARKS
       }, () => {
         // Refresh analytics when marks change
+        fetchDashboardData();
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'events'
+      }, () => {
+        // Refresh dashboard when events change
         fetchDashboardData();
       })
       .subscribe();
@@ -939,6 +832,46 @@ function groupAndSortSchedule(schedule) {
           </Text>
           <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</Text>
         </View>
+
+        {/* School Details Card - AdminDashboard Style */}
+        {schoolDetails && (
+          <View style={styles.schoolDetailsSection}>
+            {/* Decorative background elements */}
+            <View style={styles.backgroundCircle1} />
+            <View style={styles.backgroundCircle2} />
+            <View style={styles.backgroundPattern} />
+            
+            <View style={styles.welcomeContent}>
+              <View style={styles.schoolHeader}>
+                {schoolDetails.logo_url ? (
+                  <Image source={{ uri: schoolDetails.logo_url }} style={styles.schoolLogo} />
+                ) : (
+                  <View style={styles.logoPlaceholder}>
+                    <Ionicons name="school" size={40} color="#fff" />
+                  </View>
+                )}
+                <View style={styles.schoolInfo}>
+                  <Text style={styles.schoolName}>
+                    {schoolDetails.name || 'Maximus School'}
+                  </Text>
+                  <Text style={styles.schoolType}>
+                    {schoolDetails.type || 'Educational Institution'}
+                  </Text>
+                </View>
+              </View>
+              
+              <View style={styles.dateContainer}>
+                <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.8)" />
+                <Text style={styles.schoolDateText}>{new Date().toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })}</Text>
+              </View>
+            </View>
+          </View>
+        )}
         {/* Enhanced Stats Cards Section */}
         <View style={styles.statsSection}>
           <View style={styles.statsSectionHeader}>
@@ -1054,31 +987,6 @@ function groupAndSortSchedule(schedule) {
               <Text style={styles.actionSubtitle}>View student info</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.quickActionCard}
-              onPress={() => {
-                // Scroll to events section
-                Alert.alert('Events', 'Check the Upcoming Events section below for your schedule!');
-              }}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: '#e91e63' }]}>
-                <Ionicons name="calendar-outline" size={24} color="#fff" />
-              </View>
-              <Text style={styles.actionTitle}>Events</Text>
-              <Text style={styles.actionSubtitle}>Upcoming activities</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.quickActionCard}
-              onPress={() => navigation.navigate('Chat')}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: '#00bcd4', position: 'relative' }]}>
-                <Ionicons name="chatbubbles" size={24} color="#fff" />
-                <MessageBadge userType="teacher" style={{ top: -8, right: -8 }} />
-              </View>
-              <Text style={styles.actionTitle}>Messages</Text>
-              <Text style={styles.actionSubtitle}>Chat with parents</Text>
-            </TouchableOpacity>
           </View>
         </View>
 
@@ -1571,182 +1479,6 @@ function groupAndSortSchedule(schedule) {
                 </TouchableOpacity>
               ))}
             </View>
-          )}
-        </View>
-        {/* Class Performance */}
-        <View style={styles.section}>
-          <View style={[styles.sectionTitleContainer, { borderBottomWidth: 0, marginBottom: 8 }]}>
-            <View style={styles.sectionIcon}>
-              <Ionicons name="trophy" size={20} color="#1976d2" />
-            </View>
-            <Text style={styles.sectionTitle}>Class Performance</Text>
-            <TouchableOpacity style={styles.viewAllButton}>
-              <Text style={styles.viewAllText}>View Details</Text>
-              <Ionicons name="chevron-forward" size={16} color="#1976d2" />
-            </TouchableOpacity>
-          </View>
-
-          {classPerformance.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="school-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyStateText}>No class data available</Text>
-              <Text style={styles.emptyStateSubtext}>Performance metrics will appear here once you have students and grades</Text>
-            </View>
-          ) : (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.performanceScrollContainer}
-            >
-              {classPerformance.map((perf, index) => (
-                <TouchableOpacity
-                  key={perf.class}
-                  style={[styles.performanceCard, { marginLeft: index === 0 ? 12 : 8, marginRight: index === classPerformance.length - 1 ? 12 : 0 }]}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.performanceCardHeader}>
-                    <View style={styles.classInfo}>
-                      <Text style={styles.className}>Class {perf.class}</Text>
-                      <Text style={styles.studentCount}>{perf.totalStudents || 0} students</Text>
-                    </View>
-                    <View style={[styles.performanceGrade, { backgroundColor: getPerformanceColor(perf.avgMarks) }]}>
-                      <Text style={styles.performanceGradeText}>{getPerformanceGrade(perf.avgMarks)}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.performanceMetrics}>
-                    <View style={styles.metricRow}>
-                      <View style={styles.metricItem}>
-                        <View style={styles.metricIconContainer}>
-                          <Ionicons name="trophy" size={16} color="#ff9800" />
-                        </View>
-                        <View style={styles.metricContent}>
-                          <Text style={styles.metricValue}>{perf.avgMarks}%</Text>
-                          <Text style={styles.metricLabel}>Avg. Score</Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.metricItem}>
-                        <View style={styles.metricIconContainer}>
-                          <Ionicons name="people" size={16} color="#4caf50" />
-                        </View>
-                        <View style={styles.metricContent}>
-                          <Text style={styles.metricValue}>{perf.attendance}%</Text>
-                          <Text style={styles.metricLabel}>Attendance</Text>
-                        </View>
-                      </View>
-                    </View>
-
-                    <View style={styles.metricRow}>
-                      <View style={styles.metricItem}>
-                        <View style={styles.metricIconContainer}>
-                          <Ionicons name="trending-up" size={16} color="#2196f3" />
-                        </View>
-                        <View style={styles.metricContent}>
-                          <Text style={styles.metricValue}>{perf.improvement || '+0'}%</Text>
-                          <Text style={styles.metricLabel}>Improvement</Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.metricItem}>
-                        <View style={styles.metricIconContainer}>
-                          <Ionicons name="star" size={16} color="#9c27b0" />
-                        </View>
-                        <View style={styles.metricContent}>
-                          <Text style={styles.metricValue}>{perf.topPerformers || 0}</Text>
-                          <Text style={styles.metricLabel}>Top Performers</Text>
-                        </View>
-                      </View>
-                    </View>
-                  </View>
-
-                  <View style={styles.performanceFooter}>
-                    <Text style={styles.topStudentLabel}>Top Student:</Text>
-                    <Text style={styles.topStudentName}>{perf.topStudent}</Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
-        </View>
-        {/* Marks Trend per Class */}
-        <View style={styles.section}>
-          <View style={[styles.sectionTitleContainer, { borderBottomWidth: 0, marginBottom: 8 }]}>
-            <View style={styles.sectionIcon}>
-              <Ionicons name="bar-chart" size={20} color="#1976d2" />
-            </View>
-            <Text style={styles.sectionTitle}>Performance Analytics</Text>
-            <TouchableOpacity style={styles.viewAllButton}>
-              <Text style={styles.viewAllText}>View Reports</Text>
-              <Ionicons name="analytics-outline" size={16} color="#1976d2" />
-            </TouchableOpacity>
-          </View>
-
-          {Object.keys(marksTrend).length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="analytics-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyStateText}>No performance data available</Text>
-              <Text style={styles.emptyStateSubtext}>Charts will appear here once students complete assessments</Text>
-            </View>
-          ) : (
-            Object.entries(marksTrend).map(([cls, trend]) => (
-              <View key={cls} style={styles.trendCard}>
-                <View style={styles.trendCardHeader}>
-                  <Text style={styles.trendClassName}>Class {cls}</Text>
-                  <View style={styles.trendStats}>
-                    <Text style={styles.trendStatsText}>
-                      {trend.data && trend.data.length > 0 ? `${Math.max(...trend.data)}% Peak` : 'No data'}
-                    </Text>
-                  </View>
-                </View>
-
-                {trend.labels && trend.labels.length > 0 && trend.data && trend.data.length > 0 ? (
-                  <LineChart
-                    data={{
-                      labels: trend.labels.slice(0, 6), // Limit to 6 labels for better display
-                      datasets: [{
-                        data: trend.data.slice(0, 6),
-                        color: (opacity = 1) => `rgba(33, 150, 243, ${opacity})`,
-                        strokeWidth: 3
-                      }],
-                    }}
-                    width={screenWidth - 48}
-                    height={180}
-                    chartConfig={{
-                      backgroundColor: '#fff',
-                      backgroundGradientFrom: '#fff',
-                      backgroundGradientTo: '#fff',
-                      decimalPlaces: 0,
-                      color: (opacity = 1) => `rgba(33, 150, 243, ${opacity})`,
-                      labelColor: (opacity = 1) => `rgba(102, 102, 102, ${opacity})`,
-                      style: { borderRadius: 8 },
-                      propsForDots: {
-                        r: '5',
-                        strokeWidth: '2',
-                        stroke: '#1976d2',
-                        fill: '#fff'
-                      },
-                      propsForBackgroundLines: {
-                        strokeDasharray: '',
-                        stroke: '#e0e0e0',
-                        strokeWidth: 1
-                      },
-                    }}
-                    bezier
-                    style={{ borderRadius: 8, marginVertical: 8 }}
-                    withHorizontalLabels={true}
-                    withVerticalLabels={true}
-                    withDots={true}
-                    withShadow={false}
-                  />
-                ) : (
-                  <View style={styles.noDataChart}>
-                    <Ionicons name="bar-chart-outline" size={32} color="#ccc" />
-                    <Text style={styles.noDataText}>No assessment data available</Text>
-                  </View>
-                )}
-              </View>
-            ))
           )}
         </View>
 
@@ -2571,157 +2303,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  performanceScrollContainer: {
-    paddingVertical: 8,
-  },
-  performanceCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    width: 280,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-  },
-  performanceCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  classInfo: {
-    flex: 1,
-  },
-  className: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1976d2',
-    marginBottom: 4,
-  },
-  studentCount: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  performanceGrade: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    minWidth: 40,
-    alignItems: 'center',
-  },
-  performanceGradeText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  performanceMetrics: {
-    marginBottom: 16,
-  },
-  metricRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  metricItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    marginHorizontal: 4,
-  },
-  metricIconContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#f5f5f5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
-  },
-  metricContent: {
-    flex: 1,
-  },
-  metricValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#333',
-  },
-  metricLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  performanceFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-  },
-  topStudentLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginRight: 8,
-  },
-  topStudentName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1976d2',
-    flex: 1,
-  },
-
-  // Enhanced Trend Chart Styles
-  trendCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginHorizontal: 12,
-    marginBottom: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  trendCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  trendClassName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1976d2',
-  },
-  trendStats: {
-    backgroundColor: '#e3f2fd',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  trendStatsText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#1976d2',
-  },
-  noDataChart: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 40,
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-    marginVertical: 8,
-  },
-  noDataText: {
-    fontSize: 14,
-    color: '#999',
-    marginTop: 8,
-    fontWeight: '500',
-  },
-
   // Empty Schedule Styles
   emptyScheduleContainer: {
     alignItems: 'center',
@@ -2971,6 +2552,101 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     borderWidth: 1,
     borderColor: '#f0f4ff',
+  },
+
+  // AdminDashboard-style School Details Section
+  schoolDetailsSection: {
+    marginVertical: 12,
+    marginHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: '#667eea',
+    shadowColor: '#667eea',
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 12,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  backgroundCircle1: {
+    position: 'absolute',
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    top: -50,
+    right: -30,
+  },
+  backgroundCircle2: {
+    position: 'absolute',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    bottom: -20,
+    left: -20,
+  },
+  backgroundPattern: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(118, 75, 162, 0.6)',
+  },
+  welcomeContent: {
+    padding: 24,
+    zIndex: 1,
+  },
+  schoolHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  schoolLogo: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginRight: 15,
+  },
+  logoPlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 15,
+  },
+  schoolInfo: {
+    flex: 1,
+  },
+  schoolName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  schoolType: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  dateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  schoolDateText: {
+    fontSize: 16,
+    color: '#ffffff',
+    marginLeft: 8,
+    fontWeight: '500',
   },
 });
 

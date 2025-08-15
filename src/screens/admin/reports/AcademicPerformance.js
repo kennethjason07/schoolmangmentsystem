@@ -10,14 +10,20 @@ import {
   RefreshControl,
   Dimensions,
   FlatList,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../../components/Header';
 import ExportModal from '../../../components/ExportModal';
+import GradeAnalysisModal from '../../../components/GradeAnalysisModal';
+import PDFPreviewModal from '../../../components/PDFPreviewModal';
 import { supabase, TABLES } from '../../../utils/supabase';
-import { exportAcademicData, EXPORT_FORMATS } from '../../../utils/exportUtils';
+import { exportAcademicData, EXPORT_FORMATS, copyToClipboard, generateAcademicPerformancePDF, generateAcademicPerformanceHTML } from '../../../utils/exportUtils';
 import { BarChart, PieChart } from 'react-native-chart-kit';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as Print from 'expo-print';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -34,6 +40,10 @@ const AcademicPerformance = ({ navigation }) => {
   const [selectedSubject, setSelectedSubject] = useState('All');
   const [selectedExam, setSelectedExam] = useState('All');
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showGradeAnalysisModal, setShowGradeAnalysisModal] = useState(false);
+  const [showPDFPreviewModal, setShowPDFPreviewModal] = useState(false);
+  const [pdfPreviewContent, setPDFPreviewContent] = useState('');
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [selectedAcademicYear, setSelectedAcademicYear] = useState('2024-25');
   
   // Statistics
@@ -292,12 +302,82 @@ const AcademicPerformance = ({ navigation }) => {
 
   const handleExport = async (format) => {
     try {
-      const success = await exportAcademicData(academicData, stats, format);
+      if (format === EXPORT_FORMATS.PDF) {
+        // Show PDF preview instead of directly generating
+        await handlePDFPreview();
+        return true;
+      }
+      const success = await exportAcademicData(marksData, stats, format);
       return success;
     } catch (error) {
       console.error('Export error:', error);
       Alert.alert('Export Error', 'Failed to export academic performance report.');
       return false;
+    }
+  };
+
+  const handlePDFPreview = async () => {
+    try {
+      // Generate HTML content for preview
+      const htmlContent = generateAcademicPerformanceHTML(marksData, stats);
+      setPDFPreviewContent(htmlContent);
+      setShowExportModal(false);
+      setShowPDFPreviewModal(true);
+    } catch (error) {
+      console.error('PDF preview error:', error);
+      Alert.alert('Preview Error', 'Failed to generate PDF preview.');
+    }
+  };
+
+  const handleGeneratePDFFromPreview = async () => {
+    setIsGeneratingPDF(true);
+    try {
+      const success = await generateAcademicPerformancePDF(marksData, stats);
+      if (success) {
+        setShowPDFPreviewModal(false);
+        setPDFPreviewContent('');
+      }
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      Alert.alert('Generation Error', 'Failed to generate PDF report.');
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
+
+  const handleGradeAnalysis = () => {
+    if (stats.gradeDistribution.length === 0) {
+      Alert.alert(
+        'No Data Available',
+        'No grade data available for analysis. Please check your filters.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    setShowGradeAnalysisModal(true);
+  };
+
+  const handleCopyGradeAnalysis = async () => {
+    const totalStudents = stats.gradeDistribution.reduce((sum, grade) => sum + grade.population, 0);
+    const gradeAnalysisText = stats.gradeDistribution
+      .map(grade => {
+        const percentage = totalStudents > 0 ? Math.round((grade.population / totalStudents) * 100) : 0;
+        return `${grade.name}: ${grade.population} students (${percentage}%)`;
+      })
+      .join('\n');
+
+    const analysisMessage = `Grade Distribution Analysis:\n\n${gradeAnalysisText}\n\nTotal Students: ${totalStudents}\nAverage Performance: ${stats.averagePercentage}%\nHighest Score: ${stats.highestScore}%\nLowest Score: ${stats.lowestScore}%`;
+    
+    await copyAnalysisToClipboard(analysisMessage);
+    setShowGradeAnalysisModal(false);
+  };
+
+  const copyAnalysisToClipboard = async (text) => {
+    try {
+      await copyToClipboard(text, 'Grade Analysis');
+    } catch (error) {
+      console.error('Failed to copy analysis:', error);
     }
   };
 
@@ -604,7 +684,10 @@ const AcademicPerformance = ({ navigation }) => {
               <Text style={styles.exportButtonText}>Performance Report</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.exportButton}>
+            <TouchableOpacity 
+              style={styles.exportButton}
+              onPress={handleGradeAnalysis}
+            >
               <Ionicons name="bar-chart" size={20} color="#4CAF50" />
               <Text style={styles.exportButtonText}>Grade Analysis</Text>
             </TouchableOpacity>
@@ -623,7 +706,28 @@ const AcademicPerformance = ({ navigation }) => {
         onClose={() => setShowExportModal(false)}
         onExport={handleExport}
         title="Export Academic Performance Report"
-        availableFormats={[EXPORT_FORMATS.CSV, EXPORT_FORMATS.JSON, EXPORT_FORMATS.CLIPBOARD]}
+        availableFormats={[EXPORT_FORMATS.CSV, EXPORT_FORMATS.PDF, EXPORT_FORMATS.CLIPBOARD]}
+      />
+
+      {/* Grade Analysis Modal */}
+      <GradeAnalysisModal
+        visible={showGradeAnalysisModal}
+        onClose={() => setShowGradeAnalysisModal(false)}
+        stats={stats}
+        onCopyAnalysis={handleCopyGradeAnalysis}
+      />
+
+      {/* PDF Preview Modal */}
+      <PDFPreviewModal
+        visible={showPDFPreviewModal}
+        onClose={() => {
+          setShowPDFPreviewModal(false);
+          setPDFPreviewContent('');
+        }}
+        onDownload={handleGeneratePDFFromPreview}
+        data={marksData}
+        stats={stats}
+        title="Academic Performance Report Preview"
       />
     </View>
   );
@@ -889,7 +993,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     margin: 16,
     marginTop: 0,
+    marginBottom: 80,
     padding: 16,
+    paddingBottom: 32,
     borderRadius: 12,
     elevation: 2,
     shadowColor: '#000',

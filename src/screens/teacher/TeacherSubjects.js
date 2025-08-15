@@ -51,7 +51,7 @@ const TeacherSubjects = ({ navigation }) => {
           id,
           teacher_id,
           subject_id,
-          assigned_at,
+          assigned_on,
           subjects(
             id,
             name,
@@ -68,7 +68,7 @@ const TeacherSubjects = ({ navigation }) => {
           )
         `)
         .eq('teacher_id', teacherData.id)
-        .order('assigned_at', { ascending: false });
+        .order('assigned_on', { ascending: false });
 
       if (subjectError) {
         throw subjectError;
@@ -107,7 +107,7 @@ const TeacherSubjects = ({ navigation }) => {
             academicYear: subject.academic_year,
             isOptional: subject.is_optional,
             isClassTeacher,
-            assignedAt: assignment.assigned_at,
+            assignedAt: assignment.assigned_on,
             classSection: `${classInfo.class_name} ${classInfo.section}`,
           };
         });

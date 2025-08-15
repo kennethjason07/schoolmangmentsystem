@@ -177,25 +177,8 @@ const StudentDetails = ({ route }) => {
 
   return (
     <View style={styles.container}>
-      {/* Custom Header with Student Profile */}
-      <View style={styles.customHeader}>
-        <View style={styles.headerLeft}>
-          <TouchableOpacity 
-            onPress={() => navigation.goBack()} 
-            style={styles.backButton}
-          >
-            <Ionicons name="arrow-back" size={24} color="#333" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Student Profile</Text>
-        </View>
-        <View style={styles.headerRight}>
-          <View style={styles.headerAvatar}>
-            <Text style={styles.headerAvatarText}>
-              {studentData.name?.charAt(0)?.toUpperCase() || 'S'}
-            </Text>
-          </View>
-        </View>
-      </View>
+      {/* Use the proper Header component for consistent profile photo loading */}
+      <Header title="Student Profile" showBack={true} />
       
       <ScrollView style={styles.content}>
         {/* Student Info Summary Card */}
@@ -479,64 +462,6 @@ const styles = StyleSheet.create({
     height: 20,
   },
   
-  // Custom Header Styles
-  customHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#f8f9fa',
-    borderBottomWidth: 1,
-    borderBottomColor: '#dee2e6',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    paddingTop: Platform.OS === 'android' ? 48 : 24,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    marginRight: 16,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: {
-    marginRight: 12,
-    padding: 4,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginLeft: 12,
-    flexShrink: 1,
-  },
-  headerAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#2196F3',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-    elevation: 2,
-    shadowColor: '#2196F3',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
-  },
-  headerAvatarText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
   
   // Summary Card Styles
   summaryCard: {
