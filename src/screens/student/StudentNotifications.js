@@ -259,7 +259,7 @@ const StudentNotifications = () => {
 
   return (
     <View style={styles.container}>
-      <Header title="Notifications" showBack={true} showProfile={false} />
+      <Header title="Notifications" showBack={true} showProfile={true} />
       <View style={styles.contentContainer}>
         <View style={styles.filterRow}>
         {FILTERS.map(f => (

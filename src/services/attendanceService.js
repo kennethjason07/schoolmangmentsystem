@@ -14,14 +14,27 @@ export const generateSampleAttendanceData = (startDate, endDate) => {
   };
   
   while (currentDate <= endDate) {
-    // Skip weekends for school attendance
-    if (currentDate.getDay() !== 0 && currentDate.getDay() !== 6) {
-      const isPresent = seededRandom() > 0.15; // 85% attendance rate
+    // Skip only Sundays (holidays), but include Saturdays
+    if (currentDate.getDay() !== 0) { // 0 = Sunday
+      const dayOfWeek = currentDate.getDay();
+      const isSaturday = dayOfWeek === 6;
+
+      // Same attendance rate for all working days (Monday-Saturday)
+      const attendanceRate = 0.85; // 85% for all working days including Saturday
+
+      const isPresent = seededRandom() > (1 - attendanceRate);
+      const dateStr = currentDate.toISOString().split('T')[0];
+
+      // Debug logging for Saturday data generation
+      if (isSaturday) {
+        console.log(`🎯 Generating Saturday attendance: ${dateStr} - ${isPresent ? 'Present' : 'Absent'}`);
+      }
+
       sampleData.push({
         id: `sample-${currentDate.getTime()}`,
         student_id: 'sample-student-id',
         class_id: 'sample-class-id',
-        date: currentDate.toISOString().split('T')[0],
+        date: dateStr,
         status: isPresent ? 'Present' : 'Absent',
         marked_by: 'sample-teacher-id',
         created_at: currentDate.toISOString(),
@@ -110,17 +123,34 @@ export const getCurrentMonthAttendance = async (studentId) => {
   }
 };
 
-// Calculate attendance statistics (used by both screens)
+// Calculate attendance statistics (used by both screens) - Exclude holidays (Sundays) but allow Saturdays for display
 export const calculateAttendanceStats = (attendanceData) => {
-  const presentCount = attendanceData.filter(item => item.status === 'Present').length;
-  const absentCount = attendanceData.filter(item => item.status === 'Absent').length;
-  const totalCount = attendanceData.length;
+  // Filter out Sundays (holidays) before calculating statistics, but keep Saturdays for display
+  const schoolDaysOnly = attendanceData.filter(item => {
+    if (item.date) {
+      const date = new Date(item.date);
+      const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+
+      if (dayOfWeek === 0) {
+        console.log(`📅 Excluding Sunday (${item.date}) from attendance statistics`);
+        return false; // Skip holidays
+      }
+      // Keep Saturday records (dayOfWeek === 6) for display
+    }
+    return true; // Include all other days including Saturday
+  });
+
+  const presentCount = schoolDaysOnly.filter(item => item.status === 'Present').length;
+  const absentCount = schoolDaysOnly.filter(item => item.status === 'Absent').length;
+  const totalCount = schoolDaysOnly.length;
   const attendancePercentage = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
 
   const attendancePieData = [
     { name: 'Present', population: presentCount, color: '#4CAF50', legendFontColor: '#333', legendFontSize: 14 },
     { name: 'Absent', population: absentCount, color: '#F44336', legendFontColor: '#333', legendFontSize: 14 },
   ];
+
+  console.log(`📊 Attendance Stats (School Days Only): ${presentCount}/${totalCount} = ${attendancePercentage}%`);
 
   return {
     presentCount,

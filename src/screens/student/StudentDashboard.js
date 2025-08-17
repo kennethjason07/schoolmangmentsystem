@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated, RefreshControl, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated, RefreshControl, Image, FlatList, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useFocusEffect } from '@react-navigation/native';
 import Header from '../../components/Header';
+import StatCard from '../../components/StatCard';
+import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 
 const StudentDashboard = ({ navigation }) => {
@@ -17,33 +19,32 @@ const StudentDashboard = ({ navigation }) => {
   const [notifications, setNotifications] = useState([]);
   const [events, setEvents] = useState([]);
   const [schoolDetails, setSchoolDetails] = useState(null);
-  // Removed todayClasses as it's not used in the new design
+  const [attendance, setAttendance] = useState([]);
+  const [marks, setMarks] = useState([]);
+  const [fees, setFees] = useState([]);
+  const [todayClasses, setTodayClasses] = useState([]);
+  const [recentActivities, setRecentActivities] = useState([]);
+  const [showStudentDetailsModal, setShowStudentDetailsModal] = useState(false);
 
   // Utility function to format date from yyyy-mm-dd to dd-mm-yyyy
   const formatDateToDDMMYYYY = (dateString) => {
     if (!dateString) return 'N/A';
     
     try {
-      // Handle different date formats
       let date;
       if (dateString.includes('T')) {
-        // ISO date format (2024-01-15T00:00:00.000Z)
         date = new Date(dateString);
       } else if (dateString.includes('-') && dateString.split('-').length === 3) {
-        // yyyy-mm-dd format
         const [year, month, day] = dateString.split('-');
-        date = new Date(year, month - 1, day); // month is 0-indexed
+        date = new Date(year, month - 1, day);
       } else {
-        // Fallback to Date constructor
         date = new Date(dateString);
       }
       
-      // Check if date is valid
       if (isNaN(date.getTime())) {
-        return dateString; // Return original if invalid
+        return dateString;
       }
       
-      // Format to dd-mm-yyyy
       const day = String(date.getDate()).padStart(2, '0');
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const year = date.getFullYear();
@@ -51,29 +52,27 @@ const StudentDashboard = ({ navigation }) => {
       return `${day}-${month}-${year}`;
     } catch (error) {
       console.warn('Error formatting date:', dateString, error);
-      return dateString; // Return original if error
+      return dateString;
     }
   };
 
-  // Handle navigation for stat cards - SIMPLE SOLUTION
+  // Handle navigation for stat cards
   const handleCardNavigation = (cardKey) => {
     switch (cardKey) {
       case 'assignments':
         navigation.navigate('Assignments');
         break;
       case 'attendance':
-        console.log('Navigating to attendance screen');
         navigation.navigate('Attendance');
         break;
       case 'marks':
-        console.log('Navigating to marks tab');
         navigation.navigate('Marks', { activeTab: 'marks' });
         break;
       case 'notifications':
         navigation.navigate('StudentNotifications');
         break;
       case 'events':
-        Alert.alert('Events', events.length > 0 ? 
+        Alert.alert('Events', events.length > 0 ?
           events.map(e => `• ${e.title} (${formatDateToDDMMYYYY(e.date)})`).join('\n') :
           'No upcoming events scheduled.'
         );
@@ -81,6 +80,11 @@ const StudentDashboard = ({ navigation }) => {
       default:
         Alert.alert('Coming Soon', `${cardKey} feature is under development.`);
     }
+  };
+
+  // Handle notification bell icon press
+  const handleNotificationsPress = () => {
+    navigation.navigate('StudentNotifications');
   };
 
   // Function to refresh notifications for badge count
@@ -93,37 +97,9 @@ const StudentDashboard = ({ navigation }) => {
       
       console.log('=== STUDENT DASHBOARD NOTIFICATION DEBUG ===');
       console.log('User ID:', user.id);
-      console.log('User object:', JSON.stringify(user, null, 2));
       
-      // First, let's check if there are any notification recipients at all
-      const { data: allRecipients, error: allError } = await supabase
-        .from(TABLES.NOTIFICATION_RECIPIENTS)
-        .select('*')
-        .limit(5);
-      
-      console.log('All notification recipients (first 5):', allRecipients);
-      console.log('All recipients error:', allError);
-      
-      // Now check specifically for this user
-      const { data: userRecipients, error: userError } = await supabase
-        .from(TABLES.NOTIFICATION_RECIPIENTS)
-        .select('*')
-        .eq('recipient_id', user.id);
-      
-      console.log('User recipients (all types):', userRecipients);
-      console.log('User recipients error:', userError);
-      
-      // Check for Student type specifically
-      const { data: studentRecipients, error: studentError } = await supabase
-        .from(TABLES.NOTIFICATION_RECIPIENTS)
-        .select('*')
-        .eq('recipient_type', 'Student')
-        .eq('recipient_id', user.id);
-      
-      console.log('Student recipients:', studentRecipients);
-      console.log('Student recipients error:', studentError);
-      
-      const { data: notificationsData, error } = await supabase
+      // Get notifications with recipients for this student
+      const { data: notificationsData, error: notificationsError } = await supabase
         .from(TABLES.NOTIFICATION_RECIPIENTS)
         .select(`
           id,
@@ -142,41 +118,23 @@ const StudentDashboard = ({ navigation }) => {
         .order('sent_at', { ascending: false })
         .limit(10);
 
-      console.log('Final query result - notificationsData:', notificationsData);
-      console.log('Final query result - error:', error);
-
-      if (error && error.code !== '42P01') {
-        console.log('Student Dashboard - Notifications refresh error:', error);
-        setNotifications([]);
+      if (notificationsError && notificationsError.code !== '42P01') {
+        console.log('Notifications refresh error:', notificationsError);
       } else {
         const mappedNotifications = (notificationsData || []).map(n => ({
           id: n.id,
-          title: n.notifications.message || 'Notification', // Use message as title since title doesn't exist
+          title: n.notifications.message || 'Notification',
           message: n.notifications.message,
           type: n.notifications.type || 'general',
-          date: n.sent_at ? n.sent_at.split('T')[0] : new Date().toISOString().split('T')[0],
           created_at: n.notifications.created_at,
           is_read: n.is_read || false,
           read_at: n.read_at
         }));
-        console.log('Student Dashboard - Mapped notifications:', mappedNotifications);
-        console.log('Student Dashboard - Mapped notifications count:', mappedNotifications.length);
-        console.log('Student Dashboard - Unread notifications count:', mappedNotifications.filter(n => !n.is_read).length);
-        console.log('============================================');
+        console.log('Mapped notifications count:', mappedNotifications.length);
         setNotifications(mappedNotifications);
-        
-        // Update the summary card with new notification count WITHOUT reloading everything
-        const unreadCount = mappedNotifications.filter(n => !n.is_read).length;
-        setSummary(prevSummary => 
-          prevSummary.map(item => 
-            item.key === 'notifications' 
-              ? { ...item, value: unreadCount }
-              : item
-          )
-        );
       }
     } catch (err) {
-      console.log('Student Dashboard - Notifications refresh fetch error:', err);
+      console.log('Notifications refresh fetch error:', err);
       setNotifications([]);
     }
   };
@@ -184,502 +142,379 @@ const StudentDashboard = ({ navigation }) => {
   // Add focus effect to refresh notifications when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      console.log('Student Dashboard - Screen focused, refreshing notifications only...');
-      // Only refresh notifications, don't reload the entire dashboard
+      if (user) {
+        console.log('Student Dashboard - Screen focused, refreshing notifications...');
       refreshNotifications();
-    }, [user?.id])
+      }
+    }, [user])
   );
 
-  // Navigation listener specifically for notification-related screens
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      console.log('Student Dashboard - Navigation focus event, checking if notification refresh needed...');
-      if (user?.id) {
-        // Only refresh notifications when coming back from notification screens
-        // Don't reload the entire dashboard data
-        refreshNotifications();
-      }
-    });
+  // Pull-to-refresh functionality
+  const { refreshing, onRefresh } = usePullToRefresh(async () => {
+    await fetchDashboardData();
+  });
 
-    return unsubscribe;
-  }, [navigation, user?.id]);
-
-  // Fetch student profile and dashboard data
+  // Fetch all dashboard data
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Load school details
+      // Get school details
       const { data: schoolData } = await dbHelpers.getSchoolDetails();
       setSchoolDetails(schoolData);
 
-      // Get student data using the helper function
-      const { data: studentUserData, error: studentError } = await dbHelpers.getStudentByUserId(user.id);
-      if (studentError || !studentUserData) {
-        throw new Error('Student data not found');
+      // Get student profile with user data for profile picture and email
+      const { data: studentData, error: studentError } = await supabase
+        .from(TABLES.STUDENTS)
+        .select(`
+          *,
+          classes(id, class_name, section),
+          users!students_parent_id_fkey(id, email, phone, profile_url, full_name)
+        `)
+        .eq('id', user.linked_student_id)
+        .single();
+
+      // Also get the student's own user account for profile picture
+      const { data: studentUserData, error: studentUserError } = await supabase
+        .from(TABLES.USERS)
+        .select('id, email, phone, profile_url, full_name')
+        .eq('linked_student_id', user.linked_student_id)
+        .maybeSingle();
+
+      if (studentError) {
+        throw new Error('Student profile not found. Please contact administrator.');
       }
 
-      // Get student details from the linked student
-      const studentData = studentUserData.students;
-      if (!studentData) {
-        throw new Error('Student profile not found');
-      }
+      // Merge student data with user data for complete profile
+      const completeStudentProfile = {
+        ...studentData,
+        // Use student's own user account data if available, otherwise use parent data
+        profile_url: studentUserData?.profile_url || studentData.users?.profile_url,
+        email: studentUserData?.email || studentData.users?.email,
+        user_phone: studentUserData?.phone || studentData.users?.phone,
+        user_full_name: studentUserData?.full_name || studentData.users?.full_name
+      };
 
-      setStudentProfile({
-        name: studentData.name,
-        class: studentData.classes?.class_name || 'N/A',
-        roll: studentData.roll_no,
-        avatarColor: '#9C27B0',
-      });
+      setStudentProfile(completeStudentProfile);
 
-      // Get assignments count from both homeworks and assignments tables
-      let assignmentsCount = 0;
-      try {
-        // Get homeworks assigned to this student
-        const { data: homeworksData, error: homeworksError } = await supabase
-          .from(TABLES.HOMEWORKS)
-          .select('*')
-          .contains('assigned_students', [studentData.id]);
+      // Get notifications
+      await refreshNotifications();
 
-        if (homeworksError && homeworksError.code === '42P01') {
-          console.log('Homeworks table does not exist - using 0 homeworks');
-        } else if (homeworksError) {
-          console.log('Error fetching homeworks:', homeworksError);
-        } else {
-          assignmentsCount += homeworksData?.length || 0;
-        }
-
-        // Get assignments for this student's class
-        const { data: assignmentsData, error: assignmentsError } = await supabase
-          .from(TABLES.ASSIGNMENTS)
-          .select('*')
-          .eq('class_id', studentData.class_id);
-
-        if (assignmentsError && assignmentsError.code === '42P01') {
-          console.log('Assignments table does not exist - using 0 assignments');
-        } else if (assignmentsError) {
-          console.log('Error fetching assignments:', assignmentsError);
-        } else {
-          assignmentsCount += assignmentsData?.length || 0;
-        }
-      } catch (err) {
-        console.log('Error fetching assignments:', err);
-        assignmentsCount = 0;
-      }
-
-      // Get attendance percentage (FIXED: consistent calculation)
-      const { data: attendanceData, error: attendanceError } = await supabase
-        .from(TABLES.STUDENT_ATTENDANCE)
-        .select('*')
-        .eq('student_id', studentData.id);
-      if (attendanceError) throw attendanceError;
-
-      const totalDays = attendanceData.length;
-      const presentDays = attendanceData.filter(a => a.status === 'Present').length;
-      const attendancePercent = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
-
-      console.log('=== STUDENT DASHBOARD ATTENDANCE DEBUG ===');
-      console.log('Total attendance records:', totalDays);
-      console.log('Present days:', presentDays);
-      console.log('Attendance percentage:', attendancePercent);
-      console.log('Recent records:', attendanceData.slice(0, 3).map(r => `${r.date}: ${r.status}`));
-      console.log('==========================================');
-
-      // Get marks percentage (average percentage of all marks)
-      let marksPercent = 0;
-      try {
-        const { data: marksData, error: marksError } = await supabase
-          .from(TABLES.MARKS)
-          .select('*')
-          .eq('student_id', studentData.id);
-
-        if (marksError && marksError.code !== '42P01') {
-          throw marksError;
-        }
-
-        if (marksData && marksData.length > 0) {
-          const totalPercentage = marksData.reduce((sum, mark) => {
-            const percentage = (mark.marks_obtained / mark.max_marks) * 100;
-            return sum + (percentage || 0);
-          }, 0);
-          marksPercent = Math.round(totalPercentage / marksData.length);
-        }
-      } catch (err) {
-        console.log('Marks error:', err);
-        marksPercent = 0;
-      }
-
-      // Get notifications for this student
-      let notificationsData = [];
-      try {
-        console.log('=== FETCHING DASHBOARD NOTIFICATIONS ===');
-        console.log('User ID:', user.id);
-
-        // Get notifications with recipients for this student
-        const { data: studentNotifications, error: notificationsError } = await supabase
-          .from(TABLES.NOTIFICATION_RECIPIENTS)
-          .select(`
-            id,
-            is_read,
-            sent_at,
-            read_at,
-            notifications!inner(
-              id,
-              message,
-              type,
-              created_at
-            )
-          `)
-          .eq('recipient_type', 'Student')
-          .eq('recipient_id', user.id)
-          .order('sent_at', { ascending: false })
-          .limit(10);
-
-        console.log('Student notifications query result:', { studentNotifications, notificationsError });
-
-        if (notificationsError && notificationsError.code !== '42P01') {
-          console.log('Notifications error:', notificationsError);
-          notificationsData = [];
-        } else if (studentNotifications && studentNotifications.length > 0) {
-          notificationsData = studentNotifications.map(notification => ({
-            id: notification.id,
-            title: notification.notifications.message || 'Notification', // Use message as title since title doesn't exist
-            message: notification.notifications.message,
-            type: notification.notifications.type || 'general',
-            date: new Date(notification.notifications.created_at).toLocaleDateString(),
-            created_at: notification.notifications.created_at,
-            is_read: notification.is_read || false,
-            read_at: notification.read_at
-          }));
-        } else {
-          console.log('No notifications found for this student');
-          notificationsData = [];
-        }
-
-        console.log('Final dashboard notifications:', notificationsData.length);
-        console.log('Unread notifications:', notificationsData.filter(n => !n.is_read).length);
-      } catch (err) {
-        console.log('Notifications error:', err);
-        notificationsData = [];
-      }
-
-      // Get deadlines (upcoming homework and assignments)
-      let deadlinesData = [];
+      // Get upcoming events
       try {
         const today = new Date().toISOString().split('T')[0];
-
-        // Get homework deadlines
-        const { data: homeworkDeadlines, error: homeworkDeadlinesError } = await supabase
-          .from(TABLES.HOMEWORKS)
-          .select('id, title, due_date, description')
-          .contains('assigned_students', [studentData.id])
-          .gte('due_date', today)
-          .order('due_date', { ascending: true })
-          .limit(3);
-
-        if (homeworkDeadlinesError && homeworkDeadlinesError.code !== '42P01') {
-          console.log('Error fetching homework deadlines:', homeworkDeadlinesError);
-        } else if (homeworkDeadlines) {
-          deadlinesData = [...deadlinesData, ...homeworkDeadlines.map(hw => ({
-            ...hw,
-            type: 'homework'
-          }))];
-        }
-
-        // Get assignment deadlines
-        const { data: assignmentDeadlines, error: assignmentDeadlinesError } = await supabase
-          .from(TABLES.ASSIGNMENTS)
-          .select('id, title, due_date, description')
-          .eq('class_id', studentData.class_id)
-          .gte('due_date', today)
-          .order('due_date', { ascending: true })
-          .limit(3);
-
-        if (assignmentDeadlinesError && assignmentDeadlinesError.code !== '42P01') {
-          console.log('Error fetching assignment deadlines:', assignmentDeadlinesError);
-        } else if (assignmentDeadlines) {
-          deadlinesData = [...deadlinesData, ...assignmentDeadlines.map(assignment => ({
-            ...assignment,
-            type: 'assignment'
-          }))];
-        }
-
-        // Sort by due date and limit to 5
-        deadlinesData = deadlinesData
-          .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
-          .slice(0, 5);
-
-      } catch (err) {
-        console.log('Error fetching deadlines:', err);
-        deadlinesData = [];
-      }
-
-      // Get upcoming exams
-      let upcomingExams = [];
-      try {
-        const today = new Date().toISOString().split('T')[0];
-        const { data: examsData, error: examsError } = await supabase
-          .from(TABLES.EXAMS)
-          .select('id, name, start_date, end_date, remarks')
-          .eq('class_id', studentData.class_id)
-          .gte('start_date', today)
-          .order('start_date', { ascending: true })
-          .limit(3);
-
-        if (examsError && examsError.code !== '42P01') {
-          console.log('Error fetching exams:', examsError);
-        } else if (examsData) {
-          upcomingExams = examsData.map(exam => ({
-            ...exam,
-            type: 'exam'
-          }));
-          // Add exams to deadlines
-          deadlinesData = [...deadlinesData, ...upcomingExams];
-          deadlinesData = deadlinesData
-            .sort((a, b) => new Date(a.due_date || a.start_date) - new Date(b.due_date || b.start_date))
-            .slice(0, 5);
-        }
-      } catch (err) {
-        console.log('Error fetching exams:', err);
-      }
-
-      // Get fee status
-      let feeStatus = { paid: 0, pending: 0 };
-      try {
-        const currentYear = new Date().getFullYear();
-        const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
-
-        // Get fee structure for this student's class
-        const { data: feeStructure, error: feeStructureError } = await supabase
-          .from(TABLES.FEE_STRUCTURE)
-          .select('amount, fee_component')
-          .eq('class_id', studentData.class_id)
-          .eq('academic_year', academicYear);
-
-        if (feeStructureError && feeStructureError.code !== '42P01') {
-          console.log('Error fetching fee structure:', feeStructureError);
-        } else if (feeStructure) {
-          const totalFees = feeStructure.reduce((sum, fee) => sum + (fee.amount || 0), 0);
-
-          // Get paid fees
-          const { data: paidFees, error: paidFeesError } = await supabase
-            .from(TABLES.STUDENT_FEES)
-            .select('amount_paid')
-            .eq('student_id', studentData.id)
-            .eq('academic_year', academicYear);
-
-          if (paidFeesError && paidFeesError.code !== '42P01') {
-            console.log('Error fetching paid fees:', paidFeesError);
-          } else if (paidFees) {
-            const totalPaid = paidFees.reduce((sum, fee) => sum + (fee.amount_paid || 0), 0);
-            feeStatus = {
-              paid: totalPaid,
-              pending: Math.max(0, totalFees - totalPaid),
-              total: totalFees
-            };
-          }
-        }
-      } catch (err) {
-        console.log('Error fetching fee status:', err);
-      }
-
-      // Removed today's timetable code as not needed for this design
-      // Removed today's classes and messages code as not needed for this design
-
-      // Get upcoming events from the events table - ENHANCED VERSION WITH DEBUG LOGGING
-      let mappedEvents = [];
-      try {
-        const today = new Date().toISOString().split('T')[0];
-        console.log('🔍 Student Dashboard - Fetching upcoming events from date:', today);
-        
-        // FIRST: Try to get ALL active events to see what's available
-        console.log('🔍 Step 1: Checking all active events in database...');
-        const { data: allActiveEvents, error: allActiveError } = await supabase
-          .from('events')
-          .select('*')
-          .eq('status', 'Active')
-          .order('event_date', { ascending: true });
-          
-        console.log('📊 All active events in database:', allActiveEvents?.length || 0);
-        if (allActiveEvents && allActiveEvents.length > 0) {
-          console.log('📋 Active events details:');
-          allActiveEvents.forEach((event, index) => {
-            console.log(`   ${index + 1}. "${event.title}" - Date: ${event.event_date}, School-wide: ${event.is_school_wide}`);
-          });
-        }
-        
-        // SECOND: Try to get upcoming events (today and future)
-        console.log('🔍 Step 2: Checking upcoming events (today and future)...');
-        const { data: upcomingEventsData, error: upcomingError } = await supabase
+        const { data: upcomingEventsData, error: eventsError } = await supabase
           .from('events')
           .select('*')
           .eq('status', 'Active')
           .gte('event_date', today)
           .order('event_date', { ascending: true });
-          
-        console.log('📊 Upcoming events found:', upcomingEventsData?.length || 0);
-        if (upcomingEventsData && upcomingEventsData.length > 0) {
-          console.log('📋 Upcoming events details:');
-          upcomingEventsData.forEach((event, index) => {
-            console.log(`   ${index + 1}. "${event.title}" - Date: ${event.event_date}, School-wide: ${event.is_school_wide}`);
-          });
+
+        if (eventsError) {
+          console.error('Events query error:', eventsError);
         }
-        
-        // THIRD: For now, let's show ALL upcoming events to the student (we can filter later if needed)
-        console.log('🔍 Step 3: Using upcoming events for student dashboard...');
-        
-        if (upcomingError) {
-          console.error('❌ Events query error:', upcomingError);
-        }
-        
-        // Map the events to the format expected by the UI
-        mappedEvents = (upcomingEventsData || []).map(event => ({
+
+        const mappedEvents = (upcomingEventsData || []).map(event => ({
           id: event.id,
-          type: event.event_type || 'Event',
           title: event.title,
           description: event.description || '',
           date: event.event_date,
-          startTime: event.start_time || '09:00',
-          endTime: event.end_time || '17:00',
-          location: event.location,
-          organizer: event.organizer,
+          time: event.start_time || '09:00',
           icon: event.icon || 'calendar',
-          color: event.color || '#FF9800'
+          color: event.color || '#FF9800',
+          location: event.location,
+          organizer: event.organizer
         }));
-        
-        console.log('✅ Student Dashboard - Mapped events for dashboard:', mappedEvents.length);
-        
-        if (mappedEvents.length > 0) {
-          console.log('🎉 Student Dashboard - SUCCESS: Events will be shown on dashboard!');
-        } else {
-          console.log('⚠️  Student Dashboard - WARNING: No events to show on dashboard!');
-        }
-        
-        setEvents(mappedEvents.slice(0, 10)); // Show top 10 events
+
+        setEvents(mappedEvents.slice(0, 5));
       } catch (err) {
-        console.log('❌ Student Dashboard - Events fetch error:', err);
-        mappedEvents = [];
+        console.log('Events fetch error:', err);
         setEvents([]);
       }
 
-      setSummary([
-        { key: 'attendance', label: 'Attendance', value: attendancePercent + '%', icon: 'checkmark-circle', color: '#48bb78' },
-        { key: 'marks', label: 'Marks', value: marksPercent + '%', icon: 'trending-up', color: '#ed8936' },
-        { key: 'assignments', label: 'Assignments', value: assignmentsCount, icon: 'book-outline', color: '#667eea' },
-        { key: 'notifications', label: 'Notifications', value: notificationsData.filter(n => !n.is_read).length, icon: 'notifications', color: '#9f7aea' },
-        { key: 'events', label: 'Events', value: mappedEvents.length, icon: 'calendar', color: '#ff6b35' },
-      ]);
-      setDeadlines(deadlinesData.map(item => ({
-        id: item.id,
-        title: item.title || item.name,
-        date: formatDateToDDMMYYYY(item.due_date || item.start_date),
-        type: item.type || 'homework',
-        name: item.name,
-        start_date: item.start_date
-      })));
-      setNotifications(notificationsData.map(n => ({
-        id: n.id,
-        message: n.message,
-        date: formatDateToDDMMYYYY(n.created_at ? n.created_at.split('T')[0] : new Date().toISOString().split('T')[0])
-      })));
+      // Get attendance data
+      try {
+        const currentDate = new Date();
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+
+        const { data: allAttendanceData, error: attendanceError } = await supabase
+        .from(TABLES.STUDENT_ATTENDANCE)
+        .select('*')
+          .eq('student_id', studentData.id)
+          .order('date', { ascending: false });
+
+      if (attendanceError) throw attendanceError;
+
+        const currentMonthRecords = (allAttendanceData || []).filter(record => {
+          if (!record.date || typeof record.date !== 'string') return false;
+          
+          const dateParts = record.date.split('-');
+          if (dateParts.length < 2) return false;
+          
+          const recordYear = parseInt(dateParts[0], 10);
+          const recordMonth = parseInt(dateParts[1], 10);
+          
+          if (isNaN(recordYear) || isNaN(recordMonth)) return false;
+          
+          return recordYear === year && recordMonth === month;
+        });
+
+        setAttendance(currentMonthRecords);
+      } catch (err) {
+        console.log('Attendance fetch error:', err);
+        setAttendance([]);
+      }
+
+      // Get marks data
+      try {
+        const { data: marksData, error: marksError } = await supabase
+          .from(TABLES.MARKS)
+          .select(`
+            *,
+            subjects(name),
+            exams(name, start_date)
+          `)
+          .eq('student_id', studentData.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (marksError && marksError.code !== '42P01') {
+          console.log('Marks error:', marksError);
+        }
+        setMarks(marksData || []);
+      } catch (err) {
+        console.log('Marks fetch error:', err);
+        setMarks([]);
+      }
+
+      // Get fee information
+      try {
+        const { data: feesData, error: feesError } = await supabase
+          .from(TABLES.FEES)
+          .select('*')
+          .eq('student_id', studentData.id)
+          .order('due_date', { ascending: true });
+
+        if (feesError && feesError.code !== '42P01') {
+          console.log('Fees error:', feesError);
+        }
+        setFees(feesData || []);
+      } catch (err) {
+        console.log('Fees fetch error:', err);
+        setFees([]);
+      }
+
+      // Get today's classes
+      try {
+        const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+        const { data: timetableData, error: timetableError } = await supabase
+          .from(TABLES.TIMETABLE)
+          .select(`
+            *,
+            subjects(name),
+            classes(class_name, section)
+          `)
+          .eq('class_id', studentData.class_id)
+          .eq('day', today)
+          .order('start_time', { ascending: true });
+
+        if (timetableError && timetableError.code !== '42P01') {
+          console.log('Timetable error:', timetableError);
+        }
+        setTodayClasses(timetableData || []);
+      } catch (err) {
+        console.log('Timetable fetch error:', err);
+        setTodayClasses([]);
+      }
+
+      // Get recent activities (assignments, announcements, etc.)
+      try {
+        const { data: activitiesData, error: activitiesError } = await supabase
+          .from(TABLES.NOTIFICATIONS)
+          .select('*')
+          .eq('status', 'Active')
+          .order('created_at', { ascending: false })
+          .limit(5);
+
+        if (activitiesError && activitiesError.code !== '42P01') {
+          console.log('Activities error:', activitiesError);
+        }
+        setRecentActivities(activitiesData || []);
+      } catch (err) {
+        console.log('Activities fetch error:', err);
+        setRecentActivities([]);
+      }
+
     } catch (err) {
+      console.error('Error fetching dashboard data:', err);
       setError(err.message);
-      console.error('Dashboard error:', err);
+      Alert.alert('Error', 'Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    if (user) {
     fetchDashboardData();
-    // Real-time subscriptions for all relevant tables
-    const homeworkSub = supabase
-      .channel('student-dashboard-homework')
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.HOMEWORKS }, fetchDashboardData)
-      .subscribe();
-    const assignmentsSub = supabase
-      .channel('student-dashboard-assignments')
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.ASSIGNMENTS }, fetchDashboardData)
-      .subscribe();
-    const attendanceSub = supabase
-      .channel('student-dashboard-attendance')
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.STUDENT_ATTENDANCE }, fetchDashboardData)
-      .subscribe();
-    const marksSub = supabase
-      .channel('student-dashboard-marks')
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.MARKS }, fetchDashboardData)
-      .subscribe();
-    const notificationsSub = supabase
-      .channel('student-dashboard-notifications')
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.NOTIFICATION_RECIPIENTS }, refreshNotifications)
-      .subscribe();
-    const examsSub = supabase
-      .channel('student-dashboard-exams')
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.EXAMS }, fetchDashboardData)
-      .subscribe();
-    const feesSub = supabase
-      .channel('student-dashboard-fees')
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.STUDENT_FEES }, fetchDashboardData)
-      .subscribe();
-    const eventsSub = supabase
-      .channel('student-dashboard-events')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, fetchDashboardData)
-      .subscribe();
-
-    return () => {
-      homeworkSub.unsubscribe();
-      assignmentsSub.unsubscribe();
-      attendanceSub.unsubscribe();
-      marksSub.unsubscribe();
-      notificationsSub.unsubscribe();
-      examsSub.unsubscribe();
-      feesSub.unsubscribe();
-      eventsSub.unsubscribe();
-    };
-  }, []);
-
-  // Pull-to-refresh functionality
-  const { refreshing, onRefresh } = usePullToRefresh(async () => {
-    console.log('Pull-to-refresh triggered on Student Dashboard');
-    await fetchDashboardData();
-    await refreshNotifications();
-  });
+    }
+  }, [user]);
 
   // Calculate unread notifications count
   const unreadCount = notifications.filter(notification => !notification.is_read).length;
+  
+  // Calculate attendance percentage
+  const totalRecords = attendance.length;
+  const presentCount = attendance.filter(a => a.status === 'Present').length;
+  const attendancePercentage = totalRecords > 0 ? Math.round((presentCount / totalRecords) * 100) : 0;
 
-  // Render the new dashboard design
-  const renderDashboard = () => (
+  // Calculate attendance data for pie chart
+  const attendancePieData = [
+    {
+      name: 'Present',
+      population: presentCount,
+      color: '#4CAF50',
+      legendFontColor: '#333',
+      legendFontSize: 14
+    },
+    {
+      name: 'Absent',
+      population: totalRecords - presentCount,
+      color: '#F44336',
+      legendFontColor: '#333',
+      legendFontSize: 14
+    },
+  ];
+
+  // Get fee status
+  const getFeeStatus = () => {
+    if (fees.length === 0) return 'No fees';
+    const pendingFees = fees.filter(fee => fee.status === 'pending');
+    if (pendingFees.length === 0) return 'All paid';
+    const totalPending = pendingFees.reduce((sum, fee) => sum + (fee.amount || 0), 0);
+    return `₹${totalPending.toLocaleString()}`;
+  };
+
+  // Get average marks
+  const getAverageMarks = () => {
+    if (marks.length === 0) return 'No marks';
+    const totalMarks = marks.reduce((sum, mark) => sum + (mark.marks_obtained || 0), 0);
+    const totalMaxMarks = marks.reduce((sum, mark) => sum + (mark.max_marks || 0), 0);
+    if (totalMaxMarks === 0) return 'No marks';
+    const percentage = Math.round((totalMarks / totalMaxMarks) * 100);
+    return `${percentage}%`;
+  };
+
+  // Student stats for the dashboard
+  const studentStats = [
+    {
+      title: 'Attendance',
+      value: `${attendancePercentage}%`,
+      icon: 'checkmark-circle',
+      color: attendancePercentage >= 75 ? '#4CAF50' : attendancePercentage >= 60 ? '#FF9800' : '#F44336',
+      subtitle: `${presentCount}/${totalRecords} days present`,
+      onPress: () => handleCardNavigation('attendance')
+    },
+    {
+      title: 'Fee Status',
+      value: getFeeStatus(),
+      icon: 'card',
+      color: fees.filter(f => f.status === 'pending').length > 0 ? '#FF9800' : '#4CAF50',
+      subtitle: fees.filter(f => f.status === 'pending').length > 0 ? 'Pending fees' : 'All paid',
+      onPress: () => handleCardNavigation('fees')
+    },
+    {
+      title: 'Average Marks',
+      value: getAverageMarks(),
+      icon: 'document-text',
+      color: '#2196F3',
+      subtitle: marks.length > 0 ? `${marks.length} subjects` : 'No marks',
+      onPress: () => handleCardNavigation('marks')
+    },
+    {
+      title: 'Assignments',
+      value: '0',
+      icon: 'library',
+      color: '#9C27B0',
+      subtitle: 'No pending assignments',
+      onPress: () => handleCardNavigation('assignments')
+    },
+  ];
+
+  if (loading) {
+    return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
-      
-      <Header 
-        title="Student Dashboard" 
-        showBack={false} 
+        <Header
+          title="Student Dashboard"
+          showBack={false}
+          showNotifications={true}
+          onNotificationsPress={handleNotificationsPress}
+        />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#1976d2" />
+          <Text style={styles.loadingText}>Loading dashboard...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Header title="Student Dashboard" showBack={false} showNotifications={true} />
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle" size={48} color="#F44336" />
+          <Text style={styles.errorText}>Failed to load dashboard</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={fetchDashboardData}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <Header
+        title="Student Dashboard"
+        showBack={false}
         showNotifications={true}
-        showProfile={true}
         unreadCount={unreadCount}
-        onNotificationsPress={() => navigation.navigate('StudentNotifications')}
-        onProfilePress={() => navigation.navigate('Profile')}
+        onNotificationsPress={handleNotificationsPress}
       />
 
       <ScrollView 
+        style={styles.scrollView} 
         showsVerticalScrollIndicator={false} 
-        contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={['#2196F3']}
-            tintColor="#2196F3"
-            title="Pull to refresh..."
+            colors={['#1976d2']}
+            tintColor="#1976d2"
           />
         }
       >
-        {/* Welcome Section - Modern gradient design */}
+        {/* Welcome Section */}
         <View style={styles.welcomeSection}>
-          {/* Decorative background elements */}
+          <Text style={styles.welcomeText}>
+            Welcome back, {studentProfile?.name || 'Student'}!
+          </Text>
+          <Text style={styles.dateText}>
+            {new Date().toLocaleDateString('en-US', { 
+              weekday: 'long', 
+              year: 'numeric', 
+              month: 'long', 
+              day: 'numeric' 
+            })}
+          </Text>
+        </View>
+
+        {/* School Details Card */}
+        {schoolDetails && (
+          <View style={styles.schoolDetailsSection}>
           <View style={styles.backgroundCircle1} />
           <View style={styles.backgroundCircle2} />
           <View style={styles.backgroundPattern} />
@@ -705,498 +540,428 @@ const StudentDashboard = ({ navigation }) => {
             
             <View style={styles.dateContainer}>
               <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.8)" />
-              <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', {
+                <Text style={styles.schoolDateText}>
+                  {new Date().toLocaleDateString('en-US', {
                 weekday: 'long',
                 year: 'numeric',
                 month: 'long',
                 day: 'numeric'
-              })}</Text>
+                  })}
+                </Text>
             </View>
           </View>
         </View>
+        )}
 
-        {/* Student Dashboard Card */}
-        <View style={styles.dashboardCard}>
-
-          {/* Student Profile */}
-          {studentProfile && (
-            <View style={styles.studentProfile}>
-              <View style={styles.avatarContainer}>
-                <Text style={styles.avatarText}>
-                  {studentProfile.name.split(' ').map(n => n[0]).join('').toUpperCase()}
+        {/* Student Profile Card */}
+        <TouchableOpacity style={styles.studentCard} onPress={() => setShowStudentDetailsModal(true)} activeOpacity={0.85}>
+          <View style={styles.studentCardRow}>
+            <Image 
+              source={studentProfile?.profile_url ? { uri: studentProfile.profile_url } : require('../../../assets/icon.png')} 
+              style={styles.studentAvatar} 
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.studentCardName}>
+                {studentProfile?.name || 'Student Name'}
+              </Text>
+              <Text style={styles.studentCardClass}>
+                {studentProfile?.classes ? 
+                  `${studentProfile.classes.class_name} ${studentProfile.classes.section}` : 
+                  'Class N/A'
+                } • Roll No: {studentProfile?.roll_no || 'N/A'}
+              </Text>
+              <Text style={[styles.studentCardClass, { fontSize: 12, color: '#999' }]}>
+                Student ID: {studentProfile?.id || 'N/A'}
                 </Text>
               </View>
-              <View style={styles.studentInfo}>
-                <Text style={styles.studentName}>{studentProfile.name}</Text>
-                <Text style={styles.studentDetails}>Class {studentProfile.class} • Roll No: {studentProfile.roll}</Text>
+            <Ionicons name="chevron-forward" size={28} color="#bbb" />
               </View>
-            </View>
-          )}
+        </TouchableOpacity>
 
-          {/* Summary Cards Grid - SIMPLE FIXED VERSION */}
-          <View style={styles.summaryContainer}>
-            {/* First Row */}
-            <View style={styles.summaryRow}>
-              {/* Attendance Card */}
-              <TouchableOpacity
-                style={[styles.summaryCard, { backgroundColor: '#48bb78' }]}
-                onPress={() => handleCardNavigation('attendance')}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="checkmark-circle" size={28} color="#fff" style={styles.cardIcon} />
-                <Text style={styles.cardValue}>{summary.find(s => s.key === 'attendance')?.value || '0%'}</Text>
-                <Text style={styles.cardLabel}>Attendance</Text>
-              </TouchableOpacity>
-
-              {/* Marks Card */}
-              <TouchableOpacity
-                style={[styles.summaryCard, { backgroundColor: '#ed8936' }]}
-                onPress={() => handleCardNavigation('marks')}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="trending-up" size={28} color="#fff" style={styles.cardIcon} />
-                <Text style={styles.cardValue}>{summary.find(s => s.key === 'marks')?.value || '0%'}</Text>
-                <Text style={styles.cardLabel}>Marks</Text>
-              </TouchableOpacity>
+        {/* Stats Cards */}
+        <View style={styles.statsSection}>
+          <View style={styles.statsSectionHeader}>
+            <Ionicons name="analytics" size={20} color="#1976d2" />
+            <Text style={styles.statsSectionTitle}>Quick Overview</Text>
             </View>
 
-            {/* Second Row */}
-            <View style={styles.summaryRow}>
-              {/* Assignments Card */}
+          <View style={styles.statsColumnContainer}>
+            {studentStats.map((stat, index) => (
               <TouchableOpacity
-                style={[styles.summaryCard, { backgroundColor: '#667eea' }]}
-                onPress={() => handleCardNavigation('assignments')}
-                activeOpacity={0.8}
+                key={index}
+                style={styles.statCardWrapper}
+                onPress={stat.onPress}
+                activeOpacity={0.7}
               >
-                <Ionicons name="book-outline" size={28} color="#fff" style={styles.cardIcon} />
-                <Text style={styles.cardValue}>{summary.find(s => s.key === 'assignments')?.value || '0'}</Text>
-                <Text style={styles.cardLabel}>Assignments</Text>
+                <StatCard
+                  title={stat.title}
+                  value={stat.value}
+                  icon={stat.icon}
+                  color={stat.color}
+                  subtitle={stat.subtitle}
+                />
               </TouchableOpacity>
-
-              {/* Notifications Card */}
-              <TouchableOpacity
-                style={[styles.summaryCard, { backgroundColor: '#9f7aea' }]}
-                onPress={() => handleCardNavigation('notifications')}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="notifications" size={28} color="#fff" style={styles.cardIcon} />
-                <Text style={styles.cardValue}>{summary.find(s => s.key === 'notifications')?.value || '0'}</Text>
-                <Text style={styles.cardLabel}>Notifications</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Third Row */}
-            <View style={styles.summaryRow}>
-              {/* Events Card */}
-              <TouchableOpacity
-                style={[styles.summaryCard, { backgroundColor: '#ff6b35', width: '100%' }]}
-                onPress={() => handleCardNavigation('events')}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="calendar" size={28} color="#fff" style={styles.cardIcon} />
-                <Text style={styles.cardValue}>{summary.find(s => s.key === 'events')?.value || '0'}</Text>
-                <Text style={styles.cardLabel}>Upcoming Events</Text>
-              </TouchableOpacity>
-            </View>
+            ))}
           </View>
         </View>
 
-        {/* Upcoming Deadlines Section */}
+        {/* Quick Actions */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Upcoming Deadlines & Events</Text>
-          {deadlines.length > 0 ? (
-            deadlines.map((item, index) => (
+          <View style={styles.sectionTitleContainer}>
+            <View style={styles.sectionIcon}>
+              <Ionicons name="flash" size={20} color="#1976d2" />
+            </View>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+          </View>
+          <View style={styles.quickActionsGrid}>
               <TouchableOpacity
-                key={item.id || index}
-                style={styles.deadlineItem}
-                onPress={() => navigation.navigate('Assignments')}
-                activeOpacity={0.7}
-              >
-                <View style={styles.deadlineIcon}>
-                  <Ionicons name="calendar" size={20} color="#2196F3" />
-                </View>
-                <View style={styles.deadlineContent}>
-                  <Text style={styles.deadlineTitle}>{item.title || item.name}</Text>
-                  <Text style={styles.deadlineDate}>{item.date || item.start_date}</Text>
-                </View>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <TouchableOpacity
-              style={styles.emptyState}
-              onPress={() => navigation.navigate('Assignments')}
-              activeOpacity={0.7}
+              style={styles.quickActionCard}
+              onPress={() => handleCardNavigation('assignments')}
             >
-              <Text style={styles.emptyText}>No upcoming deadlines</Text>
-              <Text style={styles.emptySubtext}>Tap to view all assignments</Text>
+              <View style={[styles.actionIcon, { backgroundColor: '#9C27B0' }]}>
+                <Ionicons name="library" size={24} color="#fff" />
+                </View>
+              <Text style={styles.actionTitle}>Assignments</Text>
+              <Text style={styles.actionSubtitle}>View homework</Text>
+              </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => handleCardNavigation('attendance')}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#4CAF50' }]}>
+                <Ionicons name="checkmark-circle" size={24} color="#fff" />
+        </View>
+              <Text style={styles.actionTitle}>Attendance</Text>
+              <Text style={styles.actionSubtitle}>View records</Text>
             </TouchableOpacity>
-          )}
+
+              <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => handleCardNavigation('marks')}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#2196F3' }]}>
+                <Ionicons name="document-text" size={24} color="#fff" />
+                </View>
+              <Text style={styles.actionTitle}>Marks</Text>
+              <Text style={styles.actionSubtitle}>View grades</Text>
+              </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => handleCardNavigation('notifications')}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#FF9800' }]}>
+                <Ionicons name="notifications" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Notifications</Text>
+              <Text style={styles.actionSubtitle}>View updates</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Recent Notifications Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Notifications</Text>
-          {notifications.length > 0 ? (
-            notifications.map((item, index) => (
-              <TouchableOpacity
-                key={item.id || index}
-                style={styles.notificationItem}
-                onPress={() => navigation.navigate('StudentNotifications')}
-                activeOpacity={0.7}
-              >
-                <View style={styles.notificationIcon}>
-                  <Ionicons name="notifications" size={20} color="#9C27B0" />
-                </View>
-                <View style={styles.notificationContent}>
-                  <Text style={styles.notificationMessage}>{item.message}</Text>
-                  <Text style={styles.notificationDate}>{item.date}</Text>
-                </View>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <TouchableOpacity
-              style={styles.emptyState}
-              onPress={() => navigation.navigate('StudentNotifications')}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.emptyText}>No recent notifications</Text>
-              <Text style={styles.emptySubtext}>Tap to view all notifications</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Upcoming Events Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Upcoming Events</Text>
-          {events.length > 0 ? (
-            events.slice(0, 5).map((item, index) => (
-              <TouchableOpacity
-                key={item.id || index}
-                style={styles.eventItem}
-                onPress={() => Alert.alert(
-                  item.title,
-                  `Date: ${formatDateToDDMMYYYY(item.date)}\nTime: ${item.startTime}${item.endTime ? ' - ' + item.endTime : ''}${item.location ? '\nLocation: ' + item.location : ''}${item.description ? '\n\n' + item.description : ''}`
-                )}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.eventItemIcon, { backgroundColor: item.color || '#FF9800' }]}>
-                  <Ionicons name={item.icon || 'calendar'} size={20} color="#fff" />
-                </View>
-                <View style={styles.eventContent}>
-                  <Text style={styles.eventTitle}>{item.title}</Text>
-                  <Text style={styles.eventDate}>
-                    {formatDateToDDMMYYYY(item.date)} • {item.startTime}
-                    {item.location ? ` • ${item.location}` : ''}
-                  </Text>
-                  {item.description && (
-                    <Text style={styles.eventDescription} numberOfLines={2}>
-                      {item.description}
+        {/* Today's Classes */}
+        {todayClasses.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionTitleContainer}>
+              <View style={styles.sectionIcon}>
+                <Ionicons name="time" size={20} color="#1976d2" />
+            </View>
+              <Text style={styles.sectionTitle}>Today's Classes</Text>
+            </View>
+            <View style={styles.classesContainer}>
+              {todayClasses.map((classItem, index) => (
+                <View key={index} style={styles.classItem}>
+                  <View style={[styles.classIcon, { backgroundColor: '#e3f2fd' }]}>
+                    <Ionicons name="book" size={20} color="#1976d2" />
+                  </View>
+                  <View style={styles.classInfo}>
+                    <Text style={styles.classSubject}>
+                      {classItem.subjects?.name || 'Subject'}
                     </Text>
-                  )}
+                    <Text style={styles.classTime}>
+                      {classItem.start_time} - {classItem.end_time}
+                    </Text>
+                  </View>
                 </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Attendance Analytics */}
+        {attendance.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionTitleContainer}>
+              <View style={styles.sectionIcon}>
+                <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+              </View>
+              <Text style={styles.sectionTitle}>This Month's Attendance</Text>
+            </View>
+            <View style={styles.chartContainer}>
+              <Text style={styles.chartTitle}>Attendance Analytics</Text>
+              <CrossPlatformPieChart
+                data={attendancePieData}
+                width={350}
+                height={180}
+                chartConfig={{
+                  backgroundColor: '#fff',
+                  backgroundGradientFrom: '#fff',
+                  backgroundGradientTo: '#fff',
+                  color: (opacity = 1) => `rgba(33, 150, 243, ${opacity})`,
+                  labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
+                }}
+                accessor="population"
+                backgroundColor="transparent"
+                paddingLeft="15"
+                absolute
+              />
+              <View style={styles.chartSummary}>
+                <Text style={styles.chartSummaryText}>
+                  Present: {presentCount} days | Absent: {totalRecords - presentCount} days
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Recent Marks */}
+        {marks.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionTitleContainer}>
+              <View style={styles.sectionIcon}>
+                <Ionicons name="document-text" size={20} color="#2196F3" />
+              </View>
+              <Text style={styles.sectionTitle}>Recent Marks</Text>
+              <TouchableOpacity onPress={() => handleCardNavigation('marks')}>
+                <Text style={styles.viewAllText}>View All</Text>
               </TouchableOpacity>
-            ))
-          ) : (
-            <TouchableOpacity
-              style={styles.emptyState}
-              onPress={() => handleCardNavigation('events')}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.emptyText}>No upcoming events</Text>
-              <Text style={styles.emptySubtext}>Tap to view all events</Text>
-            </TouchableOpacity>
-          )}
+            </View>
+            <View style={styles.marksContainer}>
+              {marks.slice(0, 3).map((mark, index) => (
+                <View key={index} style={styles.markCard}>
+                  <View style={styles.markHeader}>
+                    <Text style={styles.markSubject}>
+                      {mark.subjects?.name || 'Subject'}
+                    </Text>
+                    <View style={[
+                      styles.markGrade,
+                      { backgroundColor: (mark.marks_obtained / mark.max_marks) >= 0.9 ? '#4CAF50' :
+                                        (mark.marks_obtained / mark.max_marks) >= 0.75 ? '#FF9800' : '#F44336' }
+                    ]}>
+                      <Text style={styles.markGradeText}>
+                        {Math.round((mark.marks_obtained / mark.max_marks) * 100)}%
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.markDetails}>
+                    {mark.marks_obtained}/{mark.max_marks} marks
+                  </Text>
+                  <Text style={styles.markExam}>
+                    {mark.exams?.name || 'Exam'} • {formatDateToDDMMYYYY(mark.exams?.start_date || mark.created_at)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Upcoming Events */}
+        {events.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionTitleContainer}>
+              <View style={styles.sectionIcon}>
+                <Ionicons name="calendar" size={20} color="#FF9800" />
+            </View>
+              <Text style={styles.sectionTitle}>Upcoming Events</Text>
+          </View>
+            <View style={styles.eventsContainer}>
+              {events.map((event, index) => (
+                <View key={index} style={styles.eventCard}>
+                  <View style={[styles.eventIcon, { backgroundColor: event.color }]}>
+                    <Ionicons name={event.icon} size={20} color="#fff" />
         </View>
+                  <View style={styles.eventInfo}>
+                    <Text style={styles.eventTitle}>{event.title}</Text>
+                    <Text style={styles.eventDescription}>{event.description}</Text>
+                    <Text style={styles.eventDateTime}>
+                      {formatDateToDDMMYYYY(event.date)} • {event.time}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
 
-        {/* Bottom spacing */}
-        <View style={{ height: 100 }} />
-      </ScrollView>
+        {/* Recent Activities */}
+        {recentActivities.length > 0 && (
+        <View style={styles.section}>
+            <View style={styles.sectionTitleContainer}>
+              <View style={styles.sectionIcon}>
+                <Ionicons name="activity" size={20} color="#4CAF50" />
+                </View>
+              <Text style={styles.sectionTitle}>Recent Activities</Text>
+            </View>
+            <View style={styles.activitiesContainer}>
+              {recentActivities.map((activity, index) => (
+                <View key={index} style={styles.activityCard}>
+                  <View style={styles.activityIcon}>
+                    <Ionicons name="megaphone" size={20} color="#1976d2" />
+                  </View>
+                  <View style={styles.activityInfo}>
+                    <Text style={styles.activityTitle}>{activity.title || 'Announcement'}</Text>
+                    <Text style={styles.activityDescription}>{activity.message}</Text>
+                    <Text style={styles.activityTime}>
+                      {formatDateToDDMMYYYY(activity.created_at)}
+                  </Text>
+                </View>
+        </View>
+              ))}
     </View>
-  );
+      </View>
+        )}
 
-  if (loading) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#2196F3" />
-        <Text style={styles.loadingText}>Loading dashboard...</Text>
+      </ScrollView>
+
+      {/* Student Details Modal */}
+      {showStudentDetailsModal && (
+        <Modal
+          visible={showStudentDetailsModal}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setShowStudentDetailsModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Student Details</Text>
+                <TouchableOpacity onPress={() => setShowStudentDetailsModal(false)}>
+                  <Ionicons name="close" size={24} color="#666" />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={true}>
+                <View style={{ alignItems: 'center', marginBottom: 18 }}>
+                  <Image
+                    source={studentProfile?.profile_url ? { uri: studentProfile.profile_url } : require('../../../assets/icon.png')}
+                    style={styles.studentAvatarLarge}
+                  />
+                </View>
+                {/* Basic Information */}
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Name:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.name || 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Student ID:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.id || 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Admission Number:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.admission_no || 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Roll Number:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.roll_no || 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Class:</Text>
+                  <Text style={styles.detailsValue}>
+                    {studentProfile?.classes ?
+                      `${studentProfile.classes.class_name} ${studentProfile.classes.section}` :
+                      'N/A'
+                    }
+                  </Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Academic Year:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.academic_year || 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Gender:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.gender || 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Date of Birth:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.dob ? formatDateToDDMMYYYY(studentProfile.dob) : 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Address:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.address || 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Pin Code:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.pin_code || 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Phone:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.user_phone || 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Email:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.email || 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Blood Group:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.blood_group || 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Nationality:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.nationality || 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Religion:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.religion || 'N/A'}</Text>
+                </View>
+                <View style={styles.detailsRow}>
+                  <Text style={styles.detailsLabel}>Mother Tongue:</Text>
+                  <Text style={styles.detailsValue}>{studentProfile?.mother_tongue || 'N/A'}</Text>
+                </View>
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      )}
       </View>
     );
-  }
-
-  if (error) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
-        <Ionicons name="alert-circle" size={48} color="#F44336" style={{ marginBottom: 16 }} />
-        <Text style={styles.errorText}>Error: {error}</Text>
-        <TouchableOpacity onPress={fetchDashboardData} style={styles.retryButton}>
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  return renderDashboard();
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#f5f5f5',
   },
-  scrollContent: {
-    paddingBottom: 20,
-  },
-  header: {
-    paddingTop: 60,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    backgroundColor: '#f8f9fa',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  notificationIcon: {
-    position: 'relative',
-    padding: 8,
-  },
-  notificationBadge: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    backgroundColor: '#F44336',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  notificationBadgeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  dashboardCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 32,
-    marginBottom: 20,
-    borderRadius: 16,
-    padding: 20,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  dashboardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  dashboardTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  profileIcon: {
-    padding: 4,
-  },
-  studentProfile: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  avatarContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#9C27B0',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-  },
-  avatarText: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  studentInfo: {
+  scrollView: {
     flex: 1,
   },
-  studentName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
-  },
-  studentDetails: {
-    fontSize: 14,
-    color: '#666',
-  },
-  summaryContainer: {
-    marginTop: 20,
-    paddingHorizontal: 2,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  summaryCard: {
-    width: '48%',
-    height: 120,
-    borderRadius: 16,
-    padding: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  cardIcon: {
-    marginBottom: 8,
-  },
-  cardValue: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  cardLabel: {
-    fontSize: 11,
-    color: '#ffffff',
-    textAlign: 'center',
-    fontWeight: '500',
-    opacity: 0.95,
-  },
-
-  section: {
-    marginHorizontal: 16,
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2196F3',
-    marginBottom: 12,
-    marginLeft: 4,
-  },
-  deadlineItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-  },
-  deadlineIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#E3F2FD',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  deadlineContent: {
+  loadingContainer: {
     flex: 1,
-  },
-  deadlineTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 2,
-  },
-  deadlineDate: {
-    fontSize: 13,
-    color: '#888',
-  },
-  notificationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-  },
-  notificationIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#F3E5F5',
-    alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
-  },
-  notificationContent: {
-    flex: 1,
-  },
-  notificationMessage: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 2,
-  },
-  notificationDate: {
-    fontSize: 13,
-    color: '#888',
-  },
-  emptyState: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 24,
     alignItems: 'center',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#999',
-    fontStyle: 'italic',
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#2196F3',
-    marginTop: 4,
-    fontWeight: '500',
+    backgroundColor: '#f5f5f5',
   },
   loadingText: {
+    marginTop: 10,
+    color: '#1976d2',
     fontSize: 16,
-    color: '#666',
-    marginTop: 12,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    padding: 20,
   },
   errorText: {
-    fontSize: 16,
     color: '#F44336',
+    fontSize: 18,
     textAlign: 'center',
     marginBottom: 20,
   },
   retryButton: {
-    backgroundColor: '#2196F3',
-    paddingHorizontal: 24,
+    backgroundColor: '#1976d2',
     paddingVertical: 12,
+    paddingHorizontal: 25,
     borderRadius: 8,
   },
   retryButtonText: {
@@ -1204,56 +969,39 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  eventItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-  },
-  eventItemIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  eventContent: {
-    flex: 1,
-  },
-  eventTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
-  },
-  eventDate: {
-    fontSize: 13,
-    color: '#888',
-    marginBottom: 2,
-  },
-  eventDescription: {
-    fontSize: 12,
-    color: '#999',
-    lineHeight: 16,
-  },
+
+  // Welcome Section
   welcomeSection: {
+    backgroundColor: '#1976d2',
+    padding: 24,
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 16,
+    elevation: 4,
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  welcomeText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  dateText: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+
+  // School Details Section
+  schoolDetailsSection: {
     marginVertical: 12,
     marginHorizontal: 16,
     borderRadius: 20,
     backgroundColor: '#667eea',
     shadowColor: '#667eea',
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
     shadowRadius: 16,
     elevation: 12,
@@ -1290,14 +1038,6 @@ const styles = StyleSheet.create({
     padding: 24,
     zIndex: 1,
   },
-  dateContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.2)',
-  },
   schoolHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1331,11 +1071,399 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: 'rgba(255, 255, 255, 0.8)',
   },
-  dateText: {
+  dateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  schoolDateText: {
     fontSize: 16,
     color: '#ffffff',
     marginLeft: 8,
     fontWeight: '500',
+  },
+
+  // Student Card
+  studentCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 14,
+    marginHorizontal: 16,
+    marginTop: 18,
+    marginBottom: 8,
+    elevation: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+  },
+  studentCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  studentCardName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  studentCardClass: {
+    fontSize: 15,
+    color: '#888',
+    marginTop: 2,
+  },
+  studentAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 12,
+    backgroundColor: '#eee',
+  },
+
+  // Stats Section
+  statsSection: {
+    marginHorizontal: 16,
+    marginTop: 16,
+  },
+  statsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  statsSectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginLeft: 8,
+  },
+  statsColumnContainer: {
+    flexDirection: 'column',
+  },
+  statCardWrapper: {
+    width: '100%',
+    marginBottom: 12,
+  },
+
+  // Section Styles
+  section: {
+    backgroundColor: '#fff',
+    marginTop: 8,
+    marginHorizontal: 16,
+    padding: 20,
+    borderRadius: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+  },
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#e3f2fd',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    flex: 1,
+  },
+  viewAllText: {
+    fontSize: 14,
+    color: '#1976d2',
+    fontWeight: '600',
+  },
+
+  // Classes Container
+  classesContainer: {
+    marginTop: 8,
+  },
+  classItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  classIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  classInfo: {
+    flex: 1,
+  },
+  classSubject: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 2,
+  },
+  classTime: {
+    fontSize: 14,
+    color: '#666',
+  },
+
+  // Chart Container
+  chartContainer: {
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
+  },
+  chartTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  chartSummary: {
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  chartSummaryText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '600',
+  },
+
+  // Marks Container
+  marksContainer: {
+    marginTop: 8,
+  },
+  markCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  markHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  markSubject: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    flex: 1,
+  },
+  markGrade: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  markGradeText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  markDetails: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  markExam: {
+    fontSize: 12,
+    color: '#999',
+  },
+
+  // Events Container
+  eventsContainer: {
+    marginTop: 8,
+  },
+  eventCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  eventIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  eventInfo: {
+    flex: 1,
+  },
+  eventTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  eventDescription: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+    lineHeight: 20,
+  },
+  eventDateTime: {
+    fontSize: 12,
+    color: '#999',
+  },
+
+  // Quick Actions
+  quickActionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  quickActionCard: {
+    width: '48%',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  actionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  actionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  actionSubtitle: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+  },
+
+  // Activities Container
+  activitiesContainer: {
+    marginTop: 8,
+  },
+  activityCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  activityIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#e3f2fd',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  activityInfo: {
+    flex: 1,
+  },
+  activityTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  activityDescription: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+    lineHeight: 20,
+  },
+  activityTime: {
+    fontSize: 12,
+    color: '#999',
+  },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    margin: 20,
+    maxHeight: '80%',
+    width: '90%',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  studentAvatarLarge: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#eee',
+  },
+  detailsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  detailsLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    flex: 1,
+  },
+  detailsValue: {
+    fontSize: 16,
+    color: '#666',
+    flex: 2,
+    textAlign: 'right',
   },
 });
 

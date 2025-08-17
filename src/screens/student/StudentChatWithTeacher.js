@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard, RefreshControl, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import * as ImagePicker from 'expo-image-picker';
@@ -227,7 +227,8 @@ const StudentChatWithTeacher = () => {
           teachers!classes_class_teacher_id_fkey(
             id,
             name,
-            qualification
+            qualification,
+            phone
           )
         `)
         .eq('id', student.class_id)
@@ -248,6 +249,7 @@ const StudentChatWithTeacher = () => {
               id: classInfo.teachers.id,
               userId: teacherUserId,
               name: classInfo.teachers.name,
+              phone: classInfo.teachers.phone,
               subject: 'Class Teacher',
               role: 'class_teacher',
               canMessage: true
@@ -261,6 +263,7 @@ const StudentChatWithTeacher = () => {
               id: classInfo.teachers.id,
               userId: null,
               name: classInfo.teachers.name + ' (No Account)',
+              phone: classInfo.teachers.phone,
               subject: 'Class Teacher',
               role: 'class_teacher',
               canMessage: false,
@@ -278,7 +281,7 @@ const StudentChatWithTeacher = () => {
         console.log('Trying direct teacher fetch for class_id:', student.class_id);
         const { data: directClassTeacher, error: directTeacherError } = await supabase
           .from(TABLES.TEACHERS)
-          .select('id, name, qualification, is_class_teacher, assigned_class_id')
+          .select('id, name, qualification, phone, is_class_teacher, assigned_class_id')
           .eq('assigned_class_id', student.class_id)
           .eq('is_class_teacher', true);
         
@@ -289,6 +292,7 @@ const StudentChatWithTeacher = () => {
             uniqueTeachers.push({
               id: teacher.id,
               name: teacher.name,
+              phone: teacher.phone,
               subject: 'Class Teacher',
               role: 'class_teacher'
             });
@@ -321,6 +325,7 @@ const StudentChatWithTeacher = () => {
                 id,
                 name,
                 qualification,
+                phone,
                 is_class_teacher
               )
             `)
@@ -343,6 +348,7 @@ const StudentChatWithTeacher = () => {
                     id: assignment.teachers.id,
                     userId: teacherUserId,
                     name: assignment.teachers.name,
+                    phone: assignment.teachers.phone,
                     subject: subject.name,
                     role: 'subject_teacher',
                     canMessage: true
@@ -355,6 +361,7 @@ const StudentChatWithTeacher = () => {
                     id: assignment.teachers.id,
                     userId: null,
                     name: assignment.teachers.name + ' (No Account)',
+                    phone: assignment.teachers.phone,
                     subject: subject.name,
                     role: 'subject_teacher',
                     canMessage: false,
@@ -931,6 +938,29 @@ const StudentChatWithTeacher = () => {
     setMessages([]);
   };
 
+  // Handle call functionality
+  const handleCall = () => {
+    if (selectedTeacher?.phone) {
+      const phoneNumber = selectedTeacher.phone;
+      const phoneUrl = Platform.OS === 'ios' ? `tel:${phoneNumber}` : `tel:${phoneNumber}`;
+
+      Linking.canOpenURL(phoneUrl)
+        .then((supported) => {
+          if (supported) {
+            return Linking.openURL(phoneUrl);
+          } else {
+            Alert.alert('Error', 'Phone calls are not supported on this device');
+          }
+        })
+        .catch((err) => {
+          console.error('Error opening phone app:', err);
+          Alert.alert('Error', 'Unable to make phone call');
+        });
+    } else {
+      Alert.alert('No Phone Number', 'Phone number not available for this teacher');
+    }
+  };
+
   // Scroll to bottom when messages change
   useEffect(() => {
     if (flatListRef.current && messages.length > 0) {
@@ -1084,10 +1114,13 @@ const StudentChatWithTeacher = () => {
               <Ionicons name="arrow-back" size={24} color="#1976d2" />
             </TouchableOpacity>
             <Ionicons name="person-circle" size={32} color="#1976d2" style={{ marginRight: 8 }} />
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.teacherName}>{selectedTeacher.name}</Text>
               <Text style={styles.teacherSubject}>{selectedTeacher.subject}</Text>
             </View>
+            <TouchableOpacity onPress={handleCall} style={styles.callButton}>
+              <Ionicons name="call" size={24} color="#4CAF50" />
+            </TouchableOpacity>
           </View>
           <FlatList
             ref={flatListRef}
@@ -1288,6 +1321,12 @@ const styles = StyleSheet.create({
   
   // Chat Styles
   chatHeader: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 12, borderBottomWidth: 1, borderColor: '#eee' },
+  callButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#f0f8f0',
+    marginLeft: 8,
+  },
   chatList: { flexGrow: 1, padding: 16 },
   messageRow: { flexDirection: 'row', marginBottom: 10 },
   messageLeft: { justifyContent: 'flex-start' },
