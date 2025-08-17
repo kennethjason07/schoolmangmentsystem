@@ -9,8 +9,6 @@ export const useMessageStatus = () => {
     try {
       if (!user?.id || !senderId) return;
 
-      console.log('✅ Marking messages as read from sender:', senderId, 'to receiver:', user.id);
-
       const { error } = await supabase
         .from(TABLES.MESSAGES)
         .update({ is_read: true })
@@ -19,14 +17,11 @@ export const useMessageStatus = () => {
         .eq('is_read', false);
 
       if (error) {
-        console.log('❌ Error marking messages as read:', error);
         return { success: false, error };
       }
 
-      console.log('✅ Messages marked as read successfully');
       return { success: true };
     } catch (error) {
-      console.log('💥 Error in markMessagesAsRead:', error);
       return { success: false, error };
     }
   };
@@ -36,8 +31,6 @@ export const useMessageStatus = () => {
     try {
       if (!user?.id) return;
 
-      console.log('✅ Marking all messages as read for user:', user.id);
-
       const { error } = await supabase
         .from(TABLES.MESSAGES)
         .update({ is_read: true })
@@ -45,14 +38,11 @@ export const useMessageStatus = () => {
         .eq('is_read', false);
 
       if (error) {
-        console.log('❌ Error marking all messages as read:', error);
         return { success: false, error };
       }
 
-      console.log('✅ All messages marked as read successfully');
       return { success: true };
     } catch (error) {
-      console.log('💥 Error in markAllMessagesAsRead:', error);
       return { success: false, error };
     }
   };
@@ -70,13 +60,11 @@ export const useMessageStatus = () => {
         .eq('is_read', false);
 
       if (error) {
-        console.log('❌ Error fetching unread count from sender:', error);
         return 0;
       }
 
       return data ? data.length : 0;
     } catch (error) {
-      console.log('💥 Error in getUnreadCountFromSender:', error);
       return 0;
     }
   };

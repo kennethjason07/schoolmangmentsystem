@@ -10,6 +10,7 @@ import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useMessageStatus, getUnreadCountFromSender } from '../../utils/useMessageStatus';
 import { formatToLocalTime } from '../../utils/timeUtils';
+import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from '../../utils/chatFileUpload';
 
 const ChatWithTeacher = () => {
   const { user } = useAuth();
@@ -692,7 +693,7 @@ const ChatWithTeacher = () => {
         text: input, // Add this for compatibility with render
         sent_at: insertedMsg?.[0]?.sent_at || new Date().toISOString(),
         timestamp: formatToLocalTime(new Date().toISOString()),
-        type: 'text',
+        message_type: 'text',
         sender: 'parent' // Add this for the render logic
       };
 
@@ -734,7 +735,7 @@ const ChatWithTeacher = () => {
     );
   };
 
-  // Handle image upload with database save
+  // Handle image upload with chat-files storage
   const handleImageUpload = async () => {
     setShowAttachmentMenu(false);
     try {
@@ -745,7 +746,7 @@ const ChatWithTeacher = () => {
       }
       
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: 'Images',
         allowsEditing: false,
         quality: 0.8,
         allowsMultipleSelection: false,
@@ -754,32 +755,87 @@ const ChatWithTeacher = () => {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
         
-        // For now, create local message (you can add Supabase storage later)
-        const newMsg = {
-          id: Date.now().toString(),
+        // Check file size (100MB limit)
+        if (asset.fileSize && asset.fileSize > 104857600) {
+          Alert.alert('File Too Large', 'Please select an image smaller than 100MB.');
+          return;
+        }
+
+        // Show uploading indicator
+        const tempMsg = {
+          id: 'temp_' + Date.now(),
           sender_id: user.id,
           receiver_id: selectedTeacher.userId,
-          message: '📷 Photo',
+          message: '📷 Uploading photo...',
           message_type: 'image',
-          file_url: asset.uri, // Local URI for now
-          file_name: asset.fileName || 'image.jpg',
-          file_size: asset.fileSize || 0,
-          file_type: 'image/jpeg',
           timestamp: formatToLocalTime(new Date().toISOString()),
-          sender: 'parent'
+          sender: 'parent',
+          uploading: true
         };
         
-        setMessages(prev => [...prev, newMsg]);
+        setMessages(prev => [...prev, tempMsg]);
         
-        // TODO: Save to database with actual file upload
-        // await sendFileMessage(newMsg);
+        // Get parent's linked student ID
+        const { data: parentUser } = await supabase
+          .from(TABLES.USERS)
+          .select('linked_parent_of')
+          .eq('id', user.id)
+          .single();
+
+        // Upload to chat-files bucket
+        const uploadResult = await uploadChatFile(
+          {
+            uri: asset.uri,
+            name: asset.fileName || `photo_${Date.now()}.jpg`,
+            size: asset.fileSize,
+            type: 'image/jpeg'
+          },
+          user.id,
+          selectedTeacher.userId,
+          parentUser?.linked_parent_of
+        );
+        
+        if (uploadResult.success) {
+          // Save to database
+          const { data: insertedMsg, error: sendError } = await supabase
+            .from('messages')
+            .insert(uploadResult.messageData)
+            .select();
+            
+          if (!sendError && insertedMsg?.[0]) {
+            // Replace temp message with actual message
+            setMessages(prev => prev.map(msg => 
+              msg.id === tempMsg.id
+                ? {
+                    ...insertedMsg[0],
+                    timestamp: formatToLocalTime(insertedMsg[0].sent_at),
+                    sender: 'parent'
+                  }
+                : msg
+            ));
+            
+            // Scroll to bottom
+            setTimeout(() => {
+              if (flatListRef.current) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            }, 100);
+          } else {
+            throw new Error('Failed to save message to database');
+          }
+        } else {
+          throw new Error(uploadResult.error);
+        }
       }
     } catch (e) {
-      Alert.alert('Error', 'Failed to pick image: ' + e.message);
+      console.error('Image upload error:', e);
+      // Remove temp message on error
+      setMessages(prev => prev.filter(msg => !msg.uploading));
+      Alert.alert('Upload Failed', 'Failed to upload image: ' + e.message);
     }
   };
 
-  // Handle document upload with database save
+  // Handle document upload with chat-files storage
   const handleDocumentUpload = async () => {
     setShowAttachmentMenu(false);
     try {
@@ -792,28 +848,90 @@ const ChatWithTeacher = () => {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const file = result.assets[0];
         
-        const newMsg = {
-          id: Date.now().toString(),
+        // Check file size (100MB limit)
+        if (file.size && file.size > 104857600) {
+          Alert.alert('File Too Large', 'Please select a file smaller than 100MB.');
+          return;
+        }
+
+        // Check if file type is supported
+        if (!isSupportedFileType(file.mimeType)) {
+          Alert.alert('Unsupported File Type', 'This file type is not supported for chat attachments.');
+          return;
+        }
+
+        // Show uploading indicator
+        const tempMsg = {
+          id: 'temp_' + Date.now(),
           sender_id: user.id,
           receiver_id: selectedTeacher.userId,
-          message: `📎 ${file.name}`,
+          message: `📎 Uploading ${file.name}...`,
           message_type: 'file',
-          file_url: file.uri, // Local URI for now
-          file_name: file.name,
-          file_size: file.size || 0,
-          file_type: file.mimeType || 'application/octet-stream',
-          sent_at: new Date().toISOString(),
           timestamp: formatToLocalTime(new Date().toISOString()),
-          sender: 'parent'
+          sender: 'parent',
+          uploading: true
         };
         
-        setMessages(prev => [...prev, newMsg]);
+        setMessages(prev => [...prev, tempMsg]);
         
-        // TODO: Save to database with actual file upload
-        // await sendFileMessage(newMsg);
+        // Get parent's linked student ID
+        const { data: parentUser } = await supabase
+          .from(TABLES.USERS)
+          .select('linked_parent_of')
+          .eq('id', user.id)
+          .single();
+
+        // Upload to chat-files bucket
+        const uploadResult = await uploadChatFile(
+          {
+            uri: file.uri,
+            name: file.name,
+            size: file.size,
+            type: file.mimeType,
+            mimeType: file.mimeType
+          },
+          user.id,
+          selectedTeacher.userId,
+          parentUser?.linked_parent_of
+        );
+        
+        if (uploadResult.success) {
+          // Save to database
+          const { data: insertedMsg, error: sendError } = await supabase
+            .from('messages')
+            .insert(uploadResult.messageData)
+            .select();
+            
+          if (!sendError && insertedMsg?.[0]) {
+            // Replace temp message with actual message
+            setMessages(prev => prev.map(msg => 
+              msg.id === tempMsg.id
+                ? {
+                    ...insertedMsg[0],
+                    timestamp: formatToLocalTime(insertedMsg[0].sent_at),
+                    sender: 'parent'
+                  }
+                : msg
+            ));
+            
+            // Scroll to bottom
+            setTimeout(() => {
+              if (flatListRef.current) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            }, 100);
+          } else {
+            throw new Error('Failed to save message to database');
+          }
+        } else {
+          throw new Error(uploadResult.error);
+        }
       }
     } catch (e) {
-      Alert.alert('Error', 'Failed to pick document: ' + e.message);
+      console.error('Document upload error:', e);
+      // Remove temp message on error
+      setMessages(prev => prev.filter(msg => !msg.uploading));
+      Alert.alert('Upload Failed', 'Failed to upload document: ' + e.message);
     }
   };
 

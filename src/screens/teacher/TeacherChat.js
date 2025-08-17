@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard, RefreshControl, Linking, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Animatable from 'react-native-animatable';
+import * as DocumentPicker from 'expo-document-picker';
 import Header from '../../components/Header';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
@@ -8,6 +10,10 @@ import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useMessageStatus } from '../../utils/useMessageStatus';
 import { formatToLocalTime, debugTimestamp } from '../../utils/timeUtils';
+import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from '../../utils/chatFileUpload';
+import { runCompleteDiagnostics } from '../../utils/storageDiagnostics';
+import { runDirectStorageTest } from '../../utils/directStorageTest';
+import { runNetworkDiagnostics, formatNetworkDiagnosticResults } from '../../utils/networkDiagnostics';
 
 const TeacherChat = () => {
   const { user } = useAuth();
@@ -26,6 +32,7 @@ const TeacherChat = () => {
   const [unreadCounts, setUnreadCounts] = useState({}); // Track unread messages per contact
   const [refreshingParents, setRefreshingParents] = useState(false);
   const [refreshingStudents, setRefreshingStudents] = useState(false);
+  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const flatListRef = useRef(null);
 
   // Keyboard visibility listeners
@@ -46,8 +53,6 @@ const TeacherChat = () => {
   // Helper function to get parent's user ID from student
   const getParentUserId = async (studentId) => {
     try {
-      console.log('🔍 Looking for parent user ID for student:', studentId);
-
       // Method 1: Try via linked_parent_of
       const { data: parentUser, error: parentError } = await supabase
         .from(TABLES.USERS)
@@ -56,15 +61,12 @@ const TeacherChat = () => {
         .single();
 
       if (parentUser && !parentError) {
-        console.log('✅ Found parent user via linked_parent_of:', parentUser);
         return {
           id: parentUser.id,
           name: parentUser.full_name || parentUser.email,
           email: parentUser.email
         };
       }
-
-      console.log('❌ Parent user not found via linked_parent_of, error:', parentError);
 
       // Method 2: Get student data and find parent via parent_id
       const { data: studentData, error: studentError } = await supabase
@@ -82,7 +84,6 @@ const TeacherChat = () => {
           .single();
 
         if (!parentUserError && parentUserData) {
-          console.log('✅ Found parent via student.parent_id:', parentUserData);
           return {
             id: parentUserData.id,
             name: parentUserData.full_name || parentUserData.email,
@@ -91,10 +92,8 @@ const TeacherChat = () => {
         }
       }
 
-      console.log('⚠️ No parent found for student:', studentId);
       return null;
     } catch (error) {
-      console.log('💥 Error getting parent user ID:', error);
       return null;
     }
   };
@@ -121,7 +120,6 @@ const TeacherChat = () => {
         .eq('is_read', false);
       
       if (error && error.code !== '42P01') {
-        console.log('Error fetching unread counts:', error);
         return;
       }
       
@@ -133,10 +131,9 @@ const TeacherChat = () => {
         });
       }
       
-      console.log('📊 Unread message counts:', counts);
       setUnreadCounts(counts);
     } catch (error) {
-      console.log('Error in fetchUnreadCounts:', error);
+      // Silently handle error
     }
   };
 
@@ -466,8 +463,6 @@ const TeacherChat = () => {
       
       // Get messages with this contact
       try {
-        console.log('🔄 Fetching messages for contact:', contact.name, 'User ID:', contactUserId);
-        
         // Try multiple query approaches for better compatibility
         let msgs = null;
         let msgError = null;
@@ -482,7 +477,6 @@ const TeacherChat = () => {
         if (!query1.error) {
           msgs = query1.data;
         } else {
-          console.log('OR query failed, trying alternative:', query1.error);
           
           // Method 2: Two separate queries and combine
           const [sentMsgs, receivedMsgs] = await Promise.all([
@@ -506,21 +500,8 @@ const TeacherChat = () => {
           }
         }
 
-        console.log('📨 Messages query result:', { msgsCount: msgs?.length || 0, msgError });
-        
         if (msgs) {
-          msgs.forEach((msg, index) => {
-            console.log(`Message ${index + 1}:`, {
-              id: msg.id,
-              sender_id: msg.sender_id,
-              receiver_id: msg.receiver_id,
-              message: msg.message?.substring(0, 50) + '...',
-              sent_at: msg.sent_at
-            });
-            
-            // Debug timestamp for each message
-            debugTimestamp(msg.sent_at, `Message ${index + 1}`);
-          });
+          // Process messages
         }
 
         if (msgError && msgError.code !== '42P01') {
@@ -530,10 +511,9 @@ const TeacherChat = () => {
         const formattedMessages = (msgs || []).map(msg => ({
           ...msg,
           id: msg.id || msg.created_at || Date.now().toString(),
-          type: msg.type || 'text'
+          message_type: msg.message_type || 'text'
         }));
         
-        console.log('✅ Setting formatted messages count:', formattedMessages.length);
         setMessages(formattedMessages);
         
         // Mark messages from this contact as read
@@ -555,19 +535,17 @@ const TeacherChat = () => {
                 flatListRef.current.scrollToEnd({ animated: true });
               }
             } catch (error) {
-              console.log('📜 Scroll to end error (loading messages):', error);
+              // Silently handle scroll error
             }
           }, 300);
         }
         
       } catch (err) {
-        console.log('❌ Messages fetch error:', err);
         setMessages([]);
       }
     } catch (err) {
       setError(err.message);
       setMessages([]);
-      console.error('❌ Fetch messages error:', err);
     } finally {
       if (!selectedContact) {
         setLoading(false);
@@ -588,8 +566,6 @@ const TeacherChat = () => {
           schema: 'public', 
           table: TABLES.MESSAGES
         }, (payload) => {
-          console.log('Real-time message update:', payload);
-          
           // Check if this message is relevant to our chat
           const isRelevant = (
             (payload.new?.sender_id === user.id && payload.new?.receiver_id === contactUserId) ||
@@ -599,20 +575,16 @@ const TeacherChat = () => {
           );
           
           if (isRelevant) {
-            console.log('Message is relevant, refreshing chat');
             setTimeout(() => {
               fetchMessages(selectedContact);
             }, 200);
           }
         })
         .subscribe();
-      
-      console.log('Subscribed to real-time updates for chat with:', selectedContact.name);
     })();
     return () => {
       if (subscription) {
         subscription.unsubscribe();
-        console.log('Unsubscribed from real-time chat updates');
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -624,24 +596,11 @@ const TeacherChat = () => {
     setSending(true);
     
     try {
-      console.log('Starting to send message...');
-      console.log('User ID:', user.id);
-      console.log('Selected Contact:', selectedContact);
-
       const contactUserId = selectedContact.userId || selectedContact.id;
       
       // Get current time and properly convert to UTC
       const now = new Date();
       const currentUTCTime = now.toISOString(); // This ensures Z suffix
-      
-      console.log('🕐 Current UTC time:', currentUTCTime);
-      console.log('🕐 Local time (IST):', now.toLocaleString('en-US', { 
-        timeZone: 'Asia/Kolkata',
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: true 
-      }));
-      console.log('🕐 Timestamp being stored:', currentUTCTime);
       
       const newMsg = {
         sender_id: user.id,
@@ -651,15 +610,10 @@ const TeacherChat = () => {
         sent_at: currentUTCTime, // Explicitly set current UTC time
       };
 
-      console.log('Message to insert:', newMsg);
-
       const { data: insertedMsg, error: sendError } = await supabase
         .from(TABLES.MESSAGES)
         .insert(newMsg)
         .select();
-
-      console.log('Send error:', sendError);
-      console.log('Inserted message:', insertedMsg);
 
       if (sendError) {
         console.error('Supabase error object:', JSON.stringify(sendError, null, 2));
@@ -674,7 +628,7 @@ const TeacherChat = () => {
         student_id: selectedContact.students ? selectedContact.students[0]?.id : selectedContact.id,
         message: input,
         sent_at: insertedMsg?.[0]?.sent_at || new Date().toISOString(),
-        type: 'text'
+        message_type: 'text'
       };
 
       setMessages(prev => [...prev, displayMsg]);
@@ -687,12 +641,10 @@ const TeacherChat = () => {
             flatListRef.current.scrollToEnd({ animated: true });
           }
         } catch (error) {
-          console.log('📜 Scroll to end error (after sending):', error);
+          // Silently handle scroll error
         }
       }, 100);
     } catch (err) {
-      console.error('Error sending message:', err);
-      console.error('Error details:', JSON.stringify(err, null, 2));
       Alert.alert('Error', `Failed to send message: ${err.message || 'Unknown error'}`);
     } finally {
       setSending(false);
@@ -723,7 +675,6 @@ const TeacherChat = () => {
                 .eq('sender_id', user.id); // Only allow deleting own messages
               
               if (deleteError) {
-                console.error('Delete error:', deleteError);
                 Alert.alert('Error', 'Failed to delete message');
                 return;
               }
@@ -731,7 +682,6 @@ const TeacherChat = () => {
               // Remove from local state
               setMessages(prev => prev.filter(msg => msg.id !== messageId));
             } catch (err) {
-              console.error('Error deleting message:', err);
               Alert.alert('Error', 'Failed to delete message');
             } finally {
               setDeletingMessageId(null);
@@ -742,50 +692,201 @@ const TeacherChat = () => {
     );
   };
 
-  // Attachment handler
-  const handleAttach = async () => {
+  // Show attachment menu
+  const handleAttach = () => {
+    setShowAttachmentMenu(true);
+  };
+
+  // Handle photo upload with chat-files storage
+  const handlePhotoUpload = async () => {
+    setShowAttachmentMenu(false);
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        alert('Permission to access media library is required!');
+        Alert.alert('Permission Required', 'Permission to access media library is required!');
         return;
       }
-      let result = await ImagePicker.launchImageLibraryAsync({
+      
+      const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
-        quality: 1,
+        aspect: [4, 3],
+        quality: 0.8,
+        allowsMultipleSelection: false,
       });
+      
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
-        const isImage = asset.type && asset.type.startsWith('image');
         
-        const contactUserId = selectedContact.userId || selectedContact.id;
-        const newMsg = {
+        // Check file size (100MB limit)
+        if (asset.fileSize && asset.fileSize > 104857600) {
+          Alert.alert('File Too Large', 'Please select an image smaller than 100MB.');
+          return;
+        }
+
+        // Show uploading indicator
+        const tempMsg = {
+          id: 'temp_' + Date.now(),
           sender_id: user.id,
-          receiver_id: contactUserId,
-          student_id: selectedContact.students ? selectedContact.students[0]?.id : selectedContact.id,
-          type: isImage ? 'image' : 'file',
-          uri: asset.uri,
-          file_name: asset.fileName || asset.uri.split('/').pop(),
+          receiver_id: selectedContact.userId || selectedContact.id,
+          message: '📷 Uploading photo...',
+          message_type: 'image',
+          timestamp: formatToLocalTime(new Date().toISOString()),
+          sender: 'teacher',
+          uploading: true
         };
         
-        const { error: sendError } = await supabase
-          .from(TABLES.MESSAGES)
-          .insert(newMsg);
+        setMessages(prev => [...prev, tempMsg]);
         
-        if (sendError) {
-          console.error('File send error:', sendError);
-          Alert.alert('Error', 'Failed to send file');
+        // Get student ID for context
+        const studentId = selectedContact.students ? selectedContact.students[0]?.id : selectedContact.id;
+        
+        // Upload to chat-files bucket
+        const uploadResult = await uploadChatFile(
+          {
+            uri: asset.uri,
+            name: asset.fileName || `photo_${Date.now()}.jpg`,
+            size: asset.fileSize,
+            type: 'image/jpeg'
+          },
+          user.id,
+          selectedContact.userId || selectedContact.id,
+          studentId
+        );
+        
+        if (uploadResult.success) {
+          // Save to database
+          const { data: insertedMsg, error: sendError } = await supabase
+            .from('messages')
+            .insert(uploadResult.messageData)
+            .select();
+            
+          if (!sendError && insertedMsg?.[0]) {
+            // Replace temp message with actual message
+            setMessages(prev => prev.map(msg => 
+              msg.id === tempMsg.id
+                ? {
+                    ...insertedMsg[0],
+                    timestamp: formatToLocalTime(insertedMsg[0].sent_at),
+                    sender: 'teacher'
+                  }
+                : msg
+            ));
+            
+            // Scroll to bottom
+            setTimeout(() => {
+              if (flatListRef.current) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            }, 100);
+          } else {
+            throw new Error('Failed to save message to database');
+          }
         } else {
-          // Refresh messages to show the new file
-          setTimeout(() => {
-            fetchMessages(selectedContact);
-          }, 500);
+          throw new Error(uploadResult.error);
         }
       }
     } catch (e) {
-      console.error('File picker error:', e);
-      Alert.alert('Error', 'Failed to pick file: ' + e.message);
+      console.error('Image upload error:', e);
+      // Remove temp message on error
+      setMessages(prev => prev.filter(msg => !msg.uploading));
+      Alert.alert('Upload Failed', 'Failed to upload image: ' + e.message);
+    }
+  };
+
+  // Handle document upload with chat-files storage
+  const handleDocumentUpload = async () => {
+    setShowAttachmentMenu(false);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const file = result.assets[0];
+        
+        // Check file size (100MB limit)
+        if (file.size && file.size > 104857600) {
+          Alert.alert('File Too Large', 'Please select a file smaller than 100MB.');
+          return;
+        }
+
+        // Check if file type is supported
+        if (!isSupportedFileType(file.mimeType)) {
+          Alert.alert('Unsupported File Type', 'This file type is not supported for chat attachments.');
+          return;
+        }
+
+        // Show uploading indicator
+        const tempMsg = {
+          id: 'temp_' + Date.now(),
+          sender_id: user.id,
+          receiver_id: selectedContact.userId || selectedContact.id,
+          message: `📎 Uploading ${file.name}...`,
+          message_type: 'file',
+          timestamp: formatToLocalTime(new Date().toISOString()),
+          sender: 'teacher',
+          uploading: true
+        };
+        
+        setMessages(prev => [...prev, tempMsg]);
+        
+        // Get student ID for context
+        const studentId = selectedContact.students ? selectedContact.students[0]?.id : selectedContact.id;
+        
+        // Upload to chat-files bucket
+        const uploadResult = await uploadChatFile(
+          {
+            uri: file.uri,
+            name: file.name,
+            size: file.size,
+            type: file.mimeType,
+            mimeType: file.mimeType
+          },
+          user.id,
+          selectedContact.userId || selectedContact.id,
+          studentId
+        );
+        
+        if (uploadResult.success) {
+          // Save to database
+          const { data: insertedMsg, error: sendError } = await supabase
+            .from('messages')
+            .insert(uploadResult.messageData)
+            .select();
+            
+          if (!sendError && insertedMsg?.[0]) {
+            // Replace temp message with actual message
+            setMessages(prev => prev.map(msg => 
+              msg.id === tempMsg.id
+                ? {
+                    ...insertedMsg[0],
+                    timestamp: formatToLocalTime(insertedMsg[0].sent_at),
+                    sender: 'teacher'
+                  }
+                : msg
+            ));
+            
+            // Scroll to bottom
+            setTimeout(() => {
+              if (flatListRef.current) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            }, 100);
+          } else {
+            throw new Error('Failed to save message to database');
+          }
+        } else {
+          throw new Error(uploadResult.error);
+        }
+      }
+    } catch (e) {
+      console.error('Document upload error:', e);
+      // Remove temp message on error
+      setMessages(prev => prev.filter(msg => !msg.uploading));
+      Alert.alert('Upload Failed', 'Failed to upload document: ' + e.message);
     }
   };
 
@@ -804,7 +905,7 @@ const TeacherChat = () => {
             flatListRef.current.scrollToEnd({ animated: true });
           }
         } catch (error) {
-          console.log('📜 Scroll to end error (messages change):', error);
+          // Silently handle scroll error
         }
       }, 100);
     }
@@ -832,7 +933,7 @@ const TeacherChat = () => {
         fetchUnreadCounts()
       ]);
     } catch (error) {
-      console.error('Error refreshing parents data:', error);
+      // Silently handle error
     } finally {
       setRefreshingParents(false);
     }
@@ -846,21 +947,12 @@ const TeacherChat = () => {
         fetchUnreadCounts()
       ]);
     } catch (error) {
-      console.error('Error refreshing students data:', error);
+      // Silently handle error
     } finally {
       setRefreshingStudents(false);
     }
   };
 
-  // Debug UI state
-  console.log('🖥️ UI RENDER DEBUG:', {
-    loading,
-    error,
-    selectedContact: selectedContact ? selectedContact.name : null,
-    activeTab,
-    studentsLength: students.length,
-    parentsLength: parents.length
-  });
   
   return (
     <View style={styles.container}>
@@ -1241,6 +1333,107 @@ const TeacherChat = () => {
           </View>
         </KeyboardAvoidingView>
       )}
+      
+      {/* Attachment Menu Modal */}
+      {showAttachmentMenu && (
+        <TouchableOpacity 
+          style={styles.attachmentModalOverlay} 
+          activeOpacity={1} 
+          onPress={() => setShowAttachmentMenu(false)}
+        >
+          <Animatable.View animation="slideInUp" duration={300} style={styles.attachmentModal}>
+            <View style={styles.attachmentHeader}>
+              <Text style={styles.attachmentTitle}>Send Attachment</Text>
+              <TouchableOpacity onPress={() => setShowAttachmentMenu(false)}>
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.attachmentOptions}
+              style={styles.attachmentScrollView}
+            >
+              <TouchableOpacity style={styles.attachmentOption} onPress={handlePhotoUpload}>
+                <View style={[styles.attachmentIcon, { backgroundColor: '#4CAF50' }]}>
+                  <Ionicons name="camera" size={24} color="#fff" />
+                </View>
+                <Text style={styles.attachmentText}>Photo</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.attachmentOption} onPress={handleDocumentUpload}>
+                <View style={[styles.attachmentIcon, { backgroundColor: '#2196F3' }]}>
+                  <Ionicons name="document" size={24} color="#fff" />
+                </View>
+                <Text style={styles.attachmentText}>Document</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
+                setShowAttachmentMenu(false);
+                runCompleteDiagnostics().then(results => {
+                  console.log('🔍 Storage Diagnostics Results:', results);
+                  const summary = results.summary;
+                  Alert.alert(
+                    'Storage Diagnostics', 
+                    `Overall Health: ${summary.overallHealth ? '✅ Good' : '❌ Issues Found'}\n\n` +
+                    `Critical Issues: ${summary.criticalIssues.length}\n` +
+                    `${summary.criticalIssues.join('\n')}\n\n` +
+                    `Recommendations:\n${summary.recommendations.join('\n')}`,
+                    [{ text: 'OK' }]
+                  );
+                });
+              }}>
+                <View style={[styles.attachmentIcon, { backgroundColor: '#FF9800' }]}>
+                  <Ionicons name="bug" size={24} color="#fff" />
+                </View>
+                <Text style={styles.attachmentText}>Diagnose</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
+                setShowAttachmentMenu(false);
+                runDirectStorageTest().then(results => {
+                  console.log('🔬 Direct Storage Test Results:', results);
+                  const { success, message, details } = results;
+                  Alert.alert(
+                    'Direct Storage Test', 
+                    `Result: ${success ? '✅ Success' : '❌ Failed'}\n\n` +
+                    `Message: ${message}\n\n` +
+                    (details ? `Details:\n${details}` : ''),
+                    [{ text: 'OK' }]
+                  );
+                });
+              }}>
+                <View style={[styles.attachmentIcon, { backgroundColor: '#9C27B0' }]}>
+                  <Ionicons name="flask" size={24} color="#fff" />
+                </View>
+                <Text style={styles.attachmentText}>Direct Test</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
+                setShowAttachmentMenu(false);
+                runNetworkDiagnostics().then(results => {
+                  console.log('🌐 Network Diagnostics Results:', results);
+                  const formattedResults = formatNetworkDiagnosticResults(results);
+                  Alert.alert(
+                    'Network Diagnostics', 
+                    formattedResults,
+                    [{ text: 'OK' }]
+                  );
+                }).catch(error => {
+                  console.error('Network diagnostics error:', error);
+                  Alert.alert('Network Diagnostics', 'Failed to run network diagnostics: ' + error.message);
+                });
+              }}>
+                <View style={[styles.attachmentIcon, { backgroundColor: '#607D8B' }]}>
+                  <Ionicons name="wifi" size={24} color="#fff" />
+                </View>
+                <Text style={styles.attachmentText}>Network</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </Animatable.View>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -1534,6 +1727,74 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: 'bold',
     lineHeight: 12,
+  },
+  
+  // Attachment Modal Styles
+  attachmentModalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+    zIndex: 1000,
+  },
+  
+  attachmentModal: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 30,
+  },
+  
+  attachmentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  
+  attachmentTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  
+  attachmentScrollView: {
+    paddingHorizontal: 10,
+  },
+  
+  attachmentOptions: {
+    flexDirection: 'row',
+    paddingHorizontal: 10,
+    paddingTop: 20,
+    alignItems: 'center',
+  },
+  
+  attachmentOption: {
+    alignItems: 'center',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    minWidth: 100,
+  },
+  
+  attachmentIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  
+  attachmentText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '600',
   },
 });
 

@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
 import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
+import LogoDisplay from '../../components/LogoDisplay';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import CrossPlatformBarChart from '../../components/CrossPlatformBarChart';
@@ -43,7 +44,13 @@ const AdminDashboard = ({ navigation }) => {
       setError(null);
 
       // Load school details
-      const { data: schoolData } = await dbHelpers.getSchoolDetails();
+      console.log('🏫 === SCHOOL DETAILS DEBUGGING ===');
+      const { data: schoolData, error: schoolError } = await dbHelpers.getSchoolDetails();
+      console.log('🏫 School data loaded:', schoolData);
+      console.log('🏫 School error:', schoolError);
+      console.log('🏫 Logo URL:', schoolData?.logo_url);
+      console.log('🏫 School name:', schoolData?.name);
+      console.log('🏫 ===================================');
       setSchoolDetails(schoolData);
 
       // Load students count with gender breakdown
@@ -589,13 +596,12 @@ const AdminDashboard = ({ navigation }) => {
           
           <View style={styles.welcomeContent}>
             <View style={styles.schoolHeader}>
-              {schoolDetails?.logo_url ? (
-                <Image source={{ uri: schoolDetails.logo_url }} style={styles.schoolLogo} />
-              ) : (
-                <View style={styles.logoPlaceholder}>
-                  <Ionicons name="school" size={40} color="#fff" />
-                </View>
-              )}
+              <LogoDisplay 
+                logoUrl={schoolDetails?.logo_url} 
+                onImageError={() => {
+                  console.log('🗓️ Logo image failed to load, using placeholder');
+                }}
+              />
               <View style={styles.schoolInfo}>
                 <Text style={styles.schoolName}>
                   {schoolDetails?.name || 'Maximus School'}

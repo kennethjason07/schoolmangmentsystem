@@ -46,7 +46,23 @@ const SchoolDetails = ({ navigation }) => {
   const loadSchoolDetails = async () => {
     try {
       setLoading(true);
+      console.log('=== Loading school details ===');
       const { data, error } = await dbHelpers.getSchoolDetails();
+
+      console.log('School details query result:', { data, error });
+      if (data) {
+        console.log('Logo URL from database:', data.logo_url);
+        if (data.logo_url) {
+          console.log('Logo URL exists - will attempt to display image');
+          console.log('URL starts with http:', data.logo_url.startsWith('http'));
+          console.log('URL starts with file:', data.logo_url.startsWith('file:'));
+          if (data.logo_url.startsWith('file:')) {
+            console.log('🚫 Local file path detected, will show placeholder instead');
+          }
+        } else {
+          console.log('No logo URL found in database');
+        }
+      }
 
       if (error) {
         console.log('Error loading school details:', error);
@@ -59,6 +75,7 @@ const SchoolDetails = ({ navigation }) => {
 
       if (data) {
         setSchoolData(data);
+        console.log('School data state updated with:', data);
       }
     } catch (error) {
       console.log('Exception loading school details:', error);
@@ -113,7 +130,7 @@ const SchoolDetails = ({ navigation }) => {
       }
 
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: 'images',
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -137,7 +154,7 @@ const SchoolDetails = ({ navigation }) => {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: 'images',
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -151,44 +168,87 @@ const SchoolDetails = ({ navigation }) => {
     }
   };
 
-  // Handle logo upload - using exact same method as ProfileScreen
-  const handleUploadLogo = async (uri) => {
+  const uploadImage = async (imageAsset) => {
     try {
       setUploading(true);
       
-      console.log('Starting school logo upload');
-      console.log('Image URI:', uri);
+  console.log('=== Starting school logo upload debug ===');
+      console.log('Current schoolData.logo_url before upload:', schoolData.logo_url);
+      console.log('Image URI:', imageAsset.uri);
+      console.log('Image size:', imageAsset.fileSize);
+      console.log('Image type:', imageAsset.type || 'unknown');
 
-      // First, get the current logo to delete it later
-      let oldImageFileName = null;
-      try {
-        if (schoolData.logo_url) {
-          // Extract filename from URL
-          const urlParts = schoolData.logo_url.split('/');
-          oldImageFileName = urlParts[urlParts.length - 1];
-          console.log('Found existing logo to delete:', oldImageFileName);
-        }
-      } catch (error) {
-        console.log('No existing logo to delete or error checking:', error);
+      // Step 1: Check authentication status
+      console.log('Step 1: Checking authentication...');
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      console.log('Current user:', user?.id || 'Not authenticated');
+      console.log('Auth error:', authError);
+      
+      if (!user) {
+        throw new Error('User not authenticated. Please log in again.');
       }
 
-      // Create a file name
+      // Step 2: Test basic Supabase connection
+      console.log('Step 2: Testing Supabase connection...');
+      try {
+        const { data: testData, error: testError } = await supabase
+          .from('school_details')
+          .select('count', { count: 'exact', head: true });
+        console.log('Connection test result:', { testData, testError });
+      } catch (testErr) {
+        console.log('Connection test failed:', testErr);
+      }
+
+      // Step 3: Skip bucket checking - we know profiles bucket exists (used by profile pictures)
+      console.log('Step 3: Skipping bucket check - profiles bucket is confirmed to exist');
+      console.log('Note: profiles bucket is actively used by profile picture uploads');
+
+      // Step 4: Generate filename exactly like working profile pictures
+      console.log('Step 4: Preparing file for upload...');
       const timestamp = Date.now();
-      const fileName = `school-logo-${timestamp}.jpg`;
+      const fileName = `${user.id}_${timestamp}.jpg`;
+      console.log('Generated filename (exact profile picture format):', fileName);
       
-      console.log('Generated filename:', fileName);
+      // Fetch the image as blob
+      console.log('Fetching image as blob...');
+      const response = await fetch(imageAsset.uri);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+      }
       
-      // React Native specific file upload approach
-      const formData = new FormData();
-      
-      // Add the file to FormData with proper React Native file object
-      formData.append('', {
-        uri: uri,
-        type: 'image/jpeg',
-        name: fileName,
+      const blob = await response.blob();
+      console.log('Blob created - size:', blob.size, 'type:', blob.type);
+
+      // Step 5: Delete old logo if exists
+      if (schoolData.logo_url) {
+        console.log('Step 5: Deleting old logo...');
+        try {
+          // Extract filename from old URL
+          const oldFileName = schoolData.logo_url.split('/').pop().split('?')[0];
+          console.log('Old filename to delete:', oldFileName);
+          
+          const { error: deleteError } = await supabase.storage
+            .from('profiles')
+            .remove([oldFileName]);
+            
+          if (deleteError) {
+            console.log('Delete error (might not exist):', deleteError);
+          } else {
+            console.log('Old logo deleted successfully');
+          }
+        } catch (deleteErr) {
+          console.log('Delete operation failed:', deleteErr);
+        }
+      }
+
+      // Step 6: Upload new image using direct fetch (same as profile pictures)
+      console.log('Step 6: Uploading new image using direct fetch...');
+      console.log('Upload parameters:', {
+        bucket: 'profiles',
+        fileName,
+        blobSize: blob.size,
+        contentType: 'image/jpeg'
       });
-      
-      console.log('FormData created for React Native upload');
       
       // Get the authenticated user's session token
       const { data: { session } } = await supabase.auth.getSession();
@@ -197,10 +257,19 @@ const SchoolDetails = ({ navigation }) => {
         throw new Error('No authenticated session found');
       }
 
-      // Upload using direct fetch to Supabase storage API
+      // Create FormData for upload (React Native compatible) - exact same as profile pictures
+      const formData = new FormData();
+      formData.append('', {
+        uri: imageAsset.uri,
+        type: 'image/jpeg',
+        name: fileName,
+      });
+      
+      console.log('FormData created for React Native upload');
+      
+      // Upload using direct fetch to Supabase storage API (same method as profile pictures)
       const supabaseUrl = 'https://dmagnsbdjsnzsddxqrwd.supabase.co';
       
-      // IMPORTANT: Use the 'profiles' bucket here - same as ProfileScreen
       const uploadResponse = await fetch(`${supabaseUrl}/storage/v1/object/profiles/${fileName}`, {
         method: 'POST',
         headers: {
@@ -213,55 +282,109 @@ const SchoolDetails = ({ navigation }) => {
       if (!uploadResponse.ok) {
         const errorText = await uploadResponse.text();
         console.error('Upload response error:', uploadResponse.status, errorText);
-        throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}\nDetails: ${errorText}`);
+        throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
       }
       
       const uploadData = { path: fileName };
-
       console.log('Upload successful:', uploadData);
 
-      // Construct the public URL manually
+      // Step 7: Generate public URL manually (same as profile pictures)
+      console.log('Step 7: Generating public URL...');
       const publicUrl = `${supabaseUrl}/storage/v1/object/public/profiles/${fileName}`;
+      console.log('Public URL generated:', publicUrl);
 
-      console.log('Generated public URL:', publicUrl);
-
-      // Update the school data
+      // Step 8: Update state and save to database immediately
+      console.log('Step 8: Updating state with new URL...');
       handleInputChange('logo_url', publicUrl);
       
-      // Delete the old image from storage if it exists
-      if (oldImageFileName) {
-        try {
-          console.log('Attempting to delete old logo:', oldImageFileName);
-          
-          const deleteResponse = await fetch(`${supabaseUrl}/storage/v1/object/profiles/${oldImageFileName}`, {
-            method: 'DELETE',
-            headers: {
-              'Authorization': `Bearer ${session.access_token}`,
-            },
-          });
-          
-          if (deleteResponse.ok) {
-            console.log('Old logo deleted successfully:', oldImageFileName);
-          } else {
-            console.warn('Failed to delete old logo (non-critical):', deleteResponse.status);
-          }
-        } catch (deleteError) {
-          console.warn('Error deleting old logo (non-critical):', deleteError);
-          // Don't throw here - image upload was successful, deletion is just cleanup
+      // Step 9: Save the new logo URL to database immediately
+      console.log('Step 9: Saving new logo URL to database...');
+      try {
+        const updatedSchoolData = { ...schoolData, logo_url: publicUrl };
+        console.log('Updating database with:', updatedSchoolData);
+        
+        const { data: saveData, error: saveError } = await dbHelpers.updateSchoolDetails(updatedSchoolData);
+        
+        if (saveError) {
+          console.error('Failed to save logo URL to database:', saveError);
+          throw new Error('Failed to save logo URL: ' + saveError.message);
         }
+        
+        console.log('Logo URL saved to database successfully:', saveData);
+        
+        // Update local state with saved data
+        if (saveData) {
+          setSchoolData(saveData);
+          console.log('Local state updated with saved data:', saveData);
+        }
+      } catch (dbError) {
+        console.error('Database save error:', dbError);
+        // Still show success for upload, but warn about database
+        Alert.alert('Warning', 'Image uploaded but failed to save to database. Please try saving the form.');
+        return;
       }
       
-      Alert.alert('Success', 'Logo updated successfully!');
+      // Step 10: Force component refresh to ensure UI updates
+      console.log('Step 10: Reloading school details to refresh UI...');
+      setTimeout(() => {
+        loadSchoolDetails();
+      }, 500);
+      
+      console.log('=== Upload completed successfully! ===');
+      Alert.alert('Success', 'Logo uploaded successfully!');
+      
     } catch (error) {
-      console.error('Error uploading logo:', error);
-      Alert.alert('Error', `Failed to upload logo: ${error.message || error}`);
+      console.error('=== Upload failed ===');
+      console.error('Error object:', error);
+      console.error('Error name:', error.name);
+      console.error('Error message:', error.message);
+      console.error('Error cause:', error.cause);
+      console.error('Error stack:', error.stack);
+      
+      let errorMessage = 'Failed to upload logo';
+      let userFriendlyMessage = '';
+      
+      // Categorize different types of errors
+      if (error.name === 'StorageUnknownError') {
+        if (error.message.includes('Network request failed')) {
+          userFriendlyMessage = 'Network connection failed. Please check your internet connection and try again.';
+        } else {
+          userFriendlyMessage = 'Storage service error. Please try again later.';
+        }
+      } else if (error.message && error.message.includes('row-level security policy')) {
+        userFriendlyMessage = 'Permission denied: Storage bucket requires additional configuration. Please contact your administrator.';
+      } else if (error.message && error.message.includes('bucket')) {
+        userFriendlyMessage = 'Storage bucket configuration issue. Please contact your administrator.';
+      } else if (error.message && error.message.includes('authenticated')) {
+        userFriendlyMessage = 'Authentication required. Please log out and log back in.';
+      } else {
+        userFriendlyMessage = errorMessage + ': ' + (error.message || 'Unknown error');
+      }
+      
+      Alert.alert(
+        'Upload Error', 
+        userFriendlyMessage,
+        [
+          {
+            text: 'OK',
+            style: 'default'
+          },
+          {
+            text: 'View Details',
+            style: 'default',
+            onPress: () => {
+              Alert.alert(
+                'Technical Details',
+                `Error Type: ${error.name || 'Unknown'}\n\nMessage: ${error.message || 'No message'}\n\nPlease share these details with your administrator.`,
+                [{ text: 'OK', style: 'default' }]
+              );
+            }
+          }
+        ]
+      );
     } finally {
       setUploading(false);
     }
-  };
-
-  const uploadImage = async (imageAsset) => {
-    await handleUploadLogo(imageAsset.uri);
   };
 
   const saveSchoolDetails = async () => {
@@ -364,23 +487,64 @@ const SchoolDetails = ({ navigation }) => {
                   <ActivityIndicator size="large" color="#2196F3" />
                   <Text style={styles.logoPlaceholderText}>Uploading...</Text>
                 </View>
-              ) : schoolData.logo_url ? (
+              ) : schoolData.logo_url && schoolData.logo_url.startsWith('http') && !schoolData.logo_url.startsWith('file:') ? (
                 <>
-                  <Image source={{ uri: schoolData.logo_url }} style={styles.logoImage} />
+                  <Image 
+                    key={schoolData.logo_url}
+                    source={{ uri: schoolData.logo_url }} 
+                    style={styles.logoImage}
+                    onLoad={() => {
+                      console.log('=== IMAGE LOADED SUCCESSFULLY ===');
+                      console.log('Image URL that loaded:', schoolData.logo_url);
+                    }}
+                    onError={(error) => {
+                      console.error('=== IMAGE LOAD ERROR ===');
+                      console.error('Failed to load image URL:', schoolData.logo_url);
+                      console.error('Image error details:', {
+                        nativeError: error.nativeEvent?.error,
+                        fullError: error,
+                        errorType: typeof error,
+                        errorKeys: Object.keys(error || {})
+                      });
+                      console.error('This image will not display - placeholder should show instead');
+                      
+                      // Test if we can fetch the URL directly
+                      fetch(schoolData.logo_url)
+                        .then(response => {
+                          console.log('Direct fetch test - Status:', response.status, response.statusText);
+                          console.log('Direct fetch test - Headers:', response.headers);
+                        })
+                        .catch(fetchError => {
+                          console.error('Direct fetch test failed:', fetchError);
+                        });
+                    }}
+                    onLoadStart={() => {
+                      console.log('=== IMAGE LOAD STARTED ===');
+                      console.log('Attempting to load image from:', schoolData.logo_url);
+                      console.log('URL validation - starts with http:', schoolData.logo_url.startsWith('http'));
+                      console.log('URL validation - length:', schoolData.logo_url.length);
+                    }}
+                    onLoadEnd={() => {
+                      console.log('=== IMAGE LOAD ENDED ===');
+                    }}
+                  />
+                  
                   <View style={styles.logoOverlay}>
                     <Ionicons name="camera" size={20} color="#fff" />
                   </View>
                 </>
               ) : (
                 <View style={styles.logoPlaceholder}>
-                  <Ionicons name="camera" size={40} color="#999" />
+                  <Ionicons name="school-outline" size={32} color="#bbb" />
+                  <Ionicons name="add-circle" size={20} color="#2196F3" style={styles.addIcon} />
                   <Text style={styles.logoPlaceholderText}>Tap to add logo</Text>
                 </View>
               )}
             </TouchableOpacity>
-            {schoolData.logo_url && !uploading && (
+            {schoolData.logo_url && schoolData.logo_url.startsWith('http') && !schoolData.logo_url.startsWith('file:') && !uploading && (
               <Text style={styles.logoHint}>Tap to change logo</Text>
             )}
+            
           </View>
 
           {/* Basic Information */}
@@ -653,12 +817,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#f8f9fa',
+    position: 'relative',
   },
   logoPlaceholderText: {
-    marginTop: 5,
-    fontSize: 12,
+    marginTop: 8,
+    fontSize: 11,
     color: '#999',
     textAlign: 'center',
+    fontWeight: '500',
+  },
+  addIcon: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
   },
   logoOverlay: {
     position: 'absolute',

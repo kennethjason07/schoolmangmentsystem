@@ -18,22 +18,17 @@ export const formatToLocalTime = (timestamp, options = {}) => {
     if (timestamp.endsWith('Z')) {
       // Already UTC format
       date = new Date(timestamp);
-      console.log('🔥 Input timestamp (UTC with Z):', timestamp);
     } else {
       // Treat as UTC by appending 'Z'
       const utcTimestamp = timestamp + 'Z';
       date = new Date(utcTimestamp);
-      console.log('🔥 Input timestamp (normalized to UTC):', timestamp, '->', utcTimestamp);
     }
     
     // Check if the date is valid
     if (isNaN(date.getTime())) {
-      console.warn('Invalid timestamp:', timestamp);
       return '';
     }
 
-    console.log('🔥 Parsed UTC date:', date.toISOString());
-    
     // Convert to IST using native JavaScript timezone support
     const istOptions = {
       timeZone: 'Asia/Kolkata',
@@ -44,11 +39,9 @@ export const formatToLocalTime = (timestamp, options = {}) => {
     
     const result = date.toLocaleString('en-IN', istOptions);
     
-    console.log('🔥 Final IST result:', result);
     return result;
     
   } catch (error) {
-    console.warn('Error formatting timestamp:', error, timestamp);
     return '';
   }
 };
@@ -67,7 +60,6 @@ export const formatToLocalDateTime = (timestamp, options = {}) => {
     
     // Check if the date is valid
     if (isNaN(date.getTime())) {
-      console.warn('Invalid timestamp:', timestamp);
       return '';
     }
 
@@ -85,7 +77,6 @@ export const formatToLocalDateTime = (timestamp, options = {}) => {
     
     return date.toLocaleString([], formatOptions);
   } catch (error) {
-    console.warn('Error formatting datetime:', error, timestamp);
     return '';
   }
 };
@@ -104,35 +95,8 @@ export const getCurrentTimezone = () => {
  * @param {string} label - Label for the debug output
  */
 export const debugTimestamp = (timestamp, label = 'Timestamp') => {
-  if (!timestamp) {
-    console.log(`${label}: No timestamp provided`);
-    return;
-  }
-  
-  try {
-    const date = new Date(timestamp);
-    const localTimezone = getCurrentTimezone();
-    
-    // Test IST conversion
-    const istTime = date.toLocaleString('en-US', {
-      timeZone: 'Asia/Kolkata',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    });
-    
-    console.log(`${label} Debug:`, {
-      original: timestamp,
-      parsed: date.toISOString(),
-      systemLocal: date.toLocaleString(),
-      manualIST: istTime,
-      utilityTime: formatToLocalTime(timestamp),
-      systemTimezone: localTimezone,
-      utcOffset: date.getTimezoneOffset()
-    });
-  } catch (error) {
-    console.log(`${label} Debug Error:`, error, timestamp);
-  }
+  // Debug function disabled in production
+  return;
 };
 
 /**
@@ -185,7 +149,6 @@ export const getRelativeTime = (timestamp) => {
       return formatToLocalDateTime(timestamp, { year: 'numeric', month: 'short', day: 'numeric' });
     }
   } catch (error) {
-    console.warn('Error getting relative time:', error, timestamp);
     return '';
   }
 };

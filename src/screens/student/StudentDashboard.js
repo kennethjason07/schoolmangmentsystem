@@ -5,6 +5,7 @@ import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useFocusEffect } from '@react-navigation/native';
 import Header from '../../components/Header';
+import LogoDisplay from '../../components/LogoDisplay';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 
 const StudentDashboard = ({ navigation }) => {
@@ -686,13 +687,12 @@ const StudentDashboard = ({ navigation }) => {
           
           <View style={styles.welcomeContent}>
             <View style={styles.schoolHeader}>
-              {schoolDetails?.logo_url ? (
-                <Image source={{ uri: schoolDetails.logo_url }} style={styles.schoolLogo} />
-              ) : (
-                <View style={styles.logoPlaceholder}>
-                  <Ionicons name="school" size={40} color="#fff" />
-                </View>
-              )}
+              <LogoDisplay 
+                logoUrl={schoolDetails?.logo_url} 
+                onImageError={() => {
+                  console.log('🗓️ Logo image failed to load, using placeholder');
+                }}
+              />
               <View style={styles.schoolInfo}>
                 <Text style={styles.schoolName}>
                   {schoolDetails?.name || 'Maximus School'}
