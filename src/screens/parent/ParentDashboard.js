@@ -136,21 +136,6 @@ const ParentDashboard = ({ navigation }) => {
     }, [user])
   );
 
-  // Also add navigation listener for when returning from notification screens
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      console.log('Parent Dashboard - Navigation focus event, refreshing...');
-      if (user) {
-        // Add a small delay to ensure database changes are propagated
-        setTimeout(() => {
-          refreshNotifications();
-        }, 500);
-      }
-    });
-
-    return unsubscribe;
-  }, [navigation, user]);
-
   // Pull-to-refresh functionality
   const { refreshing, onRefresh } = usePullToRefresh(async () => {
     // Fetch all dashboard data when refreshing
@@ -193,17 +178,65 @@ const ParentDashboard = ({ navigation }) => {
         let studentProfilePhoto = null;
         
         try {
-          // Method 1: Use the helper function first
-          console.log('Parent Dashboard - Method 1: Using getParentByUserId helper');
-          const { data: parentUserData, error: parentError } = await dbHelpers.getParentByUserId(user.id);
-          
-          if (!parentError && parentUserData) {
-            console.log('Parent Dashboard - getParentByUserId success:', JSON.stringify(parentUserData, null, 2));
+          // Method 1: Check if user has linked_parent_of (new structure)
+          if (user.linked_parent_of) {
+            console.log('Parent Dashboard - Method 1: Using linked_parent_of');
+            const { data: linkedStudentData, error: linkedStudentError } = await supabase
+              .from(TABLES.STUDENTS)
+              .select(`
+                *,
+                classes(id, class_name, section)
+              `)
+              .eq('id', user.linked_parent_of)
+              .single();
             
-            // Check if the helper function returned students data
-            if (parentUserData.students && parentUserData.students.length > 0) {
-              console.log('Parent Dashboard - Found students in helper response');
-              const student = parentUserData.students[0];
+            if (!linkedStudentError && linkedStudentData) {
+              console.log('Parent Dashboard - Successfully fetched linked student:', linkedStudentData.name);
+              
+              studentDetails = {
+                ...linkedStudentData,
+                roll_number: linkedStudentData.roll_no || linkedStudentData.roll_number,
+                admission_number: linkedStudentData.admission_no || linkedStudentData.admission_number,
+                date_of_birth: linkedStudentData.dob || linkedStudentData.date_of_birth,
+                class_name: linkedStudentData.classes?.class_name || linkedStudentData.class_name,
+                section: linkedStudentData.classes?.section || linkedStudentData.section,
+                full_class_name: linkedStudentData.classes ? `${linkedStudentData.classes.class_name} ${linkedStudentData.classes.section}` : (linkedStudentData.class_name || ''),
+                aadhar_no: linkedStudentData.aadhar_no,
+                place_of_birth: linkedStudentData.place_of_birth,
+                nationality: linkedStudentData.nationality,
+                religion: linkedStudentData.religion,
+                caste: linkedStudentData.caste,
+                pin_code: linkedStudentData.pin_code,
+                mother_tongue: linkedStudentData.mother_tongue,
+                identification_mark_1: linkedStudentData.identification_mark_1,
+                identification_mark_2: linkedStudentData.identification_mark_2,
+                academic_year: linkedStudentData.academic_year,
+                general_behaviour: linkedStudentData.general_behaviour,
+                remarks: linkedStudentData.remarks,
+                parent_id: linkedStudentData.parent_id,
+                school_id: linkedStudentData.school_id,
+                created_at: linkedStudentData.created_at
+              };
+            } else {
+              console.error('Parent Dashboard - Error fetching linked student:', linkedStudentError);
+            }
+          }
+          
+          // Method 2: Check students table for students with this user as parent_id
+          if (!studentDetails) {
+            console.log('Parent Dashboard - Method 2: Using students.parent_id');
+            const { data: studentsData, error: studentsError } = await supabase
+              .from(TABLES.STUDENTS)
+              .select(`
+                *,
+                classes(id, class_name, section)
+              `)
+              .eq('parent_id', user.id)
+              .limit(1);
+            
+            if (!studentsError && studentsData && studentsData.length > 0) {
+              const student = studentsData[0];
+              console.log('Parent Dashboard - Found student via parent_id:', student.name);
               
               studentDetails = {
                 ...student,
@@ -230,62 +263,77 @@ const ParentDashboard = ({ navigation }) => {
                 school_id: student.school_id,
                 created_at: student.created_at
               };
+            } else {
+              console.log('Parent Dashboard - No students found via parent_id method');
             }
-            // Check if linked_parent_of is available
-            else if (parentUserData.linked_parent_of) {
-              console.log('Parent Dashboard - Found linked_parent_of, fetching student:', parentUserData.linked_parent_of);
+          }
+          
+          // Method 3: Check parents table for this user's email
+          if (!studentDetails) {
+            console.log('Parent Dashboard - Method 3: Using parents table');
+            const { data: parentData, error: parentError } = await supabase
+              .from('parents')
+              .select('id, name, email, phone, student_id, relation')
+              .eq('email', user.email)
+              .limit(1);
+            
+            if (!parentError && parentData && parentData.length > 0) {
+              const parentRecord = parentData[0];
+              console.log('Parent Dashboard - Found parent record:', parentRecord);
               
-              const { data: linkedStudentData, error: linkedStudentError } = await supabase
-                .from(TABLES.STUDENTS)
-                .select(`
-                  *,
-                  classes(id, class_name, section)
-                `)
-                .eq('id', parentUserData.linked_parent_of)
-                .single();
-              
-              if (!linkedStudentError && linkedStudentData) {
-                console.log('Parent Dashboard - Successfully fetched linked student:', linkedStudentData.name);
+              if (parentRecord.student_id) {
+                const { data: linkedStudentData, error: linkedStudentError } = await supabase
+                  .from(TABLES.STUDENTS)
+                  .select(`
+                    *,
+                    classes(id, class_name, section)
+                  `)
+                  .eq('id', parentRecord.student_id)
+                  .single();
                 
-                studentDetails = {
-                  ...linkedStudentData,
-                  roll_number: linkedStudentData.roll_no || linkedStudentData.roll_number,
-                  admission_number: linkedStudentData.admission_no || linkedStudentData.admission_number,
-                  date_of_birth: linkedStudentData.dob || linkedStudentData.date_of_birth,
-                  class_name: linkedStudentData.classes?.class_name || linkedStudentData.class_name,
-                  section: linkedStudentData.classes?.section || linkedStudentData.section,
-                  full_class_name: linkedStudentData.classes ? `${linkedStudentData.classes.class_name} ${linkedStudentData.classes.section}` : (linkedStudentData.class_name || ''),
-                  aadhar_no: linkedStudentData.aadhar_no,
-                  place_of_birth: linkedStudentData.place_of_birth,
-                  nationality: linkedStudentData.nationality,
-                  religion: linkedStudentData.religion,
-                  caste: linkedStudentData.caste,
-                  pin_code: linkedStudentData.pin_code,
-                  mother_tongue: linkedStudentData.mother_tongue,
-                  identification_mark_1: linkedStudentData.identification_mark_1,
-                  identification_mark_2: linkedStudentData.identification_mark_2,
-                  academic_year: linkedStudentData.academic_year,
-                  general_behaviour: linkedStudentData.general_behaviour,
-                  remarks: linkedStudentData.remarks,
-                  parent_id: linkedStudentData.parent_id,
-                  school_id: linkedStudentData.school_id,
-                  created_at: linkedStudentData.created_at
-                };
-              } else {
-                console.error('Parent Dashboard - Error fetching linked student:', linkedStudentError);
+                if (!linkedStudentError && linkedStudentData) {
+                  console.log('Parent Dashboard - Successfully fetched student from parent record:', linkedStudentData.name);
+                  
+                  studentDetails = {
+                    ...linkedStudentData,
+                    roll_number: linkedStudentData.roll_no || linkedStudentData.roll_number,
+                    admission_number: linkedStudentData.admission_no || linkedStudentData.admission_number,
+                    date_of_birth: linkedStudentData.dob || linkedStudentData.date_of_birth,
+                    class_name: linkedStudentData.classes?.class_name || linkedStudentData.class_name,
+                    section: linkedStudentData.classes?.section || linkedStudentData.section,
+                    full_class_name: linkedStudentData.classes ? `${linkedStudentData.classes.class_name} ${linkedStudentData.classes.section}` : (linkedStudentData.class_name || ''),
+                    aadhar_no: linkedStudentData.aadhar_no,
+                    place_of_birth: linkedStudentData.place_of_birth,
+                    nationality: linkedStudentData.nationality,
+                    religion: linkedStudentData.religion,
+                    caste: linkedStudentData.caste,
+                    pin_code: linkedStudentData.pin_code,
+                    mother_tongue: linkedStudentData.mother_tongue,
+                    identification_mark_1: linkedStudentData.identification_mark_1,
+                    identification_mark_2: linkedStudentData.identification_mark_2,
+                    academic_year: linkedStudentData.academic_year,
+                    general_behaviour: linkedStudentData.general_behaviour,
+                    remarks: linkedStudentData.remarks,
+                    parent_id: linkedStudentData.parent_id,
+                    school_id: linkedStudentData.school_id,
+                    created_at: linkedStudentData.created_at
+                  };
+                } else {
+                  console.error('Parent Dashboard - Error fetching student from parent record:', linkedStudentError);
+                }
               }
+            } else {
+              console.log('Parent Dashboard - No parent record found via email method');
             }
-          } else {
-            console.log('Parent Dashboard - getParentByUserId failed:', parentError);
           }
         } catch (err) {
           console.error('Parent Dashboard - Error in Method 1:', err);
         }
         
-        // Method 2: Direct query if Method 1 failed
+        // Method 4: Direct query if all methods failed
         if (!studentDetails) {
           try {
-            console.log('Parent Dashboard - Method 2: Direct query for students with parent_id');
+            console.log('Parent Dashboard - Method 4: Direct query for students with parent_id');
             
             const { data: directStudentData, error: directError } = await supabase
               .from(TABLES.STUDENTS)
@@ -297,7 +345,7 @@ const ParentDashboard = ({ navigation }) => {
               .maybeSingle();
             
             if (!directError && directStudentData) {
-              console.log('Parent Dashboard - Method 2 success, found student:', directStudentData.name);
+              console.log('Parent Dashboard - Method 4 success, found student:', directStudentData.name);
               
               studentDetails = {
                 ...directStudentData,
@@ -324,72 +372,10 @@ const ParentDashboard = ({ navigation }) => {
                 created_at: directStudentData.created_at
               };
             } else {
-              console.log('Parent Dashboard - Method 2 failed:', directError);
+              console.log('Parent Dashboard - Method 4 failed:', directError);
             }
           } catch (err) {
-            console.error('Parent Dashboard - Error in Method 2:', err);
-          }
-        }
-        
-        // Method 3: Check parents table for relationship
-        if (!studentDetails) {
-          try {
-            console.log('Parent Dashboard - Method 3: Check parents table relationship');
-            
-            // First find if there's a parent record linking this user to a student
-            const { data: parentRecord, error: parentRecordError } = await supabase
-              .from(TABLES.PARENTS)
-              .select('student_id')
-              .eq('email', user.email)
-              .maybeSingle();
-            
-            if (!parentRecordError && parentRecord?.student_id) {
-              console.log('Parent Dashboard - Found parent record with student_id:', parentRecord.student_id);
-              
-              const { data: relatedStudentData, error: relatedError } = await supabase
-                .from(TABLES.STUDENTS)
-                .select(`
-                  *,
-                  classes(id, class_name, section)
-                `)
-                .eq('id', parentRecord.student_id)
-                .single();
-              
-              if (!relatedError && relatedStudentData) {
-                console.log('Parent Dashboard - Method 3 success, found related student:', relatedStudentData.name);
-                
-                studentDetails = {
-                  ...relatedStudentData,
-                  roll_number: relatedStudentData.roll_no || relatedStudentData.roll_number,
-                  admission_number: relatedStudentData.admission_no || relatedStudentData.admission_number,
-                  date_of_birth: relatedStudentData.dob || relatedStudentData.date_of_birth,
-                  class_name: relatedStudentData.classes?.class_name || relatedStudentData.class_name,
-                  section: relatedStudentData.classes?.section || relatedStudentData.section,
-                  full_class_name: relatedStudentData.classes ? `${relatedStudentData.classes.class_name} ${relatedStudentData.classes.section}` : (relatedStudentData.class_name || ''),
-                  aadhar_no: relatedStudentData.aadhar_no,
-                  place_of_birth: relatedStudentData.place_of_birth,
-                  nationality: relatedStudentData.nationality,
-                  religion: relatedStudentData.religion,
-                  caste: relatedStudentData.caste,
-                  pin_code: relatedStudentData.pin_code,
-                  mother_tongue: relatedStudentData.mother_tongue,
-                  identification_mark_1: relatedStudentData.identification_mark_1,
-                  identification_mark_2: relatedStudentData.identification_mark_2,
-                  academic_year: relatedStudentData.academic_year,
-                  general_behaviour: relatedStudentData.general_behaviour,
-                  remarks: relatedStudentData.remarks,
-                  parent_id: relatedStudentData.parent_id,
-                  school_id: relatedStudentData.school_id,
-                  created_at: relatedStudentData.created_at
-                };
-              } else {
-                console.log('Parent Dashboard - Method 3 student fetch failed:', relatedError);
-              }
-            } else {
-              console.log('Parent Dashboard - Method 3 parent record not found:', parentRecordError);
-            }
-          } catch (err) {
-            console.error('Parent Dashboard - Error in Method 3:', err);
+            console.error('Parent Dashboard - Error in Method 4:', err);
           }
         }
         
@@ -424,7 +410,7 @@ const ParentDashboard = ({ navigation }) => {
             console.log('Parent Dashboard - Fetching parent information for student ID:', studentDetails.id);
             
             const { data: parentsData, error: parentsError } = await supabase
-              .from(TABLES.PARENTS)
+              .from('parents')
               .select('name, relation, phone, email')
               .eq('student_id', studentDetails.id);
             

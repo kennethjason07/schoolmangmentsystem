@@ -23,6 +23,15 @@ const StudentSwitchBanner = ({ style }) => {
     getStudentAdmissionNo 
   } = useSelectedStudent();
   
+  // Debug logging
+  console.log('StudentSwitchBanner - Functions received:', {
+    hasGetStudentClass: typeof getStudentClass === 'function',
+    hasGetStudentDisplayName: typeof getStudentDisplayName === 'function',
+    hasGetStudentAdmissionNo: typeof getStudentAdmissionNo === 'function',
+    hasSwitchStudent: typeof switchStudent === 'function',
+    selectedStudent: selectedStudent?.name || 'None'
+  });
+  
   const [showSelector, setShowSelector] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -67,10 +76,10 @@ const StudentSwitchBanner = ({ style }) => {
             <View style={styles.studentDetails}>
               <Text style={styles.currentStudentLabel}>Viewing data for</Text>
               <Text style={styles.studentName}>
-                {getStudentDisplayName(selectedStudent)}
+                {typeof getStudentDisplayName === 'function' ? getStudentDisplayName(selectedStudent) : 'Loading...'}
               </Text>
               <Text style={styles.studentClass}>
-                Class {getStudentClass(selectedStudent)} • {selectedStudent?.relationshipType}
+                Class {typeof getStudentClass === 'function' ? getStudentClass(selectedStudent) : 'Loading...'} • {selectedStudent?.relationshipType || 'N/A'}
               </Text>
             </View>
           </View>
