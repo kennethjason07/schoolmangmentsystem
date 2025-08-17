@@ -33,15 +33,28 @@ const ExpenseManagement = ({ navigation }) => {
   
   // Expense Data
   const [expenses, setExpenses] = useState([]);
+  const [yearlyExpenses, setYearlyExpenses] = useState([]);
   const [expenseStats, setExpenseStats] = useState([]);
+  const [yearlyExpenseStats, setYearlyExpenseStats] = useState([]);
   const [monthlyTotal, setMonthlyTotal] = useState(0);
   const [yearlyTotal, setYearlyTotal] = useState(0);
   const [budgetData, setBudgetData] = useState({});
   const [allExpenses, setAllExpenses] = useState([]); // Local state for all expenses
   
+  // View Control
+  const [activeTab, setActiveTab] = useState('monthly'); // 'monthly' or 'yearly'
+  
   // Modal States
   const [isExpenseModalVisible, setIsExpenseModalVisible] = useState(false);
   const [isBudgetModalVisible, setIsBudgetModalVisible] = useState(false);
+  const [isCategoryModalVisible, setIsCategoryModalVisible] = useState(false);
+  const [categoryInput, setCategoryInput] = useState({
+    name: '',
+    icon: 'briefcase',
+    color: '#2196F3',
+    monthly_budget: ''
+  });
+  const [editCategoryIndex, setEditCategoryIndex] = useState(null);
   const [expenseInput, setExpenseInput] = useState({
     title: '',
     amount: '',
@@ -54,18 +67,22 @@ const ExpenseManagement = ({ navigation }) => {
   const [budgetInputs, setBudgetInputs] = useState({});
   const [editExpenseIndex, setEditExpenseIndex] = useState(null);
 
-  // Expense Categories with colors and icons
-  const expenseCategories = [
-    { name: 'Staff Salaries', icon: 'people', color: '#2196F3', budget: 500000 },
-    { name: 'Utilities', icon: 'flash', color: '#FF9800', budget: 50000 },
-    { name: 'Supplies & Materials', icon: 'library', color: '#4CAF50', budget: 100000 },
-    { name: 'Infrastructure', icon: 'build', color: '#9C27B0', budget: 200000 },
-    { name: 'Transportation', icon: 'car', color: '#F44336', budget: 75000 },
-    { name: 'Food & Catering', icon: 'restaurant', color: '#FF5722', budget: 80000 },
-    { name: 'Events & Activities', icon: 'calendar', color: '#607D8B', budget: 50000 },
-    { name: 'Technology', icon: 'desktop', color: '#795548', budget: 100000 },
-    { name: 'Marketing', icon: 'megaphone', color: '#E91E63', budget: 30000 },
-    { name: 'Miscellaneous', icon: 'ellipsis-horizontal', color: '#009688', budget: 50000 }
+  // Dynamic Expense Categories from database
+  const [expenseCategories, setExpenseCategories] = useState([]);
+  
+  // Default category template for new categories
+  const defaultCategoryIcons = [
+    'people', 'flash', 'library', 'build', 'car', 'restaurant', 
+    'calendar', 'desktop', 'megaphone', 'ellipsis-horizontal',
+    'briefcase', 'school', 'medical', 'fitness', 'home',
+    'airplane', 'cafe', 'business', 'hammer', 'shield'
+  ];
+  
+  const defaultCategoryColors = [
+    '#2196F3', '#FF9800', '#4CAF50', '#9C27B0', '#F44336',
+    '#FF5722', '#607D8B', '#795548', '#E91E63', '#009688',
+    '#3F51B5', '#FF5722', '#8BC34A', '#FFC107', '#673AB7',
+    '#00BCD4', '#CDDC39', '#FF6F00', '#37474F', '#6D4C41'
   ];
 
   // Mock data for frontend development
@@ -366,20 +383,21 @@ const ExpenseManagement = ({ navigation }) => {
       } else {
         const yearlySum = (yearlyExpenses || []).reduce((sum, expense) => sum + (expense.amount || 0), 0);
         setYearlyTotal(yearlySum);
+        setYearlyExpenses(yearlyExpenses || []);
         console.log('📊 Yearly total:', yearlySum, 'from', yearlyExpenses?.length || 0, 'expenses');
-      }
-
-      // Get expense categories from database
-      console.log('🏷️ Fetching expense categories...');
-      const { data: dbCategories, error: categoriesError } = await dbHelpers.getExpenseCategories();
-      console.log('🏷️ Categories result:', {
-        count: dbCategories?.length || 0,
-        data: dbCategories,
-        error: categoriesError
-      });
-      
-      if (categoriesError) {
-        console.error('❌ Error fetching categories:', categoriesError);
+        
+        // If no yearly data from database, use mock data for yearly view
+        if (!yearlyExpenses || yearlyExpenses.length === 0) {
+          console.log('⚠️ No yearly data from database, using mock data for yearly view...');
+          const yearlyMockData = mockExpenses.filter(expense => {
+            const expenseDate = new Date(expense.expense_date);
+            return expenseDate.getFullYear() === currentYear;
+          });
+          setYearlyExpenses(yearlyMockData);
+          const mockYearlySum = yearlyMockData.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+          setYearlyTotal(mockYearlySum);
+          console.log('📝 Using mock yearly data:', yearlyMockData.length, 'items, total:', mockYearlySum);
+        }
       }
 
       // Determine which expenses data to use for calculations
@@ -399,15 +417,20 @@ const ExpenseManagement = ({ navigation }) => {
         console.log('📊 Using mock data for calculations:', expensesForCalculation.length, 'expenses, total:', monthlyTotalForCalculation);
       }
 
+      // Wait for categories to be loaded before calculating breakdown
+      if (expenseCategories.length === 0) {
+        console.log('⏳ Categories not loaded yet, skipping calculation...');
+        return;
+      }
+
       // Calculate category-wise breakdown
       console.log('📊 Calculating category breakdown...');
       const categoryBreakdown = expenseCategories.map(category => {
         const categoryExpenses = (expensesForCalculation || []).filter(exp => exp.category === category.name);
         const categoryTotal = categoryExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
         
-        // Find matching database category for budget info
-        const dbCategory = (dbCategories || []).find(cat => cat.name === category.name);
-        const categoryBudget = dbCategory?.monthly_budget || category.budget || 0;
+        // Use category's monthly_budget from database
+        const categoryBudget = category.monthly_budget || 0;
         
         console.log(`📊 Category ${category.name}:`, {
           expenses: categoryExpenses.length,
@@ -443,6 +466,48 @@ const ExpenseManagement = ({ navigation }) => {
 
       setBudgetData(pieChartData);
       console.log('📈 Pie chart data set:', pieChartData.length, 'categories with data');
+      
+      // Calculate yearly category breakdown
+      console.log('📊 Calculating yearly category breakdown...');
+      let yearlyExpensesForCalculation = yearlyExpenses || [];
+      
+      // If using mock data for yearly, filter mock expenses by year
+      if (!yearlyExpenses || yearlyExpenses.length === 0) {
+        yearlyExpensesForCalculation = mockExpenses.filter(expense => {
+          const expenseDate = new Date(expense.expense_date);
+          return expenseDate.getFullYear() === currentYear;
+        });
+      }
+      
+      const yearlyTotalForCalculation = yearlyExpensesForCalculation.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+      
+      const yearlyCategoryBreakdown = expenseCategories.map(category => {
+        const categoryExpenses = yearlyExpensesForCalculation.filter(exp => exp.category === category.name);
+        const categoryTotal = categoryExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+        
+        // Use annual budget = monthly budget * 12
+        const categoryAnnualBudget = (category.monthly_budget || 0) * 12;
+        
+        console.log(`📊 Yearly Category ${category.name}:`, {
+          expenses: categoryExpenses.length,
+          total: categoryTotal,
+          annualBudget: categoryAnnualBudget
+        });
+        
+        return {
+          name: category.name,
+          amount: categoryTotal,
+          budget: categoryAnnualBudget,
+          color: category.color,
+          icon: category.icon,
+          count: categoryExpenses.length,
+          percentage: yearlyTotalForCalculation > 0 ? ((categoryTotal / yearlyTotalForCalculation) * 100).toFixed(1) : 0,
+          budgetUsage: categoryAnnualBudget > 0 ? ((categoryTotal / categoryAnnualBudget) * 100).toFixed(1) : 0
+        };
+      });
+      
+      setYearlyExpenseStats(yearlyCategoryBreakdown);
+      console.log('📊 Yearly category stats set:', yearlyCategoryBreakdown.length, 'categories');
       console.log('✅ Data loading completed successfully!');
 
     } catch (error) {
@@ -457,6 +522,36 @@ const ExpenseManagement = ({ navigation }) => {
   useEffect(() => {
     loadExpenseData();
   }, [selectedMonth]);
+  
+  // Load categories on mount and when needed, but don't reload data
+  useEffect(() => {
+    const loadCategoriesOnMount = async () => {
+      if (expenseCategories.length === 0) {
+        console.log('🏷️ Loading categories on mount...');
+        const { data: dbCategories, error: categoriesError } = await dbHelpers.getExpenseCategories();
+        
+        if (categoriesError) {
+          console.error('❌ Error fetching categories on mount:', categoriesError);
+        } else if (dbCategories && dbCategories.length > 0) {
+          setExpenseCategories(dbCategories);
+          console.log('✅ Categories loaded on mount:', dbCategories.length, 'categories');
+        } else {
+          console.log('⚠️ No categories found on mount, creating defaults...');
+          await createDefaultCategories();
+        }
+      }
+    };
+    
+    loadCategoriesOnMount();
+  }, []); // Only run once on mount
+  
+  // Re-calculate expense stats when categories become available
+  useEffect(() => {
+    if (expenseCategories.length > 0 && (expenses.length > 0 || yearlyExpenses.length > 0)) {
+      console.log('🔄 Categories loaded, recalculating expense stats...');
+      loadExpenseData();
+    }
+  }, [expenseCategories.length]); // Only when categories count changes
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -605,6 +700,176 @@ const ExpenseManagement = ({ navigation }) => {
       Alert.alert('Error', 'Failed to save budgets');
     }
   };
+  
+  // Create default categories if none exist
+  const createDefaultCategories = async () => {
+    const defaultCategories = [
+      { name: 'Staff Salaries', icon: 'people', color: '#2196F3', monthly_budget: 500000 },
+      { name: 'Utilities', icon: 'flash', color: '#FF9800', monthly_budget: 50000 },
+      { name: 'Supplies & Materials', icon: 'library', color: '#4CAF50', monthly_budget: 100000 },
+      { name: 'Infrastructure', icon: 'build', color: '#9C27B0', monthly_budget: 200000 },
+      { name: 'Transportation', icon: 'car', color: '#F44336', monthly_budget: 75000 },
+      { name: 'Food & Catering', icon: 'restaurant', color: '#FF5722', monthly_budget: 80000 },
+      { name: 'Events & Activities', icon: 'calendar', color: '#607D8B', monthly_budget: 50000 },
+      { name: 'Technology', icon: 'desktop', color: '#795548', monthly_budget: 100000 },
+      { name: 'Marketing', icon: 'megaphone', color: '#E91E63', monthly_budget: 30000 },
+      { name: 'Miscellaneous', icon: 'ellipsis-horizontal', color: '#009688', monthly_budget: 50000 }
+    ];
+    
+    try {
+      const createdCategories = [];
+      for (const category of defaultCategories) {
+        // First, try with all fields
+        let { data, error } = await dbHelpers.createExpenseCategory(category);
+        
+        // If error due to missing columns, try with minimal fields
+        if (error && error.message && error.message.includes('could not find')) {
+          console.warn('Database missing some columns, trying with basic fields only:', error.message);
+          const basicCategory = {
+            name: category.name,
+            monthly_budget: category.monthly_budget
+          };
+          
+          const result = await dbHelpers.createExpenseCategory(basicCategory);
+          data = result.data;
+          error = result.error;
+          
+          // Add missing fields to local data for UI consistency
+          if (data) {
+            data.icon = category.icon;
+            data.color = category.color;
+          }
+        }
+        
+        if (error) {
+          console.error('Error creating default category:', category.name, error);
+        } else if (data) {
+          // Ensure all required UI fields are present
+          const categoryWithDefaults = {
+            ...data,
+            icon: data.icon || category.icon || 'briefcase',
+            color: data.color || category.color || '#2196F3',
+            monthly_budget: data.monthly_budget || category.monthly_budget || 0
+          };
+          createdCategories.push(categoryWithDefaults);
+        }
+      }
+      
+      if (createdCategories.length > 0) {
+        setExpenseCategories(createdCategories);
+        console.log('✅ Created default categories:', createdCategories.length);
+      } else {
+        // Fallback: use mock categories if database creation fails
+        console.warn('⚠️ Database category creation failed, using local categories for UI');
+        setExpenseCategories(defaultCategories.map(cat => ({...cat, id: Date.now() + Math.random()})));
+      }
+    } catch (error) {
+      console.error('Error creating default categories:', error);
+      // Fallback: use mock categories if everything fails
+      console.warn('⚠️ Using fallback local categories due to database error');
+      setExpenseCategories(defaultCategories.map(cat => ({...cat, id: Date.now() + Math.random()})));
+    }
+  };
+  
+  // Category Management Functions
+  const openAddCategoryModal = () => {
+    setCategoryInput({
+      name: '',
+      icon: 'briefcase',
+      color: '#2196F3',
+      monthly_budget: ''
+    });
+    setEditCategoryIndex(null);
+    setIsCategoryModalVisible(true);
+  };
+  
+  const openEditCategoryModal = (category, index) => {
+    setCategoryInput({
+      name: category.name,
+      icon: category.icon,
+      color: category.color,
+      monthly_budget: category.monthly_budget?.toString() || ''
+    });
+    setEditCategoryIndex(index);
+    setIsCategoryModalVisible(true);
+  };
+  
+  const saveCategory = async () => {
+    if (!categoryInput.name) {
+      Alert.alert('Error', 'Please enter a category name.');
+      return;
+    }
+    
+    const budget = parseFloat(categoryInput.monthly_budget);
+    if (isNaN(budget) || budget < 0) {
+      Alert.alert('Error', 'Please enter a valid monthly budget.');
+      return;
+    }
+    
+    try {
+      const categoryData = {
+        name: categoryInput.name,
+        icon: categoryInput.icon,
+        color: categoryInput.color,
+        monthly_budget: budget
+      };
+      
+      if (editCategoryIndex !== null) {
+        // Update existing category
+        const categoryToUpdate = expenseCategories[editCategoryIndex];
+        const { error } = await dbHelpers.updateExpenseCategory(categoryToUpdate.name, categoryData);
+        
+        if (error) throw error;
+        
+        // Update local state
+        const updatedCategories = [...expenseCategories];
+        updatedCategories[editCategoryIndex] = { ...categoryToUpdate, ...categoryData };
+        setExpenseCategories(updatedCategories);
+      } else {
+        // Create new category
+        const { data, error } = await dbHelpers.createExpenseCategory(categoryData);
+        
+        if (error) throw error;
+        
+        // Add to local state
+        setExpenseCategories([...expenseCategories, data]);
+      }
+      
+      setIsCategoryModalVisible(false);
+      Alert.alert('Success', 'Category saved successfully!');
+    } catch (error) {
+      console.error('Error saving category:', error);
+      Alert.alert('Error', 'Failed to save category');
+    }
+  };
+  
+  const deleteCategory = (categoryName) => {
+    Alert.alert(
+      'Delete Category',
+      'Are you sure you want to delete this category? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await dbHelpers.deleteExpenseCategory(categoryName);
+              
+              if (error) throw error;
+              
+              // Remove from local state
+              setExpenseCategories(expenseCategories.filter(cat => cat.name !== categoryName));
+              Alert.alert('Success', 'Category deleted successfully!');
+            } catch (error) {
+              console.error('Error deleting category:', error);
+              Alert.alert('Error', 'Failed to delete category');
+            }
+          }
+        }
+      ]
+    );
+  };
 
   const chartConfig = {
     backgroundColor: '#ffffff',
@@ -621,7 +886,7 @@ const ExpenseManagement = ({ navigation }) => {
   if (loading) {
     return (
       <View style={styles.container}>
-        <Header title="Expense Management" navigation={navigation} />
+        <Header title="Expense Management" navigation={navigation} showBack={true} />
         <View style={styles.loading}>
           <ActivityIndicator size="large" color="#2196F3" />
           <Text style={styles.loadingText}>Loading expense data...</Text>
@@ -632,7 +897,7 @@ const ExpenseManagement = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <Header title="Expense Management" navigation={navigation} />
+      <Header title="Expense Management" navigation={navigation} showBack={true} />
       
       <ScrollView
         style={styles.scrollView}
@@ -646,209 +911,237 @@ const ExpenseManagement = ({ navigation }) => {
           />
         }
       >
-        {/* Month Selector */}
-        <View style={styles.monthSelector}>
-          <TouchableOpacity onPress={() => setSelectedMonth(subMonths(selectedMonth, 1))}>
-            <Ionicons name="chevron-back" size={24} color="#2196F3" />
-          </TouchableOpacity>
-          
+        {/* View Tabs */}
+        <View style={styles.tabContainer}>
           <TouchableOpacity 
-            style={styles.monthButton}
-            onPress={() => setShowMonthPicker(true)}
+            style={[styles.tab, activeTab === 'monthly' && styles.activeTab]}
+            onPress={() => setActiveTab('monthly')}
           >
-            <Text style={styles.monthText}>
-              {format(selectedMonth, 'MMMM yyyy')}
+            <Text style={[styles.tabText, activeTab === 'monthly' && styles.activeTabText]}>
+              Monthly View
             </Text>
           </TouchableOpacity>
           
-          <TouchableOpacity onPress={() => setSelectedMonth(addMonths(selectedMonth, 1))}>
-            <Ionicons name="chevron-forward" size={24} color="#2196F3" />
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'yearly' && styles.activeTab]}
+            onPress={() => setActiveTab('yearly')}
+          >
+            <Text style={[styles.tabText, activeTab === 'yearly' && styles.activeTabText]}>
+              Yearly View
+            </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Summary Stats */}
-        <View style={styles.statsContainer}>
-          <StatCard
-            title="Monthly Total"
-            value={`₹${(monthlyTotal / 100000).toFixed(1)}L`}
-            icon="card"
-            color="#F44336"
-            subtitle={`${expenses.length} transactions`}
-          />
-          
-          <StatCard
-            title="Yearly Total"
-            value={`₹${(yearlyTotal / 100000).toFixed(1)}L`}
-            icon="trending-up"
-            color="#2196F3"
-            subtitle={`${format(selectedMonth, 'yyyy')} expenses`}
-          />
+        {/* Today's Date */}
+        <View style={styles.dateContainer}>
+          <Text style={styles.dateText}>
+            {format(new Date(), 'EEEE, MMMM dd, yyyy')}
+          </Text>
         </View>
 
-        {/* Expense Breakdown Chart */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Expense Breakdown</Text>
-          
-          {budgetData.length > 0 ? (
-            <View style={styles.chartContainer}>
-              <CrossPlatformPieChart
-                data={budgetData}
-                width={width - 60}
-                height={220}
-                chartConfig={chartConfig}
-                accessor="population"
-                backgroundColor="transparent"
-                paddingLeft="15"
-                absolute={false}
-                hasLegend={false}
+        {/* Summary Stats */}
+        <View style={styles.statsContainerVertical}>
+          {activeTab === 'monthly' ? (
+            <>
+              <StatCard
+                title="Monthly Total"
+                value={`₹${(monthlyTotal / 100000).toFixed(1)}L`}
+                icon="card"
+                color="#F44336"
+                subtitle={`${expenses.length} transactions`}
               />
               
-              <View style={styles.legendContainer}>
-                {budgetData.slice(0, 4).map((item, index) => (
-                  <View key={index} style={styles.legendItem}>
-                    <View style={[styles.legendColor, { backgroundColor: item.color }]} />
-                    <Text style={styles.legendText}>
-                      {item.name}: ₹{(item.population / 1000).toFixed(0)}K
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </View>
+              <StatCard
+                title="Avg per Month"
+                value={`₹${(yearlyTotal / 12 / 100000).toFixed(1)}L`}
+                icon="trending-up"
+                color="#2196F3"
+                subtitle={`${format(selectedMonth, 'yyyy')} average`}
+              />
+            </>
           ) : (
-            <View style={styles.noDataContainer}>
-              <Ionicons name="pie-chart-outline" size={48} color="#ccc" />
-              <Text style={styles.noDataText}>No expenses recorded this month</Text>
-            </View>
+            <>
+              <StatCard
+                title="Yearly Total"
+                value={`₹${(yearlyTotal / 100000).toFixed(1)}L`}
+                icon="trending-up"
+                color="#2196F3"
+                subtitle={`${yearlyExpenses.length} transactions`}
+              />
+              
+              <StatCard
+                title="Monthly Average"
+                value={`₹${(yearlyTotal / 12 / 100000).toFixed(1)}L`}
+                icon="analytics"
+                color="#4CAF50"
+                subtitle={`${format(selectedMonth, 'yyyy')} average`}
+              />
+            </>
           )}
         </View>
+
 
         {/* Category-wise Budget Analysis */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.budgetHeaderLeft}>
-              <Text style={styles.sectionTitle}>Budget Analysis</Text>
+              <Text style={styles.sectionTitle}>
+                {activeTab === 'monthly' ? 'Monthly Budget Analysis' : 'Yearly Budget Analysis'}
+              </Text>
               <Text style={styles.sectionSubtitle}>
-                {expenseStats.filter(cat => cat.amount > 0).length} active categories
+                {(activeTab === 'monthly' ? expenseStats : yearlyExpenseStats)
+                  .filter(cat => cat.amount > 0).length} active categories
               </Text>
             </View>
-            <TouchableOpacity 
-              style={styles.manageBudgetButton} 
-              onPress={openBudgetModal}
-            >
-              <Ionicons name="settings-outline" size={16} color="#2196F3" />
-              <Text style={styles.manageBudgetText}>Manage</Text>
-            </TouchableOpacity>
+            <View style={styles.budgetHeaderRight}>
+              <TouchableOpacity 
+                style={styles.manageBudgetButton} 
+                onPress={openAddCategoryModal}
+              >
+                <Ionicons name="add" size={16} color="#4CAF50" />
+                <Text style={[styles.manageBudgetText, {color: '#4CAF50'}]}>Add</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.manageBudgetButton} 
+                onPress={openBudgetModal}
+              >
+                <Ionicons name="settings-outline" size={16} color="#2196F3" />
+                <Text style={styles.manageBudgetText}>Manage</Text>
+              </TouchableOpacity>
+            </View>
           </View>
           
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.budgetCardsContainer}>
-              {expenseStats
-                .filter(category => category.amount > 0) // Only show categories with expenses
-                .sort((a, b) => b.amount - a.amount) // Sort by amount descending
-                .map((category, index) => {
-                  const isOverBudget = category.budgetUsage > 100;
-                  const isNearLimit = category.budgetUsage > 80;
-                  const remaining = Math.max(0, category.budget - category.amount);
-                  
-                  return (
-                    <View key={index} style={[
-                      styles.budgetCard,
-                      isOverBudget && styles.budgetCardOverBudget,
-                      isNearLimit && !isOverBudget && styles.budgetCardNearLimit
-                    ]}>
-                      <View style={styles.budgetCardHeader}>
-                        <View style={[styles.categoryIcon, { backgroundColor: category.color }]}>
-                          <Ionicons name={category.icon} size={18} color="#fff" />
-                        </View>
-                        
+        <View style={styles.budgetCardsGrid}>
+            {(activeTab === 'monthly' ? expenseStats : yearlyExpenseStats)
+              .sort((a, b) => b.amount - a.amount) // Sort by amount descending
+              .map((category, index) => {
+                const isOverBudget = category.budgetUsage > 100;
+                const isNearLimit = category.budgetUsage > 80;
+                const remaining = Math.max(0, category.budget - category.amount);
+                
+                return (
+                  <View key={index} style={[
+                    styles.budgetCard,
+                    isOverBudget && styles.budgetCardOverBudget,
+                    isNearLimit && !isOverBudget && styles.budgetCardNearLimit
+                  ]}>
+                    <View style={styles.budgetCardHeader}>
+                      <View style={[styles.categoryIcon, { backgroundColor: category.color }]}>
+                        <Ionicons name={category.icon} size={18} color="#fff" />
+                      </View>
+                      
+                      <View style={styles.cardActions}>
                         {isOverBudget && (
                           <View style={styles.warningBadge}>
                             <Ionicons name="warning" size={12} color="#fff" />
                           </View>
                         )}
-                      </View>
-                      
-                      <Text style={styles.categoryName} numberOfLines={2}>
-                        {category.name}
-                      </Text>
-                      
-                      <View style={styles.amountSection}>
-                        <Text style={styles.categoryAmount}>
-                          ₹{(category.amount / 1000).toFixed(0)}K
-                        </Text>
-                        <Text style={styles.categoryBudget}>
-                          of ₹{(category.budget / 1000).toFixed(0)}K
-                        </Text>
-                      </View>
-                      
-                      <View style={styles.progressContainer}>
-                        <View style={styles.progressBar}>
-                          <View 
-                            style={[
-                              styles.progressFill, 
-                              { 
-                                width: `${Math.min(100, category.budgetUsage)}%`,
-                                backgroundColor: isOverBudget 
-                                  ? '#F44336' 
-                                  : isNearLimit 
-                                    ? '#FF9800' 
-                                    : category.color
-                              }
-                            ]} 
-                          />
-                        </View>
                         
-                        <View style={styles.budgetStats}>
-                          <Text style={[
-                            styles.budgetPercentage,
+                        <TouchableOpacity 
+                          onPress={() => openEditCategoryModal(
+                            expenseCategories.find(cat => cat.name === category.name), 
+                            expenseCategories.findIndex(cat => cat.name === category.name)
+                          )}
+                          style={styles.cardEditButton}
+                        >
+                          <Ionicons name="create-outline" size={14} color="#666" />
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity 
+                          onPress={() => deleteCategory(category.name)}
+                          style={styles.cardDeleteButton}
+                        >
+                          <Ionicons name="trash-outline" size={14} color="#F44336" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    
+                    <Text style={styles.categoryName} numberOfLines={2}>
+                      {category.name}
+                    </Text>
+                    
+                    <View style={styles.amountSection}>
+                      <Text style={styles.categoryAmount}>
+                        ₹{(category.amount / 1000).toFixed(0)}K
+                      </Text>
+                      <Text style={styles.categoryBudget}>
+                        of ₹{(category.budget / 1000).toFixed(0)}K
+                      </Text>
+                    </View>
+                    
+                    <View style={styles.progressContainer}>
+                      <View style={styles.progressBar}>
+                        <View 
+                          style={[
+                            styles.progressFill, 
                             { 
-                              color: isOverBudget 
+                              width: `${Math.min(100, category.budgetUsage)}%`,
+                              backgroundColor: isOverBudget 
                                 ? '#F44336' 
                                 : isNearLimit 
                                   ? '#FF9800' 
-                                  : '#666' 
+                                  : category.color
                             }
-                          ]}>
-                            {category.budgetUsage}%
+                          ]} 
+                        />
+                      </View>
+                      
+                      <View style={styles.budgetStats}>
+                        <Text style={[
+                          styles.budgetPercentage,
+                          { 
+                            color: isOverBudget 
+                              ? '#F44336' 
+                              : isNearLimit 
+                                ? '#FF9800' 
+                                : '#666' 
+                          }
+                        ]}>
+                          {category.budgetUsage}%
+                        </Text>
+                        
+                        {!isOverBudget && (
+                          <Text style={styles.remainingAmount}>
+                            ₹{(remaining / 1000).toFixed(0)}K left
                           </Text>
-                          
-                          {!isOverBudget && (
-                            <Text style={styles.remainingAmount}>
-                              ₹{(remaining / 1000).toFixed(0)}K left
-                            </Text>
-                          )}
-                          
-                          {isOverBudget && (
-                            <Text style={styles.overBudgetAmount}>
-                              ₹{((category.amount - category.budget) / 1000).toFixed(0)}K over
-                            </Text>
-                          )}
-                        </View>
+                        )}
+                        
+                        {isOverBudget && (
+                          <Text style={styles.overBudgetAmount}>
+                            ₹{((category.amount - category.budget) / 1000).toFixed(0)}K over
+                          </Text>
+                        )}
                       </View>
                     </View>
-                  );
-                })}
-            </View>
-          </ScrollView>
+                  </View>
+                );
+              })}
+          </View>
         </View>
 
         {/* Recent Expenses */}
-        <View style={styles.section}>
+        <View style={[styles.section, styles.recentExpensesSection]}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recent Expenses</Text>
+            <Text style={styles.sectionTitle}>
+              {activeTab === 'monthly' ? 'Monthly Expenses' : 'Yearly Expenses'}
+            </Text>
             <TouchableOpacity style={styles.addButton} onPress={openAddExpenseModal}>
               <Ionicons name="add" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
           
           <View style={styles.expensesList}>
-            {expenses.map((expense, index) => (
+            {(activeTab === 'monthly' ? expenses : yearlyExpenses).map((expense, index) => (
               <View key={expense.id} style={styles.expenseItem}>
-                <View style={styles.expenseIcon}>
+                <View style={[
+                  styles.expenseIcon, 
+                  { backgroundColor: `${expenseCategories.find(cat => cat.name === expense.category)?.color || '#2196F3'}15` }
+                ]}>
                   <Ionicons 
                     name={expenseCategories.find(cat => cat.name === expense.category)?.icon || 'receipt'} 
                     size={20} 
-                    color="#2196F3" 
+                    color={expenseCategories.find(cat => cat.name === expense.category)?.color || '#2196F3'} 
                   />
                 </View>
                 
@@ -884,10 +1177,12 @@ const ExpenseManagement = ({ navigation }) => {
             ))}
           </View>
           
-          {expenses.length === 0 && (
+          {(activeTab === 'monthly' ? expenses : yearlyExpenses).length === 0 && (
             <View style={styles.noDataContainer}>
               <Ionicons name="receipt-outline" size={48} color="#ccc" />
-              <Text style={styles.noDataText}>No expenses recorded this month</Text>
+              <Text style={styles.noDataText}>
+                No expenses recorded {activeTab === 'monthly' ? 'this month' : 'this year'}
+              </Text>
               <TouchableOpacity style={styles.addFirstButton} onPress={openAddExpenseModal}>
                 <Text style={styles.addFirstButtonText}>Add First Expense</Text>
               </TouchableOpacity>
@@ -1089,6 +1384,98 @@ const ExpenseManagement = ({ navigation }) => {
           </View>
         </View>
       </Modal>
+      
+      {/* Add/Edit Category Modal */}
+      <Modal
+        visible={isCategoryModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setIsCategoryModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <ScrollView style={styles.modalScrollView} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalTitle}>
+                {editCategoryIndex !== null ? 'Edit Category' : 'Add New Category'}
+              </Text>
+
+              <TextInput
+                placeholder="Category Name *"
+                value={categoryInput.name}
+                onChangeText={text => setCategoryInput({ ...categoryInput, name: text })}
+                style={styles.input}
+              />
+
+              <TextInput
+                placeholder="Monthly Budget *"
+                value={categoryInput.monthly_budget}
+                onChangeText={text => setCategoryInput({ ...categoryInput, monthly_budget: text })}
+                style={styles.input}
+                keyboardType="numeric"
+              />
+
+              {/* Icon Picker */}
+              <Text style={styles.inputLabel}>Choose Icon</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryPicker}>
+                {defaultCategoryIcons.map((iconName, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.iconOption,
+                      categoryInput.icon === iconName && styles.iconOptionSelected
+                    ]}
+                    onPress={() => setCategoryInput({ ...categoryInput, icon: iconName })}
+                  >
+                    <Ionicons 
+                      name={iconName} 
+                      size={20} 
+                      color={categoryInput.icon === iconName ? '#fff' : '#666'} 
+                    />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Color Picker */}
+              <Text style={styles.inputLabel}>Choose Color</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryPicker}>
+                {defaultCategoryColors.map((colorValue, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.colorOption,
+                      { backgroundColor: colorValue },
+                      categoryInput.color === colorValue && styles.colorOptionSelected
+                    ]}
+                    onPress={() => setCategoryInput({ ...categoryInput, color: colorValue })}
+                  >
+                    {categoryInput.color === colorValue && (
+                      <Ionicons name="checkmark" size={16} color="#fff" />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity 
+                  onPress={() => setIsCategoryModalVisible(false)} 
+                  style={[styles.modalButton, styles.cancelButton]}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  onPress={saveCategory} 
+                  style={[styles.modalButton, styles.saveButton]}
+                >
+                  <Text style={styles.saveButtonText}>
+                    {editCategoryIndex !== null ? 'Update' : 'Save'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -1096,11 +1483,11 @@ const ExpenseManagement = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#f0f4f8',
   },
   scrollView: {
     flex: 1,
-    padding: 16,
+    padding: 18,
   },
   loading: {
     flex: 1,
@@ -1114,10 +1501,8 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
   },
-  monthSelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+  // Date Display Styles
+  dateContainer: {
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
@@ -1127,30 +1512,34 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+    alignItems: 'center',
   },
-  monthButton: {
-    marginHorizontal: 20,
-  },
-  monthText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
+  dateText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+    textAlign: 'center',
   },
   statsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 16,
   },
+  statsContainerVertical: {
+    marginBottom: 16,
+  },
   section: {
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 16,
-    elevation: 2,
+    borderRadius: 16,
+    padding: 22,
+    marginBottom: 18,
+    elevation: 3,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -1192,19 +1581,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 8,
   },
+  budgetCardsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    minHeight: 200,
+  },
   budgetCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginRight: 12,
-    width: 170,
-    elevation: 3,
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 14,
+    width: '47%',
+    minHeight: 180,
+    elevation: 4,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
     borderWidth: 1,
-    borderColor: '#f0f0f0',
+    borderColor: '#e8e8e8',
   },
   budgetCardOverBudget: {
     borderColor: '#F44336',
@@ -1299,14 +1696,22 @@ const styles = StyleSheet.create({
   },
   expensesList: {
     marginTop: 8,
+    paddingBottom: 20,
   },
   expenseItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#f8f9fa',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 10,
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e8e8e8',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
   },
   expenseIcon: {
     width: 36,
@@ -1579,6 +1984,96 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: '#fff',
     color: '#333',
+  },
+  // Tab Switcher Styles
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activeTab: {
+    backgroundColor: '#2196F3',
+    elevation: 1,
+    shadowColor: '#2196F3',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  activeTabText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  // Category Card Action Styles
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cardEditButton: {
+    padding: 4,
+    borderRadius: 4,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  cardDeleteButton: {
+    padding: 4,
+    borderRadius: 4,
+    backgroundColor: 'rgba(244,67,54,0.1)',
+  },
+  
+  // Category Modal Styles
+  iconOption: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  iconOptionSelected: {
+    backgroundColor: '#2196F3',
+    borderColor: '#1976D2',
+  },
+  colorOption: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  colorOptionSelected: {
+    borderColor: '#333',
+    borderWidth: 3,
+  },
+  
+  // Special style for Recent Expenses section
+  recentExpensesSection: {
+    marginBottom: 60,
   },
 });
 

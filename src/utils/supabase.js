@@ -1578,6 +1578,48 @@ export const dbHelpers = {
     }
   },
 
+  // Create a new expense category
+  async createExpenseCategory(categoryData) {
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.EXPENSE_CATEGORIES)
+        .insert(categoryData)
+        .select()
+        .single();
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Update an expense category
+  async updateExpenseCategory(categoryName, updates) {
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.EXPENSE_CATEGORIES)
+        .update(updates)
+        .eq('name', categoryName)
+        .select()
+        .single();
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Delete an expense category
+  async deleteExpenseCategory(categoryName) {
+    try {
+      const { error } = await supabase
+        .from(TABLES.EXPENSE_CATEGORIES)
+        .delete()
+        .eq('name', categoryName);
+      return { error };
+    } catch (error) {
+      return { error };
+    }
+  },
+
   // Get expense statistics for a date range
   async getExpenseStats(startDate, endDate) {
     try {
