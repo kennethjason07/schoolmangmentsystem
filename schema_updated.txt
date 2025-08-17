@@ -1,0 +1,456 @@
+-- UPDATED SCHEMA: School Management System with Many-to-Many Parent-Student Relationships
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.assignments (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  title text NOT NULL,
+  description text,
+  file_url text,
+  class_id uuid NOT NULL,
+  subject_id uuid NOT NULL,
+  assigned_by uuid NOT NULL,
+  assigned_date date NOT NULL DEFAULT CURRENT_DATE,
+  due_date date NOT NULL,
+  academic_year text NOT NULL,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT assignments_pkey PRIMARY KEY (id),
+  CONSTRAINT assignments_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
+  CONSTRAINT assignments_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES public.teachers(id),
+  CONSTRAINT assignments_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id)
+);
+
+CREATE TABLE public.classes (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  class_name text NOT NULL,
+  section text NOT NULL,
+  academic_year text NOT NULL,
+  class_teacher_id uuid,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT classes_pkey PRIMARY KEY (id),
+  CONSTRAINT classes_class_teacher_id_fkey FOREIGN KEY (class_teacher_id) REFERENCES public.teachers(id)
+);
+
+CREATE TABLE public.events (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  title text NOT NULL,
+  description text,
+  event_date date NOT NULL,
+  start_time time without time zone,
+  end_time time without time zone,
+  event_type text DEFAULT 'Event'::text,
+  location text,
+  organizer text,
+  is_school_wide boolean DEFAULT true,
+  target_classes ARRAY,
+  target_students ARRAY,
+  status text DEFAULT 'Active'::text,
+  icon text DEFAULT 'calendar'::text,
+  color text DEFAULT '#FF9800'::text,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  created_by uuid,
+  CONSTRAINT events_pkey PRIMARY KEY (id),
+  CONSTRAINT events_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id)
+);
+
+CREATE TABLE public.exams (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  class_id uuid NOT NULL,
+  academic_year text NOT NULL,
+  start_date date NOT NULL,
+  end_date date NOT NULL,
+  remarks text,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT exams_pkey PRIMARY KEY (id),
+  CONSTRAINT exams_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id)
+);
+
+CREATE TABLE public.fee_structure (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  academic_year text NOT NULL,
+  class_id uuid,
+  student_id uuid,
+  fee_component text NOT NULL,
+  amount numeric NOT NULL,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  due_date date,
+  CONSTRAINT fee_structure_pkey PRIMARY KEY (id),
+  CONSTRAINT fee_structure_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
+  CONSTRAINT fee_structure_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
+);
+
+CREATE TABLE public.homeworks (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  title text NOT NULL,
+  description text,
+  instructions text,
+  due_date date,
+  class_id uuid,
+  subject_id uuid,
+  teacher_id uuid,
+  assigned_students ARRAY,
+  files jsonb DEFAULT '[]'::jsonb,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT homeworks_pkey PRIMARY KEY (id),
+  CONSTRAINT homeworks_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
+  CONSTRAINT homeworks_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
+  CONSTRAINT homeworks_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id)
+);
+
+CREATE TABLE public.marks (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  student_id uuid,
+  exam_id uuid,
+  subject_id uuid,
+  marks_obtained numeric,
+  grade text,
+  max_marks numeric NOT NULL,
+  remarks text,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT marks_pkey PRIMARY KEY (id),
+  CONSTRAINT marks_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
+  CONSTRAINT marks_exam_id_fkey FOREIGN KEY (exam_id) REFERENCES public.exams(id),
+  CONSTRAINT marks_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
+);
+
+CREATE TABLE public.messages (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  sender_id uuid NOT NULL,
+  receiver_id uuid NOT NULL,
+  student_id uuid,
+  message text NOT NULL,
+  sent_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  is_read boolean DEFAULT false,
+  message_type text DEFAULT 'text'::text CHECK (message_type = ANY (ARRAY['text'::text, 'image'::text, 'file'::text])),
+  file_url text,
+  file_name text,
+  file_size integer,
+  file_type text,
+  CONSTRAINT messages_pkey PRIMARY KEY (id),
+  CONSTRAINT messages_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT messages_sender_id_fkey FOREIGN KEY (sender_id) REFERENCES public.users(id),
+  CONSTRAINT messages_receiver_id_fkey FOREIGN KEY (receiver_id) REFERENCES public.users(id)
+);
+
+CREATE TABLE public.notification_recipients (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  notification_id uuid NOT NULL,
+  recipient_id uuid NOT NULL,
+  recipient_type text NOT NULL CHECK (recipient_type = ANY (ARRAY['Student'::text, 'Parent'::text])),
+  delivery_status text DEFAULT 'Pending'::text CHECK (delivery_status = ANY (ARRAY['Pending'::text, 'Sent'::text, 'Failed'::text])),
+  sent_at timestamp without time zone,
+  is_read boolean DEFAULT false,
+  read_at timestamp without time zone,
+  CONSTRAINT notification_recipients_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_notification FOREIGN KEY (notification_id) REFERENCES public.notifications(id),
+  CONSTRAINT fk_user FOREIGN KEY (recipient_id) REFERENCES public.users(id)
+);
+
+CREATE TABLE public.notifications (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  type USER-DEFINED NOT NULL,
+  message text NOT NULL,
+  delivery_mode text DEFAULT 'InApp'::text CHECK (delivery_mode = ANY (ARRAY['InApp'::text, 'SMS'::text, 'WhatsApp'::text])),
+  delivery_status text DEFAULT 'Pending'::text CHECK (delivery_status = ANY (ARRAY['Pending'::text, 'Sent'::text, 'Failed'::text])),
+  sent_by uuid,
+  scheduled_at timestamp without time zone,
+  sent_at timestamp without time zone,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT notifications_pkey PRIMARY KEY (id),
+  CONSTRAINT notifications_sent_by_fkey FOREIGN KEY (sent_by) REFERENCES public.users(id)
+);
+
+-- UPDATED: Parents table no longer has student_id or relation columns
+CREATE TABLE public.parents (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  phone text,
+  email text,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT parents_pkey PRIMARY KEY (id)
+);
+
+-- NEW: Junction table for many-to-many parent-student relationships
+CREATE TABLE public.parent_student_relationships (
+    id uuid NOT NULL DEFAULT gen_random_uuid(),
+    parent_id uuid NOT NULL,
+    student_id uuid NOT NULL,
+    relationship_type text NOT NULL CHECK (relationship_type = ANY (ARRAY['Father'::text, 'Mother'::text, 'Guardian'::text])),
+    is_primary_contact boolean DEFAULT false,
+    is_emergency_contact boolean DEFAULT false,
+    notes text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    
+    CONSTRAINT parent_student_relationships_pkey PRIMARY KEY (id),
+    CONSTRAINT parent_student_relationships_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.parents(id) ON DELETE CASCADE,
+    CONSTRAINT parent_student_relationships_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id) ON DELETE CASCADE,
+    CONSTRAINT unique_parent_student UNIQUE (parent_id, student_id)
+);
+
+-- Indexes for the junction table
+CREATE INDEX idx_parent_student_relationships_parent_id ON public.parent_student_relationships(parent_id);
+CREATE INDEX idx_parent_student_relationships_student_id ON public.parent_student_relationships(student_id);
+CREATE INDEX idx_parent_student_relationships_primary_contact ON public.parent_student_relationships(is_primary_contact) WHERE is_primary_contact = true;
+
+CREATE TABLE public.personal_tasks (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  task_title character varying NOT NULL,
+  task_description text,
+  task_type character varying NOT NULL DEFAULT 'general'::character varying CHECK (task_type::text = ANY (ARRAY['attendance'::character varying, 'marks'::character varying, 'homework'::character varying, 'meeting'::character varying, 'report'::character varying, 'planning'::character varying, 'general'::character varying]::text[])),
+  priority character varying NOT NULL DEFAULT 'medium'::character varying CHECK (priority::text = ANY (ARRAY['high'::character varying, 'medium'::character varying, 'low'::character varying]::text[])),
+  status character varying NOT NULL DEFAULT 'pending'::character varying CHECK (status::text = ANY (ARRAY['pending'::character varying, 'in_progress'::character varying, 'completed'::character varying, 'cancelled'::character varying]::text[])),
+  due_date date,
+  completed_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT personal_tasks_pkey PRIMARY KEY (id),
+  CONSTRAINT personal_tasks_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+
+CREATE TABLE public.roles (
+  id integer NOT NULL DEFAULT nextval('roles_id_seq'::regclass),
+  role_name text NOT NULL UNIQUE,
+  CONSTRAINT roles_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.school_details (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  type text DEFAULT 'School'::text,
+  address text,
+  city text,
+  state text,
+  pincode text,
+  phone text,
+  email text,
+  website text,
+  principal_name text,
+  established_year text,
+  affiliation text,
+  logo_url text,
+  description text,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT school_details_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.student_attendance (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  student_id uuid NOT NULL,
+  class_id uuid NOT NULL,
+  date date NOT NULL,
+  status text NOT NULL CHECK (status = ANY (ARRAY['Present'::text, 'Absent'::text])),
+  marked_by uuid,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT student_attendance_pkey PRIMARY KEY (id),
+  CONSTRAINT student_attendance_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT student_attendance_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
+  CONSTRAINT student_attendance_marked_by_fkey FOREIGN KEY (marked_by) REFERENCES public.users(id)
+);
+
+CREATE TABLE public.student_fees (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  student_id uuid,
+  academic_year text NOT NULL,
+  fee_component text NOT NULL,
+  amount_paid numeric NOT NULL,
+  payment_date date NOT NULL,
+  payment_mode text CHECK (payment_mode = ANY (ARRAY['Cash'::text, 'Card'::text, 'Online'::text, 'UPI'::text])),
+  remarks text,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT student_fees_pkey PRIMARY KEY (id),
+  CONSTRAINT student_fees_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
+);
+
+-- UPDATED: Students table no longer has parent_id column
+CREATE TABLE public.students (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  admission_no text NOT NULL UNIQUE,
+  name text NOT NULL,
+  dob date NOT NULL,
+  aadhar_no text,
+  place_of_birth text,
+  nationality text,
+  gender text NOT NULL CHECK (gender = ANY (ARRAY['Male'::text, 'Female'::text])),
+  religion text,
+  caste text CHECK (caste = ANY (ARRAY['BC'::text, 'SC'::text, 'ST'::text, 'OC'::text, 'Other'::text])),
+  address text,
+  pin_code text,
+  blood_group text,
+  mother_tongue text,
+  identification_mark_1 text,
+  identification_mark_2 text,
+  academic_year text NOT NULL,
+  general_behaviour text CHECK (general_behaviour = ANY (ARRAY['Mild'::text, 'Normal'::text, 'Hyperactive'::text])),
+  remarks text,
+  roll_no integer,
+  class_id uuid,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT students_pkey PRIMARY KEY (id),
+  CONSTRAINT students_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id)
+);
+
+CREATE TABLE public.subjects (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  class_id uuid NOT NULL,
+  academic_year text NOT NULL,
+  is_optional boolean DEFAULT false,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT subjects_pkey PRIMARY KEY (id),
+  CONSTRAINT subjects_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id)
+);
+
+CREATE TABLE public.tasks (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  title text NOT NULL,
+  description text,
+  due_date date,
+  priority text DEFAULT 'Medium'::text CHECK (priority = ANY (ARRAY['Low'::text, 'Medium'::text, 'High'::text])),
+  status text DEFAULT 'Pending'::text CHECK (status = ANY (ARRAY['Pending'::text, 'In Progress'::text, 'Completed'::text])),
+  assigned_teacher_ids ARRAY,
+  created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+  task_type character varying DEFAULT 'general'::character varying CHECK (task_type::text = ANY (ARRAY['attendance'::character varying, 'marks'::character varying, 'homework'::character varying, 'meeting'::character varying, 'report'::character varying, 'planning'::character varying, 'general'::character varying, 'administrative'::character varying]::text[])),
+  completed_at timestamp with time zone,
+  CONSTRAINT tasks_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.teacher_attendance (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  teacher_id uuid NOT NULL,
+  date date NOT NULL,
+  status text NOT NULL CHECK (status = ANY (ARRAY['Present'::text, 'Absent'::text])),
+  marked_by uuid,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT teacher_attendance_pkey PRIMARY KEY (id),
+  CONSTRAINT teacher_attendance_marked_by_fkey FOREIGN KEY (marked_by) REFERENCES public.users(id),
+  CONSTRAINT teacher_attendance_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id)
+);
+
+CREATE TABLE public.teacher_subjects (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  teacher_id uuid,
+  subject_id uuid,
+  assigned_on timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT teacher_subjects_pkey PRIMARY KEY (id),
+  CONSTRAINT teacher_subjects_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
+  CONSTRAINT teacher_subjects_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id)
+);
+
+CREATE TABLE public.teachers (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  qualification text,
+  age integer CHECK (age > 18),
+  salary_type text NOT NULL CHECK (salary_type = ANY (ARRAY['monthly'::text, 'hourly'::text])),
+  salary_amount numeric NOT NULL,
+  address text,
+  is_class_teacher boolean DEFAULT false,
+  assigned_class_id uuid,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT teachers_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.timetable_entries (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  class_id uuid NOT NULL,
+  subject_id uuid NOT NULL,
+  teacher_id uuid NOT NULL,
+  day_of_week text NOT NULL CHECK (day_of_week = ANY (ARRAY['Monday'::text, 'Tuesday'::text, 'Wednesday'::text, 'Thursday'::text, 'Friday'::text, 'Saturday'::text])),
+  period_number integer NOT NULL CHECK (period_number > 0),
+  start_time time without time zone NOT NULL,
+  end_time time without time zone NOT NULL,
+  academic_year text NOT NULL,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT timetable_entries_pkey PRIMARY KEY (id),
+  CONSTRAINT timetable_entries_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id),
+  CONSTRAINT timetable_entries_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
+  CONSTRAINT timetable_entries_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id)
+);
+
+-- UPDATED: Users table no longer has linked_parent_of column (parent relationships managed via junction table)
+CREATE TABLE public.users (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  email text NOT NULL UNIQUE,
+  role_id integer,
+  linked_student_id uuid,
+  linked_teacher_id uuid,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  password text,
+  full_name text NOT NULL DEFAULT ''::text,
+  phone text,
+  profile_url text,
+  CONSTRAINT users_pkey PRIMARY KEY (id),
+  CONSTRAINT users_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id),
+  CONSTRAINT users_linked_student_id_fkey FOREIGN KEY (linked_student_id) REFERENCES public.students(id),
+  CONSTRAINT users_linked_teacher_id_fkey FOREIGN KEY (linked_teacher_id) REFERENCES public.teachers(id)
+);
+
+-- NEW: Helper views for easy querying
+
+-- View 1: Complete parent-student information with relationship details
+CREATE OR REPLACE VIEW public.v_parent_student_details AS
+SELECT 
+    psr.id as relationship_id,
+    p.id as parent_id,
+    p.name as parent_name,
+    p.phone as parent_phone,
+    p.email as parent_email,
+    s.id as student_id,
+    s.admission_no,
+    s.name as student_name,
+    s.academic_year as student_academic_year,
+    c.class_name,
+    c.section,
+    psr.relationship_type,
+    psr.is_primary_contact,
+    psr.is_emergency_contact,
+    psr.notes,
+    psr.created_at as relationship_created_at
+FROM public.parent_student_relationships psr
+JOIN public.parents p ON psr.parent_id = p.id
+JOIN public.students s ON psr.student_id = s.id
+LEFT JOIN public.classes c ON s.class_id = c.id;
+
+-- View 2: Parents with all their children
+CREATE OR REPLACE VIEW public.v_parents_with_children AS
+SELECT 
+    p.id as parent_id,
+    p.name as parent_name,
+    p.phone as parent_phone,
+    p.email as parent_email,
+    COUNT(psr.student_id) as total_children,
+    ARRAY_AGG(s.name ORDER BY s.name) as children_names,
+    ARRAY_AGG(s.admission_no ORDER BY s.name) as children_admission_nos,
+    ARRAY_AGG(psr.relationship_type ORDER BY s.name) as relationship_types
+FROM public.parents p
+JOIN public.parent_student_relationships psr ON p.id = psr.parent_id
+JOIN public.students s ON psr.student_id = s.id
+GROUP BY p.id, p.name, p.phone, p.email;
+
+-- View 3: Students with all their parent/guardian contacts
+CREATE OR REPLACE VIEW public.v_students_with_contacts AS
+SELECT 
+    s.id as student_id,
+    s.admission_no,
+    s.name as student_name,
+    s.academic_year,
+    c.class_name,
+    c.section,
+    COUNT(psr.parent_id) as total_contacts,
+    ARRAY_AGG(p.name ORDER BY psr.is_primary_contact DESC, p.name) as contact_names,
+    ARRAY_AGG(p.phone ORDER BY psr.is_primary_contact DESC, p.name) as contact_phones,
+    ARRAY_AGG(p.email ORDER BY psr.is_primary_contact DESC, p.name) as contact_emails,
+    ARRAY_AGG(psr.relationship_type ORDER BY psr.is_primary_contact DESC, p.name) as relationship_types,
+    ARRAY_AGG(psr.is_primary_contact ORDER BY psr.is_primary_contact DESC, p.name) as is_primary_contacts
+FROM public.students s
+JOIN public.parent_student_relationships psr ON s.id = psr.student_id
+JOIN public.parents p ON psr.parent_id = p.id
+LEFT JOIN public.classes c ON s.class_id = c.id
+GROUP BY s.id, s.admission_no, s.name, s.academic_year, c.class_name, c.section;

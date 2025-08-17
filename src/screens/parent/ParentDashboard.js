@@ -14,14 +14,17 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
+import StudentSwitchBanner from '../../components/StudentSwitchBanner';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
+import { useSelectedStudent } from '../../contexts/SelectedStudentContext';
 import { useFocusEffect } from '@react-navigation/native';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
+  const { selectedStudent, hasMultipleStudents, loading: studentLoading } = useSelectedStudent();
   const [studentData, setStudentData] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [exams, setExams] = useState([]);

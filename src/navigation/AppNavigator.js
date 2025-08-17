@@ -63,6 +63,7 @@ import AttendanceSummary from '../screens/parent/AttendanceSummary';
 import FeePayment from '../screens/parent/FeePayment';
 import Notifications from '../screens/parent/Notifications';
 import ChatWithTeacher from '../screens/parent/ChatWithTeacher';
+import StudentSelectionScreen from '../screens/parent/StudentSelectionScreen';
 
 // Payment Screens
 import CardPayment from '../screens/parent/CardPayment';
@@ -400,6 +401,7 @@ export default function AppNavigator() {
             )}
             {userType === 'parent' && (
               <>
+                <Stack.Screen name="StudentSelection" component={StudentSelectionScreen} />
                 <Stack.Screen name="ParentTabs" component={ParentTabNavigator} />
                 <Stack.Screen name="ParentNotifications" component={Notifications} />
                 <Stack.Screen name="CardPayment" component={CardPayment} />
