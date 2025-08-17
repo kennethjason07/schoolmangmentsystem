@@ -322,10 +322,9 @@ const ViewAssignments = () => {
 
         if (submissionError) {
           console.error('Submission error:', submissionError);
-          // If table doesn't exist, just log the submission
+          // If table doesn't exist, provide better error message
           if (submissionError.code === '42P01') {
-            console.log('Submissions table does not exist. Logging submission locally.');
-            // Store in local storage or handle differently
+            throw new Error('Submissions table not found. Please contact administrator to set up the database properly.');
           } else {
             throw submissionError;
           }
@@ -450,7 +449,7 @@ const ViewAssignments = () => {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,

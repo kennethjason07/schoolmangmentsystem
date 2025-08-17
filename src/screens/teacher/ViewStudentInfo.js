@@ -281,7 +281,7 @@ const ViewStudentInfo = () => {
       const beforeSearchFilter = filtered.length;
       filtered = filtered.filter(student =>
         student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        student.roll_no.toString().includes(searchQuery) ||
+        (student.roll_no ?? '').toString().includes(searchQuery) ||
         student.admission_no?.toLowerCase().includes(searchQuery.toLowerCase())
       );
       console.log('ViewStudentInfo: Students after search filter:', filtered.length, 'from', beforeSearchFilter);

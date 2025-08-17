@@ -1337,6 +1337,299 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontWeight: '500',
   },
+
+  // Modern UI styles
+  quickStatsContainer: {
+    marginHorizontal: 16,
+    marginVertical: 20,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 16,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: '#1e1e3f',
+    borderRadius: 16,
+    padding: 20,
+    marginHorizontal: 6,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+  },
+  attendanceCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#00b894',
+  },
+  performanceCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#e17055',
+  },
+  statHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  statLabel: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 8,
+  },
+  statIndicator: {
+    height: 4,
+    backgroundColor: '#333',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    borderRadius: 2,
+  },
+
+  actionCardsContainer: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+  },
+  actionCardsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  actionCard: {
+    width: '48%',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 12,
+    position: 'relative',
+    overflow: 'hidden',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  actionCardIcon: {
+    marginBottom: 12,
+  },
+  actionCardValue: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  actionCardLabel: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '600',
+  },
+  actionCardArrow: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+  },
+
+  contentSection: {
+    marginHorizontal: 16,
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modernSectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  seeAllText: {
+    fontSize: 14,
+    color: '#6c5ce7',
+    fontWeight: '600',
+  },
+
+  // Deadlines styles
+  deadlinesList: {
+    backgroundColor: '#1e1e3f',
+    borderRadius: 16,
+    padding: 4,
+  },
+  modernDeadlineItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#2a2a4a',
+    borderRadius: 12,
+    padding: 16,
+    marginVertical: 4,
+  },
+  deadlineLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  modernDeadlineIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(108, 92, 231, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  deadlineInfo: {
+    flex: 1,
+  },
+  modernDeadlineTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  modernDeadlineDate: {
+    fontSize: 12,
+    color: '#888',
+  },
+  deadlineType: {
+    marginLeft: 12,
+  },
+  typeChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+    minWidth: 50,
+  },
+
+  // Notifications styles
+  notificationsList: {
+    backgroundColor: '#1e1e3f',
+    borderRadius: 16,
+    padding: 4,
+  },
+  modernNotificationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2a2a4a',
+    borderRadius: 12,
+    padding: 16,
+    marginVertical: 4,
+  },
+  notificationLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  modernNotificationIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(162, 155, 254, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  notificationInfo: {
+    flex: 1,
+  },
+  modernNotificationMessage: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  modernNotificationDate: {
+    fontSize: 12,
+    color: '#888',
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#6c5ce7',
+    marginLeft: 8,
+  },
+
+  // Events styles
+  eventsList: {
+    backgroundColor: '#1e1e3f',
+    borderRadius: 16,
+    padding: 4,
+  },
+  modernEventItem: {
+    backgroundColor: '#2a2a4a',
+    borderRadius: 12,
+    padding: 16,
+    marginVertical: 4,
+  },
+  eventLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  modernEventIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  eventInfo: {
+    flex: 1,
+  },
+  modernEventTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  modernEventDate: {
+    fontSize: 12,
+    color: '#888',
+    marginBottom: 2,
+  },
+  eventLocation: {
+    fontSize: 11,
+    color: '#666',
+  },
+
+  // Modern empty state
+  modernEmptyState: {
+    backgroundColor: '#1e1e3f',
+    borderRadius: 16,
+    padding: 40,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+    borderStyle: 'dashed',
+  },
+  modernEmptyText: {
+    fontSize: 16,
+    color: '#888',
+    marginTop: 12,
+    fontWeight: '600',
+  },
+  modernEmptySubtext: {
+    fontSize: 14,
+    color: '#6c5ce7',
+    marginTop: 4,
+    fontWeight: '500',
+  },
 });
 
 export default StudentDashboard;

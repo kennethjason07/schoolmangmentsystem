@@ -181,7 +181,17 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
         if (updateError) throw updateError;
       } else {
         // Create new task
-        const { error: insertError } = await supabase
+        console.log('🔍 ADMIN: Creating task with teacher ID:', form.teacher_ids);
+        console.log('🔍 ADMIN: Task data:', {
+          title: form.title,
+          description: form.description,
+          due_date: form.dueDate,
+          priority: form.priority,
+          status: form.status,
+          assigned_teacher_ids: [form.teacher_ids]
+        });
+        
+        const { data: insertResult, error: insertError } = await supabase
           .from(TABLES.TASKS)
           .insert({
             title: form.title,
@@ -190,7 +200,11 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
             priority: form.priority,
             status: form.status,
             assigned_teacher_ids: [form.teacher_ids]
-          });
+          })
+          .select();
+          
+        console.log('🔍 ADMIN: Insert result:', insertResult);
+        console.log('🔍 ADMIN: Insert error:', insertError);
 
         if (insertError) throw insertError;
       }
