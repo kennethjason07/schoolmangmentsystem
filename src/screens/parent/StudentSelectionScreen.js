@@ -148,13 +148,13 @@ const StudentSelectionScreen = ({ navigation }) => {
                   <View style={styles.studentInfo}>
                     <Text style={styles.studentName}>{student.name}</Text>
                     <Text style={styles.studentClass}>
-                      Class {getStudentClass(student)}
+                      Class {typeof getStudentClass === 'function' ? getStudentClass(student) : 'Loading...'}
                     </Text>
                     <Text style={styles.studentDetails}>
-                      Roll: {student.roll_no} • Admission: {getStudentAdmissionNo(student)}
+                      Roll: {student.roll_no} • Admission: {typeof getStudentAdmissionNo === 'function' ? getStudentAdmissionNo(student) : 'Loading...'}
                     </Text>
                     <Text style={styles.relationshipType}>
-                      Your relationship: {student.relationshipType}
+                      Your relationship: {student.relationshipType || 'N/A'}
                     </Text>
                   </View>
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text } from 'react-native';
 import { useAuth } from '../utils/AuthContext';
 import { supabase, TABLES } from '../utils/supabase';
@@ -6,13 +6,23 @@ import { supabase, TABLES } from '../utils/supabase';
 const MessageBadge = ({ userType, style, textStyle }) => {
   const { user } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
+  const lastFetchTime = useRef(0);
+  const isSubscribed = useRef(false);
 
-  // Fetch unread messages count
-  const fetchUnreadCount = async () => {
+  // Debounced fetch function to prevent rapid successive calls
+  const fetchUnreadCount = useCallback(async (force = false) => {
     try {
       if (!user?.id) return;
 
+      // Prevent fetching if we've fetched recently (within 2 seconds) unless forced
+      const now = Date.now();
+      if (!force && now - lastFetchTime.current < 2000) {
+        console.log('🔔 Skipping unread count fetch - too recent');
+        return;
+      }
+
       console.log('🔔 Fetching unread message count for user:', user.id, 'type:', userType);
+      lastFetchTime.current = now;
 
       // Get messages where current user is receiver and message is not read
       const { data: unreadMessages, error } = await supabase
@@ -36,10 +46,10 @@ const MessageBadge = ({ userType, style, textStyle }) => {
       console.log('💥 Error in fetchUnreadCount:', error);
       setUnreadCount(0);
     }
-  };
+  }, [user?.id, userType]);
 
   // Function to mark messages as read (can be called from chat screens)
-  const markMessagesAsRead = async (senderId) => {
+  const markMessagesAsRead = useCallback(async (senderId) => {
     try {
       if (!user?.id || !senderId) return;
 
@@ -59,25 +69,28 @@ const MessageBadge = ({ userType, style, textStyle }) => {
 
       // Refresh the unread count after marking as read
       setTimeout(() => {
-        fetchUnreadCount();
+        fetchUnreadCount(true); // Force refresh
       }, 500);
 
       console.log('✅ Messages marked as read successfully');
     } catch (error) {
       console.log('💥 Error in markMessagesAsRead:', error);
     }
-  };
+  }, [user?.id, fetchUnreadCount]);
 
   // Set up real-time subscription for new messages
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || isSubscribed.current) return;
+
+    console.log('🔔 Setting up MessageBadge subscriptions for user:', user.id);
+    isSubscribed.current = true;
 
     // Initial fetch
-    fetchUnreadCount();
+    fetchUnreadCount(true);
 
     // Set up real-time subscription
     const subscription = supabase
-      .channel(`message-badge-${user.id}-${Date.now()}`)
+      .channel(`message-badge-${user.id}`)
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
@@ -87,7 +100,7 @@ const MessageBadge = ({ userType, style, textStyle }) => {
         console.log('🔔 Real-time message update for badge:', payload);
         // Refresh count when new message is received
         setTimeout(() => {
-          fetchUnreadCount();
+          fetchUnreadCount(true); // Force refresh
         }, 500);
       })
       .on('postgres_changes', { 
@@ -99,20 +112,27 @@ const MessageBadge = ({ userType, style, textStyle }) => {
         console.log('🔔 Real-time message sent update for badge:', payload);
         // Refresh count when user sends a message (reduces unread count)
         setTimeout(() => {
-          fetchUnreadCount();
+          fetchUnreadCount(true); // Force refresh
         }, 500);
       })
       .subscribe();
 
-    // Refresh every 30 seconds to ensure accuracy
+    // Refresh every 60 seconds to ensure accuracy (reduced from 30s)
     const interval = setInterval(() => {
       fetchUnreadCount();
-    }, 30000);
+    }, 60000);
 
     return () => {
+      console.log('🔔 Cleaning up MessageBadge subscriptions for user:', user.id);
       subscription.unsubscribe();
       clearInterval(interval);
+      isSubscribed.current = false;
     };
+  }, [user?.id, fetchUnreadCount]);
+
+  // Reset subscription flag when user changes
+  useEffect(() => {
+    isSubscribed.current = false;
   }, [user?.id]);
 
   if (unreadCount === 0) return null;
