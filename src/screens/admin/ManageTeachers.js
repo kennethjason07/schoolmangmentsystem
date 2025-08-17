@@ -473,7 +473,11 @@ const ManageTeachers = ({ navigation, route }) => {
     // Remove duplicate subject IDs before rendering
     const uniqueSubjectIds = [...new Set(item.subjects)];
     return (
-      <View style={styles.teacherCard}>
+      <TouchableOpacity 
+        style={styles.teacherCard} 
+        onPress={() => navigation.navigate('TeacherDetails', { teacher: item })}
+        activeOpacity={0.7}
+      >
         <View style={styles.teacherInfo}>
           <View style={styles.teacherAvatar}>
             <Ionicons name="person" size={24} color="#4CAF50" />
@@ -486,7 +490,7 @@ const ManageTeachers = ({ navigation, route }) => {
             <Text style={styles.teacherClass}>{item.classes.map(c => classes.find(cls => cls.id === c)?.class_name || '').join(', ')}</Text>
             {/* Salary and Education */}
             <Text style={styles.teacherSalary}>
-              Salary: {item.salary_amount ? `₹${parseFloat(item.salary_amount).toFixed(2)}` : 'N/A'}
+              Salary: {item.salary_amount ? `₹${parseFloat(item.salary_amount).toFixed(2)}` : '₹0.00'}
             </Text>
             <Text style={styles.teacherQualification}>
               Education: {item.qualification || 'N/A'}
@@ -494,24 +498,48 @@ const ManageTeachers = ({ navigation, route }) => {
           </View>
         </View>
         <View style={styles.teacherActions}>
-          <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('TeacherDetails', { teacher: item })}>
+          <TouchableOpacity 
+            style={styles.actionButton} 
+            onPress={(e) => {
+              e.stopPropagation();
+              navigation.navigate('TeacherDetails', { teacher: item });
+            }}
+          >
             <Ionicons name="eye" size={16} color="#2196F3" />
             <Text style={styles.actionText}>View</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('AssignTaskToTeacher', { teacher: item })}>
+          <TouchableOpacity 
+            style={styles.actionButton} 
+            onPress={(e) => {
+              e.stopPropagation();
+              navigation.navigate('AssignTaskToTeacher', { teacher: item });
+            }}
+          >
             <Ionicons name="clipboard" size={16} color="#388e3c" />
             <Text style={styles.actionText}>Assign Task</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={() => openEditModal(item)}>
+          <TouchableOpacity 
+            style={styles.actionButton} 
+            onPress={(e) => {
+              e.stopPropagation();
+              openEditModal(item);
+            }}
+          >
             <Ionicons name="create" size={16} color="#FF9800" />
             <Text style={styles.actionText}>Edit</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={() => handleDelete(item)}>
+          <TouchableOpacity 
+            style={styles.actionButton} 
+            onPress={(e) => {
+              e.stopPropagation();
+              handleDelete(item);
+            }}
+          >
             <Ionicons name="trash" size={16} color="#f44336" />
             <Text style={styles.actionText}>Delete</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 

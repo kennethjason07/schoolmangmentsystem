@@ -27,9 +27,9 @@ export default function MarksEntry({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedClass, setSelectedClass] = useState(null);
   const [selectedSubject, setSelectedSubject] = useState(null);
+  const [selectedExam, setSelectedExam] = useState(null);
+  const [exams, setExams] = useState([]);
   const [students, setStudents] = useState([]);
-  const [examDate, setExamDate] = useState(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [marks, setMarks] = useState({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -133,9 +133,9 @@ export default function MarksEntry({ navigation }) {
         table: TABLES.MARKS
       }, () => {
         loadTeacherData();
-        // Reload marks if class and subject are already selected
-        if (selectedClass && selectedSubject) {
-          loadExistingMarks(selectedClass, selectedSubject);
+        // Reload marks if class, exam, and subject are already selected
+        if (selectedClass && selectedExam && selectedSubject) {
+          loadExistingMarks(selectedClass, selectedSubject, selectedExam);
         }
       })
       .subscribe();
@@ -145,53 +145,102 @@ export default function MarksEntry({ navigation }) {
     };
   }, []);
 
-  // Load existing marks when both class and subject are selected (including on reload)
+  // Load existing marks when class, exam, and subject are selected (including on reload)
   useEffect(() => {
-    if (selectedClass && selectedSubject && classes.length > 0) {
-      loadExistingMarks(selectedClass, selectedSubject);
+    if (selectedClass && selectedExam && selectedSubject && classes.length > 0) {
+      loadExistingMarks(selectedClass, selectedSubject, selectedExam);
     }
-  }, [selectedClass, selectedSubject, classes]);
+  }, [selectedClass, selectedExam, selectedSubject, classes]);
 
   const handleClassSelect = (classId) => {
     setSelectedClass(classId);
     setSelectedSubject(null);
+    setSelectedExam(null);
     setMarks({});
+    // Load exams for the selected class
+    loadExamsForClass(classId);
+  };
+
+  const handleExamSelect = (examId) => {
+    setSelectedExam(examId);
+    setSelectedSubject(null); // Clear subject when exam changes
+    setMarks({}); // Clear marks when exam changes
   };
 
   const handleSubjectSelect = (subjectId) => {
     setSelectedSubject(subjectId);
     setMarks({}); // Clear marks first, they will be loaded by useEffect
   };
+
+  // Load exams for the selected class
+  const loadExamsForClass = async (classId) => {
+    if (!classId) return;
+    
+    try {
+      console.log('Loading exams for class:', classId);
+      
+      // Load all exams for this class regardless of academic year for now
+      // This ensures we see all available exams
+      const { data: examsData, error: examsError } = await supabase
+        .from(TABLES.EXAMS)
+        .select('*')
+        .eq('class_id', classId)
+        .order('start_date', { ascending: false });
+      
+      if (examsError) {
+        console.error('Error loading exams:', examsError);
+        setExams([]);
+        return;
+      }
+      
+      console.log('Found exams for class', classId, ':', examsData?.length || 0);
+      console.log('Exams data:', examsData);
+      setExams(examsData || []);
+      
+    } catch (err) {
+      console.error('Error loading exams:', err);
+      setExams([]);
+    }
+  };
   
-  // Load existing marks for the selected class and subject
-  const loadExistingMarks = async (classId, subjectId) => {
-    if (!classId || !subjectId) return;
+  // Load existing marks for the selected class, subject, and exam
+  const loadExistingMarks = async (classId, subjectId, examId) => {
+    if (!classId || !subjectId || !examId) {
+      // Clear marks if any required parameter is missing
+      setMarks({});
+      return;
+    }
     
     try {
       const selectedClassData = classes.find(c => c.id === classId);
-      if (!selectedClassData || !selectedClassData.students) return;
+      if (!selectedClassData || !selectedClassData.students) {
+        setMarks({});
+        return;
+      }
       
       const studentIds = selectedClassData.students.map(s => s.id);
       
-      console.log('Loading existing marks for class:', classId, 'subject:', subjectId, 'students:', studentIds.length);
+      console.log('Loading existing marks for class:', classId, 'subject:', subjectId, 'exam:', examId, 'students:', studentIds.length);
       
-      // Get existing marks for this specific subject and students
+      // Get existing marks for this specific exam, subject, and students
       const { data: existingMarks, error: marksError } = await supabase
         .from(TABLES.MARKS)
-        .select('student_id, marks_obtained, created_at')
+        .select('student_id, marks_obtained, grade, created_at')
+        .eq('exam_id', examId)
         .eq('subject_id', subjectId)
         .in('student_id', studentIds)
         .order('created_at', { ascending: false });
         
       if (marksError) {
         console.error('Error loading existing marks:', marksError);
+        setMarks({});
         return;
       }
       
-      console.log('Found existing marks:', existingMarks?.length || 0);
+      console.log('Found existing marks for this exam:', existingMarks?.length || 0);
       
       if (existingMarks && existingMarks.length > 0) {
-        // Get the latest marks for each student (in case there are multiple entries)
+        // Get the latest marks for each student for this specific exam
         const latestMarks = {};
         existingMarks.forEach(mark => {
           if (!latestMarks[mark.student_id] || new Date(mark.created_at) > new Date(latestMarks[mark.student_id].created_at)) {
@@ -205,21 +254,20 @@ export default function MarksEntry({ navigation }) {
           marksMap[studentId] = mark.marks_obtained?.toString() || '';
         });
         
-        console.log('Setting marks for students:', Object.keys(marksMap).length);
+        console.log('Setting marks for', Object.keys(marksMap).length, 'students for exam:', examId);
         setMarks(marksMap);
+      } else {
+        // No existing marks found for this exam - clear the marks
+        console.log('No existing marks found for this exam, clearing marks');
+        setMarks({});
       }
       
     } catch (err) {
       console.error('Error loading existing marks:', err);
+      setMarks({});
     }
   };
 
-  const handleExamDateChange = (event, selectedDate) => {
-    setShowDatePicker(false);
-    if (selectedDate) {
-      setExamDate(selectedDate);
-    }
-  };
 
   const handleMarksEntry = async (studentId, marksValue) => {
     if (!selectedClass || !selectedSubject) {
@@ -272,14 +320,20 @@ export default function MarksEntry({ navigation }) {
   };
 
   const handleSaveMarks = async () => {
-    if (!selectedClass || !selectedSubject) {
-      Alert.alert('Error', 'Please select class and subject first');
+    if (!selectedClass || !selectedSubject || !selectedExam) {
+      Alert.alert('Error', 'Please select class, subject, and exam first');
       return;
     }
 
     const selectedClassData = classes.find(c => c.id === selectedClass);
     if (!selectedClassData) {
       Alert.alert('Error', 'Class not found');
+      return;
+    }
+
+    const selectedExamData = exams.find(e => e.id === selectedExam);
+    if (!selectedExamData) {
+      Alert.alert('Error', 'Exam not found');
       return;
     }
 
@@ -295,47 +349,6 @@ export default function MarksEntry({ navigation }) {
     try {
       setSaving(true);
 
-      // First, create or find the exam record
-      const examName = `Class Test - ${format(examDate, 'dd MMM yyyy')}`;
-      const academicYear = new Date().getFullYear() + '-' + (new Date().getFullYear() + 1).toString().slice(-2);
-      
-      let examId = null;
-      
-      // Check if exam already exists
-      const { data: existingExam, error: examSearchError } = await supabase
-        .from(TABLES.EXAMS)
-        .select('id')
-        .eq('name', examName)
-        .eq('class_id', selectedClass)
-        .eq('academic_year', academicYear)
-        .single();
-
-      if (examSearchError && examSearchError.code !== 'PGRST116') {
-        // PGRST116 is "no rows returned", which is expected if exam doesn't exist
-        throw examSearchError;
-      }
-
-      if (existingExam) {
-        examId = existingExam.id;
-      } else {
-        // Create new exam record
-        const { data: newExam, error: examInsertError } = await supabase
-          .from(TABLES.EXAMS)
-          .insert({
-            name: examName,
-            class_id: selectedClass,
-            academic_year: academicYear,
-            start_date: format(examDate, 'yyyy-MM-dd'),
-            end_date: format(examDate, 'yyyy-MM-dd'),
-            remarks: 'Auto-created for marks entry'
-          })
-          .select('id')
-          .single();
-
-        if (examInsertError) throw examInsertError;
-        examId = newExam.id;
-      }
-
       // Prepare marks data with grade calculation
       const marksData = studentsWithMarks.map(student => {
         const marksObtained = parseInt(marks[student.id]);
@@ -345,11 +358,11 @@ export default function MarksEntry({ navigation }) {
         return {
           student_id: student.id,
           subject_id: selectedSubject,
-          exam_id: examId,
+          exam_id: selectedExam,
           marks_obtained: marksObtained,
           max_marks: maxMarks,
           grade: grade,
-          remarks: `Class Test - ${format(examDate, 'dd MMM yyyy')}`,
+          remarks: selectedExamData.name,
           created_at: new Date().toISOString()
         };
       });
@@ -363,7 +376,7 @@ export default function MarksEntry({ navigation }) {
 
       if (upsertError) throw upsertError;
 
-      Alert.alert('Success', `Marks saved successfully!\n\nExam: ${examName}\nStudents: ${studentsWithMarks.length}`);
+      Alert.alert('Success', `Marks saved successfully!\n\nExam: ${selectedExamData.name}\nStudents: ${studentsWithMarks.length}`);
       setMarks({});
       
     } catch (err) {
@@ -451,8 +464,49 @@ export default function MarksEntry({ navigation }) {
                 </ScrollView>
               </View>
 
-              {/* Subject Selection */}
+              {/* Exam Selection */}
               {selectedClass && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Select Exam</Text>
+                  {exams.length === 0 ? (
+                    <View style={styles.noExamsContainer}>
+                      <Ionicons name="document-text-outline" size={48} color="#ccc" />
+                      <Text style={styles.noExamsText}>No exams found</Text>
+                      <Text style={styles.noExamsSubtext}>Contact administrator to create exams for this class</Text>
+                    </View>
+                  ) : (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      {exams.map(exam => (
+                        <TouchableOpacity
+                          key={exam.id}
+                          style={[
+                            styles.examCard,
+                            selectedExam === exam.id && styles.selectedExamCard
+                          ]}
+                          onPress={() => handleExamSelect(exam.id)}
+                        >
+                          <Text style={[
+                            styles.examText,
+                            selectedExam === exam.id && styles.selectedExamText
+                          ]}>
+                            {exam.name}
+                          </Text>
+                          <Text style={styles.examDate}>
+                            {new Date(exam.start_date).toLocaleDateString('en-GB', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric'
+                            })}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  )}
+                </View>
+              )}
+
+              {/* Subject Selection */}
+              {selectedClass && selectedExam && (
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>Select Subject</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -477,24 +531,8 @@ export default function MarksEntry({ navigation }) {
                 </View>
               )}
 
-              {/* Exam Date */}
-              {selectedClass && selectedSubject && (
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Exam Date</Text>
-                  <TouchableOpacity
-                    style={styles.dateButton}
-                    onPress={() => setShowDatePicker(true)}
-                  >
-                    <Ionicons name="calendar" size={20} color="#1976d2" />
-                    <Text style={styles.dateText}>
-                      {format(examDate, 'dd MMM yyyy')}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
               {/* Students Marks Entry */}
-              {selectedClass && selectedSubject && (
+              {selectedClass && selectedExam && selectedSubject && (
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>Enter Marks</Text>
                   {classes.find(c => c.id === selectedClass)?.students.map(student => {
@@ -620,7 +658,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   selectedSubjectCard: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#1976d2',
   },
   subjectText: {
     fontSize: 16,
@@ -629,6 +667,59 @@ const styles = StyleSheet.create({
   },
   selectedSubjectText: {
     color: '#fff',
+  },
+  examCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginRight: 12,
+    minWidth: 140,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  selectedExamCard: {
+    backgroundColor: '#1976d2',
+  },
+  examText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  selectedExamText: {
+    color: '#fff',
+  },
+  examDate: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
+  noExamsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 30,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  noExamsText: {
+    fontSize: 18,
+    color: '#666',
+    marginTop: 12,
+    fontWeight: 'bold',
+  },
+  noExamsSubtext: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 4,
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
   dateButton: {
     flexDirection: 'row',

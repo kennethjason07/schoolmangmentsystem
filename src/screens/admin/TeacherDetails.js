@@ -272,7 +272,7 @@ const TeacherDetails = ({ route, navigation }) => {
     <View style={styles.container}>
       <Header title="Teacher Profile" showBack={true} />
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Profile Header Card */}
         <View style={styles.profileCard}>
           <View style={styles.avatarContainer}>
@@ -303,9 +303,9 @@ const TeacherDetails = ({ route, navigation }) => {
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
-                <MaterialIcons name="attach_money" size={20} color="#FF9800" />
+                <Text style={styles.currencyIcon}>{"\u20B9"}</Text>
                 <Text style={[styles.statNumber, styles.salaryText]} numberOfLines={1} adjustsFontSizeToFit={true}>
-                  {teacherData?.salary_amount ? `₹${parseFloat(teacherData.salary_amount).toFixed(2)}` : 'N/A'}
+                  {teacherData?.salary_amount ? parseFloat(teacherData.salary_amount).toFixed(2) : '0.00'}
                 </Text>
                 <Text style={styles.statLabel}>Salary</Text>
               </View>
@@ -341,7 +341,7 @@ const TeacherDetails = ({ route, navigation }) => {
                 <View style={styles.infoItem}>
                   <Text style={styles.infoLabel}>Salary</Text>
                   <Text style={styles.infoValue}>
-                    {teacherData?.salary_amount ? `₹${parseFloat(teacherData.salary_amount).toFixed(2)}` : 'N/A'}
+                    {teacherData?.salary_amount ? `\u20B9${parseFloat(teacherData.salary_amount).toFixed(2)}` : '\u20B90.00'}
                   </Text>
                 </View>
               </View>
@@ -518,7 +518,7 @@ const TeacherDetails = ({ route, navigation }) => {
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>Monthly Salary *</Text>
                   <View style={styles.salaryInputContainer}>
-                    <Text style={styles.currencySymbol}>₹</Text>
+                    <Text style={styles.currencySymbol}>{"\u20B9"}</Text>
                     <TextInput
                       placeholder="Enter monthly salary"
                       value={form.salary}
@@ -706,6 +706,9 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  scrollContent: {
+    paddingBottom: 100, // Bottom padding for the entire ScrollView to prevent home button overlap
+  },
   // Profile Header Card
   profileCard: {
     backgroundColor: '#fff',
@@ -793,6 +796,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     minWidth: 80,
     maxWidth: 120,
+  },
+  salaryContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  currencyIcon: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#4CAF50',
+    marginRight: 2,
   },
   statDivider: {
     width: 1,
