@@ -124,8 +124,7 @@ const ProfileScreen = () => {
         .update({
           full_name: form.name,
           email: form.email,
-          phone: form.contact,
-          updated_at: new Date().toISOString()
+          phone: form.contact
         })
         .eq('id', authUser.id);
 

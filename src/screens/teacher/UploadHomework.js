@@ -279,10 +279,7 @@ const UploadHomework = () => {
         // Update existing homework
         const { error: updateError } = await supabase
           .from(TABLES.HOMEWORKS)
-          .update({
-            ...homeworkData,
-            updated_at: new Date().toISOString()
-          })
+          .update(homeworkData)
           .eq('id', editingHomework.id);
         error = updateError;
       } else {

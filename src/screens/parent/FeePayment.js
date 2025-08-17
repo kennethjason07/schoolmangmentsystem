@@ -155,8 +155,7 @@ const FeePayment = () => {
               student_id: safeStudentId,
               fee_component: 'Tuition Fee',
               amount: 25000,
-              due_date: '2024-04-30',
-              created_at: new Date().toISOString()
+              due_date: '2024-04-30'
             },
             {
               id: 'sample-2',
@@ -165,8 +164,7 @@ const FeePayment = () => {
               student_id: safeStudentId,
               fee_component: 'Development Fee',
               amount: 5000,
-              due_date: '2024-04-30',
-              created_at: new Date().toISOString()
+              due_date: '2024-04-30'
             },
             {
               id: 'sample-3',
@@ -175,8 +173,7 @@ const FeePayment = () => {
               student_id: safeStudentId,
               fee_component: 'Transport Fee',
               amount: 8000,
-              due_date: '2024-05-31',
-              created_at: new Date().toISOString()
+              due_date: '2024-05-31'
             }
           ];
         }

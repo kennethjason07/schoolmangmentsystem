@@ -133,8 +133,7 @@ const AttendanceManagement = () => {
           {
             class_name: newClassName.trim(),
             section: newClassSection.trim(),
-            academic_year: newAcademicYear,
-            created_at: new Date().toISOString()
+            academic_year: newAcademicYear
           }
         ])
         .select();
@@ -331,8 +330,7 @@ const AttendanceManagement = () => {
         student_id: studentId,
         date: attendanceDate,
         status: status,
-        marked_by: null, // You can add current user ID here if needed
-        created_at: new Date().toISOString()
+        marked_by: null // You can add current user ID here if needed
       }));
 
       await supabase
@@ -377,8 +375,7 @@ const AttendanceManagement = () => {
         teacher_id: teacherId,
         date: attendanceDate,
         status: status,
-        marked_by: null, // You can add current user ID here if needed
-        created_at: new Date().toISOString()
+        marked_by: null // You can add current user ID here if needed
       }));
 
       await supabase

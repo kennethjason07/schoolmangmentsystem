@@ -144,8 +144,7 @@ const Notifications = ({ navigation }) => {
         const { data: updateData, error: updateError } = await supabase
           .from('notification_recipients')
           .update({ 
-            is_read: true,
-            read_at: new Date().toISOString()
+            is_read: true
           })
           .eq('id', notification.recipientId)
           .select();
@@ -175,8 +174,7 @@ const Notifications = ({ navigation }) => {
           const { data: updateData, error: updateError } = await supabase
             .from('notification_recipients')
             .update({ 
-              is_read: true,
-              read_at: new Date().toISOString()
+              is_read: true
             })
             .eq('id', existingRecord.id)
             .select();
@@ -215,9 +213,7 @@ const Notifications = ({ navigation }) => {
                   recipient_id: user.id,
                   recipient_type: recipientType,
                   delivery_status: deliveryStatus,
-                  is_read: true,
-                  read_at: new Date().toISOString(),
-                  sent_at: new Date().toISOString()
+                  is_read: true
                 });
               }
             }
@@ -262,8 +258,7 @@ const Notifications = ({ navigation }) => {
               recipient_id: user.id,
               recipient_type: 'Parent', // Match schema constraint: 'Student' or 'Parent' (capitalized)
               delivery_status: 'Sent', // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
-              is_read: false, // Start as unread, then update
-              sent_at: new Date().toISOString()
+              is_read: false // Start as unread, then update
             };
             
             console.log('Trying minimal record:', minimalRecord);
@@ -284,8 +279,7 @@ const Notifications = ({ navigation }) => {
               const { error: updateError } = await supabase
                 .from('notification_recipients')
                 .update({ 
-                  is_read: true,
-                  read_at: new Date().toISOString()
+                  is_read: true
                 })
                 .eq('id', insertData[0].id);
               

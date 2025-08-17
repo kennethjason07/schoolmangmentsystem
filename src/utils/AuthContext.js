@@ -204,8 +204,7 @@ export const AuthProvider = ({ children }) => {
         role_id: userData.role_id,
         name: userData.name || '',
         phone: userData.phone || '',
-        linked_student_id: userData.linked_student_id || null,
-        created_at: new Date().toISOString()
+        linked_student_id: userData.linked_student_id || null
       };
 
       // Use upsert to handle potential race conditions

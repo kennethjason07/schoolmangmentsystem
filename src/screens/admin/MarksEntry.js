@@ -78,8 +78,7 @@ const MarksEntry = () => {
           name: subjectName,
           class_id: examClass.id,
           academic_year: '2024-25',
-          is_optional: false,
-          created_at: new Date().toISOString()
+          is_optional: false
         }));
       }
 
@@ -202,8 +201,7 @@ const MarksEntry = () => {
       name: newSubjectName.trim(),
       class_id: examClass.id,
       academic_year: '2024-25',
-      is_optional: false,
-      created_at: new Date().toISOString()
+      is_optional: false
     };
 
     setSubjects(prev => [...prev, newSubject]);
@@ -234,8 +232,7 @@ const MarksEntry = () => {
       address: null,
       phone: null,
       email: null,
-      admission_date: new Date().toISOString().split('T')[0],
-      created_at: new Date().toISOString()
+      admission_date: new Date().toISOString().split('T')[0]
     };
 
     setStudents(prev => [...prev, newStudent]);

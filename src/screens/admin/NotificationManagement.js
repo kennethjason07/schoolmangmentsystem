@@ -178,8 +178,7 @@ const NotificationManagement = () => {
       const { error: updateError } = await supabase
         .from('notification_recipients')
         .update({ 
-          delivery_status: 'Sent', // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
-          sent_at: new Date().toISOString()
+          delivery_status: 'Sent' // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
         })
         .eq('notification_id', notification.id);
       
@@ -189,8 +188,7 @@ const NotificationManagement = () => {
       const { error: notifUpdateError } = await supabase
         .from(TABLES.NOTIFICATIONS)
         .update({ 
-          delivery_status: 'Sent', // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
-          sent_at: new Date().toISOString()
+          delivery_status: 'Sent' // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
         })
         .eq('id', notification.id);
       
@@ -216,8 +214,7 @@ const NotificationManagement = () => {
         message: notification.message,
         sent_to_role: notification.sent_to_role,
         sent_to_id: notification.sent_to_id,
-        delivery_status: 'Pending', // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
-        created_at: new Date().toISOString()
+        delivery_status: 'Pending' // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
       };
       
       const { data, error } = await supabase

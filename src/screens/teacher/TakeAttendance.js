@@ -221,8 +221,7 @@ const TakeAttendance = () => {
         class_id: selectedClass,
         date: selectedDate,
         status: attendanceMark[student.id] || 'Absent',
-        marked_by: user.id, // Use user.id instead of teacherInfo.id for consistency
-        created_at: new Date().toISOString()
+        marked_by: user.id // Use user.id instead of teacherInfo.id for consistency
       }));
 
       // Upsert attendance records (insert or update if exists)

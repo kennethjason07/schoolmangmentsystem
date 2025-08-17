@@ -362,8 +362,7 @@ export default function MarksEntry({ navigation }) {
           marks_obtained: marksObtained,
           max_marks: maxMarks,
           grade: grade,
-          remarks: selectedExamData.name,
-          created_at: new Date().toISOString()
+          remarks: selectedExamData.name
         };
       });
 

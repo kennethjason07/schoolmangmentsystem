@@ -218,8 +218,7 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
               subject_id: subjectId,
               marks_obtained: markValue,
               max_marks: 100,
-              exam_id: null,
-              created_at: new Date().toISOString()
+              exam_id: null
             });
           }
         }

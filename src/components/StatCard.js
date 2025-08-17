@@ -91,11 +91,6 @@ const styles = StyleSheet.create({
     marginVertical: 8,
     marginHorizontal: 4,
     borderLeftWidth: 5,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
     minHeight: 110, // Original height for non-teacher dashboards
     position: 'relative',
   },
@@ -151,11 +146,6 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
   },
   content: {
     flex: 1,

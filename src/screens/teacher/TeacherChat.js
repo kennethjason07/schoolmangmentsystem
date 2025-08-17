@@ -630,7 +630,6 @@ const TeacherChat = () => {
         receiver_id: contactUserId,
         student_id: selectedContact.students ? selectedContact.students[0]?.id : selectedContact.id, // Parent has students array, student is the student
         message: input,
-        sent_at: new Date().toISOString(),
       };
 
       console.log('Message to insert:', newMsg);
@@ -754,7 +753,6 @@ const TeacherChat = () => {
           type: isImage ? 'image' : 'file',
           uri: asset.uri,
           file_name: asset.fileName || asset.uri.split('/').pop(),
-          sent_at: new Date().toISOString(),
         };
         
         const { error: sendError } = await supabase

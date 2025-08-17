@@ -657,7 +657,6 @@ const ChatWithTeacher = () => {
         receiver_id: teacherUserId, // Use teacher's user ID, not teacher table ID
         student_id: parentUser.linked_parent_of,
         message: input,
-        sent_at: new Date().toISOString(),
       };
 
       console.log('Message to insert:', newMsg);
@@ -690,7 +689,7 @@ const ChatWithTeacher = () => {
         receiver_id: teacherUserId,
         message: input,
         text: input, // Add this for compatibility with render
-        sent_at: new Date().toISOString(),
+        sent_at: insertedMsg?.[0]?.sent_at || new Date().toISOString(),
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         type: 'text',
         sender: 'parent' // Add this for the render logic
@@ -765,7 +764,6 @@ const ChatWithTeacher = () => {
           file_name: asset.fileName || 'image.jpg',
           file_size: asset.fileSize || 0,
           file_type: 'image/jpeg',
-          sent_at: new Date().toISOString(),
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           sender: 'parent'
         };
@@ -854,7 +852,6 @@ const ChatWithTeacher = () => {
         file_name: fileData.file_name,
         file_size: fileData.file_size,
         file_type: fileData.file_type,
-        sent_at: new Date().toISOString(),
       };
 
       const { data: insertedMsg, error: sendError } = await supabase

@@ -183,13 +183,11 @@ function groupAndSortSchedule(schedule) {
             {
               id: '1',
               message: 'Welcome to the Teacher Dashboard!',
-              created_at: new Date().toISOString(),
               type: 'general'
             },
             {
               id: '2',
               message: 'Please review your assigned classes.',
-              created_at: new Date(Date.now() - 3600000).toISOString(),
               type: 'general'
             }
           ];
@@ -217,8 +215,7 @@ function groupAndSortSchedule(schedule) {
           setAnnouncements([
             {
               id: 'a1',
-              message: 'Welcome to the new academic year!',
-              created_at: new Date().toISOString()
+              message: 'Welcome to the new academic year!'
             }
           ]);
         } else {
@@ -336,8 +333,7 @@ function groupAndSortSchedule(schedule) {
               description: 'Please submit your monthly attendance report',
               task_type: 'report',
               priority: 'High',
-              due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-              created_at: new Date().toISOString()
+              due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
             }
           ];
           setAdminTaskList(currentAdminTasks);
@@ -371,8 +367,7 @@ function groupAndSortSchedule(schedule) {
               task_description: 'Please update your profile with current information',
               task_type: 'general',
               priority: 'medium',
-              due_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-              created_at: new Date().toISOString()
+              due_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
             }
           ]);
         } else {

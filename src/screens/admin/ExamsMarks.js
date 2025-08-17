@@ -430,8 +430,7 @@ const ExamsMarks = () => {
           name: subjectName,
           class_id: classItem.id,
           academic_year: '2024-25',
-          is_optional: false,
-          created_at: new Date().toISOString()
+          is_optional: false
         };
         newSubjects.push(newSubject);
       }
@@ -501,8 +500,7 @@ const ExamsMarks = () => {
         name: newSubjectName.trim(),
         class_id: selectedClassForMarks?.id,
         academic_year: '2024-25',
-        is_optional: false,
-        created_at: new Date().toISOString()
+        is_optional: false
       };
 
       setSubjects(prev => [...prev, newSubject]);
@@ -540,8 +538,7 @@ const ExamsMarks = () => {
         address: null,
         phone: null,
         email: null,
-        admission_date: new Date().toISOString().split('T')[0],
-        created_at: new Date().toISOString()
+        admission_date: new Date().toISOString().split('T')[0]
       };
 
       setStudents(prev => [...prev, newStudent]);
@@ -763,8 +760,7 @@ const ExamsMarks = () => {
         class_name: newClassName.trim(),
         section: 'A', // Default section
         academic_year: '2024-25',
-        class_teacher_id: null,
-        created_at: new Date().toISOString()
+        class_teacher_id: null
       };
 
       setClasses(prev => [...prev, newClass]);

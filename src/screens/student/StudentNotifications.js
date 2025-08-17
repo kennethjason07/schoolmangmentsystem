@@ -171,8 +171,7 @@ const StudentNotifications = () => {
         const { error: updateError } = await supabase
           .from('notification_recipients')
           .update({
-            is_read: true,
-            read_at: new Date().toISOString()
+            is_read: true
           })
           .eq('id', notification.recipientId);
 
@@ -190,9 +189,7 @@ const StudentNotifications = () => {
             recipient_id: user.id,
             recipient_type: 'Student', // Valid values: 'Student', 'Parent' (capitalized)
             is_read: true,
-            read_at: new Date().toISOString(),
-            delivery_status: 'Sent', // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
-            sent_at: new Date().toISOString()
+            delivery_status: 'Sent' // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
           });
 
         if (insertError) {

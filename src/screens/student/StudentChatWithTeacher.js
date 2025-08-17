@@ -791,7 +791,6 @@ const StudentChatWithTeacher = () => {
         receiver_id: teacherUserId, // Use teacher's user ID, not teacher table ID
         student_id: student.id,
         message: input,
-        sent_at: new Date().toISOString(),
       };
 
       console.log('Message to insert:', newMsg);
@@ -816,7 +815,7 @@ const StudentChatWithTeacher = () => {
         receiver_id: teacherUserId,
         student_id: student.id,
         message: input,
-        sent_at: new Date().toISOString(),
+        sent_at: insertedMsg?.[0]?.sent_at || new Date().toISOString(),
         type: 'text'
       };
 
