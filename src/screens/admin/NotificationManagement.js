@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, TextInput, Button, Alert, ScrollView, ActivityIndicator } from 'react-native';
-import Header from '../../components/Header';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, TextInput, ScrollView, ActivityIndicator, Modal, Button } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { useAuth } from '../../utils/AuthContext';
+import Header from '../../components/Header';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { supabase, TABLES } from '../../utils/supabase';
-
+import { formatToLocalTime } from '../../utils/timeUtils';
 const roles = ['teacher', 'parent', 'student', 'admin'];
 const notificationTypes = ['General', 'Urgent', 'Fee Reminder', 'Event', 'Homework', 'Attendance', 'Absentee', 'Exam'];
 
@@ -506,8 +507,8 @@ const NotificationManagement = () => {
                 <Text style={styles.notificationMsg}>{item.message}</Text>
                 <Text style={styles.notificationMeta}>
                   Recipients: {item.notification_recipients?.length || 0}
-                  {item.scheduled_at ? ` | Scheduled: ${new Date(item.scheduled_at).toLocaleString()}` : ''}
-                  {item.sent_at ? ` | Sent: ${new Date(item.sent_at).toLocaleString()}` : ''}
+                  {item.scheduled_at ? ` | Scheduled: ${formatToLocalTime(item.scheduled_at)}` : ''}
+                  {item.sent_at ? ` | Sent: ${formatToLocalTime(item.sent_at)}` : ''}
                 </Text>
                 <Text style={styles.notificationStatus}>
                   Status: {item.delivery_status || 'Pending'}
@@ -544,10 +545,10 @@ const NotificationManagement = () => {
                 <Text style={styles.notificationMsg}>{modal.notification.message}</Text>
                 <Text style={styles.notificationMeta}>To: {modal.notification.sent_to_role || 'Unknown'}</Text>
                 {modal.notification.scheduled_at && (
-                  <Text style={styles.notificationMeta}>Scheduled: {new Date(modal.notification.scheduled_at).toLocaleString()}</Text>
+                  <Text style={styles.notificationMeta}>Scheduled: {formatToLocalTime(modal.notification.scheduled_at)}</Text>
                 )}
                 {modal.notification.sent_at && (
-                  <Text style={styles.notificationMeta}>Sent: {new Date(modal.notification.sent_at).toLocaleString()}</Text>
+                  <Text style={styles.notificationMeta}>Sent: {formatToLocalTime(modal.notification.sent_at)}</Text>
                 )}
                 <Text style={styles.notificationMeta}>Status: {modal.notification.delivery_status || 'Unknown'}</Text>
                 <Button title="Close" onPress={() => setModal({ visible: false, mode: 'view', notification: null })} />

@@ -19,6 +19,7 @@ import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
+import { formatToLocalTime } from '../../utils/timeUtils';
 
 const { width } = Dimensions.get('window');
 
@@ -377,7 +378,7 @@ const Notifications = ({ navigation }) => {
       if (diffInDays < 7) {
         return `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`;
       } else {
-        return date.toLocaleDateString();
+        return formatToLocalTime(timestamp);
       }
     }
   };

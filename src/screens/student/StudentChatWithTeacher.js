@@ -7,6 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useMessageStatus } from '../../utils/useMessageStatus';
+import { formatToLocalTime } from '../../utils/timeUtils';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 
 const StudentChatWithTeacher = () => {
@@ -822,11 +823,6 @@ const StudentChatWithTeacher = () => {
       setMessages(prev => [...prev, displayMsg]);
       setInput('');
       
-      // Refresh messages from database to ensure consistency
-      setTimeout(() => {
-        fetchMessages(selectedTeacher);
-      }, 500);
-      
       // Scroll to bottom after sending
       setTimeout(() => {
         if (flatListRef.current) {
@@ -1120,7 +1116,7 @@ const StudentChatWithTeacher = () => {
                   {(!item.type || item.type === 'text') && (
                     <Text style={styles.messageText}>{item.message || item.text}</Text>
                   )}
-                  <Text style={styles.messageTime}>{item.sent_at ? new Date(item.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')}</Text>
+                  <Text style={styles.messageTime}>{formatToLocalTime(item.sent_at || item.created_at)}</Text>
                 </View>
               </TouchableOpacity>
             )}

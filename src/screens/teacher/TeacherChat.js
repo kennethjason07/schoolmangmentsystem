@@ -7,6 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useMessageStatus } from '../../utils/useMessageStatus';
+import { formatToLocalTime, debugTimestamp } from '../../utils/timeUtils';
 
 const TeacherChat = () => {
   const { user } = useAuth();
@@ -516,6 +517,9 @@ const TeacherChat = () => {
               message: msg.message?.substring(0, 50) + '...',
               sent_at: msg.sent_at
             });
+            
+            // Debug timestamp for each message
+            debugTimestamp(msg.sent_at, `Message ${index + 1}`);
           });
         }
 
@@ -625,11 +629,26 @@ const TeacherChat = () => {
       console.log('Selected Contact:', selectedContact);
 
       const contactUserId = selectedContact.userId || selectedContact.id;
+      
+      // Get current time and properly convert to UTC
+      const now = new Date();
+      const currentUTCTime = now.toISOString(); // This ensures Z suffix
+      
+      console.log('🕐 Current UTC time:', currentUTCTime);
+      console.log('🕐 Local time (IST):', now.toLocaleString('en-US', { 
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: true 
+      }));
+      console.log('🕐 Timestamp being stored:', currentUTCTime);
+      
       const newMsg = {
         sender_id: user.id,
         receiver_id: contactUserId,
         student_id: selectedContact.students ? selectedContact.students[0]?.id : selectedContact.id, // Parent has students array, student is the student
         message: input,
+        sent_at: currentUTCTime, // Explicitly set current UTC time
       };
 
       console.log('Message to insert:', newMsg);
@@ -654,17 +673,12 @@ const TeacherChat = () => {
         receiver_id: contactUserId,
         student_id: selectedContact.students ? selectedContact.students[0]?.id : selectedContact.id,
         message: input,
-        sent_at: new Date().toISOString(),
+        sent_at: insertedMsg?.[0]?.sent_at || new Date().toISOString(),
         type: 'text'
       };
 
       setMessages(prev => [...prev, displayMsg]);
       setInput('');
-      
-      // Refresh messages from database to ensure consistency
-      setTimeout(() => {
-        fetchMessages(selectedContact);
-      }, 500);
       
       // Scroll to bottom after sending
       setTimeout(() => {
@@ -1193,7 +1207,7 @@ const TeacherChat = () => {
                     {(!item.type || item.type === 'text') && (
                       <Text style={styles.messageText}>{item.message || item.text}</Text>
                     )}
-                    <Text style={styles.messageTime}>{item.sent_at ? new Date(item.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</Text>
+                    <Text style={styles.messageTime}>{formatToLocalTime(item.sent_at)}</Text>
                   </View>
                 </TouchableOpacity>
               )}

@@ -9,6 +9,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useMessageStatus, getUnreadCountFromSender } from '../../utils/useMessageStatus';
+import { formatToLocalTime } from '../../utils/timeUtils';
 
 const ChatWithTeacher = () => {
   const { user } = useAuth();
@@ -178,7 +179,7 @@ const ChatWithTeacher = () => {
           messagesByTeacherUserId[teacherUserId].push({
             ...msg,
             text: msg.message,
-            timestamp: new Date(msg.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            timestamp: formatToLocalTime(msg.sent_at),
             sender: msg.sender_id === user.id ? 'parent' : 'teacher'
           });
         });
@@ -690,7 +691,7 @@ const ChatWithTeacher = () => {
         message: input,
         text: input, // Add this for compatibility with render
         sent_at: insertedMsg?.[0]?.sent_at || new Date().toISOString(),
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: formatToLocalTime(new Date().toISOString()),
         type: 'text',
         sender: 'parent' // Add this for the render logic
       };
@@ -764,7 +765,7 @@ const ChatWithTeacher = () => {
           file_name: asset.fileName || 'image.jpg',
           file_size: asset.fileSize || 0,
           file_type: 'image/jpeg',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestamp: formatToLocalTime(new Date().toISOString()),
           sender: 'parent'
         };
         
@@ -802,7 +803,7 @@ const ChatWithTeacher = () => {
           file_size: file.size || 0,
           file_type: file.mimeType || 'application/octet-stream',
           sent_at: new Date().toISOString(),
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestamp: formatToLocalTime(new Date().toISOString()),
           sender: 'parent'
         };
         
@@ -865,7 +866,7 @@ const ChatWithTeacher = () => {
       const displayMsg = {
         ...newMsg,
         id: insertedMsg[0].id,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: formatToLocalTime(new Date().toISOString()),
         sender: 'parent'
       };
 
@@ -1303,7 +1304,7 @@ const ChatWithTeacher = () => {
                     )}
                     
                     <Text style={[styles.messageTime, { opacity: deletingMessageId === item.id ? 0.3 : 1 }]}>
-                      {item.timestamp || (item.sent_at ? new Date(item.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')}
+                      {item.timestamp || formatToLocalTime(item.sent_at)}
                     </Text>
                   </View>
                 </Animatable.View>
