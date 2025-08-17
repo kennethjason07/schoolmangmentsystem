@@ -1177,7 +1177,7 @@ export const generateAcademicPerformanceHTML = (data, stats) => {
         <!-- Top Performers -->
         ${stats.topPerformers.length > 0 ? `
         <div class="performers-section">
-          <h2 class="section-title">🏆 Top Performers</h2>
+          <h2 class="section-title">📅 Top Performers</h2>
           ${stats.topPerformers.slice(0, 10).map((performer, index) => {
             const scoreColor = performer.percentage >= 90 ? '#4CAF50' : 
                               performer.percentage >= 80 ? '#8BC34A' : 

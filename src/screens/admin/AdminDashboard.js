@@ -24,6 +24,7 @@ import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import CrossPlatformBarChart from '../../components/CrossPlatformBarChart';
 import { supabase, dbHelpers } from '../../utils/supabase';
 import { format, addMonths } from 'date-fns';
+import { getEventDisplayProps } from '../../utils/eventIcons';
 
 const { width } = Dimensions.get('window');
 
@@ -163,14 +164,17 @@ const AdminDashboard = ({ navigation }) => {
         .limit(10);
 
       if (eventsData && !eventsError) {
-        setEvents(eventsData.map(event => ({
-          id: event.id,
-          type: event.event_type || 'Event',
-          title: event.title,
-          date: event.event_date,
-          icon: event.icon || 'calendar',
-          color: event.color || '#FF9800'
-        })));
+        setEvents(eventsData.map(event => {
+          const { icon, color } = getEventDisplayProps(event.event_type || 'Event', event.title || '');
+          return {
+            id: event.id,
+            type: event.event_type || 'Event',
+            title: event.title,
+            date: event.event_date,
+            icon: icon,
+            color: color
+          };
+        }));
       } else if (eventsError && eventsError.code !== '42P01') {
         console.error('Error loading events:', eventsError);
         // Set empty events array if there's an error or no events
@@ -263,13 +267,6 @@ const AdminDashboard = ({ navigation }) => {
       }, () => {
         loadDashboardData();
         loadChartData();
-      })
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'notifications'
-      }, () => {
-        loadDashboardData();
       })
       .on('postgres_changes', {
         event: '*',
@@ -391,7 +388,7 @@ const AdminDashboard = ({ navigation }) => {
     title: '', 
     description: '',
     date: '', 
-    icon: 'trophy', 
+    icon: 'calendar', 
     color: '#FF9800',
     isSchoolWide: true,
     selectedClasses: []
@@ -428,7 +425,7 @@ const AdminDashboard = ({ navigation }) => {
       title: '', 
       description: '',
       date: '', 
-      icon: 'trophy', 
+      icon: 'calendar', 
       color: '#FF9800',
       isSchoolWide: true,
       selectedClasses: [] 
@@ -457,10 +454,9 @@ const AdminDashboard = ({ navigation }) => {
           .from('events')
           .update({
             title: eventInput.title,
+            description: eventInput.description,
             event_date: eventInput.date,
             event_type: eventInput.type,
-            icon: eventInput.icon,
-            color: eventInput.color,
             is_school_wide: true,
             status: 'Active',
             updated_at: new Date().toISOString()
@@ -474,10 +470,9 @@ const AdminDashboard = ({ navigation }) => {
           .from('events')
           .insert({
             title: eventInput.title,
+            description: eventInput.description,
             event_date: eventInput.date,
             event_type: eventInput.type,
-            icon: eventInput.icon,
-            color: eventInput.color,
             is_school_wide: true,
             status: 'Active'
           });

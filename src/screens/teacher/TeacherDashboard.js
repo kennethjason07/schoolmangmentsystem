@@ -17,6 +17,10 @@ const screenWidth = Dimensions.get('window').width;
 const TeacherDashboard = ({ navigation }) => {
   const [personalTasks, setPersonalTasks] = useState([]);
   const [adminTaskList, setAdminTaskList] = useState([]);
+  const [allAdminTasks, setAllAdminTasks] = useState([]); // Store all admin tasks
+  const [allPersonalTasks, setAllPersonalTasks] = useState([]); // Store all personal tasks
+  const [showAllAdminTasks, setShowAllAdminTasks] = useState(false);
+  const [showAllPersonalTasks, setShowAllPersonalTasks] = useState(false);
   const [showAddTaskBar, setShowAddTaskBar] = useState(false);
   const [newTask, setNewTask] = useState({ task: '', type: 'attendance', due: '', priority: 'medium' });
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -282,19 +286,22 @@ function groupAndSortSchedule(schedule) {
           console.log('Query details - assignedClassIds:', assignedClassIds, 'today:', today);
         }
         
-        const mappedEvents = (upcomingEventsData || []).map(event => ({
-          id: event.id,
-          type: event.event_type || 'Event',
-          title: event.title,
-          description: event.description || '',
-          date: event.event_date,
-          time: event.start_time || '09:00',
-          icon: event.icon || 'calendar',
-          color: event.color || '#FF9800',
-          priority: event.event_type === 'Exam' ? 'high' : 'medium',
-          location: event.location,
-          organizer: event.organizer
-        }));
+        const mappedEvents = (upcomingEventsData || []).map(event => {
+          console.log(`🔍 Event mapping - Title: "${event.title}", Description: "${event.description || 'EMPTY'}"`);          
+          return {
+            id: event.id,
+            type: event.event_type || 'Event',
+            title: event.title,
+            description: event.description || 'No description available',
+            date: event.event_date,
+            time: event.start_time || '09:00',
+            icon: event.icon || 'calendar',
+            color: event.color || '#FF9800',
+            priority: event.event_type === 'Exam' ? 'high' : 'medium',
+            location: event.location,
+            organizer: event.organizer
+          };
+        });
         
         console.log('✅ Mapped events for dashboard:', mappedEvents.length);
         console.log('📊 Setting upcoming events count to:', mappedEvents.length);
@@ -315,14 +322,34 @@ function groupAndSortSchedule(schedule) {
       }
       // Get admin tasks assigned to this teacher (using existing tasks table)
       try {
+        console.log('🔍 TEACHER: Fetching admin tasks for teacher ID:', teacher.id);
+        console.log('🔍 TEACHER: Teacher object:', teacher);
+        
+        // First, let's get ALL tasks to see what's in the database
+        const { data: allTasksData, error: allTasksError } = await supabase
+          .from(TABLES.TASKS)
+          .select('*');
+          
+        console.log('🔍 TEACHER: All tasks in database:', allTasksData?.length || 0);
+        if (allTasksData && allTasksData.length > 0) {
+          console.log('📊 TEACHER: Task details:');
+          allTasksData.forEach((task, index) => {
+            console.log(`   ${index + 1}. "${task.title}" - assigned_teacher_ids:`, task.assigned_teacher_ids);
+            console.log(`      Status: ${task.status}, Priority: ${task.priority}`);
+          });
+        }
+        
+        // Now try the specific query to get ALL admin tasks
         const { data: adminTasksData, error: adminTasksError } = await supabase
           .from(TABLES.TASKS)
           .select('*')
-          .contains('assigned_teacher_ids', [user.id])
+          .overlaps('assigned_teacher_ids', [teacher.id])
           .eq('status', 'Pending')
           .order('priority', { ascending: false })
-          .order('due_date', { ascending: true })
-          .limit(5);
+          .order('due_date', { ascending: true });
+          
+        console.log('📊 TEACHER: Admin tasks found with overlaps query:', adminTasksData?.length || 0);
+        console.log('📊 TEACHER: Admin tasks error:', adminTasksError);
 
         if (adminTasksError) {
           console.log('Admin tasks error:', adminTasksError);
@@ -336,10 +363,12 @@ function groupAndSortSchedule(schedule) {
               due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
             }
           ];
-          setAdminTaskList(currentAdminTasks);
+          setAllAdminTasks(currentAdminTasks);
+          setAdminTaskList(currentAdminTasks.slice(0, 3)); // Show first 3
         } else {
           currentAdminTasks = adminTasksData || [];
-          setAdminTaskList(currentAdminTasks);
+          setAllAdminTasks(currentAdminTasks);
+          setAdminTaskList(currentAdminTasks.slice(0, 3)); // Show first 3 by default
         }
       } catch (error) {
         console.log('Admin tasks catch error:', error);
@@ -355,12 +384,11 @@ function groupAndSortSchedule(schedule) {
           .eq('user_id', user.id)
           .eq('status', 'pending')
           .order('priority', { ascending: false })
-          .order('due_date', { ascending: true })
-          .limit(5);
+          .order('due_date', { ascending: true });
 
         if (personalTasksError) {
           console.log('Personal tasks error:', personalTasksError);
-          setPersonalTasks([
+          const fallbackTasks = [
             {
               id: 'pt1',
               task_title: 'Update your profile information',
@@ -369,12 +397,17 @@ function groupAndSortSchedule(schedule) {
               priority: 'medium',
               due_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
             }
-          ]);
+          ];
+          setAllPersonalTasks(fallbackTasks);
+          setPersonalTasks(fallbackTasks.slice(0, 3)); // Show first 3
         } else {
-          setPersonalTasks(personalTasksData || []);
+          const allPersonalTasks = personalTasksData || [];
+          setAllPersonalTasks(allPersonalTasks);
+          setPersonalTasks(allPersonalTasks.slice(0, 3)); // Show first 3 by default
         }
       } catch (error) {
         console.log('Personal tasks catch error:', error);
+        setAllPersonalTasks([]);
         setPersonalTasks([]);
       }
 
@@ -497,45 +530,45 @@ function groupAndSortSchedule(schedule) {
       setTeacherStats([
         {
           title: 'My Students',
-          value: uniqueStudentCount.toString(),
+          value: (uniqueStudentCount || 0).toString(),
           icon: 'people',
           color: '#2196F3',
-          subtitle: `Across ${uniqueClasses} class${uniqueClasses !== 1 ? 'es' : ''}`,
+          subtitle: `Across ${uniqueClasses || 0} class${(uniqueClasses || 0) !== 1 ? 'es' : ''}`,
           trend: 0,
           onPress: () => navigation?.navigate('ViewStudentInfo')
         },
         {
           title: 'My Subjects',
-          value: totalSubjects.toString(),
+          value: (totalSubjects || 0).toString(),
           icon: 'book',
           color: '#4CAF50',
-          subtitle: `${uniqueClasses} class${uniqueClasses !== 1 ? 'es' : ''} assigned`,
+          subtitle: `${uniqueClasses || 0} class${(uniqueClasses || 0) !== 1 ? 'es' : ''} assigned`,
           trend: 0,
           onPress: () => navigation?.navigate('TeacherSubjects')
         },
         {
           title: 'Today\'s Classes',
-          value: todayClasses.toString(),
+          value: (todayClasses || 0).toString(),
           icon: 'time',
           color: '#FF9800',
-          subtitle: schedule.length > 0 ? `Next: ${schedule[0]?.start_time || 'N/A'}` : 'No classes today',
+          subtitle: (schedule?.length || 0) > 0 ? `Next: ${schedule[0]?.start_time || 'N/A'}` : 'No classes today',
           trend: 0,
           onPress: () => navigation?.navigate('TeacherTimetable')
         },
         {
           title: 'Upcoming Events',
-          value: currentEventsForStats.length.toString(),
+          value: (currentEventsForStats?.length || 0).toString(),
           icon: 'calendar',
-          color: currentEventsForStats.length > 0 ? '#E91E63' : '#9E9E9E',
-          subtitle: currentEventsForStats.length > 0 ?
+          color: (currentEventsForStats?.length || 0) > 0 ? '#E91E63' : '#9E9E9E',
+          subtitle: (currentEventsForStats?.length || 0) > 0 ?
             `Next: ${currentEventsForStats[0]?.title || 'Event'}` :
             'No events scheduled',
-          trend: currentEventsForStats.filter(e => e.event_type === 'Exam').length > 0 ? 1 : 0,
+          trend: (currentEventsForStats?.filter(e => e.event_type === 'Exam')?.length || 0) > 0 ? 1 : 0,
           onPress: () => {
             // Scroll to events section or show events modal
             Alert.alert(
               'Upcoming Events',
-              currentEventsForStats.length > 0 ?
+              (currentEventsForStats?.length || 0) > 0 ?
                 currentEventsForStats.map(e => `• ${e.title} (${new Date(e.event_date).toLocaleDateString()})`).join('\n') :
                 'No upcoming events scheduled.',
               [{ text: 'OK' }]
@@ -717,7 +750,7 @@ function groupAndSortSchedule(schedule) {
           completed_at: new Date().toISOString()
         })
         .eq('id', id)
-        .contains('assigned_teacher_ids', [user.id]);
+        .overlaps('assigned_teacher_ids', [teacherProfile?.id]);
 
       if (error) {
         console.error('Error completing admin task:', error);
@@ -1021,6 +1054,17 @@ function groupAndSortSchedule(schedule) {
               <Text style={styles.actionSubtitle}>View student info</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => navigation.navigate('ViewSubmissions')}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#e91e63' }]}>
+                <Ionicons name="document-text-outline" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Submissions</Text>
+              <Text style={styles.actionSubtitle}>Grade assignments</Text>
+            </TouchableOpacity>
+
           </View>
         </View>
 
@@ -1090,8 +1134,31 @@ function groupAndSortSchedule(schedule) {
                 <Ionicons name="shield-checkmark" size={16} color="#1976d2" />
                 <Text style={styles.tasksCategoryTitle}>Admin Tasks</Text>
               </View>
-              <View style={styles.tasksCategoryCount}>
-                <Text style={styles.tasksCategoryCountText}>{adminTaskList.length}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={styles.tasksCategoryCount}>
+                  <Text style={styles.tasksCategoryCountText}>
+                    {showAllAdminTasks ? allAdminTasks.length : adminTaskList.length}
+                  </Text>
+                </View>
+                {allAdminTasks.length > 3 && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setShowAllAdminTasks(!showAllAdminTasks);
+                      setAdminTaskList(showAllAdminTasks ? allAdminTasks.slice(0, 3) : allAdminTasks);
+                    }}
+                    style={styles.viewAllButton}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.viewAllText}>
+                      {showAllAdminTasks ? 'Show Less' : 'View All'}
+                    </Text>
+                    <Ionicons 
+                      name={showAllAdminTasks ? 'chevron-up' : 'chevron-down'} 
+                      size={14} 
+                      color="#1976d2" 
+                    />
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
 
@@ -1167,8 +1234,29 @@ function groupAndSortSchedule(schedule) {
               </View>
               <View style={styles.personalTasksHeaderRight}>
                 <View style={[styles.tasksCategoryCount, { backgroundColor: '#4CAF50' }]}>
-                  <Text style={styles.tasksCategoryCountText}>{personalTasks.length}</Text>
+                  <Text style={styles.tasksCategoryCountText}>
+                    {showAllPersonalTasks ? allPersonalTasks.length : personalTasks.length}
+                  </Text>
                 </View>
+                {allPersonalTasks.length > 3 && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setShowAllPersonalTasks(!showAllPersonalTasks);
+                      setPersonalTasks(showAllPersonalTasks ? allPersonalTasks.slice(0, 3) : allPersonalTasks);
+                    }}
+                    style={[styles.viewAllButton, { backgroundColor: '#e8f5e8', marginLeft: 8, marginRight: 8 }]}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.viewAllText, { color: '#4CAF50' }]}>
+                      {showAllPersonalTasks ? 'Show Less' : 'View All'}
+                    </Text>
+                    <Ionicons 
+                      name={showAllPersonalTasks ? 'chevron-up' : 'chevron-down'} 
+                      size={14} 
+                      color="#4CAF50" 
+                    />
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   onPress={() => setAddTaskModalVisible(true)}
                   style={styles.addPersonalTaskButton}
@@ -2435,8 +2523,11 @@ const styles = StyleSheet.create({
   },
   eventDescription: {
     fontSize: 14,
-    color: '#666',
+    color: '#444',
     lineHeight: 20,
+    marginTop: 2,
+    fontWeight: '500',
+    minHeight: 20,
   },
   eventMeta: {
     alignItems: 'flex-end',

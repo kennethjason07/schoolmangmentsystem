@@ -803,7 +803,7 @@ const ManageStudents = () => {
     const matchesSearch = search === '' ||
       student.name?.toLowerCase().includes(search.toLowerCase()) ||
       student.admission_no?.toLowerCase().includes(search.toLowerCase()) ||
-      (student.roll_no && student.roll_no.toString().includes(search));
+      ((student.roll_no ?? '').toString().includes(search));
 
     const matchesClass = selectedClass === 'All' || student.class_id === selectedClass;
     

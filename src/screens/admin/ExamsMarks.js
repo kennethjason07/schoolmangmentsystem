@@ -1113,24 +1113,68 @@ const ExamsMarks = () => {
                 onChangeText={text => setExamForm(prev => ({ ...prev, name: text }))}
               />
 
-              <Text style={styles.inputLabel}>Class *</Text>
-              <View style={styles.pickerContainer}>
-                <View style={styles.pickerButton}>
-                  <Picker
-                    selectedValue={examForm.class_id}
-                    style={styles.picker}
-                    onValueChange={(value) => setExamForm(prev => ({ ...prev, class_id: value }))}
-                  >
-                    <Picker.Item label="Select Class & Section" value="" />
-                    {classes.map(classItem => (
-                      <Picker.Item
-                        key={classItem.id}
-                        label={`${classItem.class_name} - ${classItem.section}`}
-                        value={classItem.id}
-                      />
-                    ))}
-                  </Picker>
-                </View>
+              <Text style={styles.inputLabel}>Classes * (Select multiple)</Text>
+              <View style={styles.classSelectionGrid}>
+                {classes.map(classItem => {
+                  const isSelected = (examForm.selected_classes || []).includes(classItem.id);
+                  return (
+                    <TouchableOpacity
+                      key={classItem.id}
+                      style={[
+                        styles.classSelectionItem,
+                        isSelected && styles.classSelectionItemSelected
+                      ]}
+                      onPress={() => {
+                        if (isSelected) {
+                          // Remove class from selection
+                          setExamForm(prev => ({
+                            ...prev,
+                            selected_classes: prev.selected_classes.filter(id => id !== classItem.id)
+                          }));
+                        } else {
+                          // Add class to selection
+                          setExamForm(prev => ({
+                            ...prev,
+                            selected_classes: [...prev.selected_classes, classItem.id]
+                          }));
+                        }
+                      }}
+                    >
+                      <View style={styles.classItemContent}>
+                        <View style={styles.classItemInfo}>
+                          <Text style={[
+                            styles.classItemName,
+                            isSelected && styles.classItemNameSelected
+                          ]}>
+                            {classItem.class_name}
+                          </Text>
+                          <Text style={[
+                            styles.classItemSection,
+                            isSelected && styles.classItemSectionSelected
+                          ]}>
+                            Section: {classItem.section}
+                          </Text>
+                        </View>
+                        <View style={[
+                          styles.classSelectionIndicator,
+                          isSelected && styles.classSelectionIndicatorSelected
+                        ]}>
+                          <Ionicons 
+                            name={isSelected ? "checkmark-circle" : "add-circle-outline"} 
+                            size={24} 
+                            color={isSelected ? "#fff" : "#2196F3"} 
+                          />
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+                {classes.length === 0 && (
+                  <View style={styles.noClassesAvailable}>
+                    <Text style={styles.noClassesText}>No classes available</Text>
+                    <Text style={styles.noClassesSubText}>Please add classes first</Text>
+                  </View>
+                )}
               </View>
 
               <Text style={styles.inputLabel}>Start Date *</Text>

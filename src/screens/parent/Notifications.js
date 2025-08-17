@@ -399,12 +399,12 @@ const Notifications = ({ navigation }) => {
         <View style={styles.actionButtons}>
           {item.isRead ? (
             <TouchableOpacity style={styles.actionBtn} onPress={() => markAsUnread(item.id)}>
-              <Ionicons name="mail" size={18} color="#1976d2" />
+              <Ionicons name="mail-open" size={18} color="#1976d2" />
               <Text style={styles.actionText}>Mark as Unread</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={styles.actionBtn} onPress={() => markAsRead(item.id)}>
-              <Ionicons name="mail-open" size={18} color="#388e3c" />
+              <Ionicons name="mail" size={18} color="#388e3c" />
               <Text style={styles.actionText}>Mark as Read</Text>
             </TouchableOpacity>
           )}

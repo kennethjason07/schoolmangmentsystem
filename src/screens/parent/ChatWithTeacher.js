@@ -745,7 +745,7 @@ const ChatWithTeacher = () => {
       }
       
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
         quality: 0.8,
         allowsMultipleSelection: false,
@@ -1065,19 +1065,7 @@ const ChatWithTeacher = () => {
                 // Get unread count for this teacher
                 const unreadCount = unreadCounts[item.userId] || 0;
                 const hasUnread = unreadCount > 0;
-
-                // Get last message details
-                const lastMessage = item.messages && item.messages.length > 0 ? 
-                  item.messages[item.messages.length - 1] : null;
-                const lastMessageSender = lastMessage ? 
-                  (lastMessage.sender_id === user.id ? 'You' : item.name.split(' ')[0]) : null;
-                const lastMessageText = lastMessage ? 
-                  (lastMessage.text || lastMessage.message || 'Attachment') : 'No messages yet';
-                const lastMessageTime = lastMessage ? 
-                  new Date(lastMessage.sent_at).toLocaleDateString('en-US', { 
-                    month: 'short', day: 'numeric',
-                    ...(new Date(lastMessage.sent_at).getFullYear() !== new Date().getFullYear() && { year: 'numeric' })
-                  }) : null;
+                const hasMessages = item.messages && item.messages.length > 0;
 
                 return (
                   <View>
@@ -1133,46 +1121,35 @@ const ChatWithTeacher = () => {
                           {item.subject || 'Teacher'}
                         </Text>
                         
-                        {/* Last Message Preview */}
-                        {lastMessage ? (
-                          <View style={styles.lastMessageContainer}>
-                            <Text style={[
-                              styles.lastMessageText,
-                              hasUnread && styles.unreadText
-                            ]} numberOfLines={1}>
-                              {lastMessageSender}: {lastMessageText}
+                        {/* Unread Message Count or Status */}
+                        <View style={styles.messageStatusContainer}>
+                          {hasUnread ? (
+                            <Text style={styles.unreadMessagesText}>
+                              +{unreadCount} new message{unreadCount > 1 ? 's' : ''}
                             </Text>
-                            {lastMessageTime && (
-                              <Text style={[
-                                styles.lastMessageTime,
-                                hasUnread && styles.unreadTime
-                              ]}>
-                                {lastMessageTime}
-                              </Text>
-                            )}
-                          </View>
-                        ) : (
-                          <Text style={styles.noMessagesText}>
-                            Start a conversation
-                          </Text>
-                        )}
+                          ) : hasMessages ? (
+                            <Text style={styles.allReadText}>
+                              All messages read
+                            </Text>
+                          ) : (
+                            <Text style={styles.noMessagesText}>
+                              Start a conversation
+                            </Text>
+                          )}
+                        </View>
                       </View>
                       <View style={styles.chatActions}>
-                        {hasUnread ? (
-                          <View style={styles.unreadBadge}>
-                            <Text style={styles.unreadBadgeText}>
-                              {unreadCount > 99 ? '99+' : unreadCount}
-                            </Text>
-                          </View>
-                        ) : (
-                          <View style={styles.messageIndicator}>
-                            <Ionicons name="chatbubble-outline" size={18} color="#9c27b0" />
-                            {item.messages && item.messages.length > 0 && (
-                              <Text style={styles.messageCount}>{item.messages.length}</Text>
-                            )}
-                          </View>
-                        )}
-                        <Ionicons name="chevron-forward" size={20} color="#ccc" />
+                        <View style={styles.chatIconContainer}>
+                          <Ionicons name="chatbubbles" size={20} color={hasUnread ? "#f44336" : "#9c27b0"} />
+                          {hasUnread && (
+                            <View style={styles.unreadBadge}>
+                              <Text style={styles.unreadBadgeText}>
+                                {unreadCount > 99 ? '99+' : unreadCount}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                        <Ionicons name="chevron-forward" size={16} color="#ccc" style={{ marginTop: 2 }} />
                       </View>
                     </TouchableOpacity>
                   </View>
@@ -1739,21 +1716,27 @@ const styles = StyleSheet.create({
 
   // Unread Message Indicators
   unreadCard: {
-    borderLeftWidth: 3,
+    borderLeftWidth: 4,
     borderLeftColor: '#f44336',
-    backgroundColor: '#fffef7',
+    backgroundColor: '#fff8f8',
+    elevation: 4,
+    shadowColor: '#f44336',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   unreadAvatar: {
-    borderWidth: 2,
+    borderWidth: 3,
     borderColor: '#f44336',
+    elevation: 2,
   },
   unreadDot: {
     position: 'absolute',
-    top: -2,
-    right: -2,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    top: -3,
+    right: -3,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
     backgroundColor: '#f44336',
     borderWidth: 2,
     borderColor: '#fff',
@@ -1762,44 +1745,88 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#222',
   },
-  unreadTime: {
-    fontWeight: 'bold',
-    color: '#f44336',
-  },
   unreadBadge: {
     backgroundColor: '#f44336',
-    borderRadius: 12,
-    minWidth: 24,
-    height: 24,
+    borderRadius: 14,
+    minWidth: 28,
+    height: 28,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 4,
+    elevation: 2,
+    shadowColor: '#f44336',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
   },
   unreadBadgeText: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: 'bold',
   },
 
-  // Last Message Display
-  lastMessageContainer: {
-    marginTop: 4,
+  // Message Status Display
+  messageStatusContainer: {
+    marginTop: 6,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
   },
-  lastMessageText: {
+  unreadMessagesText: {
     fontSize: 13,
-    color: '#666',
-    flex: 1,
-    marginRight: 8,
+    color: '#f44336',
+    fontWeight: '600',
+    backgroundColor: 'rgba(244, 67, 54, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  allReadText: {
+    fontSize: 12,
+    color: '#4CAF50',
+    fontWeight: '500',
+    fontStyle: 'italic',
   },
   noMessagesText: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#999',
     fontStyle: 'italic',
-    marginTop: 4,
+  },
+  readIndicator: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  newChatIndicator: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  
+  // Chat Icon Container for badge positioning
+  chatIconContainer: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
+
+// Update unreadBadge to use absolute positioning
+const updatedStyles = {
+  ...styles,
+  unreadBadge: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#f44336',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+};
 
 export default ChatWithTeacher; 

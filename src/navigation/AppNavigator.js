@@ -56,6 +56,7 @@ import TeacherChat from '../screens/teacher/TeacherChat';
 import MarksEntryStudentsScreen from '../screens/teacher/MarksEntryStudentsScreen';
 import StudentAttendanceScreen from '../screens/teacher/StudentAttendanceScreen';
 import StudentMarksScreen from '../screens/teacher/StudentMarksScreen';
+import ViewSubmissions from '../screens/teacher/ViewSubmissions';
 
 // Parent Screens
 import ParentDashboard from '../screens/parent/ParentDashboard';
@@ -394,6 +395,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="TeacherTimetable" component={TeacherTimetable} />
                 <Stack.Screen name="TeacherSubjects" component={TeacherSubjects} />
                 <Stack.Screen name="ViewStudentInfo" component={ViewStudentInfo} />
+                <Stack.Screen name="ViewSubmissions" component={ViewSubmissions} />
                 <Stack.Screen name="MarksEntryStudentsScreen" component={MarksEntryStudentsScreen} />
                 <Stack.Screen name="StudentAttendanceScreen" component={StudentAttendanceScreen} />
                 <Stack.Screen name="StudentMarksScreen" component={StudentMarksScreen} />

@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard, RefreshControl, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Animatable from 'react-native-animatable';
+import * as DocumentPicker from 'expo-document-picker';
 import Header from '../../components/Header';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
@@ -23,11 +25,16 @@ const StudentChatWithTeacher = () => {
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState(null);
   const [unreadCounts, setUnreadCounts] = useState({}); // Track unread messages per teacher
+  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [messageSubscription, setMessageSubscription] = useState(null);
   const flatListRef = useRef(null);
 
   // Pull-to-refresh functionality
   const { refreshing, onRefresh } = usePullToRefresh(async () => {
-    await fetchData();
+    await Promise.all([
+      fetchData(),
+      fetchUnreadCounts()
+    ]);
   });
 
   // Keyboard visibility listeners
@@ -682,8 +689,12 @@ const StudentChatWithTeacher = () => {
         // Scroll to bottom after loading messages
         if (formattedMessages.length > 0) {
           setTimeout(() => {
-            if (flatListRef.current) {
-              flatListRef.current.scrollToEnd({ animated: true });
+            try {
+              if (flatListRef.current && flatListRef.current.scrollToEnd) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            } catch (error) {
+              console.log('Scroll to end error:', error);
             }
           }, 300);
         }
@@ -825,8 +836,12 @@ const StudentChatWithTeacher = () => {
       
       // Scroll to bottom after sending
       setTimeout(() => {
-        if (flatListRef.current) {
-          flatListRef.current.scrollToEnd({ animated: true });
+        try {
+          if (flatListRef.current && flatListRef.current.scrollToEnd) {
+            flatListRef.current.scrollToEnd({ animated: true });
+          }
+        } catch (error) {
+          console.log('Scroll to end after sending error:', error);
         }
       }, 100);
     } catch (err) {
@@ -883,41 +898,165 @@ const StudentChatWithTeacher = () => {
 
   // Attachment handler
   const handleAttach = async () => {
+    Alert.alert(
+      'Select Attachment',
+      'Choose what you want to attach',
+      [
+        {
+          text: 'Photos',
+          onPress: handleImageUpload
+        },
+        {
+          text: 'Documents',
+          onPress: handleDocumentUpload
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        }
+      ]
+    );
+  };
+
+  // Handle image upload with database save
+  const handleImageUpload = async () => {
+    setShowAttachmentMenu(false);
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        alert('Permission to access media library is required!');
+        Alert.alert('Permission Required', 'Please grant permission to access your photo library.');
         return;
       }
-      let result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
+      
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
-        quality: 1,
+        quality: 0.8,
+        allowsMultipleSelection: false,
       });
+      
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
-        const isImage = asset.type && asset.type.startsWith('image');
-        // Get student info
-        const { data: student } = await supabase
-          .from(TABLES.STUDENTS)
-          .select('id')
-          .eq('user_id', user.id)
-          .single();
+        
+        // For now, create local message (you can add Supabase storage later)
         const newMsg = {
-          sender_id: student.id,
-          receiver_id: selectedTeacher.id,
-          type: isImage ? 'image' : 'file',
-          uri: asset.uri,
-          file_name: asset.fileName || asset.uri.split('/').pop(),
-          created_at: new Date().toISOString(),
+          id: Date.now().toString(),
+          sender_id: user.id,
+          receiver_id: selectedTeacher.userId,
+          message: '📷 Photo',
+          message_type: 'image',
+          file_url: asset.uri, // Local URI for now
+          file_name: asset.fileName || 'image.jpg',
+          file_size: asset.fileSize || 0,
+          file_type: 'image/jpeg',
+          sent_at: new Date().toISOString(),
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          sender: 'student'
         };
-        const { error: sendError } = await supabase
-          .from(TABLES.MESSAGES)
-          .insert(newMsg);
-        if (sendError) throw sendError;
+        
+        setMessages(prev => [...prev, newMsg]);
+        
+        // TODO: Save to database with actual file upload
+        // await sendFileMessage(newMsg);
       }
     } catch (e) {
-      alert('Failed to pick file: ' + e.message);
+      Alert.alert('Error', 'Failed to pick image: ' + e.message);
+    }
+  };
+
+  // Handle document upload with database save
+  const handleDocumentUpload = async () => {
+    setShowAttachmentMenu(false);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const file = result.assets[0];
+        
+        const newMsg = {
+          id: Date.now().toString(),
+          sender_id: user.id,
+          receiver_id: selectedTeacher.userId,
+          message: `📎 ${file.name}`,
+          message_type: 'file',
+          file_url: file.uri, // Local URI for now
+          file_name: file.name,
+          file_size: file.size || 0,
+          file_type: file.mimeType || 'application/octet-stream',
+          sent_at: new Date().toISOString(),
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          sender: 'student'
+        };
+        
+        setMessages(prev => [...prev, newMsg]);
+        
+        // TODO: Save to database with actual file upload
+        // await sendFileMessage(newMsg);
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Failed to pick document: ' + e.message);
+    }
+  };
+
+  // Send file message to database
+  const sendFileMessage = async (fileData) => {
+    try {
+      // Get student's linked ID
+      const { data: studentUserData, error: studentError } = await dbHelpers.getStudentByUserId(user.id);
+      if (studentError || !studentUserData) {
+        throw new Error('Student data not found');
+      }
+
+      const student = studentUserData.students;
+      if (!student) {
+        throw new Error('Student profile not found');
+      }
+
+      // Get teacher's user ID
+      const teacherUserId = selectedTeacher.userId || await getTeacherUserId(selectedTeacher.id);
+
+      if (!teacherUserId) {
+        throw new Error('Teacher user account not found');
+      }
+
+      // Create message with file data
+      const newMsg = {
+        sender_id: user.id,
+        receiver_id: teacherUserId,
+        student_id: student.id,
+        message: fileData.message_type === 'image' ? '📷 Photo' : `📎 ${fileData.file_name}`,
+        message_type: fileData.message_type,
+        file_url: fileData.file_url,
+        file_name: fileData.file_name,
+        file_size: fileData.file_size,
+        file_type: fileData.file_type,
+        sent_at: new Date().toISOString(),
+      };
+
+      const { data: insertedMsg, error: sendError } = await supabase
+        .from('messages')
+        .insert(newMsg)
+        .select();
+
+      if (sendError) throw sendError;
+
+      // Add to local state for immediate display
+      const displayMsg = {
+        ...newMsg,
+        id: insertedMsg[0].id,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        sender: 'student'
+      };
+
+      setMessages(prev => [...prev, displayMsg]);
+
+    } catch (error) {
+      console.error('Error sending file message:', error);
+      Alert.alert('Error', 'Failed to send file: ' + error.message);
     }
   };
 
@@ -929,10 +1068,16 @@ const StudentChatWithTeacher = () => {
 
   // Scroll to bottom when messages change
   useEffect(() => {
-    if (flatListRef.current && messages.length > 0) {
+    if (messages.length > 0) {
       setTimeout(() => {
-        flatListRef.current.scrollToEnd({ animated: true });
-      }, 100);
+        try {
+          if (flatListRef.current && flatListRef.current.scrollToEnd) {
+            flatListRef.current.scrollToEnd({ animated: true });
+          }
+        } catch (error) {
+          console.log('Scroll to end on messages change error:', error);
+        }
+      }, 200);
     }
   }, [messages]);
 
@@ -989,6 +1134,11 @@ const StudentChatWithTeacher = () => {
                   item.role === 'subject_teacher' &&
                   sortedTeachers[index - 1].role !== 'subject_teacher';
 
+                // Get unread count for this teacher
+                const unreadCount = unreadCounts[item.userId] || unreadCounts[item.id];
+                const hasUnread = unreadCount > 0;
+                const hasMessages = messages && messages.length > 0;
+
                 return (
                   <View>
                     {showClassTeacherHeader && (
@@ -1005,14 +1155,18 @@ const StudentChatWithTeacher = () => {
                       style={[
                         styles.teacherCard,
                         item.role === 'class_teacher' && styles.classTeacherCard,
-(unreadCounts[item.userId] || unreadCounts[item.id]) && styles.unreadTeacherCard
-                      ]} 
+                        hasUnread && styles.unreadTeacherCard
+                      ]}
                       onPress={() => fetchMessages(item)}
                     >
                       <View style={[
                         styles.teacherAvatar,
-                        { backgroundColor: item.role === 'class_teacher' ? '#4CAF50' : '#2196F3' }
+                        { backgroundColor: item.role === 'class_teacher' ? '#4CAF50' : '#2196F3' },
+                        hasUnread && styles.unreadAvatar
                       ]}>
+                        {hasUnread && (
+                          <View style={styles.unreadDot} />
+                        )}
                         <Ionicons
                           name={item.role === 'class_teacher' ? 'school' : 'book'}
                           size={24}
@@ -1021,7 +1175,10 @@ const StudentChatWithTeacher = () => {
                       </View>
                       <View style={styles.teacherInfo}>
                         <View style={styles.teacherHeader}>
-                          <Text style={styles.teacherName} numberOfLines={item.name.includes('(No Account)') ? 2 : 1}>
+                          <Text style={[
+                            styles.teacherName,
+                            hasUnread && styles.unreadText
+                          ]} numberOfLines={item.name.includes('(No Account)') ? 2 : 1}>
                             {item.name}
                           </Text>
                           <View style={[
@@ -1033,17 +1190,34 @@ const StudentChatWithTeacher = () => {
                             </Text>
                           </View>
                         </View>
-                        <Text style={styles.teacherSubject} numberOfLines={2}>
+                        <Text style={styles.teacherSubject} numberOfLines={1}>
                           {item.subject}
                         </Text>
+                        
+                        {/* Unread Message Count or Status */}
+                        <View style={styles.messageStatusContainer}>
+                          {hasUnread ? (
+                            <Text style={styles.unreadMessagesText}>
+                              +{unreadCount} new message{unreadCount > 1 ? 's' : ''}
+                            </Text>
+                          ) : hasMessages ? (
+                            <Text style={styles.allReadText}>
+                              All messages read
+                            </Text>
+                          ) : (
+                            <Text style={styles.noMessagesText}>
+                              Start a conversation
+                            </Text>
+                          )}
+                        </View>
                       </View>
                       <View style={styles.chatActions}>
                         <View style={styles.chatIconContainer}>
-                          <Ionicons name="chatbubbles" size={20} color={(unreadCounts[item.userId] || unreadCounts[item.id]) ? "#f44336" : "#9c27b0"} />
-                          {(unreadCounts[item.userId] || unreadCounts[item.id]) && (
+                          <Ionicons name="chatbubbles" size={20} color={hasUnread ? "#f44336" : "#9c27b0"} />
+                          {hasUnread && (
                             <View style={styles.unreadBadge}>
                               <Text style={styles.unreadBadgeText}>
-                                {(unreadCounts[item.userId] || unreadCounts[item.id]) > 99 ? '99+' : (unreadCounts[item.userId] || unreadCounts[item.id])}
+                                {unreadCount > 99 ? '99+' : unreadCount}
                               </Text>
                             </View>
                           )}
@@ -1072,17 +1246,18 @@ const StudentChatWithTeacher = () => {
       ) : (
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 20}
+          enabled={true}
         >
           <View style={styles.chatHeader}>
             <TouchableOpacity onPress={handleBack} style={{ marginRight: 10 }}>
               <Ionicons name="arrow-back" size={24} color="#1976d2" />
             </TouchableOpacity>
             <Ionicons name="person-circle" size={32} color="#1976d2" style={{ marginRight: 8 }} />
-            <View>
-              <Text style={styles.teacherName}>{selectedTeacher.name}</Text>
-              <Text style={styles.teacherSubject}>{selectedTeacher.subject}</Text>
+            <View style={styles.chatHeaderInfo}>
+              <Text style={styles.chatHeaderName} numberOfLines={1}>{selectedTeacher.name}</Text>
+              <Text style={styles.chatHeaderSubject} numberOfLines={1}>{selectedTeacher.subject}</Text>
             </View>
           </View>
           <FlatList
@@ -1091,13 +1266,17 @@ const StudentChatWithTeacher = () => {
             keyExtractor={item => item.id?.toString() || Math.random().toString()}
             renderItem={({ item }) => (
               <TouchableOpacity 
-                style={[styles.messageRow, item.sender_id === user.id ? styles.messageRight : styles.messageLeft]}
                 onLongPress={() => {
                   if (item.sender_id === user.id) {
                     handleDeleteMessage(item.id);
                   }
                 }}
-                disabled={deletingMessageId === item.id}
+                delayLongPress={500}
+                activeOpacity={0.7}
+                style={{ 
+                  opacity: deletingMessageId === item.id ? 0.5 : 1,
+                  transform: [{ scale: deletingMessageId === item.id ? 0.95 : 1 }]
+                }}
               >
                 <View style={[
                   styles.messageBubble, 
@@ -1198,6 +1377,16 @@ const styles = StyleSheet.create({
     borderLeftColor: '#4CAF50',
     backgroundColor: '#f8fff8',
   },
+  unreadCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#f44336',
+    backgroundColor: '#fff8f8',
+    elevation: 4,
+    shadowColor: '#f44336',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
   
   teacherAvatar: {
     width: 50,
@@ -1207,6 +1396,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+    position: 'relative',
+  },
+  unreadAvatar: {
+    borderWidth: 3,
+    borderColor: '#f44336',
+    elevation: 2,
+  },
+  unreadDot: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#f44336',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   
   teacherInfo: {
@@ -1246,6 +1452,10 @@ const styles = StyleSheet.create({
     flex: 1, // Allow name to take available space
     marginRight: 8, // Ensure spacing from badge
   },
+  unreadText: {
+    fontWeight: 'bold',
+    color: '#222',
+  },
   teacherSubject: { 
     fontSize: 14, 
     color: '#666', 
@@ -1258,6 +1468,63 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minWidth: 40, // Ensure minimum width for touch target
     marginLeft: 8, // Add margin to prevent overlap
+  },
+  
+  // Message Status Display
+  messageStatusContainer: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  unreadMessagesText: {
+    fontSize: 13,
+    color: '#f44336',
+    fontWeight: '600',
+    backgroundColor: 'rgba(244, 67, 54, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  allReadText: {
+    fontSize: 12,
+    color: '#4CAF50',
+    fontWeight: '500',
+    fontStyle: 'italic',
+  },
+  noMessagesText: {
+    fontSize: 12,
+    color: '#999',
+    fontStyle: 'italic',
+  },
+  readIndicator: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  newChatIndicator: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  unreadBadgeContainer: {
+    backgroundColor: '#f44336',
+    borderRadius: 14,
+    minWidth: 28,
+    height: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 4,
+    elevation: 2,
+    shadowColor: '#f44336',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  unreadBadgeMainText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 'bold',
   },
   
   // Empty State Styles
@@ -1284,6 +1551,21 @@ const styles = StyleSheet.create({
   
   // Chat Styles
   chatHeader: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 12, borderBottomWidth: 1, borderColor: '#eee' },
+  chatHeaderInfo: {
+    flex: 1,
+    marginRight: 8,
+  },
+  chatHeaderName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#222',
+    marginBottom: 2,
+  },
+  chatHeaderSubject: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 0,
+  },
   chatList: { flexGrow: 1, padding: 16 },
   messageRow: { flexDirection: 'row', marginBottom: 10 },
   messageLeft: { justifyContent: 'flex-start' },
@@ -1304,16 +1586,30 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     backgroundColor: '#eee',
   },
+  fileContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    minWidth: 200,
+  },
   fileRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+  },
+  fileInfo: {
+    flex: 1,
+    marginLeft: 10,
   },
   fileName: {
-    fontSize: 14,
     color: '#1976d2',
-    textDecorationLine: 'underline',
-    maxWidth: 120,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  fileSize: {
+    color: '#666',
+    fontSize: 12,
+    marginTop: 2,
   },
   deletingMessage: {
     opacity: 0.5,
@@ -1355,6 +1651,21 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     lineHeight: 12,
   },
+  
+  // Animation and deleting overlay styles
+  deletingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(244, 67, 54, 0.8)',
+    borderRadius: 16,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
 });
 
-export default StudentChatWithTeacher; 
+export default StudentChatWithTeacher;
