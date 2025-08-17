@@ -15,6 +15,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
+import { decode as atob } from 'base-64';
 import Header from '../../components/Header';
 import { supabase, dbHelpers } from '../../utils/supabase';
 
@@ -209,15 +211,15 @@ const SchoolDetails = ({ navigation }) => {
       const fileName = `${user.id}_${timestamp}.jpg`;
       console.log('Generated filename (exact profile picture format):', fileName);
       
-      // Fetch the image as blob
-      console.log('Fetching image as blob...');
-      const response = await fetch(imageAsset.uri);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
-      }
+      // Read the image using expo-file-system (React Native compatible)
+      console.log('Reading image via FileSystem...');
+      const base64 = await FileSystem.readAsStringAsync(imageAsset.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
       
-      const blob = await response.blob();
-      console.log('Blob created - size:', blob.size, 'type:', blob.type);
+      // Convert base64 → Uint8Array (React Native compatible)
+      const fileData = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+      console.log('File data created - size:', fileData.length, 'type: image/jpeg');
 
       // Step 5: Delete old logo if exists
       if (schoolData.logo_url) {
@@ -241,56 +243,36 @@ const SchoolDetails = ({ navigation }) => {
         }
       }
 
-      // Step 6: Upload new image using direct fetch (same as profile pictures)
-      console.log('Step 6: Uploading new image using direct fetch...');
+      // Step 6: Upload new image using Supabase storage (React Native compatible)
+      console.log('Step 6: Uploading new image using Uint8Array...');
       console.log('Upload parameters:', {
         bucket: 'profiles',
         fileName,
-        blobSize: blob.size,
+        dataSize: fileData.length,
         contentType: 'image/jpeg'
       });
       
-      // Get the authenticated user's session token
-      const { data: { session } } = await supabase.auth.getSession();
+      // Upload using Supabase storage with Uint8Array (React Native compatible)
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('profiles')
+        .upload(fileName, fileData, {
+          contentType: 'image/jpeg',
+          cacheControl: '3600',
+          upsert: true // Allow replacing existing files
+        });
       
-      if (!session) {
-        throw new Error('No authenticated session found');
-      }
-
-      // Create FormData for upload (React Native compatible) - exact same as profile pictures
-      const formData = new FormData();
-      formData.append('', {
-        uri: imageAsset.uri,
-        type: 'image/jpeg',
-        name: fileName,
-      });
-      
-      console.log('FormData created for React Native upload');
-      
-      // Upload using direct fetch to Supabase storage API (same method as profile pictures)
-      const supabaseUrl = 'https://dmagnsbdjsnzsddxqrwd.supabase.co';
-      
-      const uploadResponse = await fetch(`${supabaseUrl}/storage/v1/object/profiles/${fileName}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          // Don't set Content-Type for FormData - let the browser set it with boundary
-        },
-        body: formData,
-      });
-      
-      if (!uploadResponse.ok) {
-        const errorText = await uploadResponse.text();
-        console.error('Upload response error:', uploadResponse.status, errorText);
-        throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        throw new Error(`Upload failed: ${uploadError.message}`);
       }
       
-      const uploadData = { path: fileName };
       console.log('Upload successful:', uploadData);
 
-      // Step 7: Generate public URL manually (same as profile pictures)
+      // Step 7: Generate public URL using Supabase
       console.log('Step 7: Generating public URL...');
-      const publicUrl = `${supabaseUrl}/storage/v1/object/public/profiles/${fileName}`;
+      const { data: { publicUrl } } = supabase.storage
+        .from('profiles')
+        .getPublicUrl(fileName);
       console.log('Public URL generated:', publicUrl);
 
       // Step 8: Update state and save to database immediately

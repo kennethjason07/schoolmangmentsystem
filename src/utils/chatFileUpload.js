@@ -1,4 +1,6 @@
 import { supabase } from './supabase';
+import * as FileSystem from 'expo-file-system';
+import { decode as atob } from 'base-64';
 
 /**
  * Utility functions for handling chat file uploads to Supabase Storage
@@ -29,101 +31,56 @@ export const uploadChatFile = async (file, senderId, receiverId, studentId = nul
     // Clean filename to prevent issues
     const cleanFileName = sanitizeFileName(file.name);
     
-    // Create file path: {messageId}/{senderId}_{timestamp}_{filename}
-    const filePath = `${messageId}/${senderId}_${timestamp}_${cleanFileName}`;
+    // Create file path using profiles bucket structure: {senderId}/{timestamp}_{filename}
+    // This matches the profiles bucket policy that expects (storage.foldername(name))[1] = auth.uid()::text
+    const filePath = `${senderId}/${timestamp}_${cleanFileName}`;
     
     console.log('📁 Generated file path:', filePath);
 
-    // Convert URI to blob for upload
-    let fileBlob;
+    // Convert URI to Uint8Array for upload using Expo FileSystem (React Native compatible)
+    let fileData;
+    let contentType;
     if (file.uri) {
-      console.log('🔄 Fetching file from URI:', file.uri);
-      const response = await fetch(file.uri);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
-      }
-      fileBlob = await response.blob();
+      console.log('🔄 Reading file via FileSystem:', file.uri);
+      
+      // Use expo-file-system to read the file as base64
+      const base64 = await FileSystem.readAsStringAsync(file.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      
+      // Convert base64 → Uint8Array (React Native Blob polyfill doesn't support ArrayBuffer)
+      fileData = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+      contentType = file.mimeType || file.type || 'application/octet-stream';
+      
+      console.log('📦 File data created via FileSystem, size:', fileData.length, 'type:', contentType);
     } else {
       throw new Error('No file URI provided');
     }
 
-    console.log('📦 File blob created, size:', fileBlob.size, 'type:', fileBlob.type);
-
-    // Try multiple upload approaches for better compatibility
+    // Upload using Uint8Array (React Native compatible)
     let uploadData = null;
     let uploadError = null;
     
-    // Method 1: Standard upload with detailed options
-    console.log('🚀 Attempting Method 1: Standard upload...');
+    console.log('🚀 Uploading file using Uint8Array (React Native compatible)...');
     try {
-      const result1 = await supabase.storage
+      const { data, error } = await supabase.storage
         .from('chat-files')
-        .upload(filePath, fileBlob, {
-          contentType: file.mimeType || file.type || fileBlob.type || 'application/octet-stream',
+        .upload(filePath, fileData, {
+          contentType: contentType,
           cacheControl: '3600',
-          upsert: false
+          upsert: true // Allow replacing existing files
         });
       
-      if (!result1.error) {
-        uploadData = result1.data;
-        console.log('✅ Method 1 succeeded:', uploadData);
+      if (!error) {
+        uploadData = data;
+        console.log('✅ Upload succeeded:', uploadData);
       } else {
-        console.log('❌ Method 1 failed:', result1.error);
-        uploadError = result1.error;
+        console.log('❌ Upload failed:', error);
+        uploadError = error;
       }
-    } catch (method1Error) {
-      console.log('❌ Method 1 threw exception:', method1Error);
-      uploadError = method1Error;
-    }
-    
-    // Method 2: Simplified upload if Method 1 failed
-    if (!uploadData && uploadError) {
-      console.log('🚀 Attempting Method 2: Simplified upload...');
-      try {
-        const result2 = await supabase.storage
-          .from('chat-files')
-          .upload(filePath, fileBlob);
-        
-        if (!result2.error) {
-          uploadData = result2.data;
-          console.log('✅ Method 2 succeeded:', uploadData);
-          uploadError = null; // Clear the error
-        } else {
-          console.log('❌ Method 2 also failed:', result2.error);
-          uploadError = result2.error;
-        }
-      } catch (method2Error) {
-        console.log('❌ Method 2 threw exception:', method2Error);
-        uploadError = method2Error;
-      }
-    }
-    
-    // Method 3: Different path structure if both methods failed
-    if (!uploadData && uploadError) {
-      console.log('🚀 Attempting Method 3: Alternative path structure...');
-      const altFilePath = `uploads/${senderId}/${timestamp}_${cleanFileName}`;
-      console.log('📁 Alternative file path:', altFilePath);
-      
-      try {
-        const result3 = await supabase.storage
-          .from('chat-files')
-          .upload(altFilePath, fileBlob, {
-            contentType: file.mimeType || file.type || 'application/octet-stream'
-          });
-        
-        if (!result3.error) {
-          uploadData = result3.data;
-          filePath = altFilePath; // Update the file path for URL generation
-          console.log('✅ Method 3 succeeded:', uploadData);
-          uploadError = null;
-        } else {
-          console.log('❌ Method 3 also failed:', result3.error);
-          uploadError = result3.error;
-        }
-      } catch (method3Error) {
-        console.log('❌ Method 3 threw exception:', method3Error);
-        uploadError = method3Error;
-      }
+    } catch (uploadException) {
+      console.log('❌ Upload threw exception:', uploadException);
+      uploadError = uploadException;
     }
 
     if (!uploadData || uploadError) {
@@ -149,8 +106,8 @@ export const uploadChatFile = async (file, senderId, receiverId, studentId = nul
       message_type: getMessageType(file),
       file_url: publicUrl,
       file_name: file.name,
-      file_size: file.size || fileBlob.size,
-      file_type: file.mimeType || file.type || 'application/octet-stream'
+      file_size: file.size || fileData.length,
+      file_type: contentType
     };
 
     console.log('💾 Message data prepared:', messageData);

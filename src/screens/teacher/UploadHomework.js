@@ -10,7 +10,9 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { uploadMultipleHomeworkFiles, deleteHomeworkFile } from '../../utils/homeworkFileUpload';
 import { format } from 'date-fns';
+import ImageViewer from '../../components/ImageViewer';
 
 const UploadHomework = () => {
   const [classes, setClasses] = useState([]);
@@ -32,6 +34,8 @@ const UploadHomework = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [teacherData, setTeacherData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedImageData, setSelectedImageData] = useState(null);
+  const [showImageViewer, setShowImageViewer] = useState(false);
   const { user } = useAuth();
 
   // Fetch teacher's assigned classes and subjects
@@ -195,9 +199,10 @@ const UploadHomework = () => {
       const file = result.assets[0];
       const fileInfo = {
         id: Date.now().toString(),
-        name: file.name,
-        size: file.size,
-        type: file.mimeType,
+        name: file.name || `document_${Date.now()}.${file.mimeType?.split('/')[1] || 'bin'}`,
+        size: file.size || 0,
+        type: file.mimeType || 'application/octet-stream',
+        mimeType: file.mimeType || 'application/octet-stream',
         uri: file.uri,
       };
 
@@ -230,6 +235,7 @@ const UploadHomework = () => {
         name: `image_${Date.now()}.jpg`,
         size: asset.fileSize || 0,
         type: 'image/jpeg',
+        mimeType: 'image/jpeg',
         uri: asset.uri,
       };
 
@@ -261,7 +267,8 @@ const UploadHomework = () => {
         return;
       }
 
-      const homeworkData = {
+      // Prepare basic homework data
+      let homeworkData = {
         title: homeworkTitle,
         description: homeworkDescription,
         instructions: homeworkInstructions,
@@ -270,8 +277,73 @@ const UploadHomework = () => {
         subject_id: selectedSubject,
         teacher_id: teacherData.id,
         assigned_students: selectedStudents,
-        files: uploadedFiles
+        files: [] // Will be updated with uploaded file information
       };
+
+      // Handle file uploads if there are files
+      if (uploadedFiles.length > 0) {
+        console.log('📤 Starting file uploads for homework...');
+        
+        // Show loading alert
+        Alert.alert(
+          'Uploading Files', 
+          `Uploading ${uploadedFiles.length} file(s)...`,
+          [],
+          { cancelable: false }
+        );
+
+        // Upload files to Supabase storage
+        const uploadResult = await uploadMultipleHomeworkFiles(
+          uploadedFiles,
+          teacherData.id,
+          selectedClassData.id,
+          selectedSubject,
+          {
+            title: homeworkTitle,
+            description: homeworkDescription,
+            due_date: dueDate.toISOString().split('T')[0]
+          }
+        );
+
+        if (uploadResult.success && uploadResult.uploadedFiles.length > 0) {
+          // Extract file information for database storage
+          const fileData = uploadResult.uploadedFiles.map(result => ({
+            file_name: result.homeworkRecord.file_name,
+            file_url: result.publicUrl,
+            file_path: result.filePath,
+            file_size: result.homeworkRecord.file_size,
+            file_type: result.homeworkRecord.file_type,
+            homework_id: result.homeworkId
+          }));
+          
+          homeworkData.files = fileData;
+          console.log('✅ Files uploaded successfully:', fileData);
+        } else if (uploadResult.errors.length > 0) {
+          console.warn('⚠️ Some file uploads failed:', uploadResult.errors);
+          Alert.alert(
+            'Upload Warning',
+            `${uploadResult.failedUploads} out of ${uploadResult.totalFiles} files failed to upload. Continue anyway?`,
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => { return; } },
+              { text: 'Continue', onPress: () => {} }
+            ]
+          );
+
+          // Include successfully uploaded files
+          if (uploadResult.uploadedFiles.length > 0) {
+            const fileData = uploadResult.uploadedFiles.map(result => ({
+              file_name: result.homeworkRecord.file_name,
+              file_url: result.publicUrl,
+              file_path: result.filePath,
+              file_size: result.homeworkRecord.file_size,
+              file_type: result.homeworkRecord.file_type,
+              homework_id: result.homeworkId
+            }));
+            
+            homeworkData.files = fileData;
+          }
+        }
+      }
 
       let error;
 
@@ -298,7 +370,11 @@ const UploadHomework = () => {
         throw error;
       }
 
-      Alert.alert('Success', `Homework ${editingHomework ? 'updated' : 'assigned'} successfully!`);
+      const successMessage = uploadedFiles.length > 0 
+        ? `Homework ${editingHomework ? 'updated' : 'assigned'} successfully with ${homeworkData.files.length} file(s)!`
+        : `Homework ${editingHomework ? 'updated' : 'assigned'} successfully!`;
+      
+      Alert.alert('Success', successMessage);
 
       // Reset form
       setHomeworkTitle('');
@@ -408,6 +484,53 @@ const UploadHomework = () => {
 
   const getStatusColor = (status) => {
     return status === 'active' ? '#4CAF50' : '#f44336';
+  };
+
+  // Handle attachment file viewing
+  const handleAttachmentPress = async (file) => {
+    try {
+      // Check if it's an image file
+      const isImage = file.file_type && file.file_type.startsWith('image/');
+      
+      if (isImage) {
+        // Open image in ImageViewer
+        const imageData = {
+          file_url: file.file_url,
+          file_name: file.file_name,
+          file_size: file.file_size,
+          file_type: file.file_type
+        };
+        
+        setSelectedImageData(imageData);
+        setShowImageViewer(true);
+      } else {
+        // For non-image files, show options to view/download
+        Alert.alert(
+          'File Options',
+          `What would you like to do with ${file.file_name}?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'View/Download', 
+              onPress: () => {
+                // Open file URL in browser/default app
+                if (file.file_url) {
+                  Linking.openURL(file.file_url).catch((err) => {
+                    Alert.alert('Error', 'Unable to open file. Please try again.');
+                    console.error('Error opening file:', err);
+                  });
+                } else {
+                  Alert.alert('Error', 'File URL not available.');
+                }
+              }
+            }
+          ]
+        );
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Unable to open file. Please try again.');
+      console.error('Error handling attachment press:', error);
+    }
   };
 
   // Handle pull-to-refresh
@@ -675,6 +798,33 @@ const UploadHomework = () => {
                     </Text>
                     <Text style={styles.homeworkDescription}>{hw.description}</Text>
                     <Text style={styles.homeworkDueDate}>Due: {format(new Date(hw.due_date), 'dd-MM-yyyy')}</Text>
+                    
+                    {/* File attachments */}
+                    {hw.files && hw.files.length > 0 && (
+                      <View style={styles.attachmentsSection}>
+                        <Text style={styles.attachmentsTitle}>Attachments ({hw.files.length}):</Text>
+                        <View style={styles.attachmentsList}>
+                          {hw.files.map((file, index) => (
+                            <TouchableOpacity 
+                              key={index} 
+                              style={styles.attachmentItem}
+                              onPress={() => handleAttachmentPress(file)}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons name={getFileIcon(file.file_type)} size={16} color="#666" />
+                              <Text style={styles.attachmentName} numberOfLines={1}>
+                                {file.file_name}
+                              </Text>
+                              <Text style={styles.attachmentSize}>
+                                {formatFileSize(file.file_size)}
+                              </Text>
+                              <Ionicons name="chevron-forward" size={14} color="#999" style={styles.attachmentChevron} />
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+                    
                     <View style={styles.homeworkStatus}>
                       <Text style={[
                         styles.statusText,
@@ -800,6 +950,18 @@ const UploadHomework = () => {
           </View>
         </View>
       </Modal>
+
+      {/* Image Viewer Modal */}
+      {showImageViewer && selectedImageData && (
+        <ImageViewer
+          imageData={selectedImageData}
+          visible={showImageViewer}
+          onClose={() => {
+            setShowImageViewer(false);
+            setSelectedImageData(null);
+          }}
+        />
+      )}
     </View>
   );
 };
@@ -1322,6 +1484,54 @@ const styles = StyleSheet.create({
     color: '#999',
     fontSize: 16,
     fontStyle: 'italic',
+  },
+  attachmentsSection: {
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  attachmentsTitle: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 6,
+  },
+  attachmentsList: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 8,
+  },
+  attachmentItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    backgroundColor: '#fff',
+    borderRadius: 6,
+    marginBottom: 4,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  attachmentName: {
+    flex: 1,
+    fontSize: 12,
+    color: '#333',
+    marginLeft: 8,
+    marginRight: 8,
+  },
+  attachmentSize: {
+    fontSize: 10,
+    color: '#666',
+    backgroundColor: '#e9ecef',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  attachmentChevron: {
+    marginLeft: 4,
   },
 });
 

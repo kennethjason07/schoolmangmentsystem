@@ -14,6 +14,10 @@ import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from
 import { runCompleteDiagnostics } from '../../utils/storageDiagnostics';
 import { runDirectStorageTest } from '../../utils/directStorageTest';
 import { runNetworkDiagnostics, formatNetworkDiagnosticResults } from '../../utils/networkDiagnostics';
+import { runBucketDiagnostics, formatBucketDiagnosticResults } from '../../utils/bucketDiagnostics';
+import { runSimpleNetworkTest, formatSimpleNetworkResults } from '../../utils/simpleNetworkTest';
+import { handleFileView, formatFileSize as formatFileSizeDisplay, getFileTypeColor } from '../../utils/fileViewer';
+import ImageViewer from '../../components/ImageViewer';
 
 const TeacherChat = () => {
   const { user } = useAuth();
@@ -33,6 +37,8 @@ const TeacherChat = () => {
   const [refreshingParents, setRefreshingParents] = useState(false);
   const [refreshingStudents, setRefreshingStudents] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const [currentImage, setCurrentImage] = useState(null);
   const flatListRef = useRef(null);
 
   // Keyboard visibility listeners
@@ -1272,7 +1278,36 @@ const TeacherChat = () => {
               ref={flatListRef}
               data={[...messages]}
               keyExtractor={item => item.id?.toString() || Math.random().toString()}
-              renderItem={({ item }) => (
+              renderItem={({ item }) => {
+                // Debug logging
+                console.log('🔍 Rendering message:', {
+                  id: item.id,
+                  message_type: item.message_type,
+                  type: item.type,
+                  message: item.message,
+                  file_url: item.file_url,
+                  file_name: item.file_name,
+                  hasFileUrl: !!item.file_url,
+                  keys: Object.keys(item),
+                  isImageType: (item.message_type === 'image' || item.type === 'image'),
+                  isFileType: (item.message_type === 'file' || item.type === 'file'),
+                  shouldShowText: (!item.message_type || item.message_type === 'text' || (!item.type || item.type === 'text'))
+                });
+                
+                // Special handling for image messages
+                const isImageMessage = (item.message_type === 'image' || item.type === 'image') && item.file_url;
+                const isFileMessage = (item.message_type === 'file' || item.type === 'file') && item.file_url;
+                const isTextMessage = !isImageMessage && !isFileMessage;
+                
+                console.log('🎯 Message rendering decision:', {
+                  id: item.id,
+                  isImageMessage,
+                  isFileMessage,
+                  isTextMessage,
+                  hasFileUrl: !!item.file_url
+                });
+                
+                return (
                 <TouchableOpacity 
                   style={[styles.messageRow, item.sender_id === user.id ? styles.messageRight : styles.messageLeft]}
                   onLongPress={() => {
@@ -1287,22 +1322,74 @@ const TeacherChat = () => {
                     item.sender_id === user.id ? styles.bubbleTeacher : styles.bubbleParent,
                     deletingMessageId === item.id && styles.deletingMessage
                   ]}>
-                    {item.type === 'image' && (
-                      <Image source={{ uri: item.uri }} style={styles.chatImage} />
+                    {isImageMessage && (
+                      <TouchableOpacity 
+                        onPress={() => {
+                          console.log('🖼️ Image pressed, showing ImageViewer with:', {
+                            file_url: item.file_url || item.uri,
+                            file_name: item.file_name || 'image.jpg',
+                            file_type: item.file_type || 'image/jpeg',
+                            file_size: item.file_size
+                          });
+                          setCurrentImage({
+                            file_url: item.file_url || item.uri,
+                            file_name: item.file_name || 'image.jpg',
+                            file_type: item.file_type || 'image/jpeg',
+                            file_size: item.file_size
+                          });
+                          setImageViewerVisible(true);
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Image 
+                          source={{ uri: item.file_url || item.uri }} 
+                          style={styles.chatImage} 
+                          resizeMode="cover"
+                          onError={(error) => console.log('🚨 Image load error:', error)}
+                          onLoad={() => console.log('✅ Image loaded successfully:', item.file_url)}
+                        />
+                        <View style={styles.imageOverlay}>
+                          <Ionicons name="eye" size={16} color="#fff" />
+                        </View>
+                      </TouchableOpacity>
                     )}
-                    {item.type === 'file' && (
-                      <View style={styles.fileRow}>
-                        <Ionicons name="document" size={20} color="#1976d2" style={{ marginRight: 6 }} />
-                        <Text style={styles.fileName}>{item.file_name}</Text>
-                      </View>
+                    {isFileMessage && (
+                      <TouchableOpacity 
+                        style={styles.fileRow}
+                        onPress={() => {
+                          console.log('📄 File pressed, calling handleFileView with:', {
+                            file_url: item.file_url,
+                            file_name: item.file_name,
+                            file_type: item.file_type,
+                            file_size: item.file_size
+                          });
+                          handleFileView({
+                            file_url: item.file_url,
+                            file_name: item.file_name,
+                            file_type: item.file_type,
+                            file_size: item.file_size
+                          });
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.fileIconContainer, { backgroundColor: getFileTypeColor(item.file_type) }]}>
+                          <Ionicons name={getFileIcon(item.file_type)} size={18} color="#fff" />
+                        </View>
+                        <View style={styles.fileInfo}>
+                          <Text style={styles.fileName} numberOfLines={2}>{item.file_name}</Text>
+                          <Text style={styles.fileSize}>{formatFileSizeDisplay(item.file_size)}</Text>
+                        </View>
+                        <Ionicons name="download" size={16} color="#666" style={{ marginLeft: 8 }} />
+                      </TouchableOpacity>
                     )}
-                    {(!item.type || item.type === 'text') && (
+                    {isTextMessage && (
                       <Text style={styles.messageText}>{item.message || item.text}</Text>
                     )}
                     <Text style={styles.messageTime}>{formatToLocalTime(item.sent_at)}</Text>
                   </View>
                 </TouchableOpacity>
-              )}
+                );
+              }}
               contentContainerStyle={styles.chatList}
               style={{ flex: 1 }}
               keyboardShouldPersistTaps="handled"
@@ -1430,10 +1517,62 @@ const TeacherChat = () => {
                 </View>
                 <Text style={styles.attachmentText}>Network</Text>
               </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
+                setShowAttachmentMenu(false);
+                runBucketDiagnostics().then(results => {
+                  console.log('🪣 Bucket Diagnostics Results:', results);
+                  const formattedResults = formatBucketDiagnosticResults(results);
+                  Alert.alert(
+                    'Bucket Diagnostics', 
+                    formattedResults,
+                    [{ text: 'OK' }]
+                  );
+                }).catch(error => {
+                  console.error('Bucket diagnostics error:', error);
+                  Alert.alert('Bucket Diagnostics', 'Failed to run bucket diagnostics: ' + error.message);
+                });
+              }}>
+                <View style={[styles.attachmentIcon, { backgroundColor: '#795548' }]}>
+                  <Ionicons name="server" size={24} color="#fff" />
+                </View>
+                <Text style={styles.attachmentText}>Buckets</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
+                setShowAttachmentMenu(false);
+                runSimpleNetworkTest().then(results => {
+                  console.log('🌐 Simple Network Test Results:', results);
+                  const formattedResults = formatSimpleNetworkResults(results);
+                  Alert.alert(
+                    'Network Test', 
+                    formattedResults,
+                    [{ text: 'OK' }]
+                  );
+                }).catch(error => {
+                  console.error('Simple network test error:', error);
+                  Alert.alert('Network Test', 'Failed to run network test: ' + error.message);
+                });
+              }}>
+                <View style={[styles.attachmentIcon, { backgroundColor: '#4CAF50' }]}>
+                  <Ionicons name="pulse" size={24} color="#fff" />
+                </View>
+                <Text style={styles.attachmentText}>Net Test</Text>
+              </TouchableOpacity>
             </ScrollView>
           </Animatable.View>
         </TouchableOpacity>
       )}
+      
+      {/* ImageViewer Modal */}
+      <ImageViewer
+        visible={imageViewerVisible}
+        imageData={currentImage}
+        onClose={() => {
+          setImageViewerVisible(false);
+          setCurrentImage(null);
+        }}
+      />
     </View>
   );
 };
@@ -1684,17 +1823,47 @@ const styles = StyleSheet.create({
     backgroundColor: '#eee',
   },
   
+  imageOverlay: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 12,
+    padding: 4,
+  },
+  
   fileRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 4,
+    backgroundColor: 'rgba(25, 118, 210, 0.05)',
+    borderRadius: 8,
+    padding: 8,
+  },
+  
+  fileIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  
+  fileInfo: {
+    flex: 1,
   },
   
   fileName: {
     fontSize: 14,
     color: '#1976d2',
-    textDecorationLine: 'underline',
-    maxWidth: 120,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  
+  fileSize: {
+    fontSize: 12,
+    color: '#666',
   },
   
   attachBtn: {

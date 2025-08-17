@@ -14,6 +14,8 @@ import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from
 import { runCompleteDiagnostics } from '../../utils/storageDiagnostics';
 import { runDirectStorageTest } from '../../utils/directStorageTest';
 import { runNetworkDiagnostics, formatNetworkDiagnosticResults } from '../../utils/networkDiagnostics';
+import { runBucketDiagnostics, formatBucketDiagnosticResults } from '../../utils/bucketDiagnostics';
+import { runSimpleNetworkTest, formatSimpleNetworkResults } from '../../utils/simpleNetworkTest';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 
 const StudentChatWithTeacher = () => {
@@ -1540,6 +1542,48 @@ const StudentChatWithTeacher = () => {
                   <Ionicons name="wifi" size={24} color="#fff" />
                 </View>
                 <Text style={styles.attachmentText}>Network</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
+                setShowAttachmentMenu(false);
+                runBucketDiagnostics().then(results => {
+                  console.log('🪣 Bucket Diagnostics Results:', results);
+                  const formattedResults = formatBucketDiagnosticResults(results);
+                  Alert.alert(
+                    'Bucket Diagnostics', 
+                    formattedResults,
+                    [{ text: 'OK' }]
+                  );
+                }).catch(error => {
+                  console.error('Bucket diagnostics error:', error);
+                  Alert.alert('Bucket Diagnostics', 'Failed to run bucket diagnostics: ' + error.message);
+                });
+              }}>
+                <View style={[styles.attachmentIcon, { backgroundColor: '#795548' }]}>
+                  <Ionicons name="server" size={24} color="#fff" />
+                </View>
+                <Text style={styles.attachmentText}>Buckets</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
+                setShowAttachmentMenu(false);
+                runSimpleNetworkTest().then(results => {
+                  console.log('🌐 Simple Network Test Results:', results);
+                  const formattedResults = formatSimpleNetworkResults(results);
+                  Alert.alert(
+                    'Network Test', 
+                    formattedResults,
+                    [{ text: 'OK' }]
+                  );
+                }).catch(error => {
+                  console.error('Simple network test error:', error);
+                  Alert.alert('Network Test', 'Failed to run network test: ' + error.message);
+                });
+              }}>
+                <View style={[styles.attachmentIcon, { backgroundColor: '#4CAF50' }]}>
+                  <Ionicons name="pulse" size={24} color="#fff" />
+                </View>
+                <Text style={styles.attachmentText}>Net Test</Text>
               </TouchableOpacity>
             </ScrollView>
           </Animatable.View>
