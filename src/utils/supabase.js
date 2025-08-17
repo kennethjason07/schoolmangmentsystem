@@ -42,6 +42,8 @@ export const TABLES = {
   MESSAGES: 'messages',
   EVENTS: 'events',
   FEES: 'fees',
+  SCHOOL_EXPENSES: 'school_expenses',
+  EXPENSE_CATEGORIES: 'expense_categories',
 };
 
 // Authentication helper functions
@@ -1485,6 +1487,136 @@ export const dbHelpers = {
 
         return { data, error: null };
       }
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // ========================================
+  // EXPENSE MANAGEMENT FUNCTIONS
+  // ========================================
+
+  // Get expense categories
+  async getExpenseCategories() {
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.EXPENSE_CATEGORIES)
+        .select('*')
+        .order('name');
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Get expenses with date filtering
+  async getExpenses(filters = {}) {
+    try {
+      const { startDate = null, endDate = null, category = null } = filters;
+      
+      let query = supabase
+        .from(TABLES.SCHOOL_EXPENSES)
+        .select('*')
+        .order('expense_date', { ascending: false });
+
+      if (startDate) {
+        query = query.gte('expense_date', startDate);
+      }
+      if (endDate) {
+        query = query.lte('expense_date', endDate);
+      }
+      if (category) {
+        query = query.eq('category', category);
+      }
+
+      const { data, error } = await query;
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Create a new expense
+  async createExpense(expenseData) {
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.SCHOOL_EXPENSES)
+        .insert(expenseData)
+        .select()
+        .single();
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Update an expense
+  async updateExpense(expenseId, updates) {
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.SCHOOL_EXPENSES)
+        .update(updates)
+        .eq('id', expenseId)
+        .select()
+        .single();
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Delete an expense
+  async deleteExpense(expenseId) {
+    try {
+      const { error } = await supabase
+        .from(TABLES.SCHOOL_EXPENSES)
+        .delete()
+        .eq('id', expenseId);
+      return { error };
+    } catch (error) {
+      return { error };
+    }
+  },
+
+  // Get expense statistics for a date range
+  async getExpenseStats(startDate, endDate) {
+    try {
+      const { data: expenses, error } = await this.getExpenses({ startDate, endDate });
+      
+      if (error) return { data: null, error };
+
+      const { data: categories, error: categoriesError } = await this.getExpenseCategories();
+      
+      if (categoriesError) return { data: null, error: categoriesError };
+
+      // Calculate totals
+      const totalAmount = expenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+      const totalTransactions = expenses.length;
+
+      // Group by category
+      const categoryStats = categories.map(category => {
+        const categoryExpenses = expenses.filter(exp => exp.category === category.name);
+        const categoryTotal = categoryExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+        
+        return {
+          name: category.name,
+          amount: categoryTotal,
+          budget: category.monthly_budget || 0,
+          count: categoryExpenses.length,
+          percentage: totalAmount > 0 ? ((categoryTotal / totalAmount) * 100).toFixed(1) : 0,
+          budgetUsage: category.monthly_budget > 0 ? ((categoryTotal / category.monthly_budget) * 100).toFixed(1) : 0
+        };
+      });
+
+      return {
+        data: {
+          totalAmount,
+          totalTransactions,
+          categoryStats,
+          expenses
+        },
+        error: null
+      };
     } catch (error) {
       return { data: null, error };
     }

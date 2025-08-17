@@ -121,12 +121,13 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   title: {
-    fontSize: 18, // Increased significantly for better readability in admin dashboard
-    color: '#666', // Original color
-    fontWeight: '700', // Increased weight for better visibility
+    fontSize: 16,
+    color: '#444',
+    fontWeight: '600',
     marginRight: 8,
     flexShrink: 1,
-    lineHeight: 22, // Adjusted line height proportionally
+    lineHeight: 20,
+    marginBottom: 2,
   },
   titleTeacher: {
     fontSize: 28, // Very large size for teachers (100% increase from original 14px)
@@ -145,28 +146,35 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   iconContainer: {
-    width: 48, // Moderate size to balance with larger title
-    height: 48,
-    borderRadius: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
   },
   content: {
     flex: 1,
     justifyContent: 'center',
+    marginTop: 4,
   },
   value: {
-    fontSize: 26, // Reverted back to original size
+    fontSize: 28,
     fontWeight: '800',
-    marginBottom: 4,
+    marginBottom: 6,
     letterSpacing: -0.5,
-    lineHeight: 30, // Reverted back to original
+    lineHeight: 32,
   },
   subtitle: {
-    fontSize: 12, // Reverted back to original size
-    color: '#888',
-    lineHeight: 16, // Reverted back to original
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 18,
     fontWeight: '500',
+    opacity: 0.8,
   },
   actionIndicator: {
     position: 'absolute',
