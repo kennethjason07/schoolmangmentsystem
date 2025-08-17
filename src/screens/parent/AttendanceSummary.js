@@ -146,7 +146,7 @@ const AttendanceSummary = () => {
     await fetchAttendanceData();
   });
 
-  // Fetch attendance data from Supabase (using same method as ParentDashboard)
+  // Fetch attendance data from Supabase (using EXACT SAME method as ParentDashboard)
   const fetchAttendanceData = async () => {
     try {
       setLoading(true);
@@ -171,6 +171,7 @@ const AttendanceSummary = () => {
         // Students data is available in the joined response
         studentDetails = parentUserData.students[0];
         console.log('AttendanceSummary - Using real student data from students array:', studentDetails?.name || 'Unnamed Student');
+        console.log('AttendanceSummary - Full student data:', JSON.stringify(studentDetails, null, 2));
       } else if (parentUserData.linked_parent_of) {
         // Fallback: try to get student data from linked_parent_of field
         console.log('AttendanceSummary - Trying to get student from linked_parent_of:', parentUserData.linked_parent_of);
@@ -185,6 +186,7 @@ const AttendanceSummary = () => {
               dob,
               gender,
               address,
+              profile_url,
               class_id,
               classes(id, class_name, section)
             `)
@@ -200,34 +202,86 @@ const AttendanceSummary = () => {
         }
       }
       
-      // If we still don't have student data, use sample data
-      if (!studentDetails) {
-        console.log('AttendanceSummary - No student data found, using sample data');
-        studentDetails = {
-          id: 'sample-student-id',
-          name: 'Sample Student',
-          admission_no: 'ADM2024001',
-          class_id: 'sample-class-id',
-          roll_no: 42,
-          academic_year: '2024-2025',
-          classes: {
-            id: 'sample-class-id',
-            class_name: 'Class 10',
-            section: 'A',
-            academic_year: '2024-2025'
-          }
-        };
+  // If we still don't have student data, use sample data
+  if (!studentDetails) {
+    console.log('AttendanceSummary - No student data found, using sample data');
+    studentDetails = {
+      id: 'sample-student-id',
+      name: 'Sample Student',
+      admission_no: 'ADM2024001',
+      roll_no: 42,
+      profile_url: null, // Add profile picture field
+      class_id: 'sample-class-id',
+      academic_year: '2024-2025',
+      classes: {
+        id: 'sample-class-id',
+        class_name: 'Class 10',
+        section: 'A',
+        academic_year: '2024-2025'
       }
+    };
+  }
 
       setStudentData(studentDetails);
 
-      // Get attendance records for the student (organized by month)
-      await fetchAttendanceRecords(studentDetails.id, studentDetails.class_id);
+      // EXACT SAME ATTENDANCE FETCHING AS PARENT DASHBOARD
+      const currentDate = new Date();
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth() + 1; // getMonth() returns 0-11, so add 1
 
-      // Also get dashboard-style attendance data using shared service
-      console.log('AttendanceSummary - Fetching dashboard attendance using shared service');
-      const dashboardData = await getCurrentMonthAttendance(studentDetails.id);
-      setDashboardAttendance(dashboardData);
+      try {
+        // Get ALL attendance records for this student - SAME AS PARENT DASHBOARD
+        const { data: allAttendanceData, error: attendanceError } = await supabase
+          .from(TABLES.STUDENT_ATTENDANCE)
+          .select('*')
+          .eq('student_id', studentDetails.id)
+          .order('date', { ascending: false });
+
+        if (attendanceError) throw attendanceError;
+
+        // Filter to current month records - SAME AS PARENT DASHBOARD
+        const currentMonthRecords = (allAttendanceData || []).filter(record => {
+          // Safety check for valid date format
+          if (!record.date || typeof record.date !== 'string') {
+            console.warn('Invalid date format in attendance record:', record.date);
+            return false;
+          }
+          
+          const dateParts = record.date.split('-');
+          if (dateParts.length < 2) {
+            console.warn('Date does not contain expected format (YYYY-MM-DD):', record.date);
+            return false;
+          }
+          
+          const recordYear = parseInt(dateParts[0], 10);
+          const recordMonth = parseInt(dateParts[1], 10);
+          
+          // Check if parsing was successful (not NaN)
+          if (isNaN(recordYear) || isNaN(recordMonth)) {
+            console.warn('Failed to parse date components:', record.date, 'year:', dateParts[0], 'month:', dateParts[1]);
+            return false;
+          }
+          
+          return recordYear === year && recordMonth === month;
+        });
+
+        console.log('=== ATTENDANCE SUMMARY EXACT SAME CALCULATION AS PARENT DASHBOARD ===');
+        console.log('Current month:', `${year}-${String(month).padStart(2, '0')}`);
+        console.log('Current month records:', currentMonthRecords.length);
+        console.log('Records:', currentMonthRecords.map(r => `${r.date}: ${r.status}`));
+        console.log('===============================================================');
+
+        // Use the filtered records - SAME AS PARENT DASHBOARD
+        const attendanceData = currentMonthRecords;
+        setDashboardAttendance(attendanceData || []);
+
+      } catch (err) {
+        console.log('AttendanceSummary - Attendance fetch error:', err);
+        setDashboardAttendance([]);
+      }
+
+      // Get attendance records for all months for organized data
+      await fetchAttendanceRecords(studentDetails.id, studentDetails.class_id);
 
     } catch (err) {
       console.error('AttendanceSummary - Error fetching attendance data:', err);
@@ -699,21 +753,28 @@ const AttendanceSummary = () => {
     return TERMS[TERMS.length - 1];
   };
 
-  // Get month days for calendar view
+  // Get month days for calendar view - always show single month with proper calendar grid
   const getMonthDays = () => {
-    if (selectedTerm && selectedTerm !== 'All Terms') {
-      // Show all days from the first to last month in the selected term
-      const months = TERM_MONTHS[selectedTerm];
-      if (months && months.length > 0) {
-        const start = startOfMonth(new Date(months[0]));
-        const end = endOfMonth(new Date(months[months.length - 1]));
-        return eachDayOfInterval({ start, end });
-      }
-    }
-    // Default: show selected month
+    const monthStart = startOfMonth(displayMonth);
+    const monthEnd = endOfMonth(displayMonth);
+    
+    // Get the first day of the week for the month (0 = Sunday, 1 = Monday, etc.)
+    const firstDayOfWeek = monthStart.getDay();
+    
+    // Calculate the start date to show (may include days from previous month)
+    const calendarStart = new Date(monthStart);
+    calendarStart.setDate(monthStart.getDate() - firstDayOfWeek);
+    
+    // Calculate the end date to show (may include days from next month)
+    const calendarEnd = new Date(monthEnd);
+    const lastDayOfWeek = monthEnd.getDay();
+    const daysToAdd = 6 - lastDayOfWeek; // Days needed to complete the week
+    calendarEnd.setDate(monthEnd.getDate() + daysToAdd);
+    
+    // Return all days needed for a complete calendar grid
     return eachDayOfInterval({
-      start: startOfMonth(displayMonth),
-      end: endOfMonth(displayMonth)
+      start: calendarStart,
+      end: calendarEnd
     });
   };
 
@@ -732,47 +793,25 @@ const AttendanceSummary = () => {
     calendarTitle = `Monthly Calendar: ${getMonthLabel(format(displayMonth, 'yyyy-MM'))}`;
   }
 
+  // EXACT SAME calculation variables as Parent Dashboard for consistency
+  const totalRecords = dashboardAttendance.length;
+  const presentOnlyCount = dashboardAttendance.filter(a => a.status === 'Present').length;
+  const absentCount = dashboardAttendance.filter(item => item.status === 'Absent').length;
+  const attendancePercentage = totalRecords > 0 ? Math.round((presentOnlyCount / totalRecords) * 100) : 0;
+
+  console.log('=== ATTENDANCE SUMMARY CALCULATION (SAME AS DASHBOARD) ===');
+  console.log('Total records:', totalRecords);
+  console.log('Present records:', presentOnlyCount);
+  console.log('Absent records:', absentCount);
+  console.log('Calculated percentage:', attendancePercentage);
+  console.log('=======================================================');
+
   const getAttendanceStats = () => {
-    // If we're viewing current month and have dashboard data, use dashboard calculation
-    const currentDate = new Date();
-    const currentMonthKey = format(currentDate, 'yyyy-MM');
-    const selectedMonthKey = selectedMonth === 'all' ? currentMonthKey : format(displayMonth, 'yyyy-MM');
-
-    if (selectedMonthKey === currentMonthKey && dashboardAttendance.length > 0) {
-      // Use EXACT same calculation as dashboard
-      const dashboardStats = getDashboardAttendanceStats();
-      return {
-        present: dashboardStats.presentCount,
-        absent: dashboardStats.absentCount,
-        late: 0, // Dashboard doesn't track late/excused
-        excused: 0,
-        total: dashboardStats.totalCount,
-        percentage: dashboardStats.attendancePercentage
-      };
-    }
-
-    // Fallback to organized data for other months
-    const stats = { present: 0, absent: 0, late: 0, excused: 0, total: 0 };
-
-    Object.values(currentMonthData).forEach(day => {
-      if (day.status) {
-        // Map database status to stats
-        if (day.status === 'present') {
-          stats.present++;
-        } else if (day.status === 'absent') {
-          stats.absent++;
-        } else if (day.status === 'late') {
-          stats.late++;
-        } else if (day.status === 'excused') {
-          stats.excused++;
-        }
-        stats.total++;
-      }
-    });
-
     return {
-      ...stats,
-      percentage: stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0
+      present: presentOnlyCount,
+      absent: absentCount,
+      total: totalRecords,
+      percentage: attendancePercentage
     };
   };
 
@@ -892,26 +931,49 @@ const AttendanceSummary = () => {
     }
   };
 
-  // School info (you can make this dynamic later)
-  const SCHOOL_INFO = {
-    name: 'Springfield Public School',
-    address: '123 Main St, Springfield, USA',
-    logoUrl: 'https://via.placeholder.com/60x60?text=Logo',
-  };
+  // Get actual school info from the database
+  const [schoolInfo, setSchoolInfo] = useState({
+    name: 'School Name',
+    address: 'School Address',
+    logoUrl: '',
+  });
+
+  // Fetch school info when component mounts
+  useEffect(() => {
+    const fetchSchoolInfo = async () => {
+      try {
+        const schoolData = await dbHelpers.getSchoolDetails();
+        if (schoolData && schoolData.data) {
+          setSchoolInfo({
+            name: schoolData.data.name || 'Maximus School',
+            address: schoolData.data.address || 'School Address',
+            logoUrl: schoolData.data.logo_url || '',
+          });
+        }
+      } catch (error) {
+        console.log('Error fetching school info:', error);
+      }
+    };
+    fetchSchoolInfo();
+  }, []);
   
-  // Student info from database
+  // Student info from database with better field mapping
   const STUDENT_INFO = studentData ? {
-    name: studentData.name,
-    class: studentData.class_name || 'N/A',
-    rollNo: studentData.roll_number || 'N/A',
-    section: studentData.section || 'N/A',
-    profilePicUrl: studentData.profile_picture || '',
+    name: studentData.name || 'Student Name',
+    class: studentData.classes?.class_name || studentData.class_name || 'N/A',
+    rollNo: studentData.roll_no || studentData.roll_number || 'N/A',
+    section: studentData.classes?.section || studentData.section || 'N/A',
+    profilePicUrl: studentData.profile_url || '',
+    fullClassName: studentData.classes ? `${studentData.classes.class_name} ${studentData.classes.section}` : (studentData.full_class_name || studentData.class_name || 'N/A'),
+    admissionNo: studentData.admission_no || studentData.admission_number || 'N/A',
   } : {
     name: 'Loading...',
     class: 'N/A',
     rollNo: 'N/A',
     section: 'N/A',
     profilePicUrl: '',
+    fullClassName: 'N/A',
+    admissionNo: 'N/A',
   };
 
   // Helper to generate a calendar table for a given month
@@ -1028,14 +1090,6 @@ const AttendanceSummary = () => {
               <p>${stats.absent}</p>
             </div>
             <div class="stat-box">
-              <h3>Late</h3>
-              <p>${stats.late}</p>
-            </div>
-            <div class="stat-box">
-              <h3>Excused</h3>
-              <p>${stats.excused}</p>
-            </div>
-            <div class="stat-box">
               <h3>Attendance %</h3>
               <p>${stats.percentage}%</p>
             </div>
@@ -1060,13 +1114,11 @@ const AttendanceSummary = () => {
   };
 
   const chartData = {
-    labels: ['Present', 'Absent', 'Late', 'Excused'],
+    labels: ['Present', 'Absent'],
     datasets: [{
       data: [
         getAttendanceStats().present,
-        getAttendanceStats().absent,
-        getAttendanceStats().late,
-        getAttendanceStats().excused
+        getAttendanceStats().absent
       ]
     }]
   };
@@ -1080,13 +1132,8 @@ const AttendanceSummary = () => {
     }]
   };
 
-  // Group days by month for rendering
-  const groupedMonthDays = monthDays.reduce((acc, day) => {
-    const monthKey = format(day, 'yyyy-MM');
-    if (!acc[monthKey]) acc[monthKey] = [];
-    acc[monthKey].push(day);
-    return acc;
-  }, {});
+  // Since we're showing single month, no need to group by month
+  // Just create a single array with all days of the current month
 
   if (loading) {
     return (
@@ -1139,7 +1186,7 @@ const AttendanceSummary = () => {
             <View style={styles.filterButtonTextContainer}>
               <Text style={styles.filterButtonText}>Filters</Text>
               <Text style={styles.filterButtonSubtext}>
-                {selectedMonth === 'all' ? 'All Months' : format(new Date(selectedMonth), 'MMM yyyy')} • {selectedSubject} • {selectedTerm}
+                {selectedMonth === 'all' ? 'All Months' : format(new Date(selectedMonth), 'MMM yyyy')}
               </Text>
             </View>
             <Ionicons 
@@ -1159,32 +1206,6 @@ const AttendanceSummary = () => {
                 >
                   <Text style={styles.dropdownButtonText}>
                     {selectedMonth === 'all' ? 'All Months' : MONTHS.find(m => m.value === selectedMonth)?.label || 'Select Month'}
-                  </Text>
-                  <Ionicons name="chevron-down" size={16} color="#666" />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.filterRow}>
-                <Text style={styles.filterLabel}>Subject:</Text>
-                <TouchableOpacity 
-                  style={styles.dropdownButton}
-                  onPress={() => setShowSubjectPicker(true)}
-                >
-                  <Text style={styles.dropdownButtonText}>
-                    {selectedSubject}
-                  </Text>
-                  <Ionicons name="chevron-down" size={16} color="#666" />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.filterRow}>
-                <Text style={styles.filterLabel}>Term:</Text>
-                <TouchableOpacity 
-                  style={styles.dropdownButton}
-                  onPress={() => setShowTermPicker(true)}
-                >
-                  <Text style={styles.dropdownButtonText}>
-                    {selectedTerm}
                   </Text>
                   <Ionicons name="chevron-down" size={16} color="#666" />
                 </TouchableOpacity>
@@ -1244,22 +1265,6 @@ const AttendanceSummary = () => {
             <Text style={styles.statLabel}>Absent</Text>
             <Text style={styles.statSubtext}>Days</Text>
           </View>
-          <View style={styles.statCard}>
-            <View style={styles.statIconContainer}>
-              <Ionicons name="time" size={24} color="#FF9800" />
-            </View>
-            <Text style={styles.statNumber}>{getAttendanceStats().late}</Text>
-            <Text style={styles.statLabel}>Late</Text>
-            <Text style={styles.statSubtext}>Days</Text>
-          </View>
-          <View style={styles.statCard}>
-            <View style={styles.statIconContainer}>
-              <Ionicons name="medical" size={24} color="#9C27B0" />
-            </View>
-            <Text style={styles.statNumber}>{getAttendanceStats().excused}</Text>
-            <Text style={styles.statLabel}>Excused</Text>
-            <Text style={styles.statSubtext}>Days</Text>
-          </View>
         </View>
 
         {viewMode === 'calendar' ? (
@@ -1271,46 +1276,30 @@ const AttendanceSummary = () => {
                 <TouchableOpacity
                   style={styles.calendarNavButton}
                   onPress={() => {
-                    if (selectedTerm && selectedTerm !== 'All Terms') {
-                      setSelectedTerm(getPrevTerm(selectedTerm));
-                    } else {
-                      const newMonth = new Date(displayMonth);
-                      newMonth.setMonth(newMonth.getMonth() - 1);
-                      setDisplayMonth(newMonth);
-                    }
+                    const newMonth = new Date(displayMonth);
+                    newMonth.setMonth(newMonth.getMonth() - 1);
+                    setDisplayMonth(newMonth);
                   }}
                 >
                   <Ionicons name="chevron-back" size={24} color="#fff" />
                 </TouchableOpacity>
               </View>
               <Text style={styles.currentMonthLabel}>
-                {selectedTerm && selectedTerm !== 'All Terms'
-                  ? getTermRangeLabel(selectedTerm)
-                  : getMonthLabel(format(displayMonth, 'yyyy-MM'))}
+                {format(displayMonth, 'MMMM yyyy')}
               </Text>
               <View style={styles.navButtonContainer}>
                 <TouchableOpacity
                   style={styles.calendarNavButton}
                   onPress={() => {
-                    if (selectedTerm && selectedTerm !== 'All Terms') {
-                      setSelectedTerm(getNextTerm(selectedTerm));
-                    } else {
-                      const newMonth = new Date(displayMonth);
-                      newMonth.setMonth(newMonth.getMonth() + 1);
-                      setDisplayMonth(newMonth);
-                    }
+                    const newMonth = new Date(displayMonth);
+                    newMonth.setMonth(newMonth.getMonth() + 1);
+                    setDisplayMonth(newMonth);
                   }}
                 >
                   <Ionicons name="chevron-forward" size={24} color="#fff" />
                 </TouchableOpacity>
               </View>
             </View>
-            
-            {selectedMonth === 'all' && (
-              <Text style={styles.calendarNote}>
-                Showing 3-month overview with attendance indicators
-              </Text>
-            )}
             
             {/* Calendar Header */}
             <View style={styles.calendarHeader}>
@@ -1323,47 +1312,51 @@ const AttendanceSummary = () => {
             
             {/* Calendar Grid */}
             <View style={styles.calendarGrid}>
-              {Object.entries(groupedMonthDays).map(([monthKey, days], idx) => {
-                const monthIndex = new Date(monthKey + '-01').getMonth() % 3;
-                const monthBgColor = MONTH_BG_COLORS[monthIndex];
-                const monthName = getMonthLabel(monthKey).split(' ')[0];
+              {monthDays.map(day => {
+                const dateStr = format(day, 'yyyy-MM-dd');
+                const attendance = currentMonthData[dateStr];
+                const isCurrentDay = isToday(day);
+                const isCurrentMonth = day.getMonth() === displayMonth.getMonth();
+                const isSunday = day.getDay() === 0; // Sunday is 0 - ALWAYS HOLIDAY
+                const isSaturday = day.getDay() === 6; // Saturday is 6
+                const isWeekend = isSunday || isSaturday;
+                
                 return (
-                  <React.Fragment key={monthKey}>
-                    <View style={[styles.monthLabelContainer, { backgroundColor: monthBgColor }]}> 
-                      <Text style={styles.monthLabelText}>{monthName}</Text>
-                    </View>
-                    {days.map(day => {
-                      const dateStr = format(day, 'yyyy-MM-dd');
-                      const attendance = currentMonthData[dateStr];
-                      const isCurrentDay = isToday(day);
-                      const isCurrentMonth = day.getMonth() === displayMonth.getMonth();
-                      return (
-                        <View key={dateStr} style={[
-                          styles.calendarDay,
-                          isCurrentDay && styles.currentDay,
-                          !isCurrentMonth && styles.otherMonthDay,
-                          { backgroundColor: monthBgColor },
-                        ]}>
-                          <Text style={[
-                            styles.dayNumber,
-                            isCurrentDay && styles.currentDayText,
-                            !isCurrentMonth && styles.otherMonthText
-                          ]}>
-                            {format(day, 'd')}
-                          </Text>
-                          {attendance && (
-                            <View style={[styles.attendanceIndicator, { backgroundColor: getAttendanceColor(attendance.status) }]}>
-                              <Ionicons
-                                name={getAttendanceIcon(attendance.status)}
-                                size={10}
-                                color="#fff"
-                              />
-                            </View>
-                          )}
-                        </View>
-                      );
-                    })}
-                  </React.Fragment>
+                  <View key={dateStr} style={[
+                    styles.calendarDay,
+                    isCurrentDay && styles.currentDay,
+                    !isCurrentMonth && styles.otherMonthDay,
+                    isSunday && styles.holidayDay, // Special styling for holidays (Sundays)
+                    isSaturday && styles.weekendDay, // Special styling for weekends
+                  ]}>
+                    <Text style={[
+                      styles.dayNumber,
+                      isCurrentDay && styles.currentDayText,
+                      !isCurrentMonth && styles.otherMonthText,
+                      isSunday && styles.sundayText, // Holiday text styling for all Sundays
+                      isSaturday && styles.saturdayText,
+                    ]}>
+                      {format(day, 'd')}
+                    </Text>
+                    
+                    {/* Holiday/Weekend indicators */}
+                    {isSunday && isCurrentMonth && (
+                      <View style={styles.holidayIndicator}>
+                        <Ionicons name="star" size={10} color="#FF5722" />
+                      </View>
+                    )}
+                    
+                    {/* Attendance indicator - only for non-holiday days */}
+                    {attendance && !isSunday && (
+                      <View style={[styles.attendanceIndicator, { backgroundColor: getAttendanceColor(attendance.status) }]}>
+                        <Ionicons
+                          name={getAttendanceIcon(attendance.status)}
+                          size={12}
+                          color="#fff"
+                        />
+                      </View>
+                    )}
+                  </View>
                 );
               })}
             </View>
@@ -1379,12 +1372,12 @@ const AttendanceSummary = () => {
                 <Text style={styles.legendText}>Absent</Text>
               </View>
               <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: '#FF9800' }]} />
-                <Text style={styles.legendText}>Late</Text>
+                <View style={[styles.legendDot, { backgroundColor: '#FFE5E5', borderWidth: 1, borderColor: '#FF6B6B' }]} />
+                <Text style={styles.legendText}>Holiday</Text>
               </View>
               <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: '#9C27B0' }]} />
-                <Text style={styles.legendText}>Excused</Text>
+                <View style={[styles.legendDot, { backgroundColor: '#E5F3FF', borderWidth: 1, borderColor: '#4A90E2' }]} />
+                <Text style={styles.legendText}>Weekend</Text>
               </View>
             </View>
             
@@ -1636,11 +1629,17 @@ const AttendanceSummary = () => {
                   onPress={() => {
                     setShowMonthSelect(false);
                     setTimeout(async () => {
-                      // School and student info
-                      const schoolName = 'Springfield Public School';
-                      const schoolLogoUrl = '';
-                      const studentName = 'John Doe';
-                      const profilePicUrl = '';
+                      // Use actual school and student info
+                      const schoolName = schoolInfo.name;
+                      const schoolLogoUrl = schoolInfo.logoUrl;
+                      const studentName = STUDENT_INFO.name;
+                      const profilePicUrl = STUDENT_INFO.profilePicUrl;
+                      console.log('DEBUG PDF - STUDENT_INFO values:', {
+                        name: STUDENT_INFO.name,
+                        rollNo: STUDENT_INFO.rollNo,
+                        admissionNo: STUDENT_INFO.admissionNo,
+                        profilePicUrl: STUDENT_INFO.profilePicUrl
+                      });
                       const monthLabel = m.label;
                       // Attendance data for the selected month
                       const [year, month] = m.value.split('-').map(Number);
@@ -1661,46 +1660,146 @@ const AttendanceSummary = () => {
                         if ((startWeekday + day) % 7 === 0) calendarTable += '</tr><tr>';
                       }
                       calendarTable += '</tr></table>';
-                      // Legend HTML
+                      // Legend HTML - Only show Present and Absent (no late/excused)
                       const legendHtml = `
                         <div style="display:flex;gap:16px;margin-top:16px;align-items:center;justify-content:center;">
                           <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#4CAF50;border-radius:4px;margin-right:6px;"></span>Present</span>
                           <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#F44336;border-radius:4px;margin-right:6px;"></span>Absent</span>
-                          <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#FF9800;border-radius:4px;margin-right:6px;"></span>Late</span>
-                          <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#9C27B0;border-radius:4px;margin-right:6px;"></span>Excused</span>
                         </div>
                       `;
-                      // Profile picture HTML
-                      const profilePic = profilePicUrl
-                        ? `<img src="${profilePicUrl}" style="width:60px;height:60px;border-radius:30px;margin-right:16px;" />`
-                        : `<div style="width:60px;height:60px;border-radius:30px;background:#ccc;margin-right:16px;display:inline-block;"></div>`;
-                      // School logo HTML with placeholder
-                      const schoolLogo = schoolLogoUrl
-                        ? `<img src="${schoolLogoUrl}" style="width:60px;height:60px;border-radius:8px;margin-right:16px;" />`
-                        : `<div style="width:60px;height:60px;border-radius:8px;background:#eee;margin-right:16px;display:inline-block;"></div>`;
+                      // Enhanced Profile picture HTML - using base64 or placeholder with better styling
+                      const profilePic = STUDENT_INFO.profilePicUrl && STUDENT_INFO.profilePicUrl.trim()
+                        ? `<div style="width:80px;height:80px;border-radius:50%;overflow:hidden;border:3px solid #2196F3;margin-right:16px;display:flex;align-items:center;justify-content:center;background:#f0f0f0;">
+                             <img src="${STUDENT_INFO.profilePicUrl}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';this.parentElement.innerHTML='<div style=\"font-size:24px;color:#666;font-weight:bold;\">${STUDENT_INFO.name.charAt(0).toUpperCase()}</div>';"/>
+                           </div>`
+                        : `<div style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#2196F3,#1976D2);margin-right:16px;display:flex;align-items:center;justify-content:center;border:3px solid #e3f2fd;">
+                             <span style="color:white;font-size:28px;font-weight:bold;">${STUDENT_INFO.name.charAt(0).toUpperCase()}</span>
+                           </div>`;
+                      
+                      // Enhanced School logo HTML with better placeholder
+                      const schoolLogo = schoolInfo.logoUrl && schoolInfo.logoUrl.trim()
+                        ? `<div style="width:70px;height:70px;border-radius:12px;overflow:hidden;border:2px solid #ddd;margin-right:20px;display:flex;align-items:center;justify-content:center;background:#fff;">
+                             <img src="${schoolInfo.logoUrl}" style="width:100%;height:100%;object-fit:contain;" onerror="this.style.display='none';this.parentElement.innerHTML='<div style=\"font-size:16px;color:#666;font-weight:bold;text-align:center;\">LOGO</div>';"/>
+                           </div>`
+                        : `<div style="width:70px;height:70px;border-radius:12px;background:linear-gradient(135deg,#FF9800,#F57C00);margin-right:20px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+                             <span style="color:white;font-size:18px;font-weight:bold;">📚</span>
+                           </div>`;
+                      
                       const htmlContent = `
+                        <!DOCTYPE html>
                         <html>
                           <head>
+                            <meta charset="UTF-8">
+                            <title>Attendance Report - ${STUDENT_INFO.name}</title>
                             <style>
-                              .present { background: #4CAF50; color: #fff; }
-                              .absent { background: #F44336; color: #fff; }
-                              .late { background: #FF9800; color: #fff; }
-                              .excused { background: #9C27B0; color: #fff; }
+                              body { 
+                                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+                                margin: 20px; 
+                                background: #f8f9fa;
+                                color: #333;
+                              }
+                              .header-container {
+                                background: white;
+                                padding: 24px;
+                                border-radius: 12px;
+                                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                                margin-bottom: 24px;
+                              }
+                              .school-info {
+                                display: flex;
+                                align-items: center;
+                                margin-bottom: 20px;
+                                padding-bottom: 20px;
+                                border-bottom: 2px solid #e3f2fd;
+                              }
+                              .student-info {
+                                display: flex;
+                                align-items: center;
+                              }
+                              .student-details {
+                                font-size: 16px;
+                                line-height: 1.6;
+                              }
+                              .student-name {
+                                font-size: 24px;
+                                font-weight: bold;
+                                color: #1976d2;
+                                margin-bottom: 8px;
+                              }
+                              .info-row {
+                                margin-bottom: 4px;
+                                color: #555;
+                              }
+                              .school-name {
+                                font-size: 28px;
+                                font-weight: bold;
+                                color: #2196F3;
+                                margin: 0 0 8px 0;
+                              }
+                              .school-address {
+                                color: #666;
+                                margin: 0;
+                                font-size: 14px;
+                              }
+                              table { 
+                                border-collapse: collapse; 
+                                width: 100%; 
+                                margin: 20px 0;
+                                background: white;
+                                border-radius: 8px;
+                                overflow: hidden;
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                              }
+                              th, td { 
+                                width: 40px; 
+                                height: 40px; 
+                                text-align: center; 
+                                border: 1px solid #e0e0e0;
+                                font-weight: 500;
+                              }
+                              th { 
+                                background: linear-gradient(135deg, #2196F3, #1976D2);
+                                color: white;
+                                font-weight: 600;
+                                font-size: 14px;
+                              }
+                              .present { background: #4CAF50; color: #fff; font-weight: bold; }
+                              .absent { background: #F44336; color: #fff; font-weight: bold; }
+                              .report-title {
+                                text-align: center;
+                                color: #1976d2;
+                                font-size: 32px;
+                                font-weight: bold;
+                                margin-bottom: 24px;
+                                text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                              }
                             </style>
                           </head>
                           <body>
-                            <h1>Attendance Report</h1>
-                            <div style="display:flex;align-items:center;margin-bottom:16px;">
-                              ${schoolLogo}
-                              ${profilePic}
-                              <div>
-                                <strong>School:</strong> ${schoolName}<br/>
-                                <strong>Student:</strong> ${studentName}<br/>
-                                <strong>Month:</strong> ${monthLabel}
+                            <h1 class="report-title">📊 Attendance Report</h1>
+                            <div class="header-container">
+                              <div class="school-info">
+                                ${schoolLogo}
+                                <div>
+                                  <h2 class="school-name">${schoolInfo.name}</h2>
+                                  <p class="school-address">${schoolInfo.address || 'School Address'}</p>
+                                </div>
+                              </div>
+                              <div class="student-info">
+                                ${profilePic}
+                                <div class="student-details">
+                                  <div class="student-name">${STUDENT_INFO.name}</div>
+                                  <div class="info-row"><strong>Class:</strong> ${STUDENT_INFO.class} | <strong>Section:</strong> ${STUDENT_INFO.section}</div>
+                                  <div class="info-row"><strong>Roll No:</strong> ${STUDENT_INFO.rollNo} | <strong>Admission No:</strong> ${STUDENT_INFO.admissionNo}</div>
+                                  <div class="info-row"><strong>Report Period:</strong> ${monthLabel}</div>
+                                </div>
                               </div>
                             </div>
-                            ${calendarTable}
-                            ${legendHtml}
+                            <div style="background:white;padding:20px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+                              <h3 style="color:#1976d2;margin-top:0;">📅 Attendance Calendar</h3>
+                              ${calendarTable}
+                              ${legendHtml}
+                            </div>
                           </body>
                         </html>
                       `;
@@ -1980,6 +2079,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#666',
+    paddingVertical: 8,
+    backgroundColor: '#f0f0f0',
   },
   calendarGrid: {
     flexDirection: 'row',
@@ -1987,40 +2088,56 @@ const styles = StyleSheet.create({
   },
   calendarDay: {
     width: (width - 64) / 7,
-    height: 45,
+    height: 58,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderWidth: 0.5,
+    borderColor: '#e8e8e8',
     position: 'relative',
+    backgroundColor: '#ffffff',
   },
   currentDay: {
-    backgroundColor: '#e3f2fd',
+    backgroundColor: '#E3F2FD',
     borderColor: '#2196F3',
+    borderWidth: 2,
+    elevation: 2,
+    shadowColor: '#2196F3',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
   },
   otherMonthDay: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#f5f5f5',
+    opacity: 0.6,
   },
   dayNumber: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#333',
+    fontWeight: '500',
   },
   currentDayText: {
     color: '#2196F3',
     fontWeight: 'bold',
+    fontSize: 16,
   },
   otherMonthText: {
-    color: '#999',
+    color: '#bbb',
+    fontWeight: '400',
   },
   attendanceIndicator: {
     position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
+    bottom: 3,
+    left: 3,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
   },
   calendarStats: {
     flexDirection: 'row',
@@ -2231,6 +2348,34 @@ const styles = StyleSheet.create({
   monthScrollList: {
     maxHeight: 500,
     flex: 1,
+  },
+  // Weekend and Holiday styles - Enhanced UI
+  sundayText: {
+    color: '#FF0000', // Simple red color for Sunday (Holiday)
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+  saturdayText: {
+    color: '#2196F3', // Blue color for Saturday
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  holidayDay: {
+    backgroundColor: '#FFE5E5', // Light red background for holidays (Sundays)
+  },
+  weekendDay: {
+    backgroundColor: '#E5F3FF', // Light blue background for weekends (Saturdays)
+  },
+  holidayIndicator: {
+    position: 'absolute',
+    top: 3,
+    right: 3,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: 'rgba(255, 87, 34, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 

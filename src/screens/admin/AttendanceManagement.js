@@ -88,6 +88,9 @@ const AttendanceManagement = () => {
   const [teacherViewModalVisible, setTeacherViewModalVisible] = useState(false);
   const [teacherViewDate, setTeacherViewDate] = useState(new Date());
   const [selectedClass, setSelectedClass] = useState(null);
+  const [editMode, setEditMode] = useState({});
+  const [teacherEditMode, setTeacherEditMode] = useState({});
+  const [isEditable, setIsEditable] = useState(true);
   const today = new Date();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [attendanceMark, setAttendanceMark] = useState({});
@@ -719,20 +722,20 @@ const AttendanceManagement = () => {
   // Render header for the list
   const renderHeader = () => (
     <View style={styles.headerContainer}>
-      {/* Enhanced Tab Navigation */}
+      {/* Tab Navigation */}
       <View style={styles.tabContainer}>
         <TouchableOpacity
           style={[styles.tabButton, tab === 'student' && styles.tabActive]}
           onPress={() => setTab('student')}
         >
           <Ionicons
-            name="school"
+            name="people"
             size={20}
-            color={tab === 'student' ? '#1976d2' : '#666'}
+            color={tab === 'student' ? '#fff' : '#666'}
             style={styles.tabIcon}
           />
           <Text style={[styles.tabText, tab === 'student' && styles.tabTextActive]}>
-            Student Attendance
+            Student
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -742,11 +745,11 @@ const AttendanceManagement = () => {
           <Ionicons
             name="person"
             size={20}
-            color={tab === 'teacher' ? '#1976d2' : '#666'}
+            color={tab === 'teacher' ? '#fff' : '#666'}
             style={styles.tabIcon}
           />
           <Text style={[styles.tabText, tab === 'teacher' && styles.tabTextActive]}>
-            Teacher Attendance
+            Teacher
           </Text>
         </TouchableOpacity>
       </View>
