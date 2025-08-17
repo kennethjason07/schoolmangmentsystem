@@ -677,9 +677,6 @@ const TakeAttendance = () => {
               <TouchableOpacity onPress={exportToPDF} style={styles.exportButton}>
                 <Text style={styles.exportButtonText}>Export to PDF</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setViewModalVisible(false)} style={styles.closeButton}>
-                <Text style={styles.closeButtonText}>Close</Text>
-              </TouchableOpacity>
             </View>
           </View>
         </View>

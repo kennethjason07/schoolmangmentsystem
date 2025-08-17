@@ -2069,6 +2069,7 @@ const styles = StyleSheet.create({
   },
   classStatsContainer: {
     marginBottom: 20,
+    paddingBottom: 80,
   },
   classStatCard: {
     backgroundColor: '#fff',
@@ -2144,6 +2145,7 @@ const styles = StyleSheet.create({
   },
   recentPaymentsContainer: {
     marginBottom: 20,
+    paddingBottom: 80,
   },
   paymentItemLeft: {
     flex: 1,

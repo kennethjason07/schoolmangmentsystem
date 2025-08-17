@@ -410,6 +410,7 @@ const FeeCollection = ({ navigation }) => {
 
       <ScrollView
         style={styles.content}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
@@ -719,6 +720,9 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 100, // Bottom padding for the entire ScrollView to prevent home button overlap
   },
   loadingContainer: {
     flex: 1,

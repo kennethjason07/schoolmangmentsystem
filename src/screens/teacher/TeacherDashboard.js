@@ -308,7 +308,10 @@ function groupAndSortSchedule(schedule) {
           console.log('⚠️  WARNING: No events to show on dashboard!');
         }
         
-        setUpcomingEvents(mappedEvents.slice(0, 5));
+        const eventsList = mappedEvents.slice(0, 5);
+        setUpcomingEvents(eventsList);
+        
+        console.log('📝 Events state will be updated with:', eventsList.length, 'events');
       } catch (error) {
         console.error('❌ Events catch error:', error);
         setUpcomingEvents([]);
@@ -431,7 +434,7 @@ function groupAndSortSchedule(schedule) {
       ];
       setRecentActivities(recentActivities);
 
-      // Calculate and set teacher stats
+      // Calculate and set teacher stats (moved AFTER events processing to use current data)
       const uniqueClasses = Object.keys(classMap).length;
       const totalSubjects = assignedSubjects.length;
       const todayClasses = schedule.length;
@@ -475,8 +478,27 @@ function groupAndSortSchedule(schedule) {
       }
 
       const uniqueStudentCount = uniqueStudentIds.size;
+      
+      // Get current events data from above instead of relying on state
+      let currentEventsForStats = [];
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const { data: statsEventsData } = await supabase
+          .from('events')
+          .select('*')
+          .eq('status', 'Active')
+          .gte('event_date', today)
+          .order('event_date', { ascending: true })
+          .limit(5);
+        
+        currentEventsForStats = statsEventsData || [];
+        console.log('📊 Using current events for stats calculation:', currentEventsForStats.length);
+      } catch (error) {
+        console.log('Error fetching events for stats:', error);
+        currentEventsForStats = [];
+      }
 
-      // Set enhanced teacher stats
+      // Set enhanced teacher stats using current events data
       setTeacherStats([
         {
           title: 'My Students',
@@ -507,25 +529,28 @@ function groupAndSortSchedule(schedule) {
         },
         {
           title: 'Upcoming Events',
-          value: upcomingEvents.length.toString(),
+          value: currentEventsForStats.length.toString(),
           icon: 'calendar',
-          color: upcomingEvents.length > 0 ? '#E91E63' : '#9E9E9E',
-          subtitle: upcomingEvents.length > 0 ?
-            `Next: ${upcomingEvents[0]?.title || 'Event'}` :
+          color: currentEventsForStats.length > 0 ? '#E91E63' : '#9E9E9E',
+          subtitle: currentEventsForStats.length > 0 ?
+            `Next: ${currentEventsForStats[0]?.title || 'Event'}` :
             'No events scheduled',
-          trend: upcomingEvents.filter(e => e.priority === 'high').length > 0 ? 1 : 0,
+          trend: currentEventsForStats.filter(e => e.event_type === 'Exam').length > 0 ? 1 : 0,
           onPress: () => {
             // Scroll to events section or show events modal
             Alert.alert(
               'Upcoming Events',
-              upcomingEvents.length > 0 ?
-                upcomingEvents.map(e => `• ${e.title} (${new Date(e.date).toLocaleDateString()})`).join('\n') :
+              currentEventsForStats.length > 0 ?
+                currentEventsForStats.map(e => `• ${e.title} (${new Date(e.event_date).toLocaleDateString()})`).join('\n') :
                 'No upcoming events scheduled.',
               [{ text: 'OK' }]
             );
           }
         }
       ]);
+      
+      console.log('✅ Teacher stats updated with', currentEventsForStats.length, 'events');
+      console.log('📋 Stats card will show:', currentEventsForStats.length, 'upcoming events');
 
       setLoading(false);
     } catch (err) {
@@ -547,6 +572,7 @@ function groupAndSortSchedule(schedule) {
         table: TABLES.PERSONAL_TASKS
       }, () => {
         // Refresh dashboard data when personal tasks change
+        console.log('🔄 Personal tasks changed, refreshing dashboard...');
         fetchDashboardData();
       })
       .on('postgres_changes', {
@@ -555,6 +581,7 @@ function groupAndSortSchedule(schedule) {
         table: TABLES.TASKS
       }, () => {
         // Refresh dashboard data when admin tasks change
+        console.log('🔄 Admin tasks changed, refreshing dashboard...');
         fetchDashboardData();
       })
       .on('postgres_changes', {
@@ -563,6 +590,7 @@ function groupAndSortSchedule(schedule) {
         table: TABLES.NOTIFICATIONS
       }, () => {
         // Refresh dashboard data when notifications change
+        console.log('🔄 Notifications changed, refreshing dashboard...');
         fetchDashboardData();
       })
       .on('postgres_changes', {
@@ -571,6 +599,7 @@ function groupAndSortSchedule(schedule) {
         table: TABLES.STUDENT_ATTENDANCE
       }, () => {
         // Refresh analytics when attendance changes
+        console.log('🔄 Student attendance changed, refreshing dashboard...');
         fetchDashboardData();
       })
       .on('postgres_changes', {
@@ -579,6 +608,7 @@ function groupAndSortSchedule(schedule) {
         table: TABLES.MARKS
       }, () => {
         // Refresh analytics when marks change
+        console.log('🔄 Marks changed, refreshing dashboard...');
         fetchDashboardData();
       })
       .on('postgres_changes', {
@@ -587,6 +617,7 @@ function groupAndSortSchedule(schedule) {
         table: 'events'
       }, () => {
         // Refresh dashboard when events change
+        console.log('🔄 Events changed, refreshing dashboard...');
         fetchDashboardData();
       })
       .subscribe();
@@ -595,6 +626,14 @@ function groupAndSortSchedule(schedule) {
       dashboardSubscription.unsubscribe();
     };
   }, []);
+  
+  // Additional effect to ensure data loads when user is available
+  useEffect(() => {
+    if (user?.id && !loading) {
+      console.log('👤 User ready, ensuring dashboard data is loaded...');
+      fetchDashboardData();
+    }
+  }, [user?.id]);
 
   // Pull-to-refresh handler
   const onRefresh = async () => {
@@ -1337,7 +1376,13 @@ function groupAndSortSchedule(schedule) {
                 <Text style={{ color: '#1976d2', fontWeight: 'bold', fontSize: 15 }}>{note.message}</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
                   <Ionicons name="calendar" size={14} color="#888" style={{ marginRight: 4 }} />
-                  <Text style={{ color: '#888', fontSize: 13 }}>{note.created_at}</Text>
+                  <Text style={{ color: '#888', fontSize: 13 }}>
+                    {note.created_at ? new Date(note.created_at).toLocaleDateString('en-GB', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric'
+                    }) : 'N/A'}
+                  </Text>
                 </View>
               </View>
             ))}
@@ -1494,7 +1539,13 @@ function groupAndSortSchedule(schedule) {
             {recentActivities.map((act, index) => (
               <View key={`activity-${act.id || index}`} style={styles.activityCard}>
                 <Text style={{ color: '#333', fontWeight: 'bold' }}>{act.activity}</Text>
-                <Text style={{ color: '#888', marginTop: 2, fontSize: 13 }}>{act.date}</Text>
+                <Text style={{ color: '#888', marginTop: 2, fontSize: 13 }}>
+                  {act.date ? new Date(act.date).toLocaleDateString('en-GB', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                  }) : 'N/A'}
+                </Text>
               </View>
             ))}
                 </View>

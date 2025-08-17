@@ -92,7 +92,7 @@ const ExamsMarks = () => {
     name: '',
     start_date: '',
     end_date: '',
-    class_id: '',
+    selected_classes: [], // Changed from class_id to selected_classes array
     description: ''
   });
   const [marksForm, setMarksForm] = useState({});
@@ -198,33 +198,41 @@ const ExamsMarks = () => {
   // Add exam (schema.txt: exams table)
   const handleAddExam = async () => {
     try {
-      if (!examForm.name || !examForm.class_id || !examForm.start_date || !examForm.end_date) {
-        Alert.alert('Error', 'Please fill required fields');
+      if (!examForm.name || examForm.selected_classes.length === 0 || !examForm.start_date || !examForm.end_date) {
+        Alert.alert('Error', 'Please fill required fields and select at least one class');
         return;
       }
 
+      // Create exam records for each selected class
+      const examRecords = examForm.selected_classes.map(classId => ({
+        name: examForm.name,
+        class_id: classId,
+        academic_year: examForm.academic_year || '2024-25',
+        start_date: examForm.start_date,
+        end_date: examForm.end_date,
+        remarks: examForm.description || examForm.remarks
+      }));
+
       const { error } = await supabase
         .from('exams')
-        .insert({
-          name: examForm.name,
-          class_id: examForm.class_id,
-          academic_year: examForm.academic_year || '2024-25',
-          start_date: examForm.start_date,
-          end_date: examForm.end_date,
-          remarks: examForm.remarks
-        });
+        .insert(examRecords);
 
       if (error) throw error;
 
-      Alert.alert('Success', 'Exam created');
+      const classNames = examForm.selected_classes.map(classId => {
+        const classItem = classes.find(c => c.id === classId);
+        return classItem ? `${classItem.class_name} - ${classItem.section}` : 'Unknown';
+      }).join(', ');
+
+      Alert.alert('Success', `Exam "${examForm.name}" created for ${examForm.selected_classes.length} class(es):\n${classNames}`);
       setAddExamModalVisible(false);
       setExamForm({
         name: '',
-        class_id: '',
+        selected_classes: [],
         academic_year: '',
         start_date: '',
         end_date: '',
-        remarks: ''
+        description: ''
       });
       loadAllData();
 
@@ -236,27 +244,41 @@ const ExamsMarks = () => {
   // Edit exam (using schema: exams table)
   const handleEditExam = async () => {
     try {
-      if (!selectedExam || !examForm.name || !examForm.start_date || !examForm.class_id) {
-        Alert.alert('Error', 'Please fill in all required fields');
+      if (!selectedExam || !examForm.name || !examForm.start_date || examForm.selected_classes.length === 0) {
+        Alert.alert('Error', 'Please fill in all required fields and select at least one class');
         return;
       }
 
-      const examData = {
+      // First, delete the existing exam record
+      const { error: deleteError } = await supabase
+        .from('exams')
+        .delete()
+        .eq('id', selectedExam.id);
+
+      if (deleteError) throw deleteError;
+
+      // Create new exam records for each selected class
+      const examRecords = examForm.selected_classes.map(classId => ({
         name: examForm.name,
-        class_id: examForm.class_id,
+        class_id: classId,
+        academic_year: examForm.academic_year || '2024-25',
         start_date: examForm.start_date,
         end_date: examForm.end_date || examForm.start_date,
         remarks: examForm.description || null
-      };
+      }));
 
-      const { error } = await supabase
+      const { error: insertError } = await supabase
         .from('exams')
-        .update(examData)
-        .eq('id', selectedExam.id);
+        .insert(examRecords);
 
-      if (error) throw error;
+      if (insertError) throw insertError;
 
-      Alert.alert('Success', 'Exam updated successfully!');
+      const classNames = examForm.selected_classes.map(classId => {
+        const classItem = classes.find(c => c.id === classId);
+        return classItem ? `${classItem.class_name} - ${classItem.section}` : 'Unknown';
+      }).join(', ');
+
+      Alert.alert('Success', `Exam "${examForm.name}" updated for ${examForm.selected_classes.length} class(es):\n${classNames}`);
       setEditExamModalVisible(false);
       setSelectedExam(null);
       await loadAllData();
@@ -361,12 +383,16 @@ const ExamsMarks = () => {
   // UI helper functions
   const openEditExamModal = (exam) => {
     setSelectedExam(exam);
+    // For editing, find all exams with the same name to pre-select all classes
+    const relatedExams = exams.filter(e => e.name === exam.name);
+    const selectedClassIds = relatedExams.map(e => e.class_id);
+    
     setExamForm({
       name: exam.name,
       start_date: exam.start_date,
       end_date: exam.end_date,
-      class_id: exam.class_id,
-      description: exam.description || ''
+      selected_classes: selectedClassIds,
+      description: exam.description || exam.remarks || ''
     });
     setEditExamModalVisible(true);
   };
@@ -936,24 +962,68 @@ const ExamsMarks = () => {
                 onChangeText={text => setExamForm(prev => ({ ...prev, name: text }))}
               />
 
-              <Text style={styles.inputLabel}>Class *</Text>
-              <View style={styles.pickerContainer}>
-                <View style={styles.pickerButton}>
-                  <Picker
-                    selectedValue={examForm.class_id}
-                    style={styles.picker}
-                    onValueChange={(value) => setExamForm(prev => ({ ...prev, class_id: value }))}
-                  >
-                    <Picker.Item label="Select Class & Section" value="" />
-                    {classes.map(classItem => (
-                      <Picker.Item
-                        key={classItem.id}
-                        label={`${classItem.class_name} - ${classItem.section}`}
-                        value={classItem.id}
-                      />
-                    ))}
-                  </Picker>
-                </View>
+              <Text style={styles.inputLabel}>Classes * (Select multiple)</Text>
+              <View style={styles.classSelectionGrid}>
+                {classes.map(classItem => {
+                  const isSelected = examForm.selected_classes.includes(classItem.id);
+                  return (
+                    <TouchableOpacity
+                      key={classItem.id}
+                      style={[
+                        styles.classSelectionItem,
+                        isSelected && styles.classSelectionItemSelected
+                      ]}
+                      onPress={() => {
+                        if (isSelected) {
+                          // Remove class from selection
+                          setExamForm(prev => ({
+                            ...prev,
+                            selected_classes: prev.selected_classes.filter(id => id !== classItem.id)
+                          }));
+                        } else {
+                          // Add class to selection
+                          setExamForm(prev => ({
+                            ...prev,
+                            selected_classes: [...prev.selected_classes, classItem.id]
+                          }));
+                        }
+                      }}
+                    >
+                      <View style={styles.classItemContent}>
+                        <View style={styles.classItemInfo}>
+                          <Text style={[
+                            styles.classItemName,
+                            isSelected && styles.classItemNameSelected
+                          ]}>
+                            {classItem.class_name}
+                          </Text>
+                          <Text style={[
+                            styles.classItemSection,
+                            isSelected && styles.classItemSectionSelected
+                          ]}>
+                            Section: {classItem.section}
+                          </Text>
+                        </View>
+                        <View style={[
+                          styles.classSelectionIndicator,
+                          isSelected && styles.classSelectionIndicatorSelected
+                        ]}>
+                          <Ionicons 
+                            name={isSelected ? "checkmark-circle" : "add-circle-outline"} 
+                            size={24} 
+                            color={isSelected ? "#fff" : "#2196F3"} 
+                          />
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+                {classes.length === 0 && (
+                  <View style={styles.noClassesAvailable}>
+                    <Text style={styles.noClassesText}>No classes available</Text>
+                    <Text style={styles.noClassesSubText}>Please add classes first</Text>
+                  </View>
+                )}
               </View>
 
               <Text style={styles.inputLabel}>Start Date *</Text>
@@ -3097,6 +3167,78 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   noReportCardsSubText: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+  // Class selection grid styles
+  classSelectionGrid: {
+    marginBottom: 16,
+  },
+  classSelectionItem: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  classSelectionItemSelected: {
+    borderColor: '#2196F3',
+    backgroundColor: '#2196F3',
+    elevation: 4,
+    shadowOpacity: 0.2,
+  },
+  classItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+  },
+  classItemInfo: {
+    flex: 1,
+  },
+  classItemName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  classItemNameSelected: {
+    color: '#fff',
+  },
+  classItemSection: {
+    fontSize: 14,
+    color: '#666',
+  },
+  classItemSectionSelected: {
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  classSelectionIndicator: {
+    padding: 4,
+  },
+  classSelectionIndicatorSelected: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 20,
+  },
+  noClassesAvailable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+  },
+  noClassesText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  noClassesSubText: {
     fontSize: 14,
     color: '#999',
     textAlign: 'center',

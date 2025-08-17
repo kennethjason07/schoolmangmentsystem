@@ -398,6 +398,7 @@ const AttendanceReport = ({ navigation }) => {
 
       <ScrollView
         style={styles.content}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
@@ -604,6 +605,9 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  scrollContent: {
+    paddingBottom: 100, // Bottom padding for the entire ScrollView to prevent home button overlap
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -807,6 +811,7 @@ const styles = StyleSheet.create({
     margin: 16,
     marginTop: 0,
     padding: 16,
+    paddingBottom: 80, // Increased bottom padding to prevent home button overlap
     borderRadius: 12,
     elevation: 2,
     shadowColor: '#000',

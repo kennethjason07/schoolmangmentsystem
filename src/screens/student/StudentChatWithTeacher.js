@@ -895,7 +895,7 @@ const StudentChatWithTeacher = () => {
         return;
       }
       let result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        mediaTypes: ImagePicker.MediaType.Images,
         allowsEditing: false,
         quality: 1,
       });

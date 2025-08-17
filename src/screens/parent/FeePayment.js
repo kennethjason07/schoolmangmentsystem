@@ -1281,22 +1281,6 @@ const FeePayment = () => {
       <Header title="Fee Payment" showBack={true} />
       
       <View style={styles.content}>
-        {/* Fee Summary Cards */}
-        <View style={styles.summaryCards}>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Total Academic Fee</Text>
-            <Text style={[styles.summaryAmount, { color: '#2196F3' }]}>₹{feeStructure.totalDue}</Text>
-          </View>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Paid</Text>
-            <Text style={[styles.summaryAmount, { color: '#4CAF50' }]}>₹{feeStructure.totalPaid}</Text>
-          </View>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Outstanding</Text>
-            <Text style={[styles.summaryAmount, { color: '#F44336' }]}>₹{feeStructure.outstanding}</Text>
-          </View>
-        </View>
-
         {/* Tab Navigation */}
         <View style={styles.tabContainer}>
           <TouchableOpacity 
@@ -1311,6 +1295,25 @@ const FeePayment = () => {
           >
             <Text style={[styles.tabText, selectedTab === 'history' && styles.activeTabText]}>Payment History</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Fee Summary Cards */}
+        <View style={styles.feeDistributionContainer}>
+          <Text style={styles.feeDistributionTitle}>Fee Distribution Summary</Text>
+          <View style={styles.summaryCards}>
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryLabel}>Total Academic Fee</Text>
+              <Text style={[styles.summaryAmount, { color: '#2196F3' }]}>₹{feeStructure.totalDue}</Text>
+            </View>
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryLabel}>Paid</Text>
+              <Text style={[styles.summaryAmount, { color: '#4CAF50' }]}>₹{feeStructure.totalPaid}</Text>
+            </View>
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryLabel}>Outstanding</Text>
+              <Text style={[styles.summaryAmount, { color: '#F44336' }]}>₹{feeStructure.outstanding}</Text>
+            </View>
+          </View>
         </View>
 
         {/* Content based on selected tab */}
@@ -1334,26 +1337,6 @@ const FeePayment = () => {
                 <Ionicons name="card-outline" size={48} color="#ccc" />
                 <Text style={styles.emptyText}>No fees configured</Text>
                 <Text style={styles.emptySubtext}>Fee structure will be available once configured by the school.</Text>
-              </View>
-            }
-            ListFooterComponent={
-              <View style={styles.feeDistributionContainer}>
-                <Text style={styles.feeDistributionTitle}>Fee Distribution Summary</Text>
-                
-                <View style={styles.feeDistributionRow}>
-                  <View style={styles.feeDistributionItem}>
-                    <Text style={styles.feeDistributionLabel}>Total Academic Fee</Text>
-                    <Text style={[styles.feeDistributionAmount, { color: '#2196F3' }]}>₹{feeStructure.totalDue}</Text>
-                  </View>
-                  <View style={styles.feeDistributionItem}>
-                    <Text style={styles.feeDistributionLabel}>Total Paid</Text>
-                    <Text style={[styles.feeDistributionAmount, { color: '#4CAF50' }]}>₹{feeStructure.totalPaid}</Text>
-                  </View>
-                  <View style={styles.feeDistributionItem}>
-                    <Text style={styles.feeDistributionLabel}>Total Outstanding</Text>
-                    <Text style={[styles.feeDistributionAmount, { color: '#F44336' }]}>₹{feeStructure.outstanding}</Text>
-                  </View>
-                </View>
               </View>
             }
           />
@@ -2120,6 +2103,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginTop: 20,
+    marginBottom: 20,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },

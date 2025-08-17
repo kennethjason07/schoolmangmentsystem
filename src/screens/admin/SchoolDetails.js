@@ -51,8 +51,9 @@ const SchoolDetails = ({ navigation }) => {
       if (error) {
         console.log('Error loading school details:', error);
         // Don't show error for missing data, just use defaults
-        if (error.code !== 'PGRST116' && !error.message?.includes('no rows')) {
-          Alert.alert('Error', 'Failed to load school details: ' + error.message);
+        const errorMessage = error.message || '';
+        if (error.code !== 'PGRST116' && !errorMessage.includes('no rows')) {
+          Alert.alert('Error', 'Failed to load school details: ' + errorMessage);
         }
       }
 
@@ -112,7 +113,7 @@ const SchoolDetails = ({ navigation }) => {
       }
 
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaType.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -122,7 +123,7 @@ const SchoolDetails = ({ navigation }) => {
         await uploadImage(result.assets[0]);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to take photo: ' + error.message);
+      Alert.alert('Error', 'Failed to take photo: ' + (error.message || error));
     }
   };
 
@@ -136,7 +137,7 @@ const SchoolDetails = ({ navigation }) => {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaType.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -146,65 +147,121 @@ const SchoolDetails = ({ navigation }) => {
         await uploadImage(result.assets[0]);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to pick image: ' + error.message);
+      Alert.alert('Error', 'Failed to pick image: ' + (error.message || error));
+    }
+  };
+
+  // Handle logo upload - using exact same method as ProfileScreen
+  const handleUploadLogo = async (uri) => {
+    try {
+      setUploading(true);
+      
+      console.log('Starting school logo upload');
+      console.log('Image URI:', uri);
+
+      // First, get the current logo to delete it later
+      let oldImageFileName = null;
+      try {
+        if (schoolData.logo_url) {
+          // Extract filename from URL
+          const urlParts = schoolData.logo_url.split('/');
+          oldImageFileName = urlParts[urlParts.length - 1];
+          console.log('Found existing logo to delete:', oldImageFileName);
+        }
+      } catch (error) {
+        console.log('No existing logo to delete or error checking:', error);
+      }
+
+      // Create a file name
+      const timestamp = Date.now();
+      const fileName = `school-logo-${timestamp}.jpg`;
+      
+      console.log('Generated filename:', fileName);
+      
+      // React Native specific file upload approach
+      const formData = new FormData();
+      
+      // Add the file to FormData with proper React Native file object
+      formData.append('', {
+        uri: uri,
+        type: 'image/jpeg',
+        name: fileName,
+      });
+      
+      console.log('FormData created for React Native upload');
+      
+      // Get the authenticated user's session token
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        throw new Error('No authenticated session found');
+      }
+
+      // Upload using direct fetch to Supabase storage API
+      const supabaseUrl = 'https://dmagnsbdjsnzsddxqrwd.supabase.co';
+      
+      // IMPORTANT: Use the 'profiles' bucket here - same as ProfileScreen
+      const uploadResponse = await fetch(`${supabaseUrl}/storage/v1/object/profiles/${fileName}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          // Don't set Content-Type for FormData - let the browser set it with boundary
+        },
+        body: formData,
+      });
+      
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        console.error('Upload response error:', uploadResponse.status, errorText);
+        throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}\nDetails: ${errorText}`);
+      }
+      
+      const uploadData = { path: fileName };
+
+      console.log('Upload successful:', uploadData);
+
+      // Construct the public URL manually
+      const publicUrl = `${supabaseUrl}/storage/v1/object/public/profiles/${fileName}`;
+
+      console.log('Generated public URL:', publicUrl);
+
+      // Update the school data
+      handleInputChange('logo_url', publicUrl);
+      
+      // Delete the old image from storage if it exists
+      if (oldImageFileName) {
+        try {
+          console.log('Attempting to delete old logo:', oldImageFileName);
+          
+          const deleteResponse = await fetch(`${supabaseUrl}/storage/v1/object/profiles/${oldImageFileName}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+          });
+          
+          if (deleteResponse.ok) {
+            console.log('Old logo deleted successfully:', oldImageFileName);
+          } else {
+            console.warn('Failed to delete old logo (non-critical):', deleteResponse.status);
+          }
+        } catch (deleteError) {
+          console.warn('Error deleting old logo (non-critical):', deleteError);
+          // Don't throw here - image upload was successful, deletion is just cleanup
+        }
+      }
+      
+      Alert.alert('Success', 'Logo updated successfully!');
+    } catch (error) {
+      console.error('Error uploading logo:', error);
+      Alert.alert('Error', `Failed to upload logo: ${error.message || error}`);
+    } finally {
+      setUploading(false);
     }
   };
 
   const uploadImage = async (imageAsset) => {
-    try {
-      setUploading(true);
-      
-      // Create a unique filename
-      const timestamp = Date.now();
-      const fileExt = imageAsset.uri.split('.').pop();
-      const fileName = `school-logo-${timestamp}.${fileExt}`;
-      
-      // Convert image to blob
-      const response = await fetch(imageAsset.uri);
-      const blob = await response.blob();
-      
-      // Delete old logo if exists
-      if (schoolData.logo_url) {
-        try {
-          const oldFileName = schoolData.logo_url.split('/').pop();
-          if (oldFileName && oldFileName !== fileName) {
-            await supabase.storage
-              .from('school-logos')
-              .remove([oldFileName]);
-          }
-        } catch (deleteError) {
-          console.log('Error deleting old logo:', deleteError);
-          // Don't block upload if delete fails
-        }
-      }
-      
-      // Upload to Supabase storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('school-logos')
-        .upload(fileName, blob, {
-          cacheControl: '3600',
-          upsert: false,
-        });
-      
-      if (uploadError) {
-        throw uploadError;
-      }
-      
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('school-logos')
-        .getPublicUrl(fileName);
-      
-      // Update state with new URL
-      handleInputChange('logo_url', publicUrl);
-      
-      Alert.alert('Success', 'Logo uploaded successfully!');
-    } catch (error) {
-      console.error('Upload error:', error);
-      Alert.alert('Upload Failed', error.message || 'Failed to upload logo. Please try again.');
-    } finally {
-      setUploading(false);
-    }
+    await handleUploadLogo(imageAsset.uri);
   };
 
   const saveSchoolDetails = async () => {
@@ -250,7 +307,7 @@ const SchoolDetails = ({ navigation }) => {
       // Show error message and navigate back to dashboard
       Alert.alert(
         'Error', 
-        'Failed to save school details: ' + error.message,
+        'Failed to save school details: ' + (error.message || error),
         [
           {
             text: 'OK',
