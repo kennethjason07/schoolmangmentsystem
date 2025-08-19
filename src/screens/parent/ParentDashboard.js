@@ -1053,6 +1053,58 @@ const ParentDashboard = ({ navigation }) => {
           ))}
         </View>
 
+        {/* Quick Actions */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+          </View>
+          <View style={styles.quickActionsGrid}>
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => navigation.navigate('ParentTabs', { screen: 'Chat' })}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#9C27B0' }]}>
+                <Ionicons name="chatbubble" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Message Teacher</Text>
+              <Text style={styles.actionSubtitle}>Chat with teachers</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => navigation.navigate('CallWithTeacher')}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#4CAF50' }]}>
+                <Ionicons name="call" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Call Teacher</Text>
+              <Text style={styles.actionSubtitle}>Make a phone call</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => navigation.navigate('ParentNotifications')}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#FF9800' }]}>
+                <Ionicons name="notifications" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Notifications</Text>
+              <Text style={styles.actionSubtitle}>View updates</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => navigation.navigate('Fees')}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#2196F3' }]}>
+                <Ionicons name="card" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Pay Fees</Text>
+              <Text style={styles.actionSubtitle}>Online payment</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* This Week's Attendance */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -1957,6 +2009,43 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     marginLeft: 8,
     fontWeight: '500',
+  },
+
+  // Quick Actions Styles
+  quickActionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  quickActionCard: {
+    width: '48%',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  actionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  actionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  actionSubtitle: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
   },
 });
 

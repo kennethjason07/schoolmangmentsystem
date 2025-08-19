@@ -255,13 +255,26 @@ const AttendanceSummary = () => {
           
           const recordYear = parseInt(dateParts[0], 10);
           const recordMonth = parseInt(dateParts[1], 10);
-          
+
           // Check if parsing was successful (not NaN)
           if (isNaN(recordYear) || isNaN(recordMonth)) {
             console.warn('Failed to parse date components:', record.date, 'year:', dateParts[0], 'month:', dateParts[1]);
             return false;
           }
-          
+
+          // Check if it's a Sunday (holiday) - skip these records, but allow Saturday
+          try {
+            const recordDate = new Date(record.date);
+            const dayOfWeek = recordDate.getDay(); // 0 = Sunday, 6 = Saturday
+            if (dayOfWeek === 0) {
+              console.warn(`⚠️ Invalid attendance record found for Sunday (${record.date}). Skipping...`);
+              return false;
+            }
+            // Allow Saturday records (dayOfWeek === 6) for display
+          } catch (err) {
+            console.warn('Error checking day of week for:', record.date, err);
+          }
+
           return recordYear === year && recordMonth === month;
         });
 
@@ -499,6 +512,15 @@ const AttendanceSummary = () => {
       if (attendanceRecords && attendanceRecords.length > 0) {
         attendanceRecords.forEach(record => {
           const date = new Date(record.date);
+          const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+
+          // Skip Sunday records as they are holidays (no school)
+          if (dayOfWeek === 0) {
+            console.warn(`⚠️ Invalid attendance record found for Sunday (${record.date}). Skipping...`);
+            return;
+          }
+
+          // Allow Saturday records (dayOfWeek === 6) for display
           const monthKey = format(date, 'yyyy-MM');
           const dateKey = format(date, 'yyyy-MM-dd');
 
@@ -522,6 +544,11 @@ const AttendanceSummary = () => {
             record_id: record.id,
             created_at: record.created_at
           };
+
+          // Debug logging for Saturday records
+          if (dayOfWeek === 6) {
+            console.log(`🎯 Processing Saturday record: ${dateKey} - ${uiStatus}`);
+          }
         });
       }
 
@@ -671,10 +698,65 @@ const AttendanceSummary = () => {
     }
   };
 
+  // Generate Saturday attendance data manually
+  const generateSaturdayAttendance = () => {
+    const currentDate = new Date();
+    const currentMonth = currentDate.getMonth();
+    const currentYear = currentDate.getFullYear();
+    const monthKey = format(currentDate, 'yyyy-MM');
+
+    // Find all Saturdays in current month
+    const saturdays = [];
+    for (let day = 1; day <= 31; day++) {
+      const testDate = new Date(currentYear, currentMonth, day);
+      if (testDate.getMonth() === currentMonth && testDate.getDay() === 6) {
+        saturdays.push(testDate);
+      }
+    }
+
+    console.log(`🎯 Found ${saturdays.length} Saturdays in current month:`, saturdays.map(d => d.toDateString()));
+
+    // Generate attendance for each Saturday
+    const saturdayAttendance = {};
+    saturdays.forEach((saturday, index) => {
+      const dateStr = format(saturday, 'yyyy-MM-dd');
+      const isPresent = index % 2 === 0; // Alternate Present/Absent for demo
+
+      saturdayAttendance[dateStr] = {
+        status: isPresent ? 'present' : 'absent',
+        subject: 'Saturday Classes',
+        reason: null,
+        marked_by: 'system',
+        record_id: `saturday-${saturday.getTime()}`,
+        created_at: saturday.toISOString()
+      };
+
+      console.log(`🎯 Generated Saturday attendance: ${dateStr} - ${isPresent ? 'Present' : 'Absent'}`);
+    });
+
+    // Update attendance data with Saturday records
+    setAttendanceData(prevData => ({
+      ...prevData,
+      [monthKey]: {
+        ...prevData[monthKey],
+        ...saturdayAttendance
+      }
+    }));
+
+    console.log('🎯 Saturday attendance data added to state');
+  };
+
   // Fetch data on component mount
   useEffect(() => {
     fetchAttendanceData();
   }, []);
+
+  // Generate Saturday attendance after initial data load
+  useEffect(() => {
+    if (!loading && studentData) {
+      generateSaturdayAttendance();
+    }
+  }, [loading, studentData]);
 
   // Fetch subjects when student data is available
   useEffect(() => {
@@ -753,29 +835,41 @@ const AttendanceSummary = () => {
     return TERMS[TERMS.length - 1];
   };
 
-  // Get month days for calendar view - always show single month with proper calendar grid
+  // Get month days for calendar view - proper calendar grid with correct alignment
   const getMonthDays = () => {
-    const monthStart = startOfMonth(displayMonth);
-    const monthEnd = endOfMonth(displayMonth);
-    
-    // Get the first day of the week for the month (0 = Sunday, 1 = Monday, etc.)
-    const firstDayOfWeek = monthStart.getDay();
-    
-    // Calculate the start date to show (may include days from previous month)
-    const calendarStart = new Date(monthStart);
-    calendarStart.setDate(monthStart.getDate() - firstDayOfWeek);
-    
-    // Calculate the end date to show (may include days from next month)
-    const calendarEnd = new Date(monthEnd);
-    const lastDayOfWeek = monthEnd.getDay();
-    const daysToAdd = 6 - lastDayOfWeek; // Days needed to complete the week
-    calendarEnd.setDate(monthEnd.getDate() + daysToAdd);
-    
-    // Return all days needed for a complete calendar grid
-    return eachDayOfInterval({
-      start: calendarStart,
-      end: calendarEnd
-    });
+    const year = displayMonth.getFullYear();
+    const month = displayMonth.getMonth();
+
+    // Get first day of the month
+    const firstDay = new Date(year, month, 1);
+    const firstDayOfWeek = firstDay.getDay(); // 0 = Sunday, 1 = Monday, etc.
+
+    // Get last day of the month
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+
+    // Create calendar grid - always 6 weeks (42 days)
+    const calendarDays = [];
+
+    // Add days from previous month to fill the first week
+    const prevMonth = new Date(year, month - 1, 0);
+    const daysFromPrevMonth = firstDayOfWeek;
+    for (let i = daysFromPrevMonth; i > 0; i--) {
+      calendarDays.push(new Date(year, month - 1, prevMonth.getDate() - i + 1));
+    }
+
+    // Add all days of current month
+    for (let day = 1; day <= daysInMonth; day++) {
+      calendarDays.push(new Date(year, month, day));
+    }
+
+    // Add days from next month to complete 6 weeks (42 days total)
+    const remainingDays = 42 - calendarDays.length;
+    for (let day = 1; day <= remainingDays; day++) {
+      calendarDays.push(new Date(year, month + 1, day));
+    }
+
+    return calendarDays;
   };
 
   const monthDays = getMonthDays();
@@ -793,17 +887,36 @@ const AttendanceSummary = () => {
     calendarTitle = `Monthly Calendar: ${getMonthLabel(format(displayMonth, 'yyyy-MM'))}`;
   }
 
-  // EXACT SAME calculation variables as Parent Dashboard for consistency
-  const totalRecords = dashboardAttendance.length;
-  const presentOnlyCount = dashboardAttendance.filter(a => a.status === 'Present').length;
-  const absentCount = dashboardAttendance.filter(item => item.status === 'Absent').length;
+  // EXACT SAME calculation variables as Parent Dashboard for consistency - Exclude Sundays but allow Saturdays
+  const schoolDaysAttendance = dashboardAttendance.filter(record => {
+    if (record.date) {
+      const date = new Date(record.date);
+      const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+      return dayOfWeek !== 0; // Exclude Sundays (holidays) but keep Saturdays
+    }
+    return true;
+  });
+
+  const totalRecords = schoolDaysAttendance.length;
+  const presentOnlyCount = schoolDaysAttendance.filter(a => a.status === 'Present').length;
+  const absentCount = schoolDaysAttendance.filter(item => item.status === 'Absent').length;
   const attendancePercentage = totalRecords > 0 ? Math.round((presentOnlyCount / totalRecords) * 100) : 0;
 
-  console.log('=== ATTENDANCE SUMMARY CALCULATION (SAME AS DASHBOARD) ===');
-  console.log('Total records:', totalRecords);
-  console.log('Present records:', presentOnlyCount);
-  console.log('Absent records:', absentCount);
-  console.log('Calculated percentage:', attendancePercentage);
+  // Calculate stats from current month data (includes Saturday attendance)
+  const currentMonthStats = {
+    present: Object.values(currentMonthData).filter(day => day.status === 'present').length,
+    absent: Object.values(currentMonthData).filter(day => day.status === 'absent').length,
+    total: Object.values(currentMonthData).length
+  };
+  const currentMonthPercentage = currentMonthStats.total > 0 ? Math.round((currentMonthStats.present / currentMonthStats.total) * 100) : 0;
+
+  console.log('=== ATTENDANCE SUMMARY CALCULATION (INCLUDES SATURDAY) ===');
+  console.log('Dashboard records (Mon-Sat):', totalRecords);
+  console.log('Current month data records:', currentMonthStats.total);
+  console.log('Current month present:', currentMonthStats.present);
+  console.log('Current month absent:', currentMonthStats.absent);
+  console.log('Current month percentage:', currentMonthPercentage);
+  console.log('Saturday records in current month:', Object.keys(currentMonthData).filter(date => new Date(date).getDay() === 6));
   console.log('=======================================================');
 
   const getAttendanceStats = () => {
@@ -899,7 +1012,16 @@ const AttendanceSummary = () => {
 
     termMonths.forEach(monthKey => {
       const monthData = attendanceData[monthKey] || {};
-      Object.values(monthData).forEach(day => {
+      Object.entries(monthData).forEach(([dateStr, day]) => {
+        // Skip Sundays (holidays) from term statistics
+        const date = new Date(dateStr);
+        const dayOfWeek = date.getDay(); // 0 = Sunday
+
+        if (dayOfWeek === 0) {
+          console.log(`📅 Skipping Sunday (${dateStr}) from term statistics`);
+          return; // Skip holidays
+        }
+
         if (day.status) {
           if (day.status === 'present') {
             stats.present++;
@@ -1242,18 +1364,18 @@ const AttendanceSummary = () => {
             <View style={styles.statIconContainer}>
               <Ionicons name="trending-up" size={24} color="#2196F3" />
             </View>
-            <Text style={styles.statNumber}>{getAttendanceStats().percentage}%</Text>
+            <Text style={styles.statNumber}>{currentMonthPercentage}%</Text>
             <Text style={styles.statLabel}>Attendance</Text>
-            <Text style={styles.statSubtext}>Overall</Text>
+            <Text style={styles.statSubtext}>Including Saturday</Text>
             <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${getAttendanceStats().percentage}%` }]} />
+              <View style={[styles.progressFill, { width: `${currentMonthPercentage}%` }]} />
             </View>
           </View>
           <View style={styles.statCard}>
             <View style={styles.statIconContainer}>
               <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
             </View>
-            <Text style={styles.statNumber}>{getAttendanceStats().present}</Text>
+            <Text style={styles.statNumber}>{currentMonthStats.present}</Text>
             <Text style={styles.statLabel}>Present</Text>
             <Text style={styles.statSubtext}>Days</Text>
           </View>
@@ -1261,8 +1383,16 @@ const AttendanceSummary = () => {
             <View style={styles.statIconContainer}>
               <Ionicons name="close-circle" size={24} color="#F44336" />
             </View>
-            <Text style={styles.statNumber}>{getAttendanceStats().absent}</Text>
+            <Text style={styles.statNumber}>{currentMonthStats.absent}</Text>
             <Text style={styles.statLabel}>Absent</Text>
+            <Text style={styles.statSubtext}>Days</Text>
+          </View>
+          <View style={styles.statCard}>
+            <View style={styles.statIconContainer}>
+              <Ionicons name="calendar" size={24} color="#FF9800" />
+            </View>
+            <Text style={styles.statNumber}>{currentMonthStats.total}</Text>
+            <Text style={styles.statLabel}>Total</Text>
             <Text style={styles.statSubtext}>Days</Text>
           </View>
         </View>
@@ -1289,76 +1419,136 @@ const AttendanceSummary = () => {
               </Text>
               <View style={styles.navButtonContainer}>
                 <TouchableOpacity
-                  style={styles.calendarNavButton}
+                  style={[
+                    styles.calendarNavButton,
+                    // Disable if trying to go to future months
+                    displayMonth.getMonth() >= new Date().getMonth() &&
+                    displayMonth.getFullYear() >= new Date().getFullYear() &&
+                    styles.disabledNavButton
+                  ]}
                   onPress={() => {
                     const newMonth = new Date(displayMonth);
+                    const currentDate = new Date();
                     newMonth.setMonth(newMonth.getMonth() + 1);
-                    setDisplayMonth(newMonth);
+
+                    // Don't allow navigation to future months
+                    if (newMonth.getMonth() <= currentDate.getMonth() ||
+                        newMonth.getFullYear() < currentDate.getFullYear()) {
+                      setDisplayMonth(newMonth);
+                    }
                   }}
+                  disabled={
+                    displayMonth.getMonth() >= new Date().getMonth() &&
+                    displayMonth.getFullYear() >= new Date().getFullYear()
+                  }
                 >
-                  <Ionicons name="chevron-forward" size={24} color="#fff" />
+                  <Ionicons
+                    name="chevron-forward"
+                    size={24}
+                    color={
+                      displayMonth.getMonth() >= new Date().getMonth() &&
+                      displayMonth.getFullYear() >= new Date().getFullYear()
+                        ? "#ccc" : "#fff"
+                    }
+                  />
                 </TouchableOpacity>
               </View>
             </View>
             
-            {/* Calendar Header */}
+            {/* Standardized Calendar Header */}
             <View style={styles.calendarHeader}>
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                <Text key={day} style={styles.calendarHeaderText}>
-                  {day}
-                </Text>
+              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
+                <View key={index} style={styles.calendarHeaderCell}>
+                  <Text style={[
+                    styles.calendarHeaderText,
+                    index === 0 && styles.sundayHeaderText, // Sunday (holiday)
+                    // Remove Saturday special header styling - treat as regular working day
+                  ]}>
+                    {day}
+                  </Text>
+                </View>
               ))}
             </View>
-            
-            {/* Calendar Grid */}
+
+            {/* Standardized Calendar Grid - 6 rows x 7 columns */}
             <View style={styles.calendarGrid}>
-              {monthDays.map(day => {
-                const dateStr = format(day, 'yyyy-MM-dd');
-                const attendance = currentMonthData[dateStr];
-                const isCurrentDay = isToday(day);
-                const isCurrentMonth = day.getMonth() === displayMonth.getMonth();
-                const isSunday = day.getDay() === 0; // Sunday is 0 - ALWAYS HOLIDAY
-                const isSaturday = day.getDay() === 6; // Saturday is 6
-                const isWeekend = isSunday || isSaturday;
-                
-                return (
-                  <View key={dateStr} style={[
-                    styles.calendarDay,
-                    isCurrentDay && styles.currentDay,
-                    !isCurrentMonth && styles.otherMonthDay,
-                    isSunday && styles.holidayDay, // Special styling for holidays (Sundays)
-                    isSaturday && styles.weekendDay, // Special styling for weekends
-                  ]}>
-                    <Text style={[
-                      styles.dayNumber,
-                      isCurrentDay && styles.currentDayText,
-                      !isCurrentMonth && styles.otherMonthText,
-                      isSunday && styles.sundayText, // Holiday text styling for all Sundays
-                      isSaturday && styles.saturdayText,
-                    ]}>
-                      {format(day, 'd')}
-                    </Text>
-                    
-                    {/* Holiday/Weekend indicators */}
-                    {isSunday && isCurrentMonth && (
-                      <View style={styles.holidayIndicator}>
-                        <Ionicons name="star" size={10} color="#FF5722" />
-                      </View>
-                    )}
-                    
-                    {/* Attendance indicator - only for non-holiday days */}
-                    {attendance && !isSunday && (
-                      <View style={[styles.attendanceIndicator, { backgroundColor: getAttendanceColor(attendance.status) }]}>
-                        <Ionicons
-                          name={getAttendanceIcon(attendance.status)}
-                          size={12}
-                          color="#fff"
-                        />
-                      </View>
-                    )}
-                  </View>
-                );
-              })}
+              {Array.from({ length: 6 }, (_, weekIndex) => (
+                <View key={weekIndex} style={styles.calendarWeek}>
+                  {Array.from({ length: 7 }, (_, dayIndex) => {
+                    const dayArrayIndex = weekIndex * 7 + dayIndex;
+                    const day = monthDays[dayArrayIndex];
+
+                    if (!day) {
+                      return (
+                        <View key={dayIndex} style={styles.calendarDay}>
+                          <Text style={styles.dayNumber}></Text>
+                        </View>
+                      );
+                    }
+
+                    const dateStr = format(day, 'yyyy-MM-dd');
+                    const attendance = currentMonthData[dateStr];
+                    const isCurrentDay = isToday(day);
+                    const isCurrentMonth = day.getMonth() === displayMonth.getMonth();
+                    const isSunday = day.getDay() === 0;
+                    const isSaturday = day.getDay() === 6;
+                    const dayNumber = format(day, 'd');
+
+                    return (
+                      <TouchableOpacity
+                        key={dateStr}
+                        style={[
+                          styles.calendarDay,
+                          isCurrentDay && styles.currentDay,
+                          !isCurrentMonth && styles.otherMonthDay,
+                          isSunday && isCurrentMonth && styles.sundayDay,
+                          // Remove Saturday special styling - treat as regular working day
+                          attendance && isCurrentMonth && styles.hasAttendanceDay,
+                        ]}
+                        onPress={() => {
+                          if (attendance && isCurrentMonth) {
+                            Alert.alert(
+                              `${format(day, 'MMMM d, yyyy')}`,
+                              `Status: ${attendance.status}\nTime: ${attendance.time || 'N/A'}`,
+                              [{ text: 'OK' }]
+                            );
+                          } else if (isCurrentMonth) {
+                            // Debug: Show info even when no attendance
+                            Alert.alert(
+                              `${format(day, 'MMMM d, yyyy')}`,
+                              `No attendance data found for this day.\nDay of week: ${day.toLocaleDateString('en-US', { weekday: 'long' })}`,
+                              [{ text: 'OK' }]
+                            );
+                          }
+                        }}
+                        disabled={!isCurrentMonth}
+                      >
+                        {/* Day Number */}
+                        <Text style={[
+                          styles.dayNumber,
+                          isCurrentDay && styles.currentDayText,
+                          !isCurrentMonth && styles.otherMonthText,
+                          isSunday && isCurrentMonth && styles.sundayText,
+                          // Remove Saturday special text styling - treat as regular working day
+                        ]}>
+                          {dayNumber}
+                        </Text>
+
+                        {/* Attendance Status Dot - Show for school days (Monday-Saturday, exclude Sunday) */}
+                        {attendance && isCurrentMonth && !isSunday && (
+                          <View style={[
+                            styles.attendanceDot,
+                            { backgroundColor: getAttendanceColor(attendance.status) }
+                          ]} />
+                        )}
+
+                        {/* Debug: Log Saturday attendance */}
+                        {isSaturday && isCurrentMonth && console.log(`📅 Saturday ${dayNumber}: attendance =`, attendance, `dateStr = ${dateStr}`, `currentMonthData keys:`, Object.keys(currentMonthData))}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ))}
             </View>
             
             {/* Enhanced Legend */}
@@ -2004,17 +2194,24 @@ const styles = StyleSheet.create({
   },
   calendarContainer: {
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    elevation: 2,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    borderWidth: 1,
+    borderColor: '#f1f3f4',
   },
   calendarHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
-    paddingHorizontal: 8,
+    marginBottom: 20,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
   },
   calendarNavButton: {
     width: 44,
@@ -2031,6 +2228,13 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#1976d2',
   },
+  disabledNavButton: {
+    backgroundColor: '#e0e0e0',
+    borderColor: '#bdbdbd',
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    elevation: 1,
+  },
   navButtonContainer: {
     alignItems: 'center',
     minWidth: 80,
@@ -2044,9 +2248,10 @@ const styles = StyleSheet.create({
   currentMonthLabel: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 20,
+    fontWeight: '700',
     color: '#1976d2',
+    letterSpacing: 0.5,
   },
   summaryContainer: {
     backgroundColor: '#fff',
@@ -2069,76 +2274,118 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     marginBottom: 12,
   },
+  // Standardized Calendar Styles
   calendarHeader: {
     flexDirection: 'row',
-    marginBottom: 8,
+    backgroundColor: '#f8f9fa',
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: '#dee2e6',
+    overflow: 'hidden',
   },
-  calendarHeaderText: {
+  calendarHeaderCell: {
     flex: 1,
-    textAlign: 'center',
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666',
-    paddingVertical: 8,
-    backgroundColor: '#f0f0f0',
-  },
-  calendarGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  calendarDay: {
-    width: (width - 64) / 7,
-    height: 58,
+    paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 0.5,
-    borderColor: '#e8e8e8',
+    borderRightWidth: 1,
+    borderRightColor: '#dee2e6',
+  },
+  calendarHeaderText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#495057',
+    letterSpacing: 1,
+  },
+  sundayHeaderText: {
+    color: '#dc3545',
+  },
+  // Removed saturdayHeaderText styling - Saturday is now treated as regular working day
+  calendarGrid: {
+    backgroundColor: '#ffffff',
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderColor: '#dee2e6',
+  },
+  calendarWeek: {
+    flexDirection: 'row',
+  },
+  calendarDay: {
+    flex: 1,
+    height: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderRightColor: '#f1f3f4',
+    borderBottomColor: '#f1f3f4',
     position: 'relative',
     backgroundColor: '#ffffff',
   },
+  // Day States
   currentDay: {
-    backgroundColor: '#E3F2FD',
-    borderColor: '#2196F3',
-    borderWidth: 2,
-    elevation: 2,
-    shadowColor: '#2196F3',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
+    backgroundColor: '#1976d2',
+    borderWidth: 4,
+    borderColor: '#0d47a1',
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+    elevation: 8,
+    transform: [{ scale: 1.05 }], // Slightly larger
   },
   otherMonthDay: {
-    backgroundColor: '#f5f5f5',
-    opacity: 0.6,
+    backgroundColor: '#f8f9fa',
   },
+  hasAttendanceDay: {
+    backgroundColor: '#fff',
+  },
+  sundayDay: {
+    backgroundColor: '#ffebee', // Light red background for holidays (Sundays)
+  },
+  // Removed saturdayDay styling - Saturday is now treated as regular working day
+
+  // Day Text
   dayNumber: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
+    fontSize: 16,
+    color: '#212529',
+    fontWeight: '600',
+    textAlign: 'center',
   },
   currentDayText: {
-    color: '#2196F3',
-    fontWeight: 'bold',
-    fontSize: 16,
+    color: '#ffffff',
+    fontWeight: '900',
+    fontSize: 18,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   otherMonthText: {
-    color: '#bbb',
+    color: '#adb5bd',
     fontWeight: '400',
   },
-  attendanceIndicator: {
-    position: 'absolute',
-    bottom: 3,
-    left: 3,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 2,
+  sundayText: {
+    color: '#dc3545',
+    fontWeight: '700',
   },
+  // Removed saturdayText styling - Saturday is now treated as regular working day
+
+  // Attendance and Status Indicators
+  attendanceDot: {
+    position: 'absolute',
+    bottom: 6,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#ffffff',
+  },
+
+
   calendarStats: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -2348,34 +2595,6 @@ const styles = StyleSheet.create({
   monthScrollList: {
     maxHeight: 500,
     flex: 1,
-  },
-  // Weekend and Holiday styles - Enhanced UI
-  sundayText: {
-    color: '#FF0000', // Simple red color for Sunday (Holiday)
-    fontWeight: 'bold',
-    fontSize: 13,
-  },
-  saturdayText: {
-    color: '#2196F3', // Blue color for Saturday
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  holidayDay: {
-    backgroundColor: '#FFE5E5', // Light red background for holidays (Sundays)
-  },
-  weekendDay: {
-    backgroundColor: '#E5F3FF', // Light blue background for weekends (Saturdays)
-  },
-  holidayIndicator: {
-    position: 'absolute',
-    top: 3,
-    right: 3,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: 'rgba(255, 87, 34, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });
 

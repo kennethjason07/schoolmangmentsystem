@@ -354,8 +354,8 @@ const StudentNotifications = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <Header title="Notifications" showBack={true} />
-      <View style={styles.content}>
+      <Header title="Notifications" showBack={true} showProfile={true} />
+      <View style={styles.contentContainer}>
         <View style={styles.filterRow}>
           {FILTERS.map(f => (
             <TouchableOpacity

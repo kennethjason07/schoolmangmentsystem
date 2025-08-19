@@ -29,7 +29,13 @@ const StatCard = ({
 
   const CardContent = () => (
     <View style={[styles.card, { borderLeftColor: color }, isTeacher && styles.cardTeacher]}>
-      <View style={[styles.header, isTeacher && styles.headerTeacher]}>
+      {/* Icon at the top right */}
+      <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>
+        <Ionicons name={icon} size={32} color={color} />
+      </View>
+
+      {/* Main content - title, value, subtitle in vertical alignment */}
+      <View style={styles.mainContent}>
         <View style={styles.titleContainer}>
           <Text
             style={[styles.title, isTeacher && styles.titleTeacher]}
@@ -48,15 +54,11 @@ const StatCard = ({
             </View>
           )}
         </View>
-        <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>
-          <Ionicons name={icon} size={24} color={color} />
-        </View>
-      </View>
 
-      <View style={styles.content}>
         <Text style={[styles.value, { color }]}>
           {loading ? '...' : value}
         </Text>
+
         {subtitle && (
           <Text style={styles.subtitle} numberOfLines={2}>
             {subtitle}
@@ -100,29 +102,23 @@ const styles = StyleSheet.create({
     marginHorizontal: 0, // Full width for teacher cards
     marginVertical: 12, // More vertical spacing between cards
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  mainContent: {
+    flex: 1,
     alignItems: 'flex-start',
-    marginBottom: 8, // Original spacing for non-teacher dashboards
-  },
-  headerTeacher: {
-    marginBottom: 16, // Much more spacing for very large teacher text
+    justifyContent: 'center',
+    paddingRight: 60, // Space for the icon
   },
   titleContainer: {
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    flex: 1,
-    paddingRight: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   title: {
     fontSize: 16,
     color: '#444',
     fontWeight: '600',
-    marginRight: 8,
     flexShrink: 1,
     lineHeight: 20,
-    marginBottom: 2,
   },
   titleTeacher: {
     fontSize: 28, // Very large size for teachers (100% increase from original 14px)
@@ -141,16 +137,14 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   iconContainer: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
     width: 52,
     height: 52,
     borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    marginTop: 4,
   },
   value: {
     fontSize: 28,
@@ -158,6 +152,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     letterSpacing: -0.5,
     lineHeight: 32,
+    marginTop: 4,
   },
   subtitle: {
     fontSize: 13,

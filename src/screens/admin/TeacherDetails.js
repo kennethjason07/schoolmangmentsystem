@@ -28,13 +28,16 @@ const TeacherDetails = ({ route, navigation }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
-  const [form, setForm] = useState({ 
-    name: '', 
-    subjects: [], 
-    classes: [], 
-    salary: '', 
-    qualification: '', 
-    sections: {} 
+  const [form, setForm] = useState({
+    name: '',
+    phone: '',
+    age: '',
+    address: '',
+    subjects: [],
+    classes: [],
+    salary: '',
+    qualification: '',
+    sections: {}
   });
   const [allSubjects, setAllSubjects] = useState([]);
   const [allClasses, setAllClasses] = useState([]);
@@ -106,6 +109,9 @@ const TeacherDetails = ({ route, navigation }) => {
 
       setForm({
         name: teacherData?.name || '',
+        phone: teacherData?.phone || '',
+        age: teacherData?.age ? String(teacherData.age) : '',
+        address: teacherData?.address || '',
         subjects: subjectIds,
         classes: Array.from(classIds),
         salary: teacherData?.salary_amount ? String(teacherData.salary_amount) : '',
@@ -133,6 +139,9 @@ const TeacherDetails = ({ route, navigation }) => {
         .from(TABLES.TEACHERS)
         .update({
           name: form.name.trim(),
+          phone: form.phone.trim(),
+          age: parseInt(form.age),
+          address: form.address.trim(),
           qualification: form.qualification,
           salary_amount: parseFloat(form.salary) || 0,
         })
@@ -332,6 +341,27 @@ const TeacherDetails = ({ route, navigation }) => {
 
               <View style={styles.infoRow}>
                 <View style={styles.infoItem}>
+                  <Text style={styles.infoLabel}>Phone Number</Text>
+                  <Text style={styles.infoValue}>{teacherData?.phone || 'N/A'}</Text>
+                </View>
+              </View>
+
+              <View style={styles.infoRow}>
+                <View style={styles.infoItem}>
+                  <Text style={styles.infoLabel}>Age</Text>
+                  <Text style={styles.infoValue}>{teacherData?.age || 'N/A'}</Text>
+                </View>
+              </View>
+
+              <View style={styles.infoRow}>
+                <View style={styles.infoItem}>
+                  <Text style={styles.infoLabel}>Address</Text>
+                  <Text style={styles.infoValue}>{teacherData?.address || 'N/A'}</Text>
+                </View>
+              </View>
+
+              <View style={styles.infoRow}>
+                <View style={styles.infoItem}>
                   <Text style={styles.infoLabel}>Qualification</Text>
                   <Text style={styles.infoValue}>{teacherData?.qualification || 'N/A'}</Text>
                 </View>
@@ -501,6 +531,43 @@ const TeacherDetails = ({ route, navigation }) => {
                     onChangeText={text => setForm({ ...form, name: text })}
                     style={styles.textInput}
                     placeholderTextColor="#999"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Phone Number *</Text>
+                  <TextInput
+                    placeholder="Enter phone number"
+                    value={form.phone}
+                    onChangeText={text => setForm({ ...form, phone: text })}
+                    keyboardType="phone-pad"
+                    style={styles.textInput}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Age *</Text>
+                  <TextInput
+                    placeholder="Enter age (must be > 18)"
+                    value={form.age}
+                    onChangeText={text => setForm({ ...form, age: text })}
+                    keyboardType="numeric"
+                    style={styles.textInput}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Address</Text>
+                  <TextInput
+                    placeholder="Enter full address"
+                    value={form.address}
+                    onChangeText={text => setForm({ ...form, address: text })}
+                    style={[styles.textInput, styles.multilineInput]}
+                    placeholderTextColor="#999"
+                    multiline={true}
+                    numberOfLines={3}
                   />
                 </View>
 
@@ -1095,6 +1162,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: '#fafafa',
     color: '#333',
+  },
+  multilineInput: {
+    minHeight: 80,
+    textAlignVertical: 'top',
   },
   salaryInputContainer: {
     flexDirection: 'row',
