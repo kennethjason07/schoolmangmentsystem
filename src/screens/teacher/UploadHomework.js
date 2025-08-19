@@ -895,7 +895,7 @@ const UploadHomework = () => {
               >
                 <Ionicons name="calendar" size={20} color="#1976d2" />
                 <Text style={styles.dateButtonText}>
-                  Due Date: {dueDate.toLocaleDateString()}
+                  Due Date: {format(dueDate, 'dd-MM-yyyy')}
                 </Text>
               </TouchableOpacity>
 

@@ -125,7 +125,7 @@ const SubjectsTimetable = ({ route }) => {
       };
 
       timetableData?.forEach(period => {
-        const dayName = getDayName(period.day_of_week);
+        const dayName = period.day_of_week; // day_of_week is already a string like 'Monday', 'Tuesday', etc.
         if (grouped[dayName]) {
           grouped[dayName].push({
             id: period.id,
@@ -653,6 +653,16 @@ const SubjectsTimetable = ({ route }) => {
         teacherId = teacherSubject.teacher_id;
       }
 
+      // If no teacher is assigned to the subject, alert the user
+      if (!teacherId) {
+        Alert.alert(
+          'No Teacher Assigned',
+          'This subject has no teacher assigned. Please assign a teacher to this subject first, or select a different subject.',
+          [{ text: 'OK' }]
+        );
+        return; // Exit the function early
+      }
+
       // Get current academic year
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
@@ -661,12 +671,26 @@ const SubjectsTimetable = ({ route }) => {
         class_id: selectedClass,
         subject_id: subjectId,
         teacher_id: teacherId,
-        day_of_week: getDayNumber(day),
+        day_of_week: day, // Use day name directly (Monday, Tuesday, etc.)
         period_number: slot.number,
         start_time: slot.startTime,
         end_time: slot.endTime,
         academic_year: academicYear
       };
+
+      // Debug: Log the exact data being sent
+      console.log('🔍 TIMETABLE DEBUG - Data being sent to database:', {
+        day_of_week: timetableData.day_of_week,
+        day_of_week_type: typeof timetableData.day_of_week,
+        day_of_week_length: timetableData.day_of_week?.length,
+        class_id: timetableData.class_id,
+        subject_id: timetableData.subject_id,
+        teacher_id: timetableData.teacher_id,
+        period_number: timetableData.period_number,
+        start_time: timetableData.start_time,
+        end_time: timetableData.end_time,
+        academic_year: timetableData.academic_year
+      });
 
       // Check if period already exists for this slot
       const existingPeriod = timetables[selectedClass]?.[day]?.find(
@@ -1025,7 +1049,7 @@ const SubjectsTimetable = ({ route }) => {
               >
                 <Ionicons name="settings" size={18} color="#2196F3" />
                 <Text style={styles.settingsTextLarge}>Configure Period Timings</Text>
-                <Ionicons name="chevron-right" size={16} color="#2196F3" />
+                <Ionicons name="chevron-forward" size={16} color="#2196F3" />
               </TouchableOpacity>
 
               {/* Pre-defined time slots */}

@@ -343,8 +343,8 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
           <thead>
             <tr>
               <th>Subject</th>
-              <th>Max Marks</th>
               <th>Marks Obtained</th>
+              <th>Total Marks</th>
               <th>Percentage</th>
               <th>Grade</th>
               <th>Remarks</th>
@@ -361,8 +361,8 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
               return `
                 <tr>
                   <td>${subject.name}</td>
-                  <td>${maxMarks}</td>
                   <td>${marksObtained}</td>
+                  <td>${maxMarks}</td>
                   <td>${percentage}%</td>
                   <td>${grade}</td>
                   <td>${mark?.remarks || '-'}</td>
@@ -371,8 +371,8 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
             }).join('')}
             <tr class="total-row">
               <td><strong>TOTAL</strong></td>
-              <td><strong>${totals.totalMaxMarks}</strong></td>
               <td><strong>${totals.totalMarksObtained}</strong></td>
+              <td><strong>${totals.totalMaxMarks}</strong></td>
               <td><strong>${totals.percentage}%</strong></td>
               <td><strong>${totals.grade}</strong></td>
               <td>-</td>
@@ -575,8 +575,8 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
               <View style={styles.marksTable}>
                 <View style={styles.tableHeader}>
                   <Text style={[styles.tableCell, styles.headerCell, { flex: 2 }]}>Subject</Text>
-                  <Text style={[styles.tableCell, styles.headerCell, { flex: 1 }]}>Max</Text>
-                  <Text style={[styles.tableCell, styles.headerCell, { flex: 1 }]}>Obtained</Text>
+                  <Text style={[styles.tableCell, styles.headerCell, { flex: 1 }]}>Marks</Text>
+                  <Text style={[styles.tableCell, styles.headerCell, { flex: 1 }]}>Total</Text>
                   <Text style={[styles.tableCell, styles.headerCell, { flex: 1 }]}>%</Text>
                   <Text style={[styles.tableCell, styles.headerCell, { flex: 1 }]}>Grade</Text>
                 </View>
@@ -591,8 +591,8 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
                   return (
                     <View key={subject.id} style={styles.tableRow}>
                       <Text style={[styles.tableCell, { flex: 2 }]}>{subject.name}</Text>
-                      <Text style={[styles.tableCell, { flex: 1 }]}>{maxMarks}</Text>
                       <Text style={[styles.tableCell, { flex: 1 }]}>{marksObtained}</Text>
+                      <Text style={[styles.tableCell, { flex: 1 }]}>{maxMarks}</Text>
                       <Text style={[styles.tableCell, { flex: 1 }]}>{percentage}%</Text>
                       <Text style={[styles.tableCell, { flex: 1 }]}>{grade}</Text>
                     </View>
@@ -602,8 +602,8 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
                 {totals && (
                   <View style={[styles.tableRow, styles.totalRow]}>
                     <Text style={[styles.tableCell, styles.totalCell, { flex: 2 }]}>TOTAL</Text>
-                    <Text style={[styles.tableCell, styles.totalCell, { flex: 1 }]}>{totals.totalMaxMarks}</Text>
                     <Text style={[styles.tableCell, styles.totalCell, { flex: 1 }]}>{totals.totalMarksObtained}</Text>
+                    <Text style={[styles.tableCell, styles.totalCell, { flex: 1 }]}>{totals.totalMaxMarks}</Text>
                     <Text style={[styles.tableCell, styles.totalCell, { flex: 1 }]}>{totals.percentage}%</Text>
                     <Text style={[styles.tableCell, styles.totalCell, { flex: 1 }]}>{totals.grade}</Text>
                   </View>

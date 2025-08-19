@@ -156,7 +156,7 @@ const ManageClasses = ({ navigation }) => {
   const handleDeleteClass = async (classId) => {
     Alert.alert(
       'Delete Class',
-      'Are you sure you want to delete this class? Students will remain in the system but will no longer be assigned to this class.',
+      'Are you sure you want to delete this class? This will also delete all associated subjects, assignments, exams, and related data.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -164,30 +164,154 @@ const ManageClasses = ({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              // 1. Delete attendance records for this class
+              console.log('Starting class deletion process for class ID:', classId);
+
+              // Step 1: Get all subjects for this class to handle cascading deletes
+              const { data: classSubjects } = await supabase
+                .from('subjects')
+                .select('id')
+                .eq('class_id', classId);
+              
+              const subjectIds = classSubjects?.map(s => s.id) || [];
+              console.log('Found subjects to delete:', subjectIds);
+
+              // Step 2: Delete teacher_subjects assignments for these subjects
+              if (subjectIds.length > 0) {
+                const { error: teacherSubjectsError } = await supabase
+                  .from('teacher_subjects')
+                  .delete()
+                  .in('subject_id', subjectIds);
+                if (teacherSubjectsError) {
+                  console.error('Error deleting teacher_subjects:', teacherSubjectsError);
+                  throw teacherSubjectsError;
+                }
+              }
+
+              // Step 3: Delete marks related to subjects in this class
+              if (subjectIds.length > 0) {
+                const { error: marksError } = await supabase
+                  .from('marks')
+                  .delete()
+                  .in('subject_id', subjectIds);
+                if (marksError) {
+                  console.error('Error deleting marks:', marksError);
+                  throw marksError;
+                }
+              }
+
+              // Step 4: Delete timetable entries for this class
+              const { error: timetableError } = await supabase
+                .from('timetable_entries')
+                .delete()
+                .eq('class_id', classId);
+              if (timetableError) {
+                console.error('Error deleting timetable entries:', timetableError);
+                throw timetableError;
+              }
+
+              // Step 5: Delete assignment submissions for assignments in this class
+              const { data: classAssignments } = await supabase
+                .from('assignments')
+                .select('id')
+                .eq('class_id', classId);
+              
+              const assignmentIds = classAssignments?.map(a => a.id) || [];
+              if (assignmentIds.length > 0) {
+                const { error: submissionsError } = await supabase
+                  .from('assignment_submissions')
+                  .delete()
+                  .in('assignment_id', assignmentIds);
+                if (submissionsError) {
+                  console.error('Error deleting assignment submissions:', submissionsError);
+                  throw submissionsError;
+                }
+              }
+
+              // Step 6: Delete assignments for this class
+              const { error: assignmentsError } = await supabase
+                .from('assignments')
+                .delete()
+                .eq('class_id', classId);
+              if (assignmentsError) {
+                console.error('Error deleting assignments:', assignmentsError);
+                throw assignmentsError;
+              }
+
+              // Step 7: Delete homeworks for this class
+              const { error: homeworksError } = await supabase
+                .from('homeworks')
+                .delete()
+                .eq('class_id', classId);
+              if (homeworksError) {
+                console.error('Error deleting homeworks:', homeworksError);
+                throw homeworksError;
+              }
+
+              // Step 8: Delete exams for this class (marks are already deleted above)
+              const { error: examsError } = await supabase
+                .from('exams')
+                .delete()
+                .eq('class_id', classId);
+              if (examsError) {
+                console.error('Error deleting exams:', examsError);
+                throw examsError;
+              }
+
+              // Step 9: Delete fee structures for this class
+              const { error: feeStructureError } = await supabase
+                .from('fee_structure')
+                .delete()
+                .eq('class_id', classId);
+              if (feeStructureError) {
+                console.error('Error deleting fee structures:', feeStructureError);
+                throw feeStructureError;
+              }
+
+              // Step 10: Delete attendance records for this class
               const { error: attendanceError } = await supabase
                 .from('student_attendance')
                 .delete()
                 .eq('class_id', classId);
-              if (attendanceError) throw attendanceError;
+              if (attendanceError) {
+                console.error('Error deleting student attendance:', attendanceError);
+                throw attendanceError;
+              }
 
-              // 2. Set class_id to null for all students in this class
+              // Step 11: Set class_id to null for all students in this class
               const { error: updateError } = await supabase
                 .from('students')
                 .update({ class_id: null })
                 .eq('class_id', classId);
-              if (updateError) throw updateError;
+              if (updateError) {
+                console.error('Error updating students:', updateError);
+                throw updateError;
+              }
 
-              // 3. Delete the class
+              // Step 12: Delete subjects for this class
+              const { error: subjectsError } = await supabase
+                .from('subjects')
+                .delete()
+                .eq('class_id', classId);
+              if (subjectsError) {
+                console.error('Error deleting subjects:', subjectsError);
+                throw subjectsError;
+              }
+
+              // Step 13: Finally, delete the class
               const { error: classDeleteError } = await supabase
                 .from('classes')
                 .delete()
                 .eq('id', classId);
-              if (classDeleteError) throw classDeleteError;
+              if (classDeleteError) {
+                console.error('Error deleting class:', classDeleteError);
+                throw classDeleteError;
+              }
 
+              console.log('Class deletion completed successfully');
               await loadAllData();
-              Alert.alert('Success', 'Class deleted. Students remain in the system.');
+              Alert.alert('Success', 'Class and all associated data deleted successfully.');
             } catch (error) {
+              console.error('Failed to delete class:', error);
               Alert.alert('Error', `Failed to delete class: ${error.message}`);
             }
           },

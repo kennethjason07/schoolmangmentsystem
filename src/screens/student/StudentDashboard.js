@@ -768,7 +768,7 @@ const StudentDashboard = ({ navigation }) => {
 
         {/* Upcoming Events */}
         {events.length > 0 && (
-          <View style={styles.section}>
+          <View style={[styles.section, { marginBottom: 28 }]}>
             <View style={styles.sectionTitleContainer}>
               <View style={styles.sectionIcon}>
                 <Ionicons name="calendar" size={20} color="#FF9800" />
@@ -782,10 +782,10 @@ const StudentDashboard = ({ navigation }) => {
                     <Ionicons name={event.icon} size={20} color="#fff" />
         </View>
                   <View style={styles.eventInfo}>
-                    <Text style={styles.eventTitle}>{event.title}</Text>
-                    <Text style={styles.eventDescription}>{event.description}</Text>
+                    <Text style={styles.eventTitle}>{event.title || 'Not available'}</Text>
+                    <Text style={styles.eventDescription}>{event.description || 'Not available'}</Text>
                     <Text style={styles.eventDateTime}>
-                      {formatDateToDDMMYYYY(event.date)} • {event.time}
+                      {event.date ? formatDateToDDMMYYYY(event.date) : 'Not available'} • {event.time || 'Not available'}
                     </Text>
                   </View>
                 </View>

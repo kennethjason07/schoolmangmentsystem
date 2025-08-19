@@ -564,14 +564,6 @@ const ViewStudentInfo = () => {
         <View style={styles.studentInfo}>
           <View style={styles.studentNameRow}>
             <Text style={styles.studentName}>{item.name}</Text>
-            <View style={[
-              styles.roleBadge,
-              item.teacherRole === 'class_teacher' ? styles.classTeacherBadge : styles.subjectTeacherBadge
-            ]}>
-              <Text style={styles.roleBadgeText}>
-                {item.teacherRole === 'class_teacher' ? 'Class Teacher' : 'Subject Teacher'}
-              </Text>
-            </View>
           </View>
           <Text style={styles.studentDetails}>
             Roll: {item.roll_no} | {item.classSection}

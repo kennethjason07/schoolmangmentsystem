@@ -146,37 +146,70 @@ const AttendanceSummary = () => {
     await fetchAttendanceData();
   });
 
-  // Fetch attendance data from Supabase (using EXACT SAME method as ParentDashboard)
+  // Fetch attendance data with improved error handling
   const fetchAttendanceData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      console.log('AttendanceSummary - Starting data fetch for user:', user.id);
+      console.log('AttendanceSummary - Starting data fetch for user:', user?.id);
 
-      // Use the same method as ParentDashboard to get student data
-      const { data: parentUserData, error: parentError } = await dbHelpers.getParentByUserId(user.id);
+      if (!user?.id) {
+        throw new Error('No user logged in');
+      }
 
+      // Use multiple strategies to get student data
       let studentDetails = null;
+      let parentError = null;
 
-      // The structure returned by getParentByUserId has students data in a different location
-      // Based on the query, it should be in parentUserData.students (from the join)
-      
-      console.log('AttendanceSummary - Parent user data structure:', JSON.stringify(parentUserData, null, 2));
-      
-      if (parentError || !parentUserData) {
-        console.log('AttendanceSummary - Parent error or no data:', parentError);
-        studentDetails = null;
-      } else if (parentUserData.students && parentUserData.students.length > 0) {
-        // Students data is available in the joined response
-        studentDetails = parentUserData.students[0];
-        console.log('AttendanceSummary - Using real student data from students array:', studentDetails?.name || 'Unnamed Student');
-        console.log('AttendanceSummary - Full student data:', JSON.stringify(studentDetails, null, 2));
-      } else if (parentUserData.linked_parent_of) {
-        // Fallback: try to get student data from linked_parent_of field
-        console.log('AttendanceSummary - Trying to get student from linked_parent_of:', parentUserData.linked_parent_of);
+      try {
+        // Strategy 1: Use the same method as ParentDashboard
+        const { data: parentUserData, error: parentErr } = await dbHelpers.getParentByUserId(user.id);
+        parentError = parentErr;
+        
+        console.log('AttendanceSummary - Parent user data:', parentUserData);
+        console.log('AttendanceSummary - Parent error:', parentError);
+        
+        if (!parentError && parentUserData) {
+          if (parentUserData.students && parentUserData.students.length > 0) {
+            studentDetails = parentUserData.students[0];
+            console.log('AttendanceSummary - Found student via students array:', studentDetails.name);
+          } else if (parentUserData.linked_parent_of) {
+            console.log('AttendanceSummary - Trying linked_parent_of:', parentUserData.linked_parent_of);
+            
+            const { data: studentData, error: studentError } = await supabase
+              .from(TABLES.STUDENTS)
+              .select(`
+                id,
+                name,
+                admission_no,
+                roll_no,
+                dob,
+                gender,
+                address,
+                profile_url,
+                class_id,
+                classes(id, class_name, section)
+              `)
+              .eq('id', parentUserData.linked_parent_of)
+              .single();
+              
+            if (!studentError && studentData) {
+              studentDetails = studentData;
+              console.log('AttendanceSummary - Found student via linked_parent_of:', studentDetails.name);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('AttendanceSummary - Error in parent/student lookup:', err);
+        parentError = err;
+      }
+
+      // Strategy 2: Direct student lookup if user is a student
+      if (!studentDetails) {
         try {
-          const { data: studentData, error: studentError } = await supabase
+          console.log('AttendanceSummary - Trying direct student lookup');
+          const { data: directStudentData, error: directStudentError } = await supabase
             .from(TABLES.STUDENTS)
             .select(`
               id,
@@ -190,15 +223,15 @@ const AttendanceSummary = () => {
               class_id,
               classes(id, class_name, section)
             `)
-            .eq('id', parentUserData.linked_parent_of)
+            .eq('user_id', user.id)
             .single();
             
-          if (!studentError && studentData) {
-            studentDetails = studentData;
-            console.log('AttendanceSummary - Using real student data from direct query:', studentDetails?.name || 'Unnamed Student');
+          if (!directStudentError && directStudentData) {
+            studentDetails = directStudentData;
+            console.log('AttendanceSummary - Found student via direct lookup:', studentDetails.name);
           }
         } catch (err) {
-          console.log('AttendanceSummary - Error fetching student data:', err);
+          console.log('AttendanceSummary - Direct student lookup failed:', err);
         }
       }
       
@@ -224,77 +257,208 @@ const AttendanceSummary = () => {
 
       setStudentData(studentDetails);
 
-      // EXACT SAME ATTENDANCE FETCHING AS PARENT DASHBOARD
+      // Fetch ALL attendance records for this student from student_attendance table
       const currentDate = new Date();
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth() + 1; // getMonth() returns 0-11, so add 1
 
+      // Now fetch attendance data with multiple fallback strategies
       try {
-        // Get ALL attendance records for this student - SAME AS PARENT DASHBOARD
-        const { data: allAttendanceData, error: attendanceError } = await supabase
-          .from(TABLES.STUDENT_ATTENDANCE)
-          .select('*')
-          .eq('student_id', studentDetails.id)
-          .order('date', { ascending: false });
+        console.log('AttendanceSummary - Fetching attendance for student:', studentDetails.id);
+        
+        let allAttendanceData = null;
+        let attendanceError = null;
+        
+        // Strategy 1: Try the configured table name
+        try {
+          console.log('AttendanceSummary - TABLES.STUDENT_ATTENDANCE value:', TABLES.STUDENT_ATTENDANCE);
+          const { data, error } = await supabase
+            .from(TABLES.STUDENT_ATTENDANCE)
+            .select(`
+              id,
+              student_id,
+              class_id,
+              date,
+              status,
+              marked_by,
+              created_at
+            `)
+            .eq('student_id', studentDetails.id)
+            .order('date', { ascending: false });
+            
+          if (!error) {
+            allAttendanceData = data;
+            console.log('AttendanceSummary - Found attendance via TABLES.STUDENT_ATTENDANCE');
+          } else {
+            attendanceError = error;
+          }
+        } catch (err) {
+          console.log('AttendanceSummary - TABLES.STUDENT_ATTENDANCE failed:', err);
+          attendanceError = err;
+        }
+        
+        // Strategy 2: Try 'student_attendance' directly
+        if (!allAttendanceData) {
+          try {
+            const { data, error } = await supabase
+              .from('student_attendance')
+              .select(`
+                id,
+                student_id,
+                class_id,
+                date,
+                status,
+                marked_by,
+                created_at
+              `)
+              .eq('student_id', studentDetails.id)
+              .order('date', { ascending: false });
+              
+            if (!error) {
+              allAttendanceData = data;
+              console.log('AttendanceSummary - Found attendance via student_attendance');
+            } else {
+              attendanceError = error;
+            }
+          } catch (err) {
+            console.log('AttendanceSummary - student_attendance failed:', err);
+            attendanceError = err;
+          }
+        }
+        
+        // Strategy 3: Skip public.student_attendance (causes double public prefix)
+        // This strategy is removed to avoid the 'public.public.student_attendance' error
+        
+        // Strategy 4: Try alternative table names
+        if (!allAttendanceData) {
+          const alternativeNames = ['attendance', 'student_attendances', 'attendance_records'];
+          
+          for (const tableName of alternativeNames) {
+            try {
+              const { data, error } = await supabase
+                .from(tableName)
+                .select(`
+                  id,
+                  student_id,
+                  class_id,
+                  date,
+                  status,
+                  marked_by,
+                  created_at
+                `)
+                .eq('student_id', studentDetails.id)
+                .order('date', { ascending: false });
+                
+              if (!error && data) {
+                allAttendanceData = data;
+                console.log(`AttendanceSummary - Found attendance via ${tableName}`);
+                break;
+              }
+            } catch (err) {
+              console.log(`AttendanceSummary - ${tableName} failed:`, err);
+            }
+          }
+        }
 
         if (attendanceError) throw attendanceError;
 
-        // Filter to current month records - SAME AS PARENT DASHBOARD
-        const currentMonthRecords = (allAttendanceData || []).filter(record => {
+        console.log('=== FETCHED ATTENDANCE DATA FROM student_attendance TABLE ===');
+        console.log('Total records found:', allAttendanceData?.length || 0);
+        console.log('Sample records:', allAttendanceData?.slice(0, 3));
+
+        // Process attendance data into calendar format - Skip Sundays entirely
+        const processedAttendanceData = {};
+        const monthlyStats = {};
+
+        (allAttendanceData || []).forEach(record => {
           // Safety check for valid date format
           if (!record.date || typeof record.date !== 'string') {
             console.warn('Invalid date format in attendance record:', record.date);
-            return false;
+            return;
           }
           
-          const dateParts = record.date.split('-');
-          if (dateParts.length < 2) {
-            console.warn('Date does not contain expected format (YYYY-MM-DD):', record.date);
-            return false;
-          }
-          
-          const recordYear = parseInt(dateParts[0], 10);
-          const recordMonth = parseInt(dateParts[1], 10);
-
-          // Check if parsing was successful (not NaN)
-          if (isNaN(recordYear) || isNaN(recordMonth)) {
-            console.warn('Failed to parse date components:', record.date, 'year:', dateParts[0], 'month:', dateParts[1]);
-            return false;
-          }
-
-          // Check if it's a Sunday (holiday) - skip these records, but allow Saturday
           try {
-            const recordDate = new Date(record.date);
+            const recordDate = new Date(record.date + 'T00:00:00'); // Add time to avoid timezone issues
             const dayOfWeek = recordDate.getDay(); // 0 = Sunday, 6 = Saturday
+            
+            // Skip Sundays completely - they shouldn't be in attendance records
             if (dayOfWeek === 0) {
-              console.warn(`⚠️ Invalid attendance record found for Sunday (${record.date}). Skipping...`);
-              return false;
+              console.warn(`⚠️ Sunday attendance record found (${record.date}). This should not exist in the database.`);
+              return; // Skip Sundays entirely
             }
-            // Allow Saturday records (dayOfWeek === 6) for display
-          } catch (err) {
-            console.warn('Error checking day of week for:', record.date, err);
-          }
 
-          return recordYear === year && recordMonth === month;
+            const monthKey = format(recordDate, 'yyyy-MM');
+            const dateKey = record.date;
+            
+            // Initialize month data if not exists
+            if (!processedAttendanceData[monthKey]) {
+              processedAttendanceData[monthKey] = {};
+            }
+            if (!monthlyStats[monthKey]) {
+              monthlyStats[monthKey] = { present: 0, absent: 0, total: 0 };
+            }
+            
+            // Store attendance record
+            processedAttendanceData[monthKey][dateKey] = {
+              status: record.status.toLowerCase(), // Normalize to lowercase
+              time: record.created_at ? format(new Date(record.created_at), 'HH:mm') : 'N/A',
+              marked_by: record.marked_by,
+              record_id: record.id
+            };
+
+            // Update monthly stats (excluding Sundays)
+            monthlyStats[monthKey].total++;
+            if (record.status === 'Present') {
+              monthlyStats[monthKey].present++;
+            } else if (record.status === 'Absent') {
+              monthlyStats[monthKey].absent++;
+            }
+          } catch (err) {
+            console.warn('Error processing attendance record:', record.date, err);
+          }
         });
 
-        console.log('=== ATTENDANCE SUMMARY EXACT SAME CALCULATION AS PARENT DASHBOARD ===');
-        console.log('Current month:', `${year}-${String(month).padStart(2, '0')}`);
-        console.log('Current month records:', currentMonthRecords.length);
-        console.log('Records:', currentMonthRecords.map(r => `${r.date}: ${r.status}`));
-        console.log('===============================================================');
+        // Calculate percentages for each month
+        Object.keys(monthlyStats).forEach(monthKey => {
+          const stats = monthlyStats[monthKey];
+          stats.percentage = stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0;
+        });
 
-        // Use the filtered records - SAME AS PARENT DASHBOARD
-        const attendanceData = currentMonthRecords;
-        setDashboardAttendance(attendanceData || []);
+        console.log('=== PROCESSED ATTENDANCE DATA ===');
+        console.log('Months with data:', Object.keys(processedAttendanceData));
+        console.log('Monthly stats:', monthlyStats);
+        console.log('Current month data sample:', processedAttendanceData[format(currentDate, 'yyyy-MM')]);
+        console.log('=================================');
+
+        // Set processed data
+        setAttendanceData(processedAttendanceData);
+        
+        // Set current month records for dashboard display (excluding Sundays)
+        const currentMonthKey = format(currentDate, 'yyyy-MM');
+        const currentMonthRecords = (allAttendanceData || []).filter(record => {
+          if (!record.date) return false;
+          
+          try {
+            const recordDate = new Date(record.date + 'T00:00:00');
+            const dayOfWeek = recordDate.getDay();
+            
+            // Skip Sundays
+            if (dayOfWeek === 0) return false;
+            
+            const recordMonthKey = format(recordDate, 'yyyy-MM');
+            return recordMonthKey === currentMonthKey;
+          } catch (err) {
+            return false;
+          }
+        });
+
+        setDashboardAttendance(currentMonthRecords || []);
 
       } catch (err) {
-        console.log('AttendanceSummary - Attendance fetch error:', err);
+        console.error('AttendanceSummary - Error fetching attendance data:', err);
         setDashboardAttendance([]);
+        setAttendanceData({});
       }
-
-      // Get attendance records for all months for organized data
-      await fetchAttendanceRecords(studentDetails.id, studentDetails.class_id);
 
     } catch (err) {
       console.error('AttendanceSummary - Error fetching attendance data:', err);
@@ -1298,6 +1462,28 @@ const AttendanceSummary = () => {
           />
         }
       >
+        {/* View Mode Toggle */}
+        <View style={styles.viewModeContainer}>
+          <TouchableOpacity 
+            style={[styles.viewModeButton, viewMode === 'calendar' && styles.activeViewModeButton]}
+            onPress={() => setViewMode('calendar')}
+          >
+            <Ionicons name="calendar" size={20} color={viewMode === 'calendar' ? '#fff' : '#666'} />
+            <Text style={[styles.viewModeButtonText, viewMode === 'calendar' && styles.activeViewModeText]}>
+              Calendar
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.viewModeButton, viewMode === 'summary' && styles.activeViewModeButton]}
+            onPress={() => setViewMode('summary')}
+          >
+            <Ionicons name="stats-chart" size={20} color={viewMode === 'summary' ? '#fff' : '#666'} />
+            <Text style={[styles.viewModeButtonText, viewMode === 'summary' && styles.activeViewModeText]}>
+              Summary
+            </Text>
+          </TouchableOpacity>
+        </View>
+        
         {/* Filters Section */}
         <View style={styles.filtersSection}>
           <TouchableOpacity 
@@ -1334,28 +1520,6 @@ const AttendanceSummary = () => {
               </View>
             </View>
           )}
-        </View>
-
-        {/* View Mode Toggle */}
-        <View style={styles.viewToggle}>
-          <TouchableOpacity 
-            style={[styles.toggleButton, viewMode === 'calendar' && styles.activeToggle]}
-            onPress={() => setViewMode('calendar')}
-          >
-            <Ionicons name="calendar" size={20} color={viewMode === 'calendar' ? '#fff' : '#666'} />
-            <Text style={[styles.toggleText, viewMode === 'calendar' && styles.activeToggleText]}>
-              Calendar
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.toggleButton, viewMode === 'summary' && styles.activeToggle]}
-            onPress={() => setViewMode('summary')}
-          >
-            <Ionicons name="stats-chart" size={20} color={viewMode === 'summary' ? '#fff' : '#666'} />
-            <Text style={[styles.toggleText, viewMode === 'summary' && styles.activeToggleText]}>
-              Summary
-            </Text>
-          </TouchableOpacity>
         </View>
 
         {/* Enhanced Quick Stats */}
@@ -1401,87 +1565,98 @@ const AttendanceSummary = () => {
           /* Calendar View */
           <View style={styles.calendarContainer}>
             <Text style={styles.sectionTitle}>Monthly Calendar</Text>
-            <View style={styles.calendarHeaderRow}>
-              <View style={styles.navButtonContainer}>
-                <TouchableOpacity
-                  style={styles.calendarNavButton}
-                  onPress={() => {
-                    const newMonth = new Date(displayMonth);
-                    newMonth.setMonth(newMonth.getMonth() - 1);
-                    setDisplayMonth(newMonth);
-                  }}
-                >
-                  <Ionicons name="chevron-back" size={24} color="#fff" />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.currentMonthLabel}>
-                {format(displayMonth, 'MMMM yyyy')}
-              </Text>
-              <View style={styles.navButtonContainer}>
-                <TouchableOpacity
-                  style={[
-                    styles.calendarNavButton,
-                    // Disable if trying to go to future months
-                    displayMonth.getMonth() >= new Date().getMonth() &&
-                    displayMonth.getFullYear() >= new Date().getFullYear() &&
-                    styles.disabledNavButton
-                  ]}
-                  onPress={() => {
-                    const newMonth = new Date(displayMonth);
-                    const currentDate = new Date();
-                    newMonth.setMonth(newMonth.getMonth() + 1);
+            {/* Enhanced Modern Navigation Header */}
+            <View style={styles.modernCalendarNavHeader}>
+              <TouchableOpacity
+                style={styles.modernNavButton}
+                onPress={() => {
+                  const newMonth = new Date(displayMonth);
+                  newMonth.setMonth(newMonth.getMonth() - 1);
+                  setDisplayMonth(newMonth);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.navButtonContent}>
+                  <Ionicons name="chevron-back" size={20} color="#4285F4" />
+                  <Text style={styles.navButtonText}>Prev</Text>
+                </View>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.monthYearSelector}
+                onPress={() => setShowMonthPicker(true)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.monthYearText}>
+                  {format(displayMonth, 'MMMM yyyy')}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color="#5f6368" />
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[
+                  styles.modernNavButton,
+                  // Check if we can navigate to next month
+                  displayMonth.getTime() >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() &&
+                  styles.disabledModernNavButton
+                ]}
+                onPress={() => {
+                  const newMonth = new Date(displayMonth);
+                  const currentDate = new Date();
+                  newMonth.setMonth(newMonth.getMonth() + 1);
 
-                    // Don't allow navigation to future months
-                    if (newMonth.getMonth() <= currentDate.getMonth() ||
-                        newMonth.getFullYear() < currentDate.getFullYear()) {
-                      setDisplayMonth(newMonth);
-                    }
-                  }}
-                  disabled={
-                    displayMonth.getMonth() >= new Date().getMonth() &&
-                    displayMonth.getFullYear() >= new Date().getFullYear()
+                  // Only allow navigation if the new month is not in the future
+                  if (newMonth.getTime() <= new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getTime()) {
+                    setDisplayMonth(newMonth);
                   }
-                >
-                  <Ionicons
-                    name="chevron-forward"
-                    size={24}
+                }}
+                disabled={
+                  displayMonth.getTime() >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime()
+                }
+                activeOpacity={0.7}
+              >
+                <View style={styles.navButtonContent}>
+                  <Text style={[
+                    styles.navButtonText,
+                    displayMonth.getTime() >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() &&
+                    styles.disabledNavText
+                  ]}>Next</Text>
+                  <Ionicons 
+                    name="chevron-forward" 
+                    size={20} 
                     color={
-                      displayMonth.getMonth() >= new Date().getMonth() &&
-                      displayMonth.getFullYear() >= new Date().getFullYear()
-                        ? "#ccc" : "#fff"
-                    }
+                      displayMonth.getTime() >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime()
+                        ? "#bdc1c6" : "#4285F4"
+                    } 
                   />
-                </TouchableOpacity>
-              </View>
+                </View>
+              </TouchableOpacity>
             </View>
             
-            {/* Standardized Calendar Header */}
-            <View style={styles.calendarHeader}>
-              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
-                <View key={index} style={styles.calendarHeaderCell}>
-                  <Text style={[
-                    styles.calendarHeaderText,
-                    index === 0 && styles.sundayHeaderText, // Sunday (holiday)
-                    // Remove Saturday special header styling - treat as regular working day
-                  ]}>
+            {/* Google Calendar-style Header */}
+            <View style={styles.googleCalendarHeader}>
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => (
+                <View key={index} style={styles.googleHeaderCell}>
+                  <Text style={styles.googleHeaderText}>
                     {day}
                   </Text>
                 </View>
               ))}
             </View>
 
-            {/* Standardized Calendar Grid - 6 rows x 7 columns */}
-            <View style={styles.calendarGrid}>
+            {/* Google Calendar-inspired Clean Grid */}
+            <View style={styles.googleCalendarGrid}>
               {Array.from({ length: 6 }, (_, weekIndex) => (
-                <View key={weekIndex} style={styles.calendarWeek}>
+                <View key={`week-${weekIndex}`} style={styles.googleCalendarWeek}>
                   {Array.from({ length: 7 }, (_, dayIndex) => {
                     const dayArrayIndex = weekIndex * 7 + dayIndex;
                     const day = monthDays[dayArrayIndex];
+                    const uniqueKey = `day-${weekIndex}-${dayIndex}-${dayArrayIndex}`;
 
                     if (!day) {
                       return (
-                        <View key={dayIndex} style={styles.calendarDay}>
-                          <Text style={styles.dayNumber}></Text>
+                        <View key={uniqueKey} style={styles.googleCalendarDay}>
+                          <Text style={styles.googleDayNumber}></Text>
                         </View>
                       );
                     }
@@ -1493,57 +1668,61 @@ const AttendanceSummary = () => {
                     const isSunday = day.getDay() === 0;
                     const isSaturday = day.getDay() === 6;
                     const dayNumber = format(day, 'd');
+                    const dayKey = `${dateStr}-${uniqueKey}`; // Ensure absolute uniqueness
 
                     return (
                       <TouchableOpacity
-                        key={dateStr}
+                        key={dayKey}
                         style={[
-                          styles.calendarDay,
-                          isCurrentDay && styles.currentDay,
-                          !isCurrentMonth && styles.otherMonthDay,
-                          isSunday && isCurrentMonth && styles.sundayDay,
-                          // Remove Saturday special styling - treat as regular working day
-                          attendance && isCurrentMonth && styles.hasAttendanceDay,
+                          styles.googleCalendarDay,
+                          isCurrentDay && styles.googleTodayDay,
+                          !isCurrentMonth && styles.googleOtherMonthDay,
                         ]}
                         onPress={() => {
                           if (attendance && isCurrentMonth) {
                             Alert.alert(
-                              `${format(day, 'MMMM d, yyyy')}`,
-                              `Status: ${attendance.status}\nTime: ${attendance.time || 'N/A'}`,
+                              format(day, 'EEEE, MMMM d, yyyy'),
+                              `Status: ${attendance.status.charAt(0).toUpperCase() + attendance.status.slice(1)}\nTime: ${attendance.time || 'N/A'}`,
+                              [{ text: 'OK', style: 'default' }]
+                            );
+                          } else if (isCurrentMonth && !isSunday) {
+                            Alert.alert(
+                              format(day, 'EEEE, MMMM d, yyyy'),
+                              'No attendance record for this day.',
                               [{ text: 'OK' }]
                             );
-                          } else if (isCurrentMonth) {
-                            // Debug: Show info even when no attendance
+                          } else if (isSunday) {
                             Alert.alert(
-                              `${format(day, 'MMMM d, yyyy')}`,
-                              `No attendance data found for this day.\nDay of week: ${day.toLocaleDateString('en-US', { weekday: 'long' })}`,
+                              format(day, 'EEEE, MMMM d, yyyy'),
+                              'Holiday - No school',
                               [{ text: 'OK' }]
                             );
                           }
                         }}
                         disabled={!isCurrentMonth}
+                        activeOpacity={0.6}
                       >
                         {/* Day Number */}
                         <Text style={[
-                          styles.dayNumber,
-                          isCurrentDay && styles.currentDayText,
-                          !isCurrentMonth && styles.otherMonthText,
-                          isSunday && isCurrentMonth && styles.sundayText,
-                          // Remove Saturday special text styling - treat as regular working day
+                          styles.googleDayNumber,
+                          isCurrentDay && styles.googleTodayText,
+                          !isCurrentMonth && styles.googleOtherMonthText,
+                          isSunday && isCurrentMonth && styles.googleSundayText,
                         ]}>
                           {dayNumber}
                         </Text>
 
-                        {/* Attendance Status Dot - Show for school days (Monday-Saturday, exclude Sunday) */}
+                        {/* Google-style attendance dot */}
                         {attendance && isCurrentMonth && !isSunday && (
                           <View style={[
-                            styles.attendanceDot,
-                            { backgroundColor: getAttendanceColor(attendance.status) }
+                            styles.googleAttendanceDot,
+                            {
+                              backgroundColor: attendance.status === 'present' 
+                                ? '#4285F4' // Google Blue for present
+                                : '#EA4335' // Google Red for absent
+                            }
                           ]} />
                         )}
-
-                        {/* Debug: Log Saturday attendance */}
-                        {isSaturday && isCurrentMonth && console.log(`📅 Saturday ${dayNumber}: attendance =`, attendance, `dateStr = ${dateStr}`, `currentMonthData keys:`, Object.keys(currentMonthData))}
                       </TouchableOpacity>
                     );
                   })}
@@ -1551,23 +1730,19 @@ const AttendanceSummary = () => {
               ))}
             </View>
             
-            {/* Enhanced Legend */}
-            <View style={styles.legend}>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: '#4CAF50' }]} />
-                <Text style={styles.legendText}>Present</Text>
+            {/* Google Calendar-style Legend */}
+            <View style={styles.googleLegend}>
+              <View style={styles.googleLegendItem}>
+                <View style={[styles.googleLegendDot, { backgroundColor: '#4285F4' }]} />
+                <Text style={styles.googleLegendText}>Present</Text>
               </View>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: '#F44336' }]} />
-                <Text style={styles.legendText}>Absent</Text>
+              <View style={styles.googleLegendItem}>
+                <View style={[styles.googleLegendDot, { backgroundColor: '#EA4335' }]} />
+                <Text style={styles.googleLegendText}>Absent</Text>
               </View>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: '#FFE5E5', borderWidth: 1, borderColor: '#FF6B6B' }]} />
-                <Text style={styles.legendText}>Holiday</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: '#E5F3FF', borderWidth: 1, borderColor: '#4A90E2' }]} />
-                <Text style={styles.legendText}>Weekend</Text>
+              <View style={styles.googleLegendItem}>
+                <View style={[styles.googleLegendDot, { backgroundColor: '#9AA0A6' }]} />
+                <Text style={styles.googleLegendText}>Holiday</Text>
               </View>
             </View>
             
@@ -2093,6 +2268,45 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '500',
   },
+  viewModeContainer: {
+    flexDirection: 'row',
+    marginBottom: 20,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 4,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  viewModeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    gap: 8,
+  },
+  activeViewModeButton: {
+    backgroundColor: '#007bff',
+    elevation: 3,
+    shadowColor: '#007bff',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+  },
+  viewModeButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#666',
+  },
+  activeViewModeText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
   viewToggle: {
     flexDirection: 'row',
     backgroundColor: '#fff',
@@ -2595,6 +2809,370 @@ const styles = StyleSheet.create({
   monthScrollList: {
     maxHeight: 500,
     flex: 1,
+  },
+
+  // Modern Calendar Styles with Enhanced Design
+  modernCalendarGrid: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 16,
+    padding: 8,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  modernCalendarWeek: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  modernCalendarDay: {
+    flex: 1,
+    height: 64,
+    margin: 2,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  modernDayContainer: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  modernDayNumber: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+
+  // Modern Day Status Styles
+  modernDay_normal: {
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e8ecf0',
+  },
+  modernDay_otherMonth: {
+    backgroundColor: '#f8f9fa',
+    opacity: 0.4,
+  },
+  modernDay_today: {
+    backgroundColor: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    shadowColor: '#667eea',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
+    borderWidth: 2,
+    borderColor: '#ffffff',
+  },
+  modernDay_present: {
+    backgroundColor: '#e8f5e8',
+    borderWidth: 2,
+    borderColor: '#4CAF50',
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  modernDay_absent: {
+    backgroundColor: '#ffebee',
+    borderWidth: 2,
+    borderColor: '#f44336',
+    shadowColor: '#f44336',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  modernDay_holiday: {
+    backgroundColor: '#fff3e0',
+    borderWidth: 2,
+    borderColor: '#ff9800',
+    shadowColor: '#ff9800',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+
+  // Modern Day Text Styles
+  modernDayText_normal: {
+    color: '#2c3e50',
+    fontWeight: '600',
+  },
+  modernDayText_otherMonth: {
+    color: '#bdc3c7',
+    fontWeight: '400',
+  },
+  modernDayText_today: {
+    color: '#ffffff',
+    fontWeight: '900',
+    fontSize: 18,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  modernDayText_present: {
+    color: '#2e7d32',
+    fontWeight: '700',
+  },
+  modernDayText_absent: {
+    color: '#c62828',
+    fontWeight: '700',
+  },
+  modernDayText_holiday: {
+    color: '#f57c00',
+    fontWeight: '700',
+  },
+
+  // Today Glow Effect
+  todayGlow: {
+    shadowColor: '#667eea',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+
+  // Pulse Overlay for Today
+  pulseOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 12,
+    backgroundColor: 'rgba(102, 126, 234, 0.2)',
+  },
+
+  // Modern Attendance Indicators
+  modernAttendanceIndicator: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  presentIndicator: {
+    backgroundColor: '#4CAF50',
+  },
+  absentIndicator: {
+    backgroundColor: '#f44336',
+  },
+  indicatorIcon: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+
+  // Holiday and Weekend Indicators
+  holidayIndicator: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  holidayIcon: {
+    fontSize: 10,
+  },
+  weekendIndicator: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  weekendIcon: {
+    fontSize: 10,
+  },
+
+  // Google Calendar-inspired Clean Styles
+  googleCalendarHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#f8f9fa',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    paddingVertical: 8,
+  },
+  googleHeaderCell: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleHeaderText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#5f6368',
+    textTransform: 'uppercase',
+  },
+  googleCalendarGrid: {
+    backgroundColor: '#ffffff',
+  },
+  googleCalendarWeek: {
+    flexDirection: 'row',
+  },
+  googleCalendarDay: {
+    flex: 1,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderRightColor: '#f1f3f4',
+    borderBottomColor: '#f1f3f4',
+    position: 'relative',
+  },
+  googleTodayDay: {
+    backgroundColor: '#e8f0fe',
+  },
+  googleOtherMonthDay: {
+    backgroundColor: '#f8f9fa',
+  },
+  googleDayNumber: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#3c4043',
+  },
+  googleTodayText: {
+    color: '#1a73e8',
+    fontWeight: '600',
+  },
+  googleOtherMonthText: {
+    color: '#9aa0a6',
+  },
+  googleSundayText: {
+    color: '#ea4335',
+  },
+  googleAttendanceDot: {
+    position: 'absolute',
+    bottom: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  googleLegend: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    gap: 24,
+  },
+  googleLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  googleLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  googleLegendText: {
+    fontSize: 12,
+    color: '#5f6368',
+    fontWeight: '400',
+  },
+
+  // Modern Navigation Header Styles
+  modernCalendarNavHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  modernNavButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#dadce0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+    minWidth: 80,
+  },
+  disabledModernNavButton: {
+    backgroundColor: '#f8f9fa',
+    borderColor: '#e8eaed',
+    shadowOpacity: 0.05,
+  },
+  navButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  navButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#4285F4',
+  },
+  disabledNavText: {
+    color: '#bdc1c6',
+  },
+  monthYearSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#ffffff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#dadce0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+    gap: 8,
+    minWidth: 160,
+    justifyContent: 'center',
+  },
+  monthYearText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#3c4043',
+    textAlign: 'center',
   },
 });
 

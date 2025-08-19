@@ -1,9 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, Modal, TextInput, Alert, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, Modal, TextInput, Alert, ActivityIndicator, RefreshControl, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import Header from '../../components/Header';
+import ImageViewerModal from '../../components/ImageViewerModal';
+import { 
+  formatFileSize as formatAssignmentFileSize, 
+  getAssignmentFileIcon,
+  getAssignmentFileType 
+} from '../../utils/assignmentFileUpload';
 
 const statusColors = {
   submitted: '#FF9800',
@@ -62,6 +68,10 @@ const ViewSubmissions = () => {
   const [selectedGrade, setSelectedGrade] = useState('');
   const [feedback, setFeedback] = useState('');
   const [gradingSubmission, setGradingSubmission] = useState(null);
+  
+  // Image viewer modal state
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [isImageModalVisible, setIsImageModalVisible] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -315,6 +325,92 @@ const ViewSubmissions = () => {
     fetchSubmissions();
   };
 
+  const handleOpenFile = (file) => {
+    console.log('Attempting to open file:', file);
+    
+    // Check for different possible URL properties in order of preference
+    const fileUrl = file.file_url || file.url || file.localUri || file.uri;
+    const fileStatus = file.status || 'unknown';
+    const fileType = file.type || file.mimeType || '';
+    
+    // Validate the URL is a string and not empty
+    if (fileUrl && typeof fileUrl === 'string' && fileUrl.trim() !== '') {
+      // If it's a local URI (starts with file://), we can't open it from the teacher's device
+      if (fileUrl.startsWith('file://') || fileStatus === 'local') {
+        Alert.alert(
+          '📱 Local File Detected', 
+          `This file ("${file.name}") was stored locally on the student's device and cannot be accessed remotely.\n\n` +
+          `File details:\n• Size: ${formatAssignmentFileSize(file.size)}\n• Type: ${getAssignmentFileType(file)}\n\n` +
+          `To view this file, please ask the student to re-submit using cloud storage.`,
+          [
+            { text: 'OK', style: 'default' },
+            { 
+              text: 'Copy File Info', 
+              onPress: () => {
+                // In a real app, you might copy file details to clipboard
+                console.log('File info copied:', file);
+              }
+            }
+          ]
+        );
+        return;
+      }
+      
+      // Check if it's an image file and can be displayed in modal
+      const isImage = fileType.toLowerCase().includes('image') || 
+                     file.name?.toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/i);
+                     
+      if (isImage && (fileStatus === 'uploaded' || fileUrl.includes('supabase'))) {
+        // Open image in modal viewer
+        console.log('✅ Opening image in modal:', fileUrl);
+        setSelectedImage({
+          imageUrl: fileUrl,
+          imageName: file.name || 'Image'
+        });
+        setIsImageModalVisible(true);
+        return;
+      }
+      
+      // Check if it's a cloud URL (uploaded to Supabase storage)
+      if (fileStatus === 'uploaded' || fileUrl.includes('supabase')) {
+        console.log('✅ Opening cloud file:', fileUrl);
+      }
+      
+      // Try to open the URL externally
+      Linking.canOpenURL(fileUrl)
+        .then((supported) => {
+          if (supported) {
+            Linking.openURL(fileUrl);
+          } else {
+            Alert.alert(
+              'File Format Not Supported', 
+              `Cannot open "${file.name}" (${file.type}). The file format may not be supported by your device.\n\nFile URL: ${fileUrl}`,
+              [{ text: 'OK' }]
+            );
+          }
+        })
+        .catch((error) => {
+          console.error('Error opening file:', error);
+          Alert.alert(
+            'Error Opening File', 
+            `An error occurred while trying to open "${file.name}":\n${error.message}`,
+            [{ text: 'OK' }]
+          );
+        });
+    } else {
+      Alert.alert(
+        '❌ File URL Not Available', 
+        `The file "${file.name}" is not accessible. This may happen if:\n\n` +
+        `• The file was stored locally on the student's device\n` +
+        `• The file upload to cloud storage failed\n` +
+        `• The file has been moved or deleted from cloud storage\n` +
+        `• The file URL was not properly saved\n\n` +
+        `Please ask the student to re-submit this assignment with proper cloud storage.`,
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
   const renderSubmissionCard = ({ item }) => {
     const isOverdue = item.assignmentDueDate && new Date(item.submitted_at) > new Date(item.assignmentDueDate);
     
@@ -550,13 +646,65 @@ const ViewSubmissions = () => {
                     <Text style={styles.sectionTitle}>Submitted Files</Text>
                     {selectedSubmission.submitted_files && selectedSubmission.submitted_files.length > 0 ? (
                       selectedSubmission.submitted_files.map((file, index) => (
-                        <View key={index} style={styles.fileItem}>
-                          <Ionicons name={getFileIcon(file.type)} size={24} color="#1976d2" />
-                          <View style={styles.fileInfo}>
-                            <Text style={styles.fileName}>{file.name}</Text>
-                            <Text style={styles.fileSize}>{formatFileSize(file.size)}</Text>
+                        <TouchableOpacity 
+                          key={index} 
+                          style={[
+                            styles.fileItem,
+                            file.status === 'local' && styles.localFileItem,
+                            file.status === 'uploaded' && styles.cloudFileItem
+                          ]}
+                          onPress={() => handleOpenFile(file)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.fileIconContainer}>
+                            <Ionicons 
+                              name={getAssignmentFileIcon(file)} 
+                              size={24} 
+                              color={file.status === 'uploaded' ? '#4CAF50' : '#1976d2'} 
+                            />
+                            {file.status === 'uploaded' && (
+                              <Ionicons 
+                                name="cloud-done" 
+                                size={12} 
+                                color="#4CAF50" 
+                                style={styles.statusIcon}
+                              />
+                            )}
+                            {file.status === 'local' && (
+                              <Ionicons 
+                                name="phone-portrait" 
+                                size={12} 
+                                color="#FF9800" 
+                                style={styles.statusIcon}
+                              />
+                            )}
                           </View>
-                        </View>
+                          <View style={styles.fileInfo}>
+                            <View style={styles.fileNameRow}>
+                              <Text style={styles.fileName} numberOfLines={1}>{file.name}</Text>
+                              {file.status === 'uploaded' && (
+                                <View style={styles.cloudBadge}>
+                                  <Text style={styles.cloudBadgeText}>Cloud</Text>
+                                </View>
+                              )}
+                              {file.status === 'local' && (
+                                <View style={styles.localBadge}>
+                                  <Text style={styles.localBadgeText}>Local</Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text style={styles.fileSize}>
+                              {formatAssignmentFileSize(file.size)} • {getAssignmentFileType(file)}
+                              {file.status === 'uploaded' && ' • Accessible'}
+                              {file.status === 'local' && ' • Not Accessible'}
+                            </Text>
+                          </View>
+                          <Ionicons 
+                            name={file.status === 'local' ? 'warning' : 'open-outline'} 
+                            size={20} 
+                            color={file.status === 'local' ? '#FF9800' : '#666'} 
+                          />
+                        </TouchableOpacity>
                       ))
                     ) : (
                       <Text style={styles.noFilesText}>No files submitted</Text>
@@ -656,6 +804,17 @@ const ViewSubmissions = () => {
           </View>
         </View>
       </Modal>
+      
+      {/* Image Viewer Modal */}
+      <ImageViewerModal
+        visible={isImageModalVisible}
+        imageUrl={selectedImage?.imageUrl}
+        imageName={selectedImage?.imageName}
+        onClose={() => {
+          setIsImageModalVisible(false);
+          setSelectedImage(null);
+        }}
+      />
     </View>
   );
 };
@@ -955,14 +1114,62 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 8,
   },
+  localFileItem: {
+    backgroundColor: '#fff3e0',
+    borderWidth: 1,
+    borderColor: '#ffb74d',
+  },
+  cloudFileItem: {
+    backgroundColor: '#f3e5f5',
+    borderWidth: 1,
+    borderColor: '#81c784',
+  },
+  fileIconContainer: {
+    position: 'relative',
+  },
+  statusIcon: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+  },
   fileInfo: {
     flex: 1,
     marginLeft: 12,
+  },
+  fileNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
   },
   fileName: {
     fontSize: 14,
     fontWeight: '500',
     color: '#333',
+    flex: 1,
+  },
+  cloudBadge: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginLeft: 8,
+  },
+  cloudBadgeText: {
+    fontSize: 10,
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  localBadge: {
+    backgroundColor: '#FF9800',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginLeft: 8,
+  },
+  localBadgeText: {
+    fontSize: 10,
+    color: '#fff',
+    fontWeight: 'bold',
   },
   fileSize: {
     fontSize: 12,
