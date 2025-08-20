@@ -171,7 +171,7 @@ const StudentDashboard = ({ navigation }) => {
         .select(`
           *,
           classes(id, class_name, section),
-          users!students_parent_id_fkey(id, email, phone, profile_url, full_name)
+          parents:parent_id(name, phone, email)
         `)
         .eq('id', user.linked_student_id)
         .single();

@@ -102,8 +102,8 @@ const ReportCardGeneration = ({ navigation }) => {
             class_name,
             section
           ),
-          users:parent_id (
-            full_name,
+          parents:parent_id (
+            name,
             phone,
             email
           )
@@ -174,7 +174,7 @@ const ReportCardGeneration = ({ navigation }) => {
           Admission No: {student.admission_no}
         </Text>
         <Text style={styles.studentDetails}>
-          Parent: {student.users?.full_name || 'N/A'}
+          Parent: {student.parents?.name || 'N/A'}
         </Text>
       </View>
       <View style={styles.viewReportButton}>

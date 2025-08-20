@@ -40,9 +40,9 @@ class StudentsCache {
             class_name,
             section
           ),
-          users:parent_id (
+          parents:parent_id (
             id,
-            full_name,
+            name,
             phone
           )
         `)
@@ -79,7 +79,7 @@ class StudentsCache {
       // Process students with attendance
       const processedStudents = studentsData.map(student => {
         const classInfo = student.classes || { class_name: 'N/A', section: 'N/A' };
-        const parentInfo = student.users || { full_name: 'N/A', phone: 'N/A' };
+        const parentInfo = student.parents || { name: 'N/A', phone: 'N/A' };
         const attendance = attendanceData.get(student.id) || { total: 0, present: 0 };
         
         const attendancePercentage = attendance.total > 0 
@@ -91,7 +91,7 @@ class StudentsCache {
           attendancePercentage,
           className: classInfo.class_name,
           section: classInfo.section,
-          parentName: parentInfo.full_name,
+          parentName: parentInfo.name,
           parentPhone: parentInfo.phone
         };
 
@@ -171,9 +171,9 @@ class StudentsCache {
             class_name,
             section
           ),
-          users:parent_id (
+          parents:parent_id (
             id,
-            full_name,
+            name,
             phone
           )
         `)
@@ -201,7 +201,7 @@ class StudentsCache {
 
       const processedStudents = studentsData.map(student => {
         const classInfo = student.classes || { class_name: 'N/A', section: 'N/A' };
-        const parentInfo = student.users || { full_name: 'N/A', phone: 'N/A' };
+        const parentInfo = student.parents || { name: 'N/A', phone: 'N/A' };
         const attendance = attendanceData.get(student.id) || { total: 0, present: 0 };
         
         const attendancePercentage = attendance.total > 0 
@@ -213,7 +213,7 @@ class StudentsCache {
           attendancePercentage,
           className: classInfo.class_name,
           section: classInfo.section,
-          parentName: parentInfo.full_name,
+          parentName: parentInfo.name,
           parentPhone: parentInfo.phone
         };
       });

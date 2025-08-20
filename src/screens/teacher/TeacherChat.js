@@ -280,32 +280,26 @@ const TeacherChat = () => {
       const uniqueParents = [];
       const seen = new Set();
 
-      // SUPER OPTIMIZATION: Execute both queries in parallel for maximum speed
-      const [classParentResult, subjectParentResult] = await Promise.all([
-        // Query 1: Get class teacher students and their parents
+      // OPTIMIZED: Execute both queries in parallel for maximum speed
+      const [classStudentResult, subjectStudentResult, allParentUsersResult] = await Promise.all([
+        // Query 1: Get class teacher students
         supabase
           .from(TABLES.STUDENTS)
           .select(`
             id,
             name,
             roll_no,
-            parent_id,
             class_id,
             classes!inner (
               id,
               class_name,
               section,
               class_teacher_id
-            ),
-            users!students_parent_id_fkey (
-              id,
-              email,
-              full_name
             )
           `)
           .eq('classes.class_teacher_id', teacherId),
           
-        // Query 2: Get subject teaching students and their parents
+        // Query 2: Get subject teaching students
         supabase
           .from(TABLES.TEACHER_SUBJECTS)
           .select(`
@@ -319,28 +313,44 @@ const TeacherChat = () => {
                 students!inner (
                   id,
                   name,
-                  roll_no,
-                  parent_id,
-                  users!students_parent_id_fkey (
-                    id,
-                    email,
-                    full_name
-                  )
+                  roll_no
                 )
               )
             )
           `)
-          .eq('teacher_id', teacherId)
+          .eq('teacher_id', teacherId),
+          
+        // Query 3: Get ALL parent user accounts in one query
+        supabase
+          .from(TABLES.USERS)
+          .select('id, email, full_name, linked_parent_of')
+          .not('linked_parent_of', 'is', null)
       ]);
 
-      // Process class teacher students and parents
-      if (!classParentResult.error && classParentResult.data) {
-        for (const student of classParentResult.data) {
-          if (student.users && !seen.has(student.users.id)) {
+      // Build parent-user mapping for instant lookups
+      const parentUserMap = new Map();
+      if (!allParentUsersResult.error && allParentUsersResult.data) {
+        allParentUsersResult.data.forEach(user => {
+          if (user.linked_parent_of) {
+            parentUserMap.set(user.linked_parent_of, {
+              id: user.id,
+              name: user.full_name || user.email,
+              email: user.email,
+              canMessage: true
+            });
+          }
+        });
+      }
+
+      // Process class teacher students and find their parent users
+      if (!classStudentResult.error && classStudentResult.data) {
+        for (const student of classStudentResult.data) {
+          const parentUser = parentUserMap.get(student.id);
+          if (parentUser && !seen.has(parentUser.id)) {
             uniqueParents.push({
-              id: student.users.id,
-              name: student.users.full_name || student.users.email,
-              email: student.users.email,
+              id: parentUser.id,
+              name: parentUser.name,
+              email: parentUser.email,
               students: [{
                 id: student.id,
                 name: student.name,
@@ -350,10 +360,10 @@ const TeacherChat = () => {
               role: 'class_parent',
               canMessage: true
             });
-            seen.add(student.users.id);
-          } else if (student.users) {
+            seen.add(parentUser.id);
+          } else if (parentUser) {
             // Add student to existing parent
-            const existingParent = uniqueParents.find(p => p.id === student.users.id);
+            const existingParent = uniqueParents.find(p => p.id === parentUser.id);
             if (existingParent) {
               existingParent.students.push({
                 id: student.id,
@@ -366,16 +376,17 @@ const TeacherChat = () => {
         }
       }
 
-      // Process subject teaching students and parents
-      if (!subjectParentResult.error && subjectParentResult.data) {
-        for (const teacherSubject of subjectParentResult.data) {
+      // Process subject teaching students and find their parent users
+      if (!subjectStudentResult.error && subjectStudentResult.data) {
+        for (const teacherSubject of subjectStudentResult.data) {
           if (teacherSubject.subjects?.classes?.students) {
             for (const student of teacherSubject.subjects.classes.students) {
-              if (student.users && !seen.has(student.users.id)) {
+              const parentUser = parentUserMap.get(student.id);
+              if (parentUser && !seen.has(parentUser.id)) {
                 uniqueParents.push({
-                  id: student.users.id,
-                  name: student.users.full_name || student.users.email,
-                  email: student.users.email,
+                  id: parentUser.id,
+                  name: parentUser.name,
+                  email: parentUser.email,
                   students: [{
                     id: student.id,
                     name: student.name,
@@ -386,10 +397,10 @@ const TeacherChat = () => {
                   role: 'subject_parent',
                   canMessage: true
                 });
-                seen.add(student.users.id);
-              } else if (student.users) {
+                seen.add(parentUser.id);
+              } else if (parentUser) {
                 // Add student to existing parent
-                const existingParent = uniqueParents.find(p => p.id === student.users.id);
+                const existingParent = uniqueParents.find(p => p.id === parentUser.id);
                 if (existingParent) {
                   const studentExists = existingParent.students.some(s => s.id === student.id);
                   if (!studentExists) {

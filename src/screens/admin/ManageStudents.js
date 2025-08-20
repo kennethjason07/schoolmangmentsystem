@@ -116,7 +116,7 @@ const ManageStudents = () => {
     try {
       console.log('🚀 Loading students with optimized query...');
       
-      // Use a single JOIN query to get all student data with related information
+      // Use a single query to get all student data with class information
       const { data: studentsData, error } = await supabase
         .from(TABLES.STUDENTS)
         .select(`
@@ -125,11 +125,6 @@ const ManageStudents = () => {
             id,
             class_name,
             section
-          ),
-          users:parent_id (
-            id,
-            full_name,
-            phone
           )
         `)
         .order('created_at', { ascending: false });
@@ -150,9 +145,67 @@ const ManageStudents = () => {
         return;
       }
 
-      // Get attendance data for all students in a single query
+      // Get all student IDs for batch queries
       const studentIds = studentsData.map(s => s.id);
+
+      // Get parent data from parents table for all student parent_ids
+      const parentIds = studentsData.map(s => s.parent_id).filter(Boolean);
+      let parentsLookup = {};
       
+      if (parentIds.length > 0) {
+        const { data: parentsData, error: parentsError } = await supabase
+          .from(TABLES.PARENTS)
+          .select('id, name, phone, email')
+          .in('id', parentIds);
+        
+        if (parentsError) {
+          console.warn('Error loading parents data:', parentsError);
+        }
+        
+        // Create parent lookup map for O(1) access
+        (parentsData || []).forEach(parent => {
+          parentsLookup[parent.id] = {
+            name: parent.name || 'N/A',
+            phone: parent.phone || 'N/A',
+            email: parent.email || 'N/A'
+          };
+        });
+      }
+
+      // Get additional parent user data for parent accounts linking (optional)
+      const { data: parentUsersData, error: parentError } = await supabase
+        .from('users')
+        .select('id, full_name, phone, email, linked_parent_of')
+        .not('linked_parent_of', 'is', null);
+      
+      if (parentError) {
+        console.warn('Error loading parent user data:', parentError);
+      }
+
+      // Create parent user lookup map for O(1) access (from users table - as fallback)
+      const parentUserLookup = {};
+      (parentUsersData || []).forEach(parent => {
+        if (parent.linked_parent_of) {
+          // Handle multiple students per parent (comma-separated or array)
+          let studentIds = [];
+          if (typeof parent.linked_parent_of === 'string') {
+            studentIds = parent.linked_parent_of.split(',').map(id => id.trim());
+          } else if (Array.isArray(parent.linked_parent_of)) {
+            studentIds = parent.linked_parent_of;
+          } else {
+            studentIds = [parent.linked_parent_of.toString()];
+          }
+          
+          studentIds.forEach(studentId => {
+            parentUserLookup[studentId] = {
+              name: parent.full_name || 'N/A',
+              phone: parent.phone || 'N/A',
+              email: parent.email || 'N/A'
+            };
+          });
+        }
+      });
+
       // Use last 3 months for more comprehensive attendance data
       const threeMonthsAgo = new Date();
       threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
@@ -259,7 +312,18 @@ const ManageStudents = () => {
       // Process students data - no async operations needed
       const studentsWithDetails = studentsData.map(student => {
         const classInfo = student.classes || { class_name: 'N/A', section: 'N/A' };
-        const parentInfo = student.users || { full_name: 'N/A', phone: 'N/A' };
+        
+        // Get parent info from parents table first, fallback to user lookup
+        let parentInfo = { name: 'N/A', phone: 'N/A' };
+        if (student.parent_id && parentsLookup[student.parent_id]) {
+          parentInfo = {
+            name: parentsLookup[student.parent_id].name,
+            phone: parentsLookup[student.parent_id].phone
+          };
+        } else if (parentUserLookup[student.id]) {
+          parentInfo = parentUserLookup[student.id];
+        }
+        
         const attendance = attendanceLookup[student.id] || { total: 0, present: 0 };
         const attendancePercentage = attendance.total > 0 
           ? Math.round((attendance.present / attendance.total) * 100) 
@@ -279,7 +343,7 @@ const ManageStudents = () => {
           attendancePercentage,
           className: classInfo.class_name,
           section: classInfo.section,
-          parentName: parentInfo.full_name,
+          parentName: parentInfo.name,
           parentPhone: parentInfo.phone,
           feesStatus: feesStatus,
           academicPercentage,
@@ -349,13 +413,13 @@ const ManageStudents = () => {
     }
   };
 
-  // Load parents (users with parent role)
+  // Load parents from the users table (parent accounts)
   const loadParents = async () => {
     try {
       const { data: parentData, error } = await supabase
-        .from(TABLES.USERS)
-        .select('id, full_name, phone')
-        .eq('role_id', 3) // Assuming role_id 3 is for parents
+        .from('users')
+        .select('id, full_name, phone, email')
+        .not('linked_parent_of', 'is', null)
         .order('full_name');
 
       if (error) throw error;

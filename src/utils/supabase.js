@@ -254,7 +254,7 @@ export const dbHelpers = {
         .select(`
           *,
           classes(class_name, section),
-          users!students_parent_id_fkey(full_name, phone, email)
+          parents:parent_id(name, phone, email)
         `)
         .eq('class_id', classId);
 
@@ -307,8 +307,8 @@ export const dbHelpers = {
       let parentData = null;
       if (basicData.parent_id) {
         const { data: parentInfo, error: parentError } = await supabase
-          .from(TABLES.USERS)
-          .select('full_name, phone, email')
+          .from(TABLES.PARENTS)
+          .select('name, phone, email')
           .eq('id', basicData.parent_id)
           .single();
 
@@ -682,11 +682,11 @@ export const dbHelpers = {
 
       console.log('Creating parent account - Step 9: Parent record created:', parentRecord);
 
-      // 5. Update student record to link to the user account
+      // 5. Update student record to link to the parent record
       console.log('Creating parent account - Step 10: Updating student parent_id');
       const { error: studentUpdateError } = await supabase
         .from(TABLES.STUDENTS)
-        .update({ parent_id: authUser.user.id })
+        .update({ parent_id: parentRecord.id })
         .eq('id', studentData.studentId);
 
       if (studentUpdateError) {

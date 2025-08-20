@@ -508,11 +508,12 @@ const AttendanceManagement = () => {
   // Render student attendance item with enhanced UI
   const renderStudentItem = ({ item, index }) => {
     const currentStatus = attendanceMark[item.id];
+    const safeIndex = getSafeIndex(index);
 
     return (
       <Animatable.View
         animation="fadeInUp"
-        delay={index * 50}
+        delay={safeIndex * 50}
         style={[
           styles.attendanceCard,
           currentStatus === 'Present' && styles.presentCard,
@@ -532,7 +533,7 @@ const AttendanceManagement = () => {
           <View style={styles.studentDetails}>
             <Text style={styles.studentName}>{item.full_name || item.name}</Text>
             <View style={styles.studentMetaInfo}>
-              <Text style={styles.studentRoll}>Roll: {item.roll_no || index + 1}</Text>
+              <Text style={styles.studentRoll}>Roll: {getSafeNumber(item.roll_no, safeIndex + 1)}</Text>
               {item.admission_no && (
                 <Text style={styles.studentAdmission}>ID: {item.admission_no}</Text>
               )}
@@ -612,11 +613,12 @@ const AttendanceManagement = () => {
   // Render teacher attendance item with enhanced UI
   const renderTeacherItem = ({ item, index }) => {
     const currentStatus = teacherAttendanceMark[item.id];
+    const safeIndex = getSafeIndex(index);
 
     return (
       <Animatable.View
         animation="fadeInUp"
-        delay={index * 50}
+        delay={safeIndex * 50}
         style={[
           styles.attendanceCard,
           currentStatus === 'Present' && styles.presentCard,
@@ -637,7 +639,7 @@ const AttendanceManagement = () => {
           <View style={styles.studentDetails}>
             <Text style={styles.studentName}>{item.name}</Text>
             <View style={styles.studentMetaInfo}>
-              <Text style={styles.studentRoll}>Teacher ID: {item.teacher_id || index + 1}</Text>
+              <Text style={styles.studentRoll}>Teacher ID: {getSafeNumber(item.teacher_id, safeIndex + 1)}</Text>
               {item.subject && (
                 <Text style={styles.studentAdmission}>Subject: {item.subject}</Text>
               )}
@@ -858,7 +860,7 @@ const AttendanceManagement = () => {
         {(tab === 'student' ? studentsForClass : teachers).length > 0 ? (
           <>
             <Text style={styles.listTitle}>
-              {tab === 'student' ? 'Students' : 'Teachers'} ({(tab === 'student' ? studentsForClass : teachers).length})
+              {tab === 'student' ? 'Students' : 'Teachers'} ({tab === 'student' ? getSafeArrayLength(studentsForClass) : getSafeArrayLength(teachers)})
             </Text>
             {(tab === 'student' ? studentsForClass : teachers).map((item, index) => (
               <View key={item.id}>
@@ -887,20 +889,95 @@ const AttendanceManagement = () => {
     </View>
   );
 
-  // Calculate attendance analytics
+  // Calculate attendance analytics with comprehensive safety checks
   const calculateAnalytics = () => {
-    if (tab === 'student') {
-      const presentCount = studentsForClass.filter(student => attendanceMark[student.id] === 'Present').length;
-      const absentCount = studentsForClass.filter(student => attendanceMark[student.id] === 'Absent').length;
-      return { present: presentCount, absent: absentCount };
-    } else {
-      const presentCount = teachers.filter(teacher => teacherAttendanceMark[teacher.id] === 'Present').length;
-      const absentCount = teachers.filter(teacher => teacherAttendanceMark[teacher.id] === 'Absent').length;
-      return { present: presentCount, absent: absentCount };
+    try {
+      if (tab === 'student') {
+        // Ensure studentsForClass is an array
+        const safeStudentsForClass = Array.isArray(studentsForClass) ? studentsForClass : [];
+        // Ensure attendanceMark is an object
+        const safeAttendanceMark = attendanceMark && typeof attendanceMark === 'object' ? attendanceMark : {};
+        
+        const presentCount = safeStudentsForClass.filter(student => {
+          return student && student.id && safeAttendanceMark[student.id] === 'Present';
+        }).length;
+        const absentCount = safeStudentsForClass.filter(student => {
+          return student && student.id && safeAttendanceMark[student.id] === 'Absent';
+        }).length;
+        
+        // Ensure counts are valid numbers
+        const safePresentCount = Number.isFinite(presentCount) ? presentCount : 0;
+        const safeAbsentCount = Number.isFinite(absentCount) ? absentCount : 0;
+        
+        return { present: safePresentCount, absent: safeAbsentCount };
+      } else {
+        // Ensure teachers is an array
+        const safeTeachers = Array.isArray(teachers) ? teachers : [];
+        // Ensure teacherAttendanceMark is an object
+        const safeTeacherAttendanceMark = teacherAttendanceMark && typeof teacherAttendanceMark === 'object' ? teacherAttendanceMark : {};
+        
+        const presentCount = safeTeachers.filter(teacher => {
+          return teacher && teacher.id && safeTeacherAttendanceMark[teacher.id] === 'Present';
+        }).length;
+        const absentCount = safeTeachers.filter(teacher => {
+          return teacher && teacher.id && safeTeacherAttendanceMark[teacher.id] === 'Absent';
+        }).length;
+        
+        // Ensure counts are valid numbers
+        const safePresentCount = Number.isFinite(presentCount) ? presentCount : 0;
+        const safeAbsentCount = Number.isFinite(absentCount) ? absentCount : 0;
+        
+        return { present: safePresentCount, absent: safeAbsentCount };
+      }
+    } catch (error) {
+      console.error('Error in calculateAnalytics:', error);
+      // Return safe default values in case of any error
+      return { present: 0, absent: 0 };
     }
   };
 
   const analytics = calculateAnalytics();
+
+  // Safe percentage calculation helper to prevent NaN errors
+  const calculateSafePercentage = (numerator, denominator) => {
+    // Handle all invalid cases
+    if (!numerator && numerator !== 0) return 0;
+    if (!denominator && denominator !== 0) return 0;
+    if (denominator === 0) return 0;
+    if (typeof numerator !== 'number') return 0;
+    if (typeof denominator !== 'number') return 0;
+    if (!Number.isFinite(numerator)) return 0;
+    if (!Number.isFinite(denominator)) return 0;
+    
+    const result = (numerator / denominator) * 100;
+    
+    // Double-check the result is valid
+    if (!Number.isFinite(result)) return 0;
+    if (isNaN(result)) return 0;
+    
+    return Math.max(0, Math.min(100, Math.round(result)));
+  };
+
+  // Safe display helpers for array lengths
+  const getSafeArrayLength = (arr) => {
+    if (!arr || !Array.isArray(arr)) return 0;
+    const length = arr.length;
+    return Number.isFinite(length) ? length : 0;
+  };
+
+  // Safe number helper for general numeric displays
+  const getSafeNumber = (value, fallback = 0) => {
+    if (value === null || value === undefined) return fallback;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  // Safe index helper for animation delays
+  const getSafeIndex = (index, fallback = 0) => {
+    const safeIndex = getSafeNumber(index, fallback);
+    return Math.max(0, safeIndex); // Ensure non-negative
+  };
 
   if (loading) {
     return (
@@ -929,13 +1006,13 @@ const AttendanceManagement = () => {
         <View style={styles.quickStatItem}>
           <Ionicons name="people-outline" size={18} color="#4CAF50" />
           <Text style={styles.quickStatText}>
-            {tab === 'student' ? studentsForClass.length : teachers.length} Total
+            {tab === 'student' ? getSafeArrayLength(studentsForClass) : getSafeArrayLength(teachers)} Total
           </Text>
         </View>
         <View style={styles.quickStatItem}>
           <Ionicons name="checkmark-circle-outline" size={18} color="#FF9800" />
           <Text style={styles.quickStatText}>
-            {analytics.present} Present
+            {getSafeNumber(analytics.present)} Present
           </Text>
         </View>
       </View>
@@ -1032,13 +1109,13 @@ const AttendanceManagement = () => {
                       style={[
                         styles.progressBarFill,
                         {
-                          width: `${(analytics.present / (analytics.present + analytics.absent)) * 100}%`
+                          width: `${calculateSafePercentage(analytics.present, analytics.present + analytics.absent)}%`
                         }
                       ]}
                     />
                   </View>
                   <Text style={styles.percentageText}>
-                    {Math.round((analytics.present / (analytics.present + analytics.absent)) * 100)}%
+                    {calculateSafePercentage(analytics.present, analytics.present + analytics.absent)}%
                   </Text>
                 </View>
               </View>

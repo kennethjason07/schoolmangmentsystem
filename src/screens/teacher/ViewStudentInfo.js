@@ -138,8 +138,7 @@ const ViewStudentInfo = () => {
             gender,
             admission_no,
             academic_year,
-            classes(class_name, section),
-            users!students_parent_id_fkey(full_name, phone, email)
+            classes(class_name, section)
           `)
           .eq('class_id', classInfo.id)
           .order('roll_no')
@@ -149,6 +148,43 @@ const ViewStudentInfo = () => {
       const studentResults = await Promise.all(studentPromises);
       console.log('ViewStudentInfo: Student results:', studentResults);
       const allStudents = [];
+
+      // Collect all student IDs for parent data fetching
+      const allStudentIds = [];
+      studentResults.forEach((result) => {
+        if (result.data && result.classInfo) {
+          result.data.forEach(student => {
+            allStudentIds.push(student.id);
+          });
+        }
+      });
+
+      // Fetch parent user data for all students
+      console.log('ViewStudentInfo: Fetching parent data for', allStudentIds.length, 'students');
+      const { data: parentUsers, error: parentError } = await supabase
+        .from(TABLES.USERS)
+        .select('id, full_name, email, phone, linked_parent_of')
+        .in('linked_parent_of', allStudentIds);
+
+      if (parentError) {
+        console.error('ViewStudentInfo: Error fetching parent data:', parentError);
+      }
+
+      console.log('ViewStudentInfo: Parent users found:', parentUsers?.length || 0);
+
+      // Create a map of student ID to parent data
+      const parentMap = {};
+      if (parentUsers) {
+        parentUsers.forEach(parent => {
+          if (parent.linked_parent_of) {
+            parentMap[parent.linked_parent_of] = {
+              name: parent.full_name,
+              email: parent.email,
+              phone: parent.phone
+            };
+          }
+        });
+      }
 
       studentResults.forEach((result) => {
         if (result.data && result.classInfo) {
@@ -163,7 +199,7 @@ const ViewStudentInfo = () => {
               className: classInfo.class_name,
               sectionName: classInfo.section,
               teacherRole: classInfo.type, // 'subject' or 'class_teacher'
-              parents: student.users // Fix parent data access
+              parents: parentMap[student.id] || null // Add correct parent data
             });
           });
         }
@@ -339,9 +375,9 @@ const ViewStudentInfo = () => {
                   `"${student.gender || ''}"`,
                   student.dob || '',
                   `"${student.address || ''}"`,
-                  `"${student.parents?.full_name || student.users?.full_name || ''}"`,
-                  student.parents?.phone || student.users?.phone || '',
-                  `"${student.parents?.email || student.users?.email || ''}"`
+                  `"${student.parents?.name || ''}"`,
+                  student.parents?.phone || '',
+                  `"${student.parents?.email || ''}"`
                 ]);
 
                 const csvContent = [csvHeaders.join(','), ...csvRows.map(row => row.join(','))].join('\n');
@@ -513,8 +549,8 @@ const ViewStudentInfo = () => {
                               <td>${student.classSection || 'N/A'}</td>
                               <td>${student.gender || 'N/A'}</td>
                               <td>${student.dob || 'N/A'}</td>
-                              <td>${student.parents?.full_name || student.users?.full_name || 'N/A'}</td>
-                              <td>${student.parents?.phone || student.users?.phone || 'N/A'}</td>
+                              <td>${student.parents?.name || 'N/A'}</td>
+                              <td>${student.parents?.phone || 'N/A'}</td>
                             </tr>
                           `).join('')}
                         </tbody>
@@ -579,7 +615,7 @@ const ViewStudentInfo = () => {
         </View>
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Parent</Text>
-          <Text style={styles.statValue}>{item.parents?.full_name || item.users?.full_name || 'N/A'}</Text>
+          <Text style={styles.statValue}>{item.parents?.name || 'N/A'}</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -802,7 +838,7 @@ const ViewStudentInfo = () => {
                   <Text style={styles.detailTitle}>Parent Information</Text>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Name:</Text>
-                    <Text style={styles.detailValue}>{selectedStudent.parents?.full_name || selectedStudent.users?.full_name || 'N/A'}</Text>
+                    <Text style={styles.detailValue}>{selectedStudent.parents?.name || selectedStudent.users?.full_name || 'N/A'}</Text>
                   </View>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Phone:</Text>

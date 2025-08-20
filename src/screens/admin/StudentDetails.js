@@ -34,24 +34,56 @@ const StudentDetails = ({ route }) => {
           throw error;
         }
         
-        // Try multiple methods to get parent information
+        // Try multiple methods to get parent information with proper error handling
         let parentData = null;
         
-        // Method 1: Try parents table
-        const { data: parentsTableData, error: parentError } = await supabase
-          .from('parents')
-          .select('name, relation')
-          .eq('student_id', student.id)
-          .single();
-        
-        if (parentsTableData && !parentError) {
-          parentData = parentsTableData;
-          console.log('Found parent in parents table:', parentData);
-        } else {
-          console.log('No parent found in parents table for student:', student.id);
+        // Method 1: Try parents table (most reliable for parent information)
+        try {
+          const { data: parentsTableData, error: parentError } = await supabase
+            .from('parents')
+            .select('name, relation, phone, email')
+            .eq('student_id', student.id)
+            .single();
           
-          // Method 2: Try via parent_id in students table (users table)
-          if (data.parent_id) {
+          if (parentsTableData && !parentError) {
+            parentData = {
+              name: parentsTableData.name,
+              relation: parentsTableData.relation || 'Guardian',
+              phone: parentsTableData.phone,
+              email: parentsTableData.email
+            };
+            console.log('Found parent in parents table:', parentData);
+          }
+        } catch (error) {
+          console.log('Parents table lookup failed:', error);
+        }
+        
+        // Method 2: Try via parent_id in students table (parents table)
+        if (!parentData && data.parent_id) {
+          try {
+            const { data: parentFromParentId, error: parentIdError } = await supabase
+              .from('parents')
+              .select('name, relation, phone, email')
+              .eq('id', data.parent_id)
+              .single();
+            
+            if (parentFromParentId && !parentIdError) {
+              parentData = {
+                name: parentFromParentId.name,
+                relation: parentFromParentId.relation || 'Guardian',
+                phone: parentFromParentId.phone,
+                email: parentFromParentId.email
+              };
+              console.log('Found parent via parent_id in parents table:', parentData);
+            }
+          } catch (error) {
+            console.log('Parent_id lookup in parents table failed:', error);
+          }
+        }
+        
+        // Method 3: Try via parent_id in students table (users table)
+        if (!parentData && data.parent_id) {
+          try {
             const { data: userData, error: userError } = await supabase
               .from('users')
               .select('full_name, email, phone')
@@ -59,15 +91,22 @@ const StudentDetails = ({ route }) => {
               .single();
             
             if (userData && !userError) {
-              parentData = { name: userData.full_name, relation: 'Guardian' };
-              console.log('Found parent in users table:', parentData);
-            } else {
-              console.log('No parent found in users table for parent_id:', data.parent_id);
+              parentData = {
+                name: userData.full_name,
+                relation: 'Guardian',
+                phone: userData.phone,
+                email: userData.email
+              };
+              console.log('Found parent in users table via parent_id:', parentData);
             }
+          } catch (error) {
+            console.log('Parent_id lookup in users table failed:', error);
           }
-          
-          // Method 3: Try finding parent via users table linked_parent_of
-          if (!parentData) {
+        }
+        
+        // Method 4: Try finding parent via users table linked_parent_of
+        if (!parentData) {
+          try {
             const { data: linkedParentData, error: linkedError } = await supabase
               .from('users')
               .select('full_name, email, phone')
@@ -75,11 +114,16 @@ const StudentDetails = ({ route }) => {
               .single();
             
             if (linkedParentData && !linkedError) {
-              parentData = { name: linkedParentData.full_name, relation: 'Guardian' };
+              parentData = {
+                name: linkedParentData.full_name,
+                relation: 'Guardian',
+                phone: linkedParentData.phone,
+                email: linkedParentData.email
+              };
               console.log('Found parent via linked_parent_of:', parentData);
-            } else {
-              console.log('No parent found via linked_parent_of for student:', student.id);
             }
+          } catch (error) {
+            console.log('Linked_parent_of lookup failed:', error);
           }
         }
         
