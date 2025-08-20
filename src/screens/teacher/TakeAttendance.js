@@ -311,9 +311,15 @@ const TakeAttendance = () => {
       const absent = viewAttendance.filter(r => r.status === 'Absent');
       const notMarked = viewAttendance.filter(r => r.status === 'Not Marked');
       
+      // Find the class information to display class name and section
+      const selectedClassData = classes.find(c => c.id === viewClass);
+      const classDisplayName = selectedClassData 
+        ? `${selectedClassData.class_name} ${selectedClassData.section}` 
+        : viewClass;
+      
       let html = `
         <h2 style="text-align:center;">Attendance Report</h2>
-        <h3 style="text-align:center;">Class: ${viewClass} | Date: ${formatDateDMY(viewDate)}</h3>
+        <h3 style="text-align:center;">Class: ${classDisplayName} | Date: ${formatDateDMY(viewDate)}</h3>
         
         <h4 style="text-align:center; color: #4CAF50;">Present Students (${present.length})</h4>
         <table border="1" style="border-collapse:collapse;width:100%;margin-bottom:20px;">

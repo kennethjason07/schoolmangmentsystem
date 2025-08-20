@@ -4,6 +4,7 @@ import Header from '../../components/Header';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
+import * as MediaLibrary from 'expo-media-library';
 import DropDownPicker from 'react-native-dropdown-picker';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -384,19 +385,65 @@ const ViewStudentInfo = () => {
 
                 const timestamp = new Date().toISOString().split('T')[0];
                 const fileName = `students_export_${timestamp}.csv`;
-                const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+                
+                // Save directly to Downloads folder on Android
+                if (Platform.OS === 'android') {
+                  try {
+                    // Request media library permissions
+                    const { status } = await MediaLibrary.requestPermissionsAsync();
+                    if (status !== 'granted') {
+                      Alert.alert('Permission Required', 'Please grant media library permission to save the file to Downloads.');
+                      return;
+                    }
 
-                await FileSystem.writeAsStringAsync(fileUri, csvContent, {
-                  encoding: FileSystem.EncodingType.UTF8
-                });
+                    // Create file in cache first
+                    const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+                    await FileSystem.writeAsStringAsync(fileUri, csvContent, {
+                      encoding: FileSystem.EncodingType.UTF8
+                    });
 
-                if (await Sharing.isAvailableAsync()) {
-                  await Sharing.shareAsync(fileUri, {
-                    mimeType: 'text/csv',
-                    dialogTitle: 'Export Students CSV'
-                  });
+                    // Save to media library (Downloads folder)
+                    const asset = await MediaLibrary.createAssetAsync(fileUri);
+                    const album = await MediaLibrary.getAlbumAsync('Download');
+                    if (album == null) {
+                      await MediaLibrary.createAlbumAsync('Download', asset, false);
+                    } else {
+                      await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+                    }
+
+                    Alert.alert('Success', `CSV file saved to Downloads folder as ${fileName}`);
+                  } catch (error) {
+                    console.error('Android save error:', error);
+                    // Fallback to sharing
+                    const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+                    await FileSystem.writeAsStringAsync(fileUri, csvContent, {
+                      encoding: FileSystem.EncodingType.UTF8
+                    });
+                    
+                    if (await Sharing.isAvailableAsync()) {
+                      await Sharing.shareAsync(fileUri, {
+                        mimeType: 'text/csv',
+                        dialogTitle: 'Export Students CSV'
+                      });
+                    } else {
+                      Alert.alert('Success', `CSV file saved as ${fileName}`);
+                    }
+                  }
                 } else {
-                  Alert.alert('Success', `CSV file saved as ${fileName}`);
+                  // iOS - use sharing
+                  const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+                  await FileSystem.writeAsStringAsync(fileUri, csvContent, {
+                    encoding: FileSystem.EncodingType.UTF8
+                  });
+
+                  if (await Sharing.isAvailableAsync()) {
+                    await Sharing.shareAsync(fileUri, {
+                      mimeType: 'text/csv',
+                      dialogTitle: 'Export Students CSV'
+                    });
+                  } else {
+                    Alert.alert('Success', `CSV file saved as ${fileName}`);
+                  }
                 }
               } catch (error) {
                 Alert.alert('Error', 'Failed to export CSV file');
@@ -569,13 +616,51 @@ const ViewStudentInfo = () => {
                   base64: false
                 });
 
-                if (await Sharing.isAvailableAsync()) {
-                  await Sharing.shareAsync(uri, {
-                    mimeType: 'application/pdf',
-                    dialogTitle: 'Export Students PDF Report'
-                  });
+                const timestamp = new Date().toISOString().split('T')[0];
+                const fileName = `students_report_${timestamp}.pdf`;
+
+                // Save directly to Downloads folder on Android
+                if (Platform.OS === 'android') {
+                  try {
+                    // Request media library permissions
+                    const { status } = await MediaLibrary.requestPermissionsAsync();
+                    if (status !== 'granted') {
+                      Alert.alert('Permission Required', 'Please grant media library permission to save the file to Downloads.');
+                      return;
+                    }
+
+                    // Save to media library (Downloads folder)
+                    const asset = await MediaLibrary.createAssetAsync(uri);
+                    const album = await MediaLibrary.getAlbumAsync('Download');
+                    if (album == null) {
+                      await MediaLibrary.createAlbumAsync('Download', asset, false);
+                    } else {
+                      await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+                    }
+
+                    Alert.alert('Success', `PDF report saved to Downloads folder as ${fileName}`);
+                  } catch (error) {
+                    console.error('Android PDF save error:', error);
+                    // Fallback to sharing
+                    if (await Sharing.isAvailableAsync()) {
+                      await Sharing.shareAsync(uri, {
+                        mimeType: 'application/pdf',
+                        dialogTitle: 'Export Students PDF Report'
+                      });
+                    } else {
+                      Alert.alert('Success', 'PDF report generated successfully!');
+                    }
+                  }
                 } else {
-                  Alert.alert('Success', 'PDF report generated successfully!');
+                  // iOS - use sharing
+                  if (await Sharing.isAvailableAsync()) {
+                    await Sharing.shareAsync(uri, {
+                      mimeType: 'application/pdf',
+                      dialogTitle: 'Export Students PDF Report'
+                    });
+                  } else {
+                    Alert.alert('Success', 'PDF report generated successfully!');
+                  }
                 }
               } catch (error) {
                 Alert.alert('Error', 'Failed to generate PDF report');
