@@ -2,138 +2,142 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text } from 'react-native';
 import { useAuth } from '../utils/AuthContext';
 import { supabase, TABLES } from '../utils/supabase';
+import { getUnreadCountFromSender } from '../utils/useMessageStatus';
+import { AppState } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { badgeNotifier } from '../utils/badgeNotifier';
 
 const MessageBadge = ({ userType, style, textStyle }) => {
   const { user } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
-  const lastFetchTime = useRef(0);
-  const isSubscribed = useRef(false);
+  const subscriptionRef = useRef(null);
+  const isInitialized = useRef(false);
 
-  // Debounced fetch function to prevent rapid successive calls
-  const fetchUnreadCount = useCallback(async (force = false) => {
+  // Fetch unread count from database
+  const fetchUnreadCount = useCallback(async () => {
     try {
       if (!user?.id) return;
 
-      // Prevent fetching if we've fetched recently (within 2 seconds) unless forced
-      const now = Date.now();
-      if (!force && now - lastFetchTime.current < 2000) {
-        console.log('🔔 Skipping unread count fetch - too recent');
-        return;
-      }
+      console.log(`🔔 MessageBadge (${userType}): Fetching unread count for user:`, user.id);
 
-      console.log('🔔 Fetching unread message count for user:', user.id, 'type:', userType);
-      lastFetchTime.current = now;
-
-      // Get messages where current user is receiver and message is not read
       const { data: unreadMessages, error } = await supabase
-        .from(TABLES.MESSAGES)
-        .select('id, sender_id, receiver_id, sent_at')
-        .eq('receiver_id', user.id)
-        .eq('is_read', false)
-        .order('sent_at', { ascending: false });
-
-      if (error && error.code !== '42P01') {
-        console.log('❌ Error fetching unread messages:', error);
-        setUnreadCount(0);
-        return;
-      }
-
-      const count = unreadMessages ? unreadMessages.length : 0;
-      console.log('🔢 Unread message count:', count);
-      setUnreadCount(count);
-
-    } catch (error) {
-      console.log('💥 Error in fetchUnreadCount:', error);
-      setUnreadCount(0);
-    }
-  }, [user?.id, userType]);
-
-  // Function to mark messages as read (can be called from chat screens)
-  const markMessagesAsRead = useCallback(async (senderId) => {
-    try {
-      if (!user?.id || !senderId) return;
-
-      console.log('✅ Marking messages as read from sender:', senderId, 'to receiver:', user.id);
-
-      const { error } = await supabase
-        .from(TABLES.MESSAGES)
-        .update({ is_read: true })
-        .eq('sender_id', senderId)
+        .from('messages')
+        .select('id, sender_id')
         .eq('receiver_id', user.id)
         .eq('is_read', false);
 
       if (error) {
-        console.log('❌ Error marking messages as read:', error);
+        console.log('❌ MessageBadge: Error fetching unread messages:', error);
         return;
       }
 
-      // Refresh the unread count after marking as read
-      setTimeout(() => {
-        fetchUnreadCount(true); // Force refresh
-      }, 500);
+      const count = unreadMessages?.length || 0;
+      console.log(`📊 MessageBadge (${userType}): Found ${count} unread messages`);
+      setUnreadCount(count);
 
-      console.log('✅ Messages marked as read successfully');
     } catch (error) {
-      console.log('💥 Error in markMessagesAsRead:', error);
+      console.log('💥 MessageBadge: Error in fetchUnreadCount:', error);
     }
-  }, [user?.id, fetchUnreadCount]);
+  }, [user?.id, userType]);
 
-  // Set up real-time subscription for new messages
+  // Aggressive polling-based approach with AppState monitoring
   useEffect(() => {
-    if (!user?.id || isSubscribed.current) return;
+    if (!user?.id) {
+      setUnreadCount(0);
+      return;
+    }
 
-    console.log('🔔 Setting up MessageBadge subscriptions for user:', user.id);
-    isSubscribed.current = true;
-
+    console.log(`🔔 MessageBadge (${userType}): Setting up polling for user:`, user.id);
+    
     // Initial fetch
-    fetchUnreadCount(true);
+    fetchUnreadCount();
 
-    // Set up real-time subscription
-    const subscription = supabase
-      .channel(`message-badge-${user.id}`)
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: TABLES.MESSAGES,
-        filter: `receiver_id=eq.${user.id}`
-      }, (payload) => {
-        console.log('🔔 Real-time message update for badge:', payload);
-        // Refresh count when new message is received
-        setTimeout(() => {
-          fetchUnreadCount(true); // Force refresh
-        }, 500);
-      })
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: TABLES.MESSAGES,
-        filter: `sender_id=eq.${user.id}`
-      }, (payload) => {
-        console.log('🔔 Real-time message sent update for badge:', payload);
-        // Refresh count when user sends a message (reduces unread count)
-        setTimeout(() => {
-          fetchUnreadCount(true); // Force refresh
-        }, 500);
-      })
-      .subscribe();
-
-    // Refresh every 60 seconds to ensure accuracy (reduced from 30s)
-    const interval = setInterval(() => {
+    // Frequent polling (every 5 seconds)
+    const frequentPolling = setInterval(() => {
+      console.log(`🔄 MessageBadge (${userType}): Frequent polling check`);
       fetchUnreadCount();
-    }, 60000);
+    }, 5000);
 
-    return () => {
-      console.log('🔔 Cleaning up MessageBadge subscriptions for user:', user.id);
-      subscription.unsubscribe();
-      clearInterval(interval);
-      isSubscribed.current = false;
+    // App state change listener - refresh when app becomes active
+    const handleAppStateChange = (nextAppState) => {
+      console.log(`🔔 MessageBadge (${userType}): App state changed to:`, nextAppState);
+      if (nextAppState === 'active') {
+        console.log(`🔄 MessageBadge (${userType}): App became active, refreshing count`);
+        fetchUnreadCount();
+      }
     };
-  }, [user?.id, fetchUnreadCount]);
 
-  // Reset subscription flag when user changes
-  useEffect(() => {
-    isSubscribed.current = false;
-  }, [user?.id]);
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    // Subscribe to badge notification events for instant updates
+    const unsubscribeBadgeNotifier = badgeNotifier.subscribe(user.id, (reason) => {
+      console.log(`📡 MessageBadge (${userType}): Received notification, reason: ${reason}`);
+      fetchUnreadCount();
+    });
+
+    // Also try real-time as a bonus (but don't rely on it)
+    let realtimeSubscription = null;
+    try {
+      const channelName = `message-badge-${userType}-${user.id}-${Date.now()}`;
+      console.log(`🔔 MessageBadge (${userType}): Attempting real-time subscription:`, channelName);
+      
+      realtimeSubscription = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public', 
+            table: 'messages',
+            filter: `receiver_id=eq.${user.id}`
+          },
+          (payload) => {
+            console.log(`⚡ MessageBadge (${userType}): Real-time INSERT event:`, payload);
+            // Immediately refresh count when we get a real-time event
+            setTimeout(() => fetchUnreadCount(), 100);
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'messages',
+            filter: `receiver_id=eq.${user.id}`
+          },
+          (payload) => {
+            console.log(`⚡ MessageBadge (${userType}): Real-time UPDATE event:`, payload);
+            // Immediately refresh count when we get a real-time event
+            setTimeout(() => fetchUnreadCount(), 100);
+          }
+        )
+        .subscribe((status) => {
+          console.log(`🔔 MessageBadge (${userType}): Real-time status:`, status);
+          if (status === 'SUBSCRIBED') {
+            console.log(`✅ MessageBadge (${userType}): Real-time working! (Bonus)`);
+          } else if (status === 'CHANNEL_ERROR') {
+            console.log(`❌ MessageBadge (${userType}): Real-time failed, relying on polling`);
+          }
+        });
+    } catch (error) {
+      console.log(`❌ MessageBadge (${userType}): Real-time setup failed:`, error);
+    }
+
+    // Cleanup function
+    return () => {
+      console.log(`🗿 MessageBadge (${userType}): Cleaning up`);
+      clearInterval(frequentPolling);
+      subscription?.remove();
+      unsubscribeBadgeNotifier();
+      if (realtimeSubscription) {
+        try {
+          realtimeSubscription.unsubscribe();
+        } catch (error) {
+          console.log('Error unsubscribing:', error);
+        }
+      }
+    };
+  }, [user?.id, userType, fetchUnreadCount]);
 
   if (unreadCount === 0) return null;
 

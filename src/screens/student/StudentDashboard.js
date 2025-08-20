@@ -772,35 +772,42 @@ const StudentDashboard = ({ navigation }) => {
             <View style={styles.sectionTitleContainer}>
               <View style={styles.sectionIcon}>
                 <Ionicons name="calendar" size={20} color="#FF9800" />
-            </View>
+              </View>
               <Text style={styles.sectionTitle}>Upcoming Events</Text>
-          </View>
+            </View>
             <View style={styles.eventsContainer}>
-              {events.map((event, index) => (
-                <View key={index} style={styles.eventCard}>
-                  <View style={[styles.eventIcon, { backgroundColor: event.color }]}>
-                    <Ionicons name={event.icon} size={20} color="#fff" />
-        </View>
-                  <View style={styles.eventInfo}>
-                    <Text style={styles.eventTitle}>{event.title}</Text>
-                    <Text style={styles.eventDescription}>{event.description}</Text>
-                    <Text style={styles.eventDateTime}>
-                      {formatDateToDDMMYYYY(event.date)} • {event.time}
-                    </Text>
+              {events.map((event, index) => {
+                const eventTitle = event?.title || 'Event';
+                const eventDescription = event?.description || 'No description';
+                const eventDate = event?.date || new Date().toISOString().split('T')[0];
+                const eventTime = event?.time || '09:00';
+                const eventColor = event?.color || '#FF9800';
+                
+                return (
+                  <View key={index} style={styles.eventCard}>
+                    <View style={[styles.eventIcon, { backgroundColor: eventColor }]}>
+                      <Ionicons name="calendar" size={20} color="#fff" />
+                    </View>
+                    <View style={styles.eventInfo}>
+                      <Text style={styles.eventTitle}>{eventTitle}</Text>
+                      <Text style={styles.eventDescription}>{eventDescription}</Text>
+                      <Text style={styles.eventDateTime}>
+                        {formatDateToDDMMYYYY(eventDate)} • {eventTime}
+                      </Text>
+                    </View>
                   </View>
-                </View>
-              ))}
+                );
+              })}
             </View>
           </View>
         )}
-
         {/* Recent Activities */}
         {recentActivities.length > 0 && (
-        <View style={styles.section}>
+          <View style={styles.section}>
             <View style={styles.sectionTitleContainer}>
               <View style={styles.sectionIcon}>
                 <Ionicons name="activity" size={20} color="#4CAF50" />
-                </View>
+              </View>
               <Text style={styles.sectionTitle}>Recent Activities</Text>
             </View>
             <View style={styles.activitiesContainer}>
@@ -814,12 +821,12 @@ const StudentDashboard = ({ navigation }) => {
                     <Text style={styles.activityDescription}>{activity.message}</Text>
                     <Text style={styles.activityTime}>
                       {formatDateToDDMMYYYY(activity.created_at)}
-                  </Text>
+                    </Text>
+                  </View>
                 </View>
-        </View>
               ))}
-    </View>
-      </View>
+            </View>
+          </View>
         )}
 
       </ScrollView>

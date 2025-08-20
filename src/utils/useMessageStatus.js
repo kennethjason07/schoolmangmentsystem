@@ -75,3 +75,28 @@ export const useMessageStatus = () => {
     getUnreadCountFromSender
   };
 };
+
+// Standalone function for getting unread count from a specific sender
+// This can be used outside of React components
+export const getUnreadCountFromSender = async (senderId, userId) => {
+  try {
+    if (!userId || !senderId) return 0;
+
+    const { data, error } = await supabase
+      .from(TABLES.MESSAGES)
+      .select('id')
+      .eq('sender_id', senderId)
+      .eq('receiver_id', userId)
+      .eq('is_read', false);
+
+    if (error) {
+      console.log('Error fetching unread count:', error);
+      return 0;
+    }
+
+    return data ? data.length : 0;
+  } catch (error) {
+    console.log('Error in getUnreadCountFromSender:', error);
+    return 0;
+  }
+};

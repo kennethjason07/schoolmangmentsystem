@@ -39,7 +39,7 @@ const StudentMarksScreen = ({ navigation, route }) => {
         .select(`
           *,
           subjects(name),
-          exams(name, date)
+          exams(name, start_date)
         `)
         .eq('student_id', student.id)
         .order('created_at', { ascending: false });
@@ -50,7 +50,7 @@ const StudentMarksScreen = ({ navigation, route }) => {
       const examGroups = {};
       marksData.forEach(mark => {
         const examName = mark.exams?.name || 'Class Test';
-        const examDate = mark.exams?.date || mark.exam_date || new Date().toISOString();
+        const examDate = mark.exams?.start_date || mark.exam_date || new Date().toISOString();
         
         if (!examGroups[examName]) {
           examGroups[examName] = {
@@ -63,7 +63,7 @@ const StudentMarksScreen = ({ navigation, route }) => {
         examGroups[examName].data.push({
           subject: mark.subjects?.name || 'Unknown Subject',
           marks: mark.marks_obtained || 0,
-          total: mark.total_marks || 100,
+          total: mark.max_marks || 100,
           subjectId: mark.subject_id
         });
       });

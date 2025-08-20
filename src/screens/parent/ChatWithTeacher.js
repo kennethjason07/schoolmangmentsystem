@@ -11,6 +11,8 @@ import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useMessageStatus, getUnreadCountFromSender } from '../../utils/useMessageStatus';
 import { formatToLocalTime } from '../../utils/timeUtils';
 import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from '../../utils/chatFileUpload';
+import { badgeNotifier } from '../../utils/badgeNotifier';
+import { testRealtimeConnection, testUserFilteredConnection, insertTestMessage } from '../../utils/testRealtime';
 
 const ChatWithTeacher = () => {
   const { user } = useAuth();
@@ -27,6 +29,7 @@ const ChatWithTeacher = () => {
   const [unreadCounts, setUnreadCounts] = useState({}); // Track unread messages per teacher
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [messageSubscription, setMessageSubscription] = useState(null);
+  const [realtimeTestCleanup, setRealtimeTestCleanup] = useState(null);
   const flatListRef = useRef(null);
 
   // Helper function to get teacher's user ID (exact copy from student logic)
@@ -562,16 +565,227 @@ const ChatWithTeacher = () => {
       
       for (const teacher of teachersList) {
         if (teacher.userId && teacher.userId !== user.id) {
-          const count = await getUnreadCountFromSender(teacher.userId);
+          const count = await getUnreadCountFromSender(teacher.userId, user.id);
           counts[teacher.userId] = count;
+          console.log(`📊 Unread count for ${teacher.name} (${teacher.userId}): ${count}`);
         }
       }
       
+      console.log('📊 Final unread counts:', counts);
       setUnreadCounts(counts);
     } catch (error) {
       console.log('Error fetching unread counts:', error);
     }
   };
+
+  // Set up real-time message subscription
+  useEffect(() => {
+    let subscription = null;
+    
+    if (user?.id) {
+      console.log('🔔 Setting up real-time message subscription for user:', user.id);
+      console.log('🔔 Selected teacher:', selectedTeacher?.name, 'userId:', selectedTeacher?.userId);
+      
+      // Create a unique channel name to avoid conflicts
+      const channelName = `messages-realtime-${user.id}-${Date.now()}`;
+      
+      // Test subscription setup
+      subscription = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
+            schema: 'public',
+            table: 'messages',
+            filter: `or(sender_id.eq.${user.id},receiver_id.eq.${user.id})` // Only messages involving this user
+          },
+          (payload) => {
+            console.log('🚨 REAL-TIME EVENT RECEIVED! 🚨');
+            console.log('💬 Real-time message update:', JSON.stringify(payload, null, 2));
+            console.log('💬 Event type:', payload.eventType);
+            console.log('💬 Timestamp:', new Date().toISOString());
+            
+            if (payload.eventType === 'INSERT') {
+              const newMessage = payload.new;
+              console.log('📨 New message received:', newMessage);
+              console.log('📨 Message sender_id:', newMessage.sender_id, 'receiver_id:', newMessage.receiver_id);
+              console.log('📨 Current user.id:', user.id);
+              
+              // Get fresh selectedTeacher from state to avoid stale closure
+              setSelectedTeacher(currentSelectedTeacher => {
+                console.log('💬 Current selectedTeacher in callback:', currentSelectedTeacher?.name, currentSelectedTeacher?.userId);
+                
+                // If we're currently in a chat with the sender/receiver, add the message immediately
+                if (currentSelectedTeacher && currentSelectedTeacher.userId && 
+                    (newMessage.sender_id === currentSelectedTeacher.userId || 
+                     newMessage.receiver_id === currentSelectedTeacher.userId)) {
+                  
+                  console.log('✅ Message is for current chat, adding to messages');
+                  const formattedMessage = {
+                    ...newMessage,
+                    text: newMessage.message,
+                    timestamp: formatToLocalTime(newMessage.sent_at),
+                    sender: newMessage.sender_id === user.id ? 'parent' : 'teacher'
+                  };
+                  
+                  setMessages(prev => {
+                    // Check if message already exists to prevent duplicates
+                    const exists = prev.some(msg => msg.id === newMessage.id);
+                    if (!exists) {
+                      console.log('✅ Adding new message to current chat:', formattedMessage.text);
+                      const newMessages = [...prev, formattedMessage];
+                      console.log('📊 Total messages after adding:', newMessages.length);
+                      return newMessages;
+                    }
+                    console.log('⚠️ Message already exists, skipping');
+                    return prev;
+                  });
+                  
+                  // Scroll to bottom when new message arrives
+                  setTimeout(() => {
+                    if (flatListRef.current) {
+                      console.log('🔄 Scrolling to bottom after new message');
+                      flatListRef.current.scrollToEnd({ animated: true });
+                    }
+                  }, 100);
+                } else {
+                  console.log('📨 Message not for current chat or no chat selected');
+                  console.log('   - currentSelectedTeacher exists:', !!currentSelectedTeacher);
+                  console.log('   - currentSelectedTeacher.userId:', currentSelectedTeacher?.userId);
+                  console.log('   - Message sender_id:', newMessage.sender_id);
+                  console.log('   - Message receiver_id:', newMessage.receiver_id);
+                }
+                
+                // Always return the current selected teacher (no change)
+                return currentSelectedTeacher;
+              });
+              
+              // Update unread counts if message is from teacher to parent
+              if (newMessage.receiver_id === user.id && newMessage.sender_id !== user.id) {
+                console.log('📬 Parent Chat: Updating unread count for sender:', newMessage.sender_id);
+                setUnreadCounts(prev => {
+                  const newCount = (prev[newMessage.sender_id] || 0) + 1;
+                  console.log(`📊 Parent Chat: Teacher ${newMessage.sender_id} unread count: ${prev[newMessage.sender_id] || 0} -> ${newCount}`);
+                  return {
+                    ...prev,
+                    [newMessage.sender_id]: newCount
+                  };
+                });
+              }
+              
+              // Update teachers list with new message if not in current chat
+              if (!selectedTeacher || 
+                  (selectedTeacher.userId !== newMessage.sender_id && selectedTeacher.userId !== newMessage.receiver_id)) {
+                console.log('🔄 Updating teachers list due to new message');
+                setTeachers(prevTeachers => {
+                  return prevTeachers.map(teacher => {
+                    // Find the teacher this message involves
+                    const isInvolvedTeacher = teacher.userId === newMessage.sender_id || teacher.userId === newMessage.receiver_id;
+                    if (isInvolvedTeacher) {
+                      const formattedMessage = {
+                        ...newMessage,
+                        text: newMessage.message,
+                        timestamp: formatToLocalTime(newMessage.sent_at),
+                        sender: newMessage.sender_id === user.id ? 'parent' : 'teacher'
+                      };
+                      
+                      return {
+                        ...teacher,
+                        messages: [...(teacher.messages || []), formattedMessage],
+                        lastMessageTime: newMessage.sent_at
+                      };
+                    }
+                    return teacher;
+                  });
+                });
+              }
+            }
+            
+            if (payload.eventType === 'UPDATE') {
+              const updatedMessage = payload.new;
+              console.log('📝 Message updated:', updatedMessage);
+              
+              // Update the message in current chat if it's visible
+              if (selectedTeacher && selectedTeacher.userId &&
+                  (updatedMessage.sender_id === selectedTeacher.userId || 
+                   updatedMessage.receiver_id === selectedTeacher.userId)) {
+                
+                setMessages(prev => prev.map(msg => 
+                  msg.id === updatedMessage.id 
+                    ? {
+                        ...updatedMessage,
+                        text: updatedMessage.message,
+                        timestamp: formatToLocalTime(updatedMessage.sent_at),
+                        sender: updatedMessage.sender_id === user.id ? 'parent' : 'teacher'
+                      }
+                    : msg
+                ));
+              }
+              
+              // If a message was marked as read, update unread counts
+              if (updatedMessage.is_read === true && updatedMessage.receiver_id === user.id) {
+                console.log('✅ Message marked as read, updating unread counts');
+                setUnreadCounts(prev => {
+                  const newCount = Math.max(0, (prev[updatedMessage.sender_id] || 0) - 1);
+                  return {
+                    ...prev,
+                    [updatedMessage.sender_id]: newCount
+                  };
+                });
+              }
+            }
+            
+            if (payload.eventType === 'DELETE') {
+              const deletedMessage = payload.old;
+              console.log('🗑️ Message deleted:', deletedMessage);
+              
+              // Remove from current chat if visible
+              if (selectedTeacher && selectedTeacher.userId &&
+                  (deletedMessage.sender_id === selectedTeacher.userId || 
+                   deletedMessage.receiver_id === selectedTeacher.userId)) {
+                
+                setMessages(prev => prev.filter(msg => msg.id !== deletedMessage.id));
+              }
+            }
+          }
+        )
+        .subscribe((status, err) => {
+          console.log('📡 SUBSCRIPTION STATUS:', status);
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Real-time subscription established successfully with channel:', channelName);
+            console.log('🔄 Subscription is now active and ready to receive events');
+          } else if (status === 'CLOSED') {
+            console.log('❌ Subscription closed');
+          } else if (status === 'CHANNEL_ERROR') {
+            console.log('❌ Subscription error:', err);
+          } else {
+            console.log('🔄 Subscription status changed to:', status);
+          }
+        });
+      
+      // Test the subscription by logging its details
+      console.log('🔍 Subscription object:', subscription);
+      console.log('🔍 Channel name:', channelName);
+      console.log('🔍 Filter:', `or(sender_id.eq.${user.id},receiver_id.eq.${user.id})`);
+      console.log('🔍 Table:', 'messages');
+      console.log('🔍 Schema:', 'public');
+      
+      // Test if Supabase client is properly configured for realtime
+      console.log('🔍 Supabase client settings:');
+      console.log('   - URL:', supabase.supabaseUrl);
+      console.log('   - Key:', supabase.supabaseKey ? 'Present' : 'Missing');
+      console.log('   - Realtime URL:', supabase.realtime?.endPoint || 'Not found');
+      console.log('   - Realtime Status:', supabase.realtime?.socket?.readyState || 'Unknown');
+    }
+    
+    return () => {
+      if (subscription) {
+        console.log('🔕 Cleaning up real-time subscription');
+        supabase.removeChannel(subscription);
+      }
+    };
+  }, [user?.id, selectedTeacher?.userId]);
 
   // Reset teacher selection and messages on screen focus
   useFocusEffect(
@@ -596,6 +810,9 @@ const ChatWithTeacher = () => {
     // Only handle read status if teacher has a user account
     if (teacher.userId && teacher.userId !== user.id && teacher.hasUserAccount !== false) {
       await markMessagesAsRead(teacher.userId);
+      
+      // Notify badge system that messages were read
+      badgeNotifier.notifyMessagesRead(user.id, teacher.userId);
       
       // Clear unread count for this teacher immediately
       setUnreadCounts(prev => ({
@@ -699,6 +916,9 @@ const ChatWithTeacher = () => {
 
       setMessages(prev => [...prev, displayMsg]);
       setInput('');
+
+      // Notify badge system that a new message was sent (for the receiver)
+      badgeNotifier.notifyNewMessage(teacherUserId, user.id);
 
       // Scroll to bottom after sending
       setTimeout(() => {
@@ -1184,6 +1404,15 @@ const ChatWithTeacher = () => {
                 const unreadCount = unreadCounts[item.userId] || 0;
                 const hasUnread = unreadCount > 0;
                 const hasMessages = item.messages && item.messages.length > 0;
+                
+                // Debug logging
+                console.log(`🔍 Teacher: ${item.name}`);
+                console.log(`   - userId: ${item.userId}`);
+                console.log(`   - unreadCounts[${item.userId}]: ${unreadCounts[item.userId]}`);
+                console.log(`   - unreadCount: ${unreadCount}`);
+                console.log(`   - hasUnread: ${hasUnread}`);
+                console.log(`   - hasMessages: ${hasMessages}`);
+                console.log(`   - All unreadCounts:`, unreadCounts);
 
                 return (
                   <View>
@@ -1308,6 +1537,59 @@ const ChatWithTeacher = () => {
                 {selectedTeacher.subject}
               </Text>
             </View>
+            {/* Real-time Test Button */}
+            <TouchableOpacity 
+              style={styles.testButton}
+              onPress={() => {
+                Alert.alert(
+                  'Real-time Test',
+                  'Choose a test to run:',
+                  [
+                    {
+                      text: 'Basic Test',
+                      onPress: () => {
+                        // Clean up any previous test
+                        if (realtimeTestCleanup) {
+                          realtimeTestCleanup();
+                        }
+                        // Start basic real-time test
+                        const cleanup = testRealtimeConnection(user.id);
+                        setRealtimeTestCleanup(cleanup);
+                      }
+                    },
+                    {
+                      text: 'Filtered Test',
+                      onPress: () => {
+                        // Clean up any previous test
+                        if (realtimeTestCleanup) {
+                          realtimeTestCleanup();
+                        }
+                        // Start filtered real-time test
+                        const cleanup = testUserFilteredConnection(user.id);
+                        setRealtimeTestCleanup(cleanup);
+                      }
+                    },
+                    {
+                      text: 'Insert Test Message',
+                      onPress: async () => {
+                        try {
+                          await insertTestMessage(user.id);
+                          Alert.alert('Success', 'Test message inserted! Check console for real-time events.');
+                        } catch (error) {
+                          Alert.alert('Error', 'Failed to insert test message: ' + error.message);
+                        }
+                      }
+                    },
+                    {
+                      text: 'Cancel',
+                      style: 'cancel'
+                    }
+                  ]
+                );
+              }}
+            >
+              <Ionicons name="bug" size={18} color="#ff9800" />
+            </TouchableOpacity>
           </View>
           
           <FlatList
@@ -1864,22 +2146,22 @@ const styles = StyleSheet.create({
     color: '#222',
   },
   unreadBadge: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
     backgroundColor: '#f44336',
-    borderRadius: 14,
-    minWidth: 28,
-    height: 28,
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 4,
-    elevation: 2,
-    shadowColor: '#f44336',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
+    borderWidth: 2,
+    borderColor: '#fff',
+    zIndex: 1,
   },
   unreadBadgeText: {
     color: '#fff',
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: 'bold',
   },
 
@@ -1927,24 +2209,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  
+  // Test button for real-time debugging
+  testButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 152, 0, 0.1)',
+    marginLeft: 8,
+  },
 });
 
-// Update unreadBadge to use absolute positioning
-const updatedStyles = {
-  ...styles,
-  unreadBadge: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: '#f44336',
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-};
 
 export default ChatWithTeacher; 

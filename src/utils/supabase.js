@@ -890,7 +890,7 @@ export const dbHelpers = {
         .from(TABLES.EXAMS)
         .select('*')
         .eq('class_id', classId)
-        .order('date', { ascending: false });
+        .order('start_date', { ascending: false });
       return { data, error };
     } catch (error) {
       return { data: null, error };
@@ -903,7 +903,7 @@ export const dbHelpers = {
         .from(TABLES.MARKS)
         .select(`
           *,
-          exams(name, date),
+          exams(name, start_date),
           subjects(name)
         `)
         .eq('student_id', studentId);
@@ -1079,7 +1079,7 @@ export const dbHelpers = {
         .select(`
           *,
           subjects(name),
-          exams(name, date)
+          exams(name, start_date)
         `)
         .eq('student_id', studentId)
         .order('created_at', { ascending: false });

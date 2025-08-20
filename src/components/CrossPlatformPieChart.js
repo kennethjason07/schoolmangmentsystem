@@ -35,14 +35,33 @@ function filterWebStyle(style) {
 }
 
 export default function CrossPlatformPieChart({ data, style, chartConfig, width, height, ...props }) {
+  // Ensure data is valid and has required properties
+  const safeData = (data || []).map(item => ({
+    name: item.name || 'Unknown',
+    population: Number.isFinite(item.population) ? item.population : 0,
+    color: item.color || '#E0E0E0',
+    legendFontColor: item.legendFontColor || '#333',
+    legendFontSize: item.legendFontSize || 14
+  }));
+
+  // Filter out items with zero population if all items have zero population
+  const validData = safeData.filter(item => item.population > 0);
+  const finalData = validData.length > 0 ? validData : [{
+    name: 'No Data',
+    population: 1,
+    color: '#E0E0E0',
+    legendFontColor: '#999',
+    legendFontSize: 14
+  }];
+
   if (Platform.OS === 'web') {
     // Convert data to Chart.js format
     const chartData = {
-      labels: data.map(d => d.name),
+      labels: finalData.map(d => d.name),
       datasets: [
         {
-          data: data.map(d => d.population),
-          backgroundColor: data.map(d => d.color),
+          data: finalData.map(d => d.population),
+          backgroundColor: finalData.map(d => d.color),
         },
       ],
     };
@@ -63,7 +82,7 @@ export default function CrossPlatformPieChart({ data, style, chartConfig, width,
   } else {
     // Mobile
     return (
-      <PieChartMobile data={data} style={style} chartConfig={chartConfig} width={width} height={height} {...props} />
+      <PieChartMobile data={finalData} style={style} chartConfig={chartConfig} width={width} height={height} {...props} />
     );
   }
 } 

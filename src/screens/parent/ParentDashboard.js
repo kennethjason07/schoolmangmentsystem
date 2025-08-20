@@ -864,18 +864,30 @@ const ParentDashboard = ({ navigation }) => {
     </View>
   );
 
-  const renderEventItem = ({ item, index }) => (
-    <View style={styles.eventItem}>
-      <View style={[styles.eventIcon, { backgroundColor: item.color || '#FF9800' }]}>
-        <Ionicons name={item.icon || 'calendar'} size={24} color="#fff" />
+  const renderEventItem = ({ item, index }) => {
+    // Ensure item is defined and has required properties
+    const safeItem = {
+      color: item?.color || '#FF9800',
+      icon: item?.icon || 'calendar',
+      title: item?.title || 'Event',
+      event_date: item?.event_date || new Date().toISOString().split('T')[0],
+      event_time: item?.event_time || '09:00',
+      description: item?.description || 'No description available'
+    };
+
+    return (
+      <View style={styles.eventItem}>
+        <View style={[styles.eventIcon, { backgroundColor: safeItem.color }]}>
+          <Ionicons name={safeItem.icon} size={24} color="#fff" />
+        </View>
+        <View style={styles.eventInfo}>
+          <Text style={styles.eventTitle}>{safeItem.title}</Text>
+          <Text style={styles.eventDetails}>{formatDateToDDMMYYYY(safeItem.event_date)} • {safeItem.event_time}</Text>
+          <Text style={styles.eventDescription}>{safeItem.description}</Text>
+        </View>
       </View>
-      <View style={styles.eventInfo}>
-        <Text style={styles.eventTitle}>{item.title}</Text>
-        <Text style={styles.eventDetails}>{formatDateToDDMMYYYY(item.event_date)} • {item.event_time}</Text>
-        <Text style={styles.eventDescription}>{item.description}</Text>
-      </View>
-    </View>
-  );
+    );
+  };
 
   const renderNotificationItem = ({ item, index }) => (
     <View style={[styles.notificationItem, { borderLeftColor: getNotificationColor(item.type) }]}>
