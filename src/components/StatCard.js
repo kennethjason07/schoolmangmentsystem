@@ -31,7 +31,7 @@ const StatCard = ({
     <View style={[styles.card, { borderLeftColor: color }, isTeacher && styles.cardTeacher]}>
       {/* Icon at the top right */}
       <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>
-        <Ionicons name={icon} size={32} color={color} />
+        <Ionicons name={icon} size={26} color={color} />
       </View>
 
       {/* Main content - title, value, subtitle in vertical alignment */}
@@ -106,7 +106,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'flex-start',
     justifyContent: 'center',
-    paddingRight: 60, // Space for the icon
+    paddingRight: 50, // Reduced space for smaller icon
   },
   titleContainer: {
     flexDirection: 'row',
@@ -114,11 +114,11 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#444',
     fontWeight: '600',
     flexShrink: 1,
-    lineHeight: 20,
+    lineHeight: 18,
   },
   titleTeacher: {
     fontSize: 28, // Very large size for teachers (100% increase from original 14px)
@@ -138,26 +138,26 @@ const styles = StyleSheet.create({
   },
   iconContainer: {
     position: 'absolute',
-    top: 16,
-    right: 16,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    top: 12,
+    right: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
   value: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '800',
-    marginBottom: 6,
+    marginBottom: 4,
     letterSpacing: -0.5,
-    lineHeight: 32,
-    marginTop: 4,
+    lineHeight: 28,
+    marginTop: 2,
   },
   subtitle: {
-    fontSize: 13,
+    fontSize: 11,
     color: '#666',
-    lineHeight: 18,
+    lineHeight: 15,
     fontWeight: '500',
     opacity: 0.8,
   },

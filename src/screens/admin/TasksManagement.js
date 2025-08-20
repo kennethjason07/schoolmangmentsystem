@@ -356,7 +356,7 @@ const TasksManagement = ({ navigation }) => {
 
           {/* Table Header */}
           <View style={styles.tableHeader}>
-            <Text style={[styles.tableHeaderText, styles.titleColumn]}>Task Title</Text>
+            <Text style={[styles.tableHeaderText, styles.titleColumn, { textAlign: 'left' }]}>Task Title</Text>
             <Text style={[styles.tableHeaderText, styles.teacherColumn]}>Teacher</Text>
             <Text style={[styles.tableHeaderText, styles.priorityColumn]}>Priority</Text>
             <Text style={[styles.tableHeaderText, styles.statusColumn]}>Status</Text>
@@ -644,7 +644,8 @@ const styles = StyleSheet.create({
     borderColor: '#ddd',
   },
   picker: {
-    height: 40,
+    height: 50,
+    width: '100%',
   },
 
   // Summary Cards

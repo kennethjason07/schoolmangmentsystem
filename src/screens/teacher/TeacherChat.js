@@ -1449,6 +1449,32 @@ const TeacherChat = () => {
               ref={flatListRef}
               data={[...messages]}
               keyExtractor={item => item.id?.toString() || Math.random().toString()}
+              maintainVisibleContentPosition={{
+                minIndexForVisible: 0,
+                autoscrollToTopThreshold: 10,
+              }}
+              onContentSizeChange={() => {
+                if (flatListRef.current && messages.length > 0) {
+                  setTimeout(() => {
+                    try {
+                      flatListRef.current?.scrollToEnd({ animated: false });
+                    } catch (error) {
+                      // Silently handle scroll error
+                    }
+                  }, 100);
+                }
+              }}
+              onLayout={() => {
+                if (flatListRef.current && messages.length > 0) {
+                  setTimeout(() => {
+                    try {
+                      flatListRef.current?.scrollToEnd({ animated: false });
+                    } catch (error) {
+                      // Silently handle scroll error  
+                    }
+                  }, 200);
+                }
+              }}
               renderItem={({ item }) => {
                 // Debug logging
                 console.log('🔍 Rendering message:', {

@@ -4,7 +4,6 @@ import Header from '../../components/Header';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
-import * as MediaLibrary from 'expo-media-library';
 import DropDownPicker from 'react-native-dropdown-picker';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -342,337 +341,243 @@ const ViewStudentInfo = () => {
     setSelectedStudent(null);
   };
 
-  const handleExportCSV = async () => {
-    try {
-      Alert.alert(
-        'Export CSV',
-        `Export ${filteredStudents.length} students to CSV file?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Export',
-            onPress: async () => {
-              try {
-                const csvHeaders = [
-                  'Name',
-                  'Roll No',
-                  'Admission No',
-                  'Class',
-                  'Section',
-                  'Gender',
-                  'Date of Birth',
-                  'Address',
-                  'Parent Name',
-                  'Parent Phone',
-                  'Parent Email'
-                ];
 
-                const csvRows = filteredStudents.map(student => [
-                  `"${student.name || ''}"`,
-                  student.roll_no || '',
-                  `"${student.admission_no || ''}"`,
-                  `"${student.className || ''}"`,
-                  `"${student.sectionName || ''}"`,
-                  `"${student.gender || ''}"`,
-                  student.dob || '',
-                  `"${student.address || ''}"`,
-                  `"${student.parents?.name || ''}"`,
-                  student.parents?.phone || '',
-                  `"${student.parents?.email || ''}"`
-                ]);
-
-                const csvContent = [csvHeaders.join(','), ...csvRows.map(row => row.join(','))].join('\n');
-
-                const timestamp = new Date().toISOString().split('T')[0];
-                const fileName = `students_export_${timestamp}.csv`;
-                
-                // Save directly to Downloads folder on Android
-                if (Platform.OS === 'android') {
-                  try {
-                    // Request media library permissions
-                    const { status } = await MediaLibrary.requestPermissionsAsync();
-                    if (status !== 'granted') {
-                      Alert.alert('Permission Required', 'Please grant media library permission to save the file to Downloads.');
-                      return;
-                    }
-
-                    // Create file in cache first
-                    const fileUri = `${FileSystem.documentDirectory}${fileName}`;
-                    await FileSystem.writeAsStringAsync(fileUri, csvContent, {
-                      encoding: FileSystem.EncodingType.UTF8
-                    });
-
-                    // Save to media library (Downloads folder)
-                    const asset = await MediaLibrary.createAssetAsync(fileUri);
-                    const album = await MediaLibrary.getAlbumAsync('Download');
-                    if (album == null) {
-                      await MediaLibrary.createAlbumAsync('Download', asset, false);
-                    } else {
-                      await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
-                    }
-
-                    Alert.alert('Success', `CSV file saved to Downloads folder as ${fileName}`);
-                  } catch (error) {
-                    console.error('Android save error:', error);
-                    // Fallback to sharing
-                    const fileUri = `${FileSystem.documentDirectory}${fileName}`;
-                    await FileSystem.writeAsStringAsync(fileUri, csvContent, {
-                      encoding: FileSystem.EncodingType.UTF8
-                    });
-                    
-                    if (await Sharing.isAvailableAsync()) {
-                      await Sharing.shareAsync(fileUri, {
-                        mimeType: 'text/csv',
-                        dialogTitle: 'Export Students CSV'
-                      });
-                    } else {
-                      Alert.alert('Success', `CSV file saved as ${fileName}`);
-                    }
-                  }
-                } else {
-                  // iOS - use sharing
-                  const fileUri = `${FileSystem.documentDirectory}${fileName}`;
-                  await FileSystem.writeAsStringAsync(fileUri, csvContent, {
-                    encoding: FileSystem.EncodingType.UTF8
-                  });
-
-                  if (await Sharing.isAvailableAsync()) {
-                    await Sharing.shareAsync(fileUri, {
-                      mimeType: 'text/csv',
-                      dialogTitle: 'Export Students CSV'
-                    });
-                  } else {
-                    Alert.alert('Success', `CSV file saved as ${fileName}`);
-                  }
-                }
-              } catch (error) {
-                Alert.alert('Error', 'Failed to export CSV file');
-                console.error('CSV export error:', error);
-              }
-            }
-          }
-        ]
-      );
-    } catch (error) {
-      Alert.alert('Error', 'Failed to prepare CSV export');
-      console.error('CSV export preparation error:', error);
-    }
-  };
 
   const handleExportPDF = async () => {
     try {
-      Alert.alert(
-        'Export PDF',
-        `Generate PDF report for ${filteredStudents.length} students?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Generate',
-            onPress: async () => {
-              try {
-                const currentDate = new Date().toLocaleDateString('en-US', {
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric'
-                });
+      const currentDate = new Date().toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
 
-                const htmlContent = `
-                  <!DOCTYPE html>
-                  <html>
-                    <head>
-                      <meta charset="UTF-8">
-                      <title>Students Report</title>
-                      <style>
-                        body {
-                          font-family: 'Arial', sans-serif;
-                          margin: 0;
-                          padding: 20px;
-                          color: #333;
-                          line-height: 1.4;
-                        }
-                        .header {
-                          text-align: center;
-                          margin-bottom: 40px;
-                          border-bottom: 3px solid #1976d2;
-                          padding-bottom: 20px;
-                        }
-                        .header h1 {
-                          color: #1976d2;
-                          margin: 0 0 10px 0;
-                          font-size: 28px;
-                        }
-                        .header p {
-                          margin: 5px 0;
-                          color: #666;
-                          font-size: 14px;
-                        }
-                        .summary {
-                          background: #f8f9fa;
-                          padding: 15px;
-                          border-radius: 8px;
-                          margin-bottom: 30px;
-                          text-align: center;
-                        }
-                        .summary h3 {
-                          margin: 0 0 10px 0;
-                          color: #1976d2;
-                        }
-                        table {
-                          width: 100%;
-                          border-collapse: collapse;
-                          margin-top: 20px;
-                          font-size: 12px;
-                        }
-                        th {
-                          background-color: #1976d2;
-                          color: white;
-                          padding: 12px 8px;
-                          text-align: left;
-                          font-weight: bold;
-                        }
-                        td {
-                          border: 1px solid #ddd;
-                          padding: 10px 8px;
-                          vertical-align: top;
-                        }
-                        tr:nth-child(even) {
-                          background-color: #f9f9f9;
-                        }
-                        tr:hover {
-                          background-color: #f0f8ff;
-                        }
-                        .student-name {
-                          font-weight: bold;
-                          color: #1976d2;
-                        }
-                        .footer {
-                          margin-top: 40px;
-                          text-align: center;
-                          font-size: 12px;
-                          color: #666;
-                          border-top: 1px solid #ddd;
-                          padding-top: 20px;
-                        }
-                        @media print {
-                          body { margin: 0; }
-                          .header { page-break-after: avoid; }
-                          table { page-break-inside: auto; }
-                          tr { page-break-inside: avoid; }
-                        }
-                      </style>
-                    </head>
-                    <body>
-                      <div class="header">
-                        <h1>Student Information Report</h1>
-                        <p>Generated on: ${currentDate}</p>
-                        <p>Teacher: ${user?.email || 'N/A'}</p>
-                      </div>
-
-                      <div class="summary">
-                        <h3>Report Summary</h3>
-                        <p>Total Students: <strong>${filteredStudents.length}</strong></p>
-                        <p>Classes: <strong>${[...new Set(filteredStudents.map(s => s.classSection))].join(', ')}</strong></p>
-                      </div>
-
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Name</th>
-                            <th>Roll No</th>
-                            <th>Admission No</th>
-                            <th>Class</th>
-                            <th>Gender</th>
-                            <th>DOB</th>
-                            <th>Parent Name</th>
-                            <th>Parent Contact</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          ${filteredStudents.map(student => `
-                            <tr>
-                              <td class="student-name">${student.name || 'N/A'}</td>
-                              <td>${student.roll_no || 'N/A'}</td>
-                              <td>${student.admission_no || 'N/A'}</td>
-                              <td>${student.classSection || 'N/A'}</td>
-                              <td>${student.gender || 'N/A'}</td>
-                              <td>${student.dob || 'N/A'}</td>
-                              <td>${student.parents?.name || 'N/A'}</td>
-                              <td>${student.parents?.phone || 'N/A'}</td>
-                            </tr>
-                          `).join('')}
-                        </tbody>
-                      </table>
-
-                      <div class="footer">
-                        <p>This report was generated automatically by the School Management System</p>
-                        <p>© ${new Date().getFullYear()} School Management System</p>
-                      </div>
-                    </body>
-                  </html>
-                `;
-
-                const { uri } = await Print.printToFileAsync({
-                  html: htmlContent,
-                  base64: false
-                });
-
-                const timestamp = new Date().toISOString().split('T')[0];
-                const fileName = `students_report_${timestamp}.pdf`;
-
-                // Save directly to Downloads folder on Android
-                if (Platform.OS === 'android') {
-                  try {
-                    // Request media library permissions
-                    const { status } = await MediaLibrary.requestPermissionsAsync();
-                    if (status !== 'granted') {
-                      Alert.alert('Permission Required', 'Please grant media library permission to save the file to Downloads.');
-                      return;
-                    }
-
-                    // Save to media library (Downloads folder)
-                    const asset = await MediaLibrary.createAssetAsync(uri);
-                    const album = await MediaLibrary.getAlbumAsync('Download');
-                    if (album == null) {
-                      await MediaLibrary.createAlbumAsync('Download', asset, false);
-                    } else {
-                      await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
-                    }
-
-                    Alert.alert('Success', `PDF report saved to Downloads folder as ${fileName}`);
-                  } catch (error) {
-                    console.error('Android PDF save error:', error);
-                    // Fallback to sharing
-                    if (await Sharing.isAvailableAsync()) {
-                      await Sharing.shareAsync(uri, {
-                        mimeType: 'application/pdf',
-                        dialogTitle: 'Export Students PDF Report'
-                      });
-                    } else {
-                      Alert.alert('Success', 'PDF report generated successfully!');
-                    }
-                  }
-                } else {
-                  // iOS - use sharing
-                  if (await Sharing.isAvailableAsync()) {
-                    await Sharing.shareAsync(uri, {
-                      mimeType: 'application/pdf',
-                      dialogTitle: 'Export Students PDF Report'
-                    });
-                  } else {
-                    Alert.alert('Success', 'PDF report generated successfully!');
-                  }
-                }
-              } catch (error) {
-                Alert.alert('Error', 'Failed to generate PDF report');
-                console.error('PDF export error:', error);
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="UTF-8">
+            <title>Students Report</title>
+            <style>
+              body {
+                font-family: 'Arial', sans-serif;
+                margin: 0;
+                padding: 20px;
+                color: #333;
+                line-height: 1.4;
               }
-            }
+              .header {
+                text-align: center;
+                margin-bottom: 40px;
+                border-bottom: 3px solid #1976d2;
+                padding-bottom: 20px;
+              }
+              .header h1 {
+                color: #1976d2;
+                margin: 0 0 10px 0;
+                font-size: 28px;
+              }
+              .header p {
+                margin: 5px 0;
+                color: #666;
+                font-size: 14px;
+              }
+              .summary {
+                background: #f8f9fa;
+                padding: 15px;
+                border-radius: 8px;
+                margin-bottom: 30px;
+                text-align: center;
+              }
+              .summary h3 {
+                margin: 0 0 10px 0;
+                color: #1976d2;
+              }
+              table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 20px;
+                font-size: 12px;
+              }
+              th {
+                background-color: #1976d2;
+                color: white;
+                padding: 12px 8px;
+                text-align: left;
+                font-weight: bold;
+              }
+              td {
+                border: 1px solid #ddd;
+                padding: 10px 8px;
+                vertical-align: top;
+              }
+              tr:nth-child(even) {
+                background-color: #f9f9f9;
+              }
+              tr:hover {
+                background-color: #f0f8ff;
+              }
+              .student-name {
+                font-weight: bold;
+                color: #1976d2;
+              }
+              .footer {
+                margin-top: 40px;
+                text-align: center;
+                font-size: 12px;
+                color: #666;
+                border-top: 1px solid #ddd;
+                padding-top: 20px;
+              }
+              @media print {
+                body { margin: 0; }
+                .header { page-break-after: avoid; }
+                table { page-break-inside: auto; }
+                tr { page-break-inside: avoid; }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <h1>Student Information Report</h1>
+              <p>Generated on: ${currentDate}</p>
+              <p>Teacher: ${user?.email || 'N/A'}</p>
+            </div>
+
+            <div class="summary">
+              <h3>Report Summary</h3>
+              <p>Total Students: <strong>${filteredStudents.length}</strong></p>
+              <p>Classes: <strong>${[...new Set(filteredStudents.map(s => s.classSection))].join(', ')}</strong></p>
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Roll No</th>
+                  <th>Admission No</th>
+                  <th>Class</th>
+                  <th>Gender</th>
+                  <th>DOB</th>
+                  <th>Parent Name</th>
+                  <th>Parent Contact</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filteredStudents.map(student => `
+                  <tr>
+                    <td class="student-name">${student.name || 'N/A'}</td>
+                    <td>${student.roll_no || 'N/A'}</td>
+                    <td>${student.admission_no || 'N/A'}</td>
+                    <td>${student.classSection || 'N/A'}</td>
+                    <td>${student.gender || 'N/A'}</td>
+                    <td>${student.dob || 'N/A'}</td>
+                    <td>${student.parents?.name || 'N/A'}</td>
+                    <td>${student.parents?.phone || 'N/A'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+
+            <div class="footer">
+              <p>This report was generated automatically by the School Management System</p>
+              <p>© ${new Date().getFullYear()} School Management System</p>
+            </div>
+          </body>
+        </html>
+      `;
+
+      // Generate PDF
+      const { uri } = await Print.printToFileAsync({
+        html: htmlContent,
+        base64: false
+      });
+
+      // Create filename with timestamp
+      const timestamp = new Date().toISOString().split('T')[0];
+      const time = new Date().toTimeString().split(' ')[0].replace(/:/g, '-');
+      const fileName = `Students_Report_${timestamp}_${time}.pdf`;
+
+      // For Android and iOS, use different storage approaches
+      if (Platform.OS === 'android') {
+        // Android: Save to Downloads folder or use SAF
+        try {
+          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+          if (permissions.granted) {
+            // User selected a directory, save there
+            const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+              permissions.directoryUri,
+              fileName,
+              'application/pdf'
+            );
+            
+            const fileContent = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+            await FileSystem.writeAsStringAsync(fileUri, fileContent, { encoding: FileSystem.EncodingType.Base64 });
+            
+            Alert.alert(
+              'Download Successful! 📁',
+              `PDF saved to your selected folder:\n\n📄 ${fileName}\n👥 ${filteredStudents.length} students exported\n\n✅ You can find it in your chosen directory.`,
+              [{ text: 'Great!', style: 'default' }]
+            );
+            return;
           }
-        ]
-      );
+        } catch (error) {
+          console.log('SAF failed, trying alternative:', error);
+        }
+        
+        // Fallback: Save to app directory and share
+        const documentDirectory = FileSystem.documentDirectory;
+        const newPath = `${documentDirectory}${fileName}`;
+        await FileSystem.moveAsync({ from: uri, to: newPath });
+        
+        // Immediately trigger sharing to let user save wherever they want
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(newPath, {
+            mimeType: 'application/pdf',
+            dialogTitle: 'Save Students Report',
+            UTI: 'com.adobe.pdf'
+          });
+          
+          Alert.alert(
+            'Export Complete! 📱',
+            `PDF generated successfully:\n\n📄 ${fileName}\n👥 ${filteredStudents.length} students exported\n\n💾 Use the share dialog to save to your preferred location (Downloads, Drive, etc.).`,
+            [{ text: 'Done', style: 'default' }]
+          );
+        }
+      } else {
+        // iOS: Use the share sheet for direct saving
+        const documentDirectory = FileSystem.documentDirectory;
+        const newPath = `${documentDirectory}${fileName}`;
+        await FileSystem.moveAsync({ from: uri, to: newPath });
+        
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(newPath, {
+            mimeType: 'application/pdf',
+            dialogTitle: 'Save Students Report',
+            UTI: 'com.adobe.pdf'
+          });
+          
+          Alert.alert(
+            'Export Complete! 📱',
+            `PDF generated successfully:\n\n📄 ${fileName}\n👥 ${filteredStudents.length} students exported\n\n💾 Use the share options to save to Files, iCloud, or other locations.`,
+            [{ text: 'Done', style: 'default' }]
+          );
+        } else {
+          // Fallback if sharing is not available
+          Alert.alert(
+            'Export Complete! 📁',
+            `PDF saved to app storage:\n\n📄 ${fileName}\n👥 ${filteredStudents.length} students exported\n\n📍 Location: App Documents`,
+            [{ text: 'OK', style: 'default' }]
+          );
+        }
+      }
+
     } catch (error) {
-      Alert.alert('Error', 'Failed to prepare PDF export');
-      console.error('PDF export preparation error:', error);
+      console.error('PDF export error:', error);
+      Alert.alert(
+        'Export Failed ❌',
+        'Unable to save PDF report. Please check storage permissions and try again.',
+        [{ text: 'Try Again', style: 'default' }]
+      );
     }
   };
 
@@ -804,44 +709,27 @@ const ViewStudentInfo = () => {
           </View>
         </View>
 
-        {/* Export Buttons */}
+        {/* Export Section */}
         {filteredStudents.length > 0 && (
           <View style={styles.exportSection}>
-            <View style={styles.exportHeader}>
-              <Ionicons name="download-outline" size={20} color="#666" />
-              <Text style={styles.exportHeaderText}>
-                Export {filteredStudents.length} student{filteredStudents.length !== 1 ? 's' : ''}
-              </Text>
-            </View>
-            <View style={styles.exportButtons}>
-              <TouchableOpacity
-                style={[styles.exportButton, styles.csvButton]}
-                onPress={handleExportCSV}
-                activeOpacity={0.8}
-              >
-                <View style={styles.exportButtonContent}>
-                  <Ionicons name="document-text" size={22} color="#fff" />
-                  <View style={styles.exportButtonTextContainer}>
-                    <Text style={styles.exportButtonText}>Export CSV</Text>
-                    <Text style={styles.exportButtonSubtext}>Spreadsheet format</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.exportButton, styles.pdfButton]}
-                onPress={handleExportPDF}
-                activeOpacity={0.8}
-              >
-                <View style={styles.exportButtonContent}>
-                  <Ionicons name="document" size={22} color="#fff" />
-                  <View style={styles.exportButtonTextContainer}>
-                    <Text style={styles.exportButtonText}>Export PDF</Text>
-                    <Text style={styles.exportButtonSubtext}>Printable report</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={styles.modernExportButton}
+              onPress={handleExportPDF}
+              activeOpacity={0.8}
+            >
+              <View style={styles.exportIconContainer}>
+                <Ionicons name="document-text" size={24} color="#fff" />
+              </View>
+              <View style={styles.exportTextContainer}>
+                <Text style={styles.exportTitle}>Export PDF Report</Text>
+                <Text style={styles.exportSubtitle}>
+                  Download {filteredStudents.length} student{filteredStudents.length !== 1 ? 's' : ''} data
+                </Text>
+              </View>
+              <View style={styles.exportArrowContainer}>
+                <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.8)" />
+              </View>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -1077,65 +965,52 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   exportSection: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
     marginBottom: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
   },
-  exportHeader: {
+  modernExportButton: {
+    backgroundColor: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    backgroundColor: '#667eea',
+    borderRadius: 16,
+    padding: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    elevation: 4,
+    shadowColor: '#667eea',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    marginHorizontal: 4,
   },
-  exportHeaderText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginLeft: 8,
-  },
-  exportButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  exportButton: {
-    flex: 1,
-    borderRadius: 12,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-  },
-  csvButton: {
-    backgroundColor: '#4CAF50',
-  },
-  pdfButton: {
-    backgroundColor: '#f44336',
-  },
-  exportButtonContent: {
-    flexDirection: 'row',
+  exportIconContainer: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
     alignItems: 'center',
-    padding: 16,
+    marginRight: 16,
   },
-  exportButtonTextContainer: {
-    marginLeft: 12,
+  exportTextContainer: {
     flex: 1,
   },
-  exportButtonText: {
+  exportTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
     color: '#fff',
-    fontWeight: '700',
-    fontSize: 16,
-    marginBottom: 2,
+    marginBottom: 4,
   },
-  exportButtonSubtext: {
+  exportSubtitle: {
+    fontSize: 14,
     color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 12,
-    fontWeight: '400',
+    fontWeight: '500',
+  },
+  exportArrowContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   studentCard: {
     backgroundColor: '#fff',

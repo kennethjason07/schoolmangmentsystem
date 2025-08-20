@@ -1097,7 +1097,6 @@ const ParentDashboard = ({ navigation }) => {
             <View style={{ flex: 1 }}>
               <Text style={styles.studentCardName}>{studentData?.name || 'Student Name'}</Text>
               <Text style={styles.studentCardClass}>{studentData?.full_class_name || studentData?.class_name || 'N/A'} • Roll No: {studentData?.roll_number || 'N/A'}</Text>
-              <Text style={[styles.studentCardClass, { fontSize: 12, color: '#999' }]}>Class ID: {studentData?.class_id || 'N/A'}</Text>
             </View>
             <Ionicons name="chevron-forward" size={28} color="#bbb" />
           </View>
@@ -1467,7 +1466,7 @@ const ParentDashboard = ({ navigation }) => {
               <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Academic Year:</Text><Text style={styles.detailsValue}>{studentData?.academic_year || 'N/A'}</Text></View>
               
               {/* Personal Information */}
-              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>DOB:</Text><Text style={styles.detailsValue}>{studentData?.date_of_birth || 'N/A'}</Text></View>
+              <View style={styles.detailsRow}><Text style={styles.detailsLabel}>DOB:</Text><Text style={styles.detailsValue}>{formatDateToDDMMYYYY(studentData?.date_of_birth) || 'N/A'}</Text></View>
               <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Gender:</Text><Text style={styles.detailsValue}>{studentData?.gender || 'N/A'}</Text></View>
               <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Blood Group:</Text><Text style={styles.detailsValue}>{studentData?.blood_group || 'N/A'}</Text></View>
               <View style={styles.detailsRow}><Text style={styles.detailsLabel}>Aadhar No:</Text><Text style={styles.detailsValue}>{studentData?.aadhar_no || 'N/A'}</Text></View>
@@ -1542,6 +1541,7 @@ const styles = StyleSheet.create({
   },
   statCardWrapper: {
     width: '48%',
+    height: 130, // Fixed height for uniform card sizes
     marginBottom: 12,
   },
   section: {
