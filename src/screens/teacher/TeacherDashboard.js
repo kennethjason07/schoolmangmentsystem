@@ -553,7 +553,7 @@ function groupAndSortSchedule(schedule) {
           value: (todayClasses || 0).toString(),
           icon: 'time',
           color: '#FF9800',
-          subtitle: (processedSchedule?.length || 0) > 0 ? `Next: ${processedSchedule[0]?.start_time || 'N/A'}` : 'No classes today',
+          subtitle: (processedSchedule?.length || 0) > 0 ? `Next: ${formatTime(processedSchedule[0]?.start_time) || 'N/A'}` : 'No classes today',
           trend: 0,
           onPress: () => navigation?.navigate('TeacherTimetable')
         },
@@ -571,7 +571,7 @@ function groupAndSortSchedule(schedule) {
             Alert.alert(
               'Upcoming Events',
               (currentEventsForStats?.length || 0) > 0 ?
-                currentEventsForStats.map(e => `• ${e.title} (${new Date(e.event_date).toLocaleDateString()})`).join('\n') :
+                currentEventsForStats.map(e => `• ${e.title} (${new Date(e.event_date).toLocaleDateString('en-GB')})`).join('\n') :
                 'No upcoming events scheduled.',
               [{ text: 'OK' }]
             );
@@ -844,6 +844,16 @@ function groupAndSortSchedule(schedule) {
     }
   };
 
+  // Helper function to format time to 12-hour format with AM/PM
+  const formatTime = (timeString) => {
+    if (!timeString) return '';
+    const [hours, minutes] = timeString.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const displayHour = hour % 12 || 12;
+    return `${displayHour}:${minutes} ${ampm}`;
+  };
+
   // Helper function to sort tasks by priority
   const sortTasksByPriority = (tasks) => {
     const priorityOrder = { high: 3, medium: 2, low: 1 };
@@ -1103,7 +1113,7 @@ function groupAndSortSchedule(schedule) {
                       <View style={styles.scheduleItemContent}>
                         <Text style={styles.scheduleSubjectText}>{item.subject}</Text>
                         <Text style={styles.scheduleTimeText}>
-                          {item.start_time} - {item.end_time} | Period {item.period_number}
+                          {formatTime(item.start_time)} - {formatTime(item.end_time)} | Period {item.period_number}
                         </Text>
                       </View>
                       <Ionicons name="chevron-forward" size={20} color="#666" />
@@ -1556,7 +1566,7 @@ function groupAndSortSchedule(schedule) {
                   onPress={() => {
                     Alert.alert(
                       event.title,
-                      `${event.description}\n\nDate: ${new Date(event.date).toLocaleDateString('en-US', {
+                      `${event.description}\n\nDate: ${new Date(event.date).toLocaleDateString('en-GB', {
                         weekday: 'long',
                         year: 'numeric',
                         month: 'long',
@@ -1592,9 +1602,9 @@ function groupAndSortSchedule(schedule) {
                     <View style={styles.eventDateTime}>
                       <Ionicons name="calendar" size={14} color="#666" />
                       <Text style={styles.eventDate}>
-                        {new Date(event.date).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric'
+                        {new Date(event.date).toLocaleDateString('en-GB', {
+                          day: 'numeric',
+                          month: 'short'
                         })}
                       </Text>
                       <Ionicons name="time" size={14} color="#666" style={{ marginLeft: 12 }} />
