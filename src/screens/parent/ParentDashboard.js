@@ -22,6 +22,7 @@ import { useSelectedStudent } from '../../contexts/SelectedStudentContext';
 import { useFocusEffect } from '@react-navigation/native';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 
+
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
   const { selectedStudent, hasMultipleStudents, loading: studentLoading } = useSelectedStudent();
@@ -80,10 +81,12 @@ const ParentDashboard = ({ navigation }) => {
   const [showStudentDetailsModal, setShowStudentDetailsModal] = useState(false);
 
   // Function to refresh notifications
+
+
   const refreshNotifications = async () => {
     try {
-      console.log('Refreshing notifications for parent:', user.id);
-      
+      console.log('🔔 Refreshing notifications for parent:', user.id);
+
       // Get notifications with recipients for this parent
       const { data: notificationsData, error: notificationsError } = await supabase
         .from(TABLES.NOTIFICATION_RECIPIENTS)
@@ -94,6 +97,7 @@ const ParentDashboard = ({ navigation }) => {
           read_at,
           notifications!inner(
             id,
+            title,
             message,
             type,
             created_at
@@ -102,26 +106,32 @@ const ParentDashboard = ({ navigation }) => {
         .eq('recipient_type', 'Parent')
         .eq('recipient_id', user.id)
         .order('sent_at', { ascending: false })
-        .limit(10);
+        .limit(20);
+
+      console.log('🔔 Notifications data:', notificationsData);
+      console.log('🔔 Notifications error:', notificationsError);
 
       if (notificationsError && notificationsError.code !== '42P01') {
-        console.log('Notifications refresh error:', notificationsError);
+        console.log('❌ Notifications refresh error:', notificationsError);
+        setNotifications([]);
       } else {
         const mappedNotifications = (notificationsData || []).map(n => ({
           id: n.id,
-          title: n.notifications.message || 'Notification', // Use message as title since title doesn't exist
+          title: n.notifications.title || n.notifications.message || 'Notification',
           message: n.notifications.message,
           type: n.notifications.type || 'general',
           created_at: n.notifications.created_at,
           is_read: n.is_read || false,
           read_at: n.read_at
         }));
-        console.log('Mapped notifications count:', mappedNotifications.length);
-        console.log('Unread notifications count:', mappedNotifications.filter(n => !n.is_read).length);
+
+        console.log('🔔 Mapped notifications:', mappedNotifications.length, 'notifications');
+        console.log('🔔 Absentee notifications:', mappedNotifications.filter(n => n.type === 'Absentee').length);
+
         setNotifications(mappedNotifications);
       }
     } catch (err) {
-      console.log('Notifications refresh fetch error:', err);
+      console.log('❌ Notifications refresh fetch error:', err);
       setNotifications([]);
     }
   };
@@ -130,11 +140,57 @@ const ParentDashboard = ({ navigation }) => {
   useFocusEffect(
     React.useCallback(() => {
       if (user) {
-        console.log('Parent Dashboard - Screen focused, refreshing notifications...');
         refreshNotifications();
       }
     }, [user])
   );
+
+  // Auto-refresh notifications every 30 seconds
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const interval = setInterval(() => {
+      console.log('🔄 Auto-refreshing notifications...');
+      refreshNotifications();
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(interval);
+  }, [user?.id]);
+
+  // Set up real-time notifications subscription
+  useEffect(() => {
+    if (!user?.id) return;
+
+    console.log('🔔 Setting up real-time notifications for parent:', user.id);
+
+    // Subscribe to new notifications for this parent
+    const notificationSubscription = supabase
+      .channel(`parent-notifications-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notification_recipients',
+          filter: `recipient_id=eq.${user.id}`
+        },
+        (payload) => {
+          console.log('🔔 New notification received via real-time:', payload);
+          // Small delay to ensure database transaction is complete
+          setTimeout(() => {
+            refreshNotifications();
+          }, 1000);
+        }
+      )
+      .subscribe((status) => {
+        console.log('🔔 Notification subscription status:', status);
+      });
+
+    return () => {
+      console.log('🔔 Cleaning up notification subscription');
+      supabase.removeChannel(notificationSubscription);
+    };
+  }, [user?.id]);
 
   // Pull-to-refresh functionality
   const { refreshing, onRefresh } = usePullToRefresh(async () => {
@@ -907,6 +963,7 @@ const ParentDashboard = ({ navigation }) => {
       case 'fee': return '#FF9800';
       case 'exam': return '#9C27B0';
       case 'attendance': return '#f44336';
+      case 'Absentee': return '#f44336'; // Red for absence notifications
       case 'homework': return '#2196F3';
       case 'event': return '#FF9800';
       case 'sports': return '#4CAF50';
@@ -920,6 +977,7 @@ const ParentDashboard = ({ navigation }) => {
       case 'fee': return 'card';
       case 'exam': return 'calendar';
       case 'attendance': return 'checkmark-circle';
+      case 'Absentee': return 'alert-circle'; // Alert icon for absence notifications
       case 'homework': return 'library';
       case 'event': return 'trophy';
       case 'sports': return 'football';
@@ -1064,6 +1122,8 @@ const ParentDashboard = ({ navigation }) => {
             </TouchableOpacity>
           ))}
         </View>
+
+
 
         {/* Quick Actions */}
         <View style={styles.section}>
@@ -1326,22 +1386,60 @@ const ParentDashboard = ({ navigation }) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Recent Notifications</Text>
+              <View>
+                <Text style={styles.modalTitle}>Recent Notifications</Text>
+                <Text style={{
+                  fontSize: 12,
+                  color: '#666',
+                  marginTop: 2
+                }}>
+                  {notifications.length} notification{notifications.length !== 1 ? 's' : ''} found
+                </Text>
+              </View>
               <TouchableOpacity onPress={() => setShowNotificationsModal(false)}>
                 <Ionicons name="close" size={24} color="#666" />
               </TouchableOpacity>
             </View>
-            <ScrollView 
-              style={{ height: 400 }} 
+
+
+            <ScrollView
+              style={{ height: 400 }}
               showsVerticalScrollIndicator={true}
               nestedScrollEnabled={true}
               scrollEventThrottle={16}
             >
-              {notifications.map((item, idx) => (
-                <View key={idx} style={styles.notificationItem}>
-                  {renderNotificationItem({ item, index: idx })}
+              {notifications.length > 0 ? (
+                notifications.map((item, idx) => (
+                  <View key={idx} style={styles.notificationItem}>
+                    {renderNotificationItem({ item, index: idx })}
+                  </View>
+                ))
+              ) : (
+                <View style={{
+                  flex: 1,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  paddingVertical: 50
+                }}>
+                  <Ionicons name="notifications-off" size={48} color="#ccc" />
+                  <Text style={{
+                    fontSize: 16,
+                    color: '#666',
+                    marginTop: 16,
+                    textAlign: 'center'
+                  }}>
+                    No notifications yet
+                  </Text>
+                  <Text style={{
+                    fontSize: 14,
+                    color: '#999',
+                    marginTop: 8,
+                    textAlign: 'center'
+                  }}>
+                    Absence notifications will appear here
+                  </Text>
                 </View>
-              ))}
+              )}
             </ScrollView>
           </View>
         </View>

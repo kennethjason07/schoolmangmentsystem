@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, Platform, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import Header from '../../components/Header';
-import { dbHelpers, supabase } from '../../utils/supabase';
+import { dbHelpers, supabase, TABLES } from '../../utils/supabase';
 
 const StudentDetails = ({ route }) => {
   const navigation = useNavigation();
   const { student } = route.params;
   const [studentData, setStudentData] = useState(null);
+  const [studentUser, setStudentUser] = useState(null); // Store user data with profile_url
   const [feeStatus, setFeeStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -136,6 +137,20 @@ const StudentDetails = ({ route }) => {
         console.log('Combined student data:', combinedData);
         setStudentData(combinedData);
 
+        // Fetch student's user profile data (including profile_url)
+        const { data: userData, error: userError } = await supabase
+          .from(TABLES.USERS)
+          .select('id, full_name, email, phone, profile_url')
+          .eq('linked_student_id', student.id)
+          .single();
+
+        if (!userError && userData) {
+          setStudentUser(userData);
+          console.log('Student user profile loaded:', userData);
+        } else {
+          console.log('No user profile found for student:', userError);
+        }
+
         // Fetch fee status
         console.log('Fetching fees for student ID:', student.id);
         const { data: fees, error: feeError } = await dbHelpers.getStudentFees(student.id);
@@ -225,13 +240,32 @@ const StudentDetails = ({ route }) => {
       <Header title="Student Profile" showBack={true} />
       
       <ScrollView style={styles.content}>
-        {/* Student Info Summary Card */}
+        {/* Student Info Summary Card with Profile Photo */}
         <View style={styles.summaryCard}>
-          <Text style={styles.studentName}>{studentData.name}</Text>
-          <Text style={styles.classInfo}>
-            {studentData.classes ? `${studentData.classes.class_name} - Section ${studentData.classes.section}` : 'Class not assigned'}
-          </Text>
-          <Text style={styles.rollNumber}>Roll No: {studentData.roll_no || 'N/A'}</Text>
+          <View style={styles.summaryHeader}>
+            <View style={styles.summaryTextContainer}>
+              <Text style={styles.studentName}>{studentData.name}</Text>
+              <Text style={styles.classInfo}>
+                {studentData.classes ? `${studentData.classes.class_name} - Section ${studentData.classes.section}` : 'Class not assigned'}
+              </Text>
+              <Text style={styles.rollNumber}>Roll No: {studentData.roll_no || 'N/A'}</Text>
+            </View>
+
+            {/* Student Profile Photo */}
+            <View style={styles.studentProfileContainer}>
+              {studentUser?.profile_url ? (
+                <Image
+                  source={{ uri: studentUser.profile_url }}
+                  style={styles.studentProfileImage}
+                  onError={() => console.log('Failed to load student profile image')}
+                />
+              ) : (
+                <View style={styles.studentProfilePlaceholder}>
+                  <Ionicons name="person" size={32} color="#666" />
+                </View>
+              )}
+            </View>
+          </View>
         </View>
 
         {/* Information Cards */}
@@ -519,6 +553,34 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     alignItems: 'center',
+  },
+  summaryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  summaryTextContainer: {
+    flex: 1,
+  },
+  studentProfileContainer: {
+    marginLeft: 16,
+  },
+  studentProfileImage: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    borderWidth: 3,
+    borderColor: '#2196F3',
+  },
+  studentProfilePlaceholder: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#f0f0f0',
+    borderWidth: 2,
+    borderColor: '#ddd',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 

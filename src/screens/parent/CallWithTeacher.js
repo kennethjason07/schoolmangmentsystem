@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
@@ -24,24 +25,43 @@ const CallWithTeacher = ({ navigation }) => {
     fetchTeachers();
   }, []);
 
-  // Helper function to get teacher's phone number from teachers table
-  const getTeacherPhone = async (teacherId) => {
+  // Helper function to get teacher's phone number and profile photo from teachers and users tables
+  const getTeacherDetails = async (teacherId) => {
     try {
-      const { data: teacherData, error } = await supabase
+      // Get teacher data including user_id
+      const { data: teacherData, error: teacherError } = await supabase
         .from(TABLES.TEACHERS)
-        .select('phone')
+        .select('phone, user_id')
         .eq('id', teacherId)
         .single();
 
-      if (error) {
-        console.log('❌ Error fetching teacher phone:', error);
-        return null;
+      if (teacherError) {
+        console.log('❌ Error fetching teacher details:', teacherError);
+        return { phone: null, profilePhoto: null };
       }
 
-      return teacherData?.phone || null;
+      let profilePhoto = null;
+
+      // If teacher has a user_id, get profile photo from users table
+      if (teacherData?.user_id) {
+        const { data: userData, error: userError } = await supabase
+          .from(TABLES.USERS)
+          .select('profile_picture')
+          .eq('id', teacherData.user_id)
+          .single();
+
+        if (!userError && userData?.profile_picture) {
+          profilePhoto = userData.profile_picture;
+        }
+      }
+
+      return {
+        phone: teacherData?.phone || null,
+        profilePhoto: profilePhoto
+      };
     } catch (err) {
-      console.log('❌ Exception getting teacher phone:', err);
-      return null;
+      console.log('❌ Exception getting teacher details:', err);
+      return { phone: null, profilePhoto: null };
     }
   };
 
@@ -116,19 +136,20 @@ const CallWithTeacher = ({ navigation }) => {
         if (classInfo.class_teacher_id && classInfo.teachers && classInfo.teachers.name) {
           console.log('Found class teacher from classes table:', classInfo.teachers);
 
-          // Get teacher's phone number
-          const teacherPhone = await getTeacherPhone(classInfo.teachers.id);
+          // Get teacher's phone number and profile photo
+          const teacherDetails = await getTeacherDetails(classInfo.teachers.id);
 
           uniqueTeachers.push({
             id: classInfo.teachers.id,
             name: classInfo.teachers.name,
-            phone: teacherPhone,
+            phone: teacherDetails.phone,
+            profilePhoto: teacherDetails.profilePhoto,
             qualification: classInfo.teachers.qualification,
             subjects: ['Class Teacher'],
             role: 'class_teacher',
             className: `${student.classes.class_name} ${student.classes.section}`,
             studentName: student.name,
-            hasPhone: !!teacherPhone
+            hasPhone: !!teacherDetails.phone
           });
           seen.add(classInfo.teachers.id);
         }
@@ -141,7 +162,7 @@ const CallWithTeacher = ({ navigation }) => {
         console.log('Trying direct teacher fetch for class_id:', student.class_id);
         const { data: directClassTeacher, error: directTeacherError } = await supabase
           .from(TABLES.TEACHERS)
-          .select('id, name, qualification, phone, is_class_teacher, assigned_class_id')
+          .select('id, name, qualification, phone, is_class_teacher, assigned_class_id, user_id')
           .eq('assigned_class_id', student.class_id)
           .eq('is_class_teacher', true);
 
@@ -149,10 +170,14 @@ const CallWithTeacher = ({ navigation }) => {
           console.log('Found class teacher directly:', directClassTeacher[0]);
           const teacher = directClassTeacher[0];
           if (teacher.name && !seen.has(teacher.id)) {
+            // Get teacher's profile photo
+            const teacherDetails = await getTeacherDetails(teacher.id);
+
             uniqueTeachers.push({
               id: teacher.id,
               name: teacher.name,
               phone: teacher.phone,
+              profilePhoto: teacherDetails.profilePhoto,
               qualification: teacher.qualification,
               subjects: ['Class Teacher'],
               role: 'class_teacher',
@@ -196,15 +221,19 @@ const CallWithTeacher = ({ navigation }) => {
                 // Get teacher details separately
                 const { data: teacherData, error: teacherDataError } = await supabase
                   .from(TABLES.TEACHERS)
-                  .select('id, name, qualification, phone, is_class_teacher')
+                  .select('id, name, qualification, phone, is_class_teacher, user_id')
                   .eq('id', assignment.teacher_id)
                   .single();
 
                 if (!teacherDataError && teacherData && teacherData.name) {
+                  // Get teacher's profile photo
+                  const teacherDetails = await getTeacherDetails(teacherData.id);
+
                   uniqueTeachers.push({
                     id: teacherData.id,
                     name: teacherData.name,
                     phone: teacherData.phone,
+                    profilePhoto: teacherDetails.profilePhoto,
                     qualification: teacherData.qualification,
                     subjects: [subject.name],
                     role: 'subject_teacher',
@@ -373,16 +402,30 @@ const CallWithTeacher = ({ navigation }) => {
                     hasPhone && styles.phoneAvailableCard
                   ]} onPress={() => handleCallTeacher(item)}>
                     <View style={[
-                      styles.teacherAvatar,
-                      { backgroundColor: item.role === 'class_teacher' ? '#4CAF50' :
-                                        item.role === 'both' ? '#FF9800' : '#2196F3' },
+                      styles.teacherAvatarContainer,
                       hasPhone && styles.phoneAvailableAvatar
                     ]}>
-                      <Ionicons
-                        name={item.role === 'class_teacher' ? 'school' : item.role === 'both' ? 'star' : 'book'}
-                        size={24}
-                        color="#fff"
-                      />
+                      {item.profilePhoto ? (
+                        <Image
+                          source={{ uri: item.profilePhoto }}
+                          style={styles.teacherProfileImage}
+                          onError={() => {
+                            console.log('Failed to load profile image for:', item.name);
+                          }}
+                        />
+                      ) : (
+                        <View style={[
+                          styles.teacherAvatar,
+                          { backgroundColor: item.role === 'class_teacher' ? '#4CAF50' :
+                                            item.role === 'both' ? '#FF9800' : '#2196F3' }
+                        ]}>
+                          <Ionicons
+                            name="person"
+                            size={24}
+                            color="#fff"
+                          />
+                        </View>
+                      )}
                       {hasPhone && (
                         <View style={styles.phoneAvailableDot} />
                       )}
@@ -524,7 +567,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Enhanced Teacher Card Styles (same as ChatWithTeacher)
+  // Enhanced Teacher Card Styles with Profile Photo Support
+  teacherAvatarContainer: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 12,
+    position: 'relative',
+  },
   teacherAvatar: {
     width: 50,
     height: 50,
@@ -532,7 +582,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#1976d2',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+  },
+  teacherProfileImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#f0f0f0',
   },
   teacherInfo: {
     flex: 1,

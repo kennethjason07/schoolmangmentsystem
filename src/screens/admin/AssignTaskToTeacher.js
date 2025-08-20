@@ -158,8 +158,8 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
 
   // Save (add/edit) task
   const handleSave = async () => {
-    if (!form.title.trim() || !form.dueDate || !form.teacher_ids) {
-      Alert.alert('Error', 'Please fill all required fields.');
+    if (!form.title.trim() || !form.description.trim() || !form.dueDate || !form.teacher_ids) {
+      Alert.alert('Error', 'Please fill all required fields (Title, Description, Due Date, and Teacher).');
       return;
     }
 
@@ -415,21 +415,9 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
               onPress={() => openModal(item)}
               activeOpacity={0.7}
             >
-              {/* Task Header */}
+              {/* Task Header with Delete Button */}
               <View style={styles.taskHeader}>
-                <View style={styles.taskTitleContainer}>
-                  <Text style={styles.taskTitle} numberOfLines={2}>{item.title}</Text>
-                  <View style={styles.taskBadges}>
-                    <View style={[styles.priorityBadge, { backgroundColor: priorityInfo.color }]}>
-                      <MaterialIcons name={priorityInfo.icon} size={12} color="#fff" />
-                      <Text style={styles.priorityText}>{priorityInfo.label}</Text>
-                    </View>
-                    <View style={[styles.statusBadge, { backgroundColor: statusInfo.color }]}>
-                      <MaterialIcons name={statusInfo.icon} size={12} color="#fff" />
-                      <Text style={styles.statusText}>{statusInfo.label}</Text>
-                    </View>
-                  </View>
-                </View>
+                <Text style={styles.taskCardTitle}>Task Details</Text>
                 <TouchableOpacity
                   onPress={(e) => {
                     e.stopPropagation();
@@ -441,26 +429,49 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
                 </TouchableOpacity>
               </View>
 
-              {/* Task Description */}
-              {item.description && (
-                <Text style={styles.taskDescription} numberOfLines={2}>
-                  {item.description}
-                </Text>
-              )}
+              {/* Task Details in Popup Format */}
+              <View style={styles.taskDetailsContainer}>
+                {/* Task Title */}
+                <View style={styles.taskDetailRow}>
+                  <Text style={styles.taskDetailLabel}>Task Title:</Text>
+                  <Text style={styles.taskDetailValue}>{item.title}</Text>
+                </View>
 
-              {/* Task Meta Information */}
-              <View style={styles.taskMetaContainer}>
-                <View style={styles.taskMetaItem}>
-                  <MaterialIcons name="schedule" size={16} color="#666" />
-                  <Text style={styles.taskMetaText}>
-                    Due: {formatDateDMY(item.due_date)}
+                {/* Task Description */}
+                {item.description && (
+                  <View style={styles.taskDetailRow}>
+                    <Text style={styles.taskDetailLabel}>Task Description:</Text>
+                    <Text style={styles.taskDetailValue}>{item.description}</Text>
+                  </View>
+                )}
+
+                {/* Due Date */}
+                <View style={styles.taskDetailRow}>
+                  <Text style={styles.taskDetailLabel}>Due Date:</Text>
+                  <Text style={styles.taskDetailValue}>{formatDateDMY(item.due_date)}</Text>
+                </View>
+
+                {/* Priority */}
+                <View style={styles.taskDetailRow}>
+                  <Text style={styles.taskDetailLabel}>Priority:</Text>
+                  <Text style={[styles.taskDetailValue, { color: priorityInfo.color, fontWeight: 'bold' }]}>
+                    {priorityInfo.label}
                   </Text>
                 </View>
 
+                {/* Status */}
+                <View style={styles.taskDetailRow}>
+                  <Text style={styles.taskDetailLabel}>Status:</Text>
+                  <Text style={[styles.taskDetailValue, { color: statusInfo.color, fontWeight: 'bold' }]}>
+                    {statusInfo.label}
+                  </Text>
+                </View>
+
+                {/* Assigned to Teacher */}
                 {assignedTeachers.length > 0 && (
-                  <View style={styles.taskMetaItem}>
-                    <MaterialIcons name="person" size={16} color="#666" />
-                    <Text style={styles.taskMetaText} numberOfLines={1}>
+                  <View style={styles.taskDetailRow}>
+                    <Text style={styles.taskDetailLabel}>Assigned to Teacher:</Text>
+                    <Text style={styles.taskDetailValue}>
                       {assignedTeachers.length === 1
                         ? assignedTeachers[0]
                         : `${assignedTeachers[0]} +${assignedTeachers.length - 1} more`
@@ -553,14 +564,15 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
 
                 {/* Description */}
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Description</Text>
+                  <Text style={styles.inputLabel}>Task Description *</Text>
+                  <Text style={styles.inputHint}>Provide detailed information about the task</Text>
                   <TextInput
                     style={[styles.textInput, styles.textArea]}
-                    placeholder="Enter task description"
+                    placeholder="Enter detailed task description, requirements, and expectations..."
                     value={form.description}
                     onChangeText={text => setForm(f => ({ ...f, description: text }))}
                     multiline
-                    numberOfLines={3}
+                    numberOfLines={4}
                     textAlignVertical="top"
                     placeholderTextColor="#999"
                   />
@@ -957,11 +969,37 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#fff5f5',
   },
-  taskDescription: {
-    fontSize: 15,
-    color: '#666',
-    lineHeight: 22,
+  taskDetailsContainer: {
     marginBottom: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196F3',
+  },
+  taskDetailRow: {
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  taskDetailLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    minWidth: 120,
+    marginRight: 8,
+  },
+  taskDetailValue: {
+    fontSize: 14,
+    color: '#555',
+    flex: 1,
+    lineHeight: 20,
+  },
+  taskCardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#2196F3',
   },
   taskMetaContainer: {
     marginBottom: 16,
@@ -1095,7 +1133,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
+    marginBottom: 4,
+  },
+  inputHint: {
+    fontSize: 13,
+    color: '#666',
     marginBottom: 8,
+    fontStyle: 'italic',
   },
   textInput: {
     backgroundColor: '#f8f9fa',
@@ -1108,8 +1152,10 @@ const styles = StyleSheet.create({
     borderColor: '#e9ecef',
   },
   textArea: {
-    height: 80,
+    height: 100,
     textAlignVertical: 'top',
+    paddingTop: 12,
+    lineHeight: 20,
   },
   datePickerButton: {
     flexDirection: 'row',

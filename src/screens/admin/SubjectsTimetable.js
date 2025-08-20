@@ -6,6 +6,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import useResponsive from '../../utils/useResponsive';
 
 
 
@@ -39,6 +40,7 @@ function formatTime(t) {
 }
 
 const SubjectsTimetable = ({ route }) => {
+  const { getPickerHeight, getResponsiveFontSize } = useResponsive();
   const { classId } = route?.params || {};
   const [tab, setTab] = useState(classId ? 'timetable' : 'subjects');
   const [subjects, setSubjects] = useState([]);
@@ -955,7 +957,7 @@ const SubjectsTimetable = ({ route }) => {
                 <Text style={{ marginTop: 8 }}>Assign Teacher:</Text>
                 <Picker
                   selectedValue={subjectForm.teacherId}
-                  style={styles.input}
+                  style={[styles.input, { height: getPickerHeight() }]}
                   onValueChange={itemValue => setSubjectForm(f => ({ ...f, teacherId: itemValue }))}
                 >
                   {teachers.map(t => (
@@ -985,7 +987,7 @@ const SubjectsTimetable = ({ route }) => {
             <View style={styles.pickerWrapper}>
               <Picker
                 selectedValue={selectedClass}
-                style={styles.classPicker}
+                style={[styles.classPicker, { height: getPickerHeight() }]}
                 onValueChange={setSelectedClass}
               >
                 {classes.map(c => (
@@ -1070,7 +1072,7 @@ const SubjectsTimetable = ({ route }) => {
                       <View style={styles.subjectPickerWrapper}>
                         <Picker
                           selectedValue={existingPeriod?.subjectId || ''}
-                          style={styles.subjectPicker}
+                          style={[styles.subjectPicker, { height: getPickerHeight() }]}
                           onValueChange={(subjectId) => handleSubjectChange(selectedDay, slot, subjectId)}
                         >
                           <Picker.Item label="Select Subject" value="" />
@@ -1149,7 +1151,7 @@ const SubjectsTimetable = ({ route }) => {
                 <Text style={{ marginTop: 8 }}>Subject:</Text>
                 <Picker
                   selectedValue={periodForm.subjectId}
-                  style={styles.input}
+                  style={[styles.input, { height: getPickerHeight() }]}
                   onValueChange={itemValue => setPeriodForm(f => ({ ...f, subjectId: itemValue }))}
                 >
                   {subjects.map(s => (
