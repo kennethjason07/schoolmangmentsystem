@@ -23,6 +23,7 @@ import { format } from 'date-fns';
 import * as Animatable from 'react-native-animatable';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { sendBulkAbsenceNotifications } from '../../services/notificationService';
 import * as Print from 'expo-print';
 
 const AttendanceManagement = () => {
@@ -337,16 +338,43 @@ const AttendanceManagement = () => {
         .from(TABLES.STUDENT_ATTENDANCE)
         .insert(records);
 
+      // Send notifications for absent students
+      const absentRecords = records.filter(record => record.status === 'Absent');
+
+      if (absentRecords.length > 0) {
+        console.log(`📧 Sending absence notifications for ${absentRecords.length} students`);
+
+        // Prepare data for bulk notification sending
+        const absentStudentsData = absentRecords.map(record => ({
+          studentId: record.student_id,
+          date: record.date,
+          markedBy: record.marked_by
+        }));
+
+        try {
+          const result = await sendBulkAbsenceNotifications(absentStudentsData);
+          console.log('📧 Bulk notification result:', result);
+
+          Alert.alert(
+            'Success',
+            `Attendance saved successfully!\n\nAbsence notifications sent to ${absentRecords.length} parent(s).\n\nYou can now edit individual records using the pencil icon.`
+          );
+        } catch (notificationError) {
+          console.error('❌ Error sending bulk notifications:', notificationError);
+          Alert.alert(
+            'Success',
+            `Attendance saved successfully!\n\nNote: Some notifications may not have been sent. You can now edit individual records using the pencil icon.`
+          );
+        }
+      } else {
+        Alert.alert('Success', 'Attendance saved successfully! You can now edit individual records using the pencil icon.');
+      }
+
       // Update local state
       setAttendanceRecords({
         ...attendanceRecords,
         [key]: { ...attendanceMark },
       });
-
-      // Direct editing enabled - no edit mode needed
-
-      // Show confirmation popup
-      Alert.alert('Success', 'Attendance saved successfully! You can now edit individual records using the pencil icon.');
     } catch (error) {
       console.error('Error saving attendance:', error);
       Alert.alert('Error', 'Failed to save attendance');

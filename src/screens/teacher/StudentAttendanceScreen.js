@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import Header from '../../components/Header';
 import { supabase, TABLES } from '../../utils/supabase';
+import { sendAbsenceNotificationToParent } from '../../services/notificationService';
 import { format, parseISO } from 'date-fns';
 import { CrossPlatformBarChart } from '../../components/CrossPlatformChart';
 import { Ionicons } from '@expo/vector-icons';
@@ -132,7 +133,29 @@ const StudentAttendanceScreen = ({ navigation, route }) => {
 
       if (error) throw error;
 
-      Alert.alert('Success', 'Attendance updated successfully');
+      // Send notification if marking as absent
+      if (status === 'Absent') {
+        try {
+          console.log(`📧 Sending absence notification for student ${student.id} on ${date}`);
+          const result = await sendAbsenceNotificationToParent(
+            student.id,
+            date,
+            null // No specific teacher ID for individual updates
+          );
+
+          if (result.success) {
+            Alert.alert('Success', 'Attendance updated successfully!\n\nAbsence notification sent to parent.');
+          } else {
+            Alert.alert('Success', 'Attendance updated successfully!\n\nNote: Notification may not have been sent.');
+          }
+        } catch (notificationError) {
+          console.error('❌ Error sending notification:', notificationError);
+          Alert.alert('Success', 'Attendance updated successfully!\n\nNote: Notification may not have been sent.');
+        }
+      } else {
+        Alert.alert('Success', 'Attendance updated successfully');
+      }
+
       loadAttendanceData();
     } catch (error) {
       console.error('Error updating attendance:', error);

@@ -9,7 +9,8 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
-  TextInput
+  TextInput,
+  Image
 } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { ActivityIndicator as PaperActivityIndicator } from 'react-native-paper';
@@ -22,6 +23,7 @@ const { width } = Dimensions.get('window');
 const TeacherDetails = ({ route, navigation }) => {
   const { teacher } = route.params;
   const [teacherData, setTeacherData] = useState(null);
+  const [teacherUser, setTeacherUser] = useState(null); // Store user data with profile_url
   const [subjects, setSubjects] = useState([]);
   const [classes, setClasses] = useState([]);
   const [classTeacherOf, setClassTeacherOf] = useState(null);
@@ -183,6 +185,20 @@ const TeacherDetails = ({ route, navigation }) => {
         if (teacherError) throw teacherError;
         const t = teachers.find(t => t.id === teacher.id);
         setTeacherData(t);
+
+        // Fetch teacher's user profile data (including profile_url)
+        const { data: userData, error: userError } = await supabase
+          .from(TABLES.USERS)
+          .select('id, full_name, email, phone, profile_url')
+          .eq('linked_teacher_id', teacher.id)
+          .single();
+
+        if (!userError && userData) {
+          setTeacherUser(userData);
+          console.log('Teacher user profile loaded:', userData);
+        } else {
+          console.log('No user profile found for teacher:', userError);
+        }
         // Fetch teacher subjects/classes
         const { data: teacherSubjects, error: tsError } = await dbHelpers.getTeacherSubjects(teacher.id);
         
@@ -285,9 +301,17 @@ const TeacherDetails = ({ route, navigation }) => {
         {/* Profile Header Card */}
         <View style={styles.profileCard}>
           <View style={styles.avatarContainer}>
-            <View style={styles.avatar}>
-              <MaterialIcons name="person" size={48} color="#fff" />
-            </View>
+            {teacherUser?.profile_url ? (
+              <Image
+                source={{ uri: teacherUser.profile_url }}
+                style={styles.teacherProfileImage}
+                onError={() => console.log('Failed to load teacher profile image')}
+              />
+            ) : (
+              <View style={styles.avatar}>
+                <MaterialIcons name="person" size={48} color="#fff" />
+              </View>
+            )}
             <View style={styles.onlineIndicator} />
           </View>
 
@@ -805,6 +829,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
+  },
+  teacherProfileImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 3,
+    borderColor: '#2196F3',
   },
   onlineIndicator: {
     position: 'absolute',

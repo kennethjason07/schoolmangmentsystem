@@ -7,6 +7,9 @@ import { Picker } from '@react-native-picker/picker';
 import * as Print from 'expo-print';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
+import { sendAbsenceNotificationToParent } from '../../services/notificationService';
+import useResponsive from '../../utils/useResponsive';
+import { sendBulkAbsenceNotifications } from '../../services/notificationService';
 
 function formatDateDMY(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') return '';
@@ -21,6 +24,7 @@ function formatDateDMY(dateStr) {
 }
 
 const TakeAttendance = () => {
+  const { getPickerHeight, getResponsiveFontSize } = useResponsive();
   const today = new Date();
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
@@ -234,8 +238,39 @@ const TakeAttendance = () => {
 
       if (upsertError) throw upsertError;
 
-      Alert.alert('Success', 'Attendance saved successfully!');
-      
+      // Send notifications for absent students
+      const absentStudents = attendanceRecords.filter(record => record.status === 'Absent');
+
+      if (absentStudents.length > 0) {
+        console.log(`📧 Sending absence notifications for ${absentStudents.length} students`);
+
+        // Send notifications for each absent student
+        for (const absentRecord of absentStudents) {
+          try {
+            const result = await sendAbsenceNotificationToParent(
+              absentRecord.student_id,
+              absentRecord.date,
+              absentRecord.marked_by
+            );
+
+            if (result.success) {
+              console.log(`✅ Notification sent for student ${absentRecord.student_id}`);
+            } else {
+              console.log(`❌ Failed to send notification for student ${absentRecord.student_id}:`, result.error);
+            }
+          } catch (notificationError) {
+            console.error(`❌ Error sending notification for student ${absentRecord.student_id}:`, notificationError);
+          }
+        }
+
+        Alert.alert(
+          'Success',
+          `Attendance saved successfully!\n\nAbsence notifications sent to ${absentStudents.length} parent(s).`
+        );
+      } else {
+        Alert.alert('Success', 'Attendance saved successfully!');
+      }
+
     } catch (err) {
       Alert.alert('Error', err.message);
       console.error('Error saving attendance:', err);
@@ -429,7 +464,7 @@ const TakeAttendance = () => {
                     setSelectedSection(selectedClassData.section);
                   }
                 }}
-                style={styles.picker}
+                style={[styles.picker, { height: getPickerHeight() }]}
               >
                 <Picker.Item label="Select Class" value={null} />
                 {classes.map(cls => (

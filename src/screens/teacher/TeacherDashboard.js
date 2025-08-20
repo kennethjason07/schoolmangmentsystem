@@ -36,6 +36,7 @@ const TeacherDashboard = ({ navigation }) => {
   const [recentActivities, setRecentActivities] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
 const [teacherProfile, setTeacherProfile] = useState(null);
+  const [teacherUser, setTeacherUser] = useState(null); // Store user data with profile_url
   const [refreshing, setRefreshing] = useState(false);
   const [schoolDetails, setSchoolDetails] = useState(null);
   const { user } = useAuth();
@@ -92,6 +93,20 @@ function groupAndSortSchedule(schedule) {
 
       const teacher = teacherData;
       setTeacherProfile(teacher);
+
+      // Fetch teacher's user profile data (including profile_url)
+      const { data: userData, error: userError } = await supabase
+        .from(TABLES.USERS)
+        .select('id, full_name, email, phone, profile_url')
+        .eq('linked_teacher_id', teacher.id)
+        .single();
+
+      if (!userError && userData) {
+        setTeacherUser(userData);
+        console.log('Teacher user profile loaded:', userData);
+      } else {
+        console.log('No user profile found for teacher:', userError);
+      }
 
       // Get assigned classes and subjects
       const { data: assignedSubjects, error: subjectsError } = await supabase
@@ -892,12 +907,31 @@ function groupAndSortSchedule(schedule) {
           />
         }
       >
-        {/* Welcome Section at the very top */}
+        {/* Welcome Section with Profile Photo */}
         <View style={styles.welcomeSection}>
-          <Text style={styles.welcomeText}>
-            Welcome back, {teacherProfile?.name || teacherProfile?.full_name || 'Teacher'}!
-          </Text>
-          <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</Text>
+          <View style={styles.welcomeHeader}>
+            <View style={styles.welcomeTextContainer}>
+              <Text style={styles.welcomeText}>
+                Welcome back, {teacherProfile?.name || teacherProfile?.full_name || 'Teacher'}!
+              </Text>
+              <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</Text>
+            </View>
+
+            {/* Teacher Profile Photo */}
+            <View style={styles.teacherProfileContainer}>
+              {teacherUser?.profile_url ? (
+                <Image
+                  source={{ uri: teacherUser.profile_url }}
+                  style={styles.teacherProfileImage}
+                  onError={() => console.log('Failed to load teacher profile image')}
+                />
+              ) : (
+                <View style={styles.teacherProfilePlaceholder}>
+                  <Ionicons name="person" size={32} color="#666" />
+                </View>
+              )}
+            </View>
+          </View>
         </View>
 
         {/* School Details Card - AdminDashboard Style */}
@@ -1857,6 +1891,34 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
+  },
+  welcomeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  welcomeTextContainer: {
+    flex: 1,
+  },
+  teacherProfileContainer: {
+    marginLeft: 16,
+  },
+  teacherProfileImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    borderWidth: 3,
+    borderColor: '#1976d2',
+  },
+  teacherProfilePlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#f0f0f0',
+    borderWidth: 2,
+    borderColor: '#ddd',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   welcomeText: {
     fontSize: 24,

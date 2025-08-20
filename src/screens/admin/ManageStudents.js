@@ -11,7 +11,8 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
-  Platform
+  Platform,
+  Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
@@ -25,6 +26,7 @@ import { formatDate } from '../../utils/helpers';
 const ManageStudents = () => {
   const navigation = useNavigation();
   const [students, setStudents] = useState([]);
+  const [studentUsers, setStudentUsers] = useState({}); // Store user data with profile_url by student_id
   const [classes, setClasses] = useState([]);
   const [parents, setParents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -297,6 +299,27 @@ const ManageStudents = () => {
       });
 
       setStudents(sortedStudents);
+
+      // Fetch student user profiles (including profile_url) for all students
+      const { data: studentUsersData, error: usersError } = await supabase
+        .from(TABLES.USERS)
+        .select('id, full_name, email, phone, profile_url, linked_student_id')
+        .in('linked_student_id', studentIds)
+        .not('linked_student_id', 'is', null);
+
+      if (!usersError && studentUsersData) {
+        const usersLookup = {};
+        studentUsersData.forEach(user => {
+          if (user.linked_student_id) {
+            usersLookup[user.linked_student_id] = user;
+          }
+        });
+        setStudentUsers(usersLookup);
+        console.log('Student user profiles loaded:', Object.keys(usersLookup).length, 'profiles');
+      } else {
+        console.log('No student user profiles found:', usersError);
+        setStudentUsers({});
+      }
 
       // Calculate statistics
       const totalStudents = studentsWithDetails.length;
@@ -865,7 +888,15 @@ const ManageStudents = () => {
         <View style={styles.studentInfoRow}>
           <View style={styles.leftSection}>
             <View style={styles.avatarContainer}>
-              <Ionicons name="person" size={24} color="#2196F3" />
+              {studentUsers[item.id]?.profile_url ? (
+                <Image
+                  source={{ uri: studentUsers[item.id].profile_url }}
+                  style={styles.studentAvatarImage}
+                  onError={() => console.log('Failed to load student avatar image')}
+                />
+              ) : (
+                <Ionicons name="person" size={24} color="#2196F3" />
+              )}
             </View>
 
             <View style={styles.studentDetails}>
@@ -1569,6 +1600,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+    overflow: 'hidden',
+  },
+  studentAvatarImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
   },
   studentDetails: {
     flex: 1,

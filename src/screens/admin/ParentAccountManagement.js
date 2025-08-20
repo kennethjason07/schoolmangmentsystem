@@ -18,8 +18,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import useResponsive from '../../utils/useResponsive';
 
 const ParentAccountManagement = ({ navigation }) => {
+  const { getPickerHeight, getResponsiveFontSize } = useResponsive();
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState('all');
@@ -427,7 +429,7 @@ const ParentAccountManagement = ({ navigation }) => {
             <Picker
               selectedValue={selectedClass}
               onValueChange={(itemValue) => setSelectedClass(itemValue)}
-              style={styles.picker}
+              style={[styles.picker, { height: getPickerHeight() }]}
             >
               <Picker.Item label="All Classes" value="all" />
               {classes.map((cls) => (
@@ -797,7 +799,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   picker: {
-    height: 50,
+    height: 50, // This will be overridden by dynamic style
     width: '100%',
   },
 
