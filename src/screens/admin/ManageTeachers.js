@@ -421,7 +421,7 @@ const ManageTeachers = ({ navigation, route }) => {
   const handleDelete = async (teacher) => {
     Alert.alert(
       'Confirm Delete',
-      `Are you sure you want to delete ${teacher.name}?`,
+      `Are you sure you want to delete ${teacher.name}? This will also remove all related data including assignments, homework, and attendance records.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { 
@@ -430,31 +430,114 @@ const ManageTeachers = ({ navigation, route }) => {
           onPress: async () => {
             setLoading(true);
             try {
-              // First delete teacher-subject assignments
+              console.log(`Starting deletion process for teacher: ${teacher.name} (ID: ${teacher.id})`);
+              
+              // Delete all related data in the correct order (from most dependent to least)
+              
+              // 1. Delete teacher-subject assignments
               const { error: assignmentError } = await supabase
                 .from(TABLES.TEACHER_SUBJECTS)
                 .delete()
                 .eq('teacher_id', teacher.id);
-                
-              if (assignmentError) throw new Error('Failed to delete teacher assignments');
+              if (assignmentError) {
+                console.error('Error deleting teacher-subject assignments:', assignmentError);
+                throw new Error(`Failed to delete teacher assignments: ${assignmentError.message}`);
+              }
+              console.log('✓ Deleted teacher-subject assignments');
               
-              // Then delete the teacher
+              // 2. Delete teacher attendance records
+              const { error: attendanceError } = await supabase
+                .from(TABLES.TEACHER_ATTENDANCE)
+                .delete()
+                .eq('teacher_id', teacher.id);
+              if (attendanceError) {
+                console.error('Error deleting teacher attendance:', attendanceError);
+                throw new Error(`Failed to delete teacher attendance: ${attendanceError.message}`);
+              }
+              console.log('✓ Deleted teacher attendance records');
+              
+              // 3. Delete homework assignments (if homeworks table exists)
+              try {
+                const { error: homeworkError } = await supabase
+                  .from('homeworks')
+                  .delete()
+                  .eq('teacher_id', teacher.id);
+                if (homeworkError && !homeworkError.message.includes('does not exist')) {
+                  console.warn('Error deleting teacher homework:', homeworkError);
+                }
+                console.log('✓ Deleted teacher homework records');
+              } catch (homeworkErr) {
+                console.log('ℹ Homeworks table not found, skipping...');
+              }
+              
+              // 4. Delete tasks assigned to teacher
+              try {
+                const { error: tasksError } = await supabase
+                  .from(TABLES.TASKS)
+                  .delete()
+                  .eq('assigned_to', teacher.id);
+                if (tasksError && !tasksError.message.includes('does not exist')) {
+                  console.warn('Error deleting teacher tasks:', tasksError);
+                }
+                console.log('✓ Deleted teacher tasks');
+              } catch (tasksErr) {
+                console.log('ℹ Tasks table reference to teacher not found, skipping...');
+              }
+              
+              // 5. Update timetable entries (set teacher_id to NULL instead of deleting)
+              try {
+                const { error: timetableError } = await supabase
+                  .from(TABLES.TIMETABLE)
+                  .update({ teacher_id: null })
+                  .eq('teacher_id', teacher.id);
+                if (timetableError && !timetableError.message.includes('does not exist')) {
+                  console.warn('Error updating timetable entries:', timetableError);
+                }
+                console.log('✓ Updated timetable entries');
+              } catch (timetableErr) {
+                console.log('ℹ Timetable table not found, skipping...');
+              }
+              
+              // 6. Update or delete any user accounts linked to this teacher
+              try {
+                const { error: userError } = await supabase
+                  .from(TABLES.USERS)
+                  .update({ linked_teacher_id: null })
+                  .eq('linked_teacher_id', teacher.id);
+                if (userError && !userError.message.includes('does not exist')) {
+                  console.warn('Error unlinking teacher from user accounts:', userError);
+                }
+                console.log('✓ Unlinked teacher from user accounts');
+              } catch (userErr) {
+                console.log('ℹ User accounts not linked to teacher, skipping...');
+              }
+              
+              // 7. Finally, delete the teacher record
               const { error } = await supabase
                 .from(TABLES.TEACHERS)
                 .delete()
                 .eq('id', teacher.id);
                 
-              if (error) throw new Error('Failed to delete teacher');
+              if (error) {
+                console.error('Error deleting teacher record:', error);
+                throw new Error(`Failed to delete teacher: ${error.message}`);
+              }
+              
+              console.log('✓ Deleted teacher record');
               
               // Update local state
               setTeachers(teachers.filter(t => t.id !== teacher.id));
               
               // Show success message with teacher name
-              Alert.alert('Success', `Deleted teacher: ${teacher.name}`);
+              Alert.alert('Success', `Successfully deleted teacher: ${teacher.name}`);
+              console.log(`✅ Teacher deletion completed successfully: ${teacher.name}`);
               
             } catch (err) {
-              console.error('Error deleting teacher:', err);
-              Alert.alert('Error', err.message);
+              console.error('❌ Error deleting teacher:', err);
+              Alert.alert(
+                'Deletion Failed', 
+                `Could not delete ${teacher.name}: ${err.message}\n\nPlease check if this teacher has dependencies that need to be removed first.`
+              );
             } finally {
               setLoading(false);
             }
