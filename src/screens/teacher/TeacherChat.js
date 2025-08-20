@@ -18,6 +18,7 @@ import { runBucketDiagnostics, formatBucketDiagnosticResults } from '../../utils
 import { runSimpleNetworkTest, formatSimpleNetworkResults } from '../../utils/simpleNetworkTest';
 import { handleFileView, formatFileSize as formatFileSizeDisplay, getFileTypeColor } from '../../utils/fileViewer';
 import ImageViewer from '../../components/ImageViewer';
+import { getGlobalMessageHandler } from '../../utils/realtimeMessageHandler';
 
 const TeacherChat = () => {
   const { user } = useAuth();
@@ -40,6 +41,7 @@ const TeacherChat = () => {
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [currentImage, setCurrentImage] = useState(null);
   const flatListRef = useRef(null);
+  const badgeSubscriptionRef = useRef(null);
 
   // Keyboard visibility listeners
   useEffect(() => {
@@ -104,6 +106,98 @@ const TeacherChat = () => {
     }
   };
 
+  // Global real-time subscription for badge updates
+  useEffect(() => {
+    if (!user?.id) return;
+
+    console.log('🔔 TeacherChat: Setting up global badge subscription for teacher:', user.id);
+
+    // Setup global real-time subscription for badge updates
+    const setupBadgeSubscription = () => {
+      const channelName = `teacher-badge-${user.id}-${Date.now()}`;
+      
+      badgeSubscriptionRef.current = supabase
+        .channel(channelName)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `receiver_id=eq.${user.id}`
+        }, (payload) => {
+          console.log('📨 TeacherChat Badge: New message received from:', payload.new?.sender_id);
+          
+          if (payload.new?.sender_id && payload.new.sender_id !== user.id) {
+            // Increment unread count for this sender
+            setUnreadCounts(prev => {
+              const updated = { ...prev };
+              updated[payload.new.sender_id] = (updated[payload.new.sender_id] || 0) + 1;
+              console.log('📊 TeacherChat Badge: Updated counts:', updated);
+              return updated;
+            });
+          }
+        })
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `receiver_id=eq.${user.id}`
+        }, (payload) => {
+          console.log('📝 TeacherChat Badge: Message updated:', payload);
+          
+          // If message was marked as read, decrease unread count
+          if (payload.new?.is_read && !payload.old?.is_read && payload.new?.sender_id) {
+            console.log('✅ TeacherChat Badge: Message marked as read from:', payload.new.sender_id);
+            setUnreadCounts(prev => {
+              const updated = { ...prev };
+              if (updated[payload.new.sender_id]) {
+                updated[payload.new.sender_id] = Math.max(0, updated[payload.new.sender_id] - 1);
+                if (updated[payload.new.sender_id] === 0) {
+                  delete updated[payload.new.sender_id];
+                }
+              }
+              console.log('📊 TeacherChat Badge: Updated counts after read:', updated);
+              return updated;
+            });
+          }
+        })
+        .on('postgres_changes', {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'messages'
+        }, (payload) => {
+          console.log('🗑️ TeacherChat Badge: Message deleted:', payload);
+          
+          // If a message was deleted, refetch counts to be safe
+          if (payload.old?.receiver_id === user.id && payload.old?.sender_id) {
+            console.log('🔄 TeacherChat Badge: Refetching counts due to deletion');
+            fetchUnreadCounts();
+          }
+        })
+        .subscribe((status) => {
+          console.log('📡 TeacherChat Badge: Subscription status:', status);
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ TeacherChat Badge: Real-time badge updates are working!');
+          } else if (status === 'CHANNEL_ERROR') {
+            console.log('❌ TeacherChat Badge: Real-time failed, will rely on manual refresh');
+          }
+        });
+    };
+
+    setupBadgeSubscription();
+
+    return () => {
+      console.log('🛑 TeacherChat: Cleaning up global badge subscription');
+      if (badgeSubscriptionRef.current) {
+        try {
+          badgeSubscriptionRef.current.unsubscribe();
+        } catch (error) {
+          console.log('Error unsubscribing from badge updates:', error);
+        }
+        badgeSubscriptionRef.current = null;
+      }
+    };
+  }, [user?.id]);
+
   // Reset selection and messages on screen focus
   useFocusEffect(
     React.useCallback(() => {
@@ -118,6 +212,8 @@ const TeacherChat = () => {
     try {
       if (!user?.id) return;
       
+      console.log('🔄 TeacherChat: Fetching unread counts for teacher:', user.id);
+      
       // Get all unread messages for current user
       const { data: unreadMessages, error } = await supabase
         .from(TABLES.MESSAGES)
@@ -126,8 +222,11 @@ const TeacherChat = () => {
         .eq('is_read', false);
       
       if (error && error.code !== '42P01') {
+        console.log('❌ TeacherChat: Error fetching unread messages:', error);
         return;
       }
+      
+      console.log('📊 TeacherChat: Fetched unread messages:', unreadMessages);
       
       // Count unique senders
       const counts = {};
@@ -137,9 +236,10 @@ const TeacherChat = () => {
         });
       }
       
+      console.log('📊 TeacherChat: Calculated unread counts:', counts);
       setUnreadCounts(counts);
     } catch (error) {
-      // Silently handle error
+      console.log('❌ TeacherChat: Exception in fetchUnreadCounts:', error);
     }
   };
 
@@ -559,99 +659,137 @@ const TeacherChat = () => {
     }
   };
 
-  // Real-time subscription for messages
+  // Real-time subscription for messages using optimistic UI
+  const messageHandler = getGlobalMessageHandler(supabase, TABLES.MESSAGES);
+  
   useEffect(() => {
     if (!selectedContact) return;
-    let subscription;
-    (async () => {
-      const contactUserId = selectedContact.userId || selectedContact.id;
-      subscription = supabase
-        .channel(`teacher-chat-${user.id}-${contactUserId}-${Date.now()}`)
-        .on('postgres_changes', { 
-          event: '*', 
-          schema: 'public', 
-          table: TABLES.MESSAGES
-        }, (payload) => {
-          // Check if this message is relevant to our chat
-          const isRelevant = (
-            (payload.new?.sender_id === user.id && payload.new?.receiver_id === contactUserId) ||
-            (payload.new?.sender_id === contactUserId && payload.new?.receiver_id === user.id) ||
-            (payload.old?.sender_id === user.id && payload.old?.receiver_id === contactUserId) ||
-            (payload.old?.sender_id === contactUserId && payload.old?.receiver_id === user.id)
-          );
+    
+    const contactUserId = selectedContact.userId || selectedContact.id;
+    
+    // Setup real-time subscription with message updates
+    const subscription = messageHandler.startSubscription(
+      user.id,
+      contactUserId,
+      (message, eventType) => {
+        console.log('📨 Real-time message update:', { message, eventType });
+        
+        if (eventType === 'sent' || eventType === 'received' || eventType === 'updated') {
+          // Update messages state
+          setMessages(prev => {
+            // Remove any existing message with the same ID
+            const filtered = prev.filter(m => m.id !== message.id);
+            // Add the new/updated message and sort by timestamp
+            const updated = [...filtered, message].sort((a, b) => 
+              new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+            );
+            return updated;
+          });
           
-          if (isRelevant) {
-            setTimeout(() => {
-              fetchMessages(selectedContact);
-            }, 200);
+          // Mark messages as read if they're from the contact
+          if (message.sender_id === contactUserId && !message.is_read) {
+            markMessagesAsRead(contactUserId);
+            setUnreadCounts(prev => {
+              const updated = { ...prev };
+              delete updated[contactUserId];
+              return updated;
+            });
           }
-        })
-        .subscribe();
-    })();
-    return () => {
-      if (subscription) {
-        subscription.unsubscribe();
+          
+          // Auto-scroll to bottom on new messages
+          setTimeout(() => {
+            try {
+              if (flatListRef.current?.scrollToEnd) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            } catch (error) {
+              // Silently handle scroll error
+            }
+          }, 100);
+        } else if (eventType === 'deleted') {
+          // Remove deleted message
+          setMessages(prev => prev.filter(m => m.id !== message.id));
+        }
       }
+    );
+    
+    return () => {
+      messageHandler.stopSubscription();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedContact, user.id]);
+  }, [selectedContact, user.id, messageHandler, markMessagesAsRead]);
 
-  // Send a message
+  // Send a message with optimistic UI
   const handleSend = async () => {
-    if (!input.trim() || !selectedContact) return;
+    if (!input.trim() || !selectedContact || sending) return;
+    
+    const contactUserId = selectedContact.userId || selectedContact.id;
+    const messageText = input.trim();
+    const studentId = selectedContact.students ? selectedContact.students[0]?.id : selectedContact.id;
+    
+    // Clear input immediately for better UX
+    setInput('');
     setSending(true);
     
     try {
-      const contactUserId = selectedContact.userId || selectedContact.id;
-      
-      // Get current time and properly convert to UTC
-      const now = new Date();
-      const currentUTCTime = now.toISOString(); // This ensures Z suffix
-      
-      const newMsg = {
+      // Prepare message data for the handler
+      const messageData = {
         sender_id: user.id,
         receiver_id: contactUserId,
-        student_id: selectedContact.students ? selectedContact.students[0]?.id : selectedContact.id, // Parent has students array, student is the student
-        message: input,
-        sent_at: currentUTCTime, // Explicitly set current UTC time
-      };
-
-      const { data: insertedMsg, error: sendError } = await supabase
-        .from(TABLES.MESSAGES)
-        .insert(newMsg)
-        .select();
-
-      if (sendError) {
-        console.error('Supabase error object:', JSON.stringify(sendError, null, 2));
-        throw new Error(`Database error: ${sendError.message || sendError.code || 'Unknown database error'}`);
-      }
-
-      // Add message to local state for immediate display
-      const displayMsg = {
-        id: insertedMsg?.[0]?.id || Date.now().toString(),
-        sender_id: user.id,
-        receiver_id: contactUserId,
-        student_id: selectedContact.students ? selectedContact.students[0]?.id : selectedContact.id,
-        message: input,
-        sent_at: insertedMsg?.[0]?.sent_at || new Date().toISOString(),
+        student_id: studentId,
+        message: messageText,
         message_type: 'text'
       };
-
-      setMessages(prev => [...prev, displayMsg]);
-      setInput('');
       
-      // Scroll to bottom after sending
-      setTimeout(() => {
-        try {
-          if (flatListRef.current && flatListRef.current.scrollToEnd) {
-            flatListRef.current.scrollToEnd({ animated: true });
-          }
-        } catch (error) {
-          // Silently handle scroll error
+      // Use the message handler for optimistic UI and reliable sending
+      await messageHandler.sendMessageOptimistic(
+        messageData,
+        // Optimistic update callback
+        (optimisticMessage) => {
+          console.log('⚡ Adding optimistic message to UI:', optimisticMessage);
+          setMessages(prev => {
+            const updated = [...prev, optimisticMessage].sort((a, b) => 
+              new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+            );
+            return updated;
+          });
+          
+          // Auto-scroll to bottom
+          setTimeout(() => {
+            try {
+              if (flatListRef.current?.scrollToEnd) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            } catch (error) {
+              // Silently handle scroll error
+            }
+          }, 100);
+        },
+        // Confirmed callback
+        (tempId, confirmedMessage) => {
+          console.log('✅ Message confirmed, replacing optimistic:', { tempId, confirmedMessage });
+          setMessages(prev => prev.map(msg => 
+            msg.id === tempId ? confirmedMessage : msg
+          ));
+        },
+        // Error callback
+        (tempId, failedMessage, error) => {
+          console.error('❌ Message failed:', { tempId, error });
+          // Update message to show failed state
+          setMessages(prev => prev.map(msg => 
+            msg.id === tempId ? { ...failedMessage, failed: true } : msg
+          ));
+          
+          // Restore input text for retry
+          setInput(messageText);
+          Alert.alert('Message Failed', `Failed to send message: ${error.message || 'Unknown error'}. The message is marked as failed - you can try sending again.`);
         }
-      }, 100);
-    } catch (err) {
-      Alert.alert('Error', `Failed to send message: ${err.message || 'Unknown error'}`);
+      );
+      
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      // Restore input text on failure
+      setInput(messageText);
+      Alert.alert('Error', `Failed to send message: ${error.message || 'Unknown error'}`);
     } finally {
       setSending(false);
     }
@@ -1101,13 +1239,23 @@ const TeacherChat = () => {
                           <View style={styles.chatActions}>
                             <View style={styles.chatIconContainer}>
                               <Ionicons name="chatbubbles" size={20} color={unreadCounts[item.id] ? "#f44336" : "#9c27b0"} />
-                              {unreadCounts[item.id] && (
-                                <View style={styles.unreadBadge}>
-                                  <Text style={styles.unreadBadgeText}>
-                                    {unreadCounts[item.id] > 99 ? '99+' : unreadCounts[item.id]}
-                                  </Text>
-                                </View>
-                              )}
+                              {(() => {
+                                // Debug logging for parent badges
+                                console.log('🔍 Parent Badge Debug:', {
+                                  parentName: item.name,
+                                  parentId: item.id,
+                                  unreadCount: unreadCounts[item.id],
+                                  allUnreadCounts: unreadCounts,
+                                  shouldShowBadge: !!unreadCounts[item.id]
+                                });
+                                return unreadCounts[item.id] ? (
+                                  <View style={styles.unreadBadge}>
+                                    <Text style={styles.unreadBadgeText}>
+                                      {unreadCounts[item.id] > 99 ? '99+' : unreadCounts[item.id]}
+                                    </Text>
+                                  </View>
+                                ) : null;
+                              })()}
                             </View>
                             <Ionicons name="chevron-forward" size={16} color="#ccc" style={{ marginTop: 2 }} />
                           </View>
@@ -1221,13 +1369,25 @@ const TeacherChat = () => {
                               <>
                                 <View style={styles.chatIconContainer}>
                                   <Ionicons name="chatbubbles" size={20} color={unreadCounts[item.userId] ? "#f44336" : "#9c27b0"} />
-                                  {unreadCounts[item.userId] && (
-                                    <View style={styles.unreadBadge}>
-                                      <Text style={styles.unreadBadgeText}>
-                                        {unreadCounts[item.userId] > 99 ? '99+' : unreadCounts[item.userId]}
-                                      </Text>
-                                    </View>
-                                  )}
+                                  {(() => {
+                                    // Debug logging for student badges
+                                    console.log('🔍 Student Badge Debug:', {
+                                      studentName: item.name,
+                                      studentId: item.id,
+                                      userId: item.userId,
+                                      canMessage: item.canMessage,
+                                      unreadCount: unreadCounts[item.userId],
+                                      allUnreadCounts: unreadCounts,
+                                      shouldShowBadge: !!unreadCounts[item.userId]
+                                    });
+                                    return unreadCounts[item.userId] ? (
+                                      <View style={styles.unreadBadge}>
+                                        <Text style={styles.unreadBadgeText}>
+                                          {unreadCounts[item.userId] > 99 ? '99+' : unreadCounts[item.userId]}
+                                        </Text>
+                                      </View>
+                                    ) : null;
+                                  })()}
                                 </View>
                                 <Ionicons name="chevron-forward" size={16} color="#ccc" style={{ marginTop: 2 }} />
                               </>

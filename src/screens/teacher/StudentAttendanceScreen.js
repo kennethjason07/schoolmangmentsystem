@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   TouchableOpacity,
   Modal,
   ScrollView,
@@ -178,25 +177,35 @@ const StudentAttendanceScreen = ({ navigation, route }) => {
               <View style={styles.chartContainer}>
                 <Text style={styles.sectionTitle}>Attendance Summary</Text>
                 <CrossPlatformBarChart
-                  data={monthlyAttendance.map(month => ({
-                    month: month.month,
-                    percentage: month.percentage
-                  }))}
-                  xAxisLabel="Month"
-                  yAxisLabel="Attendance %"
-                  barColor="#1976d2"
-                  style={{ height: 200 }}
+                  data={{
+                    labels: monthlyAttendance.map(month => month.month),
+                    datasets: [
+                      {
+                        data: monthlyAttendance.map(month => month.percentage)
+                      }
+                    ]
+                  }}
+                  chartConfig={{
+                    backgroundColor: '#ffffff',
+                    backgroundGradientFrom: '#ffffff',
+                    backgroundGradientTo: '#ffffff',
+                    color: (opacity = 1) => `rgba(25, 118, 210, ${opacity})`,
+                    labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
+                    strokeWidth: 2
+                  }}
+                  width={350}
+                  height={200}
+                  style={{ marginVertical: 8, borderRadius: 16 }}
                 />
               </View>
 
               {/* Monthly Attendance List */}
               <View style={styles.attendanceList}>
                 <Text style={styles.sectionTitle}>Monthly Attendance</Text>
-                <FlatList
-                  data={monthlyAttendance}
-                  keyExtractor={item => item.month}
-                  renderItem={({ item }) => (
+                <View style={styles.list}>
+                  {monthlyAttendance.map((item) => (
                     <TouchableOpacity
+                      key={item.month}
                       style={[styles.monthRow, {
                         backgroundColor: selectedMonth === item.month ? '#e3f2fd' : '#fff'
                       }]}
@@ -213,9 +222,8 @@ const StudentAttendanceScreen = ({ navigation, route }) => {
                         </Text>
                       </View>
                     </TouchableOpacity>
-                  )}
-                  contentContainerStyle={styles.list}
-                />
+                  ))}
+                </View>
               </View>
             </>
           )}

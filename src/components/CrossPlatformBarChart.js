@@ -42,6 +42,12 @@ function isPercentOrMarksChart(data) {
 }
 
 export default function CrossPlatformBarChart({ data, style, chartConfig, width, height, horizontal, ...props }) {
+  // Guard against undefined data
+  if (!data || !data.datasets || !data.datasets[0] || !data.datasets[0].data) {
+    console.warn('CrossPlatformBarChart: Invalid data provided');
+    return null;
+  }
+
   // If percent/marks chart, ensure axis goes to 100
   let patchedData = data;
   if (isPercentOrMarksChart(data)) {
@@ -61,11 +67,11 @@ export default function CrossPlatformBarChart({ data, style, chartConfig, width,
   if (Platform.OS === 'web') {
     // Convert data to Chart.js format
     const chartData = {
-      labels: patchedData.labels,
+      labels: patchedData.labels || [],
       datasets: [
         {
           label: '',
-          data: patchedData.datasets[0].data,
+          data: patchedData?.datasets?.[0]?.data || [],
           backgroundColor: (chartConfig?.color && typeof chartConfig.color === 'function') 
             ? chartConfig.color(1) 
             : chartConfig?.backgroundColor || '#2196F3',

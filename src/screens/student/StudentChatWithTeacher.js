@@ -17,6 +17,7 @@ import { runNetworkDiagnostics, formatNetworkDiagnosticResults } from '../../uti
 import { runBucketDiagnostics, formatBucketDiagnosticResults } from '../../utils/bucketDiagnostics';
 import { runSimpleNetworkTest, formatSimpleNetworkResults } from '../../utils/simpleNetworkTest';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
+import { getGlobalMessageHandler } from '../../utils/realtimeMessageHandler';
 
 const StudentChatWithTeacher = () => {
   const { user } = useAuth();
@@ -727,69 +728,88 @@ const StudentChatWithTeacher = () => {
     }
   };
 
-  // Real-time subscription for messages
+  // Real-time subscription for messages using optimistic UI
+  const messageHandler = getGlobalMessageHandler(supabase, TABLES.MESSAGES);
+  
   useEffect(() => {
     if (!selectedTeacher) return;
-    let subscription;
-    (async () => {
-      // Get teacher's user ID for proper subscription
-      let teacherUserId = selectedTeacher.userId;
-      if (!teacherUserId) {
-        try {
-          teacherUserId = await getTeacherUserId(selectedTeacher.id);
-        } catch (err) {
-          console.log('Could not get teacher user ID for subscription:', err);
-          return;
+    
+    // Get teacher's user ID for proper subscription
+    let teacherUserId = selectedTeacher.userId;
+    if (!teacherUserId) {
+      // If we don't have the teacher user ID, we can't set up subscription
+      console.log('No teacher user ID available for real-time subscription');
+      return;
+    }
+    
+    // Setup real-time subscription with message updates
+    const subscription = messageHandler.startSubscription(
+      user.id,
+      teacherUserId,
+      (message, eventType) => {
+        console.log('📨 Real-time message update:', { message, eventType });
+        
+        if (eventType === 'sent' || eventType === 'received' || eventType === 'updated') {
+          // Update messages state
+          setMessages(prev => {
+            // Remove any existing message with the same ID
+            const filtered = prev.filter(m => m.id !== message.id);
+            // Add the new/updated message and sort by timestamp
+            const updated = [...filtered, message].sort((a, b) => 
+              new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+            );
+            return updated;
+          });
+          
+          // Mark messages as read if they're from the teacher
+          if (message.sender_id === teacherUserId && !message.is_read) {
+            markMessagesAsRead(teacherUserId);
+            setUnreadCounts(prev => {
+              const updated = { ...prev };
+              delete updated[teacherUserId];
+              return updated;
+            });
+          }
+          
+          // Auto-scroll to bottom on new messages
+          setTimeout(() => {
+            try {
+              if (flatListRef.current?.scrollToEnd) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            } catch (error) {
+              // Silently handle scroll error
+            }
+          }, 100);
+        } else if (eventType === 'deleted') {
+          // Remove deleted message
+          setMessages(prev => prev.filter(m => m.id !== message.id));
         }
       }
-      
-      subscription = supabase
-        .channel(`student-chat-${user.id}-${teacherUserId}-${Date.now()}`)
-        .on('postgres_changes', { 
-          event: '*', 
-          schema: 'public', 
-          table: TABLES.MESSAGES
-        }, (payload) => {
-          console.log('Real-time message update:', payload);
-          
-          // Check if this message is relevant to our chat
-          const isRelevant = (
-            (payload.new?.sender_id === user.id && payload.new?.receiver_id === teacherUserId) ||
-            (payload.new?.sender_id === teacherUserId && payload.new?.receiver_id === user.id) ||
-            (payload.old?.sender_id === user.id && payload.old?.receiver_id === teacherUserId) ||
-            (payload.old?.sender_id === teacherUserId && payload.old?.receiver_id === user.id)
-          );
-          
-          if (isRelevant) {
-            console.log('Message is relevant, refreshing chat');
-            // Refresh messages when there's a relevant change
-            setTimeout(() => {
-              fetchMessages(selectedTeacher);
-            }, 200);
-          }
-        })
-        .subscribe();
-      
-      console.log('Subscribed to real-time updates for chat between', user.id, 'and', teacherUserId);
-    })();
+    );
+    
     return () => {
-      if (subscription) {
-        subscription.unsubscribe();
-        console.log('Unsubscribed from real-time chat updates');
-      }
+      messageHandler.stopSubscription();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTeacher, user.id]);
+  }, [selectedTeacher, user.id, messageHandler, markMessagesAsRead]);
 
-  // Send a message
+  // Send a message with optimistic UI
   const handleSend = async () => {
-    if (!input.trim() || !selectedTeacher) return;
+    if (!input.trim() || !selectedTeacher || sending) return;
+    
+    const messageText = input.trim();
+    const teacherUserId = selectedTeacher.userId;
+    
+    if (!teacherUserId) {
+      Alert.alert('Error', 'Cannot send message: Teacher account not available');
+      return;
+    }
+    
+    // Clear input immediately for better UX
+    setInput('');
     setSending(true);
+    
     try {
-      console.log('Starting to send message...');
-      console.log('User ID:', user.id);
-      console.log('Selected Teacher:', selectedTeacher);
-
       // Get student data for the student_id field
       const { data: studentUserData, error: studentError } = await dbHelpers.getStudentByUserId(user.id);
       if (studentError || !studentUserData) {
@@ -800,67 +820,66 @@ const StudentChatWithTeacher = () => {
       if (!student) {
         throw new Error('Student profile not found');
       }
-
-      // Get teacher's user ID using our helper function
-      const teacherUserId = selectedTeacher.userId || await getTeacherUserId(selectedTeacher.id);
-      console.log('Teacher User ID:', teacherUserId);
-      console.log('Selected Teacher ID:', selectedTeacher.id);
-      console.log('Selected Teacher userId:', selectedTeacher.userId);
-
-      if (!teacherUserId) {
-        throw new Error('Teacher user account not found. Please contact admin to ensure teacher has a user account.');
-      }
-
-      const newMsg = {
-        sender_id: user.id,
-        receiver_id: teacherUserId, // Use teacher's user ID, not teacher table ID
-        student_id: student.id,
-        message: input,
-      };
-
-      console.log('Message to insert:', newMsg);
-
-      const { data: insertedMsg, error: sendError } = await supabase
-        .from(TABLES.MESSAGES)
-        .insert(newMsg)
-        .select();
-
-      console.log('Send error:', sendError);
-      console.log('Inserted message:', insertedMsg);
-
-      if (sendError) {
-        console.error('Supabase error object:', JSON.stringify(sendError, null, 2));
-        throw new Error(`Database error: ${sendError.message || sendError.code || 'Unknown database error'}`);
-      }
-
-      // Add message to local state for immediate display
-      const displayMsg = {
-        id: insertedMsg?.[0]?.id || Date.now().toString(),
+      
+      // Prepare message data for the handler
+      const messageData = {
         sender_id: user.id,
         receiver_id: teacherUserId,
         student_id: student.id,
-        message: input,
-        sent_at: insertedMsg?.[0]?.sent_at || new Date().toISOString(),
+        message: messageText,
         message_type: 'text'
       };
-
-      setMessages(prev => [...prev, displayMsg]);
-      setInput('');
       
-      // Scroll to bottom after sending
-      setTimeout(() => {
-        try {
-          if (flatListRef.current && flatListRef.current.scrollToEnd) {
-            flatListRef.current.scrollToEnd({ animated: true });
-          }
-        } catch (error) {
-          console.log('Scroll to end after sending error:', error);
+      // Use the message handler for optimistic UI and reliable sending
+      await messageHandler.sendMessageOptimistic(
+        messageData,
+        // Optimistic update callback
+        (optimisticMessage) => {
+          console.log('⚡ Adding optimistic message to UI:', optimisticMessage);
+          setMessages(prev => {
+            const updated = [...prev, optimisticMessage].sort((a, b) => 
+              new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+            );
+            return updated;
+          });
+          
+          // Auto-scroll to bottom
+          setTimeout(() => {
+            try {
+              if (flatListRef.current?.scrollToEnd) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            } catch (error) {
+              // Silently handle scroll error
+            }
+          }, 100);
+        },
+        // Confirmed callback
+        (tempId, confirmedMessage) => {
+          console.log('✅ Message confirmed, replacing optimistic:', { tempId, confirmedMessage });
+          setMessages(prev => prev.map(msg => 
+            msg.id === tempId ? confirmedMessage : msg
+          ));
+        },
+        // Error callback
+        (tempId, failedMessage, error) => {
+          console.error('❌ Message failed:', { tempId, error });
+          // Update message to show failed state
+          setMessages(prev => prev.map(msg => 
+            msg.id === tempId ? { ...failedMessage, failed: true } : msg
+          ));
+          
+          // Restore input text for retry
+          setInput(messageText);
+          Alert.alert('Message Failed', `Failed to send message: ${error.message || 'Unknown error'}. The message is marked as failed - you can try sending again.`);
         }
-      }, 100);
-    } catch (err) {
-      console.error('Error sending message:', err);
-      console.error('Error details:', JSON.stringify(err, null, 2));
-      Alert.alert('Error', `Failed to send message: ${err.message || 'Unknown error'}`);
+      );
+      
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      // Restore input text on failure
+      setInput(messageText);
+      Alert.alert('Error', `Failed to send message: ${error.message || 'Unknown error'}`);
     } finally {
       setSending(false);
     }

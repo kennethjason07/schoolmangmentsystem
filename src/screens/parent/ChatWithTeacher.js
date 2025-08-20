@@ -7,7 +7,8 @@ import Header from '../../components/Header';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
-import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { supabase, TABLES } from '../../utils/supabase';
+import { getGlobalMessageHandler } from '../../utils/realtimeMessageHandler';
 import { useMessageStatus, getUnreadCountFromSender } from '../../utils/useMessageStatus';
 import { formatToLocalTime } from '../../utils/timeUtils';
 import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from '../../utils/chatFileUpload';
@@ -578,214 +579,87 @@ const ChatWithTeacher = () => {
     }
   };
 
-  // Set up real-time message subscription
+  // Set up real-time message subscription using RealtimeMessageHandler
+  const messageHandler = getGlobalMessageHandler(supabase, TABLES.MESSAGES);
+  
   useEffect(() => {
-    let subscription = null;
+    if (!selectedTeacher || !selectedTeacher.userId) return;
     
-    if (user?.id) {
-      console.log('🔔 Setting up real-time message subscription for user:', user.id);
-      console.log('🔔 Selected teacher:', selectedTeacher?.name, 'userId:', selectedTeacher?.userId);
-      
-      // Create a unique channel name to avoid conflicts
-      const channelName = `messages-realtime-${user.id}-${Date.now()}`;
-      
-      // Test subscription setup
-      subscription = supabase
-        .channel(channelName)
-        .on(
-          'postgres_changes',
-          {
-            event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
-            schema: 'public',
-            table: 'messages',
-            filter: `or(sender_id.eq.${user.id},receiver_id.eq.${user.id})` // Only messages involving this user
-          },
-          (payload) => {
-            console.log('🚨 REAL-TIME EVENT RECEIVED! 🚨');
-            console.log('💬 Real-time message update:', JSON.stringify(payload, null, 2));
-            console.log('💬 Event type:', payload.eventType);
-            console.log('💬 Timestamp:', new Date().toISOString());
-            
-            if (payload.eventType === 'INSERT') {
-              const newMessage = payload.new;
-              console.log('📨 New message received:', newMessage);
-              console.log('📨 Message sender_id:', newMessage.sender_id, 'receiver_id:', newMessage.receiver_id);
-              console.log('📨 Current user.id:', user.id);
-              
-              // Get fresh selectedTeacher from state to avoid stale closure
-              setSelectedTeacher(currentSelectedTeacher => {
-                console.log('💬 Current selectedTeacher in callback:', currentSelectedTeacher?.name, currentSelectedTeacher?.userId);
-                
-                // If we're currently in a chat with the sender/receiver, add the message immediately
-                if (currentSelectedTeacher && currentSelectedTeacher.userId && 
-                    (newMessage.sender_id === currentSelectedTeacher.userId || 
-                     newMessage.receiver_id === currentSelectedTeacher.userId)) {
-                  
-                  console.log('✅ Message is for current chat, adding to messages');
-                  const formattedMessage = {
-                    ...newMessage,
-                    text: newMessage.message,
-                    timestamp: formatToLocalTime(newMessage.sent_at),
-                    sender: newMessage.sender_id === user.id ? 'parent' : 'teacher'
-                  };
-                  
-                  setMessages(prev => {
-                    // Check if message already exists to prevent duplicates
-                    const exists = prev.some(msg => msg.id === newMessage.id);
-                    if (!exists) {
-                      console.log('✅ Adding new message to current chat:', formattedMessage.text);
-                      const newMessages = [...prev, formattedMessage];
-                      console.log('📊 Total messages after adding:', newMessages.length);
-                      return newMessages;
-                    }
-                    console.log('⚠️ Message already exists, skipping');
-                    return prev;
-                  });
-                  
-                  // Scroll to bottom when new message arrives
-                  setTimeout(() => {
-                    if (flatListRef.current) {
-                      console.log('🔄 Scrolling to bottom after new message');
-                      flatListRef.current.scrollToEnd({ animated: true });
-                    }
-                  }, 100);
-                } else {
-                  console.log('📨 Message not for current chat or no chat selected');
-                  console.log('   - currentSelectedTeacher exists:', !!currentSelectedTeacher);
-                  console.log('   - currentSelectedTeacher.userId:', currentSelectedTeacher?.userId);
-                  console.log('   - Message sender_id:', newMessage.sender_id);
-                  console.log('   - Message receiver_id:', newMessage.receiver_id);
-                }
-                
-                // Always return the current selected teacher (no change)
-                return currentSelectedTeacher;
-              });
-              
-              // Update unread counts if message is from teacher to parent
-              if (newMessage.receiver_id === user.id && newMessage.sender_id !== user.id) {
-                console.log('📬 Parent Chat: Updating unread count for sender:', newMessage.sender_id);
-                setUnreadCounts(prev => {
-                  const newCount = (prev[newMessage.sender_id] || 0) + 1;
-                  console.log(`📊 Parent Chat: Teacher ${newMessage.sender_id} unread count: ${prev[newMessage.sender_id] || 0} -> ${newCount}`);
-                  return {
-                    ...prev,
-                    [newMessage.sender_id]: newCount
-                  };
-                });
-              }
-              
-              // Update teachers list with new message if not in current chat
-              if (!selectedTeacher || 
-                  (selectedTeacher.userId !== newMessage.sender_id && selectedTeacher.userId !== newMessage.receiver_id)) {
-                console.log('🔄 Updating teachers list due to new message');
-                setTeachers(prevTeachers => {
-                  return prevTeachers.map(teacher => {
-                    // Find the teacher this message involves
-                    const isInvolvedTeacher = teacher.userId === newMessage.sender_id || teacher.userId === newMessage.receiver_id;
-                    if (isInvolvedTeacher) {
-                      const formattedMessage = {
-                        ...newMessage,
-                        text: newMessage.message,
-                        timestamp: formatToLocalTime(newMessage.sent_at),
-                        sender: newMessage.sender_id === user.id ? 'parent' : 'teacher'
-                      };
-                      
-                      return {
-                        ...teacher,
-                        messages: [...(teacher.messages || []), formattedMessage],
-                        lastMessageTime: newMessage.sent_at
-                      };
-                    }
-                    return teacher;
-                  });
-                });
-              }
-            }
-            
-            if (payload.eventType === 'UPDATE') {
-              const updatedMessage = payload.new;
-              console.log('📝 Message updated:', updatedMessage);
-              
-              // Update the message in current chat if it's visible
-              if (selectedTeacher && selectedTeacher.userId &&
-                  (updatedMessage.sender_id === selectedTeacher.userId || 
-                   updatedMessage.receiver_id === selectedTeacher.userId)) {
-                
-                setMessages(prev => prev.map(msg => 
-                  msg.id === updatedMessage.id 
-                    ? {
-                        ...updatedMessage,
-                        text: updatedMessage.message,
-                        timestamp: formatToLocalTime(updatedMessage.sent_at),
-                        sender: updatedMessage.sender_id === user.id ? 'parent' : 'teacher'
-                      }
-                    : msg
-                ));
-              }
-              
-              // If a message was marked as read, update unread counts
-              if (updatedMessage.is_read === true && updatedMessage.receiver_id === user.id) {
-                console.log('✅ Message marked as read, updating unread counts');
-                setUnreadCounts(prev => {
-                  const newCount = Math.max(0, (prev[updatedMessage.sender_id] || 0) - 1);
-                  return {
-                    ...prev,
-                    [updatedMessage.sender_id]: newCount
-                  };
-                });
-              }
-            }
-            
-            if (payload.eventType === 'DELETE') {
-              const deletedMessage = payload.old;
-              console.log('🗑️ Message deleted:', deletedMessage);
-              
-              // Remove from current chat if visible
-              if (selectedTeacher && selectedTeacher.userId &&
-                  (deletedMessage.sender_id === selectedTeacher.userId || 
-                   deletedMessage.receiver_id === selectedTeacher.userId)) {
-                
-                setMessages(prev => prev.filter(msg => msg.id !== deletedMessage.id));
-              }
-            }
+    console.log('🔔 Setting up RealtimeMessageHandler subscription for:', {
+      userId: user.id,
+      teacherUserId: selectedTeacher.userId,
+      teacherName: selectedTeacher.name
+    });
+    
+    // Setup real-time subscription with message updates using the same pattern as TeacherChat.js
+    const subscription = messageHandler.startSubscription(
+      user.id,
+      selectedTeacher.userId,
+      (message, eventType) => {
+        console.log('📨 Parent Chat - Real-time message update:', { message, eventType });
+        
+        if (eventType === 'sent' || eventType === 'received' || eventType === 'updated') {
+          // Update messages state
+          setMessages(prev => {
+            // Remove any existing message with the same ID
+            const filtered = prev.filter(m => m.id !== message.id);
+            // Add the new/updated message and sort by timestamp
+            const formattedMessage = {
+              ...message,
+              text: message.message,
+              timestamp: formatToLocalTime(message.sent_at),
+              sender: message.sender_id === user.id ? 'parent' : 'teacher'
+            };
+            const updated = [...filtered, formattedMessage].sort((a, b) => 
+              new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+            );
+            return updated;
+          });
+          
+          // Mark messages as read if they're from the teacher
+          if (message.sender_id === selectedTeacher.userId && !message.is_read) {
+            markMessagesAsRead(selectedTeacher.userId);
+            setUnreadCounts(prev => {
+              const updated = { ...prev };
+              delete updated[selectedTeacher.userId];
+              return updated;
+            });
           }
-        )
-        .subscribe((status, err) => {
-          console.log('📡 SUBSCRIPTION STATUS:', status);
-          if (status === 'SUBSCRIBED') {
-            console.log('✅ Real-time subscription established successfully with channel:', channelName);
-            console.log('🔄 Subscription is now active and ready to receive events');
-          } else if (status === 'CLOSED') {
-            console.log('❌ Subscription closed');
-          } else if (status === 'CHANNEL_ERROR') {
-            console.log('❌ Subscription error:', err);
-          } else {
-            console.log('🔄 Subscription status changed to:', status);
-          }
-        });
-      
-      // Test the subscription by logging its details
-      console.log('🔍 Subscription object:', subscription);
-      console.log('🔍 Channel name:', channelName);
-      console.log('🔍 Filter:', `or(sender_id.eq.${user.id},receiver_id.eq.${user.id})`);
-      console.log('🔍 Table:', 'messages');
-      console.log('🔍 Schema:', 'public');
-      
-      // Test if Supabase client is properly configured for realtime
-      console.log('🔍 Supabase client settings:');
-      console.log('   - URL:', supabase.supabaseUrl);
-      console.log('   - Key:', supabase.supabaseKey ? 'Present' : 'Missing');
-      console.log('   - Realtime URL:', supabase.realtime?.endPoint || 'Not found');
-      console.log('   - Realtime Status:', supabase.realtime?.socket?.readyState || 'Unknown');
-    }
+          
+          // Auto-scroll to bottom on new messages
+          setTimeout(() => {
+            try {
+              if (flatListRef.current?.scrollToEnd) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            } catch (error) {
+              // Silently handle scroll error
+            }
+          }, 100);
+        } else if (eventType === 'deleted') {
+          // Remove deleted message
+          setMessages(prev => prev.filter(m => m.id !== message.id));
+        }
+        
+        // Update unread counts if message is from teacher to parent (not in current chat)
+        if (message.sender_id !== user.id && message.receiver_id === user.id) {
+          console.log('📬 Parent Chat: Updating unread count for sender:', message.sender_id);
+          setUnreadCounts(prev => {
+            const newCount = (prev[message.sender_id] || 0) + 1;
+            console.log(`📊 Parent Chat: Teacher ${message.sender_id} unread count: ${prev[message.sender_id] || 0} -> ${newCount}`);
+            return {
+              ...prev,
+              [message.sender_id]: newCount
+            };
+          });
+        }
+      }
+    );
     
     return () => {
-      if (subscription) {
-        console.log('🔕 Cleaning up real-time subscription');
-        supabase.removeChannel(subscription);
-      }
+      messageHandler.stopSubscription();
     };
-  }, [user?.id, selectedTeacher?.userId]);
+  }, [selectedTeacher?.userId, user.id, messageHandler, markMessagesAsRead]);
 
   // Reset teacher selection and messages on screen focus
   useFocusEffect(
@@ -836,9 +710,15 @@ const ChatWithTeacher = () => {
     }
   };
 
-  // Send a message
+  // Send a message with optimistic UI using RealtimeMessageHandler
   const handleSend = async () => {
-    if (!input.trim() || !selectedTeacher) return;
+    if (!input.trim() || !selectedTeacher || sending) return;
+    
+    const messageText = input.trim();
+    
+    // Clear input immediately for better UX
+    setInput('');
+    setSending(true);
     
     try {
       console.log('Starting to send message...');
@@ -852,9 +732,6 @@ const ChatWithTeacher = () => {
         .eq('id', user.id)
         .single();
 
-      console.log('Parent User Data:', parentUser);
-      console.log('Parent Error:', parentError);
-
       if (parentError || !parentUser?.linked_parent_of) {
         throw new Error('Parent data not found or no student linked');
       }
@@ -862,74 +739,90 @@ const ChatWithTeacher = () => {
       // Get teacher's user ID using our enhanced helper function
       const teacherUserId = selectedTeacher.userId || await getTeacherUserId(selectedTeacher.id);
 
-      console.log('Teacher User ID:', teacherUserId);
-      console.log('Selected Teacher ID:', selectedTeacher.id);
-      console.log('Selected Teacher userId:', selectedTeacher.userId);
-
       if (!teacherUserId) {
         throw new Error('Teacher user account not found. Please contact admin to ensure teacher has a user account.');
       }
 
-      // Create message for the messages table
-      const newMsg = {
-        sender_id: user.id,
-        receiver_id: teacherUserId, // Use teacher's user ID, not teacher table ID
-        student_id: parentUser.linked_parent_of,
-        message: input,
-      };
-
-      console.log('Message to insert:', newMsg);
-      console.log('Table name being used:', TABLES.MESSAGES);
-
-      const { data: insertedMsg, error: sendError } = await supabase
-        .from('messages')
-        .insert(newMsg)
-        .select();
-
-      console.log('Insert result:', insertedMsg);
-      console.log('Insert error:', sendError);
-      console.log('Insert error code:', sendError?.code);
-      console.log('Insert error message:', sendError?.message);
-      console.log('Insert error details:', sendError?.details);
-
-      if (sendError) {
-        console.error('Supabase error object:', JSON.stringify(sendError, null, 2));
-        throw new Error(`Database error: ${sendError.message || sendError.code || 'Unknown database error'}`);
-      }
-
-      if (!insertedMsg || insertedMsg.length === 0) {
-        throw new Error('Message was not inserted successfully');
-      }
-
-      // Add message to local state for immediate display
-      const displayMsg = {
-        id: Date.now().toString(),
+      // Prepare message data for the handler
+      const messageData = {
         sender_id: user.id,
         receiver_id: teacherUserId,
-        message: input,
-        text: input, // Add this for compatibility with render
-        sent_at: insertedMsg?.[0]?.sent_at || new Date().toISOString(),
-        timestamp: formatToLocalTime(new Date().toISOString()),
-        message_type: 'text',
-        sender: 'parent' // Add this for the render logic
+        student_id: parentUser.linked_parent_of,
+        message: messageText,
+        message_type: 'text'
       };
-
-      setMessages(prev => [...prev, displayMsg]);
-      setInput('');
-
-      // Notify badge system that a new message was sent (for the receiver)
-      badgeNotifier.notifyNewMessage(teacherUserId, user.id);
-
-      // Scroll to bottom after sending
-      setTimeout(() => {
-        if (flatListRef.current) {
-          flatListRef.current.scrollToEnd({ animated: true });
+      
+      // Use the message handler for optimistic UI and reliable sending
+      await messageHandler.sendMessageOptimistic(
+        messageData,
+        // Optimistic update callback
+        (optimisticMessage) => {
+          console.log('⚡ Parent Chat - Adding optimistic message to UI:', optimisticMessage);
+          setMessages(prev => {
+            const updated = [...prev, {
+              ...optimisticMessage,
+              text: optimisticMessage.message,
+              timestamp: formatToLocalTime(optimisticMessage.sent_at),
+              sender: 'parent'
+            }].sort((a, b) => 
+              new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+            );
+            return updated;
+          });
+          
+          // Auto-scroll to bottom
+          setTimeout(() => {
+            try {
+              if (flatListRef.current?.scrollToEnd) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            } catch (error) {
+              // Silently handle scroll error
+            }
+          }, 100);
+        },
+        // Confirmed callback
+        (tempId, confirmedMessage) => {
+          console.log('✅ Parent Chat - Message confirmed, replacing optimistic:', { tempId, confirmedMessage });
+          setMessages(prev => prev.map(msg => 
+            msg.id === tempId ? {
+              ...confirmedMessage,
+              text: confirmedMessage.message,
+              timestamp: formatToLocalTime(confirmedMessage.sent_at),
+              sender: 'parent'
+            } : msg
+          ));
+          
+          // Notify badge system that a new message was sent (for the receiver)
+          badgeNotifier.notifyNewMessage(teacherUserId, user.id);
+        },
+        // Error callback
+        (tempId, failedMessage, error) => {
+          console.error('❌ Parent Chat - Message failed:', { tempId, error });
+          // Update message to show failed state
+          setMessages(prev => prev.map(msg => 
+            msg.id === tempId ? { 
+              ...failedMessage, 
+              failed: true,
+              text: failedMessage.message,
+              timestamp: formatToLocalTime(failedMessage.sent_at),
+              sender: 'parent'
+            } : msg
+          ));
+          
+          // Restore input text for retry
+          setInput(messageText);
+          Alert.alert('Message Failed', `Failed to send message: ${error.message || 'Unknown error'}. The message is marked as failed - you can try sending again.`);
         }
-      }, 100);
-    } catch (err) {
-      console.error('Error sending message:', err);
-      console.error('Error details:', JSON.stringify(err, null, 2));
-      Alert.alert('Error', `Failed to send message: ${err.message || 'Unknown error'}`);
+      );
+      
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      // Restore input text on failure
+      setInput(messageText);
+      Alert.alert('Error', `Failed to send message: ${error.message || 'Unknown error'}`);
+    } finally {
+      setSending(false);
     }
   };
 
