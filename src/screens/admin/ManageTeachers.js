@@ -448,6 +448,10 @@ const ManageTeachers = ({ navigation, route }) => {
               
               // Update local state
               setTeachers(teachers.filter(t => t.id !== teacher.id));
+              
+              // Show success message with teacher name
+              Alert.alert('Success', `Deleted teacher: ${teacher.name}`);
+              
             } catch (err) {
               console.error('Error deleting teacher:', err);
               Alert.alert('Error', err.message);
@@ -499,14 +503,23 @@ const ManageTeachers = ({ navigation, route }) => {
       >
         <View style={styles.teacherInfo}>
           <View style={styles.teacherAvatar}>
-            <Ionicons name="person" size={24} color="#4CAF50" />
+            <View style={styles.profileContainer}>
+              <Text style={styles.profileInitials}>
+                {item.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
+              </Text>
+            </View>
+            <View style={styles.iconOverlay}>
+              <Ionicons name="person" size={16} color="#4CAF50" />
+            </View>
           </View>
           <View style={styles.teacherDetails}>
             <Text style={styles.teacherName}>{item.name}</Text>
             <Text style={styles.teacherSubject}>
-              {item.subjects.map(s => subjects.find(sub => sub.id === s)?.name || '').join(', ')}
+              {item.subjects.map(s => subjects.find(sub => sub.id === s)?.name).filter(name => name).join(', ') || 'Not assigned'}
             </Text>
-            <Text style={styles.teacherClass}>{item.classes.map(c => classes.find(cls => cls.id === c)?.class_name || '').join(', ')}</Text>
+            {item.classes.map(c => classes.find(cls => cls.id === c)?.class_name).filter(name => name).length > 0 && (
+              <Text style={styles.teacherClass}>{item.classes.map(c => classes.find(cls => cls.id === c)?.class_name).filter(name => name).join(', ')}</Text>
+            )}
             {/* Salary and Education */}
             <Text style={styles.teacherSalary}>
               Salary: {item.salary_amount ? `₹${parseFloat(item.salary_amount).toFixed(2)}` : '₹0.00'}
@@ -1118,6 +1131,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+    position: 'relative',
+  },
+  profileContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#4CAF50',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.5,
+  },
+  profileInitials: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  iconOverlay: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
   },
   teacherDetails: {
     flex: 1,

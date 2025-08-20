@@ -603,6 +603,28 @@ const ViewReportCard = () => {
           </Text>
         </View>
 
+        <View style={styles.subjectsHeader}>
+          <Text style={styles.subjectHeaderText}>Subject</Text>
+          <Text style={styles.subjectHeaderText}>Marks</Text>
+          <Text style={styles.subjectHeaderText}>Total</Text>
+          <Text style={styles.subjectHeaderText}>Grade</Text>
+        </View>
+
+        {reportCard.subjects.map((subjectMark, index) => (
+          <View key={index} style={styles.subjectRow}>
+            <Text style={styles.subjectName}>{subjectMark.subject?.name}</Text>
+            <Text style={styles.subjectMarks}>
+              {subjectMark.marks_obtained}
+            </Text>
+            <Text style={styles.subjectTotal}>
+              {subjectMark.max_marks}
+            </Text>
+            <Text style={[styles.subjectGrade, { color: getGradeColor(subjectMark.grade) }]}>
+              {subjectMark.grade || 'N/A'}
+            </Text>
+          </View>
+        ))}
+
         <View style={styles.summarySection}>
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>Total Marks</Text>
@@ -617,24 +639,6 @@ const ViewReportCard = () => {
             </Text>
           </View>
         </View>
-
-        <View style={styles.subjectsHeader}>
-          <Text style={styles.subjectHeaderText}>Subject</Text>
-          <Text style={styles.subjectHeaderText}>Marks</Text>
-          <Text style={styles.subjectHeaderText}>Grade</Text>
-        </View>
-
-        {reportCard.subjects.map((subjectMark, index) => (
-          <View key={index} style={styles.subjectRow}>
-            <Text style={styles.subjectName}>{subjectMark.subject?.name}</Text>
-            <Text style={styles.subjectMarks}>
-              {subjectMark.marks_obtained}/{subjectMark.max_marks}
-            </Text>
-            <Text style={[styles.subjectGrade, { color: getGradeColor(subjectMark.grade) }]}>
-              {subjectMark.grade || 'N/A'}
-            </Text>
-          </View>
-        ))}
       </View>
     );
   };
@@ -1295,8 +1299,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
     fontWeight: '500',
+    textAlign: 'center',
   },
   subjectMarks: {
+    flex: 1,
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+  },
+  subjectTotal: {
     flex: 1,
     fontSize: 14,
     color: '#666',

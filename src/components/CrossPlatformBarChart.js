@@ -66,7 +66,9 @@ export default function CrossPlatformBarChart({ data, style, chartConfig, width,
         {
           label: '',
           data: patchedData.datasets[0].data,
-          backgroundColor: chartConfig?.color ? chartConfig.color(1) : '#2196F3',
+          backgroundColor: (chartConfig?.color && typeof chartConfig.color === 'function') 
+            ? chartConfig.color(1) 
+            : chartConfig?.backgroundColor || '#2196F3',
         },
       ],
     };

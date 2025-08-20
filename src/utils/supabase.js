@@ -1493,6 +1493,363 @@ export const dbHelpers = {
   },
 
   // ========================================
+  // ADVANCED ATTENDANCE QUERIES
+  // ========================================
+
+  // Fetch attendance by student name, father's name, and class
+  async getAttendanceByStudentDetails(searchCriteria, options = {}) {
+    try {
+      const {
+        studentName = null,
+        fatherName = null,
+        className = null,
+        section = null,
+        startDate = null,
+        endDate = null,
+        limit = 100
+      } = searchCriteria;
+
+      const {
+        includeStudentDetails = true,
+        includeClassDetails = true,
+        includeParentDetails = true,
+        orderBy = 'date',
+        orderDirection = 'desc'
+      } = options;
+
+      console.log('Searching attendance with criteria:', searchCriteria);
+
+      // Build the query step by step
+      let query = supabase
+        .from(TABLES.STUDENT_ATTENDANCE)
+        .select(`
+          id,
+          student_id,
+          class_id,
+          date,
+          status,
+          marked_by,
+          created_at,
+          ${includeStudentDetails ? `
+          students!inner (
+            id,
+            name,
+            admission_no,
+            roll_no,
+            dob,
+            gender,
+            academic_year,
+            parent_id
+          ),` : ''}
+          ${includeClassDetails ? `
+          classes!inner (
+            id,
+            class_name,
+            section,
+            academic_year
+          )` : ''}
+        `)
+        .order(orderBy, { ascending: orderDirection === 'asc' })
+        .limit(limit);
+
+      // Apply student name filter
+      if (studentName && studentName.trim()) {
+        query = query.ilike('students.name', `%${studentName.trim()}%`);
+      }
+
+      // Apply class name filter
+      if (className && className.trim()) {
+        query = query.ilike('classes.class_name', `%${className.trim()}%`);
+      }
+
+      // Apply section filter
+      if (section && section.trim()) {
+        query = query.ilike('classes.section', `%${section.trim()}%`);
+      }
+
+      // Apply date range filters
+      if (startDate) {
+        query = query.gte('date', startDate);
+      }
+      if (endDate) {
+        query = query.lte('date', endDate);
+      }
+
+      const { data: attendanceRecords, error: attendanceError } = await query;
+
+      if (attendanceError) {
+        console.error('Error fetching attendance records:', attendanceError);
+        return { data: null, error: attendanceError };
+      }
+
+      console.log(`Found ${attendanceRecords?.length || 0} attendance records`);
+
+      // If father's name is specified, we need to filter by parent data
+      let filteredRecords = attendanceRecords || [];
+
+      if (fatherName && fatherName.trim() && includeParentDetails) {
+        console.log('Filtering by father name:', fatherName);
+        
+        // Get parent information for each student
+        const studentIds = [...new Set(filteredRecords.map(record => record.student_id))];
+        
+        if (studentIds.length > 0) {
+          const { data: parentData, error: parentError } = await supabase
+            .from(TABLES.PARENTS)
+            .select('student_id, name, relation')
+            .in('student_id', studentIds)
+            .ilike('name', `%${fatherName.trim()}%`)
+            .eq('relation', 'Father');
+
+          if (parentError) {
+            console.error('Error fetching parent data:', parentError);
+          } else {
+            const validStudentIds = new Set(parentData.map(parent => parent.student_id));
+            filteredRecords = filteredRecords.filter(record => 
+              validStudentIds.has(record.student_id)
+            );
+            
+            // Add parent information to the records
+            filteredRecords = filteredRecords.map(record => {
+              const parentInfo = parentData.find(parent => parent.student_id === record.student_id);
+              return {
+                ...record,
+                father_name: parentInfo?.name || null
+              };
+            });
+          }
+        }
+      }
+
+      console.log(`Final filtered records: ${filteredRecords.length}`);
+
+      return {
+        data: filteredRecords,
+        error: null,
+        totalCount: filteredRecords.length,
+        searchCriteria
+      };
+    } catch (error) {
+      console.error('Error in getAttendanceByStudentDetails:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Search students by name and father's name
+  async searchStudentsByNameAndFather(searchCriteria) {
+    try {
+      const {
+        studentName = null,
+        fatherName = null,
+        className = null,
+        section = null,
+        limit = 50
+      } = searchCriteria;
+
+      console.log('Searching students with criteria:', searchCriteria);
+
+      let query = supabase
+        .from(TABLES.STUDENTS)
+        .select(`
+          id,
+          name,
+          admission_no,
+          roll_no,
+          dob,
+          gender,
+          academic_year,
+          class_id,
+          parent_id,
+          classes!inner (
+            id,
+            class_name,
+            section,
+            academic_year
+          )
+        `)
+        .limit(limit);
+
+      // Apply student name filter
+      if (studentName && studentName.trim()) {
+        query = query.ilike('name', `%${studentName.trim()}%`);
+      }
+
+      // Apply class name filter
+      if (className && className.trim()) {
+        query = query.ilike('classes.class_name', `%${className.trim()}%`);
+      }
+
+      // Apply section filter
+      if (section && section.trim()) {
+        query = query.ilike('classes.section', `%${section.trim()}%`);
+      }
+
+      const { data: students, error: studentsError } = await query;
+
+      if (studentsError) {
+        console.error('Error fetching students:', studentsError);
+        return { data: null, error: studentsError };
+      }
+
+      let filteredStudents = students || [];
+
+      // Filter by father's name if specified
+      if (fatherName && fatherName.trim()) {
+        console.log('Filtering students by father name:', fatherName);
+        
+        const studentIds = filteredStudents.map(student => student.id);
+        
+        if (studentIds.length > 0) {
+          const { data: parentData, error: parentError } = await supabase
+            .from(TABLES.PARENTS)
+            .select('student_id, name, relation')
+            .in('student_id', studentIds)
+            .ilike('name', `%${fatherName.trim()}%`)
+            .eq('relation', 'Father');
+
+          if (parentError) {
+            console.error('Error fetching parent data for filtering:', parentError);
+          } else {
+            const validStudentIds = new Set(parentData.map(parent => parent.student_id));
+            filteredStudents = filteredStudents.filter(student => 
+              validStudentIds.has(student.id)
+            );
+            
+            // Add father's name to student records
+            filteredStudents = filteredStudents.map(student => {
+              const fatherInfo = parentData.find(parent => parent.student_id === student.id);
+              return {
+                ...student,
+                father_name: fatherInfo?.name || null
+              };
+            });
+          }
+        }
+      }
+
+      console.log(`Found ${filteredStudents.length} matching students`);
+
+      return {
+        data: filteredStudents,
+        error: null,
+        totalCount: filteredStudents.length,
+        searchCriteria
+      };
+    } catch (error) {
+      console.error('Error in searchStudentsByNameAndFather:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Get detailed attendance report for specific students
+  async getDetailedAttendanceReport(studentIds, options = {}) {
+    try {
+      const {
+        startDate = null,
+        endDate = null,
+        includeStats = true,
+        groupByMonth = false
+      } = options;
+
+      if (!studentIds || studentIds.length === 0) {
+        return { data: [], error: null };
+      }
+
+      console.log('Generating detailed attendance report for students:', studentIds);
+
+      // Fetch attendance records
+      let query = supabase
+        .from(TABLES.STUDENT_ATTENDANCE)
+        .select(`
+          id,
+          student_id,
+          class_id,
+          date,
+          status,
+          marked_by,
+          created_at,
+          students!inner (
+            id,
+            name,
+            admission_no,
+            roll_no,
+            academic_year
+          ),
+          classes!inner (
+            id,
+            class_name,
+            section,
+            academic_year
+          )
+        `)
+        .in('student_id', studentIds)
+        .order('date', { ascending: false });
+
+      if (startDate) {
+        query = query.gte('date', startDate);
+      }
+      if (endDate) {
+        query = query.lte('date', endDate);
+      }
+
+      const { data: attendanceRecords, error: attendanceError } = await query;
+
+      if (attendanceError) {
+        console.error('Error fetching attendance for report:', attendanceError);
+        return { data: null, error: attendanceError };
+      }
+
+      let reportData = attendanceRecords || [];
+
+      // Add statistics if requested
+      if (includeStats) {
+        const statsPromises = studentIds.map(async (studentId) => {
+          const studentRecords = reportData.filter(record => record.student_id === studentId);
+          const totalDays = studentRecords.length;
+          const presentDays = studentRecords.filter(record => record.status === 'Present').length;
+          const absentDays = studentRecords.filter(record => record.status === 'Absent').length;
+          const attendancePercentage = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+
+          const student = studentRecords[0]?.students;
+          
+          return {
+            student_id: studentId,
+            student_name: student?.name || 'Unknown',
+            admission_no: student?.admission_no || 'N/A',
+            roll_no: student?.roll_no || 'N/A',
+            total_days: totalDays,
+            present_days: presentDays,
+            absent_days: absentDays,
+            attendance_percentage: attendancePercentage,
+            records: studentRecords
+          };
+        });
+
+        const stats = await Promise.all(statsPromises);
+        
+        return {
+          data: reportData,
+          statistics: stats,
+          error: null,
+          summary: {
+            total_students: studentIds.length,
+            date_range: { startDate, endDate },
+            total_records: reportData.length
+          }
+        };
+      }
+
+      return {
+        data: reportData,
+        error: null
+      };
+    } catch (error) {
+      console.error('Error generating attendance report:', error);
+      return { data: null, error };
+    }
+  },
+
+  // ========================================
   // EXPENSE MANAGEMENT FUNCTIONS
   // ========================================
 

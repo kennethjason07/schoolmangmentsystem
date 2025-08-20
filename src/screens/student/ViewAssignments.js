@@ -6,6 +6,13 @@ import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import Header from '../../components/Header';
+import ImageViewerModal from '../../components/ImageViewerModal';
+import { 
+  uploadAssignmentFile, 
+  formatFileSize as formatAssignmentFileSize, 
+  getAssignmentFileIcon,
+  isSupportedFileType 
+} from '../../utils/assignmentFileUpload';
 
 const statusColors = {
   not_submitted: '#F44336',
@@ -33,6 +40,45 @@ const getFileIcon = (fileType) => {
   return 'document-outline';
 };
 
+// Helper function to get proper URL from bucket storage
+const getFileUrlFromBucket = (filePathOrUrl, fileName, bucketName = 'homework-files') => {
+  try {
+    if (!filePathOrUrl) {
+      console.log('⚠️ No file path or URL provided for:', fileName);
+      return null;
+    }
+
+    // If it's already a full URL (from teacher uploads), return it directly
+    if (filePathOrUrl.startsWith('http://') || filePathOrUrl.startsWith('https://')) {
+      console.log('✅ File already has full URL:', filePathOrUrl);
+      return filePathOrUrl;
+    }
+
+    // If it's a Supabase storage path that starts with bucket name, extract the actual path
+    let actualPath = filePathOrUrl;
+    if (filePathOrUrl.startsWith(`${bucketName}/`)) {
+      actualPath = filePathOrUrl.substring(`${bucketName}/`.length);
+      console.log('🔧 Extracted path from bucket prefix:', actualPath);
+    }
+
+    // Generate public URL from storage bucket
+    const { data: { publicUrl } } = supabase.storage
+      .from(bucketName)
+      .getPublicUrl(actualPath);
+    
+    if (publicUrl) {
+      console.log('✅ Generated public URL for', fileName, ':', publicUrl);
+      return publicUrl;
+    } else {
+      console.log('❌ Failed to generate public URL for:', fileName);
+      return null;
+    }
+  } catch (error) {
+    console.error('❌ Error generating URL for', fileName, ':', error);
+    return null;
+  }
+};
+
 const ViewAssignments = () => {
   const { user, loading: authLoading } = useAuth(); // Destructure loading state
   const [assignments, setAssignments] = useState([]);
@@ -41,6 +87,12 @@ const ViewAssignments = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  
+  // Image viewer modal state
+  const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const [selectedImageUrl, setSelectedImageUrl] = useState('');
+  const [selectedImageName, setSelectedImageName] = useState('');
 
   useEffect(() => {
     if (authLoading) {
@@ -126,9 +178,9 @@ const ViewAssignments = () => {
             files: assignment.file_url ? [{
               id: assignment.id,
               name: 'Assignment File',
-              url: assignment.file_url,
+              url: getFileUrlFromBucket(assignment.file_url, 'Assignment File'),
               type: 'assignment_file'
-            }] : [],
+            }].filter(file => file.url) : [],
             status: 'not_submitted', // Default status
             submissionId: null,
             uploadedFiles: [],
@@ -162,29 +214,78 @@ const ViewAssignments = () => {
             console.error('Homeworks error:', homeworksError);
           }
         } else if (homeworksData) {
-          const processedHomeworks = homeworksData.map(homework => ({
-            id: homework.id,
-            type: 'homework',
-            subject: homework.subjects?.name || 'Unknown Subject',
-            title: homework.title,
-            description: homework.description,
-            instructions: homework.instructions,
-            dueDate: homework.due_date,
-            assignedDate: homework.created_at?.split('T')[0],
-            academicYear: new Date().getFullYear().toString(), // Default to current year
-            assignedBy: homework.teachers?.name || 'Teacher',
-            files: homework.files ? homework.files.map((file, index) => ({
-              id: `${homework.id}-${index}`,
-              name: file.name || `File ${index + 1}`,
-              url: file.url,
-              type: 'homework_file'
-            })) : [],
-            status: 'not_submitted', // Default status
-            submissionId: null,
-            uploadedFiles: [],
-            grade: null,
-            feedback: null,
-          }));
+          console.log('📚 Processing homeworks data:', homeworksData.length, 'homeworks found');
+          
+          const processedHomeworks = homeworksData.map((homework, homeworkIndex) => {
+            console.log(`📝 Processing homework ${homeworkIndex + 1}:`, {
+              id: homework.id,
+              title: homework.title,
+              files: homework.files
+            });
+            
+            let processedFiles = [];
+            if (homework.files && Array.isArray(homework.files)) {
+              console.log(`📁 Found ${homework.files.length} files for homework "${homework.title}"`);
+              
+              processedFiles = homework.files
+                .map((file, index) => {
+                  console.log(`📄 Processing file ${index + 1}:`, {
+                    original_file: file,
+                    file_name: file.file_name,
+                    file_url: file.file_url,
+                    name: file.name,
+                    url: file.url
+                  });
+                  
+                  const fileName = file.file_name || file.name || `File ${index + 1}`;
+                  const fileUrl = file.file_url || file.url;
+                  const processedUrl = getFileUrlFromBucket(fileUrl, fileName);
+                  
+                  console.log(`🔗 File URL processing result:`, {
+                    fileName,
+                    originalUrl: fileUrl,
+                    processedUrl
+                  });
+                  
+                  return {
+                    id: `${homework.id}-${index}`,
+                    name: fileName,
+                    url: processedUrl,
+                    type: 'homework_file'
+                  };
+                })
+                .filter(file => {
+                  const hasUrl = !!file.url;
+                  if (!hasUrl) {
+                    console.log(`⚠️ Filtering out file "${file.name}" - no valid URL`);
+                  }
+                  return hasUrl;
+                });
+            } else {
+              console.log(`📁 No files found for homework "${homework.title}"`);
+            }
+            
+            console.log(`✅ Final processed files for "${homework.title}":`, processedFiles.length, 'files');
+            
+            return {
+              id: homework.id,
+              type: 'homework',
+              subject: homework.subjects?.name || 'Unknown Subject',
+              title: homework.title,
+              description: homework.description,
+              instructions: homework.instructions,
+              dueDate: homework.due_date,
+              assignedDate: homework.created_at?.split('T')[0],
+              academicYear: new Date().getFullYear().toString(), // Default to current year
+              assignedBy: homework.teachers?.name || 'Teacher',
+              files: processedFiles,
+              status: 'not_submitted', // Default status
+              submissionId: null,
+              uploadedFiles: [],
+              grade: null,
+              feedback: null,
+            };
+          });
           allAssignments = [...allAssignments, ...processedHomeworks];
         }
       } catch (err) {
@@ -301,8 +402,11 @@ const ViewAssignments = () => {
           name: file.name,
           size: file.size,
           type: file.type,
+          file_url: file.file_url || null, // Cloud URL if uploaded
+          file_path: file.file_path || null, // Cloud path if uploaded
           uploadTime: file.uploadTime,
-          // Note: In a real app, you'd upload files to storage and store URLs
+          status: file.status, // 'uploaded' or 'local'
+          // Keep local URI as fallback
           localUri: file.uri
         })),
         status: 'submitted',
@@ -371,6 +475,7 @@ const ViewAssignments = () => {
   const handleFileUpload = async () => {
     try {
       console.log('=== FILE UPLOAD STARTED ===');
+      setUploading(true);
 
       const result = await DocumentPicker.getDocumentAsync({
         type: '*/*',
@@ -382,31 +487,80 @@ const ViewAssignments = () => {
         const file = result.assets[0];
         console.log('Selected file:', { name: file.name, size: file.size, type: file.mimeType });
 
-        // Create file object for local storage
-        const newFile = {
-          id: Date.now().toString(),
-          name: file.name,
-          size: file.size || 0,
-          type: file.mimeType || 'application/octet-stream',
-          uri: file.uri,
-          uploadTime: new Date().toISOString(),
-          status: 'local', // Indicates file is stored locally
-        };
+        // Check if file type is supported
+        if (!isSupportedFileType(file.mimeType)) {
+          Alert.alert(
+            'Unsupported File Type', 
+            `File type "${file.mimeType}" is not supported. Please select a different file.`
+          );
+          return;
+        }
 
-        // TODO: In a production app, upload to Supabase Storage
-        // const uploadResult = await uploadFileToSupabase(file);
-        // if (uploadResult.success) {
-        //   newFile.url = uploadResult.url;
-        //   newFile.status = 'uploaded';
-        // }
+        // Get student data for upload
+        const { data: studentUserData, error: studentError } = await dbHelpers.getStudentByUserId(user.id);
+        if (studentError || !studentUserData) {
+          throw new Error('Student data not found');
+        }
 
-        setUploadedFiles(prev => [...prev, newFile]);
-        Alert.alert('Success', `File "${file.name}" selected for submission!`);
-        console.log('File added to upload queue:', newFile);
+        const student = studentUserData.students;
+        if (!student) {
+          throw new Error('Student profile not found');
+        }
+
+        // Upload file to Supabase Storage
+        console.log('🔄 Uploading file to Supabase Storage...');
+        const uploadResult = await uploadAssignmentFile(
+          file, 
+          student.id, 
+          selectedAssignment.id, 
+          selectedAssignment.type
+        );
+
+        if (uploadResult.success) {
+          // File uploaded successfully to cloud storage
+          const newFile = {
+            id: Date.now().toString(),
+            name: file.name,
+            size: file.size || 0,
+            type: file.mimeType || 'application/octet-stream',
+            uri: file.uri, // Keep local URI as backup
+            file_url: uploadResult.publicUrl, // Cloud URL
+            file_path: uploadResult.filePath, // Cloud path
+            uploadTime: new Date().toISOString(),
+            status: 'uploaded', // Successfully uploaded to cloud
+          };
+
+          setUploadedFiles(prev => [...prev, newFile]);
+          Alert.alert('Success', `File "${file.name}" uploaded to cloud storage successfully!`);
+          console.log('✅ File uploaded to cloud and added to list:', newFile);
+        } else {
+          // Upload failed, store locally as fallback
+          console.log('❌ Cloud upload failed, storing locally:', uploadResult.error);
+          
+          const newFile = {
+            id: Date.now().toString(),
+            name: file.name,
+            size: file.size || 0,
+            type: file.mimeType || 'application/octet-stream',
+            uri: file.uri,
+            uploadTime: new Date().toISOString(),
+            status: 'local', // Stored locally due to upload failure
+            error: uploadResult.error
+          };
+
+          setUploadedFiles(prev => [...prev, newFile]);
+          Alert.alert(
+            'Upload Warning', 
+            `File "${file.name}" selected but could not be uploaded to cloud storage. It will be stored locally.\n\nError: ${uploadResult.error}`
+          );
+          console.log('⚠️ File stored locally due to upload failure:', newFile);
+        }
       }
     } catch (error) {
       console.error('File upload error:', error);
       Alert.alert('Error', 'Failed to select file. Please try again.');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -443,11 +597,14 @@ const ViewAssignments = () => {
   // Image upload
   const handleImageUpload = async () => {
     try {
+      setUploading(true);
+      
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (permissionResult.granted === false) {
         Alert.alert('Permission Required', 'Please grant permission to access your photo library.');
         return;
       }
+      
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: 'Images',
         allowsEditing: true,
@@ -455,22 +612,85 @@ const ViewAssignments = () => {
         quality: 0.8,
         allowsMultipleSelection: false,
       });
+      
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const image = result.assets[0];
-        const newFile = {
-          id: Date.now().toString(),
+        
+        // Create file object compatible with DocumentPicker format
+        const file = {
           name: `image_${Date.now()}.jpg`,
           size: image.fileSize || 0,
-          type: 'image/jpeg',
+          mimeType: 'image/jpeg',
           uri: image.uri,
-          uploadTime: new Date().toISOString(),
         };
-        setUploadedFiles(prev => [...prev, newFile]);
-        Alert.alert('Success', 'Image uploaded from your gallery!');
+
+        console.log('Selected image:', { name: file.name, size: file.size, type: file.mimeType });
+
+        // Get student data for upload
+        const { data: studentUserData, error: studentError } = await dbHelpers.getStudentByUserId(user.id);
+        if (studentError || !studentUserData) {
+          throw new Error('Student data not found');
+        }
+
+        const student = studentUserData.students;
+        if (!student) {
+          throw new Error('Student profile not found');
+        }
+
+        // Upload image to Supabase Storage
+        console.log('🔄 Uploading image to Supabase Storage...');
+        const uploadResult = await uploadAssignmentFile(
+          file, 
+          student.id, 
+          selectedAssignment.id, 
+          selectedAssignment.type
+        );
+
+        if (uploadResult.success) {
+          // Image uploaded successfully to cloud storage
+          const newFile = {
+            id: Date.now().toString(),
+            name: file.name,
+            size: file.size || 0,
+            type: file.mimeType || 'image/jpeg',
+            uri: image.uri, // Keep local URI as backup
+            file_url: uploadResult.publicUrl, // Cloud URL
+            file_path: uploadResult.filePath, // Cloud path
+            uploadTime: new Date().toISOString(),
+            status: 'uploaded', // Successfully uploaded to cloud
+          };
+
+          setUploadedFiles(prev => [...prev, newFile]);
+          Alert.alert('Success', `Image "${file.name}" uploaded to cloud storage successfully!`);
+          console.log('✅ Image uploaded to cloud and added to list:', newFile);
+        } else {
+          // Upload failed, store locally as fallback
+          console.log('❌ Cloud image upload failed, storing locally:', uploadResult.error);
+          
+          const newFile = {
+            id: Date.now().toString(),
+            name: file.name,
+            size: file.size || 0,
+            type: file.mimeType || 'image/jpeg',
+            uri: image.uri,
+            uploadTime: new Date().toISOString(),
+            status: 'local', // Stored locally due to upload failure
+            error: uploadResult.error
+          };
+
+          setUploadedFiles(prev => [...prev, newFile]);
+          Alert.alert(
+            'Upload Warning', 
+            `Image "${file.name}" selected but could not be uploaded to cloud storage. It will be stored locally.\n\nError: ${uploadResult.error}`
+          );
+          console.log('⚠️ Image stored locally due to upload failure:', newFile);
+        }
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to upload image. Please try again.');
       console.error('Image upload error:', error);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -491,6 +711,87 @@ const ViewAssignments = () => {
       };
     }
     return null;
+  };
+
+  // Helper function to check if file is an image
+  const isImageFile = (fileName, mimeType) => {
+    if (mimeType && mimeType.startsWith('image/')) {
+      return true;
+    }
+    
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
+    const lowerFileName = fileName?.toLowerCase() || '';
+    return imageExtensions.some(ext => lowerFileName.endsWith(ext));
+  };
+
+  // Handler for opening teacher files - use ImageViewerModal for images, Linking for others
+  const handleTeacherFilePress = (file) => {
+    const fileUrl = file.url || file.file_url;
+    
+    if (!fileUrl || typeof fileUrl !== 'string' || fileUrl.trim() === '') {
+      Alert.alert(
+        'File Not Available',
+        `The file "${file.name}" is not available. The teacher may need to re-upload it.`
+      );
+      return;
+    }
+
+    // Check if it's an image
+    if (isImageFile(file.name, file.type || file.mimeType)) {
+      // Open in ImageViewerModal
+      setSelectedImageUrl(fileUrl);
+      setSelectedImageName(file.name);
+      setImageViewerVisible(true);
+    } else {
+      // Open in external browser/app
+      Linking.canOpenURL(fileUrl)
+        .then((supported) => {
+          if (supported) {
+            Linking.openURL(fileUrl);
+          } else {
+            Alert.alert('Cannot Open File', `Unable to open "${file.name}". The file format may not be supported.`);
+          }
+        })
+        .catch((error) => {
+          console.error('Error opening teacher file:', error);
+          Alert.alert('Error', `Failed to open "${file.name}": ${error.message}`);
+        });
+    }
+  };
+
+  // Handler for opening student uploaded files - use ImageViewerModal for images, Linking for others
+  const handleStudentFilePress = (file) => {
+    const fileUrl = file.file_url || file.url || file.uri;
+    
+    if (!fileUrl || typeof fileUrl !== 'string' || fileUrl.trim() === '') {
+      Alert.alert(
+        'File Not Available',
+        `The file "${file.name}" is not available.`
+      );
+      return;
+    }
+
+    // Check if it's an image
+    if (isImageFile(file.name, file.type || file.mimeType)) {
+      // Open in ImageViewerModal
+      setSelectedImageUrl(fileUrl);
+      setSelectedImageName(file.name);
+      setImageViewerVisible(true);
+    } else {
+      // For non-images, try to open in external browser/app
+      Linking.canOpenURL(fileUrl)
+        .then((supported) => {
+          if (supported) {
+            Linking.openURL(fileUrl);
+          } else {
+            Alert.alert('Cannot Open File', `Unable to open "${file.name}". The file format may not be supported.`);
+          }
+        })
+        .catch((error) => {
+          console.error('Error opening student file:', error);
+          Alert.alert('Error', `Failed to open "${file.name}": ${error.message}`);
+        });
+    }
   };
 
   if (loading) {
@@ -577,12 +878,26 @@ const ViewAssignments = () => {
                 <Text style={styles.modalLabel}>Assignment Resources:</Text>
                 {getTeacherFiles(selectedAssignment).length > 0 ? (
                   <View style={{ marginBottom: 8 }}>
-                    {getTeacherFiles(selectedAssignment).map((file) => (
-                      <Pressable key={file.id || file.name} onPress={() => Linking.openURL(file.url)} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                        <Ionicons name="document-text" size={18} color="#1976d2" style={{ marginRight: 6 }} />
-                        <Text style={styles.fileLink}>{file.name}</Text>
-                      </Pressable>
-                    ))}
+                    {getTeacherFiles(selectedAssignment).map((file) => {
+                      return (
+                        <Pressable 
+                          key={file.id || file.name} 
+                          onPress={() => handleTeacherFilePress(file)} 
+                          style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}
+                        >
+                          <Ionicons 
+                            name={isImageFile(file.name, file.type || file.mimeType) ? "image" : "document-text"} 
+                            size={18} 
+                            color="#1976d2" 
+                            style={{ marginRight: 6 }} 
+                          />
+                          <Text style={styles.fileLink}>{file.name}</Text>
+                          {isImageFile(file.name, file.type || file.mimeType) && (
+                            <Ionicons name="eye" size={14} color="#1976d2" style={{ marginLeft: 4 }} />
+                          )}
+                        </Pressable>
+                      );
+                    })}
                   </View>
                 ) : (
                   <Text style={{ color: '#888', fontStyle: 'italic', marginBottom: 8 }}>No files provided by teacher.</Text>
@@ -599,20 +914,34 @@ const ViewAssignments = () => {
                   </View>
                   <View style={{ flexDirection: 'row', marginBottom: 8 }}>
                     <TouchableOpacity
-                      style={[styles.uploadButton, { opacity: isEditing ? 1 : 0.5 }]}
+                      style={[styles.uploadButton, { opacity: (isEditing && !uploading) ? 1 : 0.5 }]}
                       onPress={handleFileUpload}
-                      disabled={!isEditing}
+                      disabled={!isEditing || uploading}
                     >
-                      <Ionicons name="document-text" size={18} color="#fff" style={{ marginRight: 6 }} />
-                      <Text style={styles.uploadButtonText}>Upload File</Text>
+                      <Ionicons 
+                        name={uploading ? "hourglass" : "document-text"} 
+                        size={18} 
+                        color="#fff" 
+                        style={{ marginRight: 6 }} 
+                      />
+                      <Text style={styles.uploadButtonText}>
+                        {uploading ? 'Uploading...' : 'Upload File'}
+                      </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.uploadButton, { backgroundColor: '#FF9800', marginLeft: 8, opacity: isEditing ? 1 : 0.5 }]}
+                      style={[styles.uploadButton, { backgroundColor: '#FF9800', marginLeft: 8, opacity: (isEditing && !uploading) ? 1 : 0.5 }]}
                       onPress={handleImageUpload}
-                      disabled={!isEditing}
+                      disabled={!isEditing || uploading}
                     >
-                      <Ionicons name="image" size={18} color="#fff" style={{ marginRight: 6 }} />
-                      <Text style={styles.uploadButtonText}>Upload Image</Text>
+                      <Ionicons 
+                        name={uploading ? "hourglass" : "image"} 
+                        size={18} 
+                        color="#fff" 
+                        style={{ marginRight: 6 }} 
+                      />
+                      <Text style={styles.uploadButtonText}>
+                        {uploading ? 'Uploading...' : 'Upload Image'}
+                      </Text>
                     </TouchableOpacity>
                   </View>
                   {/* Divider and label for uploaded files/images */}
@@ -621,18 +950,37 @@ const ViewAssignments = () => {
                   {uploadedFiles.length > 0 ? (
                     <View style={{ marginBottom: 8 }}>
                       {uploadedFiles.map((file) => (
-                        <View key={file.id || file.name} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, backgroundColor: '#f4f6fa', borderRadius: 8, padding: 8 }}>
-                          <Ionicons name={getFileIcon(file.type)} size={22} color="#1976d2" style={{ marginRight: 10 }} />
+                        <Pressable 
+                          key={file.id || file.name} 
+                          onPress={() => handleStudentFilePress(file)}
+                          style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, backgroundColor: '#f4f6fa', borderRadius: 8, padding: 8 }}
+                        >
+                          <Ionicons name={getAssignmentFileIcon(file)} size={22} color="#1976d2" style={{ marginRight: 10 }} />
                           <View style={{ flex: 1 }}>
-                            <Text style={{ color: '#333', fontWeight: 'bold' }}>{file.name}</Text>
-                            <Text style={{ color: '#888', fontSize: 12 }}>{formatFileSize(file.size)}</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                              <Text style={{ color: '#333', fontWeight: 'bold', flex: 1 }}>{file.name}</Text>
+                              {isImageFile(file.name, file.type || file.mimeType) && (
+                                <Ionicons name="eye" size={14} color="#1976d2" style={{ marginLeft: 4 }} />
+                              )}
+                              {file.status === 'uploaded' && (
+                                <Ionicons name="cloud-done" size={16} color="#4CAF50" style={{ marginLeft: 4 }} />
+                              )}
+                              {file.status === 'local' && (
+                                <Ionicons name="phone-portrait" size={16} color="#FF9800" style={{ marginLeft: 4 }} />
+                              )}
+                            </View>
+                            <Text style={{ color: '#888', fontSize: 12 }}>
+                              {formatAssignmentFileSize(file.size)}
+                              {file.status === 'uploaded' && ' • Cloud Storage'}
+                              {file.status === 'local' && ' • Local Only'}
+                            </Text>
                           </View>
                           {isEditing && (
                             <TouchableOpacity onPress={() => handleRemoveFile(file.id)}>
                               <Ionicons name="close-circle" size={20} color="#F44336" />
                             </TouchableOpacity>
                           )}
-                        </View>
+                        </Pressable>
                       ))}
                     </View>
                   ) : (
@@ -666,6 +1014,18 @@ const ViewAssignments = () => {
           </View>
         </View>
       </Modal>
+
+      {/* Image Viewer Modal */}
+      <ImageViewerModal
+        visible={imageViewerVisible}
+        imageUrl={selectedImageUrl}
+        imageName={selectedImageName}
+        onClose={() => {
+          setImageViewerVisible(false);
+          setSelectedImageUrl('');
+          setSelectedImageName('');
+        }}
+      />
     </View>
   );
 };

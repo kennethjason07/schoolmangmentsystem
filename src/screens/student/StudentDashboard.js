@@ -768,7 +768,7 @@ const StudentDashboard = ({ navigation }) => {
 
         {/* Upcoming Events */}
         {events.length > 0 && (
-          <View style={styles.section}>
+          <View style={[styles.section, { marginBottom: 28 }]}>
             <View style={styles.sectionTitleContainer}>
               <View style={styles.sectionIcon}>
                 <Ionicons name="calendar" size={20} color="#FF9800" />
@@ -776,28 +776,20 @@ const StudentDashboard = ({ navigation }) => {
               <Text style={styles.sectionTitle}>Upcoming Events</Text>
             </View>
             <View style={styles.eventsContainer}>
-              {events.map((event, index) => {
-                const eventTitle = event?.title || 'Event';
-                const eventDescription = event?.description || 'No description';
-                const eventDate = event?.date || new Date().toISOString().split('T')[0];
-                const eventTime = event?.time || '09:00';
-                const eventColor = event?.color || '#FF9800';
-                
-                return (
-                  <View key={index} style={styles.eventCard}>
-                    <View style={[styles.eventIcon, { backgroundColor: eventColor }]}>
-                      <Ionicons name="calendar" size={20} color="#fff" />
-                    </View>
-                    <View style={styles.eventInfo}>
-                      <Text style={styles.eventTitle}>{eventTitle}</Text>
-                      <Text style={styles.eventDescription}>{eventDescription}</Text>
-                      <Text style={styles.eventDateTime}>
-                        {formatDateToDDMMYYYY(eventDate)} • {eventTime}
-                      </Text>
-                    </View>
+              {events.map((event, index) => (
+                <View key={index} style={styles.eventCard}>
+                  <View style={[styles.eventIcon, { backgroundColor: event.color }]}>
+                    <Ionicons name={event.icon} size={20} color="#fff" />
+        </View>
+                  <View style={styles.eventInfo}>
+                    <Text style={styles.eventTitle}>{event.title || 'Not available'}</Text>
+                    <Text style={styles.eventDescription}>{event.description || 'Not available'}</Text>
+                    <Text style={styles.eventDateTime}>
+                      {event.date ? formatDateToDDMMYYYY(event.date) : 'Not available'} • {event.time || 'Not available'}
+                    </Text>
                   </View>
-                );
-              })}
+                </View>
+              ))}
             </View>
           </View>
         )}

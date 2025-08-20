@@ -125,6 +125,7 @@ function groupAndSortSchedule(schedule) {
       const todayName = dayNames[today];
 
       // Get today's schedule (timetable) with error handling
+      let processedSchedule = [];
       try {
         console.log('Fetching today\'s schedule for teacher:', teacher.id, 'Day:', todayName);
 
@@ -133,7 +134,7 @@ function groupAndSortSchedule(schedule) {
         const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
 
         const { data: timetableData, error: timetableError } = await supabase
-          .from(TABLES.TIMETABLE)
+          .from('timetable_entries')
           .select(`
             *,
             subjects(name),
@@ -154,7 +155,7 @@ function groupAndSortSchedule(schedule) {
         console.log('Raw timetable data:', timetableData);
 
         // Process the timetable data to match the expected format
-        const processedSchedule = (timetableData || []).map(entry => ({
+        processedSchedule = (timetableData || []).map(entry => ({
           id: entry.id,
           subject: entry.subjects?.name || 'Unknown Subject',
           class: entry.classes ? `${entry.classes.class_name} ${entry.classes.section}` : 'Unknown Class',
@@ -169,6 +170,7 @@ function groupAndSortSchedule(schedule) {
         setSchedule(processedSchedule);
       } catch (err) {
         console.error('Timetable fetch error:', err);
+        processedSchedule = [];
         setSchedule([]);
       }
 
@@ -465,7 +467,7 @@ function groupAndSortSchedule(schedule) {
       // Calculate and set teacher stats (moved AFTER events processing to use current data)
       const uniqueClasses = Object.keys(classMap).length;
       const totalSubjects = assignedSubjects.length;
-      const todayClasses = schedule.length;
+      const todayClasses = processedSchedule.length;
 
       // Calculate total students from assigned classes
       let totalStudents = 0;
@@ -551,7 +553,7 @@ function groupAndSortSchedule(schedule) {
           value: (todayClasses || 0).toString(),
           icon: 'time',
           color: '#FF9800',
-          subtitle: (schedule?.length || 0) > 0 ? `Next: ${schedule[0]?.start_time || 'N/A'}` : 'No classes today',
+          subtitle: (processedSchedule?.length || 0) > 0 ? `Next: ${processedSchedule[0]?.start_time || 'N/A'}` : 'No classes today',
           trend: 0,
           onPress: () => navigation?.navigate('TeacherTimetable')
         },
