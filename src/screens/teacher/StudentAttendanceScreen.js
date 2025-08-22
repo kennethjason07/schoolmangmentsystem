@@ -3,6 +3,7 @@ import {
   View,
   Text,
   StyleSheet,
+  FlatList,
   TouchableOpacity,
   Modal,
   ScrollView,
@@ -15,7 +16,6 @@ import {
 } from 'react-native';
 import Header from '../../components/Header';
 import { supabase, TABLES } from '../../utils/supabase';
-import { sendAbsenceNotificationToParent } from '../../services/notificationService';
 import { format, parseISO } from 'date-fns';
 import { CrossPlatformBarChart } from '../../components/CrossPlatformChart';
 import { Ionicons } from '@expo/vector-icons';
@@ -132,29 +132,7 @@ const StudentAttendanceScreen = ({ navigation, route }) => {
 
       if (error) throw error;
 
-      // Send notification if marking as absent
-      if (status === 'Absent') {
-        try {
-          console.log(`📧 Sending absence notification for student ${student.id} on ${date}`);
-          const result = await sendAbsenceNotificationToParent(
-            student.id,
-            date,
-            null // No specific teacher ID for individual updates
-          );
-
-          if (result.success) {
-            Alert.alert('Success', 'Attendance updated successfully!\n\nAbsence notification sent to parent.');
-          } else {
-            Alert.alert('Success', 'Attendance updated successfully!\n\nNote: Notification may not have been sent.');
-          }
-        } catch (notificationError) {
-          console.error('❌ Error sending notification:', notificationError);
-          Alert.alert('Success', 'Attendance updated successfully!\n\nNote: Notification may not have been sent.');
-        }
-      } else {
-        Alert.alert('Success', 'Attendance updated successfully');
-      }
-
+      Alert.alert('Success', 'Attendance updated successfully');
       loadAttendanceData();
     } catch (error) {
       console.error('Error updating attendance:', error);
@@ -200,35 +178,25 @@ const StudentAttendanceScreen = ({ navigation, route }) => {
               <View style={styles.chartContainer}>
                 <Text style={styles.sectionTitle}>Attendance Summary</Text>
                 <CrossPlatformBarChart
-                  data={{
-                    labels: monthlyAttendance.map(month => month.month),
-                    datasets: [
-                      {
-                        data: monthlyAttendance.map(month => month.percentage)
-                      }
-                    ]
-                  }}
-                  chartConfig={{
-                    backgroundColor: '#ffffff',
-                    backgroundGradientFrom: '#ffffff',
-                    backgroundGradientTo: '#ffffff',
-                    color: (opacity = 1) => `rgba(25, 118, 210, ${opacity})`,
-                    labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
-                    strokeWidth: 2
-                  }}
-                  width={350}
-                  height={200}
-                  style={{ marginVertical: 8, borderRadius: 16 }}
+                  data={monthlyAttendance.map(month => ({
+                    month: month.month,
+                    percentage: month.percentage
+                  }))}
+                  xAxisLabel="Month"
+                  yAxisLabel="Attendance %"
+                  barColor="#1976d2"
+                  style={{ height: 200 }}
                 />
               </View>
 
               {/* Monthly Attendance List */}
               <View style={styles.attendanceList}>
                 <Text style={styles.sectionTitle}>Monthly Attendance</Text>
-                <View style={styles.list}>
-                  {monthlyAttendance.map((item) => (
+                <FlatList
+                  data={monthlyAttendance}
+                  keyExtractor={item => item.month}
+                  renderItem={({ item }) => (
                     <TouchableOpacity
-                      key={item.month}
                       style={[styles.monthRow, {
                         backgroundColor: selectedMonth === item.month ? '#e3f2fd' : '#fff'
                       }]}
@@ -245,8 +213,9 @@ const StudentAttendanceScreen = ({ navigation, route }) => {
                         </Text>
                       </View>
                     </TouchableOpacity>
-                  ))}
-                </View>
+                  )}
+                  contentContainerStyle={styles.list}
+                />
               </View>
             </>
           )}

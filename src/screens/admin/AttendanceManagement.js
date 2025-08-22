@@ -23,8 +23,8 @@ import { format } from 'date-fns';
 import * as Animatable from 'react-native-animatable';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { sendBulkAbsenceNotifications } from '../../services/notificationService';
 import * as Print from 'expo-print';
+import { sendAbsenceNotificationToParent } from '../../services/notificationService';
 
 const AttendanceManagement = () => {
   const [loading, setLoading] = useState(true);
@@ -338,36 +338,52 @@ const AttendanceManagement = () => {
         .from(TABLES.STUDENT_ATTENDANCE)
         .insert(records);
 
-      // Send notifications for absent students
+      // Send absence notifications to parents
+      console.log('📧 [ADMIN ATTENDANCE] Checking for absent students to notify parents...');
+
       const absentRecords = records.filter(record => record.status === 'Absent');
+      console.log(`📧 [ADMIN ATTENDANCE] Found ${absentRecords.length} absent students`);
+
+      let notificationResults = [];
 
       if (absentRecords.length > 0) {
-        console.log(`📧 Sending absence notifications for ${absentRecords.length} students`);
+        console.log('📧 [ADMIN ATTENDANCE] Sending absence notifications...');
 
-        // Prepare data for bulk notification sending
-        const absentStudentsData = absentRecords.map(record => ({
-          studentId: record.student_id,
-          date: record.date,
-          markedBy: record.marked_by
-        }));
+        for (const absentRecord of absentRecords) {
+          try {
+            console.log(`📧 [ADMIN ATTENDANCE] Sending notification for student: ${absentRecord.student_id}`);
 
-        try {
-          const result = await sendBulkAbsenceNotifications(absentStudentsData);
-          console.log('📧 Bulk notification result:', result);
+            const result = await sendAbsenceNotificationToParent(
+              absentRecord.student_id,
+              absentRecord.date,
+              absentRecord.marked_by
+            );
 
-          Alert.alert(
-            'Success',
-            `Attendance saved successfully!\n\nAbsence notifications sent to ${absentRecords.length} parent(s).\n\nYou can now edit individual records using the pencil icon.`
-          );
-        } catch (notificationError) {
-          console.error('❌ Error sending bulk notifications:', notificationError);
-          Alert.alert(
-            'Success',
-            `Attendance saved successfully!\n\nNote: Some notifications may not have been sent. You can now edit individual records using the pencil icon.`
-          );
+            notificationResults.push({
+              studentId: absentRecord.student_id,
+              success: result.success,
+              message: result.message || result.error
+            });
+
+            if (result.success) {
+              console.log(`✅ [ADMIN ATTENDANCE] Notification sent for student ${absentRecord.student_id}: ${result.message}`);
+            } else {
+              console.log(`❌ [ADMIN ATTENDANCE] Failed to send notification for student ${absentRecord.student_id}: ${result.error}`);
+            }
+          } catch (notificationError) {
+            console.error(`❌ [ADMIN ATTENDANCE] Error sending notification for student ${absentRecord.student_id}:`, notificationError);
+            notificationResults.push({
+              studentId: absentRecord.student_id,
+              success: false,
+              message: notificationError.message
+            });
+          }
         }
-      } else {
-        Alert.alert('Success', 'Attendance saved successfully! You can now edit individual records using the pencil icon.');
+
+        const successCount = notificationResults.filter(r => r.success).length;
+        const failureCount = notificationResults.filter(r => !r.success).length;
+
+        console.log(`📊 [ADMIN ATTENDANCE] Notification results: ${successCount} sent, ${failureCount} failed`);
       }
 
       // Update local state
@@ -375,6 +391,30 @@ const AttendanceManagement = () => {
         ...attendanceRecords,
         [key]: { ...attendanceMark },
       });
+
+      // Direct editing enabled - no edit mode needed
+
+      // Show confirmation popup with notification results
+      if (absentRecords.length > 0) {
+        const successCount = notificationResults.filter(r => r.success).length;
+        const failureCount = notificationResults.filter(r => !r.success).length;
+
+        if (successCount > 0) {
+          Alert.alert(
+            'Success',
+            `Attendance saved successfully!\n\n✅ Absence notifications sent to ${successCount} parent(s)\n✅ Absence messages sent to ${successCount} parent(s)\n\nParents will see both notifications and messages about their child's absence.\n\nYou can now edit individual records using the pencil icon.`
+          );
+        } else if (failureCount > 0) {
+          Alert.alert(
+            'Partial Success',
+            `Attendance saved successfully!\n\n⚠️ Note: ${failureCount} absence notification(s) and message(s) could not be sent (no parent mapping found).\n\nTo enable notifications for these students, add their parent mappings to the system.\n\nYou can now edit individual records using the pencil icon.`
+          );
+        } else {
+          Alert.alert('Success', 'Attendance saved successfully! You can now edit individual records using the pencil icon.');
+        }
+      } else {
+        Alert.alert('Success', 'Attendance saved successfully! You can now edit individual records using the pencil icon.');
+      }
     } catch (error) {
       console.error('Error saving attendance:', error);
       Alert.alert('Error', 'Failed to save attendance');
@@ -536,12 +576,11 @@ const AttendanceManagement = () => {
   // Render student attendance item with enhanced UI
   const renderStudentItem = ({ item, index }) => {
     const currentStatus = attendanceMark[item.id];
-    const safeIndex = getSafeIndex(index);
 
     return (
       <Animatable.View
         animation="fadeInUp"
-        delay={safeIndex * 50}
+        delay={index * 50}
         style={[
           styles.attendanceCard,
           currentStatus === 'Present' && styles.presentCard,
@@ -561,7 +600,7 @@ const AttendanceManagement = () => {
           <View style={styles.studentDetails}>
             <Text style={styles.studentName}>{item.full_name || item.name}</Text>
             <View style={styles.studentMetaInfo}>
-              <Text style={styles.studentRoll}>Roll: {getSafeNumber(item.roll_no, safeIndex + 1)}</Text>
+              <Text style={styles.studentRoll}>Roll: {item.roll_no || index + 1}</Text>
               {item.admission_no && (
                 <Text style={styles.studentAdmission}>ID: {item.admission_no}</Text>
               )}
@@ -641,12 +680,11 @@ const AttendanceManagement = () => {
   // Render teacher attendance item with enhanced UI
   const renderTeacherItem = ({ item, index }) => {
     const currentStatus = teacherAttendanceMark[item.id];
-    const safeIndex = getSafeIndex(index);
 
     return (
       <Animatable.View
         animation="fadeInUp"
-        delay={safeIndex * 50}
+        delay={index * 50}
         style={[
           styles.attendanceCard,
           currentStatus === 'Present' && styles.presentCard,
@@ -667,7 +705,7 @@ const AttendanceManagement = () => {
           <View style={styles.studentDetails}>
             <Text style={styles.studentName}>{item.name}</Text>
             <View style={styles.studentMetaInfo}>
-              <Text style={styles.studentRoll}>Teacher ID: {getSafeNumber(item.teacher_id, safeIndex + 1)}</Text>
+              <Text style={styles.studentRoll}>Teacher ID: {item.teacher_id || index + 1}</Text>
               {item.subject && (
                 <Text style={styles.studentAdmission}>Subject: {item.subject}</Text>
               )}
@@ -888,7 +926,7 @@ const AttendanceManagement = () => {
         {(tab === 'student' ? studentsForClass : teachers).length > 0 ? (
           <>
             <Text style={styles.listTitle}>
-              {tab === 'student' ? 'Students' : 'Teachers'} ({tab === 'student' ? getSafeArrayLength(studentsForClass) : getSafeArrayLength(teachers)})
+              {tab === 'student' ? 'Students' : 'Teachers'} ({(tab === 'student' ? studentsForClass : teachers).length})
             </Text>
             {(tab === 'student' ? studentsForClass : teachers).map((item, index) => (
               <View key={item.id}>
@@ -917,95 +955,20 @@ const AttendanceManagement = () => {
     </View>
   );
 
-  // Calculate attendance analytics with comprehensive safety checks
+  // Calculate attendance analytics
   const calculateAnalytics = () => {
-    try {
-      if (tab === 'student') {
-        // Ensure studentsForClass is an array
-        const safeStudentsForClass = Array.isArray(studentsForClass) ? studentsForClass : [];
-        // Ensure attendanceMark is an object
-        const safeAttendanceMark = attendanceMark && typeof attendanceMark === 'object' ? attendanceMark : {};
-        
-        const presentCount = safeStudentsForClass.filter(student => {
-          return student && student.id && safeAttendanceMark[student.id] === 'Present';
-        }).length;
-        const absentCount = safeStudentsForClass.filter(student => {
-          return student && student.id && safeAttendanceMark[student.id] === 'Absent';
-        }).length;
-        
-        // Ensure counts are valid numbers
-        const safePresentCount = Number.isFinite(presentCount) ? presentCount : 0;
-        const safeAbsentCount = Number.isFinite(absentCount) ? absentCount : 0;
-        
-        return { present: safePresentCount, absent: safeAbsentCount };
-      } else {
-        // Ensure teachers is an array
-        const safeTeachers = Array.isArray(teachers) ? teachers : [];
-        // Ensure teacherAttendanceMark is an object
-        const safeTeacherAttendanceMark = teacherAttendanceMark && typeof teacherAttendanceMark === 'object' ? teacherAttendanceMark : {};
-        
-        const presentCount = safeTeachers.filter(teacher => {
-          return teacher && teacher.id && safeTeacherAttendanceMark[teacher.id] === 'Present';
-        }).length;
-        const absentCount = safeTeachers.filter(teacher => {
-          return teacher && teacher.id && safeTeacherAttendanceMark[teacher.id] === 'Absent';
-        }).length;
-        
-        // Ensure counts are valid numbers
-        const safePresentCount = Number.isFinite(presentCount) ? presentCount : 0;
-        const safeAbsentCount = Number.isFinite(absentCount) ? absentCount : 0;
-        
-        return { present: safePresentCount, absent: safeAbsentCount };
-      }
-    } catch (error) {
-      console.error('Error in calculateAnalytics:', error);
-      // Return safe default values in case of any error
-      return { present: 0, absent: 0 };
+    if (tab === 'student') {
+      const presentCount = studentsForClass.filter(student => attendanceMark[student.id] === 'Present').length;
+      const absentCount = studentsForClass.filter(student => attendanceMark[student.id] === 'Absent').length;
+      return { present: presentCount, absent: absentCount };
+    } else {
+      const presentCount = teachers.filter(teacher => teacherAttendanceMark[teacher.id] === 'Present').length;
+      const absentCount = teachers.filter(teacher => teacherAttendanceMark[teacher.id] === 'Absent').length;
+      return { present: presentCount, absent: absentCount };
     }
   };
 
   const analytics = calculateAnalytics();
-
-  // Safe percentage calculation helper to prevent NaN errors
-  const calculateSafePercentage = (numerator, denominator) => {
-    // Handle all invalid cases
-    if (!numerator && numerator !== 0) return 0;
-    if (!denominator && denominator !== 0) return 0;
-    if (denominator === 0) return 0;
-    if (typeof numerator !== 'number') return 0;
-    if (typeof denominator !== 'number') return 0;
-    if (!Number.isFinite(numerator)) return 0;
-    if (!Number.isFinite(denominator)) return 0;
-    
-    const result = (numerator / denominator) * 100;
-    
-    // Double-check the result is valid
-    if (!Number.isFinite(result)) return 0;
-    if (isNaN(result)) return 0;
-    
-    return Math.max(0, Math.min(100, Math.round(result)));
-  };
-
-  // Safe display helpers for array lengths
-  const getSafeArrayLength = (arr) => {
-    if (!arr || !Array.isArray(arr)) return 0;
-    const length = arr.length;
-    return Number.isFinite(length) ? length : 0;
-  };
-
-  // Safe number helper for general numeric displays
-  const getSafeNumber = (value, fallback = 0) => {
-    if (value === null || value === undefined) return fallback;
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  };
-
-  // Safe index helper for animation delays
-  const getSafeIndex = (index, fallback = 0) => {
-    const safeIndex = getSafeNumber(index, fallback);
-    return Math.max(0, safeIndex); // Ensure non-negative
-  };
 
   if (loading) {
     return (
@@ -1034,13 +997,13 @@ const AttendanceManagement = () => {
         <View style={styles.quickStatItem}>
           <Ionicons name="people-outline" size={18} color="#4CAF50" />
           <Text style={styles.quickStatText}>
-            {tab === 'student' ? getSafeArrayLength(studentsForClass) : getSafeArrayLength(teachers)} Total
+            {tab === 'student' ? studentsForClass.length : teachers.length} Total
           </Text>
         </View>
         <View style={styles.quickStatItem}>
           <Ionicons name="checkmark-circle-outline" size={18} color="#FF9800" />
           <Text style={styles.quickStatText}>
-            {getSafeNumber(analytics.present)} Present
+            {analytics.present} Present
           </Text>
         </View>
       </View>
@@ -1137,13 +1100,13 @@ const AttendanceManagement = () => {
                       style={[
                         styles.progressBarFill,
                         {
-                          width: `${calculateSafePercentage(analytics.present, analytics.present + analytics.absent)}%`
+                          width: `${(analytics.present / (analytics.present + analytics.absent)) * 100}%`
                         }
                       ]}
                     />
                   </View>
                   <Text style={styles.percentageText}>
-                    {calculateSafePercentage(analytics.present, analytics.present + analytics.absent)}%
+                    {Math.round((analytics.present / (analytics.present + analytics.absent)) * 100)}%
                   </Text>
                 </View>
               </View>

@@ -1,23 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard, RefreshControl, Linking, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Animatable from 'react-native-animatable';
-import * as DocumentPicker from 'expo-document-picker';
 import Header from '../../components/Header';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useMessageStatus } from '../../utils/useMessageStatus';
-import { formatToLocalTime } from '../../utils/timeUtils';
-import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from '../../utils/chatFileUpload';
-import { runCompleteDiagnostics } from '../../utils/storageDiagnostics';
-import { runDirectStorageTest } from '../../utils/directStorageTest';
-import { runNetworkDiagnostics, formatNetworkDiagnosticResults } from '../../utils/networkDiagnostics';
-import { runBucketDiagnostics, formatBucketDiagnosticResults } from '../../utils/bucketDiagnostics';
-import { runSimpleNetworkTest, formatSimpleNetworkResults } from '../../utils/simpleNetworkTest';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
-import { getGlobalMessageHandler } from '../../utils/realtimeMessageHandler';
 
 const StudentChatWithTeacher = () => {
   const { user } = useAuth();
@@ -32,16 +22,11 @@ const StudentChatWithTeacher = () => {
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState(null);
   const [unreadCounts, setUnreadCounts] = useState({}); // Track unread messages per teacher
-  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
-  const [messageSubscription, setMessageSubscription] = useState(null);
   const flatListRef = useRef(null);
 
   // Pull-to-refresh functionality
   const { refreshing, onRefresh } = usePullToRefresh(async () => {
-    await Promise.all([
-      fetchData(),
-      fetchUnreadCounts()
-    ]);
+    await fetchData();
   });
 
   // Keyboard visibility listeners
@@ -242,8 +227,7 @@ const StudentChatWithTeacher = () => {
           teachers!classes_class_teacher_id_fkey(
             id,
             name,
-            qualification,
-            phone
+            qualification
           )
         `)
         .eq('id', student.class_id)
@@ -264,7 +248,6 @@ const StudentChatWithTeacher = () => {
               id: classInfo.teachers.id,
               userId: teacherUserId,
               name: classInfo.teachers.name,
-              phone: classInfo.teachers.phone,
               subject: 'Class Teacher',
               role: 'class_teacher',
               canMessage: true
@@ -278,7 +261,6 @@ const StudentChatWithTeacher = () => {
               id: classInfo.teachers.id,
               userId: null,
               name: classInfo.teachers.name + ' (No Account)',
-              phone: classInfo.teachers.phone,
               subject: 'Class Teacher',
               role: 'class_teacher',
               canMessage: false,
@@ -296,7 +278,7 @@ const StudentChatWithTeacher = () => {
         console.log('Trying direct teacher fetch for class_id:', student.class_id);
         const { data: directClassTeacher, error: directTeacherError } = await supabase
           .from(TABLES.TEACHERS)
-          .select('id, name, qualification, phone, is_class_teacher, assigned_class_id')
+          .select('id, name, qualification, is_class_teacher, assigned_class_id')
           .eq('assigned_class_id', student.class_id)
           .eq('is_class_teacher', true);
         
@@ -307,7 +289,6 @@ const StudentChatWithTeacher = () => {
             uniqueTeachers.push({
               id: teacher.id,
               name: teacher.name,
-              phone: teacher.phone,
               subject: 'Class Teacher',
               role: 'class_teacher'
             });
@@ -340,7 +321,6 @@ const StudentChatWithTeacher = () => {
                 id,
                 name,
                 qualification,
-                phone,
                 is_class_teacher
               )
             `)
@@ -363,7 +343,6 @@ const StudentChatWithTeacher = () => {
                     id: assignment.teachers.id,
                     userId: teacherUserId,
                     name: assignment.teachers.name,
-                    phone: assignment.teachers.phone,
                     subject: subject.name,
                     role: 'subject_teacher',
                     canMessage: true
@@ -376,7 +355,6 @@ const StudentChatWithTeacher = () => {
                     id: assignment.teachers.id,
                     userId: null,
                     name: assignment.teachers.name + ' (No Account)',
-                    phone: assignment.teachers.phone,
                     subject: subject.name,
                     role: 'subject_teacher',
                     canMessage: false,
@@ -683,7 +661,7 @@ const StudentChatWithTeacher = () => {
         const formattedMessages = (msgs || []).map(msg => ({
           ...msg,
           id: msg.id || msg.created_at || Date.now().toString(),
-          message_type: msg.message_type || 'text'
+          type: msg.type || 'text'
         }));
         
         console.log('✅ Setting formatted messages count:', formattedMessages.length);
@@ -703,12 +681,8 @@ const StudentChatWithTeacher = () => {
         // Scroll to bottom after loading messages
         if (formattedMessages.length > 0) {
           setTimeout(() => {
-            try {
-              if (flatListRef.current && flatListRef.current.scrollToEnd) {
-                flatListRef.current.scrollToEnd({ animated: true });
-              }
-            } catch (error) {
-              console.log('Scroll to end error:', error);
+            if (flatListRef.current) {
+              flatListRef.current.scrollToEnd({ animated: true });
             }
           }, 300);
         }
@@ -728,88 +702,69 @@ const StudentChatWithTeacher = () => {
     }
   };
 
-  // Real-time subscription for messages using optimistic UI
-  const messageHandler = getGlobalMessageHandler(supabase, TABLES.MESSAGES);
-  
+  // Real-time subscription for messages
   useEffect(() => {
     if (!selectedTeacher) return;
-    
-    // Get teacher's user ID for proper subscription
-    let teacherUserId = selectedTeacher.userId;
-    if (!teacherUserId) {
-      // If we don't have the teacher user ID, we can't set up subscription
-      console.log('No teacher user ID available for real-time subscription');
-      return;
-    }
-    
-    // Setup real-time subscription with message updates
-    const subscription = messageHandler.startSubscription(
-      user.id,
-      teacherUserId,
-      (message, eventType) => {
-        console.log('📨 Real-time message update:', { message, eventType });
-        
-        if (eventType === 'sent' || eventType === 'received' || eventType === 'updated') {
-          // Update messages state
-          setMessages(prev => {
-            // Remove any existing message with the same ID
-            const filtered = prev.filter(m => m.id !== message.id);
-            // Add the new/updated message and sort by timestamp
-            const updated = [...filtered, message].sort((a, b) => 
-              new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
-            );
-            return updated;
-          });
-          
-          // Mark messages as read if they're from the teacher
-          if (message.sender_id === teacherUserId && !message.is_read) {
-            markMessagesAsRead(teacherUserId);
-            setUnreadCounts(prev => {
-              const updated = { ...prev };
-              delete updated[teacherUserId];
-              return updated;
-            });
-          }
-          
-          // Auto-scroll to bottom on new messages
-          setTimeout(() => {
-            try {
-              if (flatListRef.current?.scrollToEnd) {
-                flatListRef.current.scrollToEnd({ animated: true });
-              }
-            } catch (error) {
-              // Silently handle scroll error
-            }
-          }, 100);
-        } else if (eventType === 'deleted') {
-          // Remove deleted message
-          setMessages(prev => prev.filter(m => m.id !== message.id));
+    let subscription;
+    (async () => {
+      // Get teacher's user ID for proper subscription
+      let teacherUserId = selectedTeacher.userId;
+      if (!teacherUserId) {
+        try {
+          teacherUserId = await getTeacherUserId(selectedTeacher.id);
+        } catch (err) {
+          console.log('Could not get teacher user ID for subscription:', err);
+          return;
         }
       }
-    );
-    
+      
+      subscription = supabase
+        .channel(`student-chat-${user.id}-${teacherUserId}-${Date.now()}`)
+        .on('postgres_changes', { 
+          event: '*', 
+          schema: 'public', 
+          table: TABLES.MESSAGES
+        }, (payload) => {
+          console.log('Real-time message update:', payload);
+          
+          // Check if this message is relevant to our chat
+          const isRelevant = (
+            (payload.new?.sender_id === user.id && payload.new?.receiver_id === teacherUserId) ||
+            (payload.new?.sender_id === teacherUserId && payload.new?.receiver_id === user.id) ||
+            (payload.old?.sender_id === user.id && payload.old?.receiver_id === teacherUserId) ||
+            (payload.old?.sender_id === teacherUserId && payload.old?.receiver_id === user.id)
+          );
+          
+          if (isRelevant) {
+            console.log('Message is relevant, refreshing chat');
+            // Refresh messages when there's a relevant change
+            setTimeout(() => {
+              fetchMessages(selectedTeacher);
+            }, 200);
+          }
+        })
+        .subscribe();
+      
+      console.log('Subscribed to real-time updates for chat between', user.id, 'and', teacherUserId);
+    })();
     return () => {
-      messageHandler.stopSubscription();
+      if (subscription) {
+        subscription.unsubscribe();
+        console.log('Unsubscribed from real-time chat updates');
+      }
     };
-  }, [selectedTeacher, user.id, messageHandler, markMessagesAsRead]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTeacher, user.id]);
 
-  // Send a message with optimistic UI
+  // Send a message
   const handleSend = async () => {
-    if (!input.trim() || !selectedTeacher || sending) return;
-    
-    const messageText = input.trim();
-    const teacherUserId = selectedTeacher.userId;
-    
-    if (!teacherUserId) {
-      Alert.alert('Error', 'Cannot send message: Teacher account not available');
-      return;
-    }
-    
-    // Clear input immediately for better UX
-    setInput('');
+    if (!input.trim() || !selectedTeacher) return;
     setSending(true);
-    
     try {
+      console.log('Starting to send message...');
+      console.log('User ID:', user.id);
+      console.log('Selected Teacher:', selectedTeacher);
+
       // Get student data for the student_id field
       const { data: studentUserData, error: studentError } = await dbHelpers.getStudentByUserId(user.id);
       if (studentError || !studentUserData) {
@@ -820,66 +775,68 @@ const StudentChatWithTeacher = () => {
       if (!student) {
         throw new Error('Student profile not found');
       }
-      
-      // Prepare message data for the handler
-      const messageData = {
+
+      // Get teacher's user ID using our helper function
+      const teacherUserId = selectedTeacher.userId || await getTeacherUserId(selectedTeacher.id);
+      console.log('Teacher User ID:', teacherUserId);
+      console.log('Selected Teacher ID:', selectedTeacher.id);
+      console.log('Selected Teacher userId:', selectedTeacher.userId);
+
+      if (!teacherUserId) {
+        throw new Error('Teacher user account not found. Please contact admin to ensure teacher has a user account.');
+      }
+
+      const newMsg = {
+        sender_id: user.id,
+        receiver_id: teacherUserId, // Use teacher's user ID, not teacher table ID
+        student_id: student.id,
+        message: input,
+      };
+
+      console.log('Message to insert:', newMsg);
+
+      const { data: insertedMsg, error: sendError } = await supabase
+        .from(TABLES.MESSAGES)
+        .insert(newMsg)
+        .select();
+
+      console.log('Send error:', sendError);
+      console.log('Inserted message:', insertedMsg);
+
+      if (sendError) {
+        console.error('Supabase error object:', JSON.stringify(sendError, null, 2));
+        throw new Error(`Database error: ${sendError.message || sendError.code || 'Unknown database error'}`);
+      }
+
+      // Add message to local state for immediate display
+      const displayMsg = {
+        id: insertedMsg?.[0]?.id || Date.now().toString(),
         sender_id: user.id,
         receiver_id: teacherUserId,
         student_id: student.id,
-        message: messageText,
-        message_type: 'text'
+        message: input,
+        sent_at: insertedMsg?.[0]?.sent_at || new Date().toISOString(),
+        type: 'text'
       };
+
+      setMessages(prev => [...prev, displayMsg]);
+      setInput('');
       
-      // Use the message handler for optimistic UI and reliable sending
-      await messageHandler.sendMessageOptimistic(
-        messageData,
-        // Optimistic update callback
-        (optimisticMessage) => {
-          console.log('⚡ Adding optimistic message to UI:', optimisticMessage);
-          setMessages(prev => {
-            const updated = [...prev, optimisticMessage].sort((a, b) => 
-              new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
-            );
-            return updated;
-          });
-          
-          // Auto-scroll to bottom
-          setTimeout(() => {
-            try {
-              if (flatListRef.current?.scrollToEnd) {
-                flatListRef.current.scrollToEnd({ animated: true });
-              }
-            } catch (error) {
-              // Silently handle scroll error
-            }
-          }, 100);
-        },
-        // Confirmed callback
-        (tempId, confirmedMessage) => {
-          console.log('✅ Message confirmed, replacing optimistic:', { tempId, confirmedMessage });
-          setMessages(prev => prev.map(msg => 
-            msg.id === tempId ? confirmedMessage : msg
-          ));
-        },
-        // Error callback
-        (tempId, failedMessage, error) => {
-          console.error('❌ Message failed:', { tempId, error });
-          // Update message to show failed state
-          setMessages(prev => prev.map(msg => 
-            msg.id === tempId ? { ...failedMessage, failed: true } : msg
-          ));
-          
-          // Restore input text for retry
-          setInput(messageText);
-          Alert.alert('Message Failed', `Failed to send message: ${error.message || 'Unknown error'}. The message is marked as failed - you can try sending again.`);
+      // Refresh messages from database to ensure consistency
+      setTimeout(() => {
+        fetchMessages(selectedTeacher);
+      }, 500);
+      
+      // Scroll to bottom after sending
+      setTimeout(() => {
+        if (flatListRef.current) {
+          flatListRef.current.scrollToEnd({ animated: true });
         }
-      );
-      
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      // Restore input text on failure
-      setInput(messageText);
-      Alert.alert('Error', `Failed to send message: ${error.message || 'Unknown error'}`);
+      }, 100);
+    } catch (err) {
+      console.error('Error sending message:', err);
+      console.error('Error details:', JSON.stringify(err, null, 2));
+      Alert.alert('Error', `Failed to send message: ${err.message || 'Unknown error'}`);
     } finally {
       setSending(false);
     }
@@ -928,287 +885,43 @@ const StudentChatWithTeacher = () => {
     );
   };
 
-  // Show attachment menu
-  const handleAttach = () => {
-    setShowAttachmentMenu(true);
-  };
-
-  // Handle photo upload with chat-files storage
-  const handlePhotoUpload = async () => {
-    setShowAttachmentMenu(false);
+  // Attachment handler
+  const handleAttach = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Permission to access media library is required!');
+        alert('Permission to access media library is required!');
         return;
       }
-      
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      let result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaType.Images,
         allowsEditing: false,
-        aspect: [4, 3],
-        quality: 0.8,
-        allowsMultipleSelection: false,
+        quality: 1,
       });
-      
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
-        
-        // Check file size (100MB limit)
-        if (asset.fileSize && asset.fileSize > 104857600) {
-          Alert.alert('File Too Large', 'Please select an image smaller than 100MB.');
-          return;
-        }
-
-        // Show uploading indicator
-        const tempMsg = {
-          id: 'temp_' + Date.now(),
-          sender_id: user.id,
-          receiver_id: selectedTeacher.userId,
-          message: '📷 Uploading photo...',
-          message_type: 'image',
-          timestamp: formatToLocalTime(new Date().toISOString()),
-          sender: 'student',
-          uploading: true
-        };
-        
-        setMessages(prev => [...prev, tempMsg]);
-        
-        // Get student data for context
-        const { data: studentUserData } = await supabase
-          .from(TABLES.USERS)
-          .select('linked_student_id')
-          .eq('id', user.id)
+        const isImage = asset.type && asset.type.startsWith('image');
+        // Get student info
+        const { data: student } = await supabase
+          .from(TABLES.STUDENTS)
+          .select('id')
+          .eq('user_id', user.id)
           .single();
-        
-        // Get teacher user ID first
-        let teacherUserId = selectedTeacher.userId;
-        if (!teacherUserId) {
-          try {
-            teacherUserId = await getTeacherUserId(selectedTeacher.id);
-          } catch (userIdError) {
-            throw new Error('Cannot get teacher user ID: ' + userIdError.message);
-          }
-        }
-        
-        // Upload to chat-files bucket
-        const uploadResult = await uploadChatFile(
-          {
-            uri: asset.uri,
-            name: asset.fileName || `photo_${Date.now()}.jpg`,
-            size: asset.fileSize,
-            type: 'image/jpeg'
-          },
-          user.id,
-          teacherUserId,
-          studentUserData?.linked_student_id
-        );
-        
-        if (uploadResult.success) {
-          // Save to database
-          const { data: insertedMsg, error: sendError } = await supabase
-            .from('messages')
-            .insert(uploadResult.messageData)
-            .select();
-            
-          if (!sendError && insertedMsg?.[0]) {
-            // Replace temp message with actual message
-            setMessages(prev => prev.map(msg => 
-              msg.id === tempMsg.id
-                ? {
-                    ...insertedMsg[0],
-                    timestamp: formatToLocalTime(insertedMsg[0].sent_at),
-                    sender: 'student'
-                  }
-                : msg
-            ));
-            
-            // Scroll to bottom
-            setTimeout(() => {
-              if (flatListRef.current) {
-                flatListRef.current.scrollToEnd({ animated: true });
-              }
-            }, 100);
-          } else {
-            throw new Error('Failed to save message to database');
-          }
-        } else {
-          throw new Error(uploadResult.error);
-        }
+        const newMsg = {
+          sender_id: student.id,
+          receiver_id: selectedTeacher.id,
+          type: isImage ? 'image' : 'file',
+          uri: asset.uri,
+          file_name: asset.fileName || asset.uri.split('/').pop(),
+          created_at: new Date().toISOString(),
+        };
+        const { error: sendError } = await supabase
+          .from(TABLES.MESSAGES)
+          .insert(newMsg);
+        if (sendError) throw sendError;
       }
     } catch (e) {
-      console.error('Image upload error:', e);
-      // Remove temp message on error
-      setMessages(prev => prev.filter(msg => !msg.uploading));
-      Alert.alert('Upload Failed', 'Failed to upload image: ' + e.message);
-    }
-  };
-
-  // Handle document upload with chat-files storage
-  const handleDocumentUpload = async () => {
-    setShowAttachmentMenu(false);
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*',
-        copyToCacheDirectory: true,
-        multiple: false,
-      });
-      
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const file = result.assets[0];
-        
-        // Check file size (100MB limit)
-        if (file.size && file.size > 104857600) {
-          Alert.alert('File Too Large', 'Please select a file smaller than 100MB.');
-          return;
-        }
-
-        // Check if file type is supported
-        if (!isSupportedFileType(file.mimeType)) {
-          Alert.alert('Unsupported File Type', 'This file type is not supported for chat attachments.');
-          return;
-        }
-
-        // Show uploading indicator
-        const tempMsg = {
-          id: 'temp_' + Date.now(),
-          sender_id: user.id,
-          receiver_id: selectedTeacher.userId,
-          message: `📎 Uploading ${file.name}...`,
-          message_type: 'file',
-          timestamp: formatToLocalTime(new Date().toISOString()),
-          sender: 'student',
-          uploading: true
-        };
-        
-        setMessages(prev => [...prev, tempMsg]);
-        
-        // Get student data for context
-        const { data: studentUserData } = await supabase
-          .from(TABLES.USERS)
-          .select('linked_student_id')
-          .eq('id', user.id)
-          .single();
-        
-        // Get teacher user ID first
-        let teacherUserId = selectedTeacher.userId;
-        if (!teacherUserId) {
-          try {
-            teacherUserId = await getTeacherUserId(selectedTeacher.id);
-          } catch (userIdError) {
-            throw new Error('Cannot get teacher user ID: ' + userIdError.message);
-          }
-        }
-        
-        // Upload to chat-files bucket
-        const uploadResult = await uploadChatFile(
-          {
-            uri: file.uri,
-            name: file.name,
-            size: file.size,
-            type: file.mimeType,
-            mimeType: file.mimeType
-          },
-          user.id,
-          teacherUserId,
-          studentUserData?.linked_student_id
-        );
-        
-        if (uploadResult.success) {
-          // Save to database
-          const { data: insertedMsg, error: sendError } = await supabase
-            .from('messages')
-            .insert(uploadResult.messageData)
-            .select();
-            
-          if (!sendError && insertedMsg?.[0]) {
-            // Replace temp message with actual message
-            setMessages(prev => prev.map(msg => 
-              msg.id === tempMsg.id
-                ? {
-                    ...insertedMsg[0],
-                    timestamp: formatToLocalTime(insertedMsg[0].sent_at),
-                    sender: 'student'
-                  }
-                : msg
-            ));
-            
-            // Scroll to bottom
-            setTimeout(() => {
-              if (flatListRef.current) {
-                flatListRef.current.scrollToEnd({ animated: true });
-              }
-            }, 100);
-          } else {
-            throw new Error('Failed to save message to database');
-          }
-        } else {
-          throw new Error(uploadResult.error);
-        }
-      }
-    } catch (e) {
-      console.error('Document upload error:', e);
-      // Remove temp message on error
-      setMessages(prev => prev.filter(msg => !msg.uploading));
-      Alert.alert('Upload Failed', 'Failed to upload document: ' + e.message);
-    }
-  };
-
-  // Send file message to database
-  const sendFileMessage = async (fileData) => {
-    try {
-      // Get student's linked ID
-      const { data: studentUserData, error: studentError } = await dbHelpers.getStudentByUserId(user.id);
-      if (studentError || !studentUserData) {
-        throw new Error('Student data not found');
-      }
-
-      const student = studentUserData.students;
-      if (!student) {
-        throw new Error('Student profile not found');
-      }
-
-      // Get teacher's user ID
-      const teacherUserId = selectedTeacher.userId || await getTeacherUserId(selectedTeacher.id);
-
-      if (!teacherUserId) {
-        throw new Error('Teacher user account not found');
-      }
-
-      // Create message with file data
-      const newMsg = {
-        sender_id: user.id,
-        receiver_id: teacherUserId,
-        student_id: student.id,
-        message: fileData.message_type === 'image' ? '📷 Photo' : `📎 ${fileData.file_name}`,
-        message_type: fileData.message_type,
-        file_url: fileData.file_url,
-        file_name: fileData.file_name,
-        file_size: fileData.file_size,
-        file_type: fileData.file_type,
-        sent_at: new Date().toISOString(),
-      };
-
-      const { data: insertedMsg, error: sendError } = await supabase
-        .from('messages')
-        .insert(newMsg)
-        .select();
-
-      if (sendError) throw sendError;
-
-      // Add to local state for immediate display
-      const displayMsg = {
-        ...newMsg,
-        id: insertedMsg[0].id,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        sender: 'student'
-      };
-
-      setMessages(prev => [...prev, displayMsg]);
-
-    } catch (error) {
-      console.error('Error sending file message:', error);
-      Alert.alert('Error', 'Failed to send file: ' + error.message);
+      alert('Failed to pick file: ' + e.message);
     }
   };
 
@@ -1218,41 +931,12 @@ const StudentChatWithTeacher = () => {
     setMessages([]);
   };
 
-  // Handle call functionality
-  const handleCall = () => {
-    if (selectedTeacher?.phone) {
-      const phoneNumber = selectedTeacher.phone;
-      const phoneUrl = Platform.OS === 'ios' ? `tel:${phoneNumber}` : `tel:${phoneNumber}`;
-
-      Linking.canOpenURL(phoneUrl)
-        .then((supported) => {
-          if (supported) {
-            return Linking.openURL(phoneUrl);
-          } else {
-            Alert.alert('Error', 'Phone calls are not supported on this device');
-          }
-        })
-        .catch((err) => {
-          console.error('Error opening phone app:', err);
-          Alert.alert('Error', 'Unable to make phone call');
-        });
-    } else {
-      Alert.alert('No Phone Number', 'Phone number not available for this teacher');
-    }
-  };
-
   // Scroll to bottom when messages change
   useEffect(() => {
-    if (messages.length > 0) {
+    if (flatListRef.current && messages.length > 0) {
       setTimeout(() => {
-        try {
-          if (flatListRef.current && flatListRef.current.scrollToEnd) {
-            flatListRef.current.scrollToEnd({ animated: true });
-          }
-        } catch (error) {
-          console.log('Scroll to end on messages change error:', error);
-        }
-      }, 200);
+        flatListRef.current.scrollToEnd({ animated: true });
+      }, 100);
     }
   }, [messages]);
 
@@ -1309,11 +993,6 @@ const StudentChatWithTeacher = () => {
                   item.role === 'subject_teacher' &&
                   sortedTeachers[index - 1].role !== 'subject_teacher';
 
-                // Get unread count for this teacher
-                const unreadCount = unreadCounts[item.userId] || unreadCounts[item.id];
-                const hasUnread = unreadCount > 0;
-                const hasMessages = messages && messages.length > 0;
-
                 return (
                   <View>
                     {showClassTeacherHeader && (
@@ -1330,18 +1009,14 @@ const StudentChatWithTeacher = () => {
                       style={[
                         styles.teacherCard,
                         item.role === 'class_teacher' && styles.classTeacherCard,
-                        hasUnread && styles.unreadTeacherCard
-                      ]}
+(unreadCounts[item.userId] || unreadCounts[item.id]) && styles.unreadTeacherCard
+                      ]} 
                       onPress={() => fetchMessages(item)}
                     >
                       <View style={[
                         styles.teacherAvatar,
-                        { backgroundColor: item.role === 'class_teacher' ? '#4CAF50' : '#2196F3' },
-                        hasUnread && styles.unreadAvatar
+                        { backgroundColor: item.role === 'class_teacher' ? '#4CAF50' : '#2196F3' }
                       ]}>
-                        {hasUnread && (
-                          <View style={styles.unreadDot} />
-                        )}
                         <Ionicons
                           name={item.role === 'class_teacher' ? 'school' : 'book'}
                           size={24}
@@ -1350,10 +1025,7 @@ const StudentChatWithTeacher = () => {
                       </View>
                       <View style={styles.teacherInfo}>
                         <View style={styles.teacherHeader}>
-                          <Text style={[
-                            styles.teacherName,
-                            hasUnread && styles.unreadText
-                          ]} numberOfLines={item.name.includes('(No Account)') ? 2 : 1}>
+                          <Text style={styles.teacherName} numberOfLines={item.name.includes('(No Account)') ? 2 : 1}>
                             {item.name}
                           </Text>
                           <View style={[
@@ -1365,34 +1037,17 @@ const StudentChatWithTeacher = () => {
                             </Text>
                           </View>
                         </View>
-                        <Text style={styles.teacherSubject} numberOfLines={1}>
+                        <Text style={styles.teacherSubject} numberOfLines={2}>
                           {item.subject}
                         </Text>
-                        
-                        {/* Unread Message Count or Status */}
-                        <View style={styles.messageStatusContainer}>
-                          {hasUnread ? (
-                            <Text style={styles.unreadMessagesText}>
-                              +{unreadCount} new message{unreadCount > 1 ? 's' : ''}
-                            </Text>
-                          ) : hasMessages ? (
-                            <Text style={styles.allReadText}>
-                              All messages read
-                            </Text>
-                          ) : (
-                            <Text style={styles.noMessagesText}>
-                              Start a conversation
-                            </Text>
-                          )}
-                        </View>
                       </View>
                       <View style={styles.chatActions}>
                         <View style={styles.chatIconContainer}>
-                          <Ionicons name="chatbubbles" size={20} color={hasUnread ? "#f44336" : "#9c27b0"} />
-                          {hasUnread && (
+                          <Ionicons name="chatbubbles" size={20} color={(unreadCounts[item.userId] || unreadCounts[item.id]) ? "#f44336" : "#9c27b0"} />
+                          {(unreadCounts[item.userId] || unreadCounts[item.id]) && (
                             <View style={styles.unreadBadge}>
                               <Text style={styles.unreadBadgeText}>
-                                {unreadCount > 99 ? '99+' : unreadCount}
+                                {(unreadCounts[item.userId] || unreadCounts[item.id]) > 99 ? '99+' : (unreadCounts[item.userId] || unreadCounts[item.id])}
                               </Text>
                             </View>
                           )}
@@ -1421,22 +1076,18 @@ const StudentChatWithTeacher = () => {
       ) : (
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 20}
-          enabled={true}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
         >
           <View style={styles.chatHeader}>
             <TouchableOpacity onPress={handleBack} style={{ marginRight: 10 }}>
               <Ionicons name="arrow-back" size={24} color="#1976d2" />
             </TouchableOpacity>
             <Ionicons name="person-circle" size={32} color="#1976d2" style={{ marginRight: 8 }} />
-            <View style={styles.chatHeaderInfo}>
-              <Text style={styles.chatHeaderName} numberOfLines={1}>{selectedTeacher.name}</Text>
-              <Text style={styles.chatHeaderSubject} numberOfLines={1}>{selectedTeacher.subject}</Text>
+            <View>
+              <Text style={styles.teacherName}>{selectedTeacher.name}</Text>
+              <Text style={styles.teacherSubject}>{selectedTeacher.subject}</Text>
             </View>
-            <TouchableOpacity onPress={handleCall} style={styles.callButton}>
-              <Ionicons name="call" size={24} color="#4CAF50" />
-            </TouchableOpacity>
           </View>
           <FlatList
             ref={flatListRef}
@@ -1444,17 +1095,13 @@ const StudentChatWithTeacher = () => {
             keyExtractor={item => item.id?.toString() || Math.random().toString()}
             renderItem={({ item }) => (
               <TouchableOpacity 
+                style={[styles.messageRow, item.sender_id === user.id ? styles.messageRight : styles.messageLeft]}
                 onLongPress={() => {
                   if (item.sender_id === user.id) {
                     handleDeleteMessage(item.id);
                   }
                 }}
-                delayLongPress={500}
-                activeOpacity={0.7}
-                style={{ 
-                  opacity: deletingMessageId === item.id ? 0.5 : 1,
-                  transform: [{ scale: deletingMessageId === item.id ? 0.95 : 1 }]
-                }}
+                disabled={deletingMessageId === item.id}
               >
                 <View style={[
                   styles.messageBubble, 
@@ -1473,7 +1120,7 @@ const StudentChatWithTeacher = () => {
                   {(!item.type || item.type === 'text') && (
                     <Text style={styles.messageText}>{item.message || item.text}</Text>
                   )}
-                  <Text style={styles.messageTime}>{formatToLocalTime(item.sent_at || item.created_at)}</Text>
+                  <Text style={styles.messageTime}>{item.sent_at ? new Date(item.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')}</Text>
                 </View>
               </TouchableOpacity>
             )}
@@ -1497,149 +1144,6 @@ const StudentChatWithTeacher = () => {
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
-      )}
-      
-      {/* Attachment Menu Modal */}
-      {showAttachmentMenu && (
-        <TouchableOpacity 
-          style={styles.attachmentModalOverlay} 
-          activeOpacity={1} 
-          onPress={() => setShowAttachmentMenu(false)}
-        >
-          <Animatable.View animation="slideInUp" duration={300} style={styles.attachmentModal}>
-            <View style={styles.attachmentHeader}>
-              <Text style={styles.attachmentTitle}>Send Attachment</Text>
-              <TouchableOpacity onPress={() => setShowAttachmentMenu(false)}>
-                <Ionicons name="close" size={24} color="#666" />
-              </TouchableOpacity>
-            </View>
-            
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.attachmentOptions}
-              style={styles.attachmentScrollView}
-            >
-              <TouchableOpacity style={styles.attachmentOption} onPress={handlePhotoUpload}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#4CAF50' }]}>
-                  <Ionicons name="camera" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Photo</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={handleDocumentUpload}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#2196F3' }]}>
-                  <Ionicons name="document" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Document</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runCompleteDiagnostics().then(results => {
-                  console.log('🔍 Storage Diagnostics Results:', results);
-                  const summary = results.summary;
-                  Alert.alert(
-                    'Storage Diagnostics', 
-                    `Overall Health: ${summary.overallHealth ? '✅ Good' : '❌ Issues Found'}\n\n` +
-                    `Critical Issues: ${summary.criticalIssues.length}\n` +
-                    `${summary.criticalIssues.join('\n')}\n\n` +
-                    `Recommendations:\n${summary.recommendations.join('\n')}`,
-                    [{ text: 'OK' }]
-                  );
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#FF9800' }]}>
-                  <Ionicons name="bug" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Diagnose</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runDirectStorageTest().then(results => {
-                  console.log('🔬 Direct Storage Test Results:', results);
-                  const { success, message, details } = results;
-                  Alert.alert(
-                    'Direct Storage Test', 
-                    `Result: ${success ? '✅ Success' : '❌ Failed'}\n\n` +
-                    `Message: ${message}\n\n` +
-                    (details ? `Details:\n${details}` : ''),
-                    [{ text: 'OK' }]
-                  );
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#9C27B0' }]}>
-                  <Ionicons name="flask" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Direct Test</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runNetworkDiagnostics().then(results => {
-                  console.log('🌐 Network Diagnostics Results:', results);
-                  const formattedResults = formatNetworkDiagnosticResults(results);
-                  Alert.alert(
-                    'Network Diagnostics', 
-                    formattedResults,
-                    [{ text: 'OK' }]
-                  );
-                }).catch(error => {
-                  console.error('Network diagnostics error:', error);
-                  Alert.alert('Network Diagnostics', 'Failed to run network diagnostics: ' + error.message);
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#607D8B' }]}>
-                  <Ionicons name="wifi" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Network</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runBucketDiagnostics().then(results => {
-                  console.log('🪣 Bucket Diagnostics Results:', results);
-                  const formattedResults = formatBucketDiagnosticResults(results);
-                  Alert.alert(
-                    'Bucket Diagnostics', 
-                    formattedResults,
-                    [{ text: 'OK' }]
-                  );
-                }).catch(error => {
-                  console.error('Bucket diagnostics error:', error);
-                  Alert.alert('Bucket Diagnostics', 'Failed to run bucket diagnostics: ' + error.message);
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#795548' }]}>
-                  <Ionicons name="server" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Buckets</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runSimpleNetworkTest().then(results => {
-                  console.log('🌐 Simple Network Test Results:', results);
-                  const formattedResults = formatSimpleNetworkResults(results);
-                  Alert.alert(
-                    'Network Test', 
-                    formattedResults,
-                    [{ text: 'OK' }]
-                  );
-                }).catch(error => {
-                  console.error('Simple network test error:', error);
-                  Alert.alert('Network Test', 'Failed to run network test: ' + error.message);
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#4CAF50' }]}>
-                  <Ionicons name="pulse" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Net Test</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </Animatable.View>
-        </TouchableOpacity>
       )}
     </View>
   );
@@ -1698,16 +1202,6 @@ const styles = StyleSheet.create({
     borderLeftColor: '#4CAF50',
     backgroundColor: '#f8fff8',
   },
-  unreadCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#f44336',
-    backgroundColor: '#fff8f8',
-    elevation: 4,
-    shadowColor: '#f44336',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
   
   teacherAvatar: {
     width: 50,
@@ -1717,23 +1211,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
-    position: 'relative',
-  },
-  unreadAvatar: {
-    borderWidth: 3,
-    borderColor: '#f44336',
-    elevation: 2,
-  },
-  unreadDot: {
-    position: 'absolute',
-    top: -3,
-    right: -3,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#f44336',
-    borderWidth: 2,
-    borderColor: '#fff',
   },
   
   teacherInfo: {
@@ -1773,10 +1250,6 @@ const styles = StyleSheet.create({
     flex: 1, // Allow name to take available space
     marginRight: 8, // Ensure spacing from badge
   },
-  unreadText: {
-    fontWeight: 'bold',
-    color: '#222',
-  },
   teacherSubject: { 
     fontSize: 14, 
     color: '#666', 
@@ -1789,63 +1262,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minWidth: 40, // Ensure minimum width for touch target
     marginLeft: 8, // Add margin to prevent overlap
-  },
-  
-  // Message Status Display
-  messageStatusContainer: {
-    marginTop: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  unreadMessagesText: {
-    fontSize: 13,
-    color: '#f44336',
-    fontWeight: '600',
-    backgroundColor: 'rgba(244, 67, 54, 0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  allReadText: {
-    fontSize: 12,
-    color: '#4CAF50',
-    fontWeight: '500',
-    fontStyle: 'italic',
-  },
-  noMessagesText: {
-    fontSize: 12,
-    color: '#999',
-    fontStyle: 'italic',
-  },
-  readIndicator: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  newChatIndicator: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  unreadBadgeContainer: {
-    backgroundColor: '#f44336',
-    borderRadius: 14,
-    minWidth: 28,
-    height: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 4,
-    elevation: 2,
-    shadowColor: '#f44336',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
-  },
-  unreadBadgeMainText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: 'bold',
   },
   
   // Empty State Styles
@@ -1872,21 +1288,6 @@ const styles = StyleSheet.create({
   
   // Chat Styles
   chatHeader: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 12, borderBottomWidth: 1, borderColor: '#eee' },
-  chatHeaderInfo: {
-    flex: 1,
-    marginRight: 8,
-  },
-  chatHeaderName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#222',
-    marginBottom: 2,
-  },
-  chatHeaderSubject: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 0,
-  },
   chatList: { flexGrow: 1, padding: 16 },
   messageRow: { flexDirection: 'row', marginBottom: 10 },
   messageLeft: { justifyContent: 'flex-start' },
@@ -1907,30 +1308,16 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     backgroundColor: '#eee',
   },
-  fileContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-    minWidth: 200,
-  },
   fileRow: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  fileInfo: {
-    flex: 1,
-    marginLeft: 10,
+    marginBottom: 4,
   },
   fileName: {
-    color: '#1976d2',
     fontSize: 14,
-    fontWeight: '600',
-  },
-  fileSize: {
-    color: '#666',
-    fontSize: 12,
-    marginTop: 2,
+    color: '#1976d2',
+    textDecorationLine: 'underline',
+    maxWidth: 120,
   },
   deletingMessage: {
     opacity: 0.5,
@@ -1972,89 +1359,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     lineHeight: 12,
   },
-  
-  // Animation and deleting overlay styles
-  deletingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(244, 67, 54, 0.8)',
-    borderRadius: 16,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  
-  // Attachment Modal Styles
-  attachmentModalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-    zIndex: 1000,
-  },
-  
-  attachmentModal: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: 30,
-  },
-  
-  attachmentHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  
-  attachmentTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  
-  attachmentScrollView: {
-    paddingHorizontal: 10,
-  },
-  
-  attachmentOptions: {
-    flexDirection: 'row',
-    paddingHorizontal: 10,
-    paddingTop: 20,
-    alignItems: 'center',
-  },
-  
-  attachmentOption: {
-    alignItems: 'center',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    minWidth: 100,
-  },
-  
-  attachmentIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  
-  attachmentText: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '600',
-  },
 });
 
-export default StudentChatWithTeacher;
+export default StudentChatWithTeacher; 

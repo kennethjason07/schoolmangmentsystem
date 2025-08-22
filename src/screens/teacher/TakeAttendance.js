@@ -8,8 +8,6 @@ import * as Print from 'expo-print';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import { sendAbsenceNotificationToParent } from '../../services/notificationService';
-import useResponsive from '../../utils/useResponsive';
-import { sendBulkAbsenceNotifications } from '../../services/notificationService';
 
 function formatDateDMY(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') return '';
@@ -24,7 +22,6 @@ function formatDateDMY(dateStr) {
 }
 
 const TakeAttendance = () => {
-  const { getPickerHeight, getResponsiveFontSize } = useResponsive();
   const today = new Date();
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
@@ -231,46 +228,81 @@ const TakeAttendance = () => {
       // Upsert attendance records (insert or update if exists)
       const { error: upsertError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
-        .upsert(attendanceRecords, { 
+        .upsert(attendanceRecords, {
           onConflict: 'student_id,date',
-          ignoreDuplicates: false 
+          ignoreDuplicates: false
         });
 
       if (upsertError) throw upsertError;
 
-      // Send notifications for absent students
+      // Send absence notifications to parents
+      console.log('📧 [ATTENDANCE] Checking for absent students to notify parents...');
+
       const absentStudents = attendanceRecords.filter(record => record.status === 'Absent');
+      console.log(`📧 [ATTENDANCE] Found ${absentStudents.length} absent students`);
+
+      let notificationResults = [];
 
       if (absentStudents.length > 0) {
-        console.log(`📧 Sending absence notifications for ${absentStudents.length} students`);
+        console.log('📧 [ATTENDANCE] Sending absence notifications...');
 
-        // Send notifications for each absent student
         for (const absentRecord of absentStudents) {
           try {
+            console.log(`📧 [ATTENDANCE] Sending notification for student: ${absentRecord.student_id}`);
+
             const result = await sendAbsenceNotificationToParent(
               absentRecord.student_id,
               absentRecord.date,
               absentRecord.marked_by
             );
 
+            notificationResults.push({
+              studentId: absentRecord.student_id,
+              success: result.success,
+              message: result.message || result.error
+            });
+
             if (result.success) {
-              console.log(`✅ Notification sent for student ${absentRecord.student_id}`);
+              console.log(`✅ [ATTENDANCE] Notification sent for student ${absentRecord.student_id}: ${result.message}`);
             } else {
-              console.log(`❌ Failed to send notification for student ${absentRecord.student_id}:`, result.error);
+              console.log(`❌ [ATTENDANCE] Failed to send notification for student ${absentRecord.student_id}: ${result.error}`);
             }
           } catch (notificationError) {
-            console.error(`❌ Error sending notification for student ${absentRecord.student_id}:`, notificationError);
+            console.error(`❌ [ATTENDANCE] Error sending notification for student ${absentRecord.student_id}:`, notificationError);
+            notificationResults.push({
+              studentId: absentRecord.student_id,
+              success: false,
+              message: notificationError.message
+            });
           }
         }
 
-        Alert.alert(
-          'Success',
-          `Attendance saved successfully!\n\nAbsence notifications sent to ${absentStudents.length} parent(s).`
-        );
+        const successCount = notificationResults.filter(r => r.success).length;
+        const failureCount = notificationResults.filter(r => !r.success).length;
+
+        console.log(`📊 [ATTENDANCE] Notification results: ${successCount} sent, ${failureCount} failed`);
+
+        if (successCount > 0) {
+          const successResults = notificationResults.filter(r => r.success);
+          const notificationsSent = successResults.filter(r => r.message.includes('Notification')).length;
+          const messagesSent = successResults.filter(r => r.message.includes('message')).length;
+
+          Alert.alert(
+            'Success',
+            `Attendance saved successfully!\n\n✅ Absence notifications sent to ${successCount} parent(s)\n✅ Absence messages sent to ${successCount} parent(s)\n\nParents will see both notifications and messages about their child's absence.`
+          );
+        } else if (failureCount > 0) {
+          Alert.alert(
+            'Partial Success',
+            `Attendance saved successfully!\n\n⚠️ Note: ${failureCount} absence notification(s) and message(s) could not be sent (no parent mapping found).\n\nTo enable notifications for these students, add their parent mappings to the system.`
+          );
+        } else {
+          Alert.alert('Success', 'Attendance saved successfully!');
+        }
       } else {
         Alert.alert('Success', 'Attendance saved successfully!');
       }
-
+      
     } catch (err) {
       Alert.alert('Error', err.message);
       console.error('Error saving attendance:', err);
@@ -346,15 +378,9 @@ const TakeAttendance = () => {
       const absent = viewAttendance.filter(r => r.status === 'Absent');
       const notMarked = viewAttendance.filter(r => r.status === 'Not Marked');
       
-      // Find the class information to display class name and section
-      const selectedClassData = classes.find(c => c.id === viewClass);
-      const classDisplayName = selectedClassData 
-        ? `${selectedClassData.class_name} ${selectedClassData.section}` 
-        : viewClass;
-      
       let html = `
         <h2 style="text-align:center;">Attendance Report</h2>
-        <h3 style="text-align:center;">Class: ${classDisplayName} | Date: ${formatDateDMY(viewDate)}</h3>
+        <h3 style="text-align:center;">Class: ${viewClass} | Date: ${formatDateDMY(viewDate)}</h3>
         
         <h4 style="text-align:center; color: #4CAF50;">Present Students (${present.length})</h4>
         <table border="1" style="border-collapse:collapse;width:100%;margin-bottom:20px;">
@@ -470,7 +496,7 @@ const TakeAttendance = () => {
                     setSelectedSection(selectedClassData.section);
                   }
                 }}
-                style={[styles.picker, { height: getPickerHeight() }]}
+                style={styles.picker}
               >
                 <Picker.Item label="Select Class" value={null} />
                 {classes.map(cls => (

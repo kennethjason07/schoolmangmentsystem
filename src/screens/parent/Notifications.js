@@ -42,38 +42,41 @@ const Notifications = ({ navigation }) => {
     try {
       console.log('Fetching notifications for user:', user.id);
       
-      // First, get all notifications
-      const { data: allNotifications, error: notificationsError } = await supabase
-        .from(TABLES.NOTIFICATIONS)
-        .select('*')
-        .order('created_at', { ascending: false })
+      console.log('🔍 [NOTIFICATIONS] Fetching notifications ONLY for parent:', user.id);
+
+      // Get notifications with recipients for this parent ONLY
+      const { data: notificationsData, error: notificationsError } = await supabase
+        .from(TABLES.NOTIFICATION_RECIPIENTS)
+        .select(`
+          id,
+          is_read,
+          sent_at,
+          read_at,
+          notifications!inner(
+            id,
+            message,
+            type,
+            created_at,
+            sent_by
+          )
+        `)
+        .eq('recipient_type', 'Parent')
+        .eq('recipient_id', user.id)
+        .order('sent_at', { ascending: false })
         .limit(50);
 
       if (notificationsError) {
+        console.error('❌ [NOTIFICATIONS] Error fetching notifications:', notificationsError);
         throw notificationsError;
       }
 
-      console.log('All notifications:', allNotifications);
+      console.log(`✅ [NOTIFICATIONS] Found ${notificationsData?.length || 0} notifications for parent ${user.id}`);
+      console.log('🔍 [NOTIFICATIONS] Notification details:', notificationsData);
 
-      // Then get recipient records for this user
-      const { data: recipientRecords, error: recipientError } = await supabase
-        .from('notification_recipients')
-        .select('*')
-        .eq('recipient_id', user.id);
-
-      if (recipientError && recipientError.code !== '42P01') {
-        console.log('Recipient error (table might not exist):', recipientError);
-      }
-
-      console.log('Recipient records:', recipientRecords);
-      
       // Transform the data to match the expected format
-      const transformedNotifications = (allNotifications || []).map(notification => {
-        // Find the recipient record for current user
-        const recipientRecord = recipientRecords?.find(
-          recipient => recipient.notification_id === notification.id
-        );
-        
+      const transformedNotifications = (notificationsData || []).map(notificationRecord => {
+        const notification = notificationRecord.notifications;
+
         return {
           id: notification.id,
           title: notification.message, // Using message as title
@@ -81,15 +84,24 @@ const Notifications = ({ navigation }) => {
           sender: notification.sent_by || 'School Admin',
           type: notification.type || 'general',
           priority: 'regular',
-          isRead: recipientRecord?.is_read || false,
+          isRead: notificationRecord.is_read || false,
           timestamp: notification.created_at,
           relatedAction: null,
-          recipientId: recipientRecord?.id, // Store recipient record ID for updates
-          recipientRecord: recipientRecord // Store full record for debugging
+          recipientId: notificationRecord.id, // Store recipient record ID for updates
+          recipientRecord: notificationRecord // Store full record for debugging
         };
       });
       
-      console.log('Transformed notifications:', transformedNotifications);
+      console.log(`✅ [NOTIFICATIONS] Showing ${transformedNotifications.length} notifications for parent ${user.id}`);
+
+      // Log notification types for debugging
+      const notificationTypes = transformedNotifications.map(n => ({
+        type: n.type,
+        message: n.message.substring(0, 50) + '...',
+        isRead: n.isRead
+      }));
+      console.log('🔍 [NOTIFICATIONS] Notification types:', notificationTypes);
+
       setNotifications(transformedNotifications);
     } catch (err) {
       console.error('Error fetching notifications:', err);

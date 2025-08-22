@@ -11,8 +11,7 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
-  Platform,
-  Image
+  Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
@@ -26,7 +25,6 @@ import { formatDate } from '../../utils/helpers';
 const ManageStudents = () => {
   const navigation = useNavigation();
   const [students, setStudents] = useState([]);
-  const [studentUsers, setStudentUsers] = useState({}); // Store user data with profile_url by student_id
   const [classes, setClasses] = useState([]);
   const [parents, setParents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -118,7 +116,7 @@ const ManageStudents = () => {
     try {
       console.log('🚀 Loading students with optimized query...');
       
-      // Use a single query to get all student data with class information
+      // Use a single JOIN query to get all student data with related information
       const { data: studentsData, error } = await supabase
         .from(TABLES.STUDENTS)
         .select(`
@@ -127,6 +125,11 @@ const ManageStudents = () => {
             id,
             class_name,
             section
+          ),
+          users:parent_id (
+            id,
+            full_name,
+            phone
           )
         `)
         .order('created_at', { ascending: false });
@@ -147,67 +150,9 @@ const ManageStudents = () => {
         return;
       }
 
-      // Get all student IDs for batch queries
+      // Get attendance data for all students in a single query
       const studentIds = studentsData.map(s => s.id);
-
-      // Get parent data from parents table for all student parent_ids
-      const parentIds = studentsData.map(s => s.parent_id).filter(Boolean);
-      let parentsLookup = {};
       
-      if (parentIds.length > 0) {
-        const { data: parentsData, error: parentsError } = await supabase
-          .from(TABLES.PARENTS)
-          .select('id, name, phone, email')
-          .in('id', parentIds);
-        
-        if (parentsError) {
-          console.warn('Error loading parents data:', parentsError);
-        }
-        
-        // Create parent lookup map for O(1) access
-        (parentsData || []).forEach(parent => {
-          parentsLookup[parent.id] = {
-            name: parent.name || 'N/A',
-            phone: parent.phone || 'N/A',
-            email: parent.email || 'N/A'
-          };
-        });
-      }
-
-      // Get additional parent user data for parent accounts linking (optional)
-      const { data: parentUsersData, error: parentError } = await supabase
-        .from('users')
-        .select('id, full_name, phone, email, linked_parent_of')
-        .not('linked_parent_of', 'is', null);
-      
-      if (parentError) {
-        console.warn('Error loading parent user data:', parentError);
-      }
-
-      // Create parent user lookup map for O(1) access (from users table - as fallback)
-      const parentUserLookup = {};
-      (parentUsersData || []).forEach(parent => {
-        if (parent.linked_parent_of) {
-          // Handle multiple students per parent (comma-separated or array)
-          let studentIds = [];
-          if (typeof parent.linked_parent_of === 'string') {
-            studentIds = parent.linked_parent_of.split(',').map(id => id.trim());
-          } else if (Array.isArray(parent.linked_parent_of)) {
-            studentIds = parent.linked_parent_of;
-          } else {
-            studentIds = [parent.linked_parent_of.toString()];
-          }
-          
-          studentIds.forEach(studentId => {
-            parentUserLookup[studentId] = {
-              name: parent.full_name || 'N/A',
-              phone: parent.phone || 'N/A',
-              email: parent.email || 'N/A'
-            };
-          });
-        }
-      });
-
       // Use last 3 months for more comprehensive attendance data
       const threeMonthsAgo = new Date();
       threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
@@ -314,18 +259,7 @@ const ManageStudents = () => {
       // Process students data - no async operations needed
       const studentsWithDetails = studentsData.map(student => {
         const classInfo = student.classes || { class_name: 'N/A', section: 'N/A' };
-        
-        // Get parent info from parents table first, fallback to user lookup
-        let parentInfo = { name: 'N/A', phone: 'N/A' };
-        if (student.parent_id && parentsLookup[student.parent_id]) {
-          parentInfo = {
-            name: parentsLookup[student.parent_id].name,
-            phone: parentsLookup[student.parent_id].phone
-          };
-        } else if (parentUserLookup[student.id]) {
-          parentInfo = parentUserLookup[student.id];
-        }
-        
+        const parentInfo = student.users || { full_name: 'N/A', phone: 'N/A' };
         const attendance = attendanceLookup[student.id] || { total: 0, present: 0 };
         const attendancePercentage = attendance.total > 0 
           ? Math.round((attendance.present / attendance.total) * 100) 
@@ -345,7 +279,7 @@ const ManageStudents = () => {
           attendancePercentage,
           className: classInfo.class_name,
           section: classInfo.section,
-          parentName: parentInfo.name,
+          parentName: parentInfo.full_name,
           parentPhone: parentInfo.phone,
           feesStatus: feesStatus,
           academicPercentage,
@@ -363,27 +297,6 @@ const ManageStudents = () => {
       });
 
       setStudents(sortedStudents);
-
-      // Fetch student user profiles (including profile_url) for all students
-      const { data: studentUsersData, error: usersError } = await supabase
-        .from(TABLES.USERS)
-        .select('id, full_name, email, phone, profile_url, linked_student_id')
-        .in('linked_student_id', studentIds)
-        .not('linked_student_id', 'is', null);
-
-      if (!usersError && studentUsersData) {
-        const usersLookup = {};
-        studentUsersData.forEach(user => {
-          if (user.linked_student_id) {
-            usersLookup[user.linked_student_id] = user;
-          }
-        });
-        setStudentUsers(usersLookup);
-        console.log('Student user profiles loaded:', Object.keys(usersLookup).length, 'profiles');
-      } else {
-        console.log('No student user profiles found:', usersError);
-        setStudentUsers({});
-      }
 
       // Calculate statistics
       const totalStudents = studentsWithDetails.length;
@@ -436,13 +349,13 @@ const ManageStudents = () => {
     }
   };
 
-  // Load parents from the users table (parent accounts)
+  // Load parents (users with parent role)
   const loadParents = async () => {
     try {
       const { data: parentData, error } = await supabase
-        .from('users')
-        .select('id, full_name, phone, email')
-        .not('linked_parent_of', 'is', null)
+        .from(TABLES.USERS)
+        .select('id, full_name, phone')
+        .eq('role_id', 3) // Assuming role_id 3 is for parents
         .order('full_name');
 
       if (error) throw error;
@@ -952,15 +865,7 @@ const ManageStudents = () => {
         <View style={styles.studentInfoRow}>
           <View style={styles.leftSection}>
             <View style={styles.avatarContainer}>
-              {studentUsers[item.id]?.profile_url ? (
-                <Image
-                  source={{ uri: studentUsers[item.id].profile_url }}
-                  style={styles.studentAvatarImage}
-                  onError={() => console.log('Failed to load student avatar image')}
-                />
-              ) : (
-                <Ionicons name="person" size={24} color="#2196F3" />
-              )}
+              <Ionicons name="person" size={24} color="#2196F3" />
             </View>
 
             <View style={styles.studentDetails}>
@@ -1664,12 +1569,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
-    overflow: 'hidden',
-  },
-  studentAvatarImage: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
   },
   studentDetails: {
     flex: 1,

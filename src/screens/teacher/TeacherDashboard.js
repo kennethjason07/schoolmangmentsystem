@@ -36,7 +36,6 @@ const TeacherDashboard = ({ navigation }) => {
   const [recentActivities, setRecentActivities] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
 const [teacherProfile, setTeacherProfile] = useState(null);
-  const [teacherUser, setTeacherUser] = useState(null); // Store user data with profile_url
   const [refreshing, setRefreshing] = useState(false);
   const [schoolDetails, setSchoolDetails] = useState(null);
   const { user } = useAuth();
@@ -94,20 +93,6 @@ function groupAndSortSchedule(schedule) {
       const teacher = teacherData;
       setTeacherProfile(teacher);
 
-      // Fetch teacher's user profile data (including profile_url)
-      const { data: userData, error: userError } = await supabase
-        .from(TABLES.USERS)
-        .select('id, full_name, email, phone, profile_url')
-        .eq('linked_teacher_id', teacher.id)
-        .single();
-
-      if (!userError && userData) {
-        setTeacherUser(userData);
-        console.log('Teacher user profile loaded:', userData);
-      } else {
-        console.log('No user profile found for teacher:', userError);
-      }
-
       // Get assigned classes and subjects
       const { data: assignedSubjects, error: subjectsError } = await supabase
         .from(TABLES.TEACHER_SUBJECTS)
@@ -140,7 +125,6 @@ function groupAndSortSchedule(schedule) {
       const todayName = dayNames[today];
 
       // Get today's schedule (timetable) with error handling
-      let processedSchedule = [];
       try {
         console.log('Fetching today\'s schedule for teacher:', teacher.id, 'Day:', todayName);
 
@@ -149,7 +133,7 @@ function groupAndSortSchedule(schedule) {
         const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
 
         const { data: timetableData, error: timetableError } = await supabase
-          .from('timetable_entries')
+          .from(TABLES.TIMETABLE)
           .select(`
             *,
             subjects(name),
@@ -170,7 +154,7 @@ function groupAndSortSchedule(schedule) {
         console.log('Raw timetable data:', timetableData);
 
         // Process the timetable data to match the expected format
-        processedSchedule = (timetableData || []).map(entry => ({
+        const processedSchedule = (timetableData || []).map(entry => ({
           id: entry.id,
           subject: entry.subjects?.name || 'Unknown Subject',
           class: entry.classes ? `${entry.classes.class_name} ${entry.classes.section}` : 'Unknown Class',
@@ -185,7 +169,6 @@ function groupAndSortSchedule(schedule) {
         setSchedule(processedSchedule);
       } catch (err) {
         console.error('Timetable fetch error:', err);
-        processedSchedule = [];
         setSchedule([]);
       }
 
@@ -482,7 +465,7 @@ function groupAndSortSchedule(schedule) {
       // Calculate and set teacher stats (moved AFTER events processing to use current data)
       const uniqueClasses = Object.keys(classMap).length;
       const totalSubjects = assignedSubjects.length;
-      const todayClasses = processedSchedule.length;
+      const todayClasses = schedule.length;
 
       // Calculate total students from assigned classes
       let totalStudents = 0;
@@ -568,7 +551,7 @@ function groupAndSortSchedule(schedule) {
           value: (todayClasses || 0).toString(),
           icon: 'time',
           color: '#FF9800',
-          subtitle: (processedSchedule?.length || 0) > 0 ? `Next: ${formatTime(processedSchedule[0]?.start_time) || 'N/A'}` : 'No classes today',
+          subtitle: (schedule?.length || 0) > 0 ? `Next: ${schedule[0]?.start_time || 'N/A'}` : 'No classes today',
           trend: 0,
           onPress: () => navigation?.navigate('TeacherTimetable')
         },
@@ -586,7 +569,7 @@ function groupAndSortSchedule(schedule) {
             Alert.alert(
               'Upcoming Events',
               (currentEventsForStats?.length || 0) > 0 ?
-                currentEventsForStats.map(e => `• ${e.title} (${new Date(e.event_date).toLocaleDateString('en-GB')})`).join('\n') :
+                currentEventsForStats.map(e => `• ${e.title} (${new Date(e.event_date).toLocaleDateString()})`).join('\n') :
                 'No upcoming events scheduled.',
               [{ text: 'OK' }]
             );
@@ -859,16 +842,6 @@ function groupAndSortSchedule(schedule) {
     }
   };
 
-  // Helper function to format time to 12-hour format with AM/PM
-  const formatTime = (timeString) => {
-    if (!timeString) return '';
-    const [hours, minutes] = timeString.split(':');
-    const hour = parseInt(hours);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const displayHour = hour % 12 || 12;
-    return `${displayHour}:${minutes} ${ampm}`;
-  };
-
   // Helper function to sort tasks by priority
   const sortTasksByPriority = (tasks) => {
     const priorityOrder = { high: 3, medium: 2, low: 1 };
@@ -919,31 +892,12 @@ function groupAndSortSchedule(schedule) {
           />
         }
       >
-        {/* Welcome Section with Profile Photo */}
+        {/* Welcome Section at the very top */}
         <View style={styles.welcomeSection}>
-          <View style={styles.welcomeHeader}>
-            <View style={styles.welcomeTextContainer}>
-              <Text style={styles.welcomeText}>
-                Welcome back, {teacherProfile?.name || teacherProfile?.full_name || 'Teacher'}!
-              </Text>
-              <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</Text>
-            </View>
-
-            {/* Teacher Profile Photo */}
-            <View style={styles.teacherProfileContainer}>
-              {teacherUser?.profile_url ? (
-                <Image
-                  source={{ uri: teacherUser.profile_url }}
-                  style={styles.teacherProfileImage}
-                  onError={() => console.log('Failed to load teacher profile image')}
-                />
-              ) : (
-                <View style={styles.teacherProfilePlaceholder}>
-                  <Ionicons name="person" size={32} color="#666" />
-                </View>
-              )}
-            </View>
-          </View>
+          <Text style={styles.welcomeText}>
+            Welcome back, {teacherProfile?.name || teacherProfile?.full_name || 'Teacher'}!
+          </Text>
+          <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</Text>
         </View>
 
         {/* School Details Card - AdminDashboard Style */}
@@ -1147,7 +1101,7 @@ function groupAndSortSchedule(schedule) {
                       <View style={styles.scheduleItemContent}>
                         <Text style={styles.scheduleSubjectText}>{item.subject}</Text>
                         <Text style={styles.scheduleTimeText}>
-                          {formatTime(item.start_time)} - {formatTime(item.end_time)} | Period {item.period_number}
+                          {item.start_time} - {item.end_time} | Period {item.period_number}
                         </Text>
                       </View>
                       <Ionicons name="chevron-forward" size={20} color="#666" />
@@ -1600,7 +1554,7 @@ function groupAndSortSchedule(schedule) {
                   onPress={() => {
                     Alert.alert(
                       event.title,
-                      `${event.description}\n\nDate: ${new Date(event.date).toLocaleDateString('en-GB', {
+                      `${event.description}\n\nDate: ${new Date(event.date).toLocaleDateString('en-US', {
                         weekday: 'long',
                         year: 'numeric',
                         month: 'long',
@@ -1636,9 +1590,9 @@ function groupAndSortSchedule(schedule) {
                     <View style={styles.eventDateTime}>
                       <Ionicons name="calendar" size={14} color="#666" />
                       <Text style={styles.eventDate}>
-                        {new Date(event.date).toLocaleDateString('en-GB', {
-                          day: 'numeric',
-                          month: 'short'
+                        {new Date(event.date).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric'
                         })}
                       </Text>
                       <Ionicons name="time" size={14} color="#666" style={{ marginLeft: 12 }} />
@@ -1903,34 +1857,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
-  },
-  welcomeHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  welcomeTextContainer: {
-    flex: 1,
-  },
-  teacherProfileContainer: {
-    marginLeft: 16,
-  },
-  teacherProfileImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    borderWidth: 3,
-    borderColor: '#1976d2',
-  },
-  teacherProfilePlaceholder: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#f0f0f0',
-    borderWidth: 2,
-    borderColor: '#ddd',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   welcomeText: {
     fontSize: 24,

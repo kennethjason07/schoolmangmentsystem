@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated, RefreshControl, Image, FlatList, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated, RefreshControl, Image, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useFocusEffect } from '@react-navigation/native';
 import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
-import LogoDisplay from '../../components/LogoDisplay';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 
@@ -25,7 +24,6 @@ const StudentDashboard = ({ navigation }) => {
   const [fees, setFees] = useState([]);
   const [todayClasses, setTodayClasses] = useState([]);
   const [recentActivities, setRecentActivities] = useState([]);
-  const [showStudentDetailsModal, setShowStudentDetailsModal] = useState(false);
 
   // Utility function to format date from yyyy-mm-dd to dd-mm-yyyy
   const formatDateToDDMMYYYY = (dateString) => {
@@ -73,7 +71,7 @@ const StudentDashboard = ({ navigation }) => {
         navigation.navigate('StudentNotifications');
         break;
       case 'events':
-        Alert.alert('Events', events.length > 0 ?
+        Alert.alert('Events', events.length > 0 ? 
           events.map(e => `• ${e.title} (${formatDateToDDMMYYYY(e.date)})`).join('\n') :
           'No upcoming events scheduled.'
         );
@@ -81,11 +79,6 @@ const StudentDashboard = ({ navigation }) => {
       default:
         Alert.alert('Coming Soon', `${cardKey} feature is under development.`);
     }
-  };
-
-  // Handle notification bell icon press
-  const handleNotificationsPress = () => {
-    navigation.navigate('StudentNotifications');
   };
 
   // Function to refresh notifications for badge count
@@ -165,39 +158,21 @@ const StudentDashboard = ({ navigation }) => {
       const { data: schoolData } = await dbHelpers.getSchoolDetails();
       setSchoolDetails(schoolData);
 
-      // Get student profile with user data for profile picture and email
+      // Get student profile
       const { data: studentData, error: studentError } = await supabase
         .from(TABLES.STUDENTS)
         .select(`
           *,
-          classes(id, class_name, section),
-          parents:parent_id(name, phone, email)
+          classes(id, class_name, section)
         `)
         .eq('id', user.linked_student_id)
         .single();
-
-      // Also get the student's own user account for profile picture
-      const { data: studentUserData, error: studentUserError } = await supabase
-        .from(TABLES.USERS)
-        .select('id, email, phone, profile_url, full_name')
-        .eq('linked_student_id', user.linked_student_id)
-        .maybeSingle();
 
       if (studentError) {
         throw new Error('Student profile not found. Please contact administrator.');
       }
 
-      // Merge student data with user data for complete profile
-      const completeStudentProfile = {
-        ...studentData,
-        // Use student's own user account data if available, otherwise use parent data
-        profile_url: studentUserData?.profile_url || studentData.users?.profile_url,
-        email: studentUserData?.email || studentData.users?.email,
-        user_phone: studentUserData?.phone || studentData.users?.phone,
-        user_full_name: studentUserData?.full_name || studentData.users?.full_name
-      };
-
-      setStudentProfile(completeStudentProfile);
+      setStudentProfile(studentData);
 
       // Get notifications
       await refreshNotifications();
@@ -447,12 +422,7 @@ const StudentDashboard = ({ navigation }) => {
   if (loading) {
     return (
     <View style={styles.container}>
-        <Header
-          title="Student Dashboard"
-          showBack={false}
-          showNotifications={true}
-          onNotificationsPress={handleNotificationsPress}
-        />
+        <Header title="Student Dashboard" showBack={false} showNotifications={true} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1976d2" />
           <Text style={styles.loadingText}>Loading dashboard...</Text>
@@ -478,12 +448,11 @@ const StudentDashboard = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <Header
-        title="Student Dashboard"
-        showBack={false}
+      <Header 
+        title="Student Dashboard" 
+        showBack={false} 
         showNotifications={true}
         unreadCount={unreadCount}
-        onNotificationsPress={handleNotificationsPress}
       />
 
       <ScrollView 
@@ -522,12 +491,13 @@ const StudentDashboard = ({ navigation }) => {
           
           <View style={styles.welcomeContent}>
             <View style={styles.schoolHeader}>
-              <LogoDisplay 
-                logoUrl={schoolDetails?.logo_url} 
-                onImageError={() => {
-                  console.log('🗓️ Logo image failed to load, using placeholder');
-                }}
-              />
+              {schoolDetails?.logo_url ? (
+                <Image source={{ uri: schoolDetails.logo_url }} style={styles.schoolLogo} />
+              ) : (
+                <View style={styles.logoPlaceholder}>
+                  <Ionicons name="school" size={40} color="#fff" />
+                </View>
+              )}
               <View style={styles.schoolInfo}>
                 <Text style={styles.schoolName}>
                   {schoolDetails?.name || 'Maximus School'}
@@ -554,7 +524,7 @@ const StudentDashboard = ({ navigation }) => {
         )}
 
         {/* Student Profile Card */}
-        <TouchableOpacity style={styles.studentCard} onPress={() => setShowStudentDetailsModal(true)} activeOpacity={0.85}>
+        <TouchableOpacity style={styles.studentCard} activeOpacity={0.85}>
           <View style={styles.studentCardRow}>
             <Image 
               source={studentProfile?.profile_url ? { uri: studentProfile.profile_url } : require('../../../assets/icon.png')} 
@@ -602,61 +572,6 @@ const StudentDashboard = ({ navigation }) => {
                 />
               </TouchableOpacity>
             ))}
-          </View>
-        </View>
-
-        {/* Quick Actions */}
-        <View style={styles.section}>
-          <View style={styles.sectionTitleContainer}>
-            <View style={styles.sectionIcon}>
-              <Ionicons name="flash" size={20} color="#1976d2" />
-            </View>
-            <Text style={styles.sectionTitle}>Quick Actions</Text>
-          </View>
-          <View style={styles.quickActionsGrid}>
-              <TouchableOpacity
-              style={styles.quickActionCard}
-              onPress={() => handleCardNavigation('assignments')}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: '#9C27B0' }]}>
-                <Ionicons name="library" size={24} color="#fff" />
-                </View>
-              <Text style={styles.actionTitle}>Assignments</Text>
-              <Text style={styles.actionSubtitle}>View homework</Text>
-              </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.quickActionCard}
-              onPress={() => handleCardNavigation('attendance')}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: '#4CAF50' }]}>
-                <Ionicons name="checkmark-circle" size={24} color="#fff" />
-        </View>
-              <Text style={styles.actionTitle}>Attendance</Text>
-              <Text style={styles.actionSubtitle}>View records</Text>
-            </TouchableOpacity>
-
-              <TouchableOpacity
-              style={styles.quickActionCard}
-              onPress={() => handleCardNavigation('marks')}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: '#2196F3' }]}>
-                <Ionicons name="document-text" size={24} color="#fff" />
-                </View>
-              <Text style={styles.actionTitle}>Marks</Text>
-              <Text style={styles.actionSubtitle}>View grades</Text>
-              </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.quickActionCard}
-              onPress={() => handleCardNavigation('notifications')}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: '#FF9800' }]}>
-                <Ionicons name="notifications" size={24} color="#fff" />
-              </View>
-              <Text style={styles.actionTitle}>Notifications</Text>
-              <Text style={styles.actionSubtitle}>View updates</Text>
-            </TouchableOpacity>
           </View>
         </View>
 
@@ -768,13 +683,13 @@ const StudentDashboard = ({ navigation }) => {
 
         {/* Upcoming Events */}
         {events.length > 0 && (
-          <View style={[styles.section, { marginBottom: 28 }]}>
+          <View style={styles.section}>
             <View style={styles.sectionTitleContainer}>
               <View style={styles.sectionIcon}>
                 <Ionicons name="calendar" size={20} color="#FF9800" />
-              </View>
-              <Text style={styles.sectionTitle}>Upcoming Events</Text>
             </View>
+              <Text style={styles.sectionTitle}>Upcoming Events</Text>
+          </View>
             <View style={styles.eventsContainer}>
               {events.map((event, index) => (
                 <View key={index} style={styles.eventCard}>
@@ -782,10 +697,10 @@ const StudentDashboard = ({ navigation }) => {
                     <Ionicons name={event.icon} size={20} color="#fff" />
         </View>
                   <View style={styles.eventInfo}>
-                    <Text style={styles.eventTitle}>{event.title || 'Not available'}</Text>
-                    <Text style={styles.eventDescription}>{event.description || 'Not available'}</Text>
+                    <Text style={styles.eventTitle}>{event.title}</Text>
+                    <Text style={styles.eventDescription}>{event.description}</Text>
                     <Text style={styles.eventDateTime}>
-                      {event.date ? formatDateToDDMMYYYY(event.date) : 'Not available'} • {event.time || 'Not available'}
+                      {formatDateToDDMMYYYY(event.date)} • {event.time}
                     </Text>
                   </View>
                 </View>
@@ -793,13 +708,69 @@ const StudentDashboard = ({ navigation }) => {
             </View>
           </View>
         )}
+
+        {/* Quick Actions */}
+        <View style={styles.section}>
+          <View style={styles.sectionTitleContainer}>
+            <View style={styles.sectionIcon}>
+              <Ionicons name="flash" size={20} color="#1976d2" />
+            </View>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+          </View>
+          <View style={styles.quickActionsGrid}>
+              <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => handleCardNavigation('assignments')}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#9C27B0' }]}>
+                <Ionicons name="library" size={24} color="#fff" />
+                </View>
+              <Text style={styles.actionTitle}>Assignments</Text>
+              <Text style={styles.actionSubtitle}>View homework</Text>
+              </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => handleCardNavigation('attendance')}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#4CAF50' }]}>
+                <Ionicons name="checkmark-circle" size={24} color="#fff" />
+        </View>
+              <Text style={styles.actionTitle}>Attendance</Text>
+              <Text style={styles.actionSubtitle}>View records</Text>
+            </TouchableOpacity>
+
+              <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => handleCardNavigation('marks')}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#2196F3' }]}>
+                <Ionicons name="document-text" size={24} color="#fff" />
+                </View>
+              <Text style={styles.actionTitle}>Marks</Text>
+              <Text style={styles.actionSubtitle}>View grades</Text>
+              </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => handleCardNavigation('notifications')}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#FF9800' }]}>
+                <Ionicons name="notifications" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Notifications</Text>
+              <Text style={styles.actionSubtitle}>View updates</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* Recent Activities */}
         {recentActivities.length > 0 && (
-          <View style={styles.section}>
+        <View style={styles.section}>
             <View style={styles.sectionTitleContainer}>
               <View style={styles.sectionIcon}>
                 <Ionicons name="activity" size={20} color="#4CAF50" />
-              </View>
+                </View>
               <Text style={styles.sectionTitle}>Recent Activities</Text>
             </View>
             <View style={styles.activitiesContainer}>
@@ -813,114 +784,15 @@ const StudentDashboard = ({ navigation }) => {
                     <Text style={styles.activityDescription}>{activity.message}</Text>
                     <Text style={styles.activityTime}>
                       {formatDateToDDMMYYYY(activity.created_at)}
-                    </Text>
-                  </View>
+                  </Text>
                 </View>
+        </View>
               ))}
-            </View>
-          </View>
+    </View>
+      </View>
         )}
 
       </ScrollView>
-
-      {/* Student Details Modal */}
-      {showStudentDetailsModal && (
-        <Modal
-          visible={showStudentDetailsModal}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowStudentDetailsModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Student Details</Text>
-                <TouchableOpacity onPress={() => setShowStudentDetailsModal(false)}>
-                  <Ionicons name="close" size={24} color="#666" />
-                </TouchableOpacity>
-              </View>
-              <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={true}>
-                <View style={{ alignItems: 'center', marginBottom: 18 }}>
-                  <Image
-                    source={studentProfile?.profile_url ? { uri: studentProfile.profile_url } : require('../../../assets/icon.png')}
-                    style={styles.studentAvatarLarge}
-                  />
-                </View>
-                {/* Basic Information */}
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Name:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.name || 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Student ID:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.id || 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Admission Number:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.admission_no || 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Roll Number:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.roll_no || 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Class:</Text>
-                  <Text style={styles.detailsValue}>
-                    {studentProfile?.classes ?
-                      `${studentProfile.classes.class_name} ${studentProfile.classes.section}` :
-                      'N/A'
-                    }
-                  </Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Academic Year:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.academic_year || 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Gender:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.gender || 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Date of Birth:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.dob ? formatDateToDDMMYYYY(studentProfile.dob) : 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Address:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.address || 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Pin Code:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.pin_code || 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Phone:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.user_phone || 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Email:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.email || 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Blood Group:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.blood_group || 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Nationality:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.nationality || 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Religion:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.religion || 'N/A'}</Text>
-                </View>
-                <View style={styles.detailsRow}>
-                  <Text style={styles.detailsLabel}>Mother Tongue:</Text>
-                  <Text style={styles.detailsValue}>{studentProfile?.mother_tongue || 'N/A'}</Text>
-                </View>
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-      )}
       </View>
     );
 };
@@ -1089,7 +961,7 @@ const styles = StyleSheet.create({
   studentCard: {
     backgroundColor: '#fff',
     borderRadius: 14,
-    padding: 14,
+    padding: 18,
     marginHorizontal: 16,
     marginTop: 18,
     marginBottom: 8,
@@ -1119,7 +991,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    marginRight: 12,
+    marginRight: 16,
     backgroundColor: '#eee',
   },
 
@@ -1140,10 +1012,12 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   statsColumnContainer: {
-    flexDirection: 'column',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
   },
   statCardWrapper: {
-    width: '100%',
+    width: '48%',
     marginBottom: 12,
   },
 
@@ -1337,7 +1211,7 @@ const styles = StyleSheet.create({
     width: '48%',
     backgroundColor: '#f8f9fa',
     borderRadius: 12,
-    padding: 12,
+    padding: 16,
     marginBottom: 12,
     alignItems: 'center',
     borderWidth: 1,
@@ -1349,14 +1223,14 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   actionTitle: {
     fontSize: 14,
     fontWeight: '600',
     color: '#333',
     textAlign: 'center',
-    marginBottom: 2,
+    marginBottom: 4,
   },
   actionSubtitle: {
     fontSize: 12,
@@ -1402,67 +1276,6 @@ const styles = StyleSheet.create({
   activityTime: {
     fontSize: 12,
     color: '#999',
-  },
-
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 20,
-    margin: 20,
-    maxHeight: '80%',
-    width: '90%',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-    paddingBottom: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  studentAvatarLarge: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#eee',
-  },
-  detailsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  detailsLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    flex: 1,
-  },
-  detailsValue: {
-    fontSize: 16,
-    color: '#666',
-    flex: 2,
-    textAlign: 'right',
   },
 });
 

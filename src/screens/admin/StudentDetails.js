@@ -1,15 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, Platform, Image } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import Header from '../../components/Header';
-import { dbHelpers, supabase, TABLES } from '../../utils/supabase';
+import { dbHelpers, supabase } from '../../utils/supabase';
 
 const StudentDetails = ({ route }) => {
   const navigation = useNavigation();
   const { student } = route.params;
   const [studentData, setStudentData] = useState(null);
-  const [studentUser, setStudentUser] = useState(null); // Store user data with profile_url
   const [feeStatus, setFeeStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -35,56 +34,24 @@ const StudentDetails = ({ route }) => {
           throw error;
         }
         
-        // Try multiple methods to get parent information with proper error handling
+        // Try multiple methods to get parent information
         let parentData = null;
         
-        // Method 1: Try parents table (most reliable for parent information)
-        try {
-          const { data: parentsTableData, error: parentError } = await supabase
-            .from('parents')
-            .select('name, relation, phone, email')
-            .eq('student_id', student.id)
-            .single();
+        // Method 1: Try parents table
+        const { data: parentsTableData, error: parentError } = await supabase
+          .from('parents')
+          .select('name, relation')
+          .eq('student_id', student.id)
+          .single();
+        
+        if (parentsTableData && !parentError) {
+          parentData = parentsTableData;
+          console.log('Found parent in parents table:', parentData);
+        } else {
+          console.log('No parent found in parents table for student:', student.id);
           
-          if (parentsTableData && !parentError) {
-            parentData = {
-              name: parentsTableData.name,
-              relation: parentsTableData.relation || 'Guardian',
-              phone: parentsTableData.phone,
-              email: parentsTableData.email
-            };
-            console.log('Found parent in parents table:', parentData);
-          }
-        } catch (error) {
-          console.log('Parents table lookup failed:', error);
-        }
-        
-        // Method 2: Try via parent_id in students table (parents table)
-        if (!parentData && data.parent_id) {
-          try {
-            const { data: parentFromParentId, error: parentIdError } = await supabase
-              .from('parents')
-              .select('name, relation, phone, email')
-              .eq('id', data.parent_id)
-              .single();
-            
-            if (parentFromParentId && !parentIdError) {
-              parentData = {
-                name: parentFromParentId.name,
-                relation: parentFromParentId.relation || 'Guardian',
-                phone: parentFromParentId.phone,
-                email: parentFromParentId.email
-              };
-              console.log('Found parent via parent_id in parents table:', parentData);
-            }
-          } catch (error) {
-            console.log('Parent_id lookup in parents table failed:', error);
-          }
-        }
-        
-        // Method 3: Try via parent_id in students table (users table)
-        if (!parentData && data.parent_id) {
-          try {
+          // Method 2: Try via parent_id in students table (users table)
+          if (data.parent_id) {
             const { data: userData, error: userError } = await supabase
               .from('users')
               .select('full_name, email, phone')
@@ -92,22 +59,15 @@ const StudentDetails = ({ route }) => {
               .single();
             
             if (userData && !userError) {
-              parentData = {
-                name: userData.full_name,
-                relation: 'Guardian',
-                phone: userData.phone,
-                email: userData.email
-              };
-              console.log('Found parent in users table via parent_id:', parentData);
+              parentData = { name: userData.full_name, relation: 'Guardian' };
+              console.log('Found parent in users table:', parentData);
+            } else {
+              console.log('No parent found in users table for parent_id:', data.parent_id);
             }
-          } catch (error) {
-            console.log('Parent_id lookup in users table failed:', error);
           }
-        }
-        
-        // Method 4: Try finding parent via users table linked_parent_of
-        if (!parentData) {
-          try {
+          
+          // Method 3: Try finding parent via users table linked_parent_of
+          if (!parentData) {
             const { data: linkedParentData, error: linkedError } = await supabase
               .from('users')
               .select('full_name, email, phone')
@@ -115,16 +75,11 @@ const StudentDetails = ({ route }) => {
               .single();
             
             if (linkedParentData && !linkedError) {
-              parentData = {
-                name: linkedParentData.full_name,
-                relation: 'Guardian',
-                phone: linkedParentData.phone,
-                email: linkedParentData.email
-              };
+              parentData = { name: linkedParentData.full_name, relation: 'Guardian' };
               console.log('Found parent via linked_parent_of:', parentData);
+            } else {
+              console.log('No parent found via linked_parent_of for student:', student.id);
             }
-          } catch (error) {
-            console.log('Linked_parent_of lookup failed:', error);
           }
         }
         
@@ -136,20 +91,6 @@ const StudentDetails = ({ route }) => {
         
         console.log('Combined student data:', combinedData);
         setStudentData(combinedData);
-
-        // Fetch student's user profile data (including profile_url)
-        const { data: userData, error: userError } = await supabase
-          .from(TABLES.USERS)
-          .select('id, full_name, email, phone, profile_url')
-          .eq('linked_student_id', student.id)
-          .single();
-
-        if (!userError && userData) {
-          setStudentUser(userData);
-          console.log('Student user profile loaded:', userData);
-        } else {
-          console.log('No user profile found for student:', userError);
-        }
 
         // Fetch fee status
         console.log('Fetching fees for student ID:', student.id);
@@ -240,32 +181,13 @@ const StudentDetails = ({ route }) => {
       <Header title="Student Profile" showBack={true} />
       
       <ScrollView style={styles.content}>
-        {/* Student Info Summary Card with Profile Photo */}
+        {/* Student Info Summary Card */}
         <View style={styles.summaryCard}>
-          <View style={styles.summaryHeader}>
-            <View style={styles.summaryTextContainer}>
-              <Text style={styles.studentName}>{studentData.name}</Text>
-              <Text style={styles.classInfo}>
-                {studentData.classes ? `${studentData.classes.class_name} - Section ${studentData.classes.section}` : 'Class not assigned'}
-              </Text>
-              <Text style={styles.rollNumber}>Roll No: {studentData.roll_no || 'N/A'}</Text>
-            </View>
-
-            {/* Student Profile Photo */}
-            <View style={styles.studentProfileContainer}>
-              {studentUser?.profile_url ? (
-                <Image
-                  source={{ uri: studentUser.profile_url }}
-                  style={styles.studentProfileImage}
-                  onError={() => console.log('Failed to load student profile image')}
-                />
-              ) : (
-                <View style={styles.studentProfilePlaceholder}>
-                  <Ionicons name="person" size={32} color="#666" />
-                </View>
-              )}
-            </View>
-          </View>
+          <Text style={styles.studentName}>{studentData.name}</Text>
+          <Text style={styles.classInfo}>
+            {studentData.classes ? `${studentData.classes.class_name} - Section ${studentData.classes.section}` : 'Class not assigned'}
+          </Text>
+          <Text style={styles.rollNumber}>Roll No: {studentData.roll_no || 'N/A'}</Text>
         </View>
 
         {/* Information Cards */}
@@ -553,34 +475,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     alignItems: 'center',
-  },
-  summaryHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  summaryTextContainer: {
-    flex: 1,
-  },
-  studentProfileContainer: {
-    marginLeft: 16,
-  },
-  studentProfileImage: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    borderWidth: 3,
-    borderColor: '#2196F3',
-  },
-  studentProfilePlaceholder: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: '#f0f0f0',
-    borderWidth: 2,
-    borderColor: '#ddd',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });
 
