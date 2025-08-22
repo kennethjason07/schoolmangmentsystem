@@ -313,7 +313,6 @@ const AdminDashboard = ({ navigation }) => {
   const quickActions = [
     { title: 'School Details', icon: 'business', color: '#673AB7', screen: 'SchoolDetails' }, // Stack screen
     { title: 'Manage Teachers', icon: 'person', color: '#FF9800', screen: 'Teachers' }, // Tab name
-    { title: 'Tasks Management', icon: 'clipboard', color: '#4CAF50', screen: 'TasksManagement' }, // Stack screen
     { title: 'Teacher Accounts', icon: 'person-add', color: '#3F51B5', screen: 'TeacherAccountManagement' }, // Stack screen
     { title: 'Student Accounts', icon: 'people-circle', color: '#8BC34A', screen: 'StudentAccountManagement' }, // Stack screen
     { title: 'Parent Accounts', icon: 'people', color: '#9C27B0', screen: 'ParentAccountManagement' }, // Stack screen
@@ -732,18 +731,12 @@ const AdminDashboard = ({ navigation }) => {
                   contentContainerStyle={styles.modalScrollContent}
                 >
                   <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>{editEventIndex !== null ? 'Edit Event' : 'Add Event'}</Text>
-                
-                {/* Event Title */}
-                <Text style={styles.inputLabel}>Event Title *</Text>
                 <TextInput
                   placeholder="Event title"
                   value={eventInput.title}
                   onChangeText={text => setEventInput({ ...eventInput, title: text })}
                   style={styles.input}
                 />
-                
-                {/* Event Description */}
-                <Text style={styles.inputLabel}>Event Description</Text>
                 <TextInput
                   placeholder="Event description (optional)"
                   value={eventInput.description}
@@ -752,9 +745,6 @@ const AdminDashboard = ({ navigation }) => {
                   multiline
                   numberOfLines={3}
                 />
-                
-                {/* Event Date */}
-                <Text style={styles.inputLabel}>Event Date *</Text>
                 {/* Date Picker Button for Events */}
                 {Platform.OS === 'web' ? (
                   <input
@@ -786,6 +776,12 @@ const AdminDashboard = ({ navigation }) => {
                     }}
                   />
                 )}
+                <TextInput
+                  placeholder="Type (Event/Exam)"
+                  value={eventInput.type}
+                  onChangeText={text => setEventInput({ ...eventInput, type: text })}
+                  style={styles.input}
+                />
                 
                 {/* Class Selection Section */}
                 <View style={{ marginBottom: 16 }}>
@@ -1757,13 +1753,6 @@ const styles = StyleSheet.create({
   },
   recentActivitiesSection: {
     paddingBottom: 20,
-  },
-  inputLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 6,
-    marginTop: 4,
   },
 
 });

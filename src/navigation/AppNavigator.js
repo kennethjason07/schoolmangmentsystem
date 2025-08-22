@@ -36,7 +36,6 @@ import LinkExistingParent from '../screens/admin/LinkExistingParent';
 import FeeClassDetails from '../screens/admin/FeeClassDetails';
 import ClassStudentDetails from '../screens/admin/ClassStudentDetails';
 import AssignTaskToTeacher from '../screens/admin/AssignTaskToTeacher';
-import TasksManagement from '../screens/admin/TasksManagement';
 import SchoolDetails from '../screens/admin/SchoolDetails';
 
 // Report Screens
@@ -58,7 +57,6 @@ import TeacherChat from '../screens/teacher/TeacherChat';
 import MarksEntryStudentsScreen from '../screens/teacher/MarksEntryStudentsScreen';
 import StudentAttendanceScreen from '../screens/teacher/StudentAttendanceScreen';
 import StudentMarksScreen from '../screens/teacher/StudentMarksScreen';
-import ViewSubmissions from '../screens/teacher/ViewSubmissions';
 
 // Parent Screens
 import ParentDashboard from '../screens/parent/ParentDashboard';
@@ -67,7 +65,6 @@ import AttendanceSummary from '../screens/parent/AttendanceSummary';
 import FeePayment from '../screens/parent/FeePayment';
 import Notifications from '../screens/parent/Notifications';
 import ChatWithTeacher from '../screens/parent/ChatWithTeacher';
-import CallWithTeacher from '../screens/parent/CallWithTeacher';
 import StudentSelectionScreen from '../screens/parent/StudentSelectionScreen';
 
 // Payment Screens
@@ -388,7 +385,6 @@ export default function AppNavigator() {
                 <Stack.Screen name="LinkExistingParent" component={LinkExistingParent} />
 
                 <Stack.Screen name="AssignTaskToTeacher" component={AssignTaskToTeacher} />
-                <Stack.Screen name="TasksManagement" component={TasksManagement} />
                 <Stack.Screen name="AttendanceReport" component={AttendanceReport} />
                 <Stack.Screen name="AttendanceRecordDetail" component={AttendanceRecordDetail} />
                 <Stack.Screen name="AcademicPerformance" component={AcademicPerformance} />
@@ -404,7 +400,6 @@ export default function AppNavigator() {
                 <Stack.Screen name="TeacherTimetable" component={TeacherTimetable} />
                 <Stack.Screen name="TeacherSubjects" component={TeacherSubjects} />
                 <Stack.Screen name="ViewStudentInfo" component={ViewStudentInfo} />
-                <Stack.Screen name="ViewSubmissions" component={ViewSubmissions} />
                 <Stack.Screen name="MarksEntryStudentsScreen" component={MarksEntryStudentsScreen} />
                 <Stack.Screen name="StudentAttendanceScreen" component={StudentAttendanceScreen} />
                 <Stack.Screen name="StudentMarksScreen" component={StudentMarksScreen} />
@@ -417,7 +412,6 @@ export default function AppNavigator() {
                 <Stack.Screen name="StudentSelection" component={StudentSelectionScreen} />
                 <Stack.Screen name="ParentTabs" component={ParentTabNavigator} />
                 <Stack.Screen name="ParentNotifications" component={Notifications} />
-                <Stack.Screen name="CallWithTeacher" component={CallWithTeacher} />
                 <Stack.Screen name="CardPayment" component={CardPayment} />
                 <Stack.Screen name="OnlineBankingPayment" component={OnlineBankingPayment} />
                 <Stack.Screen name="UPIPayment" component={UPIPayment} />

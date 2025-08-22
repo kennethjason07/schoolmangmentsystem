@@ -18,10 +18,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-import useResponsive from '../../utils/useResponsive';
 
 const StudentAccountManagement = ({ navigation }) => {
-  const { getPickerHeight, getResponsiveFontSize } = useResponsive();
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState('all');
@@ -67,7 +65,8 @@ const StudentAccountManagement = ({ navigation }) => {
         .from(TABLES.STUDENTS)
         .select(`
           *,
-          classes(id, class_name, section)
+          classes(id, class_name, section),
+          users!students_parent_id_fkey(id, email, full_name, phone)
         `)
         .order('name');
 
@@ -322,7 +321,7 @@ const StudentAccountManagement = ({ navigation }) => {
             <Picker
               selectedValue={selectedClass}
               onValueChange={(itemValue) => setSelectedClass(itemValue)}
-              style={[styles.picker, { height: getPickerHeight() }]}
+              style={styles.picker}
             >
               <Picker.Item label="All Classes" value="all" />
               {classes.map((cls) => (
