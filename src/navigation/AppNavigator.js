@@ -82,6 +82,10 @@ import StudentAttendanceMarks from '../screens/student/StudentAttendanceMarks';
 import StudentMarks from '../screens/student/StudentMarks';
 import StudentNotifications from '../screens/student/StudentNotifications';
 import StudentChatWithTeacher from '../screens/student/StudentChatWithTeacher';
+import StudentFeePayment from '../screens/student/FeePayment';
+import StudentCardPayment from '../screens/student/CardPayment';
+import StudentOnlineBankingPayment from '../screens/student/OnlineBankingPayment';
+import StudentUPIPayment from '../screens/student/UPIPayment';
 
 // Universal Screens
 import ProfileScreen from '../screens/universal/ProfileScreen';
@@ -425,6 +429,10 @@ export default function AppNavigator() {
               <>
                 <Stack.Screen name="StudentDashboard" component={StudentTabNavigator} />
                 <Stack.Screen name="StudentNotifications" component={StudentNotifications} />
+                <Stack.Screen name="StudentFeePayment" component={StudentFeePayment} />
+                <Stack.Screen name="CardPayment" component={StudentCardPayment} />
+                <Stack.Screen name="OnlineBankingPayment" component={StudentOnlineBankingPayment} />
+                <Stack.Screen name="UPIPayment" component={StudentUPIPayment} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
               </>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, Modal, Pressable, AccessibilityInfo, ActivityIndicator, Alert, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, Modal, Pressable, AccessibilityInfo, ActivityIndicator, Alert, RefreshControl, FlatList } from 'react-native';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
@@ -9,20 +9,36 @@ import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import Header from '../../components/Header';
 
-const MONTHS = [
-  { label: 'January', value: '2024-01' },
-  { label: 'February', value: '2024-02' },
-  { label: 'March', value: '2024-03' },
-  { label: 'April', value: '2024-04' },
-  { label: 'May', value: '2024-05' },
-  { label: 'June', value: '2024-06' },
-  { label: 'July', value: '2024-07' },
-  { label: 'August', value: '2024-08' },
-  { label: 'September', value: '2024-09' },
-  { label: 'October', value: '2024-10' },
-  { label: 'November', value: '2024-11' },
-  { label: 'December', value: '2024-12' },
-];
+// Generate months dynamically up to current month only (same as parent)
+const generateMonths = () => {
+  const months = [];
+  const currentDate = new Date();
+  const currentYear = currentDate.getFullYear();
+  const currentMonth = currentDate.getMonth(); // 0-indexed (0 = January)
+  const years = [currentYear - 1, currentYear]; // Previous and current year only
+
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  years.forEach(year => {
+    monthNames.forEach((monthName, index) => {
+      // Only include months up to current month
+      if (year < currentYear || (year === currentYear && index <= currentMonth)) {
+        const monthValue = `${year}-${String(index + 1).padStart(2, '0')}`;
+        months.push({
+          label: `${monthName} ${year}`,
+          value: monthValue
+        });
+      }
+    });
+  });
+
+  return months;
+};
+
+const MONTHS = generateMonths();
 
 const getAttendanceColor = (status) => {
   switch (status) {
@@ -167,6 +183,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
   const [selectedStat, setSelectedStat] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
   const [showOverallAttendance, setShowOverallAttendance] = useState(false);
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [attendanceData, setAttendanceData] = useState({});
   const [attendanceDetails, setAttendanceDetails] = useState({});
 
@@ -879,152 +896,20 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                   </Text>
                 </Animated.View>
 
-                {/* Animated Stats Grid */}
-                <Animated.View style={[styles.statsGridTwoRows, {
-                  opacity: statsAnimValue,
-                  transform: [{
-                    translateY: statsAnimValue.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [20, 0],
-                    }),
-                  }],
-                }]}>
-                  {/* First Row: Present and Absent */}
-                  <View style={styles.statsRow}>
-                  {/* Present Card */}
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    onPress={() => {
-                      animateCardPress('present');
-                      setSelectedStat('present');
-                    }}
-                  >
-                    <Animated.View style={[
-                      styles.modernStatCard,
-                      styles.presentCardModern,
-                      { transform: [{ scale: cardScaleValues.present }] }
-                    ]}>
-                      <View style={styles.modernCardHeader}>
-                        <View style={[styles.modernIconContainer, { backgroundColor: '#4CAF50' }]}>
-                          <Ionicons name="checkmark-circle" size={22} color="white" />
-                        </View>
-                        <Text style={[styles.modernStatNumber, { color: '#4CAF50' }]}>{(() => {
-                          const halfValue = Math.floor((stats.present || 0) / 2);
-                          console.log('Present - Original:', stats.present, 'Half:', halfValue);
-                          return halfValue > 0 ? halfValue : '';
-                        })()}</Text>
-                      </View>
-                      <Text style={styles.modernStatLabel}>Present</Text>
-                      <View style={[styles.modernProgressBar, { backgroundColor: '#E8F5E8' }]}>
-                        <View style={[styles.modernProgressFill, {
-                          backgroundColor: '#4CAF50',
-                          width: `${stats.present ? (Math.floor(stats.present / 2) / (Math.floor(stats.present / 2) + Math.floor(stats.absent / 2) + stats.late + stats.excused)) * 100 : 0}%`
-                        }]} />
-                      </View>
-                    </Animated.View>
-                  </TouchableOpacity>
-
-                  {/* Absent Card */}
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    onPress={() => {
-                      animateCardPress('absent');
-                      setSelectedStat('absent');
-                    }}
-                  >
-                    <Animated.View style={[
-                      styles.modernStatCard,
-                      styles.absentCardModern,
-                      { transform: [{ scale: cardScaleValues.absent }] }
-                    ]}>
-                      <View style={styles.modernCardHeader}>
-                        <View style={[styles.modernIconContainer, { backgroundColor: '#F44336' }]}>
-                          <Ionicons name="close-circle" size={22} color="white" />
-                        </View>
-                        <Text style={[styles.modernStatNumber, { color: '#F44336' }]}>{(() => {
-                          const halfValue = Math.floor((stats.absent || 0) / 2);
-                          return halfValue > 0 ? halfValue : '';
-                        })()}</Text>
-                      </View>
-                      <Text style={styles.modernStatLabel}>Absent</Text>
-                      <View style={[styles.modernProgressBar, { backgroundColor: '#FFEBEE' }]}>
-                        <View style={[styles.modernProgressFill, {
-                          backgroundColor: '#F44336',
-                          width: `${stats.absent ? (Math.floor(stats.absent / 2) / (Math.floor(stats.present / 2) + Math.floor(stats.absent / 2) + stats.late + stats.excused)) * 100 : 0}%`
-                        }]} />
-                      </View>
-                    </Animated.View>
-                  </TouchableOpacity>
+                {/* Clean Calendar Stats like Parent */}
+                <View style={styles.calendarStats}>
+                  <View style={styles.calendarStatItem}>
+                    <Text style={styles.calendarStatNumber}>{total}</Text>
+                    <Text style={styles.calendarStatLabel}>Total Days</Text>
                   </View>
-
-                  {/* Second Row: Late and Excused */}
-                  <View style={styles.statsRow}>
-                  {/* Late Card */}
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    onPress={() => {
-                      animateCardPress('late');
-                      setSelectedStat('late');
-                    }}
-                  >
-                    <Animated.View style={[
-                      styles.modernStatCard,
-                      styles.lateCardModern,
-                      { transform: [{ scale: cardScaleValues.late }] }
-                    ]}>
-                      <View style={styles.modernCardHeader}>
-                        <View style={[styles.modernIconContainer, { backgroundColor: '#FF9800' }]}>
-                          <Ionicons name="time" size={22} color="white" />
-                        </View>
-                        <Text style={[styles.modernStatNumber, { color: '#FF9800' }]}>{stats.late > 0 ? stats.late : ''}</Text>
-                      </View>
-                      <Text style={styles.modernStatLabel}>Late</Text>
-                      <View style={[styles.modernProgressBar, { backgroundColor: '#FFF3E0' }]}>
-                        <View style={[styles.modernProgressFill, {
-                          backgroundColor: '#FF9800',
-                          width: `${stats.late ? (stats.late / (Math.floor(stats.present / 2) + Math.floor(stats.absent / 2) + stats.late + stats.excused)) * 100 : 0}%`
-                        }]} />
-                      </View>
-                    </Animated.View>
-                  </TouchableOpacity>
-
-                  {/* Excused Card */}
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    onPress={() => {
-                      animateCardPress('excused');
-                      setSelectedStat('excused');
-                    }}
-                  >
-                    <Animated.View style={[
-                      styles.modernStatCard,
-                      styles.excusedCardModern,
-                      { transform: [{ scale: cardScaleValues.excused }] }
-                    ]}>
-                      <View style={styles.modernCardHeader}>
-                        <View style={[styles.modernIconContainer, { backgroundColor: '#9C27B0' }]}>
-                          <Ionicons name="medical" size={22} color="white" />
-                        </View>
-                        <Text style={[styles.modernStatNumber, { color: '#9C27B0' }]}>{stats.excused > 0 ? stats.excused : ''}</Text>
-                      </View>
-                      <Text style={styles.modernStatLabel}>Excused</Text>
-                      <View style={[styles.modernProgressBar, { backgroundColor: '#F3E5F5' }]}>
-                        <View style={[styles.modernProgressFill, {
-                          backgroundColor: '#9C27B0',
-                          width: `${stats.excused ? (stats.excused / (Math.floor(stats.present / 2) + Math.floor(stats.absent / 2) + stats.late + stats.excused)) * 100 : 0}%`
-                        }]} />
-                      </View>
-                    </Animated.View>
-                  </TouchableOpacity>
+                  <View style={styles.calendarStatItem}>
+                    <Text style={styles.calendarStatNumber}>{showOverallAttendance ? overallPercentage : percentage}%</Text>
+                    <Text style={styles.calendarStatLabel}>Attendance</Text>
                   </View>
-                </Animated.View>
-
-                {/* Quick Summary */}
-                <View style={styles.quickSummary}>
-                  <Text style={styles.summaryText}>
-                    Total Days: <Text style={styles.summaryNumber}>{total}</Text> •
-                    Attended: <Text style={styles.summaryNumber}>{stats.present + stats.late + stats.excused}</Text>
-                  </Text>
+                  <View style={styles.calendarStatItem}>
+                    <Text style={styles.calendarStatNumber}>{showOverallAttendance ? allPresentCount : stats.present}</Text>
+                    <Text style={styles.calendarStatLabel}>Present</Text>
+                  </View>
                 </View>
               </View>
               {/* Enhanced Stat Details Modal */}
@@ -1096,70 +981,206 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                   </View>
                 </View>
               </Modal>
-              {/* Carousel Month Selector */}
-              {/* In the attendance tab, update the month carousel to look like a single pill/box */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#E3F2FD', borderRadius: 18, paddingVertical: 6, paddingHorizontal: 10, marginBottom: 8 }}>
-                <TouchableOpacity onPress={goPrevMonth} style={{ backgroundColor: '#BBDEFB', borderRadius: 16, padding: 6, marginRight: 8, borderWidth: 1, borderColor: '#90caf9' }}>
-                  <Ionicons name="chevron-back" size={22} color="#1976d2" />
+              {/* Modern Google Calendar-style Navigation Header */}
+              <View style={styles.modernCalendarNavHeader}>
+                <TouchableOpacity
+                  style={styles.modernNavButton}
+                  onPress={() => {
+                    Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
+                      if (monthIdx > 0) {
+                        setSelectedMonth(MONTHS[monthIdx - 1].value);
+                      }
+                      fadeAnim.setValue(1);
+                    });
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.navButtonContent}>
+                    <Ionicons name="chevron-back" size={20} color="#4285F4" />
+                    <Text style={styles.navButtonText}>Prev</Text>
+                  </View>
                 </TouchableOpacity>
-                <Text style={{ fontSize: 17, fontWeight: 'bold', color: '#1976d2', letterSpacing: 0.5, minWidth: 90, textAlign: 'center' }}>{MONTHS.find(m => m.value === selectedMonth)?.label} {year}</Text>
-                <TouchableOpacity onPress={goNextMonth} style={{ backgroundColor: '#BBDEFB', borderRadius: 16, padding: 6, marginLeft: 8, borderWidth: 1, borderColor: '#90caf9' }}>
-                  <Ionicons name="chevron-forward" size={22} color="#1976d2" />
+                
+                <TouchableOpacity 
+                  style={styles.monthYearSelector}
+                  onPress={() => setShowMonthPicker(true)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.monthYearText}>
+                    {MONTHS.find(m => m.value === selectedMonth)?.label}
+                  </Text>
+                  <Ionicons name="chevron-down" size={16} color="#5f6368" />
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.modernNavButton,
+                    monthIdx >= MONTHS.length - 1 && styles.disabledModernNavButton
+                  ]}
+                  onPress={() => {
+                    Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
+                      if (monthIdx < MONTHS.length - 1) {
+                        setSelectedMonth(MONTHS[monthIdx + 1].value);
+                      }
+                      fadeAnim.setValue(1);
+                    });
+                  }}
+                  disabled={monthIdx >= MONTHS.length - 1}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.navButtonContent}>
+                    <Text style={[
+                      styles.navButtonText,
+                      monthIdx >= MONTHS.length - 1 && styles.disabledNavText
+                    ]}>Next</Text>
+                    <Ionicons 
+                      name="chevron-forward" 
+                      size={20} 
+                      color={monthIdx >= MONTHS.length - 1 ? "#bdc1c6" : "#4285F4"} 
+                    />
+                  </View>
                 </TouchableOpacity>
               </View>
-              {/* Attendance Calendar with Weekday Headers and Alignment */}
-              <View>
-                <Text style={[styles.sectionTitle, {marginBottom: 4}]}>{MONTHS.find(m => m.value === selectedMonth)?.label} {year}</Text>
-                {/* Wrap the calendar grid in a bordered container */}
-                <View style={{ borderWidth: 1.5, borderColor: '#FFECB3', borderRadius: 10, overflow: 'hidden', marginBottom: 12 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#FFF3E0', borderBottomWidth: 1, borderBottomColor: '#FFE0B2' }}>
-                    {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
-                      <Text key={d} style={{ flex: 1, textAlign: 'center', fontSize: 14, color: '#FF9800', fontWeight: 'bold', paddingVertical: 4 }}>{d}</Text>
-                    ))}
+              {/* Google Calendar-style Header */}
+              <View style={styles.googleCalendarHeader}>
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => (
+                  <View key={index} style={styles.googleHeaderCell}>
+                    <Text style={styles.googleHeaderText}>
+                      {day}
+                    </Text>
                   </View>
-                  <Animated.View style={{ opacity: fadeAnim }}>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                      {(() => {
+                ))}
+              </View>
+
+              {/* Google Calendar-inspired Clean Grid */}
+              <View style={styles.googleCalendarGrid}>
+                <Animated.View style={{ opacity: fadeAnim }}>
+                  {Array.from({ length: 6 }, (_, weekIndex) => (
+                    <View key={`week-${weekIndex}`} style={styles.googleCalendarWeek}>
+                      {Array.from({ length: 7 }, (_, dayIndex) => {
+                        const dayArrayIndex = weekIndex * 7 + dayIndex;
+                        
                         // Calculate calendar layout
                         const firstDay = new Date(year, month - 1, 1);
                         const daysInMonth = new Date(year, month, 0).getDate();
+                        const firstDayOfWeek = firstDay.getDay();
+                        
+                        // Create full calendar grid
+                        const calendarDays = [];
+                        
+                        // Add days from previous month
+                        const prevMonth = new Date(year, month - 2, 0);
+                        for (let i = firstDayOfWeek; i > 0; i--) {
+                          calendarDays.push(new Date(year, month - 2, prevMonth.getDate() - i + 1));
+                        }
+                        
+                        // Add all days of current month
+                        for (let day = 1; day <= daysInMonth; day++) {
+                          calendarDays.push(new Date(year, month - 1, day));
+                        }
+                        
+                        // Add days from next month to complete 6 weeks
+                        const remainingDays = 42 - calendarDays.length;
+                        for (let day = 1; day <= remainingDays; day++) {
+                          calendarDays.push(new Date(year, month, day));
+                        }
+                        
+                        const day = calendarDays[dayArrayIndex];
+                        const uniqueKey = `day-${weekIndex}-${dayIndex}-${dayArrayIndex}`;
+
+                        if (!day) {
+                          return (
+                            <View key={uniqueKey} style={styles.googleCalendarDay}>
+                              <Text style={styles.googleDayNumber}></Text>
+                            </View>
+                          );
+                        }
+
+                        const dateStr = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+                        const status = attendanceData[dateStr];
+                        const isCurrentDay = dateStr === new Date().toISOString().slice(0, 10);
+                        const isCurrentMonth = day.getMonth() === month - 1;
+                        const isSunday = day.getDay() === 0;
+                        const dayNumber = day.getDate();
+                        const dayKey = `${dateStr}-${uniqueKey}`;
 
                         return (
-                          <>
-                            {/* Empty cells before the 1st */}
-                            {[...Array(firstDay.getDay())].map((_, i) => (
-                              <View key={'empty'+i} style={{ width: `${100/7}%`, aspectRatio: 1, borderRightWidth: (i % 7 !== 6) ? 1 : 0, borderBottomWidth: 1, borderColor: '#FFE0B2' }} />
-                            ))}
-                            {[...Array(daysInMonth)].map((_, i) => {
-                              const day = i + 1;
-                              const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                              const status = attendanceData[dateStr];
-                              const isToday = dateStr === new Date().toISOString().slice(0, 10);
-                              return (
-                                <TouchableOpacity
-                                  key={day}
-                                  style={{ width: `${100/7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRightWidth: ((firstDay.getDay() + i) % 7 !== 6) ? 1 : 0, borderBottomWidth: 1, borderColor: '#FFE0B2' }}
-                                  onPress={() => setSelectedDay({ day, status, dateStr })}
-                                  activeOpacity={0.7}
-                                  accessibilityLabel={`Day ${day}, ${status || 'No data'}`}
-                                >
-                                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-                                    <Text style={{ fontSize: 16, color: '#222', fontWeight: isToday ? 'bold' : 'normal' }}>{day}</Text>
-                                    {status && (
-                                      <Ionicons name={getAttendanceIcon(status)} size={14} color={getAttendanceColor(status)} style={{ marginLeft: 2 }} />
-                                    )}
-                                  </View>
-                                </TouchableOpacity>
-                              );
-                            })}
-                          </>
+                          <TouchableOpacity
+                            key={dayKey}
+                            style={[
+                              styles.googleCalendarDay,
+                              isCurrentDay && styles.googleTodayDay,
+                              !isCurrentMonth && styles.googleOtherMonthDay,
+                            ]}
+                            onPress={() => {
+                              if (status && isCurrentMonth) {
+                                const dayStr = new Date(dateStr).toLocaleDateString('en-US', { 
+                                  weekday: 'long', 
+                                  year: 'numeric', 
+                                  month: 'long', 
+                                  day: 'numeric' 
+                                });
+                                const details = attendanceDetails[dateStr];
+                                Alert.alert(
+                                  dayStr,
+                                  `Status: ${status.charAt(0).toUpperCase() + status.slice(1)}\nMarked by: ${details?.markedBy || 'N/A'}\nTime: ${details?.markedAt || 'N/A'}`,
+                                  [{ text: 'OK', style: 'default' }]
+                                );
+                              } else if (isCurrentMonth && !isSunday) {
+                                Alert.alert(
+                                  new Date(dateStr).toLocaleDateString('en-US', { 
+                                    weekday: 'long', 
+                                    year: 'numeric', 
+                                    month: 'long', 
+                                    day: 'numeric' 
+                                  }),
+                                  'No attendance record for this day.',
+                                  [{ text: 'OK' }]
+                                );
+                              } else if (isSunday) {
+                                Alert.alert(
+                                  new Date(dateStr).toLocaleDateString('en-US', { 
+                                    weekday: 'long', 
+                                    year: 'numeric', 
+                                    month: 'long', 
+                                    day: 'numeric' 
+                                  }),
+                                  'Holiday - No school',
+                                  [{ text: 'OK' }]
+                                );
+                              }
+                            }}
+                            disabled={!isCurrentMonth}
+                            activeOpacity={0.6}
+                          >
+                            {/* Day Number */}
+                            <Text style={[
+                              styles.googleDayNumber,
+                              isCurrentDay && styles.googleTodayText,
+                              !isCurrentMonth && styles.googleOtherMonthText,
+                              isSunday && isCurrentMonth && styles.googleSundayText,
+                            ]}>
+                              {dayNumber}
+                            </Text>
+
+                            {/* Google-style attendance dot */}
+                            {status && isCurrentMonth && !isSunday && (
+                              <View style={[
+                                styles.googleAttendanceDot,
+                                {
+                                  backgroundColor: status === 'present' 
+                                    ? '#4285F4' // Google Blue for present
+                                    : '#EA4335' // Google Red for absent
+                                }
+                              ]} />
+                            )}
+                          </TouchableOpacity>
                         );
-                      })()}
+                      })}
                     </View>
-                  </Animated.View>
-                </View>
+                  ))}
+                </Animated.View>
               </View>
-              {/* Enhanced Day Tooltip/Modal */}
               <Modal visible={!!selectedDay} transparent animationType="fade" onRequestClose={() => setSelectedDay(null)}>
                 <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.18)', justifyContent: 'center', alignItems: 'center' }}>
                   <View style={{ backgroundColor: '#fff', borderRadius: 18, padding: 28, minWidth: 280, alignItems: 'center', elevation: 6 }}>
@@ -1202,12 +1223,16 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                   </View>
                 </View>
               </Modal>
-              {/* Legend */}
-              <View style={styles.legendRow}>
-                <View style={[styles.legendDot, styles.present]} /><Text style={styles.legendLabel}>Present</Text>
-                <View style={[styles.legendDot, styles.absent]} /><Text style={styles.legendLabel}>Absent</Text>
-                <View style={[styles.legendDot, styles.late]} /><Text style={styles.legendLabel}>Late</Text>
-                <View style={[styles.legendDot, styles.excused]} /><Text style={styles.legendLabel}>Excused</Text>
+              {/* Google Calendar-style Legend */}
+              <View style={styles.googleLegend}>
+                <View style={styles.googleLegendItem}>
+                  <View style={[styles.googleLegendDot, { backgroundColor: '#4285F4' }]} />
+                  <Text style={styles.googleLegendText}>Present</Text>
+                </View>
+                <View style={styles.googleLegendItem}>
+                  <View style={[styles.googleLegendDot, { backgroundColor: '#EA4335' }]} />
+                  <Text style={styles.googleLegendText}>Absent</Text>
+                </View>
               </View>
               {/* Download Button */}
               <TouchableOpacity style={styles.downloadBtn} onPress={async () => {
@@ -1859,5 +1884,203 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 6,
     gap: 8,
+  },
+  
+  // Google Calendar-style Navigation Header
+  modernCalendarNavHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  modernNavButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#f8f9fa',
+    minWidth: 60,
+  },
+  disabledModernNavButton: {
+    backgroundColor: '#f0f0f0',
+    opacity: 0.6,
+  },
+  navButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  navButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#4285F4',
+  },
+  disabledNavText: {
+    color: '#bdc1c6',
+  },
+  monthYearSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    gap: 8,
+  },
+  monthYearText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#202124',
+  },
+  
+  // Google Calendar-style Header
+  googleCalendarHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e8eaed',
+    elevation: 1,
+  },
+  googleHeaderCell: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleHeaderText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#5f6368',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  
+  // Google Calendar Grid
+  googleCalendarGrid: {
+    backgroundColor: '#fff',
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+    overflow: 'hidden',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  googleCalendarWeek: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f3f4',
+  },
+  googleCalendarDay: {
+    flex: 1,
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRightWidth: 1,
+    borderRightColor: '#f1f3f4',
+    backgroundColor: '#fff',
+    position: 'relative',
+    minHeight: 48,
+  },
+  googleTodayDay: {
+    backgroundColor: '#e8f0fe',
+  },
+  googleOtherMonthDay: {
+    backgroundColor: '#fafafa',
+  },
+  googleDayNumber: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#202124',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  googleTodayText: {
+    fontWeight: '600',
+    color: '#1a73e8',
+  },
+  googleOtherMonthText: {
+    color: '#9aa0a6',
+    fontWeight: '300',
+  },
+  googleSundayText: {
+    color: '#ea4335',
+  },
+  googleAttendanceDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    position: 'absolute',
+    bottom: 4,
+    alignSelf: 'center',
+  },
+  
+  // Google Calendar-style Legend
+  googleLegend: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 12,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    gap: 16,
+  },
+  googleLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  googleLegendDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  googleLegendText: {
+    fontSize: 12,
+    color: '#5f6368',
+    fontWeight: '500',
+  },
+  
+  // Calendar Stats (like parent)
+  calendarStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  calendarStatItem: {
+    alignItems: 'center',
+  },
+  calendarStatNumber: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2196F3',
+  },
+  calendarStatLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
   },
 });

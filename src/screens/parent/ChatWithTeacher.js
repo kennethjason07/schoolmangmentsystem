@@ -1489,6 +1489,10 @@ const ChatWithTeacher = () => {
             ref={flatListRef}
             data={[...messages]}
             keyExtractor={item => item.id}
+            maintainVisibleContentPosition={{
+              minIndexForVisible: 0,
+              autoscrollToTopThreshold: 10,
+            }}
             renderItem={({ item }) => (
               <TouchableOpacity
                 onLongPress={() => {

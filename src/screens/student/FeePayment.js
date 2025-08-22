@@ -46,25 +46,31 @@ const FeePayment = () => {
       setLoading(true);
       setError(null);
       try {
-        // Get parent's student data using the helper function
-        const { data: parentUserData, error: parentError } = await dbHelpers.getParentByUserId(user.id);
-        if (parentError || !parentUserData) {
-          throw new Error('Parent data not found');
+        // Get student data directly using linked_student_id
+        const { data: studentDetails, error: studentError } = await supabase
+          .from(TABLES.STUDENTS)
+          .select(`
+            *,
+            classes(id, class_name, section, academic_year)
+          `)
+          .eq('id', user.linked_student_id)
+          .single();
+
+        if (studentError || !studentDetails) {
+          throw new Error('Student data not found');
         }
 
-        // Get student details from the linked student
-        const studentDetails = parentUserData.students;
         setStudentData(studentDetails);
 
         // Debug student details first
-        console.log('FeePayment - Student details:', studentDetails);
+        console.log('Student FeePayment - Student details:', studentDetails);
 
         let classFees = null;
         let feesError = null;
 
         // Only fetch data if we have valid student details
         if (studentDetails && isValidUUID(studentDetails.id) && isValidUUID(studentDetails.class_id)) {
-          console.log('FeePayment - Fetching fee structure for student:', studentDetails.id, 'class:', studentDetails.class_id);
+          console.log('Student FeePayment - Fetching fee structure for student:', studentDetails.id, 'class:', studentDetails.class_id);
 
           // Get fee structure for a class using easy.txt recommendation
           const feeResult = await supabase
@@ -80,14 +86,14 @@ const FeePayment = () => {
           feesError = feeResult.error;
 
           if (feesError) {
-            console.log('FeePayment - Database error fetching fee structure:', feesError);
+            console.log('Student FeePayment - Database error fetching fee structure:', feesError);
           } else {
-            console.log('FeePayment - Loaded', classFees?.length || 0, 'fee structure records from database');
+            console.log('Student FeePayment - Loaded', classFees?.length || 0, 'fee structure records from database');
           }
         } else {
-          console.log('FeePayment - Invalid student details, will use sample data');
-          console.log('FeePayment - Student ID valid:', isValidUUID(studentDetails?.id));
-          console.log('FeePayment - Class ID valid:', isValidUUID(studentDetails?.class_id));
+          console.log('Student FeePayment - Invalid student details, will use sample data');
+          console.log('Student FeePayment - Student ID valid:', isValidUUID(studentDetails?.id));
+          console.log('Student FeePayment - Class ID valid:', isValidUUID(studentDetails?.class_id));
         }
 
         if (feesError && feesError.code !== '42P01') {
@@ -95,7 +101,7 @@ const FeePayment = () => {
         }
 
         // Debug fee structure data
-        console.log('FeePayment - Raw fee structure data:');
+        console.log('Student FeePayment - Raw fee structure data:');
         console.log('- Student ID:', studentDetails?.id);
         console.log('- Class ID:', studentDetails?.class_id);
         console.log('- Fee structures found:', classFees?.length || 0);
@@ -106,7 +112,7 @@ const FeePayment = () => {
         let paymentsError = null;
 
         if (studentDetails && isValidUUID(studentDetails.id)) {
-          console.log('FeePayment - Fetching payment history for student:', studentDetails.id);
+          console.log('Student FeePayment - Fetching payment history for student:', studentDetails.id);
 
           // Get student fees with fee structure details using easy.txt recommendation
           const paymentResult = await supabase
@@ -123,12 +129,12 @@ const FeePayment = () => {
           paymentsError = paymentResult.error;
 
           if (paymentsError) {
-            console.log('FeePayment - Database error fetching payments:', paymentsError);
+            console.log('Student FeePayment - Database error fetching payments:', paymentsError);
           } else {
-            console.log('FeePayment - Loaded', studentPayments?.length || 0, 'payment records from database');
+            console.log('Student FeePayment - Loaded', studentPayments?.length || 0, 'payment records from database');
           }
         } else {
-          console.log('FeePayment - Invalid student ID for payment history:', studentDetails?.id);
+          console.log('Student FeePayment - Invalid student ID for payment history:', studentDetails?.id);
         }
 
         if (paymentsError && paymentsError.code !== '42P01') {
@@ -136,14 +142,14 @@ const FeePayment = () => {
         }
 
         // Debug payment data
-        console.log('FeePayment - Raw payment data:');
+        console.log('Student FeePayment - Raw payment data:');
         console.log('- Payments found:', studentPayments?.length || 0);
         console.log('- Payment details:', studentPayments);
         
         // If no fee structure found, create sample data for testing
         let feesToProcess = classFees || [];
         if (!feesToProcess || feesToProcess.length === 0) {
-          console.log('FeePayment - No fee structure found, creating sample data');
+          console.log('Student FeePayment - No fee structure found, creating sample data');
           const safeClassId = (studentDetails && studentDetails.class_id) ? studentDetails.class_id : 'sample-class-id';
           const safeStudentId = (studentDetails && studentDetails.id) ? studentDetails.id : null;
 
@@ -178,18 +184,83 @@ const FeePayment = () => {
           ];
         }
 
+        // Transform payment history based on schema FIRST
+        let transformedPayments = [];
+
+        if (studentPayments && studentPayments.length > 0) {
+          transformedPayments = studentPayments.map(payment => {
+            return {
+              id: payment.id,
+              feeName: payment.fee_component || 'Fee Payment',
+              amount: Number(payment.amount_paid) || 0,
+              paymentDate: payment.payment_date || new Date().toISOString().split('T')[0],
+              paymentMethod: payment.payment_mode || 'Online',
+              transactionId: payment.id ? `TXN${payment.id.slice(-8).toUpperCase()}` : `TXN${Date.now()}`,
+              status: 'completed',
+              receiptUrl: null,
+              remarks: payment.remarks || '',
+              academicYear: payment.academic_year || '2024-2025',
+              createdAt: payment.created_at || new Date().toISOString()
+            };
+          });
+        } else {
+          // Add sample payment history if no real data exists
+          console.log('Student FeePayment - No payment history found, adding sample data');
+          transformedPayments = [
+            {
+              id: 'sample-payment-1',
+              feeName: 'Tuition Fee',
+              amount: 25000,
+              paymentDate: '2024-01-15',
+              paymentMethod: 'Online Banking',
+              transactionId: 'TXN12345678',
+              status: 'completed',
+              receiptUrl: null,
+              remarks: 'First installment payment',
+              academicYear: '2024-2025',
+              createdAt: '2024-01-15T10:30:00Z'
+            },
+            {
+              id: 'sample-payment-2',
+              feeName: 'Development Fee',
+              amount: 5000,
+              paymentDate: '2024-02-10',
+              paymentMethod: 'UPI',
+              transactionId: 'TXN87654321',
+              status: 'completed',
+              receiptUrl: null,
+              remarks: 'Development fee payment',
+              academicYear: '2024-2025',
+              createdAt: '2024-02-10T14:20:00Z'
+            },
+            {
+              id: 'sample-payment-3',
+              feeName: 'Transport Fee',
+              amount: 3000,
+              paymentDate: '2024-03-05',
+              paymentMethod: 'Credit Card',
+              transactionId: 'TXN11223344',
+              status: 'completed',
+              receiptUrl: null,
+              remarks: 'Partial payment',
+              academicYear: '2024-2025',
+              createdAt: '2024-03-05T09:15:00Z'
+            }
+          ];
+        }
+
         // Transform fee structure data based on schema
         const transformedFees = feesToProcess.map(fee => {
           // Safely get fee component name
           const feeComponent = fee.fee_component || fee.name || 'General Fee';
           
-          // Find payments for this fee component
-          const payments = studentPayments?.filter(p =>
-            p.fee_component === feeComponent &&
-            p.academic_year === fee.academic_year
+          // Find payments for this fee component using the transformed payments
+          const payments = transformedPayments?.filter(p =>
+            p.feeName === feeComponent &&
+            p.academicYear === (fee.academic_year || '2024-2025')
           ) || [];
 
-          const totalPaidAmount = payments.reduce((sum, payment) => sum + Number(payment.amount_paid || 0), 0);
+          const totalPaidAmount = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
           const feeAmount = Number(fee.amount || 0);
           const remainingAmount = feeAmount - totalPaidAmount;
 
@@ -242,7 +313,7 @@ const FeePayment = () => {
         const outstanding = totalDue - totalPaid;
 
         // Debug logging
-        console.log('FeePayment - Fee calculation debug:');
+        console.log('Student FeePayment - Fee calculation debug:');
         console.log('- Transformed fees count:', transformedFees.length);
         console.log('- Total due:', totalDue);
         console.log('- Total paid:', totalPaid);
@@ -259,79 +330,14 @@ const FeePayment = () => {
           fees: transformedFees
         });
         
-        // Transform payment history based on schema
-        let transformedPayments = [];
-
-        if (studentPayments && studentPayments.length > 0) {
-          transformedPayments = studentPayments.map(payment => {
-            return {
-              id: payment.id,
-              feeName: payment.fee_component || 'Fee Payment',
-              amount: Number(payment.amount_paid) || 0,
-              paymentDate: payment.payment_date || new Date().toISOString().split('T')[0],
-              paymentMethod: payment.payment_mode || 'Online',
-              transactionId: payment.id ? `TXN${payment.id.slice(-8).toUpperCase()}` : `TXN${Date.now()}`,
-              status: 'completed',
-              receiptUrl: null,
-              remarks: payment.remarks || '',
-              academicYear: payment.academic_year || '2024-2025',
-              createdAt: payment.created_at || new Date().toISOString()
-            };
-          });
-        } else {
-          // Add sample payment history if no real data exists
-          console.log('FeePayment - No payment history found, adding sample data');
-          transformedPayments = [
-            {
-              id: 'sample-payment-1',
-              feeName: 'Tuition Fee',
-              amount: 25000,
-              paymentDate: '2024-01-15',
-              paymentMethod: 'Online Banking',
-              transactionId: 'TXN12345678',
-              status: 'completed',
-              receiptUrl: null,
-              remarks: 'First installment payment',
-              academicYear: '2024-2025',
-              createdAt: '2024-01-15T10:30:00Z'
-            },
-            {
-              id: 'sample-payment-2',
-              feeName: 'Development Fee',
-              amount: 5000,
-              paymentDate: '2024-02-10',
-              paymentMethod: 'UPI',
-              transactionId: 'TXN87654321',
-              status: 'completed',
-              receiptUrl: null,
-              remarks: 'Development fee payment',
-              academicYear: '2024-2025',
-              createdAt: '2024-02-10T14:20:00Z'
-            },
-            {
-              id: 'sample-payment-3',
-              feeName: 'Transport Fee',
-              amount: 8000,
-              paymentDate: '2024-03-05',
-              paymentMethod: 'Credit Card',
-              transactionId: 'TXN11223344',
-              status: 'completed',
-              receiptUrl: null,
-              remarks: 'Transport fee for semester',
-              academicYear: '2024-2025',
-              createdAt: '2024-03-05T09:15:00Z'
-            }
-          ];
-        }
-
-        console.log('FeePayment - Payment history loaded:', transformedPayments.length, 'payments');
+        console.log('Student FeePayment - Payment history loaded:', transformedPayments.length, 'payments');
         setPaymentHistory(transformedPayments);
       } catch (err) {
         console.error('Error fetching fee data:', err);
         setError(err.message);
 
         // Set fallback data even when there's an error
-        console.log('FeePayment - Setting fallback data due to error');
+        console.log('Student FeePayment - Setting fallback data due to error');
         setFeeStructure({
           totalDue: 38000,
           totalPaid: 33000,
@@ -341,7 +347,7 @@ const FeePayment = () => {
               id: 'fallback-1',
               name: 'Tuition Fee',
               amount: 25000,
-              paid: 25000,
+              paidAmount: 25000,
               remainingAmount: 0,
               status: 'paid',
               dueDate: '2024-04-30',
@@ -351,7 +357,7 @@ const FeePayment = () => {
               id: 'fallback-2',
               name: 'Development Fee',
               amount: 5000,
-              paid: 5000,
+              paidAmount: 5000,
               remainingAmount: 0,
               status: 'paid',
               dueDate: '2024-04-30',
@@ -361,7 +367,7 @@ const FeePayment = () => {
               id: 'fallback-3',
               name: 'Transport Fee',
               amount: 8000,
-              paid: 3000,
+              paidAmount: 3000,
               remainingAmount: 5000,
               status: 'partial',
               dueDate: '2024-05-31',
@@ -414,7 +420,7 @@ const FeePayment = () => {
         ]);
 
         // Don't show error alert, just log it
-        console.log('FeePayment - Using fallback data due to error:', err.message);
+        console.log('Student FeePayment - Using fallback data due to error:', err.message);
       } finally {
         setLoading(false);
       }
@@ -426,82 +432,6 @@ const FeePayment = () => {
       fetchFeeData();
     }
   }, [user]);
-
-  // Get fee statistics for current academic year
-  const getFeeStatistics = async (studentId, academicYear = '2024-2025') => {
-    try {
-      // Get all fee structures for the academic year
-      const { data: yearlyFees, error: feesError } = await supabase
-        .from(TABLES.FEE_STRUCTURE)
-        .select('*')
-        .eq('academic_year', academicYear)
-        .or(`class_id.eq.${studentData?.class_id},student_id.eq.${studentId}`);
-
-      if (feesError) {
-        console.error('Error fetching yearly fees:', feesError);
-        return null;
-      }
-
-      // Get all payments for the academic year
-      const { data: yearlyPayments, error: paymentsError } = await supabase
-        .from(TABLES.STUDENT_FEES)
-        .select('*')
-        .eq('student_id', studentId)
-        .eq('academic_year', academicYear);
-
-      if (paymentsError) {
-        console.error('Error fetching yearly payments:', paymentsError);
-        return null;
-      }
-
-      const totalDue = yearlyFees?.reduce((sum, fee) => sum + Number(fee.amount), 0) || 0;
-      const totalPaid = yearlyPayments?.reduce((sum, payment) => sum + Number(payment.amount_paid), 0) || 0;
-      const outstanding = totalDue - totalPaid;
-
-      return {
-        totalDue,
-        totalPaid,
-        outstanding,
-        paymentCount: yearlyPayments?.length || 0,
-        feeComponentsCount: yearlyFees?.length || 0
-      };
-    } catch (error) {
-      console.error('Error calculating fee statistics:', error);
-      return null;
-    }
-  };
-
-  // Get fee breakdown by category
-  const getFeeBreakdown = () => {
-    if (!feeStructure?.fees) return {};
-
-    const breakdown = {};
-    feeStructure.fees.forEach(fee => {
-      if (!breakdown[fee.category]) {
-        breakdown[fee.category] = {
-          totalAmount: 0,
-          paidAmount: 0,
-          count: 0
-        };
-      }
-      breakdown[fee.category].totalAmount += fee.amount;
-      breakdown[fee.category].paidAmount += fee.paidAmount;
-      breakdown[fee.category].count += 1;
-    });
-
-    return breakdown;
-  };
-
-  // Get overdue fees
-  const getOverdueFees = () => {
-    if (!feeStructure?.fees) return [];
-
-    const today = new Date();
-    return feeStructure.fees.filter(fee => {
-      const dueDate = new Date(fee.dueDate);
-      return dueDate < today && fee.status !== 'paid';
-    });
-  };
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -547,7 +477,7 @@ const FeePayment = () => {
 
   const handlePayment = (fee) => {
     try {
-      console.log('=== PAYMENT BUTTON CLICKED ===');
+      console.log('=== STUDENT PAYMENT BUTTON CLICKED ===');
       console.log('Fee data received:', JSON.stringify(fee, null, 2));
       console.log('Current student data:', JSON.stringify(studentData, null, 2));
       console.log('Current fee structure:', JSON.stringify(feeStructure, null, 2));
@@ -578,7 +508,7 @@ const FeePayment = () => {
   // Handle payment method selection - Navigate to dedicated screens
   const handlePaymentMethodSelect = (method) => {
     try {
-      console.log('=== PAYMENT METHOD SELECTED ===');
+      console.log('=== STUDENT PAYMENT METHOD SELECTED ===');
       console.log('Method:', JSON.stringify(method, null, 2));
       console.log('Selected fee:', JSON.stringify(selectedFee, null, 2));
       console.log('Student data:', JSON.stringify(studentData, null, 2));
@@ -667,307 +597,6 @@ const FeePayment = () => {
     }
   };
 
-
-
-  // Get initial form data based on payment method
-  const getInitialFormData = (methodId) => {
-    switch (methodId) {
-      case 'Card':
-        return {
-          cardNumber: '',
-          expiryDate: '',
-          cvv: '',
-          cardHolderName: '',
-          saveCard: false
-        };
-      case 'UPI':
-        return {
-          upiId: '',
-          verifyUpiId: false
-        };
-      case 'Online':
-        return {
-          bankName: '',
-          accountType: 'savings'
-        };
-      case 'Cash':
-        return {
-          receiptNumber: '',
-          paidAt: 'School Office'
-        };
-      default:
-        return {};
-    }
-  };
-
-
-
-  // Validate payment form data
-  const validatePaymentForm = (methodId, formData) => {
-    switch (methodId) {
-      case 'Card':
-        if (!formData.cardNumber || formData.cardNumber.length < 16) {
-          return 'Please enter a valid card number';
-        }
-        if (!formData.expiryDate || !/^\d{2}\/\d{2}$/.test(formData.expiryDate)) {
-          return 'Please enter expiry date in MM/YY format';
-        }
-        if (!formData.cvv || formData.cvv.length < 3) {
-          return 'Please enter a valid CVV';
-        }
-        if (!formData.cardHolderName || formData.cardHolderName.trim().length < 2) {
-          return 'Please enter card holder name';
-        }
-        break;
-      case 'UPI':
-        if (!formData.upiId || !formData.upiId.includes('@')) {
-          return 'Please enter a valid UPI ID';
-        }
-        break;
-      case 'Online':
-        if (!formData.bankName) {
-          return 'Please select a bank';
-        }
-        break;
-      case 'Cash':
-        // Cash payments don't need validation
-        break;
-    }
-    return null;
-  };
-
-  // Process payment and save to database
-  const processPayment = async (paymentData) => {
-    try {
-      console.log('Processing payment with data:', paymentData);
-      console.log('Student data for payment:', studentData);
-
-      // Validate student data
-      const studentId = studentData?.id;
-      if (!studentId || studentId === 'undefined' || typeof studentId !== 'string') {
-        console.log('Invalid student ID, using sample payment processing');
-        // For demo purposes, simulate successful payment without database insert
-        return {
-          success: true,
-          data: {
-            id: `sample-payment-${Date.now()}`,
-            message: 'Payment processed successfully (demo mode)'
-          }
-        };
-      }
-
-      // Insert new student fee record using easy.txt recommendation
-      const { data, error } = await supabase
-        .from('student_fees')
-        .insert([
-          {
-            student_id: studentId,
-            academic_year: paymentData.academicYear || '2024-2025',
-            fee_component: paymentData.feeComponent,
-            amount_paid: Number(paymentData.amount),
-            payment_date: paymentData.paymentDate || new Date().toISOString().split('T')[0],
-            payment_mode: paymentData.paymentMode || 'Online',
-            remarks: paymentData.remarks || `Payment for ${paymentData.feeComponent}`
-          }
-        ])
-        .select();
-
-      if (error) {
-        console.error('Database error during payment:', error);
-        // Even if database fails, return success for demo
-        return {
-          success: true,
-          data: {
-            id: `fallback-payment-${Date.now()}`,
-            message: 'Payment processed successfully (fallback mode)'
-          }
-        };
-      }
-
-      // Refresh fee data after successful payment
-      try {
-        const { data: parentUserData } = await dbHelpers.getParentByUserId(user.id);
-        if (parentUserData?.students) {
-          await fetchFeeData();
-        }
-      } catch (refreshError) {
-        console.log('Error refreshing fee data:', refreshError);
-        // Don't fail the payment if refresh fails
-      }
-
-      return { success: true, data };
-    } catch (error) {
-      console.error('Error processing payment:', error);
-      // Return success even on error for demo purposes
-      return {
-        success: true,
-        data: {
-          id: `error-fallback-${Date.now()}`,
-          message: 'Payment processed successfully (error fallback)'
-        }
-      };
-    }
-  };
-
-  // Individual payment processing functions with form data
-  const processCardPayment = async (formData) => {
-    // Simulate card payment processing with form data
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        // Simulate 90% success rate
-        const success = Math.random() > 0.1;
-        resolve({
-          success,
-          transactionId: success ? `CARD${Date.now()}` : null,
-          error: success ? null : 'Card payment failed. Please check your card details.',
-          paymentDetails: {
-            cardNumber: `****-****-****-${formData.cardNumber.slice(-4)}`,
-            cardHolderName: formData.cardHolderName
-          }
-        });
-      }, 2000);
-    });
-  };
-
-  const processUPIPayment = async (formData) => {
-    // Simulate UPI payment processing with form data
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        // Simulate 95% success rate
-        const success = Math.random() > 0.05;
-        resolve({
-          success,
-          transactionId: success ? `UPI${Date.now()}` : null,
-          error: success ? null : 'UPI payment failed. Please try again.',
-          paymentDetails: {
-            upiId: formData.upiId
-          }
-        });
-      }, 1500);
-    });
-  };
-
-  const processOnlinePayment = async (formData) => {
-    // Simulate online banking payment with form data
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        // Simulate 85% success rate
-        const success = Math.random() > 0.15;
-        resolve({
-          success,
-          transactionId: success ? `NET${Date.now()}` : null,
-          error: success ? null : 'Online payment failed. Please check your internet connection.',
-          paymentDetails: {
-            bankName: formData.bankName,
-            accountType: formData.accountType
-          }
-        });
-      }, 3000);
-    });
-  };
-
-  const processCashPayment = async (formData) => {
-    // Cash payments are always successful (recorded manually)
-    return Promise.resolve({
-      success: true,
-      transactionId: `CASH${Date.now()}`,
-      error: null,
-      paymentDetails: {
-        receiptNumber: formData.receiptNumber || 'N/A',
-        paidAt: formData.paidAt
-      }
-    });
-  };
-
-  // Get pending fees for a student using easy.txt recommendation
-  const getPendingFees = async (studentId) => {
-    try {
-      if (!isValidUUID(studentId)) {
-        console.log('FeePayment - Invalid student ID for pending fees:', studentId);
-        return [];
-      }
-
-      const { data: pendingFees, error } = await supabase
-        .from('student_fees')
-        .select(`
-          *,
-          fee_structure(*)
-        `)
-        .eq('student_id', studentId)
-        .in('status', ['unpaid', 'partial']);
-
-      if (error) {
-        console.error('Error fetching pending fees:', error);
-        return [];
-      }
-
-      return pendingFees || [];
-    } catch (error) {
-      console.error('Error in getPendingFees:', error);
-      return [];
-    }
-  };
-
-  // Get payment methods available
-  const getPaymentMethods = () => {
-    return [
-      { id: 'Online', name: 'Online Payment', icon: 'card', description: 'Pay using Net Banking' },
-      { id: 'UPI', name: 'UPI Payment', icon: 'qr-code-outline', description: 'Pay using UPI apps' },
-      { id: 'Card', name: 'Credit/Debit Card', icon: 'card-outline', description: 'Pay using your card' }
-    ];
-  };
-
-  // Check for existing student fee record using easy.txt recommendation
-  const checkExistingStudentFee = async (studentId, feeId) => {
-    try {
-      if (!isValidUUID(studentId) || !isValidUUID(feeId)) {
-        return null;
-      }
-
-      const { data: existingFee, error } = await supabase
-        .from('student_fees')
-        .select('*')
-        .eq('student_id', studentId)
-        .eq('fee_id', feeId)
-        .single();
-
-      if (error && error.code !== 'PGRST116') {
-        console.error('Error checking existing fee:', error);
-        return null;
-      }
-
-      return existingFee;
-    } catch (error) {
-      console.error('Error in checkExistingStudentFee:', error);
-      return null;
-    }
-  };
-
-  // Get fee structure amount by ID using easy.txt recommendation
-  const getFeeStructureAmount = async (feeId) => {
-    try {
-      if (!isValidUUID(feeId)) {
-        return 0;
-      }
-
-      const { data: feeData, error } = await supabase
-        .from('fee_structure')
-        .select('amount')
-        .eq('id', feeId)
-        .single();
-
-      if (error) {
-        console.error('Error fetching fee amount:', error);
-        return 0;
-      }
-
-      return feeData?.amount || 0;
-    } catch (error) {
-      console.error('Error in getFeeStructureAmount:', error);
-      return 0;
-    }
-  };
-
   // Refresh fee data
   const onRefresh = async () => {
     setRefreshing(true);
@@ -980,27 +609,6 @@ const FeePayment = () => {
     } finally {
       setRefreshing(false);
     }
-  };
-
-  // Get recent payments (last 5)
-  const getRecentPayments = () => {
-    return paymentHistory.slice(0, 5);
-  };
-
-
-
-  // Calculate payment summary for a specific period
-  const getPaymentSummary = (startDate, endDate) => {
-    const filteredPayments = paymentHistory.filter(payment => {
-      const paymentDate = new Date(payment.paymentDate);
-      return paymentDate >= startDate && paymentDate <= endDate;
-    });
-
-    return {
-      totalAmount: filteredPayments.reduce((sum, payment) => sum + payment.amount, 0),
-      paymentCount: filteredPayments.length,
-      payments: filteredPayments
-    };
   };
 
   const handleDownloadReceipt = async (receipt) => {
@@ -1189,6 +797,15 @@ const FeePayment = () => {
     `;
   };
 
+  // Get payment methods available (informational for students)
+  const getPaymentMethods = () => {
+    return [
+      { id: 'Online', name: 'Online Payment', icon: 'card', description: 'Pay using Net Banking' },
+      { id: 'UPI', name: 'UPI Payment', icon: 'qr-code-outline', description: 'Pay using UPI apps' },
+      { id: 'Card', name: 'Credit/Debit Card', icon: 'card-outline', description: 'Pay using your card' }
+    ];
+  };
+
   const renderFeeItem = ({ item }) => (
     <View style={styles.feeItem}>
       <View style={styles.feeHeader}>
@@ -1228,7 +845,7 @@ const FeePayment = () => {
         >
           <Ionicons name="card" size={16} color="#fff" />
           <Text style={styles.payButtonText}>
-            {item.status === 'partial' ? 'Pay Remaining' : 'Pay Now'}
+            {item.status === 'partial' ? 'Pay Remaining' : 'View Payment Options'}
           </Text>
         </TouchableOpacity>
       )}
@@ -1242,7 +859,7 @@ const FeePayment = () => {
         <Text style={styles.historyAmount}>₹{item.amount}</Text>
       </View>
       <View style={styles.historyDetails}>
-        <Text style={styles.historyDate}>{item.paymentDate}</Text>
+        <Text style={styles.historyDate}>{formatDateForReceipt(item.paymentDate)}</Text>
         <Text style={styles.historyMethod}>{item.paymentMethod}</Text>
         <Text style={styles.historyId}>TXN: {item.transactionId}</Text>
       </View>
@@ -1275,7 +892,7 @@ const FeePayment = () => {
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle" size={48} color="#F44336" />
           <Text style={styles.errorText}>Failed to load fee information</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => window.location.reload()}>
+          <TouchableOpacity style={styles.retryButton} onPress={fetchFeeData}>
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -1386,7 +1003,7 @@ const FeePayment = () => {
         )}
       </View>
 
-      {/* Payment Modal */}
+      {/* Payment Information Modal */}
       <Modal
         visible={paymentModalVisible}
         animationType="slide"
@@ -1396,7 +1013,7 @@ const FeePayment = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Make Payment</Text>
+              <Text style={styles.modalTitle}>Payment Information</Text>
               <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
                 <Ionicons name="close" size={24} color="#666" />
               </TouchableOpacity>
@@ -1411,7 +1028,7 @@ const FeePayment = () => {
                 </View>
 
                 <View style={styles.paymentMethods}>
-                  <Text style={styles.paymentMethodsTitle}>Select Payment Method</Text>
+                  <Text style={styles.paymentMethodsTitle}>Available Payment Methods</Text>
                   {getPaymentMethods().map((method) => (
                     <TouchableOpacity
                       key={method.id}
@@ -1842,10 +1459,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     backgroundColor: '#fff',
   },
-  selectedPaymentMethod: {
-    backgroundColor: '#2196F3',
-    borderColor: '#2196F3',
-  },
   paymentMethodInfo: {
     flex: 1,
     marginLeft: 12,
@@ -1855,122 +1468,29 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '500',
   },
-  selectedPaymentMethodText: {
-    color: '#fff',
-  },
   paymentMethodDescription: {
     fontSize: 12,
     color: '#666',
     marginTop: 2,
   },
-  selectedPaymentMethodDescription: {
-    color: '#e3f2fd',
-  },
-  payNowButton: {
-    backgroundColor: '#2196F3',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 56,
-  },
-  payNowButtonDisabled: {
-    backgroundColor: '#ccc',
-  },
-  payNowButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  // Payment Form Styles
-  paymentFormContainer: {
+  feeDistributionContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
     marginTop: 20,
     marginBottom: 20,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
-  formTitle: {
-    fontSize: 18,
+  feeDistributionTitle: {
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 16,
-  },
-  formGroup: {
-    marginBottom: 16,
-  },
-  formLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#333',
-    marginBottom: 8,
-  },
-  formInput: {
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 16,
-    backgroundColor: '#fff',
-  },
-  formRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  // UPI Form Styles
-  upiInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#e3f2fd',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 8,
-  },
-  upiInfoText: {
-    fontSize: 12,
-    color: '#1976d2',
-    marginLeft: 8,
-    flex: 1,
-  },
-  // Online Banking Styles
-  bankSelector: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  bankOption: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 20,
-    marginBottom: 8,
-    backgroundColor: '#fff',
-  },
-  selectedBankOption: {
-    backgroundColor: '#2196F3',
-    borderColor: '#2196F3',
-  },
-  bankOptionText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  selectedBankOptionText: {
-    color: '#fff',
-  },
-  // Cash Payment Styles
-  cashInfo: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: '#fff3e0',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  cashInfoText: {
-    fontSize: 12,
-    color: '#f57c00',
-    marginLeft: 8,
-    flex: 1,
-    lineHeight: 16,
+    marginBottom: 12,
+    textAlign: 'center',
   },
   receiptPreviewContent: {
     flex: 1,
@@ -2067,13 +1587,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
   },
-  statusBadge: {
-    backgroundColor: '#4CAF50',
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 10,
-    marginLeft: 6,
-  },
   statusBadgeText: {
     fontSize: 9,
     fontWeight: 'bold',
@@ -2117,80 +1630,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '500',
     marginLeft: 6,
-  },
-  feeDistributionContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 20,
-    marginBottom: 20,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  feeDistributionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  feeDistributionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 16,
-  },
-  feeDistributionItem: {
-    alignItems: 'center',
-  },
-  feeDistributionLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 4,
-  },
-  feeDistributionAmount: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  feeCategoryBreakdown: {
-    marginTop: 16,
-  },
-  feeCategoryTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  feeCategoryItem: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  feeCategoryName: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
-  },
-  feeCategoryDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  feeCategoryAmount: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#2196F3',
-  },
-  feeCategoryStatus: {
-    fontSize: 12,
-    color: '#FF9800',
   },
   loadingContainer: {
     flex: 1,
@@ -2247,4 +1686,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default FeePayment; 
+export default FeePayment;

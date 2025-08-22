@@ -1332,7 +1332,18 @@ const StudentChatWithTeacher = () => {
                         item.role === 'class_teacher' && styles.classTeacherCard,
                         hasUnread && styles.unreadTeacherCard
                       ]}
-                      onPress={() => fetchMessages(item)}
+                      onPress={() => {
+                        // Check if teacher has a user account before proceeding
+                        if (item.canMessage === false) {
+                          Alert.alert(
+                            'Cannot Message Teacher',
+                            `${item.name.replace(' (No Account)', '')} doesn't have a user account yet, so you can't send messages to them. Please contact the school administrator to set up their account.`,
+                            [{ text: 'OK' }]
+                          );
+                          return;
+                        }
+                        fetchMessages(item);
+                      }}
                     >
                       <View style={[
                         styles.teacherAvatar,
@@ -1442,6 +1453,32 @@ const StudentChatWithTeacher = () => {
             ref={flatListRef}
             data={[...messages]}
             keyExtractor={item => item.id?.toString() || Math.random().toString()}
+            maintainVisibleContentPosition={{
+              minIndexForVisible: 0,
+              autoscrollToTopThreshold: 10,
+            }}
+            onContentSizeChange={() => {
+              if (flatListRef.current && messages.length > 0) {
+                setTimeout(() => {
+                  try {
+                    flatListRef.current?.scrollToEnd({ animated: false });
+                  } catch (error) {
+                    // Silently handle scroll error
+                  }
+                }, 100);
+              }
+            }}
+            onLayout={() => {
+              if (flatListRef.current && messages.length > 0) {
+                setTimeout(() => {
+                  try {
+                    flatListRef.current?.scrollToEnd({ animated: false });
+                  } catch (error) {
+                    // Silently handle scroll error  
+                  }
+                }, 200);
+              }
+            }}
             renderItem={({ item }) => (
               <TouchableOpacity 
                 onLongPress={() => {

@@ -1521,9 +1521,9 @@ const styles = StyleSheet.create({
   filtersSection: {
     backgroundColor: '#fff',
     marginHorizontal: 20,
-    marginVertical: 10,
-    padding: 20,
-    borderRadius: 12,
+    marginVertical: 8,
+    padding: 12,
+    borderRadius: 8,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -1533,7 +1533,7 @@ const styles = StyleSheet.create({
   filterRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 15,
+    marginBottom: 8,
   },
   filterDropdown: {
     flex: 1,
@@ -1546,12 +1546,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   dropdownContainer: {
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: '#2196F3',
-    borderRadius: 8,
+    borderRadius: 6,
     backgroundColor: '#fff',
     position: 'relative',
-    minHeight: 50,
+    minHeight: 36,
     justifyContent: 'center',
   },
   picker: {
@@ -1570,11 +1570,11 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: '#2196F3',
-    borderRadius: 8,
-    paddingHorizontal: 15,
-    paddingVertical: 12,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     backgroundColor: '#fff',
   },
   searchIcon: {
