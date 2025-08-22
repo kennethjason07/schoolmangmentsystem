@@ -249,12 +249,12 @@ export const dbHelpers = {
   // Student management
   async getStudentsByClass(classId, sectionId = null) {
     try {
+      // First, get students without parent joins to avoid foreign key errors
       let query = supabase
         .from(TABLES.STUDENTS)
         .select(`
           *,
-          classes(class_name, section),
-          parents:parent_id(name, phone, email)
+          classes(class_name, section)
         `)
         .eq('class_id', classId);
 
@@ -262,8 +262,80 @@ export const dbHelpers = {
         query = query.eq('classes.section', sectionId);
       }
 
-      const { data, error } = await query.order('roll_no');
-      return { data, error };
+      const { data: studentsData, error: studentsError } = await query.order('roll_no');
+      if (studentsError) {
+        return { data: null, error: studentsError };
+      }
+
+      if (!studentsData || studentsData.length === 0) {
+        return { data: [], error: null };
+      }
+
+      // Get all unique parent_ids and student_ids
+      const parentIds = studentsData
+        .map(student => student.parent_id)
+        .filter(id => id != null);
+      const studentIds = studentsData.map(student => student.id);
+
+      // Fetch parent data from parents table (for new parent relationships)
+      let parentsLookup = {};
+      if (parentIds.length > 0) {
+        const { data: parentsData, error: parentsError } = await supabase
+          .from(TABLES.PARENTS)
+          .select('id, name, phone, email, student_id')
+          .in('id', parentIds);
+        
+        if (!parentsError && parentsData) {
+          parentsData.forEach(parent => {
+            parentsLookup[parent.id] = parent;
+          });
+        }
+      }
+
+      // Fetch parent user data from users table (for old parent relationships)
+      let parentUsersLookup = {};
+      if (studentIds.length > 0) {
+        const { data: parentUsers, error: parentUsersError } = await supabase
+          .from(TABLES.USERS)
+          .select('id, full_name, phone, email, linked_parent_of')
+          .in('linked_parent_of', studentIds)
+          .not('linked_parent_of', 'is', null);
+        
+        if (!parentUsersError && parentUsers) {
+          parentUsers.forEach(user => {
+            parentUsersLookup[user.linked_parent_of] = {
+              name: user.full_name,
+              phone: user.phone,
+              email: user.email
+            };
+          });
+        }
+      }
+
+      // Combine student data with parent information
+      const studentsWithParents = studentsData.map(student => {
+        let parentData = null;
+        
+        // Try to get parent from parents table first (new relationship)
+        if (student.parent_id && parentsLookup[student.parent_id]) {
+          parentData = {
+            name: parentsLookup[student.parent_id].name,
+            phone: parentsLookup[student.parent_id].phone,
+            email: parentsLookup[student.parent_id].email
+          };
+        }
+        // Fall back to users table parent data (old relationship)
+        else if (parentUsersLookup[student.id]) {
+          parentData = parentUsersLookup[student.id];
+        }
+
+        return {
+          ...student,
+          parents: parentData // Use 'parents' key for consistency with existing code
+        };
+      });
+
+      return { data: studentsWithParents, error: null };
     } catch (error) {
       return { data: null, error };
     }
@@ -724,6 +796,195 @@ export const dbHelpers = {
       console.error('Error in createParentAccount:', error);
       // Note: In a production environment, you might want to implement rollback logic here
       // to clean up any partially created records if the transaction fails
+      return { data: null, error };
+    }
+  },
+
+  // Link an existing parent account to an additional student
+  async linkParentToAdditionalStudent(parentEmail, studentId, relation = 'Guardian') {
+    try {
+      console.log('🔗 ADMIN LINKING: Starting linkParentToAdditionalStudent');
+      console.log('🔗 Parameters:', { parentEmail, studentId, relation });
+      console.log('🔗 Step 1: Finding parent user with email:', parentEmail);
+      
+      // 1. Find the existing parent user account
+      const { data: existingParentUser, error: userError } = await supabase
+        .from(TABLES.USERS)
+        .select('id, email, full_name, phone, role_id, linked_parent_of')
+        .eq('email', parentEmail)
+        .eq('role_id', (await this.getParentRoleId()))
+        .single();
+      
+      console.log('🔗 Step 1 Result:', { existingParentUser, userError });
+      
+      if (userError) {
+        console.error('❌ Error finding parent user:', userError);
+        throw new Error(`Parent account with email ${parentEmail} not found`);
+      }
+      
+      console.log('✅ Step 2: Found existing parent user:', existingParentUser.full_name);
+      console.log('📋 Parent user details:', existingParentUser);
+      
+      // 2. Check if this student is already linked to this parent
+      const { data: existingParentRecord, error: existingError } = await supabase
+        .from(TABLES.PARENTS)
+        .select('id')
+        .eq('email', parentEmail)
+        .eq('student_id', studentId)
+        .maybeSingle();
+      
+      if (existingParentRecord) {
+        throw new Error('This student is already linked to this parent account');
+      }
+      
+      // Also check if student already has this parent_id in students table
+      const { data: currentStudent, error: currentStudentError } = await supabase
+        .from(TABLES.STUDENTS)
+        .select('parent_id')
+        .eq('id', studentId)
+        .single();
+      
+      if (currentStudentError) {
+        console.error('Error getting current student:', currentStudentError);
+        throw new Error('Student not found');
+      }
+      
+      // 3. Create new parent record linking this parent to the additional student
+      console.log('Linking parent - Step 3: Creating parent record for additional student');
+      const parentRecordData = {
+        name: existingParentUser.full_name,
+        relation: relation,
+        phone: existingParentUser.phone || '',
+        email: existingParentUser.email,
+        student_id: studentId
+      };
+      
+      const { data: newParentRecord, error: parentRecordError } = await supabase
+        .from(TABLES.PARENTS)
+        .insert(parentRecordData)
+        .select()
+        .single();
+      
+      if (parentRecordError) {
+        console.error('Error creating parent record for additional student:', parentRecordError);
+        throw parentRecordError;
+      }
+      
+      console.log('Linking parent - Step 4: Parent record created:', newParentRecord);
+      
+      // 4. Set the student's parent_id to link back to the parent record
+      console.log('Linking parent - Step 5: Setting student parent_id');
+      const { error: studentUpdateError } = await supabase
+        .from(TABLES.STUDENTS)
+        .update({ parent_id: newParentRecord.id })
+        .eq('id', studentId);
+      
+      if (studentUpdateError) {
+        console.error('Error updating student parent_id:', studentUpdateError);
+        // Don't throw here as the parent record was created successfully
+        console.log('Warning: Parent record created but student parent_id not updated');
+      } else {
+        console.log('Student parent_id updated successfully');
+      }
+      
+      // 5. Check if this is the first student being linked to this parent
+      // If the user doesn't have a linked_parent_of set, set it to this student
+      if (!existingParentUser.linked_parent_of) {
+        console.log('Linking parent - Step 6: Setting primary linked_parent_of');
+        const { error: userUpdateError } = await supabase
+          .from(TABLES.USERS)
+          .update({ linked_parent_of: studentId })
+          .eq('id', existingParentUser.id);
+        
+        if (userUpdateError) {
+          console.error('Error setting linked_parent_of:', userUpdateError);
+          // Don't throw as the main linking was successful
+        } else {
+          console.log('Primary linked_parent_of set successfully');
+        }
+      }
+      
+      // 6. Get the updated student record
+      const { data: student, error: studentError } = await supabase
+        .from(TABLES.STUDENTS)
+        .select('*')
+        .eq('id', studentId)
+        .single();
+      
+      if (studentError) {
+        console.error('Error getting student record:', studentError);
+        throw studentError;
+      }
+      
+      console.log('Linking parent - Step 7: Success! Parent linked to additional student:', student.name);
+      
+      return {
+        data: {
+          parentUser: existingParentUser,
+          parentRecord: newParentRecord,
+          student
+        },
+        error: null
+      };
+    } catch (error) {
+      console.error('Error in linkParentToAdditionalStudent:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Helper function to get parent role ID
+  async getParentRoleId() {
+    const { data: parentRole, error: roleError } = await supabase
+      .from(TABLES.ROLES)
+      .select('id')
+      .eq('role_name', 'parent')
+      .single();
+    
+    if (roleError) {
+      throw new Error('Parent role not found');
+    }
+    
+    return parentRole.id;
+  },
+
+  // Search for existing parent accounts by email or name
+  async searchParentAccounts(searchTerm) {
+    try {
+      const { data: parentUsers, error: userError } = await supabase
+        .from(TABLES.USERS)
+        .select('id, email, full_name, phone')
+        .eq('role_id', (await this.getParentRoleId()))
+        .or(`email.ilike.%${searchTerm}%,full_name.ilike.%${searchTerm}%`);
+      
+      if (userError) {
+        console.error('Error searching parent accounts:', userError);
+        throw userError;
+      }
+      
+      // For each parent, get their associated students
+      const parentsWithStudents = await Promise.all(
+        (parentUsers || []).map(async (parent) => {
+          const { data: parentRecords, error: recordError } = await supabase
+            .from(TABLES.PARENTS)
+            .select(`
+              id, relation, student_id,
+              students(id, name, admission_no, classes(class_name, section))
+            `)
+            .eq('email', parent.email);
+          
+          return {
+            ...parent,
+            linkedStudents: recordError ? [] : (parentRecords || []).map(record => ({
+              ...record.students,
+              relation: record.relation
+            }))
+          };
+        })
+      );
+      
+      return { data: parentsWithStudents, error: null };
+    } catch (error) {
+      console.error('Error in searchParentAccounts:', error);
       return { data: null, error };
     }
   },

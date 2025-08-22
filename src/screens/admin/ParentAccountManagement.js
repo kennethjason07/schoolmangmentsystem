@@ -47,6 +47,15 @@ const ParentAccountManagement = ({ navigation }) => {
     loadStudents();
   }, []);
 
+  // Listen for navigation focus to refresh data when coming back from LinkExistingParent
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      loadStudents();
+    });
+
+    return unsubscribe;
+  }, [navigation]);
+
   const loadStudents = async () => {
     try {
       setLoading(true);
@@ -182,14 +191,41 @@ const ParentAccountManagement = ({ navigation }) => {
       // Check if email exists in users table
       const { data: existingUser } = await supabase
         .from(TABLES.USERS)
-        .select('id')
+        .select('id, email, full_name, role_id')
         .eq('email', accountForm.email)
         .single();
 
       if (existingUser) {
-        Alert.alert('Error', 'An account with this email already exists');
-        setLoading(false);
-        return;
+        // Check if it's a parent account
+        const { data: parentRole } = await supabase
+          .from(TABLES.ROLES)
+          .select('id')
+          .eq('role_name', 'parent')
+          .single();
+        
+        if (existingUser.role_id === parentRole?.id) {
+          // It's an existing parent account, offer to link
+          Alert.alert(
+            'Existing Parent Account Found',
+            `A parent account with email "${accountForm.email}" already exists for "${existingUser.full_name}".\n\nWould you like to link this existing account to ${selectedStudent.name} as an additional child?`,
+            [
+              {
+                text: 'Cancel',
+                style: 'cancel',
+                onPress: () => setLoading(false)
+              },
+              {
+                text: 'Link Account',
+                onPress: () => handleLinkExistingAccount(accountForm.email, selectedStudent.id, accountForm.relation)
+              }
+            ]
+          );
+          return;
+        } else {
+          Alert.alert('Error', 'An account with this email already exists but is not a parent account');
+          setLoading(false);
+          return;
+        }
       }
 
       // Create parent account using proper Supabase Auth
@@ -271,6 +307,67 @@ const ParentAccountManagement = ({ navigation }) => {
       setLoading(false);
     }
   };
+
+  // Handle linking existing parent account to additional student
+  const handleLinkExistingAccount = async (parentEmail, studentId, relation) => {
+    try {
+      console.log('Linking existing parent account:', parentEmail, 'to student:', studentId);
+      
+      const { data: linkResult, error: linkError } = await dbHelpers.linkParentToAdditionalStudent(
+        parentEmail,
+        studentId,
+        relation
+      );
+      
+      if (linkError) {
+        console.error('Error linking parent to student:', linkError);
+        Alert.alert('Error', `Failed to link parent account: ${linkError.message || linkError}`);
+        return;
+      }
+      
+      console.log('Parent account linked successfully:', linkResult);
+      
+      // Close modal and reset form
+      setModalVisible(false);
+      setSelectedStudent(null);
+      setAccountForm({
+        full_name: '',
+        email: '',
+        phone: '',
+        relation: 'Guardian',
+        password: '',
+        confirmPassword: ''
+      });
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+      
+      // Show success alert
+      Alert.alert(
+        'Success',
+        `✅ Existing parent account successfully linked to ${linkResult.data.student.name}!\n\n📧 Parent Email: ${parentEmail}\n👤 Relation: ${relation}\n\n✨ The parent can now access ${linkResult.data.student.name}'s information from their existing account.`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              loadStudents(); // Refresh the list
+            }
+          }
+        ]
+      );
+      
+    } catch (error) {
+      console.error('Error in handleLinkExistingAccount:', error);
+      Alert.alert('Error', `Failed to link parent account: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Navigate to Link Existing Parent screen
+  const openLinkExistingModal = (student) => {
+    navigation.navigate('LinkExistingParent', { student });
+  };
+
 
   const filteredStudents = students.filter(student => {
     // First filter by selected class
@@ -374,9 +471,18 @@ const ParentAccountManagement = ({ navigation }) => {
       
       <View style={styles.actionContainer}>
         {item.parentStatus === 'complete' ? (
-          <View style={styles.accountCreatedContainer}>
-            <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
-            <Text style={styles.accountCreatedText}>Complete Setup</Text>
+          <View style={styles.completeActionsContainer}>
+            <View style={styles.accountCreatedContainer}>
+              <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+              <Text style={styles.accountCreatedText}>Complete Setup</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.linkButton, { backgroundColor: '#9C27B0' }]}
+              onPress={() => openLinkExistingModal(item)}
+            >
+              <Ionicons name="link" size={14} color="#fff" />
+              <Text style={styles.linkButtonText}>Link Another Parent</Text>
+            </TouchableOpacity>
           </View>
         ) : item.parentStatus === 'account_only' ? (
           <View style={styles.warningContainer}>
@@ -384,21 +490,39 @@ const ParentAccountManagement = ({ navigation }) => {
             <Text style={styles.warningText}>Login Only</Text>
           </View>
         ) : item.parentStatus === 'record_only' ? (
-          <TouchableOpacity
-            style={[styles.createButton, { backgroundColor: '#2196F3' }]}
-            onPress={() => openCreateAccountModal(item)}
-          >
-            <Ionicons name="key" size={16} color="#fff" />
-            <Text style={styles.createButtonText}>Create Login Account</Text>
-          </TouchableOpacity>
+          <View style={styles.buttonGroup}>
+            <TouchableOpacity
+              style={[styles.createButton, { backgroundColor: '#2196F3' }]}
+              onPress={() => openCreateAccountModal(item)}
+            >
+              <Ionicons name="key" size={16} color="#fff" />
+              <Text style={styles.createButtonText}>Create Login</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.linkButton, { backgroundColor: '#9C27B0' }]}
+              onPress={() => openLinkExistingModal(item)}
+            >
+              <Ionicons name="link" size={14} color="#fff" />
+              <Text style={styles.linkButtonText}>Link Existing</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
-          <TouchableOpacity
-            style={styles.createButton}
-            onPress={() => openCreateAccountModal(item)}
-          >
-            <Ionicons name="person-add" size={16} color="#fff" />
-            <Text style={styles.createButtonText}>Create Parent Account</Text>
-          </TouchableOpacity>
+          <View style={styles.buttonGroup}>
+            <TouchableOpacity
+              style={styles.createButton}
+              onPress={() => openCreateAccountModal(item)}
+            >
+              <Ionicons name="person-add" size={16} color="#fff" />
+              <Text style={styles.createButtonText}>Create Account</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.linkButton, { backgroundColor: '#9C27B0' }]}
+              onPress={() => openLinkExistingModal(item)}
+            >
+              <Ionicons name="link" size={14} color="#fff" />
+              <Text style={styles.linkButtonText}>Link Existing</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
     </View>
@@ -965,6 +1089,155 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+
+  // New styles for button groups and linking
+  completeActionsContainer: {
+    alignItems: 'flex-end',
+  },
+  buttonGroup: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  linkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginTop: 8,
+  },
+  linkButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+
+  // Link Modal Styles
+  linkModalContent: {
+    padding: 20,
+    flex: 1,
+  },
+  searchSection: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  searchInputContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  linkSearchInput: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 16,
+    color: '#333',
+  },
+  searchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#2196F3',
+    borderRadius: 8,
+    gap: 6,
+  },
+  searchButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  searchResultsContainer: {
+    flex: 1,
+    marginBottom: 16,
+  },
+  resultsHeader: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+    marginTop: 8,
+  },
+  parentResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#F9F9F9',
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  parentResultItemSelected: {
+    backgroundColor: '#E8F5E8',
+    borderColor: '#4CAF50',
+  },
+  parentResultInfo: {
+    flex: 1,
+  },
+  parentResultName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  parentResultEmail: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2,
+  },
+  parentResultPhone: {
+    fontSize: 14,
+    color: '#666',
+  },
+  noResultsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  noResultsText: {
+    fontSize: 16,
+    color: '#999',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  noResultsSubtext: {
+    fontSize: 14,
+    color: '#BDBDBD',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  searchPromptContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  searchPromptText: {
+    fontSize: 16,
+    color: '#999',
+    marginTop: 16,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  relationSection: {
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  buttonDisabled: {
+    backgroundColor: '#BDBDBD',
+    opacity: 0.7,
   },
 });
 

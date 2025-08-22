@@ -19,17 +19,21 @@ export const SelectedStudentProvider = ({ children }) => {
   const [hasMultipleStudents, setHasMultipleStudents] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Load available students for the current parent user
+  // Load available students for the current parent user - FIXED APPROACH
   const loadAvailableStudents = async () => {
     if (!user) return;
 
     try {
       setLoading(true);
-      console.log('Loading available students for parent user:', user.id);
+      console.log('Loading available students for parent user (FIXED APPROACH):', user.id);
+      console.log('User email:', user.email);
+      console.log('User linked_parent_of:', user.linked_parent_of);
+      
+      let allStudents = [];
 
-      // Method 1: Check if user has linked_parent_of (new structure)
+      // APPROACH 1: Always check linked_parent_of first (this is the primary link)
       if (user.linked_parent_of) {
-        console.log('Using linked_parent_of method');
+        console.log('Step 1: Getting student via linked_parent_of:', user.linked_parent_of);
         const { data: studentData, error: studentError } = await supabase
           .from(TABLES.STUDENTS)
           .select(`
@@ -40,6 +44,8 @@ export const SelectedStudentProvider = ({ children }) => {
             academic_year,
             gender,
             dob,
+            class_id,
+            parent_id,
             classes(
               id,
               class_name,
@@ -49,12 +55,8 @@ export const SelectedStudentProvider = ({ children }) => {
           .eq('id', user.linked_parent_of)
           .single();
 
-        if (studentError) {
-          console.error('Error loading linked student:', studentError);
-          throw studentError;
-        }
-
-        if (studentData) {
+        if (!studentError && studentData) {
+          console.log('✅ Found primary student via linked_parent_of:', studentData.name);
           const student = {
             ...studentData,
             relationshipType: 'Primary',
@@ -64,83 +66,103 @@ export const SelectedStudentProvider = ({ children }) => {
               ? `${studentData.classes.class_name} ${studentData.classes.section}`
               : 'N/A'
           };
-          
-          setAvailableStudents([student]);
-          setHasMultipleStudents(false);
-          setSelectedStudent(student);
-          return;
+          allStudents.push(student);
+        } else {
+          console.log('❌ Error getting primary student:', studentError);
         }
       }
 
-      // Method 2: Check students table for students with this user as parent_id
-      console.log('Using students.parent_id method');
-      const { data: studentsData, error: studentsError } = await supabase
-        .from(TABLES.STUDENTS)
-        .select(`
-          id,
-          name,
-          admission_no,
-          roll_no,
-          academic_year,
-          gender,
-          dob,
-          classes(
-            id,
-            class_name,
-            section
-          )
-        `)
-        .eq('parent_id', user.id);
-
-      if (studentsError) {
-        console.error('Error loading students data:', studentsError);
-        throw studentsError;
-      }
-
-      if (studentsData && studentsData.length > 0) {
-        console.log('Found students via parent_id method:', studentsData.length);
-        
-        // Map students with relationship info
-        const students = studentsData.map(student => ({
-          ...student,
-          relationshipType: 'Guardian', // Default since we don't have relation info
-          isPrimaryContact: true,
-          isEmergencyContact: true,
-          fullClassName: student.classes 
-            ? `${student.classes.class_name} ${student.classes.section}`
-            : 'N/A'
-        }));
-
-        setAvailableStudents(students);
-        setHasMultipleStudents(students.length > 1);
-        
-        // Auto-select first student if no student selected
-        if (!selectedStudent && students.length > 0) {
-          setSelectedStudent(students[0]);
-        }
-        return;
-      }
-
-      // Method 3: Check parents table for this user's email
-      console.log('Using parents table method');
-      const { data: parentData, error: parentError } = await supabase
+      // APPROACH 2: Look for other students directly linked to this parent via parent records
+      console.log('Step 2: Looking for students directly linked via parent records');
+      console.log('🔍 DEBUG: User email for parent search:', user.email);
+      
+      // First get parent records for this email
+      const { data: parentRecords, error: parentError } = await supabase
         .from('parents')
-        .select('id, name, email, phone, student_id')
-        .eq('email', user.email)
-        .limit(1);
-
-      if (parentError) {
-        console.error('Error getting parent data:', parentError);
-        throw parentError;
+        .select('id, name, email, phone, student_id, relation')
+        .eq('email', user.email);
+      
+      console.log('🔍 DEBUG: Parent records query result:', { parentRecords, parentError });
+      
+      if (!parentError && parentRecords && parentRecords.length > 0) {
+        console.log('✅ Found parent records:', parentRecords.length);
+        console.log('📋 Parent records:', parentRecords);
+        
+        // Get student IDs from parent records
+        const studentIdsFromParents = parentRecords.map(p => p.student_id);
+        console.log('🔍 Student IDs from parent records:', studentIdsFromParents);
+        
+        // Now fetch the students directly using their IDs
+        const { data: studentsFromParents, error: studentsError } = await supabase
+          .from(TABLES.STUDENTS)
+          .select(`
+            id,
+            name,
+            admission_no,
+            roll_no,
+            academic_year,
+            gender,
+            dob,
+            class_id,
+            parent_id,
+            classes(
+              id,
+              class_name,
+              section
+            )
+          `)
+          .in('id', studentIdsFromParents);
+        
+        if (!studentsError && studentsFromParents && studentsFromParents.length > 0) {
+          console.log('✅ Found students from parent records:', studentsFromParents.length);
+          console.log('📋 Students data:', studentsFromParents);
+          
+          // Add each student that isn't already in our list
+          studentsFromParents.forEach((student, index) => {
+            const alreadyExists = allStudents.some(s => s.id === student.id);
+            console.log(`🔍 Processing student ${index + 1}: ${student.name} - Already in list: ${alreadyExists}`);
+            
+            if (!alreadyExists) {
+              // Find the corresponding parent record to get the relation
+              const parentRecord = parentRecords.find(p => p.student_id === student.id);
+              console.log('✅ Adding student from parent records:', student.name);
+              
+              const mappedStudent = {
+                ...student,
+                relationshipType: parentRecord?.relation || 'Guardian',
+                isPrimaryContact: student.id === user.linked_parent_of, // Primary if matches linked_parent_of
+                isEmergencyContact: true,
+                fullClassName: student.classes 
+                  ? `${student.classes.class_name} ${student.classes.section}`
+                  : 'N/A'
+              };
+              allStudents.push(mappedStudent);
+              console.log('✅ Student added. Total students now:', allStudents.length);
+            } else {
+              console.log('⏭️ Skipping student (already in list):', student.name);
+            }
+          });
+        } else if (studentsError) {
+          console.log('❌ Error getting students from parent records:', studentsError);
+        } else {
+          console.log('❌ No students found from parent records');
+        }
+      } else if (parentError) {
+        console.log('❌ Error getting parent records:', parentError);
+      } else {
+        console.log('❌ No parent records found for email:', user.email);
       }
+      
+      console.log('🔍 DEBUG: All students after Step 2:', allStudents.length, allStudents.map(s => ({ id: s.id, name: s.name })));
 
-      if (parentData && parentData.length > 0) {
-        const parentRecord = parentData[0];
-        console.log('Found parent record:', parentRecord);
-
-        if (parentRecord.student_id) {
-          // Get student details
-          const { data: studentData, error: studentError } = await supabase
+      // APPROACH 3: If still only 1 student, look for students with similar names to the primary student
+      if (allStudents.length === 1) {
+        console.log('Step 3: Still only 1 student, looking for students with similar characteristics');
+        const primaryStudent = allStudents[0];
+        
+        // Look for students in the same class or with similar admission numbers
+        if (primaryStudent.class_id) {
+          const { data: classmateStudents, error: classmateError } = await supabase
             .from(TABLES.STUDENTS)
             .select(`
               id,
@@ -150,44 +172,47 @@ export const SelectedStudentProvider = ({ children }) => {
               academic_year,
               gender,
               dob,
+              class_id,
+              parent_id,
               classes(
                 id,
                 class_name,
                 section
               )
             `)
-            .eq('id', parentRecord.student_id)
-            .single();
-
-          if (studentError) {
-            console.error('Error loading student from parent record:', studentError);
-            throw studentError;
-          }
-
-          if (studentData) {
-            const student = {
-              ...studentData,
-              relationshipType: parentRecord.relation || 'Guardian',
-              isPrimaryContact: true,
-              isEmergencyContact: true,
-              fullClassName: studentData.classes 
-                ? `${studentData.classes.class_name} ${studentData.classes.section}`
-                : 'N/A'
-            };
-            
-            setAvailableStudents([student]);
-            setHasMultipleStudents(false);
-            setSelectedStudent(student);
-            return;
+            .eq('class_id', primaryStudent.class_id)
+            .neq('id', primaryStudent.id) // Exclude the primary student
+            .limit(5); // Limit to avoid too many results
+          
+          if (!classmateError && classmateStudents && classmateStudents.length > 0) {
+            console.log('Found classmates. Checking if any should belong to this parent...');
+            // For now, let's not automatically add classmates, but log them for debugging
+            console.log('Classmates:', classmateStudents.map(s => `${s.name} (${s.admission_no})`));
           }
         }
       }
 
-      // If no students found, set empty arrays
-      console.log('No students found for this parent');
-      setAvailableStudents([]);
-      setHasMultipleStudents(false);
-      setSelectedStudent(null);
+      // Set the available students
+      if (allStudents.length > 0) {
+        console.log('Total students found for parent:', allStudents.length);
+        setAvailableStudents(allStudents);
+        setHasMultipleStudents(allStudents.length > 1);
+        
+        // Auto-select first student if no student selected
+        if (!selectedStudent) {
+          setSelectedStudent(allStudents[0]);
+        }
+        // If current selected student is not in the list, select the first one
+        else if (!allStudents.some(s => s.id === selectedStudent.id)) {
+          setSelectedStudent(allStudents[0]);
+        }
+      } else {
+        // If no students found, set empty arrays
+        console.log('No students found for this parent');
+        setAvailableStudents([]);
+        setHasMultipleStudents(false);
+        setSelectedStudent(null);
+      }
 
     } catch (error) {
       console.error('Error loading available students:', error);

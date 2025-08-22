@@ -35,10 +35,20 @@ const StudentSwitchBanner = ({ style }) => {
   const [showSelector, setShowSelector] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
+  // Debug logging
+  console.log('StudentSwitchBanner - Render conditions:', {
+    hasMultipleStudents,
+    availableStudentsLength: availableStudents?.length || 0,
+    shouldShow: hasMultipleStudents && availableStudents.length > 1
+  });
+  
   // Don't show banner if no multiple students
   if (!hasMultipleStudents || availableStudents.length <= 1) {
+    console.log('StudentSwitchBanner - Not showing banner due to conditions');
     return null;
   }
+  
+  console.log('StudentSwitchBanner - Showing banner!');
 
   const handleStudentSelect = (student, index) => {
     setSelectedIndex(index);

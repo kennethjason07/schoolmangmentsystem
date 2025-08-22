@@ -823,7 +823,7 @@ const AttendanceManagement = () => {
               >
                 <Ionicons name="calendar-outline" size={20} color="#1976d2" style={styles.inputIcon} />
                 <Text style={styles.dateInputText}>
-                  {format(selectedDate, 'dd MMM yyyy')}
+                  {formatSafeDate(selectedDate, 'dd MMM yyyy')}
                 </Text>
                 <Ionicons name="chevron-down" size={16} color="#666" />
               </TouchableOpacity>
@@ -861,7 +861,7 @@ const AttendanceManagement = () => {
               >
                 <Ionicons name="calendar-outline" size={20} color="#1976d2" style={styles.inputIcon} />
                 <Text style={styles.dateInputText}>
-                  {format(teacherDate, 'dd MMM yyyy')}
+                  {formatSafeDate(teacherDate, 'dd MMM yyyy')}
                 </Text>
                 <Ionicons name="chevron-down" size={16} color="#666" />
               </TouchableOpacity>
@@ -1007,6 +1007,19 @@ const AttendanceManagement = () => {
     return Math.max(0, safeIndex); // Ensure non-negative
   };
 
+  // Safe date formatting helper to prevent Invalid Date errors
+  const formatSafeDate = (date, formatStr = 'dd MMM yyyy') => {
+    try {
+      if (!date) return 'Invalid Date';
+      const safeDate = new Date(date);
+      if (isNaN(safeDate.getTime())) return 'Invalid Date';
+      return format(safeDate, formatStr);
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'Invalid Date';
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -1028,7 +1041,7 @@ const AttendanceManagement = () => {
         <View style={styles.quickStatItem}>
           <Ionicons name="calendar-outline" size={18} color="#1976d2" />
           <Text style={styles.quickStatText}>
-            {format(tab === 'student' ? selectedDate : teacherDate, 'dd MMM yyyy')}
+            {formatSafeDate(tab === 'student' ? selectedDate : teacherDate, 'dd MMM yyyy')}
           </Text>
         </View>
         <View style={styles.quickStatItem}>
@@ -1156,15 +1169,15 @@ const AttendanceManagement = () => {
                       data={[
                         {
                           name: 'Present',
-                          value: analytics.present,
+                          population: analytics.present,
                           color: '#4CAF50'
                         },
                         {
                           name: 'Absent',
-                          value: analytics.absent,
+                          population: analytics.absent,
                           color: '#F44336'
                         }
-                      ].filter(item => item.value > 0)}
+                      ].filter(item => item.population > 0)}
                       width={Math.min(Dimensions.get('window').width - 48, 300)}
                       height={200}
                       chartConfig={{
@@ -1178,7 +1191,7 @@ const AttendanceManagement = () => {
                         barPercentage: 0.5,
                         useShadowColorFromDataset: false,
                       }}
-                      accessor="value"
+                      accessor="population"
                       backgroundColor="transparent"
                       paddingLeft="20"
                       center={[0, 0]}
@@ -1252,7 +1265,7 @@ const AttendanceManagement = () => {
           <View style={styles.modalContent}>
             <TextInput
               style={styles.modalDateInput}
-              value={format(viewDate, 'dd-MM-yyyy')}
+              value={formatSafeDate(viewDate, 'dd-MM-yyyy')}
               placeholder="Select Date"
               editable={false}
             />
@@ -1270,7 +1283,7 @@ const AttendanceManagement = () => {
                 <View style={styles.modalTableRow}>
                   <Text style={[styles.modalTableCell, { flex: 0.7 }]}>{item.roll_no || '-'}</Text>
                   <Text style={[styles.modalTableCell, { flex: 2 }]}>{item.full_name || item.name}</Text>
-                  <Text style={[styles.modalTableCell, { flex: 1 }]}>{format(viewDate, 'dd-MM-yyyy')}</Text>
+                  <Text style={[styles.modalTableCell, { flex: 1 }]}>{formatSafeDate(viewDate, 'dd-MM-yyyy')}</Text>
                   <Text style={[styles.modalTableCell, { flex: 1 }]}>{attendanceMark[item.id] === 'Present' ? 'P' : 'A'}</Text>
                 </View>
               )}
@@ -1317,7 +1330,7 @@ const AttendanceManagement = () => {
           <View style={styles.modalContent}>
             <TextInput
               style={styles.modalDateInput}
-              value={format(teacherViewDate, 'dd-MM-yyyy')}
+              value={formatSafeDate(teacherViewDate, 'dd-MM-yyyy')}
               placeholder="Select Date"
               editable={false}
             />
@@ -1335,7 +1348,7 @@ const AttendanceManagement = () => {
                 <View style={styles.modalTableRow}>
                   <Text style={[styles.modalTableCell, { flex: 0.7 }]}>{index + 1}</Text>
                   <Text style={[styles.modalTableCell, { flex: 2 }]}>{item.name}</Text>
-                  <Text style={[styles.modalTableCell, { flex: 1 }]}>{format(teacherViewDate, 'dd-MM-yyyy')}</Text>
+                  <Text style={[styles.modalTableCell, { flex: 1 }]}>{formatSafeDate(teacherViewDate, 'dd-MM-yyyy')}</Text>
                   <Text style={[styles.modalTableCell, { flex: 1 }]}>{teacherAttendanceMark[item.id] === 'Present' ? 'P' : 'A'}</Text>
                 </View>
               )}

@@ -25,8 +25,16 @@ import usePullToRefresh from '../../hooks/usePullToRefresh';
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
-  const { selectedStudent, hasMultipleStudents, loading: studentLoading } = useSelectedStudent();
+  const { selectedStudent, hasMultipleStudents, availableStudents, loading: studentLoading } = useSelectedStudent();
   const [studentData, setStudentData] = useState(null);
+  
+  // Debug logging for context values
+  console.log('ParentDashboard - Context values:', {
+    hasMultipleStudents,
+    availableStudentsCount: availableStudents?.length || 0,
+    selectedStudent: selectedStudent?.name || 'None',
+    studentLoading
+  });
   const [notifications, setNotifications] = useState([]);
   const [exams, setExams] = useState([]);
   const [events, setEvents] = useState([]);
@@ -221,6 +229,204 @@ const ParentDashboard = ({ navigation }) => {
       }
     }
   });
+
+  // Effect to refetch data when selected student changes
+  useEffect(() => {
+    console.log('ParentDashboard - Selected student changed:', selectedStudent?.name, 'Loading:', studentLoading);
+    if (selectedStudent && !studentLoading) {
+      console.log('ParentDashboard - Fetching data for selected student:', selectedStudent.name);
+      fetchDashboardDataForStudent(selectedStudent);
+    }
+  }, [selectedStudent?.id, studentLoading]);
+
+  // Function to fetch dashboard data for a specific student
+  const fetchDashboardDataForStudent = async (student) => {
+    if (!student) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      console.log('Parent Dashboard - Fetching data for selected student:', student.name);
+      
+      // Set the student data from the selected student context
+      setStudentData(student);
+      
+      // Get notifications for parent (independent of student)
+      await refreshNotifications();
+      
+      // Get upcoming exams for student's class
+      try {
+        const { data: examsData, error: examsError } = await supabase
+          .from(TABLES.EXAMS)
+          .select('*')
+          .eq('class_id', student.class_id)
+          .order('start_date', { ascending: true })
+          .limit(5);
+
+        if (examsError && examsError.code !== '42P01') {
+          console.log('Exams error:', examsError);
+        }
+        setExams(examsData || []);
+      } catch (err) {
+        console.log('Exams fetch error:', err);
+        setExams([]);
+      }
+
+      // Get upcoming events from the events table
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        console.log('🔍 Parent Dashboard - Fetching upcoming events from date:', today);
+        
+        // Get all upcoming events (today and future) that are active
+        const { data: upcomingEventsData, error: eventsError } = await supabase
+          .from('events')
+          .select('*')
+          .eq('status', 'Active')
+          .gte('event_date', today)
+          .order('event_date', { ascending: true });
+          
+        console.log('📊 Parent Dashboard - Upcoming events found:', upcomingEventsData?.length || 0);
+        
+        if (eventsError) {
+          console.error('❌ Parent Dashboard - Events query error:', eventsError);
+        }
+        
+        // Map the events to the format expected by the UI
+        const mappedEvents = (upcomingEventsData || []).map(event => ({
+          id: event.id,
+          title: event.title,
+          description: event.description || '',
+          event_date: event.event_date,
+          event_time: event.start_time || '09:00',
+          icon: event.icon || 'calendar',
+          color: event.color || '#FF9800',
+          location: event.location,
+          organizer: event.organizer
+        }));
+        
+        setEvents(mappedEvents.slice(0, 5)); // Show top 5 events
+      } catch (err) {
+        console.log('❌ Parent Dashboard - Events fetch error:', err);
+        setEvents([]);
+      }
+
+      // SIMPLE ATTENDANCE CALCULATION - MATCHES StudentAttendanceMarks
+      const currentDate = new Date();
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth() + 1; // getMonth() returns 0-11, so add 1
+
+      try {
+        // Get ALL attendance records for this student
+        const { data: allAttendanceData, error: attendanceError } = await supabase
+          .from(TABLES.STUDENT_ATTENDANCE)
+          .select('*')
+          .eq('student_id', student.id)
+          .order('date', { ascending: false });
+
+        if (attendanceError) throw attendanceError;
+
+        // Filter to current month records
+        const currentMonthRecords = (allAttendanceData || []).filter(record => {
+          // Safety check for valid date format
+          if (!record.date || typeof record.date !== 'string') {
+            console.warn('Invalid date format in attendance record:', record.date);
+            return false;
+          }
+          
+          const dateParts = record.date.split('-');
+          if (dateParts.length < 2) {
+            console.warn('Date does not contain expected format (YYYY-MM-DD):', record.date);
+            return false;
+          }
+          
+          const recordYear = parseInt(dateParts[0], 10);
+          const recordMonth = parseInt(dateParts[1], 10);
+          
+          // Check if parsing was successful (not NaN)
+          if (isNaN(recordYear) || isNaN(recordMonth)) {
+            console.warn('Failed to parse date components:', record.date, 'year:', dateParts[0], 'month:', dateParts[1]);
+            return false;
+          }
+          
+          return recordYear === year && recordMonth === month;
+        });
+
+        console.log('=== PARENT DASHBOARD SIMPLE CALCULATION ===');
+        console.log('Current month:', `${year}-${String(month).padStart(2, '0')}`);
+        console.log('Current month records:', currentMonthRecords.length);
+        console.log('Records:', currentMonthRecords.map(r => `${r.date}: ${r.status}`));
+        console.log('==========================================');
+
+        // Use the filtered records
+        const attendanceData = currentMonthRecords;
+
+        if (attendanceError && attendanceError.code !== '42P01') {
+          console.log('Attendance error:', attendanceError);
+        }
+        setAttendance(attendanceData || []);
+      } catch (err) {
+        console.log('Attendance fetch error:', err);
+        setAttendance([]);
+      }
+
+      // Get student marks
+      try {
+        const { data: marksData, error: marksError } = await supabase
+          .from(TABLES.MARKS)
+          .select(`
+            *,
+            subjects(name),
+            exams(name, start_date)
+          `)
+          .eq('student_id', student.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (marksError && marksError.code !== '42P01') {
+          console.log('Marks error:', marksError);
+        }
+        setMarks(marksData || []);
+      } catch (err) {
+        console.log('Marks fetch error:', err);
+        setMarks([]);
+      }
+
+      // Get fee information
+      try {
+        const { data: feesData, error: feesError } = await supabase
+          .from(TABLES.FEES)
+          .select('*')
+          .eq('student_id', student.id)
+          .order('due_date', { ascending: true });
+
+        if (feesError && feesError.code !== '42P01') {
+          console.log('Fees error:', feesError);
+        }
+        setFees(feesData || []);
+      } catch (err) {
+        console.log('Fees fetch error:', err);
+        setFees([]);
+      }
+
+      // Get school details (independent of student)
+      try {
+        const schoolData = await dbHelpers.getSchoolDetails();
+        if (schoolData && schoolData.data) {
+          setSchoolDetails(schoolData.data);
+        }
+      } catch (err) {
+        console.log('School details fetch error:', err);
+        setSchoolDetails(null);
+      }
+      
+    } catch (err) {
+      console.error('Error fetching dashboard data for student:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -1037,6 +1243,11 @@ const ParentDashboard = ({ navigation }) => {
         showNotifications={true}
         unreadCount={unreadCount}
       />
+      
+      {/* Student Switch Banner - Show when parent has multiple children */}
+      {hasMultipleStudents && (
+        <StudentSwitchBanner />
+      )}
       
       <ScrollView 
         style={styles.scrollView} 
