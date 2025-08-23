@@ -784,41 +784,9 @@ const AttendanceManagement = () => {
     );
   };
 
-  // Render header for the list
-  const renderHeader = () => (
+  // Render main content without tabs (tabs moved to top)
+  const renderMainContent = () => (
     <View style={styles.headerContainer}>
-      {/* Tab Navigation */}
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[styles.tabButton, tab === 'student' && styles.tabActive]}
-          onPress={() => setTab('student')}
-        >
-          <Ionicons
-            name="people"
-            size={20}
-            color={tab === 'student' ? '#fff' : '#666'}
-            style={styles.tabIcon}
-          />
-          <Text style={[styles.tabText, tab === 'student' && styles.tabTextActive]}>
-            Student
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabButton, tab === 'teacher' && styles.tabActive]}
-          onPress={() => setTab('teacher')}
-        >
-          <Ionicons
-            name="person"
-            size={20}
-            color={tab === 'teacher' ? '#fff' : '#666'}
-            style={styles.tabIcon}
-          />
-          <Text style={[styles.tabText, tab === 'teacher' && styles.tabTextActive]}>
-            Teacher
-          </Text>
-        </TouchableOpacity>
-      </View>
-
       {/* Enhanced Selection Controls */}
       {tab === 'student' ? (
         <View style={styles.selectionContainer}>
@@ -1040,7 +1008,39 @@ const AttendanceManagement = () => {
     <View style={styles.container}>
       <Header title="Attendance Management" showBack={true} />
 
-      {/* Enhanced Header with Quick Stats */}
+      {/* Tab Navigation at Top */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[styles.tabButton, tab === 'student' && styles.tabActive]}
+          onPress={() => setTab('student')}
+        >
+          <Ionicons
+            name="people"
+            size={20}
+            color={tab === 'student' ? '#fff' : '#666'}
+            style={styles.tabIcon}
+          />
+          <Text style={[styles.tabText, tab === 'student' && styles.tabTextActive]}>
+            Student
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabButton, tab === 'teacher' && styles.tabActive]}
+          onPress={() => setTab('teacher')}
+        >
+          <Ionicons
+            name="person"
+            size={20}
+            color={tab === 'teacher' ? '#fff' : '#666'}
+            style={styles.tabIcon}
+          />
+          <Text style={[styles.tabText, tab === 'teacher' && styles.tabTextActive]}>
+            Teacher
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Enhanced Header with Date, Total, Present Stats */}
       <View style={styles.quickStatsHeader}>
         <View style={styles.quickStatItem}>
           <Ionicons name="calendar-outline" size={18} color="#1976d2" />
@@ -1074,8 +1074,8 @@ const AttendanceManagement = () => {
           />
         }
       >
-        {/* Header Section */}
-        {renderHeader()}
+        {/* Content Section without tabs (tabs moved to top) */}
+        {renderMainContent()}
 
         {/* View Attendance Button */}
         {tab === 'student' && selectedClass && studentsForClass.length > 0 && (
@@ -1471,7 +1471,7 @@ export default AttendanceManagement;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#fafafa',
   },
   scrollContainer: {
     flex: 1,
@@ -1531,9 +1531,10 @@ const styles = StyleSheet.create({
   tabContainer: {
     flexDirection: 'row',
     backgroundColor: '#fff',
-    marginBottom: 16,
-    borderRadius: 12,
+    marginBottom: 8,
     marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -2252,7 +2253,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     marginHorizontal: 16,
-    marginBottom: 8,
+    marginBottom: 16,
     borderRadius: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
