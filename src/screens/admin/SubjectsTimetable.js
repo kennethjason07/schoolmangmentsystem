@@ -902,6 +902,7 @@ const SubjectsTimetable = ({ route }) => {
             data={subjects}
             keyExtractor={item => item.id}
             style={{ width: '100%', marginTop: 16 }}
+            contentContainerStyle={{ paddingBottom: 100 }}
             renderItem={({ item }) => (
               <View style={styles.subjectRow}>
                 <View style={{ flex: 1 }}>
@@ -951,7 +952,11 @@ const SubjectsTimetable = ({ route }) => {
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView style={styles.timetableContainer} showsVerticalScrollIndicator={false}>
+        <ScrollView 
+          style={styles.timetableContainer} 
+          contentContainerStyle={styles.timetableScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
           {/* Class Selector */}
           <View style={styles.classSelector}>
             <View style={styles.selectorHeader}>
@@ -1494,6 +1499,9 @@ const styles = StyleSheet.create({
   timetableContainer: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  timetableScrollContent: {
+    paddingBottom: 120,
   },
   timetableHeader: {
     backgroundColor: '#fff',

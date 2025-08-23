@@ -120,7 +120,12 @@ const OnlineBankingPayment = ({ route, navigation }) => {
     <View style={styles.container}>
       <Header title="Net Banking" showBack={true} />
       
-      <ScrollView style={styles.content}>
+      <ScrollView 
+        style={styles.content}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* Payment Summary */}
         <View style={styles.summaryCard}>
           <Text style={styles.summaryTitle}>Payment Summary</Text>
@@ -187,7 +192,10 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  scrollContent: {
     padding: 16,
+    paddingBottom: 80,
   },
   summaryCard: {
     backgroundColor: '#fff',
