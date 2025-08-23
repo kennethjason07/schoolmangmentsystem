@@ -349,14 +349,13 @@ const ManageStudents = () => {
     }
   };
 
-  // Load parents (users with parent role)
+  // Load parents from parents table
   const loadParents = async () => {
     try {
       const { data: parentData, error } = await supabase
-        .from(TABLES.USERS)
-        .select('id, full_name, phone')
-        .eq('role_id', 3) // Assuming role_id 3 is for parents
-        .order('full_name');
+        .from(TABLES.PARENTS)
+        .select('id, name, phone')
+        .order('name');
 
       if (error) throw error;
       setParents(parentData || []);

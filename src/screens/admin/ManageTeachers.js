@@ -30,7 +30,7 @@ const ManageTeachers = ({ navigation, route }) => {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [modalMode, setModalMode] = useState('add'); // 'add' or 'edit'
   const [selectedTeacher, setSelectedTeacher] = useState(null);
-  const [form, setForm] = useState({ name: '', subjects: [], classes: [], salary: '', qualification: '', sections: {} });
+  const [form, setForm] = useState({ name: '', phone: '', age: '', address: '', subjects: [], classes: [], salary: '', qualification: '', sections: {} });
   const [searchQuery, setSearchQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [sections, setSections] = useState([]);
@@ -209,7 +209,7 @@ const ManageTeachers = ({ navigation, route }) => {
 
   const openAddModal = () => {
     setModalMode('add');
-    setForm({ name: '', subjects: [], classes: [], salary: '', qualification: '', sections: {} });
+    setForm({ name: '', phone: '', age: '', address: '', subjects: [], classes: [], salary: '', qualification: '', sections: {} });
     setIsModalVisible(true);
   };
   const openEditModal = async (teacher) => {
@@ -247,6 +247,9 @@ const ManageTeachers = ({ navigation, route }) => {
 
       const formData = {
         name: teacher.name,
+        phone: teacher.phone || '',
+        age: teacher.age ? String(teacher.age) : '',
+        address: teacher.address || '',
         subjects: subjectIds,
         classes: finalClassIds,
         salary: teacher.salary_amount ? String(teacher.salary_amount) : '',
@@ -261,6 +264,9 @@ const ManageTeachers = ({ navigation, route }) => {
       // Fallback to basic form
       setForm({
         name: teacher.name,
+        phone: teacher.phone || '',
+        age: teacher.age ? String(teacher.age) : '',
+        address: teacher.address || '',
         subjects: [],
         classes: [],
         salary: teacher.salary_amount ? String(teacher.salary_amount) : '',
@@ -278,8 +284,15 @@ const ManageTeachers = ({ navigation, route }) => {
   const handleSave = async () => {
     console.log('Save button clicked, form data:', form);
 
-    if (!form.name.trim() || form.subjects.length === 0 || form.classes.length === 0) {
-      Alert.alert('Error', 'Please fill all fields and select at least one subject and class.');
+    if (!form.name.trim() || !form.phone.trim() || !form.age.trim() || form.subjects.length === 0 || form.classes.length === 0) {
+      Alert.alert('Error', 'Please fill all required fields (name, phone, age) and select at least one subject and class.');
+      return;
+    }
+
+    // Validate age is a number and greater than 18 (as per schema constraint)
+    const age = parseInt(form.age);
+    if (isNaN(age) || age <= 18) {
+      Alert.alert('Error', 'Age must be a valid number greater than 18.');
       return;
     }
 
@@ -290,6 +303,9 @@ const ManageTeachers = ({ navigation, route }) => {
         // Create new teacher in Supabase
         const teacherData = {
           name: form.name.trim(),
+          phone: form.phone.trim(),
+          age: parseInt(form.age),
+          address: form.address.trim(),
           qualification: form.qualification,
           salary_amount: parseFloat(form.salary) || 0,
           salary_type: 'monthly', // Default value
@@ -314,6 +330,9 @@ const ManageTeachers = ({ navigation, route }) => {
         // Update teacher in Supabase
         const teacherData = {
           name: form.name.trim(),
+          phone: form.phone.trim(),
+          age: parseInt(form.age),
+          address: form.address.trim(),
           qualification: form.qualification,
           salary_amount: parseFloat(form.salary) || 0,
         };
@@ -567,14 +586,23 @@ const ManageTeachers = ({ navigation, route }) => {
       >
         <View style={styles.teacherInfo}>
           <View style={styles.teacherAvatar}>
-            <Ionicons name="person" size={24} color="#4CAF50" />
+            <View style={styles.profileContainer}>
+              <Text style={styles.profileInitials}>
+                {item.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
+              </Text>
+            </View>
+            <View style={styles.iconOverlay}>
+              <Ionicons name="person" size={16} color="#4CAF50" />
+            </View>
           </View>
           <View style={styles.teacherDetails}>
             <Text style={styles.teacherName}>{item.name}</Text>
             <Text style={styles.teacherSubject}>
-              {item.subjects.map(s => subjects.find(sub => sub.id === s)?.name || '').join(', ')}
+              {item.subjects.map(s => subjects.find(sub => sub.id === s)?.name).filter(name => name).join(', ') || 'Not assigned'}
             </Text>
-            <Text style={styles.teacherClass}>{item.classes.map(c => classes.find(cls => cls.id === c)?.class_name || '').join(', ')}</Text>
+            {item.classes.map(c => classes.find(cls => cls.id === c)?.class_name).filter(name => name).length > 0 && (
+              <Text style={styles.teacherClass}>{item.classes.map(c => classes.find(cls => cls.id === c)?.class_name).filter(name => name).join(', ')}</Text>
+            )}
             {/* Salary and Education */}
             <Text style={styles.teacherSalary}>
               Salary: {item.salary_amount ? `₹${parseFloat(item.salary_amount).toFixed(2)}` : '₹0.00'}
@@ -784,6 +812,43 @@ const ManageTeachers = ({ navigation, route }) => {
                     onChangeText={text => setForm({ ...form, name: text })}
                     style={styles.textInput}
                     placeholderTextColor="#999"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Phone Number *</Text>
+                  <TextInput
+                    placeholder="Enter phone number"
+                    value={form.phone}
+                    onChangeText={text => setForm({ ...form, phone: text })}
+                    keyboardType="phone-pad"
+                    style={styles.textInput}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Age *</Text>
+                  <TextInput
+                    placeholder="Enter age (must be > 18)"
+                    value={form.age}
+                    onChangeText={text => setForm({ ...form, age: text })}
+                    keyboardType="numeric"
+                    style={styles.textInput}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Address</Text>
+                  <TextInput
+                    placeholder="Enter full address"
+                    value={form.address}
+                    onChangeText={text => setForm({ ...form, address: text })}
+                    style={[styles.textInput, styles.multilineInput]}
+                    placeholderTextColor="#999"
+                    multiline={true}
+                    numberOfLines={3}
                   />
                 </View>
 
@@ -1149,6 +1214,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+    position: 'relative',
+  },
+  profileContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#4CAF50',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.5,
+  },
+  profileInitials: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  iconOverlay: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
   },
   teacherDetails: {
     flex: 1,
@@ -1329,6 +1430,10 @@ const styles = StyleSheet.create({
     color: '#333',
     borderWidth: 1,
     borderColor: '#e9ecef',
+  },
+  multilineInput: {
+    minHeight: 80,
+    textAlignVertical: 'top',
   },
   salaryInputContainer: {
     flexDirection: 'row',

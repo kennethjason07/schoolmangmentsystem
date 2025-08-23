@@ -50,19 +50,19 @@ const StudentDetails = ({ route }) => {
         } else {
           console.log('No parent found in parents table for student:', student.id);
           
-          // Method 2: Try via parent_id in students table (users table)
+          // Method 2: Try via parent_id in students table (parents table)
           if (data.parent_id) {
-            const { data: userData, error: userError } = await supabase
-              .from('users')
-              .select('full_name, email, phone')
+            const { data: parentTableData, error: parentTableError } = await supabase
+              .from('parents')
+              .select('name, relation, phone, email')
               .eq('id', data.parent_id)
               .single();
             
-            if (userData && !userError) {
-              parentData = { name: userData.full_name, relation: 'Guardian' };
-              console.log('Found parent in users table:', parentData);
+            if (parentTableData && !parentTableError) {
+              parentData = { name: parentTableData.name, relation: parentTableData.relation || 'Guardian' };
+              console.log('Found parent in parents table via parent_id:', parentData);
             } else {
-              console.log('No parent found in users table for parent_id:', data.parent_id);
+              console.log('No parent found in parents table for parent_id:', data.parent_id);
             }
           }
           

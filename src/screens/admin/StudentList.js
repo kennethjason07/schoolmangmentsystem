@@ -34,7 +34,7 @@ const StudentList = ({ route, navigation }) => {
           .select(`
             *,
             classes(class_name, section),
-            users!students_parent_id_fkey(full_name, phone, email)
+            parents:parent_id(name, phone, email)
           `)
           .eq('class_id', classId)
           .order('roll_no', { ascending: true });
@@ -83,7 +83,7 @@ const StudentList = ({ route, navigation }) => {
           Class: {item.classes?.class_name} {item.classes?.section}
         </Text>
         <Text style={styles.detail}>
-          Parent: {item.users?.full_name || 'N/A'}
+          Parent: {item.parents?.name || 'N/A'}
         </Text>
       </View>
       <Ionicons name="chevron-forward" size={20} color="#999" />
