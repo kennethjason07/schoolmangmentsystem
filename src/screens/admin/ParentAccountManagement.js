@@ -70,7 +70,7 @@ const ParentAccountManagement = ({ navigation }) => {
       if (classesError) throw classesError;
       setClasses(classesData || []);
       
-      // Load students with their class information and check if they have parent accounts
+      // Load students with their class information
       const { data: studentsData, error: studentsError } = await supabase
         .from(TABLES.STUDENTS)
         .select(`

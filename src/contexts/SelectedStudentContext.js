@@ -57,14 +57,25 @@ export const SelectedStudentProvider = ({ children }) => {
 
         if (!studentError && studentData) {
           console.log('✅ Found primary student via linked_parent_of:', studentData.name);
+
+          // Get student's profile photo from users table
+          const { data: studentUserData, error: studentUserError } = await supabase
+            .from(TABLES.USERS)
+            .select('id, profile_url')
+            .eq('linked_student_id', studentData.id)
+            .maybeSingle();
+
+          console.log('📸 Student user data for profile photo:', studentUserData);
+
           const student = {
             ...studentData,
             relationshipType: 'Primary',
             isPrimaryContact: true,
             isEmergencyContact: true,
-            fullClassName: studentData.classes 
+            fullClassName: studentData.classes
               ? `${studentData.classes.class_name} ${studentData.classes.section}`
-              : 'N/A'
+              : 'N/A',
+            profile_url: studentUserData?.profile_url || null // Add profile photo
           };
           allStudents.push(student);
         } else {
@@ -118,30 +129,40 @@ export const SelectedStudentProvider = ({ children }) => {
           console.log('📋 Students data:', studentsFromParents);
           
           // Add each student that isn't already in our list
-          studentsFromParents.forEach((student, index) => {
+          for (const [index, student] of studentsFromParents.entries()) {
             const alreadyExists = allStudents.some(s => s.id === student.id);
             console.log(`🔍 Processing student ${index + 1}: ${student.name} - Already in list: ${alreadyExists}`);
-            
+
             if (!alreadyExists) {
               // Find the corresponding parent record to get the relation
               const parentRecord = parentRecords.find(p => p.student_id === student.id);
               console.log('✅ Adding student from parent records:', student.name);
-              
+
+              // Get student's profile photo from users table
+              const { data: studentUserData, error: studentUserError } = await supabase
+                .from(TABLES.USERS)
+                .select('id, profile_url')
+                .eq('linked_student_id', student.id)
+                .maybeSingle();
+
+              console.log('📸 Student user data for profile photo:', studentUserData);
+
               const mappedStudent = {
                 ...student,
                 relationshipType: parentRecord?.relation || 'Guardian',
                 isPrimaryContact: student.id === user.linked_parent_of, // Primary if matches linked_parent_of
                 isEmergencyContact: true,
-                fullClassName: student.classes 
+                fullClassName: student.classes
                   ? `${student.classes.class_name} ${student.classes.section}`
-                  : 'N/A'
+                  : 'N/A',
+                profile_url: studentUserData?.profile_url || null // Add profile photo
               };
               allStudents.push(mappedStudent);
               console.log('✅ Student added. Total students now:', allStudents.length);
             } else {
               console.log('⏭️ Skipping student (already in list):', student.name);
             }
-          });
+          }
         } else if (studentsError) {
           console.log('❌ Error getting students from parent records:', studentsError);
         } else {

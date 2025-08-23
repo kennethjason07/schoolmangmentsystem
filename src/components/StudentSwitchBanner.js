@@ -72,8 +72,8 @@ const StudentSwitchBanner = ({ style }) => {
         >
           <View style={styles.studentInfo}>
             <View style={styles.studentAvatar}>
-              <Image 
-                source={require('../../assets/icon.png')} 
+              <Image
+                source={selectedStudent?.profile_url ? { uri: selectedStudent.profile_url } : require('../../assets/icon.png')}
                 style={styles.avatarImage}
               />
               {selectedStudent?.isPrimaryContact && (
@@ -138,8 +138,8 @@ const StudentSwitchBanner = ({ style }) => {
                 >
                   <View style={styles.studentOptionContent}>
                     <View style={styles.studentOptionAvatar}>
-                      <Image 
-                        source={require('../../assets/icon.png')} 
+                      <Image
+                        source={student.profile_url ? { uri: student.profile_url } : require('../../assets/icon.png')}
                         style={styles.optionAvatarImage}
                       />
                       {student.isPrimaryContact && (

@@ -661,7 +661,7 @@ const SubjectsTimetable = ({ route }) => {
         class_id: selectedClass,
         subject_id: subjectId,
         teacher_id: teacherId,
-        day_of_week: getDayNumber(day),
+        day_of_week: day, // Use day name directly (Monday, Tuesday, etc.) - matches database constraint
         period_number: slot.number,
         start_time: slot.startTime,
         end_time: slot.endTime,

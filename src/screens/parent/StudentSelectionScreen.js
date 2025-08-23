@@ -134,8 +134,8 @@ const StudentSelectionScreen = ({ navigation }) => {
               >
                 <View style={styles.studentCardContent}>
                   <View style={styles.studentAvatar}>
-                    <Image 
-                      source={require('../../../assets/icon.png')} 
+                    <Image
+                      source={student.profile_url ? { uri: student.profile_url } : require('../../../assets/icon.png')}
                       style={styles.avatarImage}
                     />
                     {student.isPrimaryContact && (

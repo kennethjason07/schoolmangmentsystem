@@ -115,15 +115,30 @@ const ParentDashboard = ({ navigation }) => {
       if (notificationsError && notificationsError.code !== '42P01') {
         console.log('Notifications refresh error:', notificationsError);
       } else {
-        const mappedNotifications = (notificationsData || []).map(n => ({
-          id: n.id,
-          title: n.notifications.message || 'Notification', // Use message as title since title doesn't exist
-          message: n.notifications.message,
-          type: n.notifications.type || 'general',
-          created_at: n.notifications.created_at,
-          is_read: n.is_read || false,
-          read_at: n.read_at
-        }));
+        const mappedNotifications = (notificationsData || []).map(n => {
+          // Create proper title and message for absence notifications
+          let title, message;
+          if (n.notifications.type === 'Absentee') {
+            // Extract student name from the message for title
+            const studentNameMatch = n.notifications.message.match(/Student (\w+)/);
+            const studentName = studentNameMatch ? studentNameMatch[1] : 'Student';
+            title = `${studentName} - Absent`;
+            message = n.notifications.message.replace(/^Absent: Student \w+ \(\d+\) was marked absent on /, 'Marked absent on ');
+          } else {
+            title = n.notifications.type || 'Notification';
+            message = n.notifications.message;
+          }
+
+          return {
+            id: n.id,
+            title: title,
+            message: message,
+            type: n.notifications.type || 'general',
+            created_at: n.notifications.created_at,
+            is_read: n.is_read || false,
+            read_at: n.read_at
+          };
+        });
         console.log('Mapped notifications count:', mappedNotifications.length);
         console.log('Unread notifications count:', mappedNotifications.filter(n => !n.is_read).length);
         setNotifications(mappedNotifications);
@@ -704,15 +719,30 @@ const ParentDashboard = ({ navigation }) => {
           if (notificationsError && notificationsError.code !== '42P01') {
             console.log('Notifications error:', notificationsError);
           } else {
-            const mappedNotifications = (notificationsData || []).map(n => ({
-              id: n.id,
-              title: n.notifications.message || 'Notification', // Use message as title since title doesn't exist
-              message: n.notifications.message,
-              type: n.notifications.type || 'general',
-              created_at: n.notifications.created_at,
-              is_read: n.is_read || false,
-              read_at: n.read_at
-            }));
+            const mappedNotifications = (notificationsData || []).map(n => {
+              // Create proper title and message for absence notifications
+              let title, message;
+              if (n.notifications.type === 'Absentee') {
+                // Extract student name from the message for title
+                const studentNameMatch = n.notifications.message.match(/Student (\w+)/);
+                const studentName = studentNameMatch ? studentNameMatch[1] : 'Student';
+                title = `${studentName} - Absent`;
+                message = n.notifications.message.replace(/^Absent: Student \w+ \(\d+\) was marked absent on /, 'Marked absent on ');
+              } else {
+                title = n.notifications.type || 'Notification';
+                message = n.notifications.message;
+              }
+
+              return {
+                id: n.id,
+                title: title,
+                message: message,
+                type: n.notifications.type || 'general',
+                created_at: n.notifications.created_at,
+                is_read: n.is_read || false,
+                read_at: n.read_at
+              };
+            });
             console.log('Initial notifications count:', mappedNotifications.length);
             console.log('Initial unread notifications count:', mappedNotifications.filter(n => !n.is_read).length);
             setNotifications(mappedNotifications);
