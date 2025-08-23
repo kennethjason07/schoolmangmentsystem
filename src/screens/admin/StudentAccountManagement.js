@@ -65,8 +65,7 @@ const StudentAccountManagement = ({ navigation }) => {
         .from(TABLES.STUDENTS)
         .select(`
           *,
-          classes(id, class_name, section),
-          users!students_parent_id_fkey(id, email, full_name, phone)
+          classes(id, class_name, section)
         `)
         .order('name');
 

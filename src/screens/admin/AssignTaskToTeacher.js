@@ -415,19 +415,16 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
               onPress={() => openModal(item)}
               activeOpacity={0.7}
             >
-              {/* Task Header */}
+              {/* Task Header with Delete Button */}
               <View style={styles.taskHeader}>
-                <View style={styles.taskTitleContainer}>
-                  <Text style={styles.taskTitle} numberOfLines={2}>{item.title}</Text>
-                  <View style={styles.taskBadges}>
-                    <View style={[styles.priorityBadge, { backgroundColor: priorityInfo.color }]}>
-                      <MaterialIcons name={priorityInfo.icon} size={12} color="#fff" />
-                      <Text style={styles.priorityText}>{priorityInfo.label}</Text>
-                    </View>
-                    <View style={[styles.statusBadge, { backgroundColor: statusInfo.color }]}>
-                      <MaterialIcons name={statusInfo.icon} size={12} color="#fff" />
-                      <Text style={styles.statusText}>{statusInfo.label}</Text>
-                    </View>
+                <View style={styles.taskBadges}>
+                  <View style={[styles.priorityBadge, { backgroundColor: priorityInfo.color }]}>
+                    <MaterialIcons name={priorityInfo.icon} size={12} color="#fff" />
+                    <Text style={styles.priorityText}>{priorityInfo.label}</Text>
+                  </View>
+                  <View style={[styles.statusBadge, { backgroundColor: statusInfo.color }]}>
+                    <MaterialIcons name={statusInfo.icon} size={12} color="#fff" />
+                    <Text style={styles.statusText}>{statusInfo.label}</Text>
                   </View>
                 </View>
                 <TouchableOpacity
@@ -441,26 +438,47 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
                 </TouchableOpacity>
               </View>
 
-              {/* Task Description */}
-              {item.description && (
-                <Text style={styles.taskDescription} numberOfLines={2}>
-                  {item.description}
-                </Text>
-              )}
+              {/* Structured Task Information */}
+              <View style={styles.taskDetailsContainer}>
+                {/* Title */}
+                <View style={styles.taskDetailRow}>
+                  <Text style={styles.taskDetailLabel}>Title:</Text>
+                  <Text style={styles.taskDetailValue} numberOfLines={2}>{item.title}</Text>
+                </View>
 
-              {/* Task Meta Information */}
-              <View style={styles.taskMetaContainer}>
-                <View style={styles.taskMetaItem}>
-                  <MaterialIcons name="schedule" size={16} color="#666" />
-                  <Text style={styles.taskMetaText}>
-                    Due: {formatDateDMY(item.due_date)}
+                {/* Task Description */}
+                {item.description && (
+                  <View style={styles.taskDetailRow}>
+                    <Text style={styles.taskDetailLabel}>Task Description:</Text>
+                    <Text style={styles.taskDetailValue} numberOfLines={3}>{item.description}</Text>
+                  </View>
+                )}
+
+                {/* Due Date */}
+                <View style={styles.taskDetailRow}>
+                  <Text style={styles.taskDetailLabel}>Due Date:</Text>
+                  <Text style={styles.taskDetailValue}>
+                    {item.due_date ? formatDateDMY(item.due_date) : 'No date set'}
                   </Text>
                 </View>
 
+                {/* Priority */}
+                <View style={styles.taskDetailRow}>
+                  <Text style={styles.taskDetailLabel}>Priority:</Text>
+                  <Text style={styles.taskDetailValue}>{item.priority}</Text>
+                </View>
+
+                {/* Status */}
+                <View style={styles.taskDetailRow}>
+                  <Text style={styles.taskDetailLabel}>Status:</Text>
+                  <Text style={styles.taskDetailValue}>{item.status}</Text>
+                </View>
+
+                {/* Assigned to Teacher */}
                 {assignedTeachers.length > 0 && (
-                  <View style={styles.taskMetaItem}>
-                    <MaterialIcons name="person" size={16} color="#666" />
-                    <Text style={styles.taskMetaText} numberOfLines={1}>
+                  <View style={styles.taskDetailRow}>
+                    <Text style={styles.taskDetailLabel}>Assigned to Teacher:</Text>
+                    <Text style={styles.taskDetailValue} numberOfLines={2}>
                       {assignedTeachers.length === 1
                         ? assignedTeachers[0]
                         : `${assignedTeachers[0]} +${assignedTeachers.length - 1} more`
@@ -1309,6 +1327,29 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  // Structured Task Details Styles
+  taskDetailsContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  taskDetailRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+    alignItems: 'flex-start',
+  },
+  taskDetailLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    width: 120,
+    marginRight: 8,
+  },
+  taskDetailValue: {
+    fontSize: 14,
+    color: '#666',
+    flex: 1,
+    lineHeight: 20,
   },
 });
 

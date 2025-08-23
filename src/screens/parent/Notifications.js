@@ -77,10 +77,23 @@ const Notifications = ({ navigation }) => {
       const transformedNotifications = (notificationsData || []).map(notificationRecord => {
         const notification = notificationRecord.notifications;
 
+        // Create proper title and message for absence notifications
+        let title, message;
+        if (notification.type === 'Absentee') {
+          // Extract student name from the message for title
+          const studentNameMatch = notification.message.match(/Student (\w+)/);
+          const studentName = studentNameMatch ? studentNameMatch[1] : 'Student';
+          title = `${studentName} - Absent`;
+          message = notification.message.replace(/^Absent: Student \w+ \(\d+\) was marked absent on /, 'Marked absent on ');
+        } else {
+          title = notification.type || 'Notification';
+          message = notification.message;
+        }
+
         return {
           id: notification.id,
-          title: notification.message, // Using message as title
-          message: notification.message,
+          title: title,
+          message: message,
           sender: notification.sent_by || 'School Admin',
           type: notification.type || 'general',
           priority: 'regular',

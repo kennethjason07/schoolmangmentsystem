@@ -315,8 +315,9 @@ const createNotificationForSpecificUser = async (studentData, date, markedBy, us
       day: 'numeric'
     });
 
-    // Create notification message
-    const message = `Absent: Student ${studentData.name} (${studentData.admission_no}) was marked absent on ${formattedDate}. Please contact the school if this is incorrect.`;
+    // Create notification with separate title and message
+    const title = `${studentData.name} - Absent`;
+    const message = `Your child was marked absent on ${formattedDate}. Please contact the school if this is incorrect.`;
 
     // Create notification record
     const notificationData = {
