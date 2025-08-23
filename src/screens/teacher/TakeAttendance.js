@@ -222,7 +222,7 @@ const TakeAttendance = () => {
         class_id: selectedClass,
         date: selectedDate,
         status: attendanceMark[student.id] || 'Absent',
-        marked_by: user.id // Use user.id instead of teacherInfo.id for consistency
+        marked_by: user.id
       }));
 
       // Upsert attendance records (insert or update if exists)
@@ -235,72 +235,49 @@ const TakeAttendance = () => {
 
       if (upsertError) throw upsertError;
 
-      // Send absence notifications to parents
-      console.log('📧 [ATTENDANCE] Checking for absent students to notify parents...');
+      // Show success message immediately
+      Alert.alert('Success', 'Attendance saved successfully!');
 
+      // Send absence notifications in the background (non-blocking)
       const absentStudents = attendanceRecords.filter(record => record.status === 'Absent');
-      console.log(`📧 [ATTENDANCE] Found ${absentStudents.length} absent students`);
-
-      let notificationResults = [];
-
+      
       if (absentStudents.length > 0) {
-        console.log('📧 [ATTENDANCE] Sending absence notifications...');
-
-        for (const absentRecord of absentStudents) {
-          try {
-            console.log(`📧 [ATTENDANCE] Sending notification for student: ${absentRecord.student_id}`);
-
-            const result = await sendAbsenceNotificationToParent(
-              absentRecord.student_id,
-              absentRecord.date,
-              absentRecord.marked_by
-            );
-
-            notificationResults.push({
-              studentId: absentRecord.student_id,
-              success: result.success,
-              message: result.message || result.error
-            });
-
-            if (result.success) {
-              console.log(`✅ [ATTENDANCE] Notification sent for student ${absentRecord.student_id}: ${result.message}`);
-            } else {
-              console.log(`❌ [ATTENDANCE] Failed to send notification for student ${absentRecord.student_id}: ${result.error}`);
+        console.log(`📧 [ATTENDANCE] Found ${absentStudents.length} absent students - sending notifications in background`);
+        
+        // Send notifications asynchronously without blocking the UI
+        Promise.all(
+          absentStudents.map(async (absentRecord) => {
+            try {
+              const result = await Promise.race([
+                sendAbsenceNotificationToParent(
+                  absentRecord.student_id,
+                  absentRecord.date,
+                  absentRecord.marked_by
+                ),
+                // Timeout after 5 seconds per notification
+                new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('Notification timeout')), 5000)
+                )
+              ]);
+              
+              if (result.success) {
+                console.log(`✅ [ATTENDANCE] Notification sent for student ${absentRecord.student_id}`);
+              } else {
+                console.log(`⚠️ [ATTENDANCE] Notification failed for student ${absentRecord.student_id}: ${result.error}`);
+              }
+              return result;
+            } catch (error) {
+              console.log(`❌ [ATTENDANCE] Notification error for student ${absentRecord.student_id}: ${error.message}`);
+              return { success: false, error: error.message };
             }
-          } catch (notificationError) {
-            console.error(`❌ [ATTENDANCE] Error sending notification for student ${absentRecord.student_id}:`, notificationError);
-            notificationResults.push({
-              studentId: absentRecord.student_id,
-              success: false,
-              message: notificationError.message
-            });
-          }
-        }
-
-        const successCount = notificationResults.filter(r => r.success).length;
-        const failureCount = notificationResults.filter(r => !r.success).length;
-
-        console.log(`📊 [ATTENDANCE] Notification results: ${successCount} sent, ${failureCount} failed`);
-
-        if (successCount > 0) {
-          const successResults = notificationResults.filter(r => r.success);
-          const notificationsSent = successResults.filter(r => r.message.includes('Notification')).length;
-          const messagesSent = successResults.filter(r => r.message.includes('message')).length;
-
-          Alert.alert(
-            'Success',
-            `Attendance saved successfully!\n\n✅ Absence notifications sent to ${successCount} parent(s)\n✅ Absence messages sent to ${successCount} parent(s)\n\nParents will see both notifications and messages about their child's absence.`
-          );
-        } else if (failureCount > 0) {
-          Alert.alert(
-            'Partial Success',
-            `Attendance saved successfully!\n\n⚠️ Note: ${failureCount} absence notification(s) and message(s) could not be sent (no parent mapping found).\n\nTo enable notifications for these students, add their parent mappings to the system.`
-          );
-        } else {
-          Alert.alert('Success', 'Attendance saved successfully!');
-        }
-      } else {
-        Alert.alert('Success', 'Attendance saved successfully!');
+          })
+        ).then((results) => {
+          const successCount = results.filter(r => r.success).length;
+          const failureCount = results.filter(r => !r.success).length;
+          console.log(`📊 [ATTENDANCE] Background notifications completed: ${successCount} sent, ${failureCount} failed`);
+        }).catch((error) => {
+          console.error('❌ [ATTENDANCE] Error in background notification processing:', error);
+        });
       }
       
     } catch (err) {
@@ -571,37 +548,50 @@ const TakeAttendance = () => {
           {students.length > 0 ? (
             <View style={styles.studentsContainer}>
               <View style={styles.tableHeader}>
-                <Text style={[styles.headerCell, { flex: 1 }]}>Admission No</Text>
-                <Text style={[styles.headerCell, { flex: 2.5 }]}>Student Name</Text>
-                <Text style={[styles.headerCell, { flex: 1 }]}>Present</Text>
-                <Text style={[styles.headerCell, { flex: 1 }]}>Absent</Text>
+                <View style={[styles.headerCellContainer, { flex: 3.5 }]}>
+                  <Ionicons name="person" size={16} color="#1976d2" style={{ marginRight: 4 }} />
+                  <Text style={styles.headerCell}>Student Details</Text>
+                </View>
+                <View style={[styles.headerCellContainer, { flex: 1 }]}>
+                  <Ionicons name="close" size={18} color="#f44336" style={{ marginRight: 4 }} />
+                  <Text style={[styles.headerCell, { color: '#f44336' }]}>A</Text>
+                </View>
+                <View style={[styles.headerCellContainer, { flex: 1 }]}>
+                  <Ionicons name="checkmark" size={18} color="#4caf50" style={{ marginRight: 4 }} />
+                  <Text style={[styles.headerCell, { color: '#4caf50' }]}>P</Text>
+                </View>
               </View>
               
               {students.map(student => {
                 const currentStatus = attendanceMark[student.id];
                 
                 return (
-                  <View key={student.id} style={styles.studentRow}>
-                    <Text style={[styles.studentCell, { flex: 1 }]}>{student.admission_no}</Text>
-                    <Text style={[styles.studentCell, { flex: 2.5 }]}>{student.name}</Text>
-                    
-                    {/* Present Button */}
-                    <View style={{ flex: 1, alignItems: 'center' }}>
-                      <TouchableOpacity
-                        style={[
-                          styles.attendanceCircle,
-                          currentStatus === 'Present' && styles.presentCircle
-                        ]}
-                        onPress={() => toggleStudentAttendance(student.id, 'Present')}
-                      >
-                        <Ionicons
-                          name="checkmark"
-                          size={16}
-                          color={currentStatus === 'Present' ? '#fff' : '#ccc'}
-                        />
-                      </TouchableOpacity>
+                  <View key={student.id} style={[
+                    styles.studentRow,
+                    currentStatus === 'Present' && styles.presentRowHighlight,
+                    currentStatus === 'Absent' && styles.absentRowHighlight
+                  ]}>
+                    <View style={[styles.nameCell, { flex: 3.5 }]}>
+                      <View style={styles.studentDetailsContainer}>
+                        <Text 
+                          style={styles.studentName} 
+                          numberOfLines={2}
+                          ellipsizeMode="tail"
+                        >
+                          {student.name}
+                        </Text>
+                        <Text style={styles.admissionNumberBelow}>#{student.admission_no}</Text>
+                      </View>
+                      {currentStatus && (
+                        <View style={[
+                          styles.statusBadge,
+                          currentStatus === 'Present' ? styles.presentBadge : styles.absentBadge
+                        ]}>
+                          <Text style={styles.statusBadgeText}>{currentStatus}</Text>
+                        </View>
+                      )}
                     </View>
-
+                    
                     {/* Absent Button */}
                     <View style={{ flex: 1, alignItems: 'center' }}>
                       <TouchableOpacity
@@ -615,6 +605,23 @@ const TakeAttendance = () => {
                           name="close"
                           size={16}
                           color={currentStatus === 'Absent' ? '#fff' : '#ccc'}
+                        />
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Present Button */}
+                    <View style={{ flex: 1, alignItems: 'center' }}>
+                      <TouchableOpacity
+                        style={[
+                          styles.attendanceCircle,
+                          currentStatus === 'Present' && styles.presentCircle
+                        ]}
+                        onPress={() => toggleStudentAttendance(student.id, 'Present')}
+                      >
+                        <Ionicons
+                          name="checkmark"
+                          size={16}
+                          color={currentStatus === 'Present' ? '#fff' : '#ccc'}
                         />
                       </TouchableOpacity>
                     </View>
@@ -858,23 +865,38 @@ const styles = StyleSheet.create({
   },
   tableHeader: {
     flexDirection: 'row',
-    backgroundColor: '#f8f8f8',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    backgroundColor: '#f8f9fa',
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    borderBottomWidth: 2,
+    borderBottomColor: '#dee2e6',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  headerCellContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
   },
   headerCell: {
-    flex: 1,
-    fontWeight: 'bold',
+    fontWeight: '700',
     textAlign: 'center',
-    color: '#333',
+    color: '#333333',
+    fontSize: 14,
+    letterSpacing: 0.5,
   },
   studentRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'stretch',
     borderBottomWidth: 1,
     borderBottomColor: '#f5f5f5',
-    paddingVertical: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    minHeight: 70,
   },
   studentCell: {
     flex: 1,
@@ -1049,22 +1071,40 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   attendanceCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#f5f5f5',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 2,
+    borderColor: '#dee2e6',
     alignItems: 'center',
     justifyContent: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    transform: [{ scale: 1 }],
   },
   presentCircle: {
-    backgroundColor: '#4caf50',
-    borderColor: '#4caf50',
+    backgroundColor: '#28a745',
+    borderColor: '#28a745',
+    elevation: 4,
+    shadowColor: '#28a745',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    transform: [{ scale: 1.1 }],
   },
   absentCircle: {
-    backgroundColor: '#f44336',
-    borderColor: '#f44336',
+    backgroundColor: '#dc3545',
+    borderColor: '#dc3545',
+    elevation: 4,
+    shadowColor: '#dc3545',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    transform: [{ scale: 1.1 }],
   },
   disabledCircle: {
     opacity: 0.5,
@@ -1092,6 +1132,104 @@ const styles = StyleSheet.create({
   disabledButton: {
     opacity: 0.5,
   },
+  // Enhanced row highlighting styles
+  presentRowHighlight: {
+    backgroundColor: '#f8fffe',
+    borderLeftWidth: 4,
+    borderLeftColor: '#28a745',
+    elevation: 1,
+    shadowColor: '#28a745',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  absentRowHighlight: {
+    backgroundColor: '#fff8f8',
+    borderLeftWidth: 4,
+    borderLeftColor: '#dc3545',
+    elevation: 1,
+    shadowColor: '#dc3545',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  // Enhanced cell styles
+  admissionCell: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  admissionNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#495057',
+    textAlign: 'center',
+    backgroundColor: '#e9ecef',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    minWidth: 60,
+  },
+  nameCell: {
+    paddingHorizontal: 12,
+    justifyContent: 'center',
+    minHeight: 50,
+    flex: 1,
+  },
+  studentName: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#212529',
+    textAlign: 'left',
+    lineHeight: 20,
+    paddingVertical: 2,
+  },
+  // Status badge styles
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginTop: 4,
+    alignSelf: 'flex-start',
+  },
+  presentBadge: {
+    backgroundColor: '#d4edda',
+    borderWidth: 1,
+    borderColor: '#c3e6cb',
+  },
+  absentBadge: {
+    backgroundColor: '#f8d7da',
+    borderWidth: 1,
+    borderColor: '#f5c6cb',
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    color: '#495057',
+  },
+  // New styles for integrated student details
+  studentDetailsContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  admissionNumberBelow: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#6c757d',
+    backgroundColor: '#f8f9fa',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    marginTop: 2,
+    alignSelf: 'flex-start',
+    textAlign: 'center',
+  },
 });
 
-export default TakeAttendance; 
+export default TakeAttendance;
