@@ -508,14 +508,11 @@ const ManageTeachers = ({ navigation, route }) => {
               
               // Update local state
               setTeachers(teachers.filter(t => t.id !== teacher.id));
-<<<<<<< HEAD
               
               // Show success message with teacher name
               Alert.alert('Success', `Successfully deleted teacher: ${teacher.name}`);
               console.log(`✅ Teacher deletion completed successfully: ${teacher.name}`);
               
-=======
->>>>>>> origin/your
             } catch (err) {
               console.error('❌ Error deleting teacher:', err);
               Alert.alert(

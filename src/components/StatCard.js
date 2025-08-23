@@ -104,15 +104,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-<<<<<<< HEAD
-    justifyContent: 'center',
-    paddingRight: 50, // Reduced space for smaller icon
-=======
     marginBottom: 8, // Original spacing for non-teacher dashboards
   },
   headerTeacher: {
     marginBottom: 16, // Much more spacing for very large teacher text
->>>>>>> origin/your
   },
   titleContainer: {
     flexDirection: 'column',
@@ -126,12 +121,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginRight: 8,
     flexShrink: 1,
-<<<<<<< HEAD
-    lineHeight: 18,
-=======
     lineHeight: 20,
     marginBottom: 2,
->>>>>>> origin/your
   },
   titleTeacher: {
     fontSize: 28, // Very large size for teachers (100% increase from original 14px)
@@ -150,18 +141,12 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   iconContainer: {
-<<<<<<< HEAD
     position: 'absolute',
     top: 12,
     right: 12,
     width: 44,
     height: 44,
     borderRadius: 22,
-=======
-    width: 52,
-    height: 52,
-    borderRadius: 26,
->>>>>>> origin/your
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -175,12 +160,8 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 4,
     letterSpacing: -0.5,
-<<<<<<< HEAD
     lineHeight: 28,
     marginTop: 2,
-=======
-    lineHeight: 32,
->>>>>>> origin/your
   },
   subtitle: {
     fontSize: 11,
