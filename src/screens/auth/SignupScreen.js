@@ -114,30 +114,24 @@ const SignupScreen = ({ navigation }) => {
     return true;
   };
 
-  // Get role ID from Supabase
-  const getRoleId = async (roleName) => {
-    try {
-      const { data, error } = await supabase
-        .from('roles')
-        .select('id')
-        .eq('role_name', roleName)
-        .single();
-
-      if (error) throw error;
-      return data.id;
-    } catch (error) {
-      console.error('Role ID retrieval error:', error);
-      Alert.alert('Error', 'Invalid role selected');
-      return null;
-    }
-  };
-
-  // Validate role selection
+  // Validate role selection (simplified - no database query needed during signup)
   const validateRole = async () => {
     if (!roleId) {
       Alert.alert('Error', 'Please select a role');
       return false;
     }
+    
+    // Simple validation - just check if roleId is one of our valid options
+    const validRoleIds = [1, 2, 3, 4];
+    if (!validRoleIds.includes(roleId)) {
+      Alert.alert('Error', 'Please select a valid role');
+      return false;
+    }
+    
+    const roleNames = { 1: 'Admin', 2: 'Teacher', 3: 'Parent', 4: 'Student' };
+    const roleName = roleNames[roleId];
+    
+    console.log(`✅ Role selected: ${roleName} (ID: ${roleId})`);
     return true;
   };
 
@@ -160,7 +154,7 @@ const SignupScreen = ({ navigation }) => {
     try {
       const userData = {
         role_id: roleId,
-        name: fullName,
+        full_name: fullName,
         phone: phone,
         linked_student_id: linkedId,
       };
@@ -176,7 +170,14 @@ const SignupScreen = ({ navigation }) => {
         { 
           text: 'OK', 
           onPress: () => {
-            navigation.navigate('Login');
+            Alert.alert(
+              'Check Your Email', 
+              'Please check your email and click the confirmation link to activate your account. After confirming, you can login.',
+              [{
+                text: 'Got it',
+                onPress: () => navigation.navigate('Login')
+              }]
+            );
           }
         },
       ]);

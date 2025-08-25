@@ -7,11 +7,33 @@ import { dbHelpers, supabase } from '../../utils/supabase';
 
 const StudentDetails = ({ route }) => {
   const navigation = useNavigation();
-  const { student } = route.params;
+  
+  // Safely extract student data with fallback
+  const student = route?.params?.student;
+  
   const [studentData, setStudentData] = useState(null);
   const [feeStatus, setFeeStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // Early return if no student data is provided
+  if (!student || !student.id) {
+    return (
+      <View style={styles.container}>
+        <Header title="Student Details" showBack={true} />
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle" size={64} color="#f44336" />
+          <Text style={styles.errorText}>No student data provided</Text>
+          <TouchableOpacity 
+            style={styles.retryButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.retryButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   useEffect(() => {
     const fetchStudentDetails = async () => {
@@ -462,6 +484,20 @@ const styles = StyleSheet.create({
     height: 20,
   },
   
+  // Retry Button Styles
+  retryButton: {
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
   
   // Summary Card Styles
   summaryCard: {

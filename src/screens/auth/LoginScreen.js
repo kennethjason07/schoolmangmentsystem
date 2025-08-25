@@ -63,17 +63,52 @@ const LoginScreen = ({ navigation }) => {
   // Check if role exists in Supabase
   const validateRole = async (role) => {
     try {
+      console.log('🔍 Validating role:', role);
+      
+      // Convert lowercase role to proper case for database lookup
+      const roleMap = {
+        'admin': 'Admin',
+        'teacher': 'Teacher', 
+        'parent': 'Parent',
+        'student': 'Student'
+      };
+      
+      const properRoleName = roleMap[role.toLowerCase()];
+      console.log('🏷️ Looking for role name:', properRoleName);
+      
+      if (!properRoleName) {
+        console.log('❌ Invalid role name provided:', role);
+        return false;
+      }
+      
       const { data, error } = await supabase
         .from('roles')
         .select('role_name')
-        .eq('role_name', role)
-        .single();
+        .eq('role_name', properRoleName)
+        .maybeSingle();
 
-      if (error) throw error;
+      console.log('🏷️ Role validation result:', { data, error });
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          console.log('⚠️ Role not found in database:', properRoleName);
+          Alert.alert('Error', `Role '${role}' not found in the system. Please contact the administrator.`);
+          return false;
+        }
+        throw error;
+      }
+      
+      if (!data) {
+        console.log('⚠️ Role not found:', properRoleName);
+        Alert.alert('Error', `Role '${role}' not found in the system. Please contact the administrator.`);
+        return false;
+      }
+      
+      console.log('✅ Role validation successful for:', properRoleName);
       return true;
     } catch (error) {
-      console.error('Role validation error:', error);
-      Alert.alert('Error', 'Invalid role selected');
+      console.error('💥 Role validation error:', error);
+      Alert.alert('Error', 'Unable to validate role. Please try again.');
       return false;
     }
   };

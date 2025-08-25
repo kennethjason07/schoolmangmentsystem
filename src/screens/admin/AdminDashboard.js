@@ -20,6 +20,7 @@ import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
 import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
 import LogoDisplay from '../../components/LogoDisplay';
+import NoSchoolDetailsState from '../../components/NoSchoolDetailsState';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import CrossPlatformBarChart from '../../components/CrossPlatformBarChart';
@@ -595,22 +596,28 @@ const AdminDashboard = ({ navigation }) => {
           <View style={styles.backgroundPattern} />
           
           <View style={styles.welcomeContent}>
-            <View style={styles.schoolHeader}>
-              <LogoDisplay 
-                logoUrl={schoolDetails?.logo_url} 
-                onImageError={() => {
-                  console.log('🗓️ Logo image failed to load, using placeholder');
-                }}
-              />
-              <View style={styles.schoolInfo}>
-                <Text style={styles.schoolName}>
-                  {schoolDetails?.name || 'Maximus School'}
-                </Text>
-                <Text style={styles.schoolType}>
-                  {schoolDetails?.type || 'Educational Institution'}
-                </Text>
+            {schoolDetails ? (
+              <View style={styles.schoolHeader}>
+                <LogoDisplay 
+                  logoUrl={schoolDetails.logo_url} 
+                  onImageError={() => {
+                    console.log('🗓️ Logo image failed to load, using placeholder');
+                  }}
+                />
+                <View style={styles.schoolInfo}>
+                  <Text style={styles.schoolName}>
+                    {schoolDetails.name}
+                  </Text>
+                  <Text style={styles.schoolType}>
+                    {schoolDetails.type}
+                  </Text>
+                </View>
               </View>
-            </View>
+            ) : (
+              <NoSchoolDetailsState
+                onActionPress={() => navigation.navigate('SchoolDetails')}
+              />
+            )}
             
             <View style={styles.dateContainer}>
               <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.8)" />

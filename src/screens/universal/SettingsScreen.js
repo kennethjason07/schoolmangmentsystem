@@ -197,7 +197,14 @@ const SettingsScreen = ({ navigation }) => {
         {/* Account Settings */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
-          {renderSettingItem('person-outline', 'Profile', 'Manage your profile information', () => navigation.navigate('Profile'))}
+          {renderSettingItem('person-outline', 'Profile', 'Manage your profile information', () => {
+            try {
+              navigation.navigate('Profile');
+            } catch (error) {
+              console.warn('Profile navigation failed from settings:', error);
+              Alert.alert('Error', 'Profile screen is not available at the moment.');
+            }
+          })}
           {renderSettingItem('lock-closed-outline', 'Change Password', 'Update your password', () => navigation.navigate('ChangePassword'))}
           {renderSettingItem('finger-print-outline', 'Biometric Login', 'Use fingerprint or face ID', null, true, settings.biometric, (value) => setSettings(prev => ({ ...prev, biometric: value })))}
         </View>

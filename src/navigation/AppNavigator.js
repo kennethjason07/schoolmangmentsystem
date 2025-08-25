@@ -366,7 +366,7 @@ export default function AppNavigator() {
         ) : (
           // Role-based Stacks - when user is authenticated
           <>
-            {userType === 'admin' && (
+            {userType === 'Admin' && (
               <>
                 <Stack.Screen name="AdminTabs" component={AdminTabNavigator} />
                 <Stack.Screen name="SchoolDetails" component={SchoolDetails} />
@@ -393,9 +393,11 @@ export default function AppNavigator() {
                 <Stack.Screen name="ReportCardGeneration" component={ReportCardGeneration} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
+                <Stack.Screen name="StudentDetails" component={StudentDetails} />
+                <Stack.Screen name="StudentList" component={StudentList} />
               </>
             )}
-            {userType === 'teacher' && (
+            {userType === 'Teacher' && (
               <>
                 <Stack.Screen name="TeacherTabs" component={TeacherTabNavigator} />
                 <Stack.Screen name="TeacherTimetable" component={TeacherTimetable} />
@@ -409,7 +411,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="Settings" component={SettingsScreen} />
               </>
             )}
-            {userType === 'parent' && (
+            {userType === 'Parent' && (
               <>
                 <Stack.Screen name="StudentSelection" component={StudentSelectionScreen} />
                 <Stack.Screen name="ParentTabs" component={ParentTabNavigator} />
@@ -421,9 +423,9 @@ export default function AppNavigator() {
                 <Stack.Screen name="Settings" component={SettingsScreen} />
               </>
             )}
-            {userType === 'student' && (
+            {userType === 'Student' && (
               <>
-                <Stack.Screen name="StudentDashboard" component={StudentTabNavigator} />
+                <Stack.Screen name="StudentTabs" component={StudentTabNavigator} />
                 <Stack.Screen name="StudentNotifications" component={StudentNotifications} />
                 <Stack.Screen name="StudentFeePayment" component={StudentFeePayment} />
                 <Stack.Screen name="CardPayment" component={StudentCardPayment} />
@@ -431,12 +433,9 @@ export default function AppNavigator() {
                 <Stack.Screen name="UPIPayment" component={StudentUPIPayment} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
+                <Stack.Screen name="StudentDetails" component={StudentDetails} />
               </>
             )}
-            
-            {/* Universal Screens */}
-            <Stack.Screen name="StudentDetails" component={StudentDetails} />
-            <Stack.Screen name="StudentList" component={StudentList} />
           </>
         )}
       </Stack.Navigator>

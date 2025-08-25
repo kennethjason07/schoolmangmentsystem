@@ -7,7 +7,7 @@ import { supabase } from '../utils/supabase';
 
 const Header = ({ title, showBack = false, showProfile = true, showNotifications = false, onProfilePress, onNotificationsPress, unreadCount = 0 }) => {
   const navigation = useNavigation();
-  const { user: authUser } = useAuth();
+  const { user: authUser, userType } = useAuth();
   const [userProfileUrl, setUserProfileUrl] = useState(null);
 
   // Function to load user profile image
@@ -93,9 +93,21 @@ const Header = ({ title, showBack = false, showProfile = true, showNotifications
             )}
           </TouchableOpacity>
         )}
-        {showProfile && (
+        {showProfile && authUser && userType && (
           <TouchableOpacity 
-            onPress={onProfilePress || (() => navigation.navigate('Profile'))} 
+            onPress={onProfilePress || (() => {
+              try {
+                navigation.navigate('Profile');
+              } catch (error) {
+                console.warn('Profile navigation failed:', error);
+                // Fallback to settings if Profile isn't available
+                try {
+                  navigation.navigate('Settings');
+                } catch (settingsError) {
+                  console.warn('Settings navigation also failed:', settingsError);
+                }
+              }
+            })} 
             style={styles.profileButton}
           >
             {userProfileUrl ? (
