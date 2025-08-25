@@ -90,8 +90,8 @@ const ManageClasses = ({ navigation }) => {
 
   const handleAddClass = async () => {
     try {
-      if (!newClass.class_name || !newClass.section || !newClass.class_teacher_id) {
-        Alert.alert('Error', 'Please fill in all fields');
+      if (!newClass.class_name || !newClass.section) {
+        Alert.alert('Error', 'Please fill in class name and section');
         return;
       }
 
@@ -102,10 +102,13 @@ const ManageClasses = ({ navigation }) => {
           class_name: newClass.class_name,
           academic_year: newClass.academic_year,
           section: newClass.section,
-          class_teacher_id: newClass.class_teacher_id,
+          class_teacher_id: newClass.class_teacher_id || null,
         });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Database error adding class:', error);
+        throw error;
+      }
 
       // Refresh data
       await loadAllData();
@@ -118,14 +121,15 @@ const ManageClasses = ({ navigation }) => {
       setIsAddModalVisible(false);
       Alert.alert('Success', 'Class added successfully!');
     } catch (error) {
-      Alert.alert('Error', 'Failed to add class');
+      console.error('Error adding class:', error);
+      Alert.alert('Error', `Failed to add class: ${error.message}`);
     }
   };
 
   const handleEditClass = async () => {
     try {
-      if (!selectedClass.class_name || !selectedClass.section || !selectedClass.class_teacher_id) {
-        Alert.alert('Error', 'Please fill in all fields');
+      if (!selectedClass.class_name || !selectedClass.section) {
+        Alert.alert('Error', 'Please fill in class name and section');
         return;
       }
 
@@ -136,11 +140,14 @@ const ManageClasses = ({ navigation }) => {
           class_name: selectedClass.class_name,
           academic_year: selectedClass.academic_year,
           section: selectedClass.section,
-          class_teacher_id: selectedClass.class_teacher_id,
+          class_teacher_id: selectedClass.class_teacher_id || null,
         })
         .eq('id', selectedClass.id);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Database error updating class:', error);
+        throw error;
+      }
 
       // Refresh data
       await loadAllData();
@@ -149,7 +156,7 @@ const ManageClasses = ({ navigation }) => {
       Alert.alert('Success', 'Class updated successfully!');
     } catch (error) {
       console.error('Error updating class:', error);
-      Alert.alert('Error', 'Failed to update class');
+      Alert.alert('Error', `Failed to update class: ${error.message}`);
     }
   };
 
@@ -388,7 +395,7 @@ const ManageClasses = ({ navigation }) => {
               Section {item.section}
             </Text>
             <Text style={styles.classTeacher}>
-              Class Teacher: {teacher?.name || 'Unknown'}
+              Class Teacher: {teacher?.name || 'Not Assigned'}
             </Text>
           </View>
           <View style={styles.classStats}>
@@ -522,7 +529,7 @@ const ManageClasses = ({ navigation }) => {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Teacher</Text>
+                <Text style={styles.inputLabel}>Teacher (Optional)</Text>
                 <View style={styles.pickerDropdownContainer}>
                   <Picker
                     selectedValue={isEdit ? selectedClass?.class_teacher_id : newClass.class_teacher_id}
@@ -533,7 +540,7 @@ const ManageClasses = ({ navigation }) => {
                     }
                     style={styles.pickerDropdown}
                   >
-                    <Picker.Item label="Select Teacher" value="" />
+                    <Picker.Item label="No Teacher Assigned" value="" />
                     {teachers.map((teacher) => (
                       <Picker.Item key={teacher.id} label={teacher.name} value={teacher.id} />
                     ))}
@@ -580,7 +587,7 @@ const ManageClasses = ({ navigation }) => {
             <Text style={styles.infoText}>Section: {selectedClassDetails?.section}</Text>
             <Text style={styles.infoText}>Academic Year: {selectedClassDetails?.academic_year}</Text>
             <Text style={styles.infoText}>
-              Class Teacher: {teachers.find(t => t.id === selectedClassDetails?.class_teacher_id)?.name || 'Unknown'}
+              Class Teacher: {teachers.find(t => t.id === selectedClassDetails?.class_teacher_id)?.name || 'Not Assigned'}
             </Text>
             <Text style={styles.infoText}>Students: {selectedClassDetails?.students_count || 0}</Text>
           </View>

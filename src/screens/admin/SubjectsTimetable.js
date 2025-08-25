@@ -78,13 +78,18 @@ const SubjectsTimetable = ({ route }) => {
         if (teacherError) throw teacherError;
         setTeachers(teacherData || []);
 
-        // Fetch all subjects with teacher information through junction table
+        // Fetch all subjects with teacher and class information through junction table
         const { data: subjectData, error: subjectError } = await supabase
           .from(TABLES.SUBJECTS)
           .select(`
             *,
             teacher_subjects(
               teachers(id, name)
+            ),
+            classes(
+              id,
+              class_name,
+              section
             )
           `)
           .order('name');
@@ -169,7 +174,7 @@ const SubjectsTimetable = ({ route }) => {
   // Subject CRUD
   const openAddSubject = () => {
     setEditSubject(null);
-    setSubjectForm({ name: '', code: '', teacherId: '' });
+    setSubjectForm({ name: '', code: '', teacherId: '', classId: '' });
     setModalVisible(true);
   };
   const openEditSubject = (subject) => {
@@ -178,7 +183,8 @@ const SubjectsTimetable = ({ route }) => {
     const teacherId = subject.teacher_subjects?.[0]?.teachers?.id || '';
     setSubjectForm({
       name: subject.name,
-      teacherId: teacherId
+      teacherId: teacherId,
+      classId: subject.class_id || ''
     });
     setModalVisible(true);
   };
@@ -192,9 +198,9 @@ const SubjectsTimetable = ({ route }) => {
     try {
       setLoading(true);
 
-      // Validate that a class is selected
-      if (!selectedClass) {
-        Alert.alert('Error', 'Please select a class first');
+      // Validate that a class is selected in the form
+      if (!subjectForm.classId) {
+        Alert.alert('Error', 'Please select a class');
         setLoading(false);
         return;
       }
@@ -205,7 +211,7 @@ const SubjectsTimetable = ({ route }) => {
 
       const subjectData = {
         name: subjectForm.name,
-        class_id: selectedClass,
+        class_id: subjectForm.classId,
         academic_year: academicYear,
         is_optional: false // Default to false, can be made configurable later
       };
@@ -280,6 +286,11 @@ const SubjectsTimetable = ({ route }) => {
           *,
           teacher_subjects(
             teachers(id, name)
+          ),
+          classes(
+            id,
+            class_name,
+            section
           )
         `)
         .order('name');
@@ -668,18 +679,48 @@ const SubjectsTimetable = ({ route }) => {
         academic_year: academicYear
       };
 
-      // Check if period already exists for this slot
-      const existingPeriod = timetables[selectedClass]?.[day]?.find(
+      // Check if period already exists for this slot (by start time)
+      const existingPeriodByTime = timetables[selectedClass]?.[day]?.find(
         p => p.startTime === slot.startTime
       );
+
+      // Also check if there's already a period for this exact slot (class, day, period_number)
+      const { data: existingPeriodBySlot, error: checkError } = await supabase
+        .from(TABLES.TIMETABLE)
+        .select('id')
+        .eq('class_id', selectedClass)
+        .eq('day_of_week', day)
+        .eq('period_number', slot.number)
+        .maybeSingle();
+
+      if (checkError && checkError.code !== 'PGRST116') {
+        console.error('Error checking existing period:', checkError);
+        throw checkError;
+      }
+
+      // Determine which period to update
+      const existingPeriod = existingPeriodByTime || (existingPeriodBySlot ? {
+        id: existingPeriodBySlot.id,
+        startTime: slot.startTime
+      } : null);
 
       if (existingPeriod) {
         // Update existing period
         const { data, error } = await dbHelpers.updateTimetableEntry(existingPeriod.id, timetableData);
         if (error) throw error;
       } else {
-        // Create new period
-        const { data, error } = await dbHelpers.createTimetableEntry(timetableData);
+        // Create new period - use upsert to handle conflicts
+        const { data, error } = await supabase
+          .from(TABLES.TIMETABLE)
+          .upsert([timetableData], {
+            onConflict: 'class_id,day_of_week,period_number'
+          })
+          .select(`
+            *,
+            subjects(id, name),
+            classes(id, class_name, section)
+          `);
+        
         if (error) throw error;
       }
 
@@ -687,7 +728,7 @@ const SubjectsTimetable = ({ route }) => {
       await fetchTimetableForClass(selectedClass);
     } catch (error) {
       console.error('Error updating period:', error);
-      Alert.alert('Error', 'Failed to update period');
+      Alert.alert('Error', 'Failed to update period: ' + (error.message || 'Unknown error'));
     }
   };
 
@@ -906,8 +947,9 @@ const SubjectsTimetable = ({ route }) => {
             renderItem={({ item }) => (
               <View style={styles.subjectRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.subjectName}>{item.name} ({item.code})</Text>
-                  <Text style={styles.subjectTeacher}>Teacher: {getTeacherName(item.teacher_id)}</Text>
+                  <Text style={styles.subjectName}>{item.name}</Text>
+                  <Text style={styles.subjectClass}>Class: {item.classes ? `${item.classes.class_name} - ${item.classes.section}` : 'No Class Assigned'}</Text>
+                  <Text style={styles.subjectTeacher}>Teacher: {getSubjectTeacher(item)}</Text>
                 </View>
                 <TouchableOpacity onPress={() => openEditSubject(item)} style={styles.actionBtn}>
                   <Ionicons name="pencil" size={20} color="#1976d2" />
@@ -929,16 +971,37 @@ const SubjectsTimetable = ({ route }) => {
                   style={styles.input}
                 />
 
-                <Text style={{ marginTop: 8 }}>Assign Teacher:</Text>
-                <Picker
-                  selectedValue={subjectForm.teacherId}
-                  style={styles.input}
-                  onValueChange={itemValue => setSubjectForm(f => ({ ...f, teacherId: itemValue }))}
-                >
-                  {teachers.map(t => (
-                    <Picker.Item key={t.id} label={t.name} value={t.id} />
-                  ))}
-                </Picker>
+                <Text style={{ marginTop: 16, marginBottom: 4, fontSize: 14, fontWeight: '600', color: '#333' }}>Select Class:</Text>
+                <View style={styles.pickerWrapper}>
+                  <Picker
+                    selectedValue={subjectForm.classId}
+                    style={styles.modalPicker}
+                    onValueChange={itemValue => setSubjectForm(f => ({ ...f, classId: itemValue }))}
+                  >
+                    <Picker.Item label="Select a Class" value="" />
+                    {classes.map(c => (
+                      <Picker.Item 
+                        key={c.id} 
+                        label={`${c.class_name} - ${c.section}`} 
+                        value={c.id} 
+                      />
+                    ))}
+                  </Picker>
+                </View>
+
+                <Text style={{ marginTop: 16, marginBottom: 4, fontSize: 14, fontWeight: '600', color: '#333' }}>Assign Teacher (Optional):</Text>
+                <View style={styles.pickerWrapper}>
+                  <Picker
+                    selectedValue={subjectForm.teacherId}
+                    style={styles.modalPicker}
+                    onValueChange={itemValue => setSubjectForm(f => ({ ...f, teacherId: itemValue }))}
+                  >
+                    <Picker.Item label="Select a Teacher" value="" />
+                    {teachers.map(t => (
+                      <Picker.Item key={t.id} label={t.name} value={t.id} />
+                    ))}
+                  </Picker>
+                </View>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 }}>
                   <Button title="Cancel" onPress={() => setModalVisible(false)} />
                   <Button title="Save" onPress={handleSaveSubject} />
@@ -1345,9 +1408,15 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+  subjectClass: {
+    fontSize: 14,
+    color: '#888',
+    marginTop: 2,
+  },
   subjectTeacher: {
     fontSize: 14,
     color: '#666',
+    marginTop: 2,
   },
   actionBtn: {
     marginLeft: 12,
@@ -1960,6 +2029,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#fff',
     fontWeight: '600',
+  },
+  modalPicker: {
+    height: 50,
+    backgroundColor: 'transparent',
+    color: '#495057',
   },
 });
 
