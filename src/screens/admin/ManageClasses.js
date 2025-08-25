@@ -10,6 +10,7 @@ import {
   Alert,
   Modal,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
@@ -33,6 +34,7 @@ const ManageClasses = ({ navigation }) => {
   const [classDetailsModal, setClassDetailsModal] = useState(false);
   const [selectedClassDetails, setSelectedClassDetails] = useState(null);
   const [classSubjects, setClassSubjects] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     loadAllData();
@@ -364,6 +366,15 @@ const ManageClasses = ({ navigation }) => {
     }
   };
 
+  const onRefresh = async () => {
+    try {
+      setRefreshing(true);
+      await loadAllData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const renderClassItem = ({ item }) => {
     if (loading) {
       return (
@@ -649,6 +660,8 @@ const ManageClasses = ({ navigation }) => {
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="school" size={64} color="#ccc" />
