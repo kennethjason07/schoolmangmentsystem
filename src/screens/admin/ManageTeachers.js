@@ -58,10 +58,11 @@ const ManageTeachers = ({ navigation, route }) => {
       setForm(prevForm => ({ ...prevForm, subjects: validSubjects }));
     }
 
-    // Fetch sections for the selected classes
+    // Load sections for all selected classes
     if (form.classes.length > 0) {
-      const classId = form.classes[form.classes.length - 1];
-      loadSections(classId);
+      loadSectionsForClasses(form.classes);
+    } else {
+      setSections([]);
     }
 
   }, [form.classes, subjects]);
@@ -126,6 +127,13 @@ const ManageTeachers = ({ navigation, route }) => {
         `)
         .in('teacher_id', teacherIds);
       
+      // Also get direct class teacher assignments from classes table
+      const { data: classTeacherAssignments } = await supabase
+        .from('classes')
+        .select('id, class_teacher_id')
+        .in('class_teacher_id', teacherIds)
+        .not('class_teacher_id', 'is', null);
+      
       // Create teacher subjects lookup map for O(1) access
       const teacherSubjectsLookup = {};
       (allTeacherSubjects || []).forEach(assignment => {
@@ -135,11 +143,21 @@ const ManageTeachers = ({ navigation, route }) => {
         teacherSubjectsLookup[assignment.teacher_id].push(assignment);
       });
       
+      // Create class teacher lookup map
+      const classTeacherLookup = {};
+      (classTeacherAssignments || []).forEach(assignment => {
+        if (!classTeacherLookup[assignment.class_teacher_id]) {
+          classTeacherLookup[assignment.class_teacher_id] = [];
+        }
+        classTeacherLookup[assignment.class_teacher_id].push(assignment.id);
+      });
+      
       // Process teacher data - no async operations needed
       const processedTeachers = teachersData.map(teacher => {
         const teacherSubjects = teacherSubjectsLookup[teacher.id] || [];
+        const directClassAssignments = classTeacherLookup[teacher.id] || [];
         
-        // Extract unique subject IDs and class IDs
+        // Extract unique subject IDs and class IDs from subject assignments
         const subjectIds = new Set();
         const classIds = new Set();
         teacherSubjects.forEach(ts => {
@@ -147,19 +165,32 @@ const ManageTeachers = ({ navigation, route }) => {
           if (ts.subjects?.class_id) classIds.add(ts.subjects.class_id);
         });
         
+        // Add direct class teacher assignments (classes where this teacher is the class teacher)
+        directClassAssignments.forEach(classId => {
+          classIds.add(classId);
+        });
+        
         return {
           ...teacher,
           subjects: Array.from(subjectIds),
           classes: Array.from(classIds),
+          isClassTeacher: directClassAssignments.length > 0, // Flag to indicate if they're a class teacher
         };
       });
       
       // Update state with loaded data
       setTeachers(processedTeachers);
-      setClasses(classesData);
+      setClasses(classesData || []);
       // Ensure subjects are unique by ID before setting to state
-      const uniqueSubjects = Array.from(new Map(subjectsData.map(subject => [subject.id, subject])).values());
+      const uniqueSubjects = Array.from(new Map((subjectsData || []).map(subject => [subject.id, subject])).values());
       setSubjects(uniqueSubjects);
+      
+      // Debug logging
+      console.log('📊 Data loaded:', {
+        teachers: processedTeachers?.length || 0,
+        classes: classesData?.length || 0,
+        subjects: uniqueSubjects?.length || 0
+      });
       
       // 📊 Performance monitoring
       const endTime = performance.now();
@@ -204,6 +235,38 @@ const ManageTeachers = ({ navigation, route }) => {
     setSections(data);
   };
 
+  const loadSectionsForClasses = async (classIds) => {
+    if (!classIds || classIds.length === 0) {
+      setSections([]);
+      return;
+    }
+    
+    try {
+      // Load sections for all selected classes from the classes table
+      const { data, error } = await supabase
+        .from(TABLES.CLASSES)
+        .select('section')
+        .in('id', classIds)
+        .not('section', 'is', null);
+      
+      if (error) {
+        console.warn('Error loading sections:', error);
+        setSections([]);
+        return;
+      }
+      
+      // Extract unique sections
+      const uniqueSections = [...new Set(data.map(item => item.section))]
+        .filter(section => section && section.trim() !== '')
+        .map(section => ({ id: section, section_name: section }));
+      
+      setSections(uniqueSections);
+    } catch (error) {
+      console.warn('Error in loadSectionsForClasses:', error);
+      setSections([]);
+    }
+  };
+
   // Multi-select logic
   const toggleSelect = (arr, value) => arr.includes(value) ? arr.filter(v => v !== value) : [...arr, value];
 
@@ -221,11 +284,21 @@ const ManageTeachers = ({ navigation, route }) => {
       const { data: teacherSubjects, error: tsError } = await dbHelpers.getTeacherSubjects(teacher.id);
       if (tsError) throw tsError;
 
+      // Also fetch direct class teacher assignments
+      const { data: directClassAssignments, error: dcError } = await supabase
+        .from('classes')
+        .select('id')
+        .eq('class_teacher_id', teacher.id);
+      if (dcError) {
+        console.warn('Error loading direct class assignments:', dcError);
+      }
+
       // Extract subject and class IDs from teacher assignments
       const subjectIds = [];
       const classIds = new Set(); // Use Set to avoid duplicates
       const sections = {};
 
+      // Add classes from subject assignments
       teacherSubjects?.forEach(ts => {
         if (ts.subject_id) {
           subjectIds.push(ts.subject_id);
@@ -236,11 +309,17 @@ const ManageTeachers = ({ navigation, route }) => {
         }
       });
 
+      // Add direct class teacher assignments
+      directClassAssignments?.forEach(assignment => {
+        classIds.add(assignment.id);
+      });
+
       const finalClassIds = Array.from(classIds);
 
-      console.log('Teacher subjects loaded:', {
+      console.log('Teacher assignments loaded:', {
         subjectIds,
         classIds: finalClassIds,
+        directClassAssignments,
         teacherSubjects,
         teacher: teacher.name
       });
@@ -284,9 +363,18 @@ const ManageTeachers = ({ navigation, route }) => {
   const handleSave = async () => {
     console.log('Save button clicked, form data:', form);
 
-    if (!form.name.trim() || !form.phone.trim() || !form.age.trim() || form.subjects.length === 0 || form.classes.length === 0) {
-      Alert.alert('Error', 'Please fill all required fields (name, phone, age) and select at least one subject and class.');
+    if (!form.name.trim() || !form.phone.trim() || !form.age.trim()) {
+      Alert.alert('Error', 'Please fill all required fields (name, phone, age).');
       return;
+    }
+    
+    // Check if classes and subjects are available
+    if (classes.length === 0) {
+      Alert.alert('Info', 'No classes available. Teacher will be created without class assignments. You can assign classes later.');
+    }
+    
+    if (subjects.length === 0) {
+      Alert.alert('Info', 'No subjects available. Teacher will be created without subject assignments. You can assign subjects later.');
     }
 
     // Validate age is a number and greater than 18 (as per schema constraint)
@@ -364,9 +452,10 @@ const ManageTeachers = ({ navigation, route }) => {
   const handleSubjectClassAssignments = async (teacherId) => {
     try {
       console.log('Saving assignments for teacher:', teacherId);
-      console.log('Form data:', { subjects: form.subjects, classes: form.classes });
+      console.log('Form data:', { subjects: form.subjects, classes: form.classes, sections: form.sections });
 
-      // First, get all existing assignments for this teacher
+      // 1. Handle subject assignments first
+      // Get all existing subject assignments for this teacher
       const { data: existingAssignments, error: fetchError } = await supabase
         .from(TABLES.TEACHER_SUBJECTS)
         .select('*')
@@ -376,9 +465,9 @@ const ManageTeachers = ({ navigation, route }) => {
         throw new Error('Failed to fetch existing assignments');
       }
 
-      console.log('Existing assignments:', existingAssignments);
+      console.log('Existing subject assignments:', existingAssignments);
 
-      // Delete existing assignments
+      // Delete existing subject assignments
       if (existingAssignments.length > 0) {
         const { error: deleteError } = await supabase
           .from(TABLES.TEACHER_SUBJECTS)
@@ -388,7 +477,7 @@ const ManageTeachers = ({ navigation, route }) => {
           console.error('Failed to delete assignments:', deleteError);
           throw new Error('Failed to update assignments');
         }
-        console.log('Deleted existing assignments');
+        console.log('Deleted existing subject assignments');
       }
 
       // Create new assignments for selected subjects
@@ -397,9 +486,9 @@ const ManageTeachers = ({ navigation, route }) => {
         subject_id: subjectId,
       }));
 
-      console.log('New assignments to insert:', assignments);
+      console.log('New subject assignments to insert:', assignments);
 
-      // Insert new assignments if there are any
+      // Insert new subject assignments if there are any
       if (assignments.length > 0) {
         const { data: insertedData, error: insertError } = await supabase
           .from(TABLES.TEACHER_SUBJECTS)
@@ -409,10 +498,69 @@ const ManageTeachers = ({ navigation, route }) => {
           console.error('Failed to create assignments:', insertError);
           throw new Error('Failed to create assignments');
         }
-        console.log('Successfully inserted assignments:', insertedData);
+        console.log('Successfully inserted subject assignments:', insertedData);
       } else {
-        console.log('No subjects selected, no assignments to insert');
+        console.log('No subjects selected, no subject assignments to insert');
       }
+
+      // 2. Handle direct class teacher assignments
+      // First, remove this teacher from all existing class teacher assignments
+      const { data: currentClassTeacherAssignments } = await supabase
+        .from('classes')
+        .select('id, class_name')
+        .eq('class_teacher_id', teacherId);
+
+      console.log('Current class teacher assignments:', currentClassTeacherAssignments);
+
+      // Remove this teacher from all classes where they were class teacher
+      if (currentClassTeacherAssignments && currentClassTeacherAssignments.length > 0) {
+        const { error: removeError } = await supabase
+          .from('classes')
+          .update({ class_teacher_id: null })
+          .eq('class_teacher_id', teacherId);
+        if (removeError) {
+          console.error('Failed to remove from class teacher assignments:', removeError);
+          console.warn('Could not remove previous class teacher assignments');
+        } else {
+          console.log('Removed teacher from previous class teacher assignments');
+        }
+      }
+
+      // Now assign this teacher to the selected classes
+      if (form.classes.length > 0) {
+        console.log('Assigning teacher to classes:', form.classes);
+        
+        // Update each selected class to have this teacher as class_teacher_id
+        for (const classId of form.classes) {
+          const { error: assignError } = await supabase
+            .from('classes')
+            .update({ class_teacher_id: teacherId })
+            .eq('id', classId);
+          
+          if (assignError) {
+            console.error(`Failed to assign teacher to class ${classId}:`, assignError);
+            console.warn(`Could not assign teacher to class ${classId}`);
+          } else {
+            console.log(`Successfully assigned teacher to class ${classId}`);
+          }
+        }
+      }
+
+      // 3. Update teacher's is_class_teacher flag
+      const { error: updateTeacherError } = await supabase
+        .from(TABLES.TEACHERS)
+        .update({ 
+          is_class_teacher: form.classes.length > 0
+        })
+        .eq('id', teacherId);
+      
+      if (updateTeacherError) {
+        console.error('Failed to update teacher class teacher flag:', updateTeacherError);
+        console.warn('Could not update teacher\'s class teacher status');
+      } else {
+        console.log('Updated teacher class teacher status:', form.classes.length > 0);
+      }
+      
     } catch (err) {
       console.error('Error handling assignments:', err);
       throw err; // Re-throw to be caught by the caller
@@ -434,7 +582,18 @@ const ManageTeachers = ({ navigation, route }) => {
               
               // Delete all related data in the correct order (from most dependent to least)
               
-              // 1. Delete teacher-subject assignments
+              // 1. Remove teacher from direct class teacher assignments
+              const { error: classTeacherError } = await supabase
+                .from('classes')
+                .update({ class_teacher_id: null })
+                .eq('class_teacher_id', teacher.id);
+              if (classTeacherError) {
+                console.error('Error removing from class teacher assignments:', classTeacherError);
+                throw new Error(`Failed to remove class teacher assignments: ${classTeacherError.message}`);
+              }
+              console.log('✓ Removed from direct class teacher assignments');
+              
+              // 2. Delete teacher-subject assignments
               const { error: assignmentError } = await supabase
                 .from(TABLES.TEACHER_SUBJECTS)
                 .delete()
@@ -600,8 +759,13 @@ const ManageTeachers = ({ navigation, route }) => {
             <Text style={styles.teacherSubject}>
               {item.subjects.map(s => subjects.find(sub => sub.id === s)?.name).filter(name => name).join(', ') || 'Not assigned'}
             </Text>
-            {item.classes.map(c => classes.find(cls => cls.id === c)?.class_name).filter(name => name).length > 0 && (
-              <Text style={styles.teacherClass}>{item.classes.map(c => classes.find(cls => cls.id === c)?.class_name).filter(name => name).join(', ')}</Text>
+            {item.classes.length > 0 && (
+              <Text style={styles.teacherClass}>
+                {item.classes.map(classId => {
+                  const cls = classes.find(cls => cls.id === classId);
+                  return cls ? `${cls.class_name} (${cls.section || 'No Section'})` : null;
+                }).filter(name => name).join(', ')}
+              </Text>
             )}
             {/* Salary and Education */}
             <Text style={styles.teacherSalary}>
@@ -890,30 +1054,53 @@ const ManageTeachers = ({ navigation, route }) => {
                 </Text>
 
                 <View style={styles.checkboxGrid}>
-                  {classes.map(cls => (
-                    <TouchableOpacity
-                      key={cls.id}
-                      style={[
-                        styles.checkboxCard,
-                        form.classes.includes(cls.id) && styles.checkboxCardSelected
-                      ]}
-                      onPress={() => setForm({ ...form, classes: toggleSelect(form.classes, cls.id) })}
-                    >
-                      <View style={styles.checkboxCardContent}>
-                        <Ionicons
-                          name={form.classes.includes(cls.id) ? 'checkmark-circle' : 'ellipse-outline'}
-                          size={24}
-                          color={form.classes.includes(cls.id) ? '#FF9800' : '#ccc'}
-                        />
-                        <Text style={[
-                          styles.checkboxCardText,
-                          form.classes.includes(cls.id) && styles.checkboxCardTextSelected
-                        ]}>
-                          {cls.class_name}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
+                  {classes.length > 0 ? (
+                    classes.map(cls => (
+                      <TouchableOpacity
+                        key={cls.id}
+                        style={[
+                          styles.checkboxCard,
+                          form.classes.includes(cls.id) && styles.checkboxCardSelected
+                        ]}
+                        onPress={() => setForm({ ...form, classes: toggleSelect(form.classes, cls.id) })}
+                      >
+                        <View style={styles.checkboxCardContent}>
+                          <Ionicons
+                            name={form.classes.includes(cls.id) ? 'checkmark-circle' : 'ellipse-outline'}
+                            size={24}
+                            color={form.classes.includes(cls.id) ? '#FF9800' : '#ccc'}
+                          />
+                          <View style={styles.classCardTextContainer}>
+                            <Text style={[
+                              styles.checkboxCardText,
+                              form.classes.includes(cls.id) && styles.checkboxCardTextSelected
+                            ]}>
+                              {cls.class_name}
+                            </Text>
+                            <View style={styles.sectionBadgeContainer}>
+                              <View style={[
+                                styles.sectionBadge,
+                                form.classes.includes(cls.id) && styles.sectionBadgeSelected
+                              ]}>
+                                <Text style={[
+                                  styles.sectionBadgeText,
+                                  form.classes.includes(cls.id) && styles.sectionBadgeTextSelected
+                                ]}>
+                                  {cls.section || '?'}
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    ))
+                  ) : (
+                    <View style={styles.noSelectionContainer}>
+                      <Text style={styles.noSelectionText}>
+                        No classes available. Please create classes first in Manage Classes.
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
 
@@ -928,48 +1115,54 @@ const ManageTeachers = ({ navigation, route }) => {
                   Select subjects this teacher will teach (grouped by selected classes)
                 </Text>
 
-                {form.classes.map(classId => {
-                  const selectedClass = classes.find(c => c.id === classId);
-                  const classSubjects = subjects.filter(subject => subject.class_id === classId);
+                {form.classes.length > 0 ? (
+                  form.classes.map(classId => {
+                    const selectedClass = classes.find(c => c.id === classId);
+                    const classSubjects = subjects.filter(subject => subject.class_id === classId);
 
-                  if (classSubjects.length === 0) return null;
-
-                  return (
-                    <View key={classId} style={styles.classSubjectsGroup}>
-                      <Text style={styles.classSubjectsTitle}>
-                        📚 {selectedClass?.class_name} - Subjects
-                      </Text>
-                      <View style={styles.checkboxGrid}>
-                        {classSubjects.map(subject => (
-                          <TouchableOpacity
-                            key={subject.id}
-                            style={[
-                              styles.checkboxCard,
-                              form.subjects.includes(subject.id) && styles.checkboxCardSelected
-                            ]}
-                            onPress={() => setForm({ ...form, subjects: toggleSelect(form.subjects, subject.id) })}
-                          >
-                            <View style={styles.checkboxCardContent}>
-                              <Ionicons
-                                name={form.subjects.includes(subject.id) ? 'checkmark-circle' : 'ellipse-outline'}
-                                size={24}
-                                color={form.subjects.includes(subject.id) ? '#4CAF50' : '#ccc'}
-                              />
-                              <Text style={[
-                                styles.checkboxCardText,
-                                form.subjects.includes(subject.id) && styles.checkboxCardTextSelected
-                              ]}>
-                                {subject.name}
+                    return (
+                      <View key={classId} style={styles.classSubjectsGroup}>
+                        <Text style={styles.classSubjectsTitle}>
+                          📚 {selectedClass?.class_name} - Subjects
+                        </Text>
+                        <View style={styles.checkboxGrid}>
+                          {classSubjects.length > 0 ? (
+                            classSubjects.map(subject => (
+                              <TouchableOpacity
+                                key={subject.id}
+                                style={[
+                                  styles.checkboxCard,
+                                  form.subjects.includes(subject.id) && styles.checkboxCardSelected
+                                ]}
+                                onPress={() => setForm({ ...form, subjects: toggleSelect(form.subjects, subject.id) })}
+                              >
+                                <View style={styles.checkboxCardContent}>
+                                  <Ionicons
+                                    name={form.subjects.includes(subject.id) ? 'checkmark-circle' : 'ellipse-outline'}
+                                    size={24}
+                                    color={form.subjects.includes(subject.id) ? '#4CAF50' : '#ccc'}
+                                  />
+                                  <Text style={[
+                                    styles.checkboxCardText,
+                                    form.subjects.includes(subject.id) && styles.checkboxCardTextSelected
+                                  ]}>
+                                    {subject.name}
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                            ))
+                          ) : (
+                            <View style={styles.noSelectionContainer}>
+                              <Text style={styles.noSelectionText}>
+                                No subjects available for {selectedClass?.class_name}. Please add subjects to this class first.
                               </Text>
                             </View>
-                          </TouchableOpacity>
-                        ))}
+                          )}
+                        </View>
                       </View>
-                    </View>
-                  );
-                })}
-
-                {form.classes.length === 0 && (
+                    );
+                  })
+                ) : (
                   <View style={styles.noSelectionContainer}>
                     <Text style={styles.noSelectionText}>
                       Please select classes first to see available subjects
@@ -978,35 +1171,43 @@ const ManageTeachers = ({ navigation, route }) => {
                 )}
               </View>
 
-              {/* Section Assignment (if classes selected) */}
+              {/* Section Information Section */}
               {form.classes.length > 0 && (
                 <View style={styles.formSection}>
                   <View style={styles.sectionHeader}>
                     <Ionicons name="layers-outline" size={20} color="#9C27B0" />
-                    <Text style={styles.sectionTitle}>Section Assignment</Text>
+                    <Text style={styles.sectionTitle}>Class & Section Details</Text>
                   </View>
 
                   <Text style={styles.sectionDescription}>
-                    Assign sections for each selected class
+                    Classes and their assigned sections (automatically assigned when you select a class)
                   </Text>
 
                   {form.classes.map(classId => {
                     const selectedClass = classes.find(c => c.id === classId);
+                    
                     return (
-                      <View key={classId} style={styles.sectionAssignmentItem}>
-                        <Text style={styles.sectionAssignmentLabel}>{selectedClass?.class_name}</Text>
-                        <View style={styles.pickerContainer}>
-                          <Picker
-                            selectedValue={form.sections[classId]}
-                            onValueChange={(itemValue) => setForm({ ...form, sections: { ...form.sections, [classId]: itemValue } })}
-                            style={styles.picker}
-                          >
-                            <Picker.Item label="Select Section" value="" />
-                            {sections.map(section => (
-                              <Picker.Item key={section.id} label={section.section_name} value={section.id} />
-                            ))}
-                          </Picker>
+                      <View key={classId} style={styles.classSectionInfo}>
+                        <View style={styles.classSectionHeader}>
+                          <Ionicons name="school" size={18} color="#FF9800" />
+                          <Text style={styles.classSectionName}>
+                            {selectedClass?.class_name}
+                          </Text>
+                          <View style={styles.sectionBadgeLarge}>
+                            <Text style={styles.sectionBadgeLargeText}>
+                              {selectedClass?.section || '?'}
+                            </Text>
+                          </View>
                         </View>
+                        <View style={styles.classSectionDetails}>
+                          <Ionicons name="layers" size={16} color="#9C27B0" />
+                          <Text style={styles.classSectionText}>
+                            Section {selectedClass?.section || 'not assigned'}
+                          </Text>
+                        </View>
+                        <Text style={styles.classSectionNote}>
+                          ✓ Teacher assigned as Class Teacher for {selectedClass?.class_name} - Section {selectedClass?.section || 'N/A'}
+                        </Text>
                       </View>
                     );
                   })}
@@ -1640,6 +1841,119 @@ const styles = StyleSheet.create({
     color: '#6c757d',
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  // Class Section Info Styles
+  classSectionInfo: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  classSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  classSectionName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 8,
+  },
+  classSectionDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  classSectionText: {
+    fontSize: 14,
+    color: '#9C27B0',
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+  classSectionNote: {
+    fontSize: 12,
+    color: '#6c757d',
+    fontStyle: 'italic',
+    backgroundColor: '#f8f9fa',
+    padding: 8,
+    borderRadius: 6,
+    borderLeftWidth: 3,
+    borderLeftColor: '#9C27B0',
+  },
+  // Class Card Text Container Styles
+  classCardTextContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  classCardSectionText: {
+    fontSize: 12,
+    color: '#9C27B0',
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  classCardSectionTextSelected: {
+    color: '#7B1FA2',
+    fontWeight: '600',
+  },
+  // Section Badge Styles
+  sectionBadgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  sectionBadge: {
+    backgroundColor: '#E8EAF6',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    minWidth: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#C5CAE9',
+  },
+  sectionBadgeSelected: {
+    backgroundColor: '#3F51B5',
+    borderColor: '#3F51B5',
+  },
+  sectionBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#5C6BC0',
+    textAlign: 'center',
+  },
+  sectionBadgeTextSelected: {
+    color: '#fff',
+  },
+  // Large Section Badge Styles (for Class & Section Details)
+  sectionBadgeLarge: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginLeft: 12,
+    minWidth: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  sectionBadgeLargeText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
   },
 });
 
