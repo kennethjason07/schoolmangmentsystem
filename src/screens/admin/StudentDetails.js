@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, Platform, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import Header from '../../components/Header';
@@ -59,48 +59,77 @@ const StudentDetails = ({ route }) => {
         // Try multiple methods to get parent information
         let parentData = null;
         
-        // Method 1: Try parents table
-        const { data: parentsTableData, error: parentError } = await supabase
-          .from('parents')
-          .select('name, relation')
-          .eq('student_id', student.id)
-          .single();
+        // First check if parent info was already passed from ManageStudents
+        if (student.parentName && student.parentName !== 'Not Assigned' && student.parentName !== 'N/A') {
+          parentData = {
+            name: student.parentName,
+            phone: student.parentPhone || null,
+            relation: 'Guardian' // Default relation
+          };
+          console.log('Using parent info from student data:', parentData);
+        }
         
-        if (parentsTableData && !parentError) {
-          parentData = parentsTableData;
-          console.log('Found parent in parents table:', parentData);
-        } else {
-          console.log('No parent found in parents table for student:', student.id);
+        // If no parent info from student data, try database queries
+        if (!parentData) {
+          // Method 1: Try parents table with student_id
+          const { data: parentsTableData, error: parentError } = await supabase
+            .from('parents')
+            .select('name, relation, phone, email')
+            .eq('student_id', student.id);
           
-          // Method 2: Try via parent_id in students table (parents table)
-          if (data.parent_id) {
-            const { data: parentTableData, error: parentTableError } = await supabase
-              .from('parents')
-              .select('name, relation, phone, email')
-              .eq('id', data.parent_id)
-              .single();
+          if (parentsTableData && parentsTableData.length > 0 && !parentError) {
+            // Use the first parent record or combine multiple
+            const primaryParent = parentsTableData[0];
+            parentData = {
+              name: primaryParent.name,
+              relation: primaryParent.relation || 'Guardian',
+              phone: primaryParent.phone || null,
+              email: primaryParent.email || null
+            };
+            console.log('Found parent in parents table:', parentData);
+          } else {
+            console.log('No parent found in parents table for student:', student.id);
             
-            if (parentTableData && !parentTableError) {
-              parentData = { name: parentTableData.name, relation: parentTableData.relation || 'Guardian' };
-              console.log('Found parent in parents table via parent_id:', parentData);
-            } else {
-              console.log('No parent found in parents table for parent_id:', data.parent_id);
+            // Method 2: Try via parent_id in students table
+            if (data.parent_id) {
+              const { data: parentTableData, error: parentTableError } = await supabase
+                .from('parents')
+                .select('name, relation, phone, email')
+                .eq('id', data.parent_id)
+                .single();
+              
+              if (parentTableData && !parentTableError) {
+                parentData = {
+                  name: parentTableData.name,
+                  relation: parentTableData.relation || 'Guardian',
+                  phone: parentTableData.phone || null,
+                  email: parentTableData.email || null
+                };
+                console.log('Found parent in parents table via parent_id:', parentData);
+              } else {
+                console.log('No parent found in parents table for parent_id:', data.parent_id);
+              }
             }
-          }
-          
-          // Method 3: Try finding parent via users table linked_parent_of
-          if (!parentData) {
-            const { data: linkedParentData, error: linkedError } = await supabase
-              .from('users')
-              .select('full_name, email, phone')
-              .eq('linked_parent_of', student.id)
-              .single();
             
-            if (linkedParentData && !linkedError) {
-              parentData = { name: linkedParentData.full_name, relation: 'Guardian' };
-              console.log('Found parent via linked_parent_of:', parentData);
-            } else {
-              console.log('No parent found via linked_parent_of for student:', student.id);
+            // Method 3: Try finding parent via users table linked_parent_of
+            if (!parentData) {
+              const { data: linkedParentData, error: linkedError } = await supabase
+                .from('users')
+                .select('full_name, email, phone')
+                .eq('linked_parent_of', student.id)
+                .single();
+              
+              if (linkedParentData && !linkedError) {
+                parentData = {
+                  name: linkedParentData.full_name,
+                  relation: 'Guardian',
+                  phone: linkedParentData.phone || null,
+                  email: linkedParentData.email || null
+                };
+                console.log('Found parent via linked_parent_of:', parentData);
+              } else {
+                console.log('No parent found via linked_parent_of for student:', student.id);
+              }
             }
           }
         }
@@ -171,6 +200,106 @@ const StudentDetails = ({ route }) => {
     } catch (error) {
       return 'N/A';
     }
+  };
+
+  // Helper function to handle calling parent
+  const handleCallParent = async (phoneNumber, parentName) => {
+    if (!phoneNumber) {
+      Alert.alert(
+        'No Phone Number',
+        'Parent phone number is not available.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    // Clean and format phone number (remove any non-digit characters except +)
+    const cleanedPhone = phoneNumber.toString().replace(/[^+\d]/g, '');
+    
+    // Ensure we have a valid phone number after cleaning
+    if (!cleanedPhone || cleanedPhone.length < 6) {
+      Alert.alert(
+        'Invalid Phone Number',
+        'The phone number appears to be invalid.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    const telUrl = `tel:${cleanedPhone}`;
+    console.log('Attempting to call with URL:', telUrl);
+
+    // Show confirmation dialog first, then try to make the call
+    Alert.alert(
+      'Call Parent',
+      `Do you want to call ${parentName || 'parent'} at ${phoneNumber}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Call',
+          onPress: async () => {
+            try {
+              // Try to open the tel URL directly
+              const supported = await Linking.canOpenURL(telUrl);
+              
+              if (supported) {
+                await Linking.openURL(telUrl);
+              } else {
+                // If tel: scheme is not supported, try alternative approaches
+                console.log('Tel scheme not supported, trying alternative...');
+                
+                // Try with different URL formats
+                const alternatives = [
+                  `tel://${cleanedPhone}`,
+                  `phone:${cleanedPhone}`,
+                  cleanedPhone
+                ];
+                
+                let callMade = false;
+                
+                for (const altUrl of alternatives) {
+                  try {
+                    const altSupported = await Linking.canOpenURL(altUrl);
+                    if (altSupported) {
+                      await Linking.openURL(altUrl);
+                      callMade = true;
+                      break;
+                    }
+                  } catch (altError) {
+                    console.log('Alternative URL failed:', altUrl, altError);
+                  }
+                }
+                
+                if (!callMade) {
+                  // Final fallback - try to open without checking support
+                  try {
+                    await Linking.openURL(telUrl);
+                  } catch (finalError) {
+                    console.error('All call attempts failed:', finalError);
+                    Alert.alert(
+                      'Unable to Call',
+                      Platform.OS === 'web' 
+                        ? 'Phone calling is not supported in web browsers. Please use a mobile device or copy the number manually.'
+                        : 'Your device does not support making phone calls, or the phone app is not available.',
+                      [{ text: 'OK' }]
+                    );
+                  }
+                }
+              }
+            } catch (error) {
+              console.error('Error making call:', error);
+              Alert.alert(
+                'Call Failed',
+                Platform.OS === 'web' 
+                  ? 'Phone calling is not supported in web browsers. Please copy the number manually: ' + phoneNumber
+                  : 'Unable to make the call. Please ensure your device has a phone app installed.',
+                [{ text: 'OK' }]
+              );
+            }
+          }
+        }
+      ]
+    );
   };
 
   if (loading) {
@@ -282,6 +411,36 @@ const StudentDetails = ({ route }) => {
                 <View style={styles.infoContent}>
                   <Text style={styles.infoLabel}>Relationship</Text>
                   <Text style={styles.infoValue}>{studentData.parent_info.relation}</Text>
+                </View>
+              </View>
+            )}
+            
+            {studentData.parent_info?.phone && (
+              <View style={styles.infoRow}>
+                <View style={styles.infoIcon}>
+                  <Ionicons name="call" size={20} color="#4CAF50" />
+                </View>
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Phone Number</Text>
+                  <Text style={styles.infoValue}>{studentData.parent_info.phone}</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.callButton, { backgroundColor: '#4CAF50' }]}
+                  onPress={() => handleCallParent(studentData.parent_info.phone, studentData.parent_info.name)}
+                >
+                  <Ionicons name="call" size={16} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            )}
+            
+            {studentData.parent_info?.email && (
+              <View style={styles.infoRow}>
+                <View style={styles.infoIcon}>
+                  <Ionicons name="mail" size={20} color="#4CAF50" />
+                </View>
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Email</Text>
+                  <Text style={styles.infoValue}>{studentData.parent_info.email}</Text>
                 </View>
               </View>
             )}
@@ -511,6 +670,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     alignItems: 'center',
+  },
+  
+  // Call Button Styles
+  callButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
   },
 });
 

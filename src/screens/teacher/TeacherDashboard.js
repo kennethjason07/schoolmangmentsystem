@@ -93,7 +93,7 @@ function groupAndSortSchedule(schedule) {
       const teacher = teacherData;
       setTeacherProfile(teacher);
 
-      // Get assigned classes and subjects
+      // Get assigned classes and subjects (subject teacher)
       const { data: assignedSubjects, error: subjectsError } = await supabase
         .from(TABLES.TEACHER_SUBJECTS)
         .select(`
@@ -108,8 +108,32 @@ function groupAndSortSchedule(schedule) {
 
       if (subjectsError) throw subjectsError;
 
-      // Process assigned classes
+      console.log('📚 Subject assignments found:', assignedSubjects?.length || 0);
+
+      // Get classes where teacher is the class teacher
+      const { data: classTeacherClasses, error: classTeacherError } = await supabase
+        .from(TABLES.CLASSES)
+        .select(`
+          id,
+          class_name,
+          section,
+          academic_year
+        `)
+        .eq('class_teacher_id', teacher.id);
+
+      if (classTeacherError) throw classTeacherError;
+
+      console.log('🏫 Class teacher assignments found:', classTeacherClasses?.length || 0);
+      if (classTeacherClasses && classTeacherClasses.length > 0) {
+        classTeacherClasses.forEach((cls, index) => {
+          console.log(`   ${index + 1}. Class Teacher of: ${cls.class_name} - ${cls.section}`);
+        });
+      }
+
+      // Process assigned classes (both subject and class teacher)
       const classMap = {};
+      
+      // Add subject classes
       assignedSubjects.forEach(subject => {
         const className = `${subject.subjects?.classes?.class_name} - ${subject.subjects?.classes?.section}`;
         if (className && className !== 'undefined - undefined') {
@@ -117,6 +141,17 @@ function groupAndSortSchedule(schedule) {
           classMap[className].push(subject.subjects?.name || 'Unknown Subject');
         }
       });
+      
+      // Add class teacher classes
+      classTeacherClasses.forEach(cls => {
+        const className = `${cls.class_name} - ${cls.section}`;
+        if (!classMap[className]) classMap[className] = [];
+        if (!classMap[className].includes('Class Teacher')) {
+          classMap[className].push('Class Teacher');
+        }
+      });
+      
+      console.log('📊 Final class map:', classMap);
       setAssignedClasses(classMap);
 
       // Get today's schedule (timetable)
@@ -126,13 +161,24 @@ function groupAndSortSchedule(schedule) {
 
       // Get today's schedule (timetable) with error handling
       try {
-        console.log('Fetching today\'s schedule for teacher:', teacher.id, 'Day:', todayName);
+        console.log('🗓️ Fetching today\'s schedule for teacher:', teacher.id, 'Day:', todayName);
 
-        // Get current academic year
+        // Try multiple academic year formats
         const currentYear = new Date().getFullYear();
-        const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
-
-        const { data: timetableData, error: timetableError } = await supabase
+        const possibleAcademicYears = [
+          `${currentYear}-${(currentYear + 1).toString().slice(-2)}`, // 2024-25
+          `${currentYear}-${currentYear + 1}`, // 2024-2025
+          `${currentYear.toString().slice(-2)}-${(currentYear + 1).toString().slice(-2)}`, // 24-25
+          currentYear.toString() // 2024
+        ];
+        
+        console.log('📅 Trying academic years:', possibleAcademicYears);
+        
+        let timetableData = null;
+        let timetableError = null;
+        
+        // First, try to get any timetable data for this teacher to see what's available
+        const { data: allTimetableData, error: allTimetableError } = await supabase
           .from(TABLES.TIMETABLE)
           .select(`
             *,
@@ -140,9 +186,64 @@ function groupAndSortSchedule(schedule) {
             classes(class_name, section)
           `)
           .eq('teacher_id', teacher.id)
-          .eq('day_of_week', todayName)
-          .eq('academic_year', academicYear)
-          .order('start_time');
+          .limit(5);
+          
+        if (!allTimetableError && allTimetableData) {
+          console.log('📋 All timetable entries for teacher:', allTimetableData.length);
+          allTimetableData.forEach((entry, index) => {
+            console.log(`   ${index + 1}. ${entry.day_of_week} ${entry.start_time} - Subject: ${entry.subjects?.name}, Class: ${entry.classes?.class_name} ${entry.classes?.section}, Academic Year: ${entry.academic_year}`);
+          });
+        }
+        
+        // Try each academic year format
+        for (const academicYear of possibleAcademicYears) {
+          console.log(`🔍 Trying academic year: ${academicYear}`);
+          const { data, error } = await supabase
+            .from(TABLES.TIMETABLE)
+            .select(`
+              *,
+              subjects(name),
+              classes(class_name, section)
+            `)
+            .eq('teacher_id', teacher.id)
+            .eq('day_of_week', todayName)
+            .eq('academic_year', academicYear)
+            .order('start_time');
+            
+          if (!error && data && data.length > 0) {
+            console.log(`✅ Found ${data.length} classes for academic year: ${academicYear}`);
+            timetableData = data;
+            break;
+          } else if (error) {
+            console.log(`❌ Error for academic year ${academicYear}:`, error.message);
+            timetableError = error;
+          } else {
+            console.log(`⚠️ No classes found for academic year: ${academicYear}`);
+          }
+        }
+        
+        // If no data found with academic year, try without it
+        if (!timetableData || timetableData.length === 0) {
+          console.log('🔍 Trying without academic year filter...');
+          const { data, error } = await supabase
+            .from(TABLES.TIMETABLE)
+            .select(`
+              *,
+              subjects(name),
+              classes(class_name, section)
+            `)
+            .eq('teacher_id', teacher.id)
+            .eq('day_of_week', todayName)
+            .order('start_time');
+            
+          if (!error && data) {
+            console.log(`✅ Found ${data.length} classes without academic year filter`);
+            timetableData = data;
+            timetableError = null;
+          } else {
+            timetableError = error;
+          }
+        }
 
         if (timetableError) {
           console.error('Timetable query error:', timetableError);
@@ -467,45 +568,51 @@ function groupAndSortSchedule(schedule) {
       const totalSubjects = assignedSubjects.length;
       const todayClasses = schedule.length;
 
-      // Calculate total students from assigned classes
+      // Calculate total students from assigned classes - improved version
       let totalStudents = 0;
-      try {
-        for (const assignment of assignedSubjects) {
-          if (assignment.subjects?.class_id) {
-            const { data: studentsData, error: studentsError } = await supabase
-              .from(TABLES.STUDENTS)
-              .select('id')
-              .eq('class_id', assignment.subjects.class_id);
-
-            if (!studentsError && studentsData) {
-              totalStudents += studentsData.length;
-            }
-          }
-        }
-      } catch (error) {
-        console.log('Error calculating total students:', error);
-      }
-
-      // Remove duplicates for unique student count
       const uniqueStudentIds = new Set();
+      
       try {
-        for (const assignment of assignedSubjects) {
-          if (assignment.subjects?.class_id) {
-            const { data: studentsData, error: studentsError } = await supabase
-              .from(TABLES.STUDENTS)
-              .select('id')
-              .eq('class_id', assignment.subjects.class_id);
+        // Get unique class IDs from both subject assignments and class teacher assignments
+        const subjectClassIds = assignedSubjects
+          .filter(assignment => assignment.subjects?.class_id)
+          .map(assignment => assignment.subjects.class_id);
+          
+        const classTeacherClassIds = classTeacherClasses
+          .map(cls => cls.id);
+        
+        const uniqueClassIds = [...new Set([...subjectClassIds, ...classTeacherClassIds])];
+        
+        console.log('💼 Subject class IDs:', subjectClassIds);
+        console.log('🏫 Class teacher class IDs:', classTeacherClassIds);
+        console.log('📋 Combined unique class IDs:', uniqueClassIds);
+        
+        if (uniqueClassIds.length > 0) {
+          // Get all students from these classes in one query
+          const { data: allStudentsData, error: studentsError } = await supabase
+            .from(TABLES.STUDENTS)
+            .select('id, class_id, name')
+            .in('class_id', uniqueClassIds);
 
-            if (!studentsError && studentsData) {
-              studentsData.forEach(student => uniqueStudentIds.add(student.id));
-            }
+          if (!studentsError && allStudentsData) {
+            console.log('👥 Total students found across all classes:', allStudentsData.length);
+            allStudentsData.forEach(student => {
+              uniqueStudentIds.add(student.id);
+              console.log(`📚 Student: ${student.name} (ID: ${student.id}, Class: ${student.class_id})`);
+            });
+            totalStudents = allStudentsData.length;
+          } else {
+            console.log('❌ Error fetching students:', studentsError);
           }
+        } else {
+          console.log('⚠️ No class assignments found for teacher');
         }
       } catch (error) {
-        console.log('Error calculating unique students:', error);
+        console.log('💥 Error calculating students:', error);
       }
 
       const uniqueStudentCount = uniqueStudentIds.size;
+      console.log('📊 Final student count - Total:', totalStudents, 'Unique:', uniqueStudentCount);
       
       // Get current events data from above instead of relying on state
       let currentEventsForStats = [];
@@ -646,6 +753,33 @@ function groupAndSortSchedule(schedule) {
       }, () => {
         // Refresh dashboard when events change
         console.log('🔄 Events changed, refreshing dashboard...');
+        fetchDashboardData();
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: TABLES.TEACHER_SUBJECTS
+      }, () => {
+        // Refresh dashboard when teacher subject assignments change
+        console.log('🔄 Teacher subject assignments changed, refreshing dashboard...');
+        fetchDashboardData();
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: TABLES.CLASSES
+      }, () => {
+        // Refresh dashboard when class teacher assignments change
+        console.log('🔄 Class teacher assignments changed, refreshing dashboard...');
+        fetchDashboardData();
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: TABLES.TIMETABLE
+      }, () => {
+        // Refresh dashboard when timetable changes (affects Today's Classes)
+        console.log('🔄 Timetable changed, refreshing dashboard...');
         fetchDashboardData();
       })
       .subscribe();
@@ -1064,6 +1198,7 @@ function groupAndSortSchedule(schedule) {
               <Text style={styles.actionTitle}>Submissions</Text>
               <Text style={styles.actionSubtitle}>Grade assignments</Text>
             </TouchableOpacity>
+
 
           </View>
         </View>

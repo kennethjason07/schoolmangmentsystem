@@ -6,114 +6,162 @@ import { supabase, TABLES } from '../utils/supabase';
  */
 
 /**
- * Get parent user ID from database using proper parent-student relationships
- * This function queries the actual database instead of using hardcoded mappings
+ * Get parent user ID from database using improved parent-student relationships
+ * This function queries the actual database with multiple fallback methods
  */
 const getParentUserIdForStudent = async (studentId) => {
   try {
-    console.log(`🔍 [DATABASE LOOKUP] Finding parent for student: ${studentId}`);
+    console.log(`🔍 [IMPROVED LOOKUP] Finding parent for student: ${studentId}`);
 
-    // Method 1: Try to find parent through parent_student_relationships table
-    const { data: parentRelationship, error: relationshipError } = await supabase
-      .from('parent_student_relationships')
-      .select(`
-        parent_id,
-        parents!inner(
-          id,
-          name,
-          email
-        )
-      `)
-      .eq('student_id', studentId)
-      .eq('is_primary_contact', true)
-      .single();
+    // Method 1: Try to find parent through users.linked_parent_of (most direct)
+    const { data: linkedParentUser, error: linkedError } = await supabase
+      .from(TABLES.USERS)
+      .select('id, full_name, email, role_id')
+      .eq('linked_parent_of', studentId)
+      .eq('role_id', 3) // Assuming role_id 3 is parent
+      .maybeSingle();
 
-    if (!relationshipError && parentRelationship) {
-      console.log(`✅ [DATABASE LOOKUP] Found parent via relationships table:`, parentRelationship);
+    if (!linkedError && linkedParentUser) {
+      console.log(`✅ [IMPROVED LOOKUP] Method 1 - Found parent via linked_parent_of:`, linkedParentUser);
+      return {
+        success: true,
+        parentUserId: linkedParentUser.id,
+        parentName: linkedParentUser.full_name,
+        parentEmail: linkedParentUser.email,
+        method: 'linked_parent_of'
+      };
+    }
 
-      // Now find the user account for this parent
-      const { data: parentUser, error: userError } = await supabase
-        .from(TABLES.USERS)
-        .select('id, full_name, email')
-        .eq('email', parentRelationship.parents.email)
-        .eq('role_id', 3) // Assuming role_id 3 is parent
-        .single();
+    // Method 2: Try to find parent through parents table -> users table
+    const { data: parentRecords, error: parentsError } = await supabase
+      .from(TABLES.PARENTS)
+      .select('id, name, email, relation, student_id')
+      .eq('student_id', studentId);
 
-      if (!userError && parentUser) {
-        console.log(`✅ [DATABASE LOOKUP] Found parent user account:`, parentUser);
-        return {
-          success: true,
-          parentUserId: parentUser.id,
-          parentName: parentUser.full_name || parentRelationship.parents.name,
-          parentEmail: parentUser.email
-        };
+    if (!parentsError && parentRecords && parentRecords.length > 0) {
+      console.log(`✅ [IMPROVED LOOKUP] Method 2 - Found ${parentRecords.length} parent records:`, parentRecords);
+      
+      // Try to find a user account for any of these parent records
+      for (const parentRecord of parentRecords) {
+        if (parentRecord.email) {
+          const { data: parentUser, error: userError } = await supabase
+            .from(TABLES.USERS)
+            .select('id, full_name, email, role_id')
+            .eq('email', parentRecord.email)
+            .eq('role_id', 3)
+            .maybeSingle();
+
+          if (!userError && parentUser) {
+            console.log(`✅ [IMPROVED LOOKUP] Method 2 - Found matching user account:`, parentUser);
+            return {
+              success: true,
+              parentUserId: parentUser.id,
+              parentName: parentUser.full_name || parentRecord.name,
+              parentEmail: parentUser.email,
+              method: 'parents_table'
+            };
+          }
+        }
       }
     }
 
-    // Method 2: Try to find parent through students.parent_id (fallback)
+    // Method 3: Try to find parent through students.parent_id -> parents -> users
     const { data: studentData, error: studentError } = await supabase
       .from(TABLES.STUDENTS)
       .select(`
         id,
         name,
-        parent_id,
-        parents!inner(
-          id,
-          name,
-          email
-        )
+        parent_id
       `)
       .eq('id', studentId)
       .single();
 
     if (!studentError && studentData && studentData.parent_id) {
-      console.log(`✅ [DATABASE LOOKUP] Found parent via students.parent_id:`, studentData.parents);
-
-      // Find the user account for this parent
-      const { data: parentUser, error: userError } = await supabase
-        .from(TABLES.USERS)
-        .select('id, full_name, email')
-        .eq('email', studentData.parents.email)
-        .eq('role_id', 3) // Assuming role_id 3 is parent
+      console.log(`✅ [IMPROVED LOOKUP] Method 3 - Found student with parent_id:`, studentData.parent_id);
+      
+      // Get the parent record
+      const { data: parentRecord, error: parentRecordError } = await supabase
+        .from(TABLES.PARENTS)
+        .select('id, name, email, relation')
+        .eq('id', studentData.parent_id)
         .single();
+      
+      if (!parentRecordError && parentRecord && parentRecord.email) {
+        // Find user account for this parent
+        const { data: parentUser, error: userError } = await supabase
+          .from(TABLES.USERS)
+          .select('id, full_name, email, role_id')
+          .eq('email', parentRecord.email)
+          .eq('role_id', 3)
+          .maybeSingle();
 
-      if (!userError && parentUser) {
-        console.log(`✅ [DATABASE LOOKUP] Found parent user account via fallback:`, parentUser);
-        return {
-          success: true,
-          parentUserId: parentUser.id,
-          parentName: parentUser.full_name || studentData.parents.name,
-          parentEmail: parentUser.email
-        };
+        if (!userError && parentUser) {
+          console.log(`✅ [IMPROVED LOOKUP] Method 3 - Found parent user via parent_id:`, parentUser);
+          return {
+            success: true,
+            parentUserId: parentUser.id,
+            parentName: parentUser.full_name || parentRecord.name,
+            parentEmail: parentUser.email,
+            method: 'parent_id_chain'
+          };
+        }
       }
     }
 
-    // Method 3: Try to find parent through users.linked_parent_of (another fallback)
-    const { data: linkedParentUser, error: linkedError } = await supabase
-      .from(TABLES.USERS)
-      .select('id, full_name, email')
-      .eq('linked_parent_of', studentId)
-      .eq('role_id', 3) // Assuming role_id 3 is parent
-      .single();
+    // Method 4: Try parent_student_relationships table (if it exists)
+    try {
+      const { data: parentRelationship, error: relationshipError } = await supabase
+        .from('parent_student_relationships')
+        .select(`
+          parent_id,
+          relationship_type,
+          is_primary_contact,
+          parents!inner(
+            id,
+            name,
+            email
+          )
+        `)
+        .eq('student_id', studentId)
+        .order('is_primary_contact', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (!linkedError && linkedParentUser) {
-      console.log(`✅ [DATABASE LOOKUP] Found parent via linked_parent_of:`, linkedParentUser);
-      return {
-        success: true,
-        parentUserId: linkedParentUser.id,
-        parentName: linkedParentUser.full_name,
-        parentEmail: linkedParentUser.email
-      };
+      if (!relationshipError && parentRelationship) {
+        console.log(`✅ [IMPROVED LOOKUP] Method 4 - Found parent via relationships table:`, parentRelationship);
+
+        // Find the user account for this parent
+        const { data: parentUser, error: userError } = await supabase
+          .from(TABLES.USERS)
+          .select('id, full_name, email, role_id')
+          .eq('email', parentRelationship.parents.email)
+          .eq('role_id', 3)
+          .maybeSingle();
+
+        if (!userError && parentUser) {
+          console.log(`✅ [IMPROVED LOOKUP] Method 4 - Found parent user account:`, parentUser);
+          return {
+            success: true,
+            parentUserId: parentUser.id,
+            parentName: parentUser.full_name || parentRelationship.parents.name,
+            parentEmail: parentUser.email,
+            method: 'relationships_table'
+          };
+        }
+      }
+    } catch (relationshipTableError) {
+      console.log('ℹ️ [IMPROVED LOOKUP] parent_student_relationships table not available');
     }
 
-    console.log(`❌ [DATABASE LOOKUP] No parent found for student ${studentId}`);
+    console.log(`❌ [IMPROVED LOOKUP] No parent found for student ${studentId} after trying all methods`);
     return {
       success: false,
-      error: 'No parent found for this student in database'
+      error: 'No parent found for this student in database',
+      details: 'Tried all available lookup methods: linked_parent_of, parents table, parent_id chain, and relationships table'
     };
 
   } catch (error) {
-    console.error('❌ [DATABASE LOOKUP] Error finding parent:', error);
+    console.error('❌ [IMPROVED LOOKUP] Error finding parent:', error);
     return {
       success: false,
       error: error.message

@@ -367,10 +367,14 @@ const TeacherAccountManagement = ({ navigation }) => {
         transparent={true}
         animationType="slide"
         onRequestClose={() => setModalVisible(false)}
-        statusBarTranslucent={true}
+        statusBarTranslucent={false}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
+        <View style={styles.modalBackgroundOverlay}>
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.modalKeyboardContainer}
+          >
+            <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
                 Create Login Account for {selectedTeacher?.name}
@@ -385,8 +389,11 @@ const TeacherAccountManagement = ({ navigation }) => {
 
             <ScrollView
               style={styles.modalContent}
-              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.modalScrollContainer}
+              showsVerticalScrollIndicator={true}
               keyboardShouldPersistTaps="handled"
+              bounces={true}
+              scrollEnabled={true}
             >
               <Text style={styles.inputLabel}>Full Name *</Text>
               <TextInput
@@ -493,7 +500,8 @@ const TeacherAccountManagement = ({ navigation }) => {
                 )}
               </TouchableOpacity>
             </View>
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </View>
@@ -653,6 +661,14 @@ const styles = StyleSheet.create({
   },
 
   // Modal Styles
+  modalBackgroundOverlay: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  modalKeyboardContainer: {
+    flex: 1,
+    width: '100%',
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -661,87 +677,108 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
   },
   modalContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    width: '90%',
-    height: '80%',
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    flexDirection: 'column',
+    flex: 1,
+    backgroundColor: '#ffffff',
+    width: '100%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+    backgroundColor: '#ffffff',
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1a1a1a',
     flex: 1,
+    paddingRight: 16,
+    lineHeight: 26,
   },
   closeButton: {
-    padding: 4,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f8f9fa',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
   },
   modalContent: {
-    padding: 20,
+    paddingHorizontal: 24,
+    paddingTop: 8,
     flex: 1,
   },
+  modalScrollContainer: {
+    paddingBottom: 24,
+    flexGrow: 1,
+  },
   inputLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#333',
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1a1a1a',
     marginBottom: 8,
-    marginTop: 12,
+    marginTop: 20,
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderWidth: 1.5,
+    borderColor: '#e0e4e7',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     fontSize: 16,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#ffffff',
+    color: '#1a1a1a',
+    minHeight: 48,
   },
   passwordInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    backgroundColor: '#f8f9fa',
+    borderWidth: 1.5,
+    borderColor: '#e0e4e7',
+    borderRadius: 10,
+    backgroundColor: '#ffffff',
+    minHeight: 48,
   },
   passwordInput: {
     flex: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     fontSize: 16,
+    color: '#1a1a1a',
   },
   eyeButton: {
-    padding: 12,
-    paddingLeft: 8,
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   passwordRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
+    marginTop: 20,
+    marginBottom: 8,
   },
   generateButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#e3f2fd',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2196F3',
   },
   generateText: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#2196F3',
+    fontWeight: '600',
     marginLeft: 4,
   },
   modalActions: {

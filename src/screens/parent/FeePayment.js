@@ -279,49 +279,9 @@ const FeePayment = () => {
             };
           });
         } else {
-          // Add sample payment history if no real data exists
-          console.log('FeePayment - No payment history found, adding sample data');
-          transformedPayments = [
-            {
-              id: 'sample-payment-1',
-              feeName: 'Tuition Fee',
-              amount: 25000,
-              paymentDate: '2024-01-15',
-              paymentMethod: 'Online Banking',
-              transactionId: 'TXN12345678',
-              status: 'completed',
-              receiptUrl: null,
-              remarks: 'First installment payment',
-              academicYear: '2024-2025',
-              createdAt: '2024-01-15T10:30:00Z'
-            },
-            {
-              id: 'sample-payment-2',
-              feeName: 'Development Fee',
-              amount: 5000,
-              paymentDate: '2024-02-10',
-              paymentMethod: 'UPI',
-              transactionId: 'TXN87654321',
-              status: 'completed',
-              receiptUrl: null,
-              remarks: 'Development fee payment',
-              academicYear: '2024-2025',
-              createdAt: '2024-02-10T14:20:00Z'
-            },
-            {
-              id: 'sample-payment-3',
-              feeName: 'Transport Fee',
-              amount: 8000,
-              paymentDate: '2024-03-05',
-              paymentMethod: 'Credit Card',
-              transactionId: 'TXN11223344',
-              status: 'completed',
-              receiptUrl: null,
-              remarks: 'Transport fee for semester',
-              academicYear: '2024-2025',
-              createdAt: '2024-03-05T09:15:00Z'
-            }
-          ];
+          // No payment history found - show empty state
+          console.log('FeePayment - No payment history found, showing empty state');
+          transformedPayments = [];
         }
 
         console.log('FeePayment - Payment history loaded:', transformedPayments.length, 'payments');
@@ -370,48 +330,8 @@ const FeePayment = () => {
           ]
         });
 
-        // Set fallback payment history
-        setPaymentHistory([
-          {
-            id: 'fallback-payment-1',
-            feeName: 'Tuition Fee',
-            amount: 25000,
-            paymentDate: '2024-01-15',
-            paymentMethod: 'Online Banking',
-            transactionId: 'TXN12345678',
-            status: 'completed',
-            receiptUrl: null,
-            remarks: 'Full payment',
-            academicYear: '2024-2025',
-            createdAt: '2024-01-15T10:30:00Z'
-          },
-          {
-            id: 'fallback-payment-2',
-            feeName: 'Development Fee',
-            amount: 5000,
-            paymentDate: '2024-02-10',
-            paymentMethod: 'UPI',
-            transactionId: 'TXN87654321',
-            status: 'completed',
-            receiptUrl: null,
-            remarks: 'Development fee',
-            academicYear: '2024-2025',
-            createdAt: '2024-02-10T14:20:00Z'
-          },
-          {
-            id: 'fallback-payment-3',
-            feeName: 'Transport Fee',
-            amount: 3000,
-            paymentDate: '2024-03-05',
-            paymentMethod: 'Credit Card',
-            transactionId: 'TXN11223344',
-            status: 'completed',
-            receiptUrl: null,
-            remarks: 'Partial payment',
-            academicYear: '2024-2025',
-            createdAt: '2024-03-05T09:15:00Z'
-          }
-        ]);
+        // Set empty payment history when there's an error
+        setPaymentHistory([]);
 
         // Don't show error alert, just log it
         console.log('FeePayment - Using fallback data due to error:', err.message);

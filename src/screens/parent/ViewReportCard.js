@@ -38,11 +38,13 @@ const ViewReportCard = () => {
   const [exams, setExams] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [marks, setMarks] = useState([]);
+  const [schoolDetails, setSchoolDetails] = useState(null);
   const { user } = useAuth();
 
   // Pull-to-refresh functionality
   const { refreshing, onRefresh } = usePullToRefresh(async () => {
     await fetchReportCardData();
+    await fetchSchoolDetails();
   });
 
   const fetchReportCardData = async () => {
@@ -162,8 +164,24 @@ const ViewReportCard = () => {
   useEffect(() => {
     if (user) {
       fetchReportCardData();
+      fetchSchoolDetails();
     }
   }, [user]);
+
+  const fetchSchoolDetails = async () => {
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.SCHOOL_DETAILS)
+        .select('*')
+        .single();
+      
+      if (error) throw error;
+      setSchoolDetails(data);
+    } catch (err) {
+      console.error('Error fetching school details:', err);
+      // Don't set error state here to avoid blocking report card display
+    }
+  };
 
   const calculateGrade = (obtained, max) => {
     const percentage = (obtained / max) * 100;
@@ -499,7 +517,7 @@ const ViewReportCard = () => {
         </head>
         <body>
           <div class="header">
-            <div class="school-name">ABC School</div>
+            <div class="school-name">${schoolDetails?.name || 'ABC School'}</div>
             <div class="report-title">Report Card</div>
           </div>
 
@@ -810,7 +828,7 @@ const ViewReportCard = () => {
         </head>
         <body>
           <div class="header">
-            <div class="school-name">ABC School</div>
+            <div class="school-name">${schoolDetails?.name || 'ABC School'}</div>
             <h1>Complete Report Card</h1>
             <div class="student-info">
               <strong>Student:</strong> ${student?.name} | 
@@ -895,7 +913,7 @@ const ViewReportCard = () => {
         </head>
         <body>
           <div class="header">
-            <div class="school-name">ABC School</div>
+            <div class="school-name">${schoolDetails?.name || 'ABC School'}</div>
             <h1>Report Cards - Academic Year ${year}</h1>
             <div class="student-info">
               <strong>Student:</strong> ${student?.name} | 
@@ -1073,7 +1091,7 @@ const ViewReportCard = () => {
                 <View style={styles.htmlPreview}>
                   <View style={styles.previewDocument}>
                     <View style={styles.documentHeader}>
-                      <Text style={styles.schoolName}>ABC School</Text>
+                      <Text style={styles.schoolName}>{schoolDetails?.name || 'ABC School'}</Text>
                       <Text style={styles.documentTitle}>
                         Complete Report Card
                       </Text>

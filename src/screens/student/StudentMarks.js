@@ -39,16 +39,29 @@ export default function StudentMarks({ navigation }) {
   const [selectedExam, setSelectedExam] = useState(null);
   const [showChart, setShowChart] = useState(false);
   const [studentInfo, setStudentInfo] = useState(null);
-  const [schoolInfo, setSchoolInfo] = useState({
-    name: 'School Management System',
-    address: 'Education Excellence Center'
-  });
+  const [schoolDetails, setSchoolDetails] = useState(null);
 
   useEffect(() => {
     if (user) {
       fetchMarksData();
+      fetchSchoolDetails();
     }
   }, [user]);
+
+  const fetchSchoolDetails = async () => {
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.SCHOOL_DETAILS)
+        .select('*')
+        .single();
+      
+      if (error) throw error;
+      setSchoolDetails(data);
+    } catch (err) {
+      console.error('Error fetching school details:', err);
+      // Don't set error state here to avoid blocking marks display
+    }
+  };
 
   // Set up real-time subscriptions for marks updates
   useEffect(() => {
@@ -122,7 +135,6 @@ export default function StudentMarks({ navigation }) {
         rollNo: student.roll_no || 'N/A',
         section: student.classes?.section || '',
         profilePicUrl: '',
-        admissionNo: student.admission_no || 'N/A',
         dob: student.dob ? new Date(student.dob).toLocaleDateString() : 'N/A',
         gender: student.gender || 'N/A',
         address: student.address || 'N/A'
@@ -340,6 +352,7 @@ export default function StudentMarks({ navigation }) {
     }
     try {
       await fetchMarksData();
+      await fetchSchoolDetails();
     } catch (error) {
       console.error('Error refreshing data:', error);
       setError('Failed to refresh data. Please try again.');
@@ -353,12 +366,12 @@ export default function StudentMarks({ navigation }) {
   // Download Report Card Function
   const downloadReportCard = async () => {
     try {
-      // Get school information
+      // Get school information from dynamic schoolDetails or fallback
       const schoolInfo = {
-        name: "Excellence Academy",
-        address: "123 Education Street, Learning City",
-        phone: "+1 (555) 123-4567",
-        email: "info@excellenceacademy.edu"
+        name: schoolDetails?.name || "ABC School",
+        address: schoolDetails?.address || "123 Education Street, Learning City",
+        phone: schoolDetails?.phone || "+1 (555) 123-4567",
+        email: schoolDetails?.email || "info@abcschool.edu"
       };
 
       // Calculate overall grade
@@ -704,7 +717,7 @@ export default function StudentMarks({ navigation }) {
               <div class="school-name">${schoolInfo.name}</div>
               <div class="school-details">
                 ${schoolInfo.address}<br>
-                ${schoolInfo.phone} • ${schoolInfo.email}
+                ${schoolInfo.phone}
               </div>
             </div>
 
@@ -717,8 +730,8 @@ export default function StudentMarks({ navigation }) {
                 <div class="student-details">
                   <h2>${studentData?.name || 'Student Name'}</h2>
                   <div class="student-meta">
-                    <div><strong>Admission No:</strong> ${studentData?.admission_no || 'N/A'}</div>
-                    <div><strong>Gender:</strong> ${studentData?.gender || 'N/A'}</div>
+                    <div><strong>Class:</strong> ${studentData?.classes?.class_name || 'N/A'}</div>
+                    <div><strong>Section:</strong> ${studentData?.classes?.section || 'N/A'}</div>
                     <div><strong>DOB:</strong> ${studentData?.dob ? new Date(studentData.dob).toLocaleDateString() : 'N/A'}</div>
                     <div><strong>Academic Year:</strong> ${new Date().getFullYear()}</div>
                   </div>

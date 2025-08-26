@@ -25,6 +25,7 @@ const StudentDashboard = ({ navigation }) => {
   const [fees, setFees] = useState([]);
   const [todayClasses, setTodayClasses] = useState([]);
   const [recentActivities, setRecentActivities] = useState([]);
+  const [assignments, setAssignments] = useState([]);
   const [showStudentDetailsModal, setShowStudentDetailsModal] = useState(false);
 
   // Utility function to format date from yyyy-mm-dd to dd-mm-yyyy
@@ -91,6 +92,86 @@ const StudentDashboard = ({ navigation }) => {
     navigation.navigate('StudentNotifications');
   };
 
+  // Function to fetch only assignments data (for focus refresh)
+  const fetchAssignmentsData = async () => {
+    try {
+      if (!user?.linked_student_id) {
+        console.log('Student Dashboard - No linked student ID available');
+        return;
+      }
+
+      // Get student data
+      const { data: studentData, error: studentError } = await supabase
+        .from(TABLES.STUDENTS)
+        .select('id, class_id')
+        .eq('id', user.linked_student_id)
+        .single();
+
+      if (studentError) {
+        console.log('Dashboard - Student fetch error for assignments:', studentError);
+        return;
+      }
+
+      let allAssignments = [];
+
+      // Get assignments from assignments table
+      const { data: assignmentsData, error: assignmentsError } = await supabase
+        .from(TABLES.ASSIGNMENTS)
+        .select('*')
+        .eq('class_id', studentData.class_id)
+        .order('due_date', { ascending: true });
+
+      if (assignmentsError && assignmentsError.code !== '42P01') {
+        console.log('Dashboard - Assignments refresh error:', assignmentsError);
+      } else if (assignmentsData) {
+        allAssignments = [...allAssignments, ...assignmentsData];
+      }
+
+      // Get homeworks from homeworks table
+      const { data: homeworksData, error: homeworksError } = await supabase
+        .from(TABLES.HOMEWORKS)
+        .select('*')
+        .or(`class_id.eq.${studentData.class_id},assigned_students.cs.{${studentData.id}}`)
+        .order('due_date', { ascending: true });
+
+      if (homeworksError && homeworksError.code !== '42P01') {
+        console.log('Dashboard - Homeworks refresh error:', homeworksError);
+      } else if (homeworksData) {
+        allAssignments = [...allAssignments, ...homeworksData];
+      }
+
+      // Get existing submissions for this student
+      const { data: submissionsData, error: submissionsError } = await supabase
+        .from('assignment_submissions')
+        .select('*')
+        .eq('student_id', studentData.id);
+
+      if (submissionsError && submissionsError.code !== '42P01') {
+        console.log('Dashboard - Submissions refresh error:', submissionsError);
+      }
+
+      // Filter assignments to only include pending ones
+      const submittedAssignmentIds = new Set();
+      if (submissionsData) {
+        submissionsData.forEach(submission => {
+          submittedAssignmentIds.add(submission.assignment_id);
+        });
+      }
+
+      // Filter to only include pending assignments
+      const pendingAssignments = allAssignments.filter(assignment => 
+        !submittedAssignmentIds.has(assignment.id) && 
+        new Date(assignment.due_date) >= new Date()
+      );
+
+      console.log('Dashboard - Focus refresh pending assignments count:', pendingAssignments.length);
+      setAssignments(pendingAssignments);
+    } catch (err) {
+      console.log('Dashboard - Assignments focus refresh error:', err);
+      setAssignments([]);
+    }
+  };
+
   // Function to refresh notifications for badge count
   const refreshNotifications = async () => {
     try {
@@ -143,12 +224,14 @@ const StudentDashboard = ({ navigation }) => {
     }
   };
 
-  // Add focus effect to refresh notifications when screen comes into focus
+  // Add focus effect to refresh notifications and assignments when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
       if (user) {
-        console.log('Student Dashboard - Screen focused, refreshing notifications...');
-      refreshNotifications();
+        console.log('Student Dashboard - Screen focused, refreshing data...');
+        refreshNotifications();
+        // Only refresh assignments data without full dashboard reload
+        fetchAssignmentsData();
       }
     }, [user])
   );
@@ -468,6 +551,67 @@ const StudentDashboard = ({ navigation }) => {
         setRecentActivities([]);
       }
 
+      // Get assignments for student
+      try {
+        let allAssignments = [];
+
+        // Get assignments from assignments table
+        const { data: assignmentsData, error: assignmentsError } = await supabase
+          .from(TABLES.ASSIGNMENTS)
+          .select('*')
+          .eq('class_id', studentData.class_id)
+          .order('due_date', { ascending: true });
+
+        if (assignmentsError && assignmentsError.code !== '42P01') {
+          console.log('Dashboard - Assignments error:', assignmentsError);
+        } else if (assignmentsData) {
+          allAssignments = [...allAssignments, ...assignmentsData];
+        }
+
+        // Get homeworks from homeworks table
+        const { data: homeworksData, error: homeworksError } = await supabase
+          .from(TABLES.HOMEWORKS)
+          .select('*')
+          .or(`class_id.eq.${studentData.class_id},assigned_students.cs.{${studentData.id}}`)
+          .order('due_date', { ascending: true });
+
+        if (homeworksError && homeworksError.code !== '42P01') {
+          console.log('Dashboard - Homeworks error:', homeworksError);
+        } else if (homeworksData) {
+          allAssignments = [...allAssignments, ...homeworksData];
+        }
+
+        // Get existing submissions for this student to identify pending assignments
+        const { data: submissionsData, error: submissionsError } = await supabase
+          .from('assignment_submissions')
+          .select('*')
+          .eq('student_id', studentData.id);
+
+        if (submissionsError && submissionsError.code !== '42P01') {
+          console.log('Dashboard - Submissions error:', submissionsError);
+        }
+
+        // Filter assignments to only include pending ones
+        const submittedAssignmentIds = new Set();
+        if (submissionsData) {
+          submissionsData.forEach(submission => {
+            submittedAssignmentIds.add(submission.assignment_id);
+          });
+        }
+
+        // Filter to only include pending assignments
+        const pendingAssignments = allAssignments.filter(assignment => 
+          !submittedAssignmentIds.has(assignment.id) && 
+          new Date(assignment.due_date) >= new Date() // Only include assignments not past due date
+        );
+
+        console.log('Dashboard - Pending assignments count:', pendingAssignments.length);
+        setAssignments(pendingAssignments);
+      } catch (err) {
+        console.log('Dashboard - Assignments fetch error:', err);
+        setAssignments([]);
+      }
+
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
       setError(err.message);
@@ -556,10 +700,12 @@ const StudentDashboard = ({ navigation }) => {
     },
     {
       title: 'Assignments',
-      value: '0',
+      value: assignments.length.toString(),
       icon: 'library',
       color: '#9C27B0',
-      subtitle: 'No pending assignments',
+      subtitle: assignments.length === 0 ? 'No pending assignments' : 
+                assignments.length === 1 ? '1 pending assignment' : 
+                `${assignments.length} pending assignments`,
       onPress: () => handleCardNavigation('assignments')
     },
   ];

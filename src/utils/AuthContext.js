@@ -72,10 +72,11 @@ export const AuthProvider = ({ children }) => {
 
       console.log('👤 Fetching user profile for:', authUser.email);
       // First get user profile without roles join to avoid foreign key issues during signup
+      // Use case-insensitive search for email
       const { data: userProfile, error } = await supabase
         .from('users')
         .select('*')
-        .eq('email', authUser.email)
+        .ilike('email', authUser.email)
         .maybeSingle();
 
       console.log('📄 User profile query result:', { userProfile, error });
@@ -110,13 +111,13 @@ export const AuthProvider = ({ children }) => {
           console.log('🏷️ Role lookup result:', { roleData, roleError });
           
           if (!roleError && roleData) {
-            roleName = roleData.role_name;
+            roleName = roleData.role_name.toLowerCase();
             console.log('✅ Found role in database:', roleName);
           } else {
             console.log('⚠️ Role lookup failed, using fallback. Error code:', roleError?.code, 'Message:', roleError?.message);
             // Fallback role names for when database doesn't have roles yet
-            const roleMap = { 1: 'Admin', 2: 'Teacher', 3: 'Parent', 4: 'Student' };
-            roleName = roleMap[userProfile.role_id] || 'User';
+            const roleMap = { 1: 'admin', 2: 'teacher', 3: 'parent', 4: 'student' };
+            roleName = roleMap[userProfile.role_id] || 'user';
             console.log('🔄 Using fallback role name:', roleName);
             
             // Log specific error if it's the PGRST116 error
@@ -126,8 +127,8 @@ export const AuthProvider = ({ children }) => {
           }
         } catch (roleError) {
           console.log('💥 Role lookup exception, using fallback:', roleError);
-          const roleMap = { 1: 'Admin', 2: 'Teacher', 3: 'Parent', 4: 'Student' };
-          roleName = roleMap[userProfile.role_id] || 'User';
+          const roleMap = { 1: 'admin', 2: 'teacher', 3: 'parent', 4: 'student' };
+          roleName = roleMap[userProfile.role_id] || 'user';
           
           if (roleError?.code === 'PGRST116') {
             console.log('🎯 PGRST116 exception caught in role lookup - using fallback successfully');
@@ -178,19 +179,51 @@ export const AuthProvider = ({ children }) => {
         return { data: null, error: { message: 'Authentication failed' } };
       }
 
-      // Get user profile to verify role
+      // Get user profile (without roles join to avoid foreign key issues)
+      // Use case-insensitive search for email
       const { data: userProfile, error: profileError } = await supabase
         .from('users')
-        .select('*, roles(role_name)')
-        .eq('email', email)
+        .select('*')
+        .ilike('email', email)
         .maybeSingle();
 
       if (profileError) {
+        console.error('Profile query error:', profileError);
         return { data: null, error: { message: 'User profile not found' } };
       }
 
       if (!userProfile) {
+        console.log('No user profile found for:', email);
         return { data: null, error: { message: 'User profile not found' } };
+      }
+
+      console.log('User profile found:', { email: userProfile.email, role_id: userProfile.role_id });
+
+      // Get role name separately with error handling
+      let actualRoleName = null;
+      if (userProfile.role_id) {
+        try {
+          const { data: roleData, error: roleError } = await supabase
+            .from('roles')
+            .select('role_name')
+            .eq('id', userProfile.role_id)
+            .maybeSingle();
+          
+          if (!roleError && roleData) {
+            actualRoleName = roleData.role_name;
+            console.log('Found role in database:', actualRoleName);
+          } else {
+            console.log('Role lookup failed, using fallback. Error:', roleError?.message);
+            // Fallback role names
+            const fallbackRoleMap = { 1: 'Admin', 2: 'Teacher', 3: 'Parent', 4: 'Student' };
+            actualRoleName = fallbackRoleMap[userProfile.role_id] || 'Teacher';
+            console.log('Using fallback role:', actualRoleName);
+          }
+        } catch (roleError) {
+          console.log('Role lookup exception, using fallback:', roleError);
+          const fallbackRoleMap = { 1: 'Admin', 2: 'Teacher', 3: 'Parent', 4: 'Student' };
+          actualRoleName = fallbackRoleMap[userProfile.role_id] || 'Teacher';
+        }
       }
 
       // Convert the selected role to match database format
@@ -202,21 +235,29 @@ export const AuthProvider = ({ children }) => {
       };
       const expectedRole = roleMap[selectedRole.toLowerCase()];
       
-      if (userProfile.roles.role_name !== expectedRole) {
-        console.log('Role mismatch:', userProfile.roles.role_name, 'vs expected:', expectedRole);
-        return { data: null, error: { message: 'Invalid role for this user' } };
+      console.log('Role validation:', { actualRole: actualRoleName, expectedRole, selectedRole });
+      
+      // Only validate role if we have both values
+      if (actualRoleName && expectedRole && actualRoleName !== expectedRole) {
+        console.log('Role mismatch:', actualRoleName, 'vs expected:', expectedRole);
+        return { data: null, error: { message: `Invalid role for this user. User has role: ${actualRoleName}, but trying to sign in as: ${expectedRole}` } };
+      }
+      
+      // If no role found, allow sign-in but log warning
+      if (!actualRoleName) {
+        console.log('⚠️ Warning: No role found for user, allowing sign-in with selected role');
+        actualRoleName = expectedRole || 'Teacher'; // Default fallback
       }
 
       const userData = {
         id: user.id,
         email: user.email,
         role_id: userProfile.role_id,
-
         ...userProfile
       };
 
       setUser(userData);
-      setUserType(userProfile.roles.role_name);
+      setUserType(actualRoleName ? actualRoleName.toLowerCase() : 'user');
       
       return { data: userData, error: null };
     } catch (error) {

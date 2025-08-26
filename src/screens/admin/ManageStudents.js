@@ -121,7 +121,7 @@ const ManageStudents = () => {
     try {
       console.log('🚀 Loading students with optimized query...');
       
-      // Use a single JOIN query to get all student data with related information
+      // Use a single query to get all student data with class information
       const { data: studentsData, error } = await supabase
         .from(TABLES.STUDENTS)
         .select(`
@@ -130,11 +130,6 @@ const ManageStudents = () => {
             id,
             class_name,
             section
-          ),
-          parents:parent_id (
-            id,
-            name,
-            phone
           )
         `)
         .order('created_at', { ascending: false });
@@ -190,6 +185,19 @@ const ManageStudents = () => {
         .from('marks')
         .select('student_id, marks, subject_id')
         .in('student_id', studentIds);
+
+      // Get parent data for all students
+      console.log('🔍 Fetching parent data for all students...');
+      const { data: allParentsData, error: parentsError } = await supabase
+        .from(TABLES.PARENTS)
+        .select('student_id, name, phone, email, relation')
+        .in('student_id', studentIds);
+      
+      console.log(`📊 Parents query result:`, {
+        error: parentsError,
+        recordCount: allParentsData?.length || 0,
+        sampleData: allParentsData?.slice(0, 3) || []
+      });
 
       // Create attendance lookup map for O(1) access
       const attendanceLookup = {};
@@ -261,14 +269,62 @@ const ManageStudents = () => {
         }
       });
 
+      // Create parent lookup map for O(1) access
+      const parentsLookup = {};
+      console.log(`📋 Processing ${allParentsData?.length || 0} parent records...`);
+      
+      (allParentsData || []).forEach((parent, index) => {
+        if (index < 5) { // Log first 5 records for debugging
+          console.log(`Parent Record ${index}:`, parent);
+        }
+        
+        if (!parentsLookup[parent.student_id]) {
+          parentsLookup[parent.student_id] = { father: null, mother: null, phone: null, email: null };
+        }
+        
+        if (parent.relation === 'Father') {
+          parentsLookup[parent.student_id].father = parent.name;
+          parentsLookup[parent.student_id].phone = parentsLookup[parent.student_id].phone || parent.phone;
+          parentsLookup[parent.student_id].email = parentsLookup[parent.student_id].email || parent.email;
+        } else if (parent.relation === 'Mother') {
+          parentsLookup[parent.student_id].mother = parent.name;
+          parentsLookup[parent.student_id].phone = parentsLookup[parent.student_id].phone || parent.phone;
+          parentsLookup[parent.student_id].email = parentsLookup[parent.student_id].email || parent.email;
+        }
+      });
+      
+      console.log(`👨‍👩‍👧‍👦 Parent lookup summary:`, {
+        studentsWithParents: Object.keys(parentsLookup).length,
+        sampleParentData: Object.keys(parentsLookup).slice(0, 3).map(studentId => ({
+          studentId,
+          ...parentsLookup[studentId]
+        }))
+      });
+
       // Process students data - no async operations needed
       const studentsWithDetails = studentsData.map(student => {
         const classInfo = student.classes || { class_name: 'N/A', section: 'N/A' };
-        const parentInfo = student.parents || { name: 'N/A', phone: 'N/A' };
         const attendance = attendanceLookup[student.id] || { total: 0, present: 0 };
         const attendancePercentage = attendance.total > 0 
           ? Math.round((attendance.present / attendance.total) * 100) 
           : 0;
+        
+        // Get parent information with priority: Father first, then Mother
+        const parentData = parentsLookup[student.id] || { father: null, mother: null, phone: null };
+        let parentName = 'Not Assigned';
+        let parentPhone = 'Not Available';
+        
+        if (parentData.father && parentData.mother) {
+          parentName = parentData.father; // Show father name when both exist
+        } else if (parentData.father) {
+          parentName = parentData.father;
+        } else if (parentData.mother) {
+          parentName = parentData.mother;
+        }
+        
+        if (parentData.phone) {
+          parentPhone = parentData.phone;
+        }
         
         // Get fees status for the student
         const feesInfo = feesLookup[student.id] || { latestStatus: 'Unpaid' };
@@ -284,21 +340,18 @@ const ManageStudents = () => {
           attendancePercentage,
           className: classInfo.class_name,
           section: classInfo.section,
-          parentName: parentInfo.name,
-          parentPhone: parentInfo.phone,
+          parentName,
+          parentPhone,
           feesStatus: feesStatus,
           academicPercentage,
           hasMarks
         };
       });
 
-      // Sort students by academic percentage (highest to lowest)
-      // Students with no marks will appear at the end
+      // Sort students alphabetically by name
       const sortedStudents = studentsWithDetails.sort((a, b) => {
-        if (!a.hasMarks && !b.hasMarks) return 0; // Both have no marks, keep original order
-        if (!a.hasMarks) return 1; // a has no marks, move to end
-        if (!b.hasMarks) return -1; // b has no marks, move to end
-        return b.academicPercentage - a.academicPercentage; // Sort by academic percentage descending
+        // Case-insensitive alphabetical sort by name
+        return a.name.localeCompare(b.name);
       });
 
       setStudents(sortedStudents);
@@ -1038,8 +1091,10 @@ const ManageStudents = () => {
   const relationOptions = ['Father', 'Mother', 'Parent', 'Guardian'];
 
   const renderStudent = ({ item, index }) => {
-    // Only show top student badge if the student has marks and is first in the sorted list
-    const isTopStudent = index === 0 && item.hasMarks && item.academicPercentage > 0;
+    // Find the student with the highest academic percentage for the top student badge
+    const studentsWithMarks = filteredStudents.filter(s => s.hasMarks && s.academicPercentage > 0);
+    const topAcademicScore = studentsWithMarks.length > 0 ? Math.max(...studentsWithMarks.map(s => s.academicPercentage)) : 0;
+    const isTopStudent = item.hasMarks && item.academicPercentage === topAcademicScore && item.academicPercentage > 0;
     const cardStyle = isTopStudent ? [styles.studentCard, styles.topStudentCard] : styles.studentCard;
 
     return (
