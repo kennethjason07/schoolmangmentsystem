@@ -505,20 +505,27 @@ const ViewReportCard = () => {
 
           <div class="student-info">
             <div class="info-row">
-              <span><strong>Student Name:</strong> ${reportCard.studentName}</span>
-              <span><strong>Class:</strong> ${reportCard.class}</span>
+              <span><strong>Name:</strong> <strong>${reportCard.studentName}</strong></span>
+              <span><strong>Class:</strong> <strong>${reportCard.class}</strong></span>
             </div>
             <div class="info-row">
-              <span><strong>Roll Number:</strong> ${reportCard.rollNumber}</span>
-              <span><strong>Academic Year:</strong> ${reportCard.academicYear}</span>
+              <span><strong>Admission No:</strong> <strong>${reportCard.admissionNo}</strong></span>
+              <span><strong>Academic Year:</strong> <strong>${reportCard.academicYear}</strong></span>
             </div>
             <div class="info-row">
-              <span><strong>Exam:</strong> ${reportCard.examName}</span>
-              <span><strong>Date:</strong> ${new Date(reportCard.examDate).toLocaleDateString('en-US', { 
+              <span><strong>Exam:</strong> <strong>${reportCard.examName}</strong></span>
+              <span><strong>Generated On:</strong> <strong>${new Date().toLocaleDateString('en-US', { 
                 year: 'numeric', 
                 month: 'long', 
                 day: 'numeric' 
-              })}</span>
+              })}</strong></span>
+            </div>
+            <div class="info-row">
+              <span><strong>DOB:</strong> <strong>${new Date(reportCard.dob).toLocaleDateString('en-US', { 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+              })}</strong></span>
             </div>
           </div>
 

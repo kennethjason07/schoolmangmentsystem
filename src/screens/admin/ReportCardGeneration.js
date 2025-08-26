@@ -182,12 +182,7 @@ const ReportCardGeneration = ({ navigation }) => {
       onPress={() => handleStudentPress(student)}
     >
       <View style={styles.studentInfo}>
-        <View style={styles.studentHeader}>
-          <Text style={styles.studentName}>{student.name}</Text>
-          <View style={styles.rollNumberBadge}>
-            <Text style={styles.rollNumberText}>#{student.roll_no}</Text>
-          </View>
-        </View>
+        <Text style={styles.studentName}>{student.name}</Text>
         <Text style={styles.studentDetails}>
           Admission No: {student.admission_no}
         </Text>
@@ -318,7 +313,7 @@ const ReportCardGeneration = ({ navigation }) => {
           <View style={styles.studentsSection}>
             <View style={styles.studentsHeader}>
               <Ionicons name="people" size={20} color="#1976d2" />
-              <Text style={styles.sectionTitle}>Students ({students.length})</Text>
+              <Text style={styles.studentsHeaderTitle}>Students ({students.length})</Text>
             </View>
             
             {students.length === 0 ? (
@@ -493,6 +488,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
+  studentsHeaderTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 8,
+  },
   studentsList: {
     gap: 12,
   },
@@ -508,28 +509,11 @@ const styles = StyleSheet.create({
   studentInfo: {
     flex: 1,
   },
-  studentHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
   studentName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
-    flex: 1,
-  },
-  rollNumberBadge: {
-    backgroundColor: '#1976d2',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  rollNumberText: {
-    fontSize: 12,
-    color: 'white',
-    fontWeight: 'bold',
+    marginBottom: 4,
   },
   studentDetails: {
     fontSize: 13,

@@ -65,9 +65,14 @@ const ManageStudents = () => {
     academic_year: '2024-25',
     general_behaviour: 'Normal',
     remarks: '',
-    roll_no: '',
     parent_id: '',
-    class_id: ''
+    class_id: '',
+    // Parent details - separate father and mother fields
+    father_name: '',
+    mother_name: '',
+    parent_phone: '',
+    parent_email: '',
+    parent_relation: 'Father' // Default to Father
   });
 
   // Statistics
@@ -474,9 +479,14 @@ const ManageStudents = () => {
       academic_year: '2024-25',
       general_behaviour: 'Normal',
       remarks: '',
-      roll_no: '',
       parent_id: '',
-      class_id: ''
+      class_id: '',
+      // Parent details - separate father and mother fields
+      father_name: '',
+      mother_name: '',
+      parent_phone: '',
+      parent_email: '',
+      parent_relation: 'Father'
     });
   };
 
@@ -534,11 +544,25 @@ const ManageStudents = () => {
     try {
       // Validate required fields
       if (!form.admission_no || !form.name || !form.dob || !form.gender || !form.academic_year) {
-        Alert.alert('Error', 'Please fill in all required fields');
+        Alert.alert('Error', 'Please fill in all required fields (Admission No, Name, DOB, Gender, Academic Year)');
         return;
       }
 
-      const { error } = await supabase
+      // Validate parent details - at least one parent name is required
+      if (!form.father_name && !form.mother_name) {
+        Alert.alert('Error', 'Please provide at least father name or mother name');
+        return;
+      }
+
+      if (!form.parent_phone) {
+        Alert.alert('Error', 'Parent/Guardian phone number is required');
+        return;
+      }
+
+      setLoading(true);
+
+      // First, create the student record
+      const { data: studentResult, error: studentError } = await supabase
         .from(TABLES.STUDENTS)
         .insert({
           admission_no: form.admission_no,
@@ -559,19 +583,62 @@ const ManageStudents = () => {
           academic_year: form.academic_year,
           general_behaviour: form.general_behaviour,
           remarks: form.remarks || null,
-          roll_no: form.roll_no ? parseInt(form.roll_no) : null,
-          parent_id: form.parent_id || null,
           class_id: form.class_id || null
+        })
+        .select('id')
+        .single();
+
+      if (studentError) {
+        setLoading(false);
+        throw studentError;
+      }
+
+      const studentId = studentResult.id;
+
+      // Create parent records - separate entries for father and mother if both provided
+      const parentRecords = [];
+      
+      if (form.father_name) {
+        parentRecords.push({
+          name: form.father_name,
+          phone: form.parent_phone || null,
+          email: form.parent_email || null,
+          relation: 'Father',
+          student_id: studentId
         });
+      }
+      
+      if (form.mother_name) {
+        parentRecords.push({
+          name: form.mother_name,
+          phone: form.parent_phone || null,
+          email: form.parent_email || null,
+          relation: 'Mother',
+          student_id: studentId
+        });
+      }
 
-      if (error) throw error;
+      if (parentRecords.length > 0) {
+        const { error: parentError } = await supabase
+          .from(TABLES.PARENTS)
+          .insert(parentRecords);
 
-      Alert.alert('Success', 'Student added successfully');
+        if (parentError) {
+          setLoading(false);
+          // If parent creation fails, we should delete the student record to maintain consistency
+          await supabase.from(TABLES.STUDENTS).delete().eq('id', studentId);
+          throw parentError;
+        }
+      }
+
+      Alert.alert('Success', 'Student and parent details added successfully');
       await loadAllData();
       resetForm();
       setModalVisible(false);
     } catch (error) {
       Alert.alert('Error', 'Failed to add student: ' + error.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -604,8 +671,55 @@ const ManageStudents = () => {
     );
   };
 
-  const handleEdit = (student) => {
+  const handleEdit = async (student) => {
     setSelectedStudent(student);
+    
+    // Load parent details using student_id (based on actual schema)
+    let parentDetails = {
+      father_name: '',
+      mother_name: '',
+      parent_phone: '',
+      parent_email: '',
+      parent_relation: 'Father'
+    };
+
+    try {
+      const { data: parentData, error: parentError } = await supabase
+        .from(TABLES.PARENTS)
+        .select('*')
+        .eq('student_id', student.id);
+
+      if (!parentError && parentData && parentData.length > 0) {
+        // Handle multiple parent records (father and mother)
+        parentData.forEach(parent => {
+          if (parent.relation === 'Father') {
+            parentDetails.father_name = parent.name || '';
+            parentDetails.parent_phone = parent.phone || parentDetails.parent_phone;
+            parentDetails.parent_email = parent.email || parentDetails.parent_email;
+          } else if (parent.relation === 'Mother') {
+            parentDetails.mother_name = parent.name || '';
+            if (!parentDetails.parent_phone) {
+              parentDetails.parent_phone = parent.phone || '';
+            }
+            if (!parentDetails.parent_email) {
+              parentDetails.parent_email = parent.email || '';
+            }
+          }
+        });
+        
+        // Set relation based on available data
+        if (parentDetails.father_name && parentDetails.mother_name) {
+          parentDetails.parent_relation = 'Father'; // Default to father when both exist
+        } else if (parentDetails.father_name) {
+          parentDetails.parent_relation = 'Father';
+        } else if (parentDetails.mother_name) {
+          parentDetails.parent_relation = 'Mother';
+        }
+      }
+    } catch (error) {
+      console.log('Could not load parent details:', error);
+    }
+
     setForm({
       admission_no: student.admission_no || '',
       name: student.name || '',
@@ -625,9 +739,9 @@ const ManageStudents = () => {
       academic_year: student.academic_year || '2024-25',
       general_behaviour: student.general_behaviour || 'Normal',
       remarks: student.remarks || '',
-      roll_no: student.roll_no?.toString() || '',
       parent_id: student.parent_id || '',
-      class_id: student.class_id || ''
+      class_id: student.class_id || '',
+      ...parentDetails
     });
     setEditModalVisible(true);
   };
@@ -636,11 +750,25 @@ const ManageStudents = () => {
     try {
       // Validate required fields
       if (!form.admission_no || !form.name || !form.dob || !form.gender || !form.academic_year) {
-        Alert.alert('Error', 'Please fill in all required fields');
+        Alert.alert('Error', 'Please fill in all required fields (Admission No, Name, DOB, Gender, Academic Year)');
         return;
       }
 
-      const { error } = await supabase
+      // Validate parent details - at least one parent name is required
+      if (!form.father_name && !form.mother_name) {
+        Alert.alert('Error', 'Please provide at least father name or mother name');
+        return;
+      }
+
+      if (!form.parent_phone) {
+        Alert.alert('Error', 'Parent/Guardian phone number is required');
+        return;
+      }
+
+      setLoading(true);
+
+      // Update student record first
+      const { error: studentError } = await supabase
         .from(TABLES.STUDENTS)
         .update({
           admission_no: form.admission_no,
@@ -661,21 +789,68 @@ const ManageStudents = () => {
           academic_year: form.academic_year,
           general_behaviour: form.general_behaviour,
           remarks: form.remarks || null,
-          roll_no: form.roll_no ? parseInt(form.roll_no) : null,
-          parent_id: form.parent_id || null,
           class_id: form.class_id || null
         })
         .eq('id', selectedStudent.id);
 
-      if (error) throw error;
+      if (studentError) {
+        setLoading(false);
+        throw studentError;
+      }
 
-      Alert.alert('Success', 'Student updated successfully');
+      // Delete existing parent records for this student first
+      const { error: deleteError } = await supabase
+        .from(TABLES.PARENTS)
+        .delete()
+        .eq('student_id', selectedStudent.id);
+
+      if (deleteError) {
+        console.log('Warning: Could not delete existing parent records:', deleteError);
+      }
+
+      // Create new parent records - separate entries for father and mother if both provided
+      const parentRecords = [];
+      
+      if (form.father_name) {
+        parentRecords.push({
+          name: form.father_name,
+          phone: form.parent_phone || null,
+          email: form.parent_email || null,
+          relation: 'Father',
+          student_id: selectedStudent.id
+        });
+      }
+      
+      if (form.mother_name) {
+        parentRecords.push({
+          name: form.mother_name,
+          phone: form.parent_phone || null,
+          email: form.parent_email || null,
+          relation: 'Mother',
+          student_id: selectedStudent.id
+        });
+      }
+
+      if (parentRecords.length > 0) {
+        const { error: parentError } = await supabase
+          .from(TABLES.PARENTS)
+          .insert(parentRecords);
+
+        if (parentError) {
+          setLoading(false);
+          throw parentError;
+        }
+      }
+
+      Alert.alert('Success', 'Student and parent details updated successfully');
       await loadAllData();
       setEditModalVisible(false);
       setSelectedStudent(null);
       resetForm();
     } catch (error) {
       Alert.alert('Error', 'Failed to update student: ' + error.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -781,6 +956,29 @@ const ManageStudents = () => {
     return 'F';
   };
 
+  // Get unique class names for the class filter dropdown
+  const getUniqueClassNames = () => {
+    const uniqueClasses = [];
+    const seenClassNames = new Set();
+    
+    classes.forEach(cls => {
+      if (!seenClassNames.has(cls.class_name)) {
+        seenClassNames.add(cls.class_name);
+        uniqueClasses.push({
+          class_name: cls.class_name,
+          value: cls.class_name // Use class_name as value for filtering
+        });
+      }
+    });
+    
+    return uniqueClasses.sort((a, b) => {
+      // Natural sort for class names (1, 2, 3, 10, 11 instead of 1, 10, 11, 2, 3)
+      const aNum = parseInt(a.class_name.replace(/\D/g, ''));
+      const bNum = parseInt(b.class_name.replace(/\D/g, ''));
+      return aNum - bNum;
+    });
+  };
+
   // Get unique sections for the selected class
   const getAvailableSections = () => {
     if (selectedClass === 'All') {
@@ -788,9 +986,9 @@ const ManageStudents = () => {
       const sections = [...new Set(classes.map(cls => cls.section).filter(Boolean))];
       return sections.sort();
     } else {
-      // Return sections only for the selected class
+      // Return sections only for the selected class name
       const sections = classes
-        .filter(cls => cls.id === selectedClass)
+        .filter(cls => cls.class_name === selectedClass)
         .map(cls => cls.section)
         .filter(Boolean);
       return [...new Set(sections)].sort();
@@ -804,7 +1002,8 @@ const ManageStudents = () => {
       student.admission_no?.toLowerCase().includes(search.toLowerCase()) ||
       ((student.roll_no ?? '').toString().includes(search));
 
-    const matchesClass = selectedClass === 'All' || student.class_id === selectedClass;
+    // Class filter - now match by class name instead of class ID
+    const matchesClass = selectedClass === 'All' || student.className === selectedClass;
     
     // Section filter - match based on the student's section
     const matchesSection = selectedSection === 'All' || student.section === selectedSection;
@@ -834,6 +1033,9 @@ const ManageStudents = () => {
 
   // Blood group options
   const bloodGroupOptions = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+
+  // Relation options - matching database schema
+  const relationOptions = ['Father', 'Mother', 'Parent', 'Guardian'];
 
   const renderStudent = ({ item, index }) => {
     // Only show top student badge if the student has marks and is first in the sorted list
@@ -960,11 +1162,11 @@ const ManageStudents = () => {
                 style={styles.picker}
               >
                 <Picker.Item label="All Classes" value="All" />
-                {classes.map(cls => (
+                {getUniqueClassNames().map(cls => (
                   <Picker.Item
-                    key={cls.id}
+                    key={cls.class_name}
                     label={`Class ${cls.class_name}`}
-                    value={cls.id}
+                    value={cls.class_name}
                   />
                 ))}
               </Picker>
@@ -1273,6 +1475,123 @@ const ManageStudents = () => {
                   ))}
                 </Picker>
               </View>
+
+              {/* Parent/Guardian Details Section */}
+              <Text style={styles.sectionTitle}>Parent/Guardian Details</Text>
+
+              <Text style={styles.inputLabel}>Father Name</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Father's Full Name"
+                value={form.father_name}
+                onChangeText={(text) => handleFormChange('father_name', text)}
+              />
+
+              <Text style={styles.inputLabel}>Mother Name</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Mother's Full Name"
+                value={form.mother_name}
+                onChangeText={(text) => handleFormChange('mother_name', text)}
+              />
+
+              <Text style={styles.inputLabel}>Phone Number *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Contact Number"
+                value={form.parent_phone}
+                onChangeText={(text) => handleFormChange('parent_phone', text)}
+                keyboardType="phone-pad"
+                maxLength={10}
+              />
+
+              <Text style={styles.inputLabel}>Email (Optional)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Email Address"
+                value={form.parent_email}
+                onChangeText={(text) => handleFormChange('parent_email', text)}
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+
+              <Text style={styles.inputLabel}>Relation *</Text>
+              <View style={styles.pickerContainer}>
+                <Picker
+                  selectedValue={form.parent_relation}
+                  style={styles.picker}
+                  onValueChange={(value) => handleFormChange('parent_relation', value)}
+                >
+                  {relationOptions.map(relation => (
+                    <Picker.Item key={relation} label={relation} value={relation} />
+                  ))}
+                </Picker>
+              </View>
+
+              {/* Contact & Address Details */}
+              <Text style={styles.sectionTitle}>Address Details</Text>
+
+              <Text style={styles.inputLabel}>Address</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Complete Address"
+                value={form.address}
+                onChangeText={(text) => handleFormChange('address', text)}
+                multiline
+                numberOfLines={3}
+              />
+
+              <Text style={styles.inputLabel}>Pin Code</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Pin Code"
+                value={form.pin_code}
+                onChangeText={(text) => handleFormChange('pin_code', text)}
+                keyboardType="number-pad"
+                maxLength={6}
+              />
+
+              {/* Additional Details */}
+              <Text style={styles.sectionTitle}>Additional Information</Text>
+
+              <Text style={styles.inputLabel}>General Behaviour</Text>
+              <View style={styles.pickerContainer}>
+                <Picker
+                  selectedValue={form.general_behaviour}
+                  style={styles.picker}
+                  onValueChange={(value) => handleFormChange('general_behaviour', value)}
+                >
+                  {behaviourOptions.map(behaviour => (
+                    <Picker.Item key={behaviour} label={behaviour} value={behaviour} />
+                  ))}
+                </Picker>
+              </View>
+
+              <Text style={styles.inputLabel}>Identification Mark 1</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="First Identification Mark"
+                value={form.identification_mark_1}
+                onChangeText={(text) => handleFormChange('identification_mark_1', text)}
+              />
+
+              <Text style={styles.inputLabel}>Identification Mark 2</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Second Identification Mark"
+                value={form.identification_mark_2}
+                onChangeText={(text) => handleFormChange('identification_mark_2', text)}
+              />
+
+              <Text style={styles.inputLabel}>Remarks</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Any additional remarks"
+                value={form.remarks}
+                onChangeText={(text) => handleFormChange('remarks', text)}
+                multiline
+                numberOfLines={2}
+              />
             </ScrollView>
 
             {/* Date Picker */}
@@ -2474,6 +2793,11 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 10,
     paddingVertical: 4,
+  },
+  // Text area style for multiline inputs
+  textArea: {
+    height: 80,
+    textAlignVertical: 'top',
   },
 });
 
