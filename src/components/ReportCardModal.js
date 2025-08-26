@@ -123,7 +123,7 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
     try {
       const { data, error } = await supabase
         .from('exams')
-        .select('*')
+        .select('id, name, class_id, academic_year, start_date, end_date, remarks, max_marks, created_at')
         .eq('id', examId)
         .single();
 
@@ -163,7 +163,9 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
 
   const calculateTotals = () => {
     const totalMarksObtained = marks.reduce((sum, mark) => sum + (mark.marks_obtained || 0), 0);
-    const totalMaxMarks = marks.reduce((sum, mark) => sum + (mark.max_marks || 0), 0);
+    // Use exam's max_marks for each subject instead of marks table max_marks
+    const examMaxMarks = examDetails?.max_marks || 100;
+    const totalMaxMarks = marks.length * examMaxMarks;
     const percentage = totalMaxMarks > 0 ? ((totalMarksObtained / totalMaxMarks) * 100).toFixed(1) : 0;
     const grade = calculateGrade(percentage);
 
@@ -354,7 +356,7 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
             ${subjects.map(subject => {
               const mark = getSubjectMark(subject.id);
               const marksObtained = mark?.marks_obtained || 0;
-              const maxMarks = mark?.max_marks || 0;
+              const maxMarks = examDetails?.max_marks || 100; // Use exam's max_marks
               const percentage = maxMarks > 0 ? ((marksObtained / maxMarks) * 100).toFixed(1) : 0;
               const grade = mark?.grade || calculateGrade(percentage);
               
@@ -584,7 +586,7 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
                 {subjects.map(subject => {
                   const mark = getSubjectMark(subject.id);
                   const marksObtained = mark?.marks_obtained || 0;
-                  const maxMarks = mark?.max_marks || 0;
+                  const maxMarks = examDetails?.max_marks || 100; // Use exam's max_marks
                   const percentage = maxMarks > 0 ? ((marksObtained / maxMarks) * 100).toFixed(1) : 0;
                   const grade = mark?.grade || calculateGrade(percentage);
                   

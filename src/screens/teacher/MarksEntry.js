@@ -183,7 +183,7 @@ export default function MarksEntry({ navigation }) {
       // This ensures we see all available exams
       const { data: examsData, error: examsError } = await supabase
         .from(TABLES.EXAMS)
-        .select('*')
+        .select('id, name, class_id, academic_year, start_date, end_date, remarks, max_marks, created_at')
         .eq('class_id', classId)
         .order('start_date', { ascending: false });
       
@@ -275,9 +275,13 @@ export default function MarksEntry({ navigation }) {
       return;
     }
 
-    // Allow empty string (user is typing) or valid numbers 0-100
-    if (marksValue !== '' && (isNaN(marksValue) || marksValue < 0 || marksValue > 100)) {
-      Alert.alert('Error', 'Please enter valid marks (0-100)');
+    // Get exam max marks for validation
+    const selectedExamData = exams.find(e => e.id === selectedExam);
+    const maxMarks = selectedExamData?.max_marks || 100;
+    
+    // Allow empty string (user is typing) or valid numbers 0 to exam max_marks
+    if (marksValue !== '' && (isNaN(marksValue) || marksValue < 0 || marksValue > maxMarks)) {
+      Alert.alert('Error', `Please enter valid marks (0-${maxMarks})`);
       return;
     }
 
@@ -352,7 +356,7 @@ export default function MarksEntry({ navigation }) {
       // Prepare marks data with grade calculation
       const marksData = studentsWithMarks.map(student => {
         const marksObtained = parseInt(marks[student.id]);
-        const maxMarks = 100;
+        const maxMarks = selectedExamData.max_marks || 100; // Use exam's max_marks
         const grade = calculateGrade(marksObtained, maxMarks);
         
         return {
@@ -360,7 +364,7 @@ export default function MarksEntry({ navigation }) {
           subject_id: selectedSubject,
           exam_id: selectedExam,
           marks_obtained: marksObtained,
-          max_marks: maxMarks,
+          max_marks: maxMarks, // Store exam's max_marks
           grade: grade,
           remarks: selectedExamData.name
         };
@@ -531,37 +535,41 @@ export default function MarksEntry({ navigation }) {
               )}
 
               {/* Students Marks Entry */}
-              {selectedClass && selectedExam && selectedSubject && (
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Enter Marks</Text>
-                  {classes.find(c => c.id === selectedClass)?.students.map(student => {
-                    const studentMarks = marks[student.id];
-                    const hasValidMarks = studentMarks !== '' && !isNaN(studentMarks) && studentMarks >= 0;
-                    const grade = hasValidMarks ? calculateGrade(parseInt(studentMarks)) : null;
-                    const isZeroMark = studentMarks === '0' || studentMarks === 0;
-                    
-                    return (
-                      <View key={student.id} style={styles.studentRowContainer}>
-                        {isZeroMark && (
-                          <View style={styles.warningMessage}>
-                            <Ionicons name="warning" size={14} color="#ff9800" />
-                            <Text style={styles.warningText}>Zero marks - Student was absent or failed</Text>
-                          </View>
-                        )}
-                        <View style={styles.studentRow}>
-                          <View style={styles.studentInfo}>
-                            <Text style={styles.studentName}>{student.name}</Text>
-                            <Text style={styles.studentRoll}>Roll: {student.roll_no}</Text>
-                          </View>
-                          <View style={styles.marksInputContainer}>
-                            <TextInput
-                              style={styles.marksInput}
-                              value={marks[student.id]?.toString() || ''}
-                              onChangeText={(value) => handleMarksEntry(student.id, value)}
-                              keyboardType="numeric"
-                              maxLength={3}
-                              placeholder="0-100"
-                            />
+              {selectedClass && selectedExam && selectedSubject && (() => {
+                const selectedExamData = exams.find(e => e.id === selectedExam);
+                const maxMarks = selectedExamData?.max_marks || 100;
+                
+                return (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Enter Marks</Text>
+                    {classes.find(c => c.id === selectedClass)?.students.map(student => {
+                      const studentMarks = marks[student.id];
+                      const hasValidMarks = studentMarks !== '' && !isNaN(studentMarks) && studentMarks >= 0;
+                      const grade = hasValidMarks ? calculateGrade(parseInt(studentMarks), maxMarks) : null;
+                      const isZeroMark = studentMarks === '0' || studentMarks === 0;
+                      
+                      return (
+                        <View key={student.id} style={styles.studentRowContainer}>
+                          {isZeroMark && (
+                            <View style={styles.warningMessage}>
+                              <Ionicons name="warning" size={14} color="#ff9800" />
+                              <Text style={styles.warningText}>Zero marks - Student was absent or failed</Text>
+                            </View>
+                          )}
+                          <View style={styles.studentRow}>
+                            <View style={styles.studentInfo}>
+                              <Text style={styles.studentName}>{student.name}</Text>
+                              <Text style={styles.studentRoll}>Roll: {student.roll_no}</Text>
+                            </View>
+                            <View style={styles.marksInputContainer}>
+                              <TextInput
+                                style={styles.marksInput}
+                                value={marks[student.id]?.toString() || ''}
+                                onChangeText={(value) => handleMarksEntry(student.id, value)}
+                                keyboardType="numeric"
+                                maxLength={3}
+                                placeholder={`0-${maxMarks}`}
+                              />
                             {grade && (
                               <View style={[
                                 styles.gradeDisplay,
@@ -586,8 +594,9 @@ export default function MarksEntry({ navigation }) {
                       {saving ? 'Saving...' : 'Save Marks'}
                     </Text>
                   </TouchableOpacity>
-                </View>
-              )}
+                  </View>
+                );
+              })()}
             </>
           )}
         </View>

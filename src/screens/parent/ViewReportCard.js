@@ -77,7 +77,7 @@ const ViewReportCard = () => {
       // Get all exams for the student's class and academic year
       const { data: examsData, error: examsError } = await supabase
         .from(TABLES.EXAMS)
-        .select('*')
+        .select('id, name, class_id, academic_year, start_date, end_date, remarks, max_marks, created_at')
         .eq('class_id', studentData.class_id)
         .eq('academic_year', studentData.academic_year)
         .order('start_date', { ascending: false });
@@ -101,7 +101,7 @@ const ViewReportCard = () => {
         .from(TABLES.MARKS)
         .select(`
           *,
-          exams(id, name, start_date, end_date),
+          exams(id, name, start_date, end_date, max_marks),
           subjects(id, name)
         `)
         .eq('student_id', studentData.id)
@@ -125,16 +125,19 @@ const ViewReportCard = () => {
             };
           }
           
+          // Use exam's max_marks instead of marks table max_marks
+          const examMaxMarks = mark.exams?.max_marks || 100;
+          
           reportCards[examId].subjects.push({
             subject: mark.subjects,
             marks_obtained: mark.marks_obtained,
-            max_marks: mark.max_marks,
+            max_marks: examMaxMarks, // Use exam's max_marks
             grade: mark.grade,
             remarks: mark.remarks
           });
           
           reportCards[examId].totalMarks += parseFloat(mark.marks_obtained || 0);
-          reportCards[examId].totalMaxMarks += parseFloat(mark.max_marks || 0);
+          reportCards[examId].totalMaxMarks += parseFloat(examMaxMarks);
         });
       }
 

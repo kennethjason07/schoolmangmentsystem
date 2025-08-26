@@ -30,6 +30,7 @@ const ExpenseManagement = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [showExpenseDatePicker, setShowExpenseDatePicker] = useState(false);
   
   // Expense Data
   const [expenses, setExpenses] = useState([]);
@@ -60,9 +61,7 @@ const ExpenseManagement = ({ navigation }) => {
     amount: '',
     category: 'Staff Salaries',
     description: '',
-    date: format(new Date(), 'yyyy-MM-dd'),
-    receipt_number: '',
-    vendor: ''
+    date: format(new Date(), 'yyyy-MM-dd')
   });
   const [budgetInputs, setBudgetInputs] = useState({});
   const [editExpenseIndex, setEditExpenseIndex] = useState(null);
@@ -85,191 +84,6 @@ const ExpenseManagement = ({ navigation }) => {
     '#00BCD4', '#CDDC39', '#FF6F00', '#37474F', '#6D4C41'
   ];
 
-  // Mock data for frontend development
-  const mockExpenses = [
-    // August 2025 data (current month for testing)
-    {
-      id: 101,
-      title: 'Monthly Teacher Salaries - August',
-      amount: 480000,
-      category: 'Staff Salaries',
-      description: 'Salary payment for all teaching staff',
-      expense_date: '2025-08-01',
-      receipt_number: 'SAL-2025-08-001',
-      vendor: 'Payroll Department'
-    },
-    {
-      id: 102,
-      title: 'Electricity Bill - August',
-      amount: 42000,
-      category: 'Utilities',
-      description: 'Monthly electricity consumption',
-      expense_date: '2025-08-15',
-      receipt_number: 'EB-AUG-2025',
-      vendor: 'State Electricity Board'
-    },
-    {
-      id: 103,
-      title: 'New Classroom Furniture',
-      amount: 95000,
-      category: 'Supplies & Materials',
-      description: 'Desks and chairs for grade 5',
-      expense_date: '2025-08-12',
-      receipt_number: 'FURN-2025-08-001',
-      vendor: 'Education Furniture Co'
-    },
-    {
-      id: 104,
-      title: 'Air Conditioning Maintenance',
-      amount: 35000,
-      category: 'Infrastructure',
-      description: 'Annual AC servicing and repairs',
-      expense_date: '2025-08-10',
-      receipt_number: 'AC-2025-08-001',
-      vendor: 'Cool Breeze Services'
-    },
-    {
-      id: 105,
-      title: 'School Van Insurance',
-      amount: 28000,
-      category: 'Transportation',
-      description: 'Annual insurance premium for school vehicles',
-      expense_date: '2025-08-08',
-      receipt_number: 'INS-2025-08-001',
-      vendor: 'SafeGuard Insurance'
-    },
-    {
-      id: 106,
-      title: 'WiFi Router Upgrade',
-      amount: 15000,
-      category: 'Technology',
-      description: 'New high-speed routers for campus',
-      expense_date: '2025-08-05',
-      receipt_number: 'TECH-2025-08-001',
-      vendor: 'NetSpeed Solutions'
-    },
-    {
-      id: 107,
-      title: 'Independence Day Celebration',
-      amount: 22000,
-      category: 'Events & Activities',
-      description: 'Decorations and refreshments for celebration',
-      expense_date: '2025-08-14',
-      receipt_number: 'EVENT-2025-08-001',
-      vendor: 'Party Supplies Plus'
-    },
-    {
-      id: 108,
-      title: 'Kitchen Equipment Repair',
-      amount: 18000,
-      category: 'Food & Catering',
-      description: 'Repair of industrial mixer and oven',
-      expense_date: '2025-08-06',
-      receipt_number: 'KITCHEN-2025-08-001',
-      vendor: 'Commercial Kitchen Services'
-    },
-    {
-      id: 109,
-      title: 'School Brochure Printing',
-      amount: 12000,
-      category: 'Marketing',
-      description: 'Admission brochures for new session',
-      expense_date: '2025-08-03',
-      receipt_number: 'PRINT-2025-08-001',
-      vendor: 'Quality Print House'
-    },
-    {
-      id: 110,
-      title: 'Office Supplies',
-      amount: 8000,
-      category: 'Miscellaneous',
-      description: 'Stationery and office consumables',
-      expense_date: '2025-08-02',
-      receipt_number: 'OFFICE-2025-08-001',
-      vendor: 'Office Mart'
-    },
-    // Previous data for other months
-    {
-      id: 1,
-      title: 'Monthly Teacher Salaries - December',
-      amount: 450000,
-      category: 'Staff Salaries',
-      description: 'Salary payment for all teaching staff',
-      expense_date: '2024-12-01',
-      receipt_number: 'SAL-2024-12-001',
-      vendor: 'Payroll Department'
-    },
-    {
-      id: 2,
-      title: 'Electricity Bill - November',
-      amount: 35000,
-      category: 'Utilities',
-      description: 'Monthly electricity consumption',
-      expense_date: '2024-11-28',
-      receipt_number: 'EB-NOV-2024',
-      vendor: 'State Electricity Board'
-    },
-    {
-      id: 3,
-      title: 'Science Lab Equipment',
-      amount: 85000,
-      category: 'Supplies & Materials',
-      description: 'Microscopes and lab apparatus',
-      expense_date: '2024-11-25',
-      receipt_number: 'LAB-2024-11-001',
-      vendor: 'Scientific Instruments Ltd'
-    },
-    {
-      id: 4,
-      title: 'Playground Maintenance',
-      amount: 45000,
-      category: 'Infrastructure',
-      description: 'Repair and maintenance of playground equipment',
-      expense_date: '2024-11-20',
-      receipt_number: 'MAINT-2024-11-003',
-      vendor: 'ABC Contractors'
-    },
-    {
-      id: 5,
-      title: 'School Bus Fuel',
-      amount: 25000,
-      category: 'Transportation',
-      description: 'Monthly fuel expenses for school buses',
-      expense_date: '2024-11-15',
-      receipt_number: 'FUEL-NOV-2024',
-      vendor: 'XYZ Petrol Pump'
-    },
-    {
-      id: 6,
-      title: 'Computer Lab Software',
-      amount: 75000,
-      category: 'Technology',
-      description: 'Annual software licenses',
-      expense_date: '2024-11-10',
-      receipt_number: 'TECH-2024-11-002',
-      vendor: 'Software Solutions Inc'
-    },
-    {
-      id: 7,
-      title: 'Sports Equipment',
-      amount: 30000,
-      category: 'Events & Activities',
-      description: 'Football, basketball equipment',
-      expense_date: '2024-11-05',
-      receipt_number: 'SPORTS-2024-11-001',
-      vendor: 'Sports World'
-    },
-    {
-      id: 8,
-      title: 'Cafeteria Supplies',
-      amount: 40000,
-      category: 'Food & Catering',
-      description: 'Monthly food supplies',
-      expense_date: '2024-11-03',
-      receipt_number: 'CAFE-2024-11-001',
-      vendor: 'Food Suppliers Ltd'
-    }
-  ];
 
   const loadExpenseData = async () => {
     try {
@@ -330,42 +144,14 @@ const ExpenseManagement = ({ navigation }) => {
         return;
       }
 
-      // If no data from database, temporarily use mock data for testing
-      if (!monthlyExpenses || monthlyExpenses.length === 0) {
-        console.log('⚠️ No data from database, falling back to mock data for testing...');
-        
-        // Filter mock data by selected month for demo purposes
-        const filteredMockData = mockExpenses.filter(expense => {
-          const expenseDate = new Date(expense.expense_date);
-          const monthStartDate = startOfMonth(selectedMonth);
-          const monthEndDate = endOfMonth(selectedMonth);
-          return expenseDate >= monthStartDate && expenseDate <= monthEndDate;
-        });
-        
-        console.log('📝 Using mock data:', filteredMockData.length, 'items for selected month');
-        setExpenses(filteredMockData);
-        
-        // Also set mock totals
-        const mockMonthlySum = filteredMockData.reduce((sum, expense) => sum + (expense.amount || 0), 0);
-        setMonthlyTotal(mockMonthlySum);
-        
-        const mockYearlySum = mockExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
-        setYearlyTotal(mockYearlySum);
-        
-        console.log('💰 Mock totals - Monthly:', mockMonthlySum, 'Yearly:', mockYearlySum);
-      } else {
-        setExpenses(monthlyExpenses || []);
-        console.log('✅ Set expenses state:', monthlyExpenses?.length || 0, 'items');
-      }
+      // Set expenses from database (empty array if no data)
+      setExpenses(monthlyExpenses || []);
+      console.log('✅ Set expenses state:', monthlyExpenses?.length || 0, 'items');
 
-      // Calculate monthly total (but don't override if we already set it from mock data)
+      // Calculate monthly total from database data
       const monthlySum = (monthlyExpenses || []).reduce((sum, expense) => sum + (expense.amount || 0), 0);
-      if (monthlyExpenses && monthlyExpenses.length > 0) {
-        setMonthlyTotal(monthlySum);
-        console.log('💰 Monthly total from DB:', monthlySum);
-      } else {
-        console.log('💰 Skipping DB monthly total (using mock data total instead)');
-      }
+      setMonthlyTotal(monthlySum);
+      console.log('💰 Monthly total from DB:', monthlySum);
 
       // Get yearly expenses
       const currentYear = selectedMonth.getFullYear();
@@ -380,41 +166,13 @@ const ExpenseManagement = ({ navigation }) => {
 
       if (yearlyError) {
         console.error('❌ Error fetching yearly expenses:', yearlyError);
+        setYearlyExpenses([]);
+        setYearlyTotal(0);
       } else {
         const yearlySum = (yearlyExpenses || []).reduce((sum, expense) => sum + (expense.amount || 0), 0);
         setYearlyTotal(yearlySum);
         setYearlyExpenses(yearlyExpenses || []);
         console.log('📊 Yearly total:', yearlySum, 'from', yearlyExpenses?.length || 0, 'expenses');
-        
-        // If no yearly data from database, use mock data for yearly view
-        if (!yearlyExpenses || yearlyExpenses.length === 0) {
-          console.log('⚠️ No yearly data from database, using mock data for yearly view...');
-          const yearlyMockData = mockExpenses.filter(expense => {
-            const expenseDate = new Date(expense.expense_date);
-            return expenseDate.getFullYear() === currentYear;
-          });
-          setYearlyExpenses(yearlyMockData);
-          const mockYearlySum = yearlyMockData.reduce((sum, expense) => sum + (expense.amount || 0), 0);
-          setYearlyTotal(mockYearlySum);
-          console.log('📝 Using mock yearly data:', yearlyMockData.length, 'items, total:', mockYearlySum);
-        }
-      }
-
-      // Determine which expenses data to use for calculations
-      let expensesForCalculation = monthlyExpenses;
-      let monthlyTotalForCalculation = monthlySum;
-      
-      // If we're using mock data, use the filtered mock data for calculations
-      if (!monthlyExpenses || monthlyExpenses.length === 0) {
-        const filteredMockData = mockExpenses.filter(expense => {
-          const expenseDate = new Date(expense.expense_date);
-          const monthStartDate = startOfMonth(selectedMonth);
-          const monthEndDate = endOfMonth(selectedMonth);
-          return expenseDate >= monthStartDate && expenseDate <= monthEndDate;
-        });
-        expensesForCalculation = filteredMockData;
-        monthlyTotalForCalculation = filteredMockData.reduce((sum, expense) => sum + (expense.amount || 0), 0);
-        console.log('📊 Using mock data for calculations:', expensesForCalculation.length, 'expenses, total:', monthlyTotalForCalculation);
       }
 
       // Wait for categories to be loaded before calculating breakdown
@@ -423,16 +181,17 @@ const ExpenseManagement = ({ navigation }) => {
         return;
       }
 
-      // Calculate category-wise breakdown
-      console.log('📊 Calculating category breakdown...');
+      // Calculate category-wise breakdown for monthly data
+      console.log('📊 Calculating monthly category breakdown...');
+      const monthlyTotalForCalculation = monthlySum;
       const categoryBreakdown = expenseCategories.map(category => {
-        const categoryExpenses = (expensesForCalculation || []).filter(exp => exp.category === category.name);
+        const categoryExpenses = (monthlyExpenses || []).filter(exp => exp.category === category.name);
         const categoryTotal = categoryExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
         
         // Use category's monthly_budget from database
         const categoryBudget = category.monthly_budget || 0;
         
-        console.log(`📊 Category ${category.name}:`, {
+        console.log(`📊 Monthly Category ${category.name}:`, {
           expenses: categoryExpenses.length,
           total: categoryTotal,
           budget: categoryBudget
@@ -451,7 +210,7 @@ const ExpenseManagement = ({ navigation }) => {
       });
 
       setExpenseStats(categoryBreakdown);
-      console.log('📊 Category stats set:', categoryBreakdown.length, 'categories');
+      console.log('📊 Monthly category stats set:', categoryBreakdown.length, 'categories');
 
       // Calculate budget data for pie chart
       const pieChartData = categoryBreakdown
@@ -469,20 +228,10 @@ const ExpenseManagement = ({ navigation }) => {
       
       // Calculate yearly category breakdown
       console.log('📊 Calculating yearly category breakdown...');
-      let yearlyExpensesForCalculation = yearlyExpenses || [];
-      
-      // If using mock data for yearly, filter mock expenses by year
-      if (!yearlyExpenses || yearlyExpenses.length === 0) {
-        yearlyExpensesForCalculation = mockExpenses.filter(expense => {
-          const expenseDate = new Date(expense.expense_date);
-          return expenseDate.getFullYear() === currentYear;
-        });
-      }
-      
-      const yearlyTotalForCalculation = yearlyExpensesForCalculation.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+      const yearlyTotalForCalculation = (yearlyExpenses || []).reduce((sum, expense) => sum + (expense.amount || 0), 0);
       
       const yearlyCategoryBreakdown = expenseCategories.map(category => {
-        const categoryExpenses = yearlyExpensesForCalculation.filter(exp => exp.category === category.name);
+        const categoryExpenses = (yearlyExpenses || []).filter(exp => exp.category === category.name);
         const categoryTotal = categoryExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
         
         // Use annual budget = monthly budget * 12
@@ -533,8 +282,28 @@ const ExpenseManagement = ({ navigation }) => {
         if (categoriesError) {
           console.error('❌ Error fetching categories on mount:', categoriesError);
         } else if (dbCategories && dbCategories.length > 0) {
-          setExpenseCategories(dbCategories);
-          console.log('✅ Categories loaded on mount:', dbCategories.length, 'categories');
+          // Add default UI fields for categories loaded from database
+          const defaultCategoryMappings = {
+            'Staff Salaries': { icon: 'people', color: '#2196F3' },
+            'Utilities': { icon: 'flash', color: '#FF9800' },
+            'Supplies & Materials': { icon: 'library', color: '#4CAF50' },
+            'Infrastructure': { icon: 'build', color: '#9C27B0' },
+            'Transportation': { icon: 'car', color: '#F44336' },
+            'Food & Catering': { icon: 'restaurant', color: '#FF5722' },
+            'Events & Activities': { icon: 'calendar', color: '#607D8B' },
+            'Technology': { icon: 'desktop', color: '#795548' },
+            'Marketing': { icon: 'megaphone', color: '#E91E63' },
+            'Miscellaneous': { icon: 'ellipsis-horizontal', color: '#009688' }
+          };
+          
+          const categoriesWithUIFields = dbCategories.map(category => ({
+            ...category,
+            icon: category.icon || defaultCategoryMappings[category.name]?.icon || 'briefcase',
+            color: category.color || defaultCategoryMappings[category.name]?.color || '#2196F3'
+          }));
+          
+          setExpenseCategories(categoriesWithUIFields);
+          console.log('✅ Categories loaded on mount:', categoriesWithUIFields.length, 'categories');
         } else {
           console.log('⚠️ No categories found on mount, creating defaults...');
           await createDefaultCategories();
@@ -565,9 +334,7 @@ const ExpenseManagement = ({ navigation }) => {
       amount: '',
       category: 'Staff Salaries',
       description: '',
-      date: format(new Date(), 'yyyy-MM-dd'),
-      receipt_number: '',
-      vendor: ''
+      date: format(new Date(), 'yyyy-MM-dd')
     });
     setEditExpenseIndex(null);
     setIsExpenseModalVisible(true);
@@ -579,9 +346,7 @@ const ExpenseManagement = ({ navigation }) => {
       amount: expense.amount.toString(),
       category: expense.category,
       description: expense.description || '',
-      date: expense.expense_date,
-      receipt_number: expense.receipt_number || '',
-      vendor: expense.vendor || ''
+      date: expense.expense_date
     });
     setEditExpenseIndex(index);
     setIsExpenseModalVisible(true);
@@ -719,39 +484,24 @@ const ExpenseManagement = ({ navigation }) => {
     try {
       const createdCategories = [];
       for (const category of defaultCategories) {
-        // First, try with all fields
-        let { data, error } = await dbHelpers.createExpenseCategory(category);
+        // Create category with only the columns that exist in the database
+        const basicCategory = {
+          name: category.name,
+          monthly_budget: category.monthly_budget
+        };
         
-        // If error due to missing columns, try with minimal fields
-        if (error && error.message && error.message.includes('could not find')) {
-          console.warn('Database missing some columns, trying with basic fields only:', error.message);
-          const basicCategory = {
-            name: category.name,
-            monthly_budget: category.monthly_budget
-          };
-          
-          const result = await dbHelpers.createExpenseCategory(basicCategory);
-          data = result.data;
-          error = result.error;
-          
-          // Add missing fields to local data for UI consistency
-          if (data) {
-            data.icon = category.icon;
-            data.color = category.color;
-          }
-        }
+        const { data, error } = await dbHelpers.createExpenseCategory(basicCategory);
         
         if (error) {
           console.error('Error creating default category:', category.name, error);
         } else if (data) {
-          // Ensure all required UI fields are present
-          const categoryWithDefaults = {
+          // Add UI-only fields that don't exist in database for local state
+          const categoryWithUIFields = {
             ...data,
-            icon: data.icon || category.icon || 'briefcase',
-            color: data.color || category.color || '#2196F3',
-            monthly_budget: data.monthly_budget || category.monthly_budget || 0
+            icon: category.icon,
+            color: category.color
           };
-          createdCategories.push(categoryWithDefaults);
+          createdCategories.push(categoryWithUIFields);
         }
       }
       
@@ -759,13 +509,13 @@ const ExpenseManagement = ({ navigation }) => {
         setExpenseCategories(createdCategories);
         console.log('✅ Created default categories:', createdCategories.length);
       } else {
-        // Fallback: use mock categories if database creation fails
+        // Fallback: use local categories for UI if database creation fails
         console.warn('⚠️ Database category creation failed, using local categories for UI');
         setExpenseCategories(defaultCategories.map(cat => ({...cat, id: Date.now() + Math.random()})));
       }
     } catch (error) {
       console.error('Error creating default categories:', error);
-      // Fallback: use mock categories if everything fails
+      // Fallback: use local categories for UI if everything fails
       console.warn('⚠️ Using fallback local categories due to database error');
       setExpenseCategories(defaultCategories.map(cat => ({...cat, id: Date.now() + Math.random()})));
     }
@@ -807,32 +557,41 @@ const ExpenseManagement = ({ navigation }) => {
     }
     
     try {
-      const categoryData = {
+      // Only include fields that exist in the database schema
+      const databaseCategoryData = {
         name: categoryInput.name,
-        icon: categoryInput.icon,
-        color: categoryInput.color,
         monthly_budget: budget
       };
       
       if (editCategoryIndex !== null) {
         // Update existing category
         const categoryToUpdate = expenseCategories[editCategoryIndex];
-        const { error } = await dbHelpers.updateExpenseCategory(categoryToUpdate.name, categoryData);
+        const { error } = await dbHelpers.updateExpenseCategory(categoryToUpdate.name, databaseCategoryData);
         
         if (error) throw error;
         
-        // Update local state
+        // Update local state with all UI fields
         const updatedCategories = [...expenseCategories];
-        updatedCategories[editCategoryIndex] = { ...categoryToUpdate, ...categoryData };
+        updatedCategories[editCategoryIndex] = { 
+          ...categoryToUpdate, 
+          ...databaseCategoryData,
+          icon: categoryInput.icon,
+          color: categoryInput.color
+        };
         setExpenseCategories(updatedCategories);
       } else {
         // Create new category
-        const { data, error } = await dbHelpers.createExpenseCategory(categoryData);
+        const { data, error } = await dbHelpers.createExpenseCategory(databaseCategoryData);
         
         if (error) throw error;
         
-        // Add to local state
-        setExpenseCategories([...expenseCategories, data]);
+        // Add to local state with UI fields
+        const categoryWithUIFields = {
+          ...data,
+          icon: categoryInput.icon,
+          color: categoryInput.color
+        };
+        setExpenseCategories([...expenseCategories, categoryWithUIFields]);
       }
       
       setIsCategoryModalVisible(false);
@@ -981,144 +740,6 @@ const ExpenseManagement = ({ navigation }) => {
         </View>
 
 
-        {/* Category-wise Budget Analysis */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.budgetHeaderLeft}>
-              <Text style={styles.sectionTitle}>
-                {activeTab === 'monthly' ? 'Monthly Budget Analysis' : 'Yearly Budget Analysis'}
-              </Text>
-              <Text style={styles.sectionSubtitle}>
-                {(activeTab === 'monthly' ? expenseStats : yearlyExpenseStats)
-                  .filter(cat => cat.amount > 0).length} active categories
-              </Text>
-            </View>
-            <View style={styles.budgetHeaderRight}>
-              <TouchableOpacity 
-                style={styles.manageBudgetButton} 
-                onPress={openAddCategoryModal}
-              >
-                <Ionicons name="add" size={16} color="#4CAF50" />
-                <Text style={[styles.manageBudgetText, {color: '#4CAF50'}]}>Add</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.manageBudgetButton} 
-                onPress={openBudgetModal}
-              >
-                <Ionicons name="settings-outline" size={16} color="#2196F3" />
-                <Text style={styles.manageBudgetText}>Manage</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-          
-        <View style={styles.budgetCardsGrid}>
-            {(activeTab === 'monthly' ? expenseStats : yearlyExpenseStats)
-              .sort((a, b) => b.amount - a.amount) // Sort by amount descending
-              .map((category, index) => {
-                const isOverBudget = category.budgetUsage > 100;
-                const isNearLimit = category.budgetUsage > 80;
-                const remaining = Math.max(0, category.budget - category.amount);
-                
-                return (
-                  <View key={index} style={[
-                    styles.budgetCard,
-                    isOverBudget && styles.budgetCardOverBudget,
-                    isNearLimit && !isOverBudget && styles.budgetCardNearLimit
-                  ]}>
-                    <View style={styles.budgetCardHeader}>
-                      <View style={[styles.categoryIcon, { backgroundColor: category.color }]}>
-                        <Ionicons name={category.icon} size={18} color="#fff" />
-                      </View>
-                      
-                      <View style={styles.cardActions}>
-                        {isOverBudget && (
-                          <View style={styles.warningBadge}>
-                            <Ionicons name="warning" size={12} color="#fff" />
-                          </View>
-                        )}
-                        
-                        <TouchableOpacity 
-                          onPress={() => openEditCategoryModal(
-                            expenseCategories.find(cat => cat.name === category.name), 
-                            expenseCategories.findIndex(cat => cat.name === category.name)
-                          )}
-                          style={styles.cardEditButton}
-                        >
-                          <Ionicons name="create-outline" size={14} color="#666" />
-                        </TouchableOpacity>
-                        
-                        <TouchableOpacity 
-                          onPress={() => deleteCategory(category.name)}
-                          style={styles.cardDeleteButton}
-                        >
-                          <Ionicons name="trash-outline" size={14} color="#F44336" />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                    
-                    <Text style={styles.categoryName} numberOfLines={2}>
-                      {category.name}
-                    </Text>
-                    
-                    <View style={styles.amountSection}>
-                      <Text style={styles.categoryAmount}>
-                        ₹{(category.amount / 1000).toFixed(0)}K
-                      </Text>
-                      <Text style={styles.categoryBudget}>
-                        of ₹{(category.budget / 1000).toFixed(0)}K
-                      </Text>
-                    </View>
-                    
-                    <View style={styles.progressContainer}>
-                      <View style={styles.progressBar}>
-                        <View 
-                          style={[
-                            styles.progressFill, 
-                            { 
-                              width: `${Math.min(100, category.budgetUsage)}%`,
-                              backgroundColor: isOverBudget 
-                                ? '#F44336' 
-                                : isNearLimit 
-                                  ? '#FF9800' 
-                                  : category.color
-                            }
-                          ]} 
-                        />
-                      </View>
-                      
-                      <View style={styles.budgetStats}>
-                        <Text style={[
-                          styles.budgetPercentage,
-                          { 
-                            color: isOverBudget 
-                              ? '#F44336' 
-                              : isNearLimit 
-                                ? '#FF9800' 
-                                : '#666' 
-                          }
-                        ]}>
-                          {category.budgetUsage}%
-                        </Text>
-                        
-                        {!isOverBudget && (
-                          <Text style={styles.remainingAmount}>
-                            ₹{(remaining / 1000).toFixed(0)}K left
-                          </Text>
-                        )}
-                        
-                        {isOverBudget && (
-                          <Text style={styles.overBudgetAmount}>
-                            ₹{((category.amount - category.budget) / 1000).toFixed(0)}K over
-                          </Text>
-                        )}
-                      </View>
-                    </View>
-                  </View>
-                );
-              })}
-          </View>
-        </View>
 
         {/* Recent Expenses */}
         <View style={[styles.section, styles.recentExpensesSection]}>
@@ -1206,6 +827,24 @@ const ExpenseManagement = ({ navigation }) => {
         />
       )}
 
+      {/* Expense Date Picker Modal */}
+      {showExpenseDatePicker && Platform.OS !== 'web' && (
+        <DateTimePicker
+          value={new Date(expenseInput.date)}
+          mode="date"
+          display="default"
+          onChange={(event, selectedDate) => {
+            setShowExpenseDatePicker(false);
+            if (selectedDate) {
+              setExpenseInput({ 
+                ...expenseInput, 
+                date: format(selectedDate, 'yyyy-MM-dd') 
+              });
+            }
+          }}
+        />
+      )}
+
       {/* Add/Edit Expense Modal */}
       <Modal
         visible={isExpenseModalVisible}
@@ -1236,7 +875,7 @@ const ExpenseManagement = ({ navigation }) => {
               />
 
               {/* Category Picker */}
-              <Text style={styles.inputLabel}>Category *</Text>
+              <Text style={styles.inputLabel}>Category</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryPicker}>
                 {expenseCategories.map((category, index) => (
                   <TouchableOpacity
@@ -1262,28 +901,17 @@ const ExpenseManagement = ({ navigation }) => {
                 ))}
               </ScrollView>
 
-              <TextInput
-                placeholder="Description"
-                value={expenseInput.description}
-                onChangeText={text => setExpenseInput({ ...expenseInput, description: text })}
-                style={[styles.input, styles.textArea]}
-                multiline
-                numberOfLines={3}
-              />
-
-              <TextInput
-                placeholder="Receipt Number"
-                value={expenseInput.receipt_number}
-                onChangeText={text => setExpenseInput({ ...expenseInput, receipt_number: text })}
-                style={styles.input}
-              />
-
-              <TextInput
-                placeholder="Vendor/Supplier"
-                value={expenseInput.vendor}
-                onChangeText={text => setExpenseInput({ ...expenseInput, vendor: text })}
-                style={styles.input}
-              />
+              {/* Date Picker */}
+              <Text style={styles.inputLabel}>Expense Date *</Text>
+              <TouchableOpacity 
+                style={styles.datePickerButton}
+                onPress={() => setShowExpenseDatePicker(true)}
+              >
+                <Ionicons name="calendar" size={20} color="#2196F3" />
+                <Text style={styles.datePickerText}>
+                  {format(new Date(expenseInput.date), 'MMM dd, yyyy')}
+                </Text>
+              </TouchableOpacity>
 
               <View style={styles.modalButtons}>
                 <TouchableOpacity 
@@ -2074,6 +1702,24 @@ const styles = StyleSheet.create({
   // Special style for Recent Expenses section
   recentExpensesSection: {
     marginBottom: 60,
+  },
+  
+  // Date Picker Button Styles
+  datePickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    backgroundColor: '#fafafa',
+    marginHorizontal: 20,
+  },
+  datePickerText: {
+    fontSize: 15,
+    color: '#333',
+    marginLeft: 8,
   },
 });
 

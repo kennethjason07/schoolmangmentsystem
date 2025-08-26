@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, TextInput, Button, Alert, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, TextInput, Button, Alert, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -59,6 +59,9 @@ const SubjectsTimetable = ({ route }) => {
   const [periodSettings, setPeriodSettings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [copiedDayData, setCopiedDayData] = useState(null);
+  const [copiedSourceDay, setCopiedSourceDay] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -130,17 +133,19 @@ const SubjectsTimetable = ({ route }) => {
       };
 
       timetableData?.forEach(period => {
-        const dayName = getDayName(period.day_of_week);
+        // day_of_week is always a string according to schema
+        const dayName = period.day_of_week;
+        
         if (grouped[dayName]) {
           grouped[dayName].push({
             id: period.id,
-            type: period.period_type || 'subject',
+            type: 'subject', // Schema doesn't have period_type, all entries are subjects
             subjectId: period.subject_id,
             subject: period.subjects,
             startTime: period.start_time,
             endTime: period.end_time,
-            label: period.label || period.subjects?.name,
-            room: period.room_number
+            label: period.subjects?.name, // Use subject name as label
+            room: null // Schema doesn't have room_number column
           });
         }
       });
@@ -150,7 +155,12 @@ const SubjectsTimetable = ({ route }) => {
         grouped[day].sort((a, b) => a.startTime.localeCompare(b.startTime));
       });
 
-      setTimetables(prev => ({ ...prev, [classId]: grouped }));
+      // Force state update to ensure UI refreshes
+      setTimetables(prev => {
+        const newState = { ...prev, [classId]: grouped };
+        console.log('Updated timetables state for class:', classId, newState[classId]);
+        return newState;
+      });
     } catch (err) {
       console.error('Error fetching timetable:', err);
       setError('Failed to load timetable for selected class.');
@@ -805,6 +815,116 @@ const SubjectsTimetable = ({ route }) => {
     }
   };
 
+  // Handler to copy day timetable
+  const copyDayTimetable = (dayToCopy) => {
+    const dayData = timetables[selectedClass]?.[dayToCopy] || [];
+    if (dayData.length === 0) {
+      Alert.alert('No Data', `No periods found for ${dayToCopy} to copy.`);
+      return;
+    }
+    
+    // Store the copied data (deep copy to avoid reference issues)
+    const copiedData = dayData.map(period => ({
+      subjectId: period.subjectId,
+      subject: period.subject,
+      startTime: period.startTime,
+      endTime: period.endTime,
+      label: period.label,
+      room: period.room,
+      type: period.type || 'subject'
+    }));
+    
+    setCopiedDayData(copiedData);
+    setCopiedSourceDay(dayToCopy);
+    setCopyDayModal({ visible: false });
+    
+    Alert.alert('Success', `${dayToCopy} timetable copied! You can now paste it to another day.`);
+  };
+
+  // Handler to paste copied day timetable
+  const pasteDayTimetable = async () => {
+    if (!copiedDayData || copiedDayData.length === 0) {
+      Alert.alert('No Data', 'No timetable data copied. Please copy a day first.');
+      return;
+    }
+
+    Alert.alert(
+      'Paste Timetable',
+      `This will replace all periods in ${selectedDay} with periods from ${copiedSourceDay}. Continue?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Paste',
+          style: 'default',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              
+              // First, clear existing periods for the current day
+              const existingPeriods = timetables[selectedClass]?.[selectedDay] || [];
+              for (const period of existingPeriods) {
+                await dbHelpers.deleteTimetableEntry(period.id);
+              }
+
+              // Get current academic year
+              const currentYear = new Date().getFullYear();
+              const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
+
+              // Create new periods from copied data
+              for (const copiedPeriod of copiedDayData) {
+                // Get teacher for the subject
+                let teacherId = null;
+                const { data: teacherSubject, error: teacherError } = await supabase
+                  .from('teacher_subjects')
+                  .select('teacher_id')
+                  .eq('subject_id', copiedPeriod.subjectId)
+                  .single();
+
+                if (!teacherError && teacherSubject) {
+                  teacherId = teacherSubject.teacher_id;
+                }
+
+                // Generate period number based on start time
+                const periodNumber = Math.floor((parseInt(copiedPeriod.startTime.split(':')[0]) - 8) * 2) + 1;
+
+                const timetableData = {
+                  class_id: selectedClass,
+                  subject_id: copiedPeriod.subjectId,
+                  teacher_id: teacherId,
+                  day_of_week: selectedDay,
+                  period_number: periodNumber,
+                  start_time: copiedPeriod.startTime,
+                  end_time: copiedPeriod.endTime,
+                  academic_year: academicYear
+                };
+
+                await supabase
+                  .from(TABLES.TIMETABLE)
+                  .insert([timetableData]);
+              }
+
+              // Refresh the timetable data to update UI
+              await fetchTimetableForClass(selectedClass);
+              
+              Alert.alert('Success', `${copiedSourceDay} timetable pasted to ${selectedDay} successfully!`);
+              
+              // Force a small delay to ensure state update is complete
+              setTimeout(() => {
+                // This ensures the UI re-renders with the updated data
+                setSelectedDay(selectedDay);
+              }, 100);
+            } catch (error) {
+              console.error('Error pasting timetable:', error);
+              Alert.alert('Error', 'Failed to paste timetable: ' + (error.message || 'Unknown error'));
+            } finally {
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
   // Handler to open copy day modal
   const openCopyDayModal = () => {
     setCopyDayModal({ visible: true });
@@ -908,6 +1028,39 @@ const SubjectsTimetable = ({ route }) => {
     }
   };
 
+  // Pull-to-refresh handler
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      // Fetch classes
+      const { data: classData, error: classError } = await dbHelpers.getClasses();
+      if (!classError) {
+        setClasses(classData || []);
+      }
+
+      // Fetch teachers
+      const { data: teacherData, error: teacherError } = await dbHelpers.getTeachers();
+      if (!teacherError) {
+        setTeachers(teacherData || []);
+      }
+
+      // Refresh subjects
+      await refreshSubjects();
+
+      // Refresh period settings
+      await fetchPeriodSettings();
+
+      // Refresh timetable for the selected class
+      if (selectedClass) {
+        await fetchTimetableForClass(selectedClass);
+      }
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -944,6 +1097,14 @@ const SubjectsTimetable = ({ route }) => {
             keyExtractor={item => item.id}
             style={{ width: '100%', marginTop: 16 }}
             contentContainerStyle={{ paddingBottom: 100 }}
+            refreshControl={
+              <RefreshControl 
+                refreshing={refreshing} 
+                onRefresh={onRefresh} 
+                colors={['#4CAF50']}
+                tintColor="#4CAF50"
+              />
+            }
             renderItem={({ item }) => (
               <View style={styles.subjectRow}>
                 <View style={{ flex: 1 }}>
@@ -1019,6 +1180,14 @@ const SubjectsTimetable = ({ route }) => {
           style={styles.timetableContainer} 
           contentContainerStyle={styles.timetableScrollContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl 
+              refreshing={refreshing} 
+              onRefresh={onRefresh} 
+              colors={['#4CAF50']}
+              tintColor="#4CAF50"
+            />
+          }
         >
           {/* Class Selector */}
           <View style={styles.classSelector}>
@@ -1059,11 +1228,6 @@ const SubjectsTimetable = ({ route }) => {
                     <Text style={[styles.dayTabText, isSelected && styles.selectedDayTabText]}>
                       {day.substring(0, 3)}
                     </Text>
-                    {dayPeriods.length > 0 && (
-                      <View style={styles.periodIndicator}>
-                        <Text style={styles.periodCount}>{dayPeriods.length}</Text>
-                      </View>
-                    )}
                   </TouchableOpacity>
                 );
               })}
@@ -1083,6 +1247,15 @@ const SubjectsTimetable = ({ route }) => {
                     <Ionicons name="copy" size={16} color="#2196F3" />
                     <Text style={styles.copyDayText}>Copy Day</Text>
                   </TouchableOpacity>
+                  {copiedDayData && copiedDayData.length > 0 && (
+                    <TouchableOpacity 
+                      style={styles.pasteDayButton}
+                      onPress={() => pasteDayTimetable()}
+                    >
+                      <Ionicons name="clipboard" size={16} color="#4CAF50" />
+                      <Text style={styles.pasteDayText}>Paste</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
               
@@ -1113,6 +1286,7 @@ const SubjectsTimetable = ({ route }) => {
                     <View style={styles.subjectSelector}>
                       <View style={styles.subjectPickerWrapper}>
                         <Picker
+                          key={`${selectedDay}-${slot.startTime}-${existingPeriod?.subjectId || 'empty'}`}
                           selectedValue={existingPeriod?.subjectId || ''}
                           style={styles.subjectPicker}
                           onValueChange={(subjectId) => handleSubjectChange(selectedDay, slot, subjectId)}
@@ -1361,6 +1535,60 @@ const SubjectsTimetable = ({ route }) => {
                 <Text style={styles.saveButtonText}>Save Settings</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Copy Day Modal */}
+      <Modal visible={copyDayModal.visible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Copy Day Timetable</Text>
+            <Text style={styles.modalSubtitle}>Select a day to copy its timetable</Text>
+            
+            <ScrollView style={styles.copyDayList}>
+              {days.map(day => {
+                const dayPeriods = timetables[selectedClass]?.[day] || [];
+                const periodCount = dayPeriods.length;
+                
+                return (
+                  <TouchableOpacity
+                    key={day}
+                    style={[
+                      styles.copyDayOption,
+                      periodCount === 0 && styles.copyDayOptionDisabled
+                    ]}
+                    onPress={() => periodCount > 0 ? copyDayTimetable(day) : null}
+                    disabled={periodCount === 0}
+                  >
+                    <View style={styles.copyDayInfo}>
+                      <Text style={[
+                        styles.copyDayName,
+                        periodCount === 0 && styles.copyDayNameDisabled
+                      ]}>
+                        {day}
+                      </Text>
+                      <Text style={[
+                        styles.copyDayPeriods,
+                        periodCount === 0 && styles.copyDayPeriodsDisabled
+                      ]}>
+                        {periodCount} {periodCount === 1 ? 'period' : 'periods'}
+                      </Text>
+                    </View>
+                    {periodCount > 0 && (
+                      <Ionicons name="chevron-forward" size={20} color="#2196F3" />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => setCopyDayModal({ visible: false })}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1674,22 +1902,6 @@ const styles = StyleSheet.create({
   selectedDayTabText: {
     color: '#fff',
   },
-  periodIndicator: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    backgroundColor: '#28a745',
-    borderRadius: 8,
-    minWidth: 16,
-    height: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  periodCount: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#fff',
-  },
   periodsList: {
     flex: 1,
     paddingTop: 16,
@@ -1902,6 +2114,64 @@ const styles = StyleSheet.create({
     color: '#2196F3',
     marginLeft: 4,
     fontWeight: '500',
+  },
+  pasteDayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#e8f5e8',
+    borderRadius: 16,
+    marginLeft: 8,
+  },
+  pasteDayText: {
+    fontSize: 11,
+    color: '#4CAF50',
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  copyDayList: {
+    maxHeight: 300,
+    marginBottom: 16,
+  },
+  copyDayOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  copyDayOptionDisabled: {
+    backgroundColor: '#f8f9fa',
+    borderColor: '#e9ecef',
+    opacity: 0.6,
+  },
+  copyDayInfo: {
+    flex: 1,
+  },
+  copyDayName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#495057',
+    marginBottom: 2,
+  },
+  copyDayNameDisabled: {
+    color: '#adb5bd',
+  },
+  copyDayPeriods: {
+    fontSize: 14,
+    color: '#6c757d',
+  },
+  copyDayPeriodsDisabled: {
+    color: '#adb5bd',
   },
   largeModalContent: {
     width: '90%',

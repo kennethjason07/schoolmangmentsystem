@@ -135,7 +135,7 @@ const MarksEntry = () => {
         Object.entries(subjectMarks).forEach(([subjectId, marksObtained]) => {
           if (marksObtained && !isNaN(parseFloat(marksObtained))) {
             const marksValue = parseFloat(marksObtained);
-            const maxMarks = 100;
+            const maxMarks = exam.max_marks || 100; // Use exam's max_marks
             const percentage = (marksValue / maxMarks) * 100;
             let grade = 'F';
             if (percentage >= 90) grade = 'A+';
@@ -150,7 +150,7 @@ const MarksEntry = () => {
               subject_id: subjectId,
               marks_obtained: marksValue,
               grade: grade,
-              max_marks: maxMarks,
+              max_marks: maxMarks, // Store exam's max_marks
               remarks: null
             });
           }

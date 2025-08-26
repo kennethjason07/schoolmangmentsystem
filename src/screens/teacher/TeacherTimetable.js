@@ -211,7 +211,18 @@ const TeacherTimetable = ({ navigation }) => {
     <View style={styles.container}>
       <Header title="My Timetable" showBack={true} />
       
-      <ScrollView style={styles.timetableContainer} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.timetableContainer} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh} 
+            colors={['#4CAF50']}
+            tintColor="#4CAF50"
+          />
+        }
+      >
         {/* Class Selector */}
         <View style={styles.classSelector}>
           <View style={styles.selectorHeader}>
@@ -363,17 +374,6 @@ const TeacherTimetable = ({ navigation }) => {
         </ScrollView>
       </ScrollView>
       
-      {/* Summary Bar */}
-      <View style={styles.summaryBar}>
-        <View style={styles.summaryItem}>
-          <Ionicons name="school" size={16} color="#666" />
-          <Text style={styles.summaryText}>{classes.length} Classes</Text>
-        </View>
-        <View style={styles.summaryItem}>
-          <Ionicons name="book" size={16} color="#666" />
-          <Text style={styles.summaryText}>{subjects.length} Subjects</Text>
-        </View>
-      </View>
     </View>
   );
 };
@@ -512,7 +512,7 @@ const styles = StyleSheet.create({
   },
   periodsContainer: {
     paddingHorizontal: 16,
-    paddingBottom: 180,
+    paddingBottom: 40,
   },
   periodsHeader: {
     marginBottom: 16,
@@ -578,31 +578,6 @@ const styles = StyleSheet.create({
   periodTime: {
     fontSize: 14,
     color: '#6c757d',
-    fontWeight: '500',
-  },
-  summaryBar: {
-    backgroundColor: '#fff',
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    paddingBottom: 30,
-    borderTopWidth: 1,
-    borderTopColor: '#e9ecef',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    justifyContent: 'space-around',
-  },
-  summaryItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  summaryText: {
-    fontSize: 14,
-    color: '#6c757d',
-    marginLeft: 6,
     fontWeight: '500',
   },
 });

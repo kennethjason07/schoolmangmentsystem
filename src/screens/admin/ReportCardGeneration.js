@@ -74,7 +74,15 @@ const ReportCardGeneration = ({ navigation }) => {
       const { data, error } = await supabase
         .from('exams')
         .select(`
-          *,
+          id,
+          name,
+          class_id,
+          academic_year,
+          start_date,
+          end_date,
+          remarks,
+          max_marks,
+          created_at,
           classes:class_id (
             id,
             class_name,
@@ -130,7 +138,17 @@ const ReportCardGeneration = ({ navigation }) => {
 
   const getFilteredExams = () => {
     if (!selectedClass) return [];
-    return exams.filter(exam => exam.class_id === selectedClass);
+    
+    // Filter exams by class_id, ensuring proper type comparison
+    const filteredExams = exams.filter(exam => {
+      // Handle both string and number types for IDs
+      const examClassId = exam.class_id?.toString();
+      const selectedClassId = selectedClass?.toString();
+      
+      return examClassId === selectedClassId;
+    });
+    
+    return filteredExams;
   };
 
   const handleStudentPress = (student) => {
@@ -238,24 +256,36 @@ const ReportCardGeneration = ({ navigation }) => {
 
           {/* Exam Selection */}
           <View style={styles.filterContainer}>
-            <Text style={styles.filterLabel}>Exam</Text>
-            <View style={styles.pickerContainer}>
+            <Text style={styles.filterLabel}>
+              Exam {selectedClass && getFilteredExams().length > 0 && (
+                <Text style={styles.filterCount}>({getFilteredExams().length} available)</Text>
+              )}
+            </Text>
+            <View style={[styles.pickerContainer, !selectedClass && styles.pickerDisabled]}>
               <Picker
                 selectedValue={selectedExam}
                 style={styles.picker}
                 onValueChange={setSelectedExam}
                 enabled={!!selectedClass}
               >
-                <Picker.Item label="Select Exam" value="" />
+                <Picker.Item 
+                  label={!selectedClass ? "Select a class first" : "Select Exam"} 
+                  value="" 
+                />
                 {getFilteredExams().map(exam => (
                   <Picker.Item
                     key={exam.id}
-                    label={exam.name}
+                    label={`${exam.name} (${exam.classes?.class_name || 'Unknown Class'})`}
                     value={exam.id}
                   />
                 ))}
               </Picker>
             </View>
+            {selectedClass && getFilteredExams().length === 0 && (
+              <Text style={styles.noExamsText}>
+                ⚠️ No exams found for this class. Please create an exam first.
+              </Text>
+            )}
           </View>
         </View>
 
@@ -553,6 +583,23 @@ const styles = StyleSheet.create({
     color: '#1976d2',
     textAlign: 'left',
     lineHeight: 20,
+  },
+  filterCount: {
+    fontSize: 12,
+    color: '#4CAF50',
+    fontWeight: '500',
+  },
+  pickerDisabled: {
+    backgroundColor: '#f0f0f0',
+    borderColor: '#ccc',
+    opacity: 0.6,
+  },
+  noExamsText: {
+    fontSize: 12,
+    color: '#FF9800',
+    marginTop: 8,
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
 });
 

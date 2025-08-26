@@ -93,7 +93,8 @@ const ExamsMarks = () => {
     start_date: '',
     end_date: '',
     selected_classes: [], // Changed from class_id to selected_classes array
-    description: ''
+    description: '',
+    max_marks: '100' // Default maximum marks
   });
   const [marksForm, setMarksForm] = useState({});
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -119,6 +120,7 @@ const ExamsMarks = () => {
           start_date, 
           end_date, 
           remarks, 
+          max_marks,
           created_at,
           classes!inner(
             id,
@@ -210,7 +212,8 @@ const ExamsMarks = () => {
         academic_year: examForm.academic_year || '2024-25',
         start_date: examForm.start_date,
         end_date: examForm.end_date,
-        remarks: examForm.description || examForm.remarks
+        remarks: examForm.description || examForm.remarks,
+        max_marks: parseInt(examForm.max_marks) || 100
       }));
 
       const { error } = await supabase
@@ -232,7 +235,8 @@ const ExamsMarks = () => {
         academic_year: '',
         start_date: '',
         end_date: '',
-        description: ''
+        description: '',
+        max_marks: '100'
       });
       loadAllData();
 
@@ -264,7 +268,8 @@ const ExamsMarks = () => {
         academic_year: examForm.academic_year || '2024-25',
         start_date: examForm.start_date,
         end_date: examForm.end_date || examForm.start_date,
-        remarks: examForm.description || null
+        remarks: examForm.description || null,
+        max_marks: parseInt(examForm.max_marks) || 100
       }));
 
       const { error: insertError } = await supabase
@@ -392,7 +397,8 @@ const ExamsMarks = () => {
       start_date: exam.start_date,
       end_date: exam.end_date,
       selected_classes: selectedClassIds,
-      description: exam.description || exam.remarks || ''
+      description: exam.description || exam.remarks || '',
+      max_marks: exam.max_marks ? exam.max_marks.toString() : '100'
     });
     setEditExamModalVisible(true);
   };
@@ -1050,6 +1056,16 @@ const ExamsMarks = () => {
                 <Ionicons name="calendar" size={20} color="#666" />
               </TouchableOpacity>
 
+              <Text style={styles.inputLabel}>Maximum Marks *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter maximum marks (e.g., 20, 50, 100)"
+                value={examForm.max_marks}
+                onChangeText={text => setExamForm(prev => ({ ...prev, max_marks: text }))}
+                keyboardType="numeric"
+                maxLength={3}
+              />
+
               <Text style={styles.inputLabel}>Description</Text>
               <TextInput
                 style={[styles.input, styles.textArea]}
@@ -1204,6 +1220,16 @@ const ExamsMarks = () => {
                 </Text>
                 <Ionicons name="calendar" size={20} color="#666" />
               </TouchableOpacity>
+
+              <Text style={styles.inputLabel}>Maximum Marks *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter maximum marks (e.g., 20, 50, 100)"
+                value={examForm.max_marks}
+                onChangeText={text => setExamForm(prev => ({ ...prev, max_marks: text }))}
+                keyboardType="numeric"
+                maxLength={3}
+              />
 
               <Text style={styles.inputLabel}>Description</Text>
               <TextInput
