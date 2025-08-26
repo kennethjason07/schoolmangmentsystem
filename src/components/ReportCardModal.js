@@ -108,11 +108,15 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
       const { data, error } = await supabase
         .from('school_details')
         .select('*')
-        .limit(1)
-        .single();
+        .limit(1);
 
-      if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "not found"
-      setSchoolDetails(data);
+      if (error) {
+        console.error('Error loading school details:', error);
+        return; // Don't throw here, school details are optional
+      }
+      
+      // Set the first school details if available, otherwise null
+      setSchoolDetails(data && data.length > 0 ? data[0] : null);
     } catch (error) {
       console.error('Error loading school details:', error);
       // Don't throw here, school details are optional
@@ -125,13 +129,18 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
         .from('exams')
         .select('*')
         .eq('id', examId)
-        .single();
+        .limit(1);
 
-      if (error) throw error;
-      setExamDetails(data);
+      if (error) {
+        console.error('Error loading exam details:', error);
+        return; // Don't throw here, set default exam details
+      }
+      
+      // Set the exam details if available, otherwise null
+      setExamDetails(data && data.length > 0 ? data[0] : null);
     } catch (error) {
       console.error('Error loading exam details:', error);
-      throw error;
+      // Don't throw here, exam details can be optional
     }
   };
 
@@ -227,9 +236,34 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
             margin: 5px 0;
           }
           .label {
-            font-weight: bold;
+            font-weight: 900 !important;
             display: inline-block;
             width: 120px;
+            font-family: Arial, sans-serif;
+            color: #000 !important;
+          }
+          .value {
+            font-weight: 900 !important;
+            font-family: Arial, sans-serif;
+            color: #000 !important;
+          }
+          strong {
+            font-weight: 900 !important;
+            font-family: Arial, sans-serif;
+            color: #000 !important;
+          }
+          .marks-table th {
+            background-color: #f0f0f0;
+            font-weight: 900 !important;
+            color: #000 !important;
+          }
+          .total-row {
+            background-color: #e3f2fd;
+            font-weight: 900 !important;
+          }
+          .total-row td {
+            font-weight: 900 !important;
+            color: #000 !important;
           }
           .marks-table {
             width: 100%;
@@ -303,38 +337,34 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
         <div class="student-info">
           <div class="info-section">
             <div class="info-row">
-              <span class="label">Student Name:</span>
-              <span>${student.name}</span>
-            </div>
-            <div class="info-row">
-              <span class="label">Roll Number:</span>
-              <span>${student.roll_no}</span>
+              <span class="label">Name:</span>
+              <span class="value">${student.name}</span>
             </div>
             <div class="info-row">
               <span class="label">Admission No:</span>
-              <span>${student.admission_no}</span>
+              <span class="value">${student.admission_no}</span>
             </div>
             <div class="info-row">
               <span class="label">Class:</span>
-              <span>${student.classes?.class_name} - ${student.classes?.section}</span>
+              <span class="value">${student.classes?.class_name} - ${student.classes?.section}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">DOB:</span>
+              <span class="value">${new Date(student.dob).toLocaleDateString()}</span>
             </div>
           </div>
           <div class="info-section">
             <div class="info-row">
               <span class="label">Exam:</span>
-              <span>${examDetails?.name || 'N/A'}</span>
+              <span class="value">${examDetails?.name || 'N/A'}</span>
             </div>
             <div class="info-row">
               <span class="label">Academic Year:</span>
-              <span>${student.academic_year}</span>
-            </div>
-            <div class="info-row">
-              <span class="label">Date of Birth:</span>
-              <span>${new Date(student.dob).toLocaleDateString()}</span>
+              <span class="value">${student.academic_year}</span>
             </div>
             <div class="info-row">
               <span class="label">Generated On:</span>
-              <span>${currentDate}</span>
+              <span class="value">${currentDate}</span>
             </div>
           </div>
         </div>
@@ -529,10 +559,6 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Student Name:</Text>
                   <Text style={styles.infoValue}>{student.name}</Text>
-                </View>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Roll Number:</Text>
-                  <Text style={styles.infoValue}>{student.roll_no}</Text>
                 </View>
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Admission No:</Text>

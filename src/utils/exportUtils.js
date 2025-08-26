@@ -1189,7 +1189,7 @@ export const generateAcademicPerformanceHTML = (data, stats) => {
                 <div class="rank-badge">${index + 1}</div>
                 <div class="performer-info">
                   <div class="performer-name">${performer.name}</div>
-                  <div class="performer-details">#${performer.admissionNo} • ${performer.count} subjects</div>
+                  <div class="performer-details">${performer.admissionNo} • ${performer.count} subjects</div>
                 </div>
                 <div class="performer-score" style="color: ${scoreColor}">${performer.percentage}%</div>
               </div>

@@ -494,12 +494,18 @@ export default function StudentMarks({ navigation }) {
               font-size: 24px;
               font-weight: bold;
               box-shadow: 0 5px 10px rgba(0,0,0,0.1);
+              flex-shrink: 0;
+            }
+
+            .student-details {
+              flex: 1;
             }
 
             .student-details h2 {
               font-size: 24px;
               color: #1976d2;
               margin-bottom: 10px;
+              margin-top: 0;
             }
 
             .student-meta {
