@@ -20,6 +20,7 @@ import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { formatToLocalTime } from '../../utils/timeUtils';
+import { getParentNotifications, markNotificationAsRead } from '../../utils/gradeNotificationHelpers';
 
 const { width } = Dimensions.get('window');
 
@@ -36,15 +37,16 @@ const Notifications = ({ navigation }) => {
     await fetchNotifications();
   });
 
-  const fetchNotifications = async () => {
-    setLoading(true);
+  const fetchNotifications = async (showLoading = true) => {
+    if (showLoading) {
+      setLoading(true);
+    }
     setError(null);
     try {
-      console.log('Fetching notifications for user:', user.id);
-      
-      console.log('🔍 [NOTIFICATIONS] Fetching notifications ONLY for parent:', user.id);
+      console.log('🔍 [NOTIFICATIONS] Fetching notifications for parent:', user.id);
 
       // Get notifications with recipients for this parent ONLY
+      // Include created_at from notifications for proper ordering
       const { data: notificationsData, error: notificationsError } = await supabase
         .from(TABLES.NOTIFICATION_RECIPIENTS)
         .select(`
@@ -52,18 +54,20 @@ const Notifications = ({ navigation }) => {
           is_read,
           sent_at,
           read_at,
+          notification_id,
           notifications!inner(
             id,
             message,
             type,
             created_at,
-            sent_by
+            sent_by,
+            sent_at
           )
         `)
         .eq('recipient_type', 'Parent')
         .eq('recipient_id', user.id)
         .order('sent_at', { ascending: false })
-        .limit(50);
+        .limit(100);
 
       if (notificationsError) {
         console.error('❌ [NOTIFICATIONS] Error fetching notifications:', notificationsError);
@@ -74,17 +78,71 @@ const Notifications = ({ navigation }) => {
       console.log('🔍 [NOTIFICATIONS] Notification details:', notificationsData);
 
       // Transform the data to match the expected format
-      const transformedNotifications = (notificationsData || []).map(notificationRecord => {
+      const allTransformedNotifications = (notificationsData || []).map(notificationRecord => {
         const notification = notificationRecord.notifications;
 
-        // Create proper title and message for absence notifications
+        // Create proper title and message for different notification types
         let title, message;
-        if (notification.type === 'Absentee') {
-          // Extract student name from the message for title
-          const studentNameMatch = notification.message.match(/Student (\w+)/);
-          const studentName = studentNameMatch ? studentNameMatch[1] : 'Student';
-          title = `${studentName} - Absent`;
-          message = notification.message.replace(/^Absent: Student \w+ \(\d+\) was marked absent on /, 'Marked absent on ');
+        if (notification.type === 'Absentee' || notification.type === 'Attendance') {
+          // Set title as "Absentee" for consistency
+          title = 'Absentee';
+          
+          // Extract student name and date info
+          const studentNameMatch = notification.message.match(/Your child (\w+)|Student (\w+)/);
+          const studentName = studentNameMatch ? (studentNameMatch[1] || studentNameMatch[2]) : 'Student';
+          
+          // Extract date from the message
+          const dateMatch = notification.message.match(/on ([^.]+)/);
+          const dateStr = dateMatch ? dateMatch[1] : '';
+          
+          // Get the current time to determine which period
+          const now = new Date();
+          const currentTime = now.toTimeString().slice(0, 5); // Format as HH:MM
+          
+          // Try to get actual period name from timetable (this will be enhanced with actual DB query)
+          let periodName = 'school hours';
+          
+          // For now, use a simple time-based approach until we can query the actual timetable
+          const hour = now.getHours();
+          const minute = now.getMinutes();
+          const timeInMinutes = hour * 60 + minute;
+          
+          // School periods (typical schedule - can be made dynamic later)
+          if (timeInMinutes >= 480 && timeInMinutes < 540) { // 8:00-9:00
+            periodName = '1st period';
+          } else if (timeInMinutes >= 540 && timeInMinutes < 600) { // 9:00-10:00
+            periodName = '2nd period';
+          } else if (timeInMinutes >= 600 && timeInMinutes < 660) { // 10:00-11:00
+            periodName = '3rd period';
+          } else if (timeInMinutes >= 660 && timeInMinutes < 720) { // 11:00-12:00
+            periodName = '4th period';
+          } else if (timeInMinutes >= 720 && timeInMinutes < 780) { // 12:00-13:00
+            periodName = '5th period';
+          } else if (timeInMinutes >= 780 && timeInMinutes < 840) { // 13:00-14:00
+            periodName = '6th period';
+          } else if (timeInMinutes >= 840 && timeInMinutes < 900) { // 14:00-15:00
+            periodName = '7th period';
+          } else if (timeInMinutes >= 900 && timeInMinutes < 960) { // 15:00-16:00
+            periodName = '8th period';
+          } else {
+            // Outside normal school hours
+            if (timeInMinutes < 480) {
+              periodName = 'morning session';
+            } else {
+              periodName = 'evening session';
+            }
+          }
+          
+          // Create a clean, formatted message
+          message = `${studentName} was absent during ${periodName} on ${dateStr}.`;
+        } else if (notification.type === 'GRADE_ENTERED') {
+          // Handle grade entry notifications
+          title = 'New Marks Entered';
+          message = notification.message;
+        } else if (notification.type === 'HOMEWORK_UPLOADED') {
+          // Handle homework notifications  
+          title = 'New Homework Assigned';
+          message = notification.message;
         } else {
           title = notification.type || 'Notification';
           message = notification.message;
@@ -92,6 +150,7 @@ const Notifications = ({ navigation }) => {
 
         return {
           id: notification.id,
+          uniqueKey: `notif-${notification.id}-rec-${notificationRecord.id}-${Date.now()}`, // Absolutely unique keys with timestamp
           title: title,
           message: message,
           sender: notification.sent_by || 'School Admin',
@@ -104,6 +163,84 @@ const Notifications = ({ navigation }) => {
           recipientRecord: notificationRecord // Store full record for debugging
         };
       });
+
+      // Remove duplicates using multiple criteria to ensure no UI duplicates
+      const notificationMap = new Map();
+      const seenNotifications = new Set();
+      
+      console.log('🔍 [NOTIFICATIONS] Starting deduplication process...');
+      console.log('📊 [NOTIFICATIONS] Raw notification data before deduplication:', {
+        totalRecords: allTransformedNotifications.length,
+        notificationIds: allTransformedNotifications.map(n => ({ id: n.id, recipientId: n.recipientId }))
+      });
+      
+      allTransformedNotifications.forEach((notification, index) => {
+        // Create multiple deduplication keys
+        const notificationIdKey = `notif_${notification.id}`;
+        const messageKey = `msg_${notification.message.substring(0, 100)}`; // Use first 100 chars of message
+        const contentKey = `content_${notification.title}_${notification.message.substring(0, 50)}_${notification.timestamp.split('T')[0]}`;
+        
+        console.log(`🔍 [NOTIFICATIONS] Processing notification ${index + 1}:`, {
+          id: notification.id,
+          recipientId: notification.recipientId,
+          title: notification.title,
+          messagePreview: notification.message.substring(0, 50) + '...'
+        });
+        
+        // Check if we've already seen this notification using any of our keys
+        if (seenNotifications.has(notificationIdKey) || 
+            seenNotifications.has(messageKey) || 
+            seenNotifications.has(contentKey)) {
+          console.log(`⚠️ [NOTIFICATIONS] DUPLICATE DETECTED - Skipping notification ${notification.id}`);
+          return; // Skip this duplicate
+        }
+        
+        // Check if we already have a notification with this ID
+        const existingByNotificationId = notificationMap.get(notificationIdKey);
+        if (existingByNotificationId) {
+          console.log(`⚠️ [NOTIFICATIONS] Found existing notification with same ID, comparing timestamps...`);
+          // Keep the one with the more recent timestamp, or better recipient data
+          if (new Date(notification.timestamp) > new Date(existingByNotificationId.timestamp) ||
+              (!existingByNotificationId.recipientId && notification.recipientId)) {
+            console.log(`✅ [NOTIFICATIONS] Replacing with newer/better notification`);
+            notificationMap.set(notificationIdKey, notification);
+          } else {
+            console.log(`⏭️ [NOTIFICATIONS] Keeping existing notification`);
+          }
+        } else {
+          // This is a new unique notification
+          console.log(`✅ [NOTIFICATIONS] Adding new unique notification:`, notification.id);
+          notificationMap.set(notificationIdKey, notification);
+        }
+        
+        // Mark all our keys as seen
+        seenNotifications.add(notificationIdKey);
+        seenNotifications.add(messageKey);
+        seenNotifications.add(contentKey);
+      });
+      
+      // Convert back to array, sorted by timestamp
+      const transformedNotifications = Array.from(notificationMap.values())
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      
+      console.log(`🔧 [NOTIFICATIONS] Deduplication completed: ${allTransformedNotifications.length} → ${transformedNotifications.length} notifications`);
+      console.log('📊 [NOTIFICATIONS] Final notification IDs:', transformedNotifications.map(n => n.id));
+      
+      if (allTransformedNotifications.length !== transformedNotifications.length) {
+        const duplicateCount = allTransformedNotifications.length - transformedNotifications.length;
+        console.log(`⚠️ [NOTIFICATIONS] SUCCESS: Removed ${duplicateCount} duplicate notification(s) from UI!`);
+        
+        // Log details about what was deduplicated
+        const finalIds = new Set(transformedNotifications.map(n => n.id));
+        const duplicatedNotifications = allTransformedNotifications.filter(n => !finalIds.has(n.id));
+        console.log('🗑️ [NOTIFICATIONS] Duplicates that were removed:', duplicatedNotifications.map(n => ({
+          id: n.id,
+          title: n.title,
+          messagePreview: n.message.substring(0, 30) + '...'
+        })));
+      } else {
+        console.log('✅ [NOTIFICATIONS] No duplicates found - all notifications are unique');
+      }
       
       console.log(`✅ [NOTIFICATIONS] Showing ${transformedNotifications.length} notifications for parent ${user.id}`);
 
@@ -153,34 +290,38 @@ const Notifications = ({ navigation }) => {
 
   const markAsRead = async (id) => {
     try {
-      console.log('=== MARKING NOTIFICATION AS READ ===');
-      console.log('Notification ID:', id);
-      console.log('User ID:', user.id);
+      console.log('🔄 Marking notification as read:', id);
       
       // Find the notification to get its recipient record
       const notification = notifications.find(n => n.id === id);
-      console.log('Found notification:', notification);
-      console.log('Existing recipient record:', notification?.recipientRecord);
       
       if (notification?.recipientId) {
-        console.log('=== UPDATING EXISTING RECIPIENT RECORD ===');
-        console.log('Recipient ID to update:', notification.recipientId);
+        console.log('📝 Updating recipient record:', notification.recipientId);
         
-        // Update existing recipient record
+        // Update existing recipient record with read timestamp
         const { data: updateData, error: updateError } = await supabase
           .from('notification_recipients')
           .update({ 
-            is_read: true
+            is_read: true,
+            read_at: new Date().toISOString()
           })
           .eq('id', notification.recipientId)
           .select();
-
-        console.log('Update result data:', updateData);
-        console.log('Update error:', updateError);
         
         if (updateError) {
+          console.error('❌ Error updating recipient:', updateError);
           throw updateError;
         }
+        
+        console.log('✅ Successfully marked as read in database');
+        
+        // Update local state immediately
+        setNotifications(prev => 
+          prev.map(n => n.id === id ? { ...n, isRead: true } : n)
+        );
+        
+        console.log('✅ Updated local state');
+        return;
       } else {
         console.log('=== CREATING NEW RECIPIENT RECORD ===');
         
@@ -411,29 +552,20 @@ const Notifications = ({ navigation }) => {
   const renderNotification = ({ item }) => (
     <View style={[styles.card, item.isRead ? styles.cardRead : styles.cardUnread]}>
       <View style={styles.cardHeader}>
-        <Ionicons name={item.isRead ? 'mail-open' : 'mail'} size={22} color={item.isRead ? '#888' : '#1976d2'} style={{ marginRight: 10 }} />
         <Text style={[styles.title, item.isRead && { color: '#888' }]}>{item.title}</Text>
-        {item.priority === 'important' && (
-          <Ionicons name="star" size={18} color="#FFD700" style={{ marginLeft: 6 }} />
-        )}
         <Text style={styles.date}>{formatDate(item.timestamp)}</Text>
       </View>
       <Text style={styles.message}>{item.message}</Text>
-      <View style={styles.metaRow}>
-        <Text style={styles.sender}>{item.sender}</Text>
-        <View style={styles.actionButtons}>
-          {item.isRead ? (
-            <TouchableOpacity style={styles.actionBtn} onPress={() => markAsUnread(item.id)}>
-              <Ionicons name="mail-open" size={18} color="#1976d2" />
-              <Text style={styles.actionText}>Mark as Unread</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={styles.actionBtn} onPress={() => markAsRead(item.id)}>
-              <Ionicons name="mail" size={18} color="#388e3c" />
-              <Text style={styles.actionText}>Mark as Read</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+      <View style={styles.actionRow}>
+        {item.isRead ? (
+          <TouchableOpacity style={styles.actionBtn} onPress={() => markAsUnread(item.id)}>
+            <Text style={styles.actionText}>Mark as Unread</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={[styles.actionBtn, styles.unreadBtn]} onPress={() => markAsRead(item.id)}>
+            <Text style={[styles.actionText, styles.unreadText]}>Mark as Read</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -499,7 +631,7 @@ const Notifications = ({ navigation }) => {
         />
         <FlatList
           data={filteredNotifications}
-          keyExtractor={item => item.id}
+          keyExtractor={item => item.uniqueKey}
           renderItem={renderNotification}
           contentContainerStyle={{ paddingBottom: 24 }}
           ListEmptyComponent={
@@ -650,9 +782,20 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontSize: 13,
   },
+  actionRow: {
+    marginTop: 8,
+    alignItems: 'flex-end',
+  },
   actionButtons: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  unreadBtn: {
+    backgroundColor: '#1976d2',
+  },
+  unreadText: {
+    color: '#fff',
+    marginLeft: 0,
   },
   loadingContainer: {
     flex: 1,

@@ -7,7 +7,7 @@ import { Picker } from '@react-native-picker/picker';
 import * as Print from 'expo-print';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
-import { sendAbsenceNotificationToParent } from '../../services/notificationService';
+import { createBulkAttendanceNotifications } from '../../utils/attendanceNotificationHelpers';
 
 function formatDateDMY(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') return '';
@@ -209,19 +209,37 @@ const TakeAttendance = () => {
 
   const handleMarkAttendance = async () => {
     try {
+      if (loading) {
+        console.log('⚠️ [ATTENDANCE] Already submitting, ignoring duplicate request');
+        return; // Prevent double submission
+      }
+      
       setLoading(true);
+      console.log('🚀 [ATTENDANCE] Starting attendance submission...');
       
       if (students.length === 0) {
         Alert.alert('No Students', 'No students found for the selected class and section.');
         return;
       }
 
-      // Prepare attendance records
-      const attendanceRecords = students.map(student => ({
+      // Only process students that have been explicitly marked (either Present or Absent)
+      const explicitlyMarkedStudents = students.filter(student => 
+        attendanceMark[student.id] && 
+        (attendanceMark[student.id] === 'Present' || attendanceMark[student.id] === 'Absent')
+      );
+
+      // If no students have been explicitly marked, show a warning
+      if (explicitlyMarkedStudents.length === 0) {
+        Alert.alert('No Attendance Marked', 'Please mark at least one student as Present or Absent before submitting.');
+        return;
+      }
+
+      // Prepare attendance records only for explicitly marked students
+      const attendanceRecords = explicitlyMarkedStudents.map(student => ({
         student_id: student.id,
         class_id: selectedClass,
         date: selectedDate,
-        status: attendanceMark[student.id] || 'Absent',
+        status: attendanceMark[student.id], // No fallback - we know it's defined
         marked_by: user.id
       }));
 
@@ -235,7 +253,7 @@ const TakeAttendance = () => {
 
       if (upsertError) throw upsertError;
 
-      // Show success message immediately
+      // Show simple success message
       Alert.alert('Success', 'Attendance saved successfully!');
 
       // Send absence notifications in the background (non-blocking)
@@ -245,39 +263,17 @@ const TakeAttendance = () => {
         console.log(`📧 [ATTENDANCE] Found ${absentStudents.length} absent students - sending notifications in background`);
         
         // Send notifications asynchronously without blocking the UI
-        Promise.all(
-          absentStudents.map(async (absentRecord) => {
-            try {
-              const result = await Promise.race([
-                sendAbsenceNotificationToParent(
-                  absentRecord.student_id,
-                  absentRecord.date,
-                  absentRecord.marked_by
-                ),
-                // Timeout after 5 seconds per notification
-                new Promise((_, reject) => 
-                  setTimeout(() => reject(new Error('Notification timeout')), 5000)
-                )
-              ]);
-              
-              if (result.success) {
-                console.log(`✅ [ATTENDANCE] Notification sent for student ${absentRecord.student_id}`);
-              } else {
-                console.log(`⚠️ [ATTENDANCE] Notification failed for student ${absentRecord.student_id}: ${result.error}`);
-              }
-              return result;
-            } catch (error) {
-              console.log(`❌ [ATTENDANCE] Notification error for student ${absentRecord.student_id}: ${error.message}`);
-              return { success: false, error: error.message };
+        createBulkAttendanceNotifications(absentStudents, user.id)
+          .then((result) => {
+            if (result.success) {
+              console.log(`✅ [ATTENDANCE] Notifications sent: ${result.successfulNotifications}/${result.totalStudents} successful, ${result.totalRecipients} total recipients`);
+            } else {
+              console.log(`⚠️ [ATTENDANCE] Bulk notifications failed: ${result.error}`);
             }
           })
-        ).then((results) => {
-          const successCount = results.filter(r => r.success).length;
-          const failureCount = results.filter(r => !r.success).length;
-          console.log(`📊 [ATTENDANCE] Background notifications completed: ${successCount} sent, ${failureCount} failed`);
-        }).catch((error) => {
-          console.error('❌ [ATTENDANCE] Error in background notification processing:', error);
-        });
+          .catch((error) => {
+            console.error('❌ [ATTENDANCE] Error in background notification processing:', error);
+          });
       }
       
     } catch (err) {
@@ -395,10 +391,20 @@ const TakeAttendance = () => {
 
   // Toggle attendance status for a student
   const toggleStudentAttendance = (studentId, status) => {
-    setAttendanceMark(prev => ({
-      ...prev,
-      [studentId]: status
-    }));
+    setAttendanceMark(prev => {
+      const currentStatus = prev[studentId];
+      // If clicking the same status, clear it (unmark)
+      if (currentStatus === status) {
+        const newState = { ...prev };
+        delete newState[studentId];
+        return newState;
+      }
+      // Otherwise, set the new status
+      return {
+        ...prev,
+        [studentId]: status
+      };
+    });
   };
 
   // Handle pull-to-refresh
@@ -542,6 +548,16 @@ const TakeAttendance = () => {
                 } 
               }}
             />
+          )}
+
+          {/* Instruction Message */}
+          {students.length > 0 && (
+            <View style={styles.instructionContainer}>
+              <Ionicons name="information-circle" size={20} color="#2196F3" />
+              <Text style={styles.instructionText}>
+                Tap Present (P) or Absent (A) to mark students. Tap again to unmark. Only explicitly marked students will be saved.
+              </Text>
+            </View>
           )}
 
           {/* Students List */}
@@ -1229,6 +1245,24 @@ const styles = StyleSheet.create({
     marginTop: 2,
     alignSelf: 'flex-start',
     textAlign: 'center',
+  },
+  // Instruction container styles
+  instructionContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e3f2fd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196F3',
+  },
+  instructionText: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#1565c0',
+    lineHeight: 20,
   },
 });
 
