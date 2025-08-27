@@ -795,12 +795,14 @@ const ParentDashboard = ({ navigation }) => {
                     is_emergency: rel.is_emergency_contact
                   });
                   
-                  // Skip invalid or placeholder parent names
+                  // Skip invalid or placeholder parent names (more lenient filtering)
                   const isValidParentName = parent.name && 
                     parent.name.trim() !== '' && 
-                    parent.name.toLowerCase() !== 'justus parent' &&
                     parent.name.toLowerCase() !== 'n/a' &&
-                    !parent.name.toLowerCase().includes('placeholder');
+                    !parent.name.toLowerCase().includes('placeholder') &&
+                    !parent.name.toLowerCase().includes('test') &&
+                    !parent.name.toLowerCase().includes('sample') &&
+                    parent.name.toLowerCase() !== 'parent';
                   
                   if (isValidParentName) {
                     const parentData = {
@@ -923,14 +925,14 @@ const ParentDashboard = ({ navigation }) => {
                   console.log(`Parent Email: "${parent.email}"`);
                   console.log(`Student ID: ${parent.student_id}`);
                   
-                  // Filter out placeholder/invalid parent names
+                  // Filter out placeholder/invalid parent names (more lenient filtering)
                   const isValidParentName = parent.name && 
                     parent.name.trim() !== '' && 
                     parent.name.toLowerCase() !== 'n/a' &&
-                    parent.name.toLowerCase() !== 'justus parent' &&
                     !parent.name.toLowerCase().includes('placeholder') &&
                     !parent.name.toLowerCase().includes('test') &&
-                    !parent.name.toLowerCase().includes('sample');
+                    !parent.name.toLowerCase().includes('sample') &&
+                    parent.name.toLowerCase() !== 'parent';
                   
                   console.log(`Valid Parent Name: ${isValidParentName}`);
                   
