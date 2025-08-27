@@ -390,13 +390,13 @@ const createNotificationForSpecificUser = async (studentData, date, markedBy, us
       return { success: false, error: 'Failed to create notification' };
     }
 
-    // Create notification recipient record
+    // Create notification recipient record with Pending status initially
     const recipientData = {
       notification_id: notificationResult.id,
       recipient_id: userId,
       recipient_type: 'Parent',
-      delivery_status: 'Sent',
-      sent_at: new Date().toISOString(),
+      delivery_status: 'Pending',
+      sent_at: null,
       is_read: false
     };
 
@@ -409,12 +409,21 @@ const createNotificationForSpecificUser = async (studentData, date, markedBy, us
       return { success: false, error: 'Failed to create notification recipient' };
     }
 
-    console.log(`✅ [TARGETED NOTIFICATION] Notification sent successfully to ${parentName} (${userId})`);
+    // Now deliver the notification (mark as Sent for InApp notifications)
+    const deliveryResult = await deliverNotification(notificationResult.id, userId);
+    
+    if (deliveryResult.success) {
+      console.log(`✅ [TARGETED NOTIFICATION] Notification delivered successfully to ${parentName} (${userId})`);
+    } else {
+      console.warn(`⚠️ [TARGETED NOTIFICATION] Notification created but delivery failed for ${parentName} (${userId}):`, deliveryResult.error);
+    }
+
     return { 
       success: true, 
       message: `Notification sent to ${parentName}`,
       parentName: parentName,
-      userId: userId
+      userId: userId,
+      deliveryStatus: deliveryResult.success ? 'Sent' : 'Failed'
     };
   } catch (error) {
     console.error('❌ [SIMPLE NOTIFICATION] Error in createNotificationForSpecificUser:', error);
@@ -626,6 +635,109 @@ export const sendAbsenceMessageOnly = async (studentId, date, markedBy) => {
 
   } catch (error) {
     console.error('❌ [MESSAGE ONLY] Error in sendAbsenceMessageOnly:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Deliver notification (mark as sent with timestamp)
+ * For InApp notifications, this simulates immediate delivery
+ * For other modes like SMS/Email, this would be called after actual delivery
+ * @param {string} notificationId - Notification UUID
+ * @param {string} userId - User UUID (optional, if not provided updates all recipients)
+ */
+export const deliverNotification = async (notificationId, userId = null) => {
+  try {
+    console.log(`📤 [DELIVERY] Marking notification ${notificationId} as delivered${userId ? ` for user ${userId}` : ' for all recipients'}`);
+    
+    const currentTimestamp = new Date().toISOString();
+    
+    // Update notification recipients
+    let recipientQuery = supabase
+      .from(TABLES.NOTIFICATION_RECIPIENTS)
+      .update({
+        delivery_status: 'Sent',
+        sent_at: currentTimestamp
+      })
+      .eq('notification_id', notificationId);
+    
+    // If specific user provided, only update for that user
+    if (userId) {
+      recipientQuery = recipientQuery.eq('recipient_id', userId);
+    }
+    
+    const { error: recipientError } = await recipientQuery;
+    
+    if (recipientError) {
+      console.error('❌ [DELIVERY] Error updating notification recipient:', recipientError);
+      return { success: false, error: 'Failed to mark notification recipient as sent' };
+    }
+    
+    // Update main notification record if all recipients are now sent
+    const { data: pendingRecipients, error: checkError } = await supabase
+      .from(TABLES.NOTIFICATION_RECIPIENTS)
+      .select('delivery_status')
+      .eq('notification_id', notificationId)
+      .neq('delivery_status', 'Sent');
+    
+    if (!checkError && (!pendingRecipients || pendingRecipients.length === 0)) {
+      // All recipients are now sent, update main notification
+      await supabase
+        .from(TABLES.NOTIFICATIONS)
+        .update({
+          delivery_status: 'Sent',
+          sent_at: currentTimestamp
+        })
+        .eq('id', notificationId);
+      
+      console.log(`✅ [DELIVERY] All recipients delivered, main notification marked as sent`);
+    }
+    
+    console.log(`✅ [DELIVERY] Notification delivery successful`);
+    return {
+      success: true,
+      message: 'Notification marked as delivered',
+      deliveredAt: currentTimestamp
+    };
+    
+  } catch (error) {
+    console.error('❌ [DELIVERY] Error in deliverNotification:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Mark notification as failed for specific recipient
+ * @param {string} notificationId - Notification UUID
+ * @param {string} userId - User UUID
+ * @param {string} reason - Failure reason
+ */
+export const markNotificationAsFailed = async (notificationId, userId, reason = 'Delivery failed') => {
+  try {
+    console.log(`❌ [DELIVERY FAILED] Marking notification ${notificationId} as failed for user ${userId}: ${reason}`);
+    
+    const { error } = await supabase
+      .from(TABLES.NOTIFICATION_RECIPIENTS)
+      .update({
+        delivery_status: 'Failed',
+        sent_at: new Date().toISOString()
+      })
+      .eq('notification_id', notificationId)
+      .eq('recipient_id', userId);
+    
+    if (error) {
+      console.error('❌ [DELIVERY FAILED] Error marking notification as failed:', error);
+      return { success: false, error: 'Failed to mark notification as failed' };
+    }
+    
+    console.log(`✅ [DELIVERY FAILED] Notification marked as failed successfully`);
+    return {
+      success: true,
+      message: 'Notification marked as failed'
+    };
+    
+  } catch (error) {
+    console.error('❌ [DELIVERY FAILED] Error in markNotificationAsFailed:', error);
     return { success: false, error: error.message };
   }
 };

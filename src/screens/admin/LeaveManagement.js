@@ -507,79 +507,38 @@ const LeaveManagement = ({ navigation }) => {
 
       if (error) throw error;
 
-      // Create notification for the teacher about leave status update
+      // Send notification to teacher silently in background
       if (selectedLeave?.teacher_id) {
         try {
-          console.log(`📧 Creating notification for teacher about leave ${reviewForm.status.toLowerCase()}...`);
-          
-          // Get the teacher's linked user account
-          const { data: teacherData, error: teacherError } = await supabase
-            .from('teachers')
-            .select('id, name')
-            .eq('id', selectedLeave.teacher_id)
-            .single();
-
-          if (teacherError) {
-            console.error('❌ Error fetching teacher data:', teacherError);
-            throw new Error('Could not find teacher information');
-          }
-
-          // Now find the user account that is linked to this teacher
           const { data: userData, error: userError } = await supabase
             .from('users')
             .select('id, full_name')
             .eq('linked_teacher_id', selectedLeave.teacher_id)
             .single();
 
-          if (userError || !userData) {
-            console.warn('⚠️ Teacher does not have a linked user account, cannot send notification');
-            return;
+          if (!userError && userData) {
+            const baseMessage = reviewForm.status === 'Approved' 
+              ? `Your ${selectedLeave.leave_type} request has been approved.`
+              : `Your ${selectedLeave.leave_type} request has been rejected.`;
+
+            const fullMessage = reviewForm.admin_remarks.trim() 
+              ? `${baseMessage} Remarks: ${reviewForm.admin_remarks.trim()}`
+              : baseMessage;
+
+            await supabase
+              .from('notifications')
+              .insert({
+                message: fullMessage,
+                type: 'General',
+                delivery_mode: 'InApp',
+                delivery_status: 'Sent',
+                sent_by: user.id,
+                created_at: new Date().toISOString()
+              });
           }
-          
-          // Create comprehensive notification message
-          const baseMessage = reviewForm.status === 'Approved' 
-            ? `Your ${selectedLeave.leave_type} request from ${format(parseISO(selectedLeave.start_date), 'MMM dd, yyyy')} to ${format(parseISO(selectedLeave.end_date), 'MMM dd, yyyy')} has been approved.`
-            : `Your ${selectedLeave.leave_type} request from ${format(parseISO(selectedLeave.start_date), 'MMM dd, yyyy')} to ${format(parseISO(selectedLeave.end_date), 'MMM dd, yyyy')} has been rejected.`;
-
-          // Add admin remarks if provided
-          const fullMessage = reviewForm.admin_remarks.trim() 
-            ? `${baseMessage} Admin remarks: ${reviewForm.admin_remarks.trim()}`
-            : baseMessage;
-
-          // Add status prefix for filtering (similar to leave requests)
-          const enhancedMessage = `[LEAVE_${reviewForm.status.toUpperCase()}] ${fullMessage}`;
-
-          // Create the notification
-          console.log('🔄 Creating notification with message:', enhancedMessage);
-          
-          const { data: notification, error: notificationError } = await supabase
-            .from('notifications')
-            .insert({
-              message: enhancedMessage,
-              type: 'General',
-              delivery_mode: 'InApp',
-              delivery_status: 'Sent',
-              sent_by: user.id,
-              created_at: new Date().toISOString()
-            })
-            .select()
-            .single();
-
-          if (notificationError) {
-            console.error('❌ Error creating notification:', notificationError);
-            throw notificationError;
-          }
-
-          console.log(`✅ Notification created successfully for teacher ${teacherData.name} (User ID: ${userData.id})`);
-          console.log(`   Status: ${reviewForm.status}`);
-          console.log(`   Notification ID: ${notification.id}`);
-          console.log(`   Message: ${enhancedMessage}`);
-          console.log(`   Leave details: ${selectedLeave.leave_type}, ${format(parseISO(selectedLeave.start_date), 'MMM dd, yyyy')} - ${format(parseISO(selectedLeave.end_date), 'MMM dd, yyyy')}`);
-          
         } catch (notificationError) {
-          console.error('❌ Error creating teacher notification:', notificationError);
-          // Don't fail the entire leave review operation if notification fails
-          console.log('⚠️ Leave review completed but teacher notification failed');
+          // Log error but don't show to user - notifications are secondary
+          console.error('Notification error:', notificationError);
         }
       }
 

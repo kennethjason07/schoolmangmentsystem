@@ -452,40 +452,24 @@ export default function MarksEntry({ navigation }) {
       // Get teacher ID for notification
       const { data: teacherData } = await dbHelpers.getTeacherByUserId(user.id);
       
-      // Trigger notification to parents
+      // Send notifications to parents silently in background
       try {
-        // Extract student IDs who got marks
         const studentIds = studentsWithMarks.map(student => student.id);
         
-        const notificationResult = await createGradeNotification({
+        await createGradeNotification({
           classId: selectedClass,
           subjectId: selectedSubject,
           examId: selectedExam,
-          teacherId: user.id, // Use current user ID as teacher
+          teacherId: user.id,
           studentIds: studentIds
         });
-
-        if (notificationResult.success) {
-          Alert.alert(
-            'Success', 
-            `Marks saved successfully and ${notificationResult.recipientCount || 0} parents notified!\n\nExam: ${selectedExamData.name}\nStudents: ${studentsWithMarks.length}`
-          );
-          console.log('✅ Parent notifications sent successfully:', notificationResult.recipientCount);
-        } else {
-          Alert.alert(
-            'Success', 
-            `Marks saved successfully!\n\nExam: ${selectedExamData.name}\nStudents: ${studentsWithMarks.length}\n\nNote: Parent notifications may have failed to send.`
-          );
-          console.log('⚠️ Parent notifications failed:', notificationResult.error);
-        }
       } catch (notificationError) {
-        // Don't fail the marks saving if notification fails
-        Alert.alert(
-          'Success', 
-          `Marks saved successfully!\n\nExam: ${selectedExamData.name}\nStudents: ${studentsWithMarks.length}\n\nNote: Parent notifications may have failed to send.`
-        );
-        console.log('⚠️ Notification error:', notificationError);
+        // Log error but don't show to user - notifications are secondary
+        console.error('⚠️ Notification error:', notificationError);
       }
+
+      // Show simple success message
+      Alert.alert('Success', 'Marks saved successfully!');
       
       setMarks({});
       

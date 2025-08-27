@@ -140,42 +140,11 @@ const FeePayment = () => {
         console.log('- Payments found:', studentPayments?.length || 0);
         console.log('- Payment details:', studentPayments);
         
-        // If no fee structure found, create sample data for testing
+        // If no fee structure found, show empty state instead of sample data
         let feesToProcess = classFees || [];
         if (!feesToProcess || feesToProcess.length === 0) {
-          console.log('FeePayment - No fee structure found, creating sample data');
-          const safeClassId = (studentDetails && studentDetails.class_id) ? studentDetails.class_id : 'sample-class-id';
-          const safeStudentId = (studentDetails && studentDetails.id) ? studentDetails.id : null;
-
-          feesToProcess = [
-            {
-              id: 'sample-1',
-              academic_year: '2024-2025',
-              class_id: safeClassId,
-              student_id: safeStudentId,
-              fee_component: 'Tuition Fee',
-              amount: 25000,
-              due_date: '2024-04-30'
-            },
-            {
-              id: 'sample-2',
-              academic_year: '2024-2025',
-              class_id: safeClassId,
-              student_id: safeStudentId,
-              fee_component: 'Development Fee',
-              amount: 5000,
-              due_date: '2024-04-30'
-            },
-            {
-              id: 'sample-3',
-              academic_year: '2024-2025',
-              class_id: safeClassId,
-              student_id: safeStudentId,
-              fee_component: 'Transport Fee',
-              amount: 8000,
-              due_date: '2024-05-31'
-            }
-          ];
+          console.log('FeePayment - No fee structure found, showing empty state');
+          feesToProcess = [];
         }
 
         // Transform fee structure data based on schema
@@ -290,51 +259,10 @@ const FeePayment = () => {
         console.error('Error fetching fee data:', err);
         setError(err.message);
 
-        // Set fallback data even when there's an error
-        console.log('FeePayment - Setting fallback data due to error');
-        setFeeStructure({
-          totalDue: 38000,
-          totalPaid: 33000,
-          outstanding: 5000,
-          fees: [
-            {
-              id: 'fallback-1',
-              name: 'Tuition Fee',
-              amount: 25000,
-              paid: 25000,
-              remainingAmount: 0,
-              status: 'paid',
-              dueDate: '2024-04-30',
-              academicYear: '2024-2025'
-            },
-            {
-              id: 'fallback-2',
-              name: 'Development Fee',
-              amount: 5000,
-              paid: 5000,
-              remainingAmount: 0,
-              status: 'paid',
-              dueDate: '2024-04-30',
-              academicYear: '2024-2025'
-            },
-            {
-              id: 'fallback-3',
-              name: 'Transport Fee',
-              amount: 8000,
-              paid: 3000,
-              remainingAmount: 5000,
-              status: 'partial',
-              dueDate: '2024-05-31',
-              academicYear: '2024-2025'
-            }
-          ]
-        });
-
-        // Set empty payment history when there's an error
+        // Set empty state when there's an error instead of fallback data
+        console.log('FeePayment - Setting empty state due to error:', err.message);
+        setFeeStructure(null);
         setPaymentHistory([]);
-
-        // Don't show error alert, just log it
-        console.log('FeePayment - Using fallback data due to error:', err.message);
       } finally {
         setLoading(false);
       }

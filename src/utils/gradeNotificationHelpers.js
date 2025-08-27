@@ -217,14 +217,28 @@ export async function createGradeNotification({ classId, subjectId, examId, teac
 
     console.log('✅ Notification recipients created:', recipients.length);
 
-    // 6. Update notification delivery status
+    // 6. Deliver the notification properly (update both recipients and main notification)
+    const currentTimestamp = new Date().toISOString();
+    
+    // First update all recipients to 'Sent' status
+    await supabase
+      .from(TABLES.NOTIFICATION_RECIPIENTS)
+      .update({
+        delivery_status: 'Sent',
+        sent_at: currentTimestamp
+      })
+      .eq('notification_id', notification.id);
+    
+    // Then update main notification to 'Sent' status
     await supabase
       .from(TABLES.NOTIFICATIONS)
       .update({
         delivery_status: 'Sent',
-        sent_at: new Date().toISOString()
+        sent_at: currentTimestamp
       })
       .eq('id', notification.id);
+    
+    console.log('✅ Notification delivered successfully with proper timestamps');
 
     return {
       success: true,

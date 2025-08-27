@@ -182,6 +182,11 @@ const StudentDashboard = ({ navigation }) => {
       
       console.log('=== STUDENT DASHBOARD NOTIFICATION DEBUG ===');
       console.log('User ID:', user.id);
+      console.log('Linked Student ID:', user.linked_student_id);
+      
+      // Use linked_student_id if available, fallback to user.id
+      const studentId = user.linked_student_id || user.id;
+      console.log('Using student ID for notifications:', studentId);
       
       // Get notifications with recipients for this student
       const { data: notificationsData, error: notificationsError } = await supabase
@@ -199,7 +204,7 @@ const StudentDashboard = ({ navigation }) => {
           )
         `)
         .eq('recipient_type', 'Student')
-        .eq('recipient_id', user.id)
+        .eq('recipient_id', studentId)
         .order('sent_at', { ascending: false })
         .limit(10);
 

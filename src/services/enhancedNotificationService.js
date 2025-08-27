@@ -314,30 +314,61 @@ class EnhancedNotificationService {
   }
 
   /**
-   * Mark notification as sent
+   * Mark notification as sent (deliver notification)
+   * This should be called after the notification has been successfully processed/delivered
    */
-  async markNotificationAsSent(notificationId) {
+  async markNotificationAsSent(notificationId, userId = null) {
     try {
-      // Update main notification
-      await supabase
-        .from(TABLES.NOTIFICATIONS)
-        .update({
-          delivery_status: 'Sent',
-          sent_at: new Date().toISOString()
-        })
-        .eq('id', notificationId);
-
-      // Update all recipients for InApp notifications
-      await supabase
+      console.log(`📤 [ENHANCED DELIVERY] Marking notification ${notificationId} as delivered${userId ? ` for user ${userId}` : ' for all recipients'}`);
+      
+      const currentTimestamp = new Date().toISOString();
+      
+      // Update notification recipients
+      let recipientQuery = supabase
         .from(TABLES.NOTIFICATION_RECIPIENTS)
         .update({
           delivery_status: 'Sent',
-          sent_at: new Date().toISOString()
+          sent_at: currentTimestamp
         })
         .eq('notification_id', notificationId);
-
+      
+      // If specific user provided, only update for that user
+      if (userId) {
+        recipientQuery = recipientQuery.eq('recipient_id', userId);
+      }
+      
+      const { error: recipientError } = await recipientQuery;
+      
+      if (recipientError) {
+        console.error('❌ [ENHANCED DELIVERY] Error updating notification recipient:', recipientError);
+        return { success: false, error: 'Failed to mark notification recipient as sent' };
+      }
+      
+      // Update main notification record if all recipients are now sent
+      const { data: pendingRecipients, error: checkError } = await supabase
+        .from(TABLES.NOTIFICATION_RECIPIENTS)
+        .select('delivery_status')
+        .eq('notification_id', notificationId)
+        .neq('delivery_status', 'Sent');
+      
+      if (!checkError && (!pendingRecipients || pendingRecipients.length === 0)) {
+        // All recipients are now sent, update main notification
+        await supabase
+          .from(TABLES.NOTIFICATIONS)
+          .update({
+            delivery_status: 'Sent',
+            sent_at: currentTimestamp
+          })
+          .eq('id', notificationId);
+        
+        console.log(`✅ [ENHANCED DELIVERY] All recipients delivered, main notification marked as sent`);
+      }
+      
+      return { success: true, deliveredAt: currentTimestamp };
+      
     } catch (error) {
-      console.error('❌ [MARK SENT] Error:', error);
+      console.error('❌ [ENHANCED DELIVERY] Error in markNotificationAsSent:', error);
+      return { success: false, error: error.message };
     }
   }
 
