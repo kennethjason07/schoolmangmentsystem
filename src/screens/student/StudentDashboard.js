@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated, RefreshControl, Image, FlatList, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated, RefreshControl, Image, FlatList, Modal, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
@@ -180,46 +180,150 @@ const StudentDashboard = ({ navigation }) => {
         return;
       }
       
-      console.log('=== STUDENT DASHBOARD NOTIFICATION DEBUG ===');
-      console.log('User ID:', user.id);
+      console.log('Dashboard: Refreshing notifications for user:', user.id);
       
-      // Get notifications with recipients for this student
-      const { data: notificationsData, error: notificationsError } = await supabase
-        .from(TABLES.NOTIFICATION_RECIPIENTS)
+      // Fetch all notifications from admins (all notification types)
+      // Fetch all notifications regardless of delivery_status
+      const { data: notificationsData, error: notifError } = await supabase
+        .from('notifications')
         .select(`
           id,
-          is_read,
-          sent_at,
-          read_at,
-          notifications!inner(
+          message,
+          type,
+          created_at,
+          sent_by,
+          delivery_status,
+          delivery_mode,
+          users!sent_by(
             id,
-            message,
-            type,
-            created_at
+            role_id,
+            full_name
           )
         `)
-        .eq('recipient_type', 'Student')
-        .eq('recipient_id', user.id)
-        .order('sent_at', { ascending: false })
-        .limit(10);
+        .in('type', ['General', 'Urgent', 'Fee Reminder', 'Event', 'Homework', 'Attendance', 'Absentee', 'Exam', 'GRADE_ENTERED', 'HOMEWORK_UPLOADED'])
+        .eq('users.role_id', 1)
+        .order('created_at', { ascending: false })
+        .limit(50);
 
-      if (notificationsError && notificationsError.code !== '42P01') {
-        console.log('Notifications refresh error:', notificationsError);
-      } else {
-        const mappedNotifications = (notificationsData || []).map(n => ({
-          id: n.id,
-          title: n.notifications.message || 'Notification',
-          message: n.notifications.message,
-          type: n.notifications.type || 'general',
-          created_at: n.notifications.created_at,
-          is_read: n.is_read || false,
-          read_at: n.read_at
-        }));
-        console.log('Mapped notifications count:', mappedNotifications.length);
-        setNotifications(mappedNotifications);
+      if (notifError && notifError.code !== '42P01') {
+        console.log('Dashboard - Notifications fetch error:', notifError);
+        setNotifications([]);
+        return;
       }
+
+      if (!notificationsData || notificationsData.length === 0) {
+        console.log('Dashboard - No notifications found');
+        setNotifications([]);
+        return;
+      }
+
+      // Update delivery status to 'Sent' for any InApp notifications that are still 'Pending'
+      const pendingNotifications = notificationsData.filter(n => 
+        n.delivery_status === 'Pending' && n.delivery_mode === 'InApp'
+      );
+      
+      if (pendingNotifications.length > 0) {
+        console.log(`Dashboard - Updating ${pendingNotifications.length} notifications from Pending to Sent status`);
+        
+        const { error: updateError } = await supabase
+          .from('notifications')
+          .update({
+            delivery_status: 'Sent',
+            sent_at: new Date().toISOString()
+          })
+          .in('id', pendingNotifications.map(n => n.id))
+          .eq('delivery_mode', 'InApp');
+        
+        if (updateError) {
+          console.error('Dashboard - Error updating notification status:', updateError);
+        } else {
+          console.log('Dashboard - Successfully updated notification delivery status');
+          // Update the local data to reflect the change
+          notificationsData.forEach(n => {
+            if (pendingNotifications.some(p => p.id === n.id)) {
+              n.delivery_status = 'Sent';
+              n.sent_at = new Date().toISOString();
+            }
+          });
+        }
+      }
+
+      // Filter out leave notifications (same logic as StudentNotifications screen)
+      const filteredNotifications = notificationsData.filter(notification => {
+        const message = notification.message.toLowerCase();
+        const isLeaveNotification = message.includes('leave') || 
+                                   message.includes('absent') || 
+                                   message.includes('vacation') || 
+                                   message.includes('sick') ||
+                                   message.includes('time off');
+        return !isLeaveNotification;
+      });
+
+      // Get read status for these notifications from notification_recipients table
+      const notificationIds = filteredNotifications.map(n => n.id);
+      let readStatusData = [];
+      
+      if (notificationIds.length > 0) {
+        const { data: readData } = await supabase
+          .from('notification_recipients')
+          .select('notification_id, is_read, id')
+          .eq('recipient_id', user.id)
+          .eq('recipient_type', 'Student')
+          .in('notification_id', notificationIds);
+        
+        readStatusData = readData || [];
+        
+        // Create recipient records for notifications that don't have them yet
+        const missingRecords = filteredNotifications.filter(notification => 
+          !readStatusData.some(record => record.notification_id === notification.id)
+        );
+        
+        if (missingRecords.length > 0) {
+          console.log(`Dashboard - Creating recipient records for ${missingRecords.length} notifications`);
+          
+          const newRecords = missingRecords.map(notification => ({
+            notification_id: notification.id,
+            recipient_id: user.id,
+            recipient_type: 'Student',
+            is_read: false,
+            delivery_status: 'Sent' // Mark as sent since we're showing it to the student
+          }));
+          
+          const { data: insertedRecords, error: insertError } = await supabase
+            .from('notification_recipients')
+            .insert(newRecords)
+            .select('notification_id, is_read, id');
+          
+          if (insertError) {
+            console.error('Dashboard - Error creating recipient records:', insertError);
+          } else {
+            console.log(`Dashboard - Created ${insertedRecords?.length || 0} new recipient records`);
+            // Add the new records to our read status data
+            readStatusData = [...readStatusData, ...(insertedRecords || [])];
+          }
+        }
+      }
+
+      // Transform notifications for dashboard display
+      const transformedNotifications = filteredNotifications.map(notification => {
+        const readRecord = readStatusData.find(r => r.notification_id === notification.id);
+        
+        return {
+          id: notification.id,
+          title: notification.message.substring(0, 50) + (notification.message.length > 50 ? '...' : ''),
+          message: notification.message,
+          type: notification.type || 'General',
+          created_at: notification.created_at,
+          is_read: readRecord?.is_read || false,
+          read_at: readRecord?.read_at,
+          sender: notification.users
+        };
+      });
+
+      console.log(`Dashboard - Found ${transformedNotifications.length} notifications, unread: ${transformedNotifications.filter(n => !n.is_read).length}`);
+      setNotifications(transformedNotifications);
     } catch (err) {
-      console.log('Notifications refresh fetch error:', err);
+      console.log('Dashboard - Notifications refresh fetch error:', err);
       setNotifications([]);
     }
   };
@@ -1186,6 +1290,15 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  scrollWrapper: {
+    flex: 1,
+  },
+  scrollContainer: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
   loadingContainer: {
     flex: 1,
