@@ -18,7 +18,6 @@ const MessageBadge = ({ userType, style, textStyle }) => {
     try {
       if (!user?.id) return;
 
-      console.log(`🔔 MessageBadge (${userType}): Fetching unread count for user:`, user.id);
 
       const { data: unreadMessages, error } = await supabase
         .from('messages')
@@ -27,16 +26,13 @@ const MessageBadge = ({ userType, style, textStyle }) => {
         .eq('is_read', false);
 
       if (error) {
-        console.log('❌ MessageBadge: Error fetching unread messages:', error);
         return;
       }
 
       const count = unreadMessages?.length || 0;
-      console.log(`📊 MessageBadge (${userType}): Found ${count} unread messages`);
       setUnreadCount(count);
 
     } catch (error) {
-      console.log('💥 MessageBadge: Error in fetchUnreadCount:', error);
     }
   }, [user?.id, userType]);
 
@@ -47,22 +43,18 @@ const MessageBadge = ({ userType, style, textStyle }) => {
       return;
     }
 
-    console.log(`🔔 MessageBadge (${userType}): Setting up polling for user:`, user.id);
     
     // Initial fetch
     fetchUnreadCount();
 
     // Frequent polling (every 5 seconds)
     const frequentPolling = setInterval(() => {
-      console.log(`🔄 MessageBadge (${userType}): Frequent polling check`);
       fetchUnreadCount();
     }, 5000);
 
     // App state change listener - refresh when app becomes active
     const handleAppStateChange = (nextAppState) => {
-      console.log(`🔔 MessageBadge (${userType}): App state changed to:`, nextAppState);
       if (nextAppState === 'active') {
-        console.log(`🔄 MessageBadge (${userType}): App became active, refreshing count`);
         fetchUnreadCount();
       }
     };
@@ -71,7 +63,6 @@ const MessageBadge = ({ userType, style, textStyle }) => {
 
     // Subscribe to badge notification events for instant updates
     const unsubscribeBadgeNotifier = badgeNotifier.subscribe(user.id, (reason) => {
-      console.log(`📡 MessageBadge (${userType}): Received notification, reason: ${reason}`);
       fetchUnreadCount();
     });
 
@@ -79,7 +70,6 @@ const MessageBadge = ({ userType, style, textStyle }) => {
     let realtimeSubscription = null;
     try {
       const channelName = `message-badge-${userType}-${user.id}-${Date.now()}`;
-      console.log(`🔔 MessageBadge (${userType}): Attempting real-time subscription:`, channelName);
       
       realtimeSubscription = supabase
         .channel(channelName)
@@ -92,7 +82,6 @@ const MessageBadge = ({ userType, style, textStyle }) => {
             filter: `receiver_id=eq.${user.id}`
           },
           (payload) => {
-            console.log(`⚡ MessageBadge (${userType}): Real-time INSERT event:`, payload);
             // Immediately refresh count when we get a real-time event
             setTimeout(() => fetchUnreadCount(), 100);
           }
@@ -106,26 +95,22 @@ const MessageBadge = ({ userType, style, textStyle }) => {
             filter: `receiver_id=eq.${user.id}`
           },
           (payload) => {
-            console.log(`⚡ MessageBadge (${userType}): Real-time UPDATE event:`, payload);
             // Immediately refresh count when we get a real-time event
             setTimeout(() => fetchUnreadCount(), 100);
           }
         )
         .subscribe((status) => {
-          console.log(`🔔 MessageBadge (${userType}): Real-time status:`, status);
           if (status === 'SUBSCRIBED') {
-            console.log(`✅ MessageBadge (${userType}): Real-time working! (Bonus)`);
+            // Real-time working!
           } else if (status === 'CHANNEL_ERROR') {
-            console.log(`❌ MessageBadge (${userType}): Real-time failed, relying on polling`);
+            // Real-time failed, relying on polling
           }
         });
     } catch (error) {
-      console.log(`❌ MessageBadge (${userType}): Real-time setup failed:`, error);
     }
 
     // Cleanup function
     return () => {
-      console.log(`🗿 MessageBadge (${userType}): Cleaning up`);
       clearInterval(frequentPolling);
       subscription?.remove();
       unsubscribeBadgeNotifier();
@@ -133,7 +118,6 @@ const MessageBadge = ({ userType, style, textStyle }) => {
         try {
           realtimeSubscription.unsubscribe();
         } catch (error) {
-          console.log('Error unsubscribing:', error);
         }
       }
     };

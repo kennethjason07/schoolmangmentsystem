@@ -116,9 +116,9 @@ export const AuthProvider = ({ children }) => {
           } else {
             console.log('⚠️ Role lookup failed, using fallback. Error code:', roleError?.code, 'Message:', roleError?.message);
             // Fallback role names for when database doesn't have roles yet
-            const roleMap = { 1: 'admin', 2: 'teacher', 3: 'parent', 4: 'student' };
+            const roleMap = { 1: 'admin', 2: 'teacher', 3: 'parent', 4: 'student', 5: 'teacher', 6: 'teacher', 7: 'student', 8: 'parent' };
             roleName = roleMap[userProfile.role_id] || 'user';
-            console.log('🔄 Using fallback role name:', roleName);
+            console.log('🔄 Using fallback role name:', roleName, 'for role_id:', userProfile.role_id);
             
             // Log specific error if it's the PGRST116 error
             if (roleError?.code === 'PGRST116') {
@@ -127,7 +127,7 @@ export const AuthProvider = ({ children }) => {
           }
         } catch (roleError) {
           console.log('💥 Role lookup exception, using fallback:', roleError);
-          const roleMap = { 1: 'admin', 2: 'teacher', 3: 'parent', 4: 'student' };
+          const roleMap = { 1: 'admin', 2: 'teacher', 3: 'parent', 4: 'student', 5: 'teacher', 6: 'teacher', 7: 'student', 8: 'parent' };
           roleName = roleMap[userProfile.role_id] || 'user';
           
           if (roleError?.code === 'PGRST116') {

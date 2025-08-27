@@ -221,15 +221,43 @@ const ParentDashboard = ({ navigation }) => {
       
       // Get upcoming exams for student's class
       try {
+        console.log('🔍 Parent Dashboard - Fetching upcoming exams for student class ID:', student.class_id);
+        
+        const today = new Date().toISOString().split('T')[0];
+        console.log('🔍 Parent Dashboard - Today date for exam filter:', today);
+        
         const { data: examsData, error: examsError } = await supabase
           .from(TABLES.EXAMS)
-          .select('*')
+          .select(`
+            id,
+            name,
+            start_date,
+            end_date,
+            remarks,
+            class_id,
+            academic_year,
+            subjects(
+              id,
+              name
+            )
+          `)
           .eq('class_id', student.class_id)
+          .gte('start_date', today)
           .order('start_date', { ascending: true })
           .limit(5);
 
+        console.log('📊 Parent Dashboard - Exams query result:', { examsData, examsError });
+        console.log('📊 Parent Dashboard - Exams found:', examsData?.length || 0);
+        
+        if (examsData && examsData.length > 0) {
+          console.log('📋 Parent Dashboard - Exam details:');
+          examsData.forEach((exam, index) => {
+            console.log(`   ${index + 1}. "${exam.name}" - Date: ${exam.start_date}, Subject: ${exam.subjects?.name || 'No subject'}`);
+          });
+        }
+
         if (examsError && examsError.code !== '42P01') {
-          console.log('Exams error:', examsError);
+          console.log('❌ Parent Dashboard - Exams error:', examsError);
         }
         setExams(examsData || []);
       } catch (err) {
@@ -275,59 +303,223 @@ const ParentDashboard = ({ navigation }) => {
         setEvents([]);
       }
 
-      // SIMPLE ATTENDANCE CALCULATION - MATCHES StudentAttendanceMarks
+      // COMPREHENSIVE ATTENDANCE CALCULATION - FIXED FOR ALL DATE FORMATS
       const currentDate = new Date();
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth() + 1; // getMonth() returns 0-11, so add 1
+      const currentMonthKey = `${year}-${String(month).padStart(2, '0')}`;
 
       try {
-        // Get ALL attendance records for this student
-        const { data: allAttendanceData, error: attendanceError } = await supabase
-          .from(TABLES.STUDENT_ATTENDANCE)
-          .select('*')
-          .eq('student_id', student.id)
-          .order('date', { ascending: false });
+        console.log('🔄 Parent Dashboard - Fetching attendance for student:', student.id, student.name);
+        console.log('🔄 Parent Dashboard - Current month filter:', currentMonthKey);
+        console.log('🔄 Parent Dashboard - Current date debug:', {
+          year,
+          month,
+          fullDate: currentDate.toISOString(),
+          localDate: currentDate.toString()
+        });
 
-        if (attendanceError) throw attendanceError;
+        // Multiple strategies to fetch attendance data - same as AttendanceSummary.js
+        let allAttendanceData = null;
+        let attendanceError = null;
+        
+        // Strategy 1: Try the configured table name
+        try {
+          console.log('🔄 Parent Dashboard - TABLES.STUDENT_ATTENDANCE value:', TABLES.STUDENT_ATTENDANCE);
+          const { data, error } = await supabase
+            .from(TABLES.STUDENT_ATTENDANCE)
+            .select(`
+              id,
+              student_id,
+              class_id,
+              date,
+              status,
+              marked_by,
+              created_at
+            `)
+            .eq('student_id', student.id)
+            .order('date', { ascending: false });
+            
+          if (!error) {
+            allAttendanceData = data;
+            console.log('✅ Parent Dashboard - Found attendance via TABLES.STUDENT_ATTENDANCE');
+          } else {
+            attendanceError = error;
+            console.log('❌ Parent Dashboard - TABLES.STUDENT_ATTENDANCE error:', error);
+          }
+        } catch (err) {
+          console.log('❌ Parent Dashboard - TABLES.STUDENT_ATTENDANCE failed:', err);
+          attendanceError = err;
+        }
+        
+        // Strategy 2: Try 'student_attendance' directly
+        if (!allAttendanceData) {
+          try {
+            const { data, error } = await supabase
+              .from('student_attendance')
+              .select(`
+                id,
+                student_id,
+                class_id,
+                date,
+                status,
+                marked_by,
+                created_at
+              `)
+              .eq('student_id', student.id)
+              .order('date', { ascending: false });
+              
+            if (!error) {
+              allAttendanceData = data;
+              console.log('✅ Parent Dashboard - Found attendance via student_attendance');
+            } else {
+              attendanceError = error;
+              console.log('❌ Parent Dashboard - student_attendance error:', error);
+            }
+          } catch (err) {
+            console.log('❌ Parent Dashboard - student_attendance failed:', err);
+            attendanceError = err;
+          }
+        }
+        
+        // Strategy 3: Try alternative table names
+        if (!allAttendanceData) {
+          const alternativeNames = ['attendance', 'student_attendances', 'attendance_records'];
+          
+          for (const tableName of alternativeNames) {
+            try {
+              const { data, error } = await supabase
+                .from(tableName)
+                .select(`
+                  id,
+                  student_id,
+                  class_id,
+                  date,
+                  status,
+                  marked_by,
+                  created_at
+                `)
+                .eq('student_id', student.id)
+                .order('date', { ascending: false });
+                
+              if (!error && data) {
+                allAttendanceData = data;
+                console.log(`✅ Parent Dashboard - Found attendance via ${tableName}`);
+                break;
+              }
+            } catch (err) {
+              console.log(`❌ Parent Dashboard - ${tableName} failed:`, err);
+            }
+          }
+        }
 
-        // Filter to current month records
+        if (attendanceError && !allAttendanceData) {
+          throw attendanceError;
+        }
+
+        console.log('📊 Parent Dashboard - Total attendance records found:', allAttendanceData?.length || 0);
+        console.log('📊 Parent Dashboard - Sample records:', allAttendanceData?.slice(0, 5));
+
+        // COMPREHENSIVE date filtering for current month records
         const currentMonthRecords = (allAttendanceData || []).filter(record => {
           // Safety check for valid date format
           if (!record.date || typeof record.date !== 'string') {
-            console.warn('Invalid date format in attendance record:', record.date);
+            console.warn('⚠️ Parent Dashboard - Invalid date format:', record.date);
             return false;
           }
           
-          const dateParts = record.date.split('-');
-          if (dateParts.length < 2) {
-            console.warn('Date does not contain expected format (YYYY-MM-DD):', record.date);
+          try {
+            let recordDate;
+            let recordYear, recordMonth;
+            
+            // Handle multiple date formats
+            if (record.date.includes('T')) {
+              // ISO format: 2025-08-01T00:00:00.000Z
+              recordDate = new Date(record.date);
+              recordYear = recordDate.getFullYear();
+              recordMonth = recordDate.getMonth() + 1;
+              console.log(`🔍 ISO format: ${record.date} -> Year: ${recordYear}, Month: ${recordMonth}`);
+            } else if (record.date.includes('-')) {
+              // Check if it's YYYY-MM-DD or DD-MM-YYYY
+              const parts = record.date.split('-');
+              if (parts.length === 3) {
+                if (parts[0].length === 4) {
+                  // YYYY-MM-DD format
+                  recordYear = parseInt(parts[0], 10);
+                  recordMonth = parseInt(parts[1], 10);
+                  console.log(`🔍 YYYY-MM-DD format: ${record.date} -> Year: ${recordYear}, Month: ${recordMonth}`);
+                } else if (parts[2].length === 4) {
+                  // DD-MM-YYYY format
+                  recordYear = parseInt(parts[2], 10);
+                  recordMonth = parseInt(parts[1], 10);
+                  console.log(`🔍 DD-MM-YYYY format: ${record.date} -> Year: ${recordYear}, Month: ${recordMonth}`);
+                } else {
+                  console.warn(`⚠️ Ambiguous date format: ${record.date}`);
+                  return false;
+                }
+              } else {
+                console.warn(`⚠️ Invalid date parts: ${record.date}`);
+                return false;
+              }
+            } else {
+              // Try to parse as a general date
+              recordDate = new Date(record.date);
+              if (isNaN(recordDate.getTime())) {
+                console.warn(`⚠️ Unparseable date: ${record.date}`);
+                return false;
+              }
+              recordYear = recordDate.getFullYear();
+              recordMonth = recordDate.getMonth() + 1;
+              console.log(`🔍 General format: ${record.date} -> Year: ${recordYear}, Month: ${recordMonth}`);
+            }
+            
+            // Check if parsing was successful (not NaN)
+            if (isNaN(recordYear) || isNaN(recordMonth)) {
+              console.warn(`⚠️ Failed to parse date components: ${record.date} -> Year: ${recordYear}, Month: ${recordMonth}`);
+              return false;
+            }
+            
+            const isCurrentMonth = recordYear === year && recordMonth === month;
+            
+            if (isCurrentMonth) {
+              console.log(`✅ Parent Dashboard - Including record: ${record.date} (${recordYear}-${String(recordMonth).padStart(2, '0')}) - ${record.status}`);
+            } else {
+              console.log(`⏭️ Parent Dashboard - Skipping record: ${record.date} (${recordYear}-${String(recordMonth).padStart(2, '0')}) - Not current month`);
+            }
+            
+            return isCurrentMonth;
+          } catch (err) {
+            console.warn('⚠️ Parent Dashboard - Error processing date:', record.date, err);
             return false;
           }
-          
-          const recordYear = parseInt(dateParts[0], 10);
-          const recordMonth = parseInt(dateParts[1], 10);
-          
-          // Check if parsing was successful (not NaN)
-          if (isNaN(recordYear) || isNaN(recordMonth)) {
-            console.warn('Failed to parse date components:', record.date, 'year:', dateParts[0], 'month:', dateParts[1]);
-            return false;
-          }
-          
-          return recordYear === year && recordMonth === month;
         });
 
-        console.log('=== PARENT DASHBOARD SIMPLE CALCULATION ===');
-        console.log('Current month:', `${year}-${String(month).padStart(2, '0')}`);
-        console.log('Current month records:', currentMonthRecords.length);
-        console.log('Records:', currentMonthRecords.map(r => `${r.date}: ${r.status}`));
-        console.log('==========================================');
+        console.log('=== PARENT DASHBOARD COMPREHENSIVE CALCULATION ===');
+        console.log('Current month:', currentMonthKey);
+        console.log('Current month records found:', currentMonthRecords.length);
+        console.log('Records details:', currentMonthRecords.map(r => ({
+          date: r.date,
+          status: r.status,
+          marked_by: r.marked_by,
+          created_at: r.created_at
+        })));
+        
+        // Calculate statistics
+        const presentCount = currentMonthRecords.filter(r => r.status === 'Present').length;
+        const absentCount = currentMonthRecords.filter(r => r.status === 'Absent').length;
+        const totalDays = currentMonthRecords.length;
+        const attendancePercentage = totalDays > 0 ? Math.round((presentCount / totalDays) * 100) : 0;
+        
+        console.log('Statistics:', {
+          present: presentCount,
+          absent: absentCount,
+          total: totalDays,
+          percentage: attendancePercentage
+        });
+        console.log('====================================================');
 
         // Use the filtered records
         const attendanceData = currentMonthRecords;
-
-        if (attendanceError && attendanceError.code !== '42P01') {
-          console.log('Attendance error:', attendanceError);
-        }
         setAttendance(attendanceData || []);
       } catch (err) {
         console.log('Attendance fetch error:', err);
@@ -1543,9 +1735,9 @@ const ParentDashboard = ({ navigation }) => {
         <Ionicons name="calendar" size={24} color="#9C27B0" />
       </View>
       <View style={styles.examInfo}>
-        <Text style={styles.examSubject}>{item.subject_name}</Text>
-        <Text style={styles.examDetails}>{formatDateToDDMMYYYY(item.exam_date)} • {item.exam_time}</Text>
-        <Text style={styles.examClass}>{item.class_name}</Text>
+        <Text style={styles.examSubject}>{item.subjects?.name || item.name || 'Exam'}</Text>
+        <Text style={styles.examDetails}>{formatDateToDDMMYYYY(item.start_date)} • 09:00</Text>
+        <Text style={styles.examClass}>{item.class_name || 'N/A'}</Text>
       </View>
       <TouchableOpacity style={styles.examAction}>
         <Ionicons name="chevron-forward" size={20} color="#9C27B0" />
@@ -1611,9 +1803,9 @@ const ParentDashboard = ({ navigation }) => {
         <Ionicons name="calendar" size={24} color="#fff" />
       </View>
       <View style={styles.eventInfo}>
-        <Text style={styles.eventTitle}>{item.subject_name} Exam</Text>
-        <Text style={styles.eventDetails}>{formatDateToDDMMYYYY(item.exam_date)} • {item.exam_time}</Text>
-        <Text style={styles.eventDescription}>{item.description || 'Exam scheduled'}</Text>
+        <Text style={styles.eventTitle}>{item.subjects?.name || item.name || 'Exam'}</Text>
+        <Text style={styles.eventDetails}>{formatDateToDDMMYYYY(item.start_date)} • 09:00</Text>
+        <Text style={styles.eventDescription}>{item.remarks || 'Exam scheduled'}</Text>
       </View>
     </View>
   );
@@ -1947,9 +2139,9 @@ const ParentDashboard = ({ navigation }) => {
                     <Ionicons name="calendar" size={24} color="#fff" />
                   </View>
                   <View style={styles.modalEventInfo}>
-                    <Text style={styles.modalEventTitle}>{item.subject_name} Exam</Text>
-                    <Text style={styles.modalEventDetails}>{formatDateToDDMMYYYY(item.exam_date)} • {item.exam_time}</Text>
-                    <Text style={styles.modalEventDescription}>{item.description || 'Exam scheduled'}</Text>
+                    <Text style={styles.modalEventTitle}>{item.subjects?.name || item.name || 'Exam'}</Text>
+                    <Text style={styles.modalEventDetails}>{formatDateToDDMMYYYY(item.start_date)} • 09:00</Text>
+                    <Text style={styles.modalEventDescription}>{item.remarks || 'Exam scheduled'}</Text>
                   </View>
                 </View>
               ))}
