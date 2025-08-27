@@ -92,35 +92,67 @@ const AdminNotifications = ({ navigation }) => {
       const readIds = await loadReadNotifications();
       setReadNotifications(readIds);
 
-      // Get all notifications for this admin
-      // Since the schema doesn't support Admin recipient type, we'll get all general notifications
-      // or notifications sent by the system for admin review
-      const { data, error } = await supabase
+      // Get notifications from notification_recipients table first (preferred method)
+      // Since admin notifications are stored with recipient_type 'Parent' as workaround
+      const { data: recipientNotifications, error: recipientError } = await supabase
+        .from('notification_recipients')
+        .select(`
+          *,
+          notification:notifications(*)
+        `)
+        .eq('recipient_id', user.id)
+        .eq('recipient_type', 'Parent') // Admin notifications use Parent type as workaround
+        .order('sent_at', { ascending: false });
+
+      let allNotifications = [];
+
+      // Process recipient notifications (these are targeted to this specific admin)
+      if (!recipientError && recipientNotifications) {
+        const recipientNotifs = recipientNotifications.map(item => ({
+          id: item.notification.id,
+          title: getNotificationTitle(item.notification.type, item.notification.message),
+          message: item.notification.message || '',
+          type: item.notification.message && item.notification.message.includes('[LEAVE_REQUEST]') 
+            ? 'leave_request' 
+            : (item.notification.type || 'general'),
+          isRead: item.is_read || readIds.has(item.notification.id.toString()),
+          createdAt: item.notification.created_at,
+          sentAt: item.sent_at,
+          deliveryStatus: item.delivery_status
+        }));
+        allNotifications = [...recipientNotifs];
+      }
+
+      // Also get general notifications not specifically targeted (fallback method)
+      const { data: generalNotifications, error: generalError } = await supabase
         .from('notifications')
         .select('*')
         .or(`sent_by.is.null,type.eq.General`)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error('Error fetching admin notifications:', error);
-        return;
+      if (!generalError && generalNotifications) {
+        const generalNotifs = generalNotifications
+          .filter(item => !allNotifications.some(existing => existing.id === item.id)) // Avoid duplicates
+          .map(item => ({
+            id: item.id,
+            title: getNotificationTitle(item.type, item.message),
+            message: item.message || '',
+            type: item.message && item.message.includes('[LEAVE_REQUEST]') 
+              ? 'leave_request' 
+              : (item.type || 'general'),
+            isRead: readIds.has(item.id.toString()),
+            createdAt: item.created_at,
+            sentAt: item.sent_at,
+            deliveryStatus: item.delivery_status
+          }));
+        allNotifications = [...allNotifications, ...generalNotifs];
       }
 
-      // Transform the data to a more usable format
-      const formattedNotifications = data?.map(item => {
-        const isLeaveRequest = item.message && item.message.includes('[LEAVE_REQUEST]');
-        
-        return {
-          id: item.id,
-          title: getNotificationTitle(item.type, item.message),
-          message: item.message || '',
-          type: isLeaveRequest ? 'leave_request' : (item.type || 'general'),
-          isRead: readIds.has(item.id.toString()), // Check if this notification has been read
-          createdAt: item.created_at
-        };
-      }) || [];
+      // Sort all notifications by created date (most recent first)
+      allNotifications.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-      setNotifications(formattedNotifications);
+      setNotifications(allNotifications);
+
     } catch (error) {
       console.error('Error fetching admin notifications:', error);
     } finally {

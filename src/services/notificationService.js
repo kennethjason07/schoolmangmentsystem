@@ -509,6 +509,92 @@ export const hasAbsenceNotificationBeenSent = async (studentId, date) => {
 };
 
 /**
+ * Create leave request notification for admins
+ * @param {Object} leaveData - Leave application data
+ * @param {Object} teacherData - Teacher profile data
+ * @param {string} sent_by - User ID who sent the notification
+ * @returns {Promise<Object>} Result with success status
+ */
+export const createLeaveRequestNotificationForAdmins = async (leaveData, teacherData, sent_by) => {
+  try {
+    console.log('📧 [LEAVE REQUEST] Creating notification for admins...');
+    
+    const notificationMessage = `[LEAVE_REQUEST] ${teacherData.teacher?.name || teacherData.full_name} has submitted a ${leaveData.leave_type} request from ${leaveData.start_date} to ${leaveData.end_date}. Reason: ${leaveData.reason}`;
+    
+    // Step 1: Create the main notification record
+    const { data: notification, error: notificationError } = await supabase
+      .from(TABLES.NOTIFICATIONS)
+      .insert({
+        message: notificationMessage,
+        type: 'General',
+        sent_by,
+        delivery_mode: 'InApp',
+        delivery_status: 'Sent'
+      })
+      .select()
+      .single();
+
+    if (notificationError) {
+      console.error('❌ [LEAVE REQUEST] Error creating notification:', notificationError);
+      throw notificationError;
+    }
+
+    console.log('✅ [LEAVE REQUEST] Notification created:', notification.id);
+
+    // Step 2: Get all admin users (role_id = 1)
+    const { data: adminUsers, error: adminError } = await supabase
+      .from(TABLES.USERS)
+      .select('id')
+      .eq('role_id', 1);
+    
+    if (adminError) {
+      console.error('❌ [LEAVE REQUEST] Error fetching admin users:', adminError);
+      throw adminError;
+    }
+
+    console.log(`📧 [LEAVE REQUEST] Found ${adminUsers?.length || 0} admin users`);
+
+    // Step 3: Create notification recipients for all admins
+    if (adminUsers && adminUsers.length > 0) {
+      // Since notification_recipients table only supports Student/Parent recipient_type,
+      // we use 'Parent' as a workaround for admin notifications
+      const adminRecipients = adminUsers.map(admin => ({
+        notification_id: notification.id,
+        recipient_id: admin.id,
+        recipient_type: 'Parent', // Workaround: Use Parent type for admins
+        delivery_status: 'Sent',
+        sent_at: new Date().toISOString(),
+        is_read: false
+      }));
+      
+      const { error: recipientsError } = await supabase
+        .from(TABLES.NOTIFICATION_RECIPIENTS)
+        .insert(adminRecipients);
+      
+      if (recipientsError) {
+        console.error('❌ [LEAVE REQUEST] Error creating admin notification recipients:', recipientsError);
+        throw recipientsError;
+      }
+
+      console.log(`✅ [LEAVE REQUEST] Created notification recipients for ${adminUsers.length} admin users`);
+    }
+
+    return {
+      success: true,
+      notification,
+      recipientCount: adminUsers?.length || 0
+    };
+
+  } catch (error) {
+    console.error('❌ [LEAVE REQUEST] Error in createLeaveRequestNotificationForAdmins:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to create leave request notification'
+    };
+  }
+};
+
+/**
  * Test function to create a simple notification for debugging
  * @param {string} parentUserId - The parent user ID
  * @param {string} message - Test message
@@ -742,12 +828,107 @@ export const markNotificationAsFailed = async (notificationId, userId, reason = 
   }
 };
 
+/**
+ * Create leave status update notification for teacher
+ * @param {Object} leaveData - Leave application data
+ * @param {string} status - New status ('Approved' or 'Rejected')
+ * @param {string} adminRemarks - Admin remarks
+ * @param {string} sent_by - User ID who sent the notification (admin)
+ * @returns {Promise<Object>} Result with success status
+ */
+export const createLeaveStatusNotificationForTeacher = async (leaveData, status, adminRemarks, sent_by) => {
+  try {
+    console.log(`📧 [LEAVE STATUS] Creating ${status} notification for teacher...`);
+    
+    // Find the user account for the teacher
+    const { data: teacherUser, error: teacherError } = await supabase
+      .from('users')
+      .select('id, full_name')
+      .eq('linked_teacher_id', leaveData.teacher_id)
+      .single();
+
+    if (teacherError || !teacherUser) {
+      console.error('❌ [LEAVE STATUS] Error finding teacher user account:', teacherError);
+      return {
+        success: false,
+        error: 'Teacher user account not found'
+      };
+    }
+
+    const baseMessage = status === 'Approved' 
+      ? `Your ${leaveData.leave_type} request has been approved.`
+      : `Your ${leaveData.leave_type} request has been rejected.`;
+
+    const fullMessage = adminRemarks?.trim() 
+      ? `${baseMessage} Remarks: ${adminRemarks.trim()}`
+      : baseMessage;
+    
+    // Step 1: Create the main notification record
+    const { data: notification, error: notificationError } = await supabase
+      .from('notifications')
+      .insert({
+        message: fullMessage,
+        type: 'General',
+        sent_by,
+        delivery_mode: 'InApp',
+        delivery_status: 'Sent'
+      })
+      .select()
+      .single();
+
+    if (notificationError) {
+      console.error('❌ [LEAVE STATUS] Error creating notification:', notificationError);
+      throw notificationError;
+    }
+
+    console.log('✅ [LEAVE STATUS] Notification created:', notification.id);
+
+    // Step 2: Create notification recipient for the teacher
+    // Since teachers are not directly supported in recipient_type, use 'Student' as workaround
+    const recipientData = {
+      notification_id: notification.id,
+      recipient_id: teacherUser.id,
+      recipient_type: 'Student', // Workaround: Use Student type for teacher notifications
+      delivery_status: 'Sent',
+      sent_at: new Date().toISOString(),
+      is_read: false
+    };
+      
+    const { error: recipientError } = await supabase
+      .from('notification_recipients')
+      .insert(recipientData);
+      
+    if (recipientError) {
+      console.error('❌ [LEAVE STATUS] Error creating teacher notification recipient:', recipientError);
+      throw recipientError;
+    }
+
+    console.log(`✅ [LEAVE STATUS] Created notification recipient for teacher user ${teacherUser.id}`);
+
+    return {
+      success: true,
+      notification,
+      teacherUserId: teacherUser.id,
+      teacherName: teacherUser.full_name
+    };
+
+  } catch (error) {
+    console.error('❌ [LEAVE STATUS] Error in createLeaveStatusNotificationForTeacher:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to create leave status notification'
+    };
+  }
+};
+
 export default {
   sendAbsenceNotificationToParent,
   sendAbsenceMessageOnly,
   sendBulkAbsenceNotifications,
   hasAbsenceNotificationBeenSent,
   createTestNotification,
+  createLeaveRequestNotificationForAdmins,
+  createLeaveStatusNotificationForTeacher,
   testParentLookupForStudent,
   getAllParentStudentRelationships,
   getParentUserIdForStudent

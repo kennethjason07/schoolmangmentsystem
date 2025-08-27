@@ -992,19 +992,29 @@ function groupAndSortSchedule(schedule) {
     const fetchUnread = async () => {
       try {
         if (!user?.id) return;
+        console.log('🔔 Fetching unread notification count for teacher:', user.id);
         const { data, error } = await supabase
           .from('notification_recipients')
           .select('id, is_read')
-          .eq('recipient_type', 'Teacher')
+          .eq('recipient_type', 'Student') // Teachers use Student type as workaround
           .eq('recipient_id', user.id)
           .eq('is_read', false);
-        if (!error && data) setUnreadCount(data.length);
+        if (!error && data) {
+          setUnreadCount(data.length);
+          console.log(`🔔 Found ${data.length} unread notifications`);
+        } else if (error) {
+          console.error('❌ Error fetching unread notifications:', error);
+        }
       } catch (e) {
         console.log('Error fetching unread notifications:', e);
         // silent fail for UI, but log for debugging
       }
     };
     fetchUnread();
+    
+    // Set up interval to refresh notification count every 30 seconds
+    const interval = setInterval(fetchUnread, 30000);
+    return () => clearInterval(interval);
   }, [user?.id]);
 
   if (loading) {

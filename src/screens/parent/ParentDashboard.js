@@ -21,6 +21,7 @@ import { useAuth } from '../../utils/AuthContext';
 import { useSelectedStudent } from '../../contexts/SelectedStudentContext';
 import { useFocusEffect } from '@react-navigation/native';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
+import { useUnreadMessageCount } from '../../hooks/useUnreadMessageCount';
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -1374,14 +1375,14 @@ const ParentDashboard = ({ navigation }) => {
     }
   }, [user]);
 
-  // Calculate unread notifications count
-  const unreadCount = notifications.filter(notification => !notification.is_read).length;
+  // Use custom hook for unread message count instead of notifications
+  const { unreadCount: unreadMessageCount = 0 } = useUnreadMessageCount() || {};
   
   // Debug logging for unread count
   console.log('=== PARENT DASHBOARD UNREAD COUNT DEBUG ===');
   console.log('Total notifications:', notifications.length);
   console.log('Notifications array:', notifications);
-  console.log('Unread count:', unreadCount);
+  console.log('Unread message count from hook:', unreadMessageCount);
   console.log('============================================');
 
   // Calculate attendance percentage - handle Sunday exclusion and case sensitivity
@@ -1701,7 +1702,7 @@ const ParentDashboard = ({ navigation }) => {
         title="Parent Dashboard" 
         showBack={false} 
         showNotifications={true}
-        unreadCount={unreadCount}
+        unreadCount={unreadMessageCount}
       />
       
       {/* Student Switch Banner - Show when parent has multiple children */}
@@ -1791,6 +1792,86 @@ const ParentDashboard = ({ navigation }) => {
               />
             </TouchableOpacity>
           ))}
+        </View>
+
+        {/* Quick Actions */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+          </View>
+          <View style={styles.quickActionsGrid}>
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => navigation.navigate('ParentViewHomework')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#FF9800' }]}>
+                <Ionicons name="library" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Homework</Text>
+              <Text style={styles.actionSubtitle}>View assignments</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => navigation.jumpTo('Attendance')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#4CAF50' }]}>
+                <Ionicons name="checkmark-circle" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Attendance</Text>
+              <Text style={styles.actionSubtitle}>View attendance details</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => navigation.jumpTo('Marks')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#2196F3' }]}>
+                <Ionicons name="document-text" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Report Card</Text>
+              <Text style={styles.actionSubtitle}>View marks & grades</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => navigation.jumpTo('Fees')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#9C27B0' }]}>
+                <Ionicons name="card" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Fee Payment</Text>
+              <Text style={styles.actionSubtitle}>Pay school fees</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => navigation.jumpTo('Chat')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#E91E63' }]}>
+                <Ionicons name="chatbubbles" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Chat</Text>
+              <Text style={styles.actionSubtitle}>Contact teachers</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => navigation.navigate('ParentNotifications')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#607D8B' }]}>
+                <Ionicons name="notifications" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Notifications</Text>
+              <Text style={styles.actionSubtitle}>View all messages</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* This Week's Attendance */}
@@ -2306,6 +2387,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
     textAlign: 'center',
+  },
+  actionSubtitle: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 4,
   },
   notificationItem: {
     flexDirection: 'row',

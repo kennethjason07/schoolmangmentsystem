@@ -18,6 +18,7 @@ import CrossPlatformDatePicker, { DatePickerButton } from '../../components/Cros
 import Header from '../../components/Header';
 import { supabase } from '../../utils/supabase';
 import { format, parseISO, isAfter, differenceInDays } from 'date-fns';
+import { createLeaveRequestNotificationForAdmins } from '../../services/notificationService';
 
 const { width } = Dimensions.get('window');
 
@@ -248,26 +249,23 @@ const LeaveApplication = ({ navigation }) => {
       try {
         console.log('📧 Creating notification for admins about new leave request...');
         
-        const notificationMessage = `${teacherProfile.teacher?.name || teacherProfile.full_name} has submitted a ${applicationForm.leave_type} request from ${format(applicationForm.start_date, 'MMM dd, yyyy')} to ${format(applicationForm.end_date, 'MMM dd, yyyy')} (${totalDays} ${totalDays === 1 ? 'day' : 'days'}).`;
+        // Use the proper notification service to create admin notifications with recipients
+        const notificationResult = await createLeaveRequestNotificationForAdmins(
+          {
+            leave_type: applicationForm.leave_type,
+            start_date: format(applicationForm.start_date, 'MMM dd, yyyy'),
+            end_date: format(applicationForm.end_date, 'MMM dd, yyyy'),
+            reason: applicationForm.reason.trim(),
+            total_days: totalDays
+          },
+          teacherProfile,
+          user.id
+        );
 
-        // Create the notification for admin review
-        const enhancedMessage = `[LEAVE_REQUEST] ${notificationMessage} Reason: ${applicationForm.reason.trim()}`;
-        
-        const { data: notification, error: notificationError } = await supabase
-          .from('notifications')
-          .insert({
-            message: enhancedMessage,
-            type: 'General',
-            sent_by: user.id
-          })
-          .select()
-          .single();
-
-        if (notificationError) {
-          console.error('❌ Error creating admin notification:', notificationError);
-          // Don't fail the entire leave submission if notification fails
+        if (notificationResult.success) {
+          console.log(`✅ Admin notification created successfully for ${notificationResult.recipientCount} admin users`);
         } else {
-          console.log('✅ Admin notification created successfully for leave request');
+          console.error('❌ Failed to create admin notification:', notificationResult.error);
         }
       } catch (notificationError) {
         console.error('❌ Error in notification creation process:', notificationError);

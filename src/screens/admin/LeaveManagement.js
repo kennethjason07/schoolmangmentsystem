@@ -24,6 +24,7 @@ import { format, parseISO, isAfter, isBefore } from 'date-fns';
 import ModernFilters from '../../components/ui/ModernFilters';
 import Colors from '../../constants/Colors';
 import { useAuth } from '../../utils/AuthContext';
+import { createLeaveStatusNotificationForTeacher } from '../../services/notificationService';
 
 const { width } = Dimensions.get('window');
 
@@ -507,34 +508,20 @@ const LeaveManagement = ({ navigation }) => {
 
       if (error) throw error;
 
-      // Send notification to teacher silently in background
+      // Send notification to teacher using notification service
       if (selectedLeave?.teacher_id) {
         try {
-          const { data: userData, error: userError } = await supabase
-            .from('users')
-            .select('id, full_name')
-            .eq('linked_teacher_id', selectedLeave.teacher_id)
-            .single();
-
-          if (!userError && userData) {
-            const baseMessage = reviewForm.status === 'Approved' 
-              ? `Your ${selectedLeave.leave_type} request has been approved.`
-              : `Your ${selectedLeave.leave_type} request has been rejected.`;
-
-            const fullMessage = reviewForm.admin_remarks.trim() 
-              ? `${baseMessage} Remarks: ${reviewForm.admin_remarks.trim()}`
-              : baseMessage;
-
-            await supabase
-              .from('notifications')
-              .insert({
-                message: fullMessage,
-                type: 'General',
-                delivery_mode: 'InApp',
-                delivery_status: 'Sent',
-                sent_by: user.id,
-                created_at: new Date().toISOString()
-              });
+          const notificationResult = await createLeaveStatusNotificationForTeacher(
+            selectedLeave,
+            reviewForm.status,
+            reviewForm.admin_remarks.trim(),
+            user.id
+          );
+          
+          if (notificationResult.success) {
+            console.log('✅ Leave status notification sent to teacher successfully');
+          } else {
+            console.error('❌ Failed to send leave status notification:', notificationResult.error);
           }
         } catch (notificationError) {
           // Log error but don't show to user - notifications are secondary

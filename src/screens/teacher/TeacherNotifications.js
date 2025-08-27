@@ -80,153 +80,82 @@ const TeacherNotifications = ({ navigation }) => {
 
       console.log('📱 Fetching notifications for teacher user ID:', user.id);
 
-      // First, get teacher profile to find linked teacher ID
-      const { data: userProfile, error: profileError } = await supabase
-        .from('users')
-        .select('linked_teacher_id')
-        .eq('id', user.id)
-        .single();
-
-      if (profileError) {
-        console.error('❌ Error fetching user profile:', profileError);
-      }
-
-      const linkedTeacherId = userProfile?.linked_teacher_id;
-      console.log('👩‍🏫 Linked teacher ID:', linkedTeacherId);
-
-      // Load read notifications from storage
-      const readIds = await loadReadNotifications();
-      setReadNotifications(readIds);
-
-      let teacherNotifications = [];
-
-      // Method 1: Skip recipient-specific notifications as schema doesn't support Teacher type
-      // Note: Schema only allows 'Student' and 'Parent' as recipient_type, not 'Teacher'
-      console.log('ℹ️ Skipping recipient-specific notifications (schema limitation)');
-      
-
-      // Method 2: Direct approach - get all notifications and check if they're relevant to this teacher
-      console.log('🔍 Looking for all notifications that might be for this teacher...');
-      
-      // Get ALL recent notifications (like admin dashboard does)
-      const { data: allNotificationsFromDB, error: allNotifError } = await supabase
-        .from('notifications')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100); // Get more recent notifications
-
-      if (!allNotifError && allNotificationsFromDB && allNotificationsFromDB.length > 0) {
-        console.log('📨 Found', allNotificationsFromDB.length, 'total notifications in system');
-        
-        // Filter for leave-related notifications
-        const leaveNotifications = allNotificationsFromDB.filter(notif => 
-          notif.message && (
-            notif.message.includes('[LEAVE_APPROVED]') ||
-            notif.message.includes('[LEAVE_REJECTED]') ||
-            notif.message.includes('approved') ||
-            notif.message.includes('rejected')
+      // Method: Use notification_recipients table to get notifications for this teacher
+      // Teachers use 'Student' recipient_type as workaround due to schema limitations
+      const { data: teacherNotificationRecipients, error: recipientError } = await supabase
+        .from('notification_recipients')
+        .select(`
+          id,
+          notification_id,
+          recipient_id,
+          recipient_type,
+          delivery_status,
+          sent_at,
+          is_read,
+          read_at,
+          notifications!inner (
+            id,
+            type,
+            message,
+            delivery_mode,
+            delivery_status,
+            sent_by,
+            scheduled_at,
+            sent_at,
+            created_at
           )
-        );
-        
-        console.log('📨 Found', leaveNotifications.length, 'leave-related notifications');
-        
-        if (linkedTeacherId && leaveNotifications.length > 0) {
-          // Get teacher info to match against notification messages
-          const { data: teacherInfo, error: teacherInfoError } = await supabase
-            .from('teachers')
-            .select('id, name')
-            .eq('id', linkedTeacherId)
-            .single();
+        `)
+        .eq('recipient_id', user.id)
+        .eq('recipient_type', 'Student') // Teachers use Student type as workaround
+        .order('sent_at', { ascending: false });
 
-          if (!teacherInfoError && teacherInfo) {
-            console.log('👩‍🏫 Current teacher:', teacherInfo.name, '(ID:', teacherInfo.id, ')');
-            
-            const relevantNotifications = [];
-            
-            // Check each leave notification
-            for (const notification of leaveNotifications) {
-              console.log('🔍 Processing notification:', notification.message.substring(0, 100) + '...');
-              
-              // Try to match this notification to the current teacher
-              // Since we can't easily parse the message, let's get this teacher's recent leaves and match by timing
-              const { data: recentLeaves, error: leavesError } = await supabase
-                .from('leave_applications')
-                .select('id, teacher_id, start_date, end_date, leave_type, reviewed_at, status')
-                .eq('teacher_id', linkedTeacherId)
-                .not('status', 'eq', 'Pending')
-                .order('reviewed_at', { ascending: false })
-                .limit(20); // Get recent leaves
+      if (recipientError) {
+        console.error('❌ Error fetching notification recipients:', recipientError);
+        setNotifications([]);
+        return;
+      }
 
-              if (!leavesError && recentLeaves && recentLeaves.length > 0) {
-                // Check if this notification could be for any of this teacher's leaves
-                const notificationDate = new Date(notification.created_at);
-                
-                for (const leave of recentLeaves) {
-                  if (!leave.reviewed_at) continue;
-                  
-                  const reviewDate = new Date(leave.reviewed_at);
-                  const timeDiff = Math.abs(notificationDate - reviewDate);
-                  const hoursDiff = timeDiff / (1000 * 60 * 60);
-                  
-                  // Check if notification is within reasonable time of leave review (48 hours)
-                  // and contains leave type
-                  const hasLeaveType = notification.message.toLowerCase().includes(leave.leave_type.toLowerCase());
-                  
-                  console.log(`     Testing leave: ${leave.leave_type} (${leave.status})`);
-                  console.log(`     Leave reviewed: ${leave.reviewed_at}`);
-                  console.log(`     Notification created: ${notification.created_at}`);
-                  console.log(`     Time diff: ${hoursDiff.toFixed(1)}h, Has type: ${hasLeaveType}`);
-                  
-                  if (hoursDiff <= 48 && hasLeaveType) {
-                    console.log('✅ MATCHED! This notification is for this teacher\'s leave');
-                    
-                    // Determine type
-                    let notificationType = 'general';
-                    if (notification.message.includes('[LEAVE_APPROVED]') || notification.message.includes('approved')) {
-                      notificationType = 'leave_approved';
-                    } else if (notification.message.includes('[LEAVE_REJECTED]') || notification.message.includes('rejected')) {
-                      notificationType = 'leave_rejected';
-                    }
-                    
-                    relevantNotifications.push({
-                      id: `teacher_notif_${notification.id}`,
-                      notificationId: notification.id,
-                      title: getNotificationTitle(notificationType, notification.message),
-                      message: notification.message.replace(/^\[LEAVE_(APPROVED|REJECTED)\]\s*/, ''),
-                      type: notificationType,
-                      isRead: readIds.has(notification.id.toString()), // Check if this notification has been read
-                      createdAt: notification.created_at,
-                      data: { leaveId: leave.id, teacherId: linkedTeacherId },
-                      source: 'direct_match'
-                    });
-                    
-                    break; // Found a match, don't check other leaves for this notification
-                  }
-                }
-              }
-            }
-            
-            // Remove duplicates
-            const uniqueNotifications = relevantNotifications.filter((notif, index, self) =>
-              index === self.findIndex(n => n.notificationId === notif.notificationId)
-            );
-            
-            console.log('🎯 Final result: Found', uniqueNotifications.length, 'notifications for this teacher');
-            teacherNotifications.push(...uniqueNotifications);
+      console.log(`📨 Found ${teacherNotificationRecipients?.length || 0} notifications from recipients table`);
+
+      const teacherNotifications = [];
+
+      if (teacherNotificationRecipients && teacherNotificationRecipients.length > 0) {
+        // Transform recipient records into notification objects
+        for (const recipient of teacherNotificationRecipients) {
+          const notification = recipient.notifications;
+          if (!notification) continue;
+
+          // Determine type based on message content
+          let notificationType = 'general';
+          if (notification.message.includes('approved')) {
+            notificationType = 'leave_approved';
+          } else if (notification.message.includes('rejected')) {
+            notificationType = 'leave_rejected';
+          } else if (notification.message.includes('pending')) {
+            notificationType = 'leave_pending';
           }
+
+          teacherNotifications.push({
+            id: recipient.id,
+            notificationId: notification.id,
+            title: getNotificationTitle(notificationType, notification.message),
+            message: notification.message,
+            type: notificationType,
+            isRead: recipient.is_read || false, // Use is_read from notification_recipients
+            createdAt: notification.created_at,
+            sentAt: recipient.sent_at,
+            deliveryStatus: recipient.delivery_status,
+            source: 'notification_recipients'
+          });
         }
-      } else {
-        console.log('ℹ️ No notifications found in system');
       }
 
-      if (!linkedTeacherId) {
-        console.warn('⚠️ Teacher not linked to a teacher profile, cannot fetch leave notifications');
-      }
-
-      // Sort all notifications by creation date (newest first)
+      // Sort notifications by creation date (newest first)
       teacherNotifications.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       
       console.log('📊 Total notifications:', teacherNotifications.length);
+      console.log('📊 Unread notifications:', teacherNotifications.filter(n => !n.isRead).length);
+      
       setNotifications(teacherNotifications);
       
     } catch (error) {
@@ -248,15 +177,20 @@ const TeacherNotifications = ({ navigation }) => {
 
   const markAsRead = async (notificationId) => {
     try {
-      // Extract the actual notification ID from teacher-prefixed ID
-      const actualNotificationId = notificationId.replace('teacher_notif_', '');
+      // Update the notification_recipients table
+      const { error: updateError } = await supabase
+        .from('notification_recipients')
+        .update({
+          is_read: true,
+          read_at: new Date().toISOString()
+        })
+        .eq('id', notificationId)
+        .eq('recipient_id', user.id);
       
-      // Update the readNotifications set
-      const newReadNotifications = new Set([...readNotifications, actualNotificationId]);
-      setReadNotifications(newReadNotifications);
-      
-      // Save to AsyncStorage
-      await saveReadNotifications(newReadNotifications);
+      if (updateError) {
+        console.error('❌ Error updating notification_recipients:', updateError);
+        return;
+      }
       
       // Update local state
       setNotifications(prev => 
@@ -267,7 +201,7 @@ const TeacherNotifications = ({ navigation }) => {
         )
       );
       
-      console.log('📖 Marked notification as read and saved to storage:', actualNotificationId);
+      console.log('📖 Marked notification as read in database:', notificationId);
     } catch (error) {
       console.error('Error marking notification as read:', error);
     }
@@ -282,15 +216,22 @@ const TeacherNotifications = ({ navigation }) => {
         return;
       }
 
-      // Get all notification IDs (extract actual IDs from teacher-prefixed IDs)
-      const allNotificationIds = notifications.map(notif => 
-        notif.notificationId ? notif.notificationId.toString() : notif.id.toString().replace('teacher_notif_', '')
-      );
-      const newReadNotifications = new Set(allNotificationIds);
-      setReadNotifications(newReadNotifications);
+      // Update all unread notifications in notification_recipients table
+      const { error: updateError } = await supabase
+        .from('notification_recipients')
+        .update({
+          is_read: true,
+          read_at: new Date().toISOString()
+        })
+        .eq('recipient_id', user.id)
+        .eq('recipient_type', 'Student') // Teachers use Student type as workaround
+        .eq('is_read', false);
       
-      // Save to AsyncStorage
-      await saveReadNotifications(newReadNotifications);
+      if (updateError) {
+        console.error('❌ Error updating all notifications:', updateError);
+        Alert.alert('Error', 'Failed to mark notifications as read.');
+        return;
+      }
       
       // Update local state
       setNotifications(prev => 
@@ -298,7 +239,7 @@ const TeacherNotifications = ({ navigation }) => {
       );
       
       Alert.alert('Success', 'All notifications marked as read.');
-      console.log('📖 Marked all notifications as read and saved to storage');
+      console.log('📖 Marked all notifications as read in database');
     } catch (error) {
       console.error('Error marking all notifications as read:', error);
       Alert.alert('Error', 'Failed to mark notifications as read.');
