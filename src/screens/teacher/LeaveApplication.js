@@ -419,7 +419,7 @@ const LeaveApplication = ({ navigation }) => {
   if (loading) {
     return (
       <View style={styles.container}>
-        <Header title="Leave Application" navigation={navigation} />
+        <Header title="Leave Application" showBack={true} navigation={navigation} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2196F3" />
           <Text style={styles.loadingText}>Loading leave data...</Text>
@@ -431,7 +431,7 @@ const LeaveApplication = ({ navigation }) => {
   if (!teacherProfile) {
     return (
       <View style={styles.container}>
-        <Header title="Leave Application" navigation={navigation} />
+        <Header title="Leave Application" showBack={true} navigation={navigation} />
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle" size={64} color="#F44336" />
           <Text style={styles.errorText}>Access Denied</Text>
@@ -445,7 +445,7 @@ const LeaveApplication = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <Header title="Leave Application" navigation={navigation} />
+      <Header title="Leave Application" showBack={true} navigation={navigation} />
       
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}

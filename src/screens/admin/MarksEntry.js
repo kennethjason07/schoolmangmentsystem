@@ -172,53 +172,25 @@ const MarksEntry = () => {
 
         if (error) throw error;
 
-        // Send marks notifications to parents using new system
-        console.log('📧 [ADMIN MARKS] Sending marks notifications to parents...');
-        
-        let notificationResults = { success: false, totalRecipients: 0, results: [] };
-        
-        if (marksToSave.length > 0) {
-          try {
-            // Use the new bulk marks notification system
-            notificationResults = await createBulkMarksNotifications(
-              marksToSave,
-              exam,
-              null // Admin user ID - you can pass actual admin user ID here
-            );
-
-            console.log(`📊 [ADMIN MARKS] Bulk marks notification results:`, notificationResults);
-          } catch (notificationError) {
-            console.error('❌ [ADMIN MARKS] Error sending bulk marks notifications:', notificationError);
-            notificationResults = {
-              success: false,
-              totalRecipients: 0,
-              results: [],
-              error: notificationError.message
-            };
-          }
+        // Send marks notifications to parents silently in background
+        try {
+          // Use the new bulk marks notification system
+          await createBulkMarksNotifications(
+            marksToSave,
+            exam,
+            null // Admin user ID - you can pass actual admin user ID here
+          );
+        } catch (notificationError) {
+          // Log error but don't show to user - notifications are secondary
+          console.error('❌ [ADMIN MARKS] Error sending bulk marks notifications:', notificationError);
         }
 
-        // Show success alert with notification results
-        const successCount = notificationResults?.results ? notificationResults.results.filter(r => r.success).length : 0;
-        const failureCount = notificationResults?.results ? notificationResults.results.filter(r => !r.success).length : 0;
-        
-        if (successCount > 0) {
-          Alert.alert(
-            'Success',
-            `Saved marks for ${marksToSave.length} entries!\n\n✅ Marks notifications sent to ${successCount} parent(s)\n✅ Marks messages sent to ${successCount} parent(s)\n\nParents will see both notifications and messages about their child's marks.`,
-            [{ text: 'OK', onPress: () => navigation.goBack() }]
-          );
-        } else if (failureCount > 0) {
-          Alert.alert(
-            'Partial Success',
-            `Saved marks for ${marksToSave.length} entries!\n\n⚠️ Note: ${failureCount} marks notification(s) and message(s) could not be sent (no parent mapping found).\n\nTo enable notifications for these students, add their parent mappings to the system.`,
-            [{ text: 'OK', onPress: () => navigation.goBack() }]
-          );
-        } else {
-          Alert.alert('Success', `Saved marks for ${marksToSave.length} entries`, [
-            { text: 'OK', onPress: () => navigation.goBack() }
-          ]);
-        }
+        // Show simple success message
+        Alert.alert(
+          'Success',
+          'Marks added successfully!',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
       } else {
         Alert.alert('Info', 'No marks to save');
       }

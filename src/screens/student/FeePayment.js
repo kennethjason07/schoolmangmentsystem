@@ -146,42 +146,11 @@ const FeePayment = () => {
         console.log('- Payments found:', studentPayments?.length || 0);
         console.log('- Payment details:', studentPayments);
         
-        // If no fee structure found, create sample data for testing
+        // If no fee structure found, show empty state instead of sample data
         let feesToProcess = classFees || [];
         if (!feesToProcess || feesToProcess.length === 0) {
-          console.log('Student FeePayment - No fee structure found, creating sample data');
-          const safeClassId = (studentDetails && studentDetails.class_id) ? studentDetails.class_id : 'sample-class-id';
-          const safeStudentId = (studentDetails && studentDetails.id) ? studentDetails.id : null;
-
-          feesToProcess = [
-            {
-              id: 'sample-1',
-              academic_year: '2024-2025',
-              class_id: safeClassId,
-              student_id: safeStudentId,
-              fee_component: 'Tuition Fee',
-              amount: 25000,
-              due_date: '2024-04-30'
-            },
-            {
-              id: 'sample-2',
-              academic_year: '2024-2025',
-              class_id: safeClassId,
-              student_id: safeStudentId,
-              fee_component: 'Development Fee',
-              amount: 5000,
-              due_date: '2024-04-30'
-            },
-            {
-              id: 'sample-3',
-              academic_year: '2024-2025',
-              class_id: safeClassId,
-              student_id: safeStudentId,
-              fee_component: 'Transport Fee',
-              amount: 8000,
-              due_date: '2024-05-31'
-            }
-          ];
+          console.log('Student FeePayment - No fee structure found, showing empty state');
+          feesToProcess = [];
         }
 
         // Transform payment history based on schema FIRST
@@ -204,49 +173,9 @@ const FeePayment = () => {
             };
           });
         } else {
-          // Add sample payment history if no real data exists
-          console.log('Student FeePayment - No payment history found, adding sample data');
-          transformedPayments = [
-            {
-              id: 'sample-payment-1',
-              feeName: 'Tuition Fee',
-              amount: 25000,
-              paymentDate: '2024-01-15',
-              paymentMethod: 'Online Banking',
-              transactionId: 'TXN12345678',
-              status: 'completed',
-              receiptUrl: null,
-              remarks: 'First installment payment',
-              academicYear: '2024-2025',
-              createdAt: '2024-01-15T10:30:00Z'
-            },
-            {
-              id: 'sample-payment-2',
-              feeName: 'Development Fee',
-              amount: 5000,
-              paymentDate: '2024-02-10',
-              paymentMethod: 'UPI',
-              transactionId: 'TXN87654321',
-              status: 'completed',
-              receiptUrl: null,
-              remarks: 'Development fee payment',
-              academicYear: '2024-2025',
-              createdAt: '2024-02-10T14:20:00Z'
-            },
-            {
-              id: 'sample-payment-3',
-              feeName: 'Transport Fee',
-              amount: 3000,
-              paymentDate: '2024-03-05',
-              paymentMethod: 'Credit Card',
-              transactionId: 'TXN11223344',
-              status: 'completed',
-              receiptUrl: null,
-              remarks: 'Partial payment',
-              academicYear: '2024-2025',
-              createdAt: '2024-03-05T09:15:00Z'
-            }
-          ];
+          // No payment history found - leave empty array
+          console.log('Student FeePayment - No payment history found in database');
+          transformedPayments = [];
         }
 
         // Transform fee structure data based on schema
@@ -336,91 +265,10 @@ const FeePayment = () => {
         console.error('Error fetching fee data:', err);
         setError(err.message);
 
-        // Set fallback data even when there's an error
-        console.log('Student FeePayment - Setting fallback data due to error');
-        setFeeStructure({
-          totalDue: 38000,
-          totalPaid: 33000,
-          outstanding: 5000,
-          fees: [
-            {
-              id: 'fallback-1',
-              name: 'Tuition Fee',
-              amount: 25000,
-              paidAmount: 25000,
-              remainingAmount: 0,
-              status: 'paid',
-              dueDate: '2024-04-30',
-              academicYear: '2024-2025'
-            },
-            {
-              id: 'fallback-2',
-              name: 'Development Fee',
-              amount: 5000,
-              paidAmount: 5000,
-              remainingAmount: 0,
-              status: 'paid',
-              dueDate: '2024-04-30',
-              academicYear: '2024-2025'
-            },
-            {
-              id: 'fallback-3',
-              name: 'Transport Fee',
-              amount: 8000,
-              paidAmount: 3000,
-              remainingAmount: 5000,
-              status: 'partial',
-              dueDate: '2024-05-31',
-              academicYear: '2024-2025'
-            }
-          ]
-        });
-
-        // Set fallback payment history
-        setPaymentHistory([
-          {
-            id: 'fallback-payment-1',
-            feeName: 'Tuition Fee',
-            amount: 25000,
-            paymentDate: '2024-01-15',
-            paymentMethod: 'Online Banking',
-            transactionId: 'TXN12345678',
-            status: 'completed',
-            receiptUrl: null,
-            remarks: 'Full payment',
-            academicYear: '2024-2025',
-            createdAt: '2024-01-15T10:30:00Z'
-          },
-          {
-            id: 'fallback-payment-2',
-            feeName: 'Development Fee',
-            amount: 5000,
-            paymentDate: '2024-02-10',
-            paymentMethod: 'UPI',
-            transactionId: 'TXN87654321',
-            status: 'completed',
-            receiptUrl: null,
-            remarks: 'Development fee',
-            academicYear: '2024-2025',
-            createdAt: '2024-02-10T14:20:00Z'
-          },
-          {
-            id: 'fallback-payment-3',
-            feeName: 'Transport Fee',
-            amount: 3000,
-            paymentDate: '2024-03-05',
-            paymentMethod: 'Credit Card',
-            transactionId: 'TXN11223344',
-            status: 'completed',
-            receiptUrl: null,
-            remarks: 'Partial payment',
-            academicYear: '2024-2025',
-            createdAt: '2024-03-05T09:15:00Z'
-          }
-        ]);
-
-        // Don't show error alert, just log it
-        console.log('Student FeePayment - Using fallback data due to error:', err.message);
+        // Set empty state when there's an error instead of fallback data
+        console.log('Student FeePayment - Setting empty state due to error:', err.message);
+        setFeeStructure(null);
+        setPaymentHistory([]);
       } finally {
         setLoading(false);
       }

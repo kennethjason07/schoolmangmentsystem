@@ -312,13 +312,24 @@ export async function createBulkMarksNotifications(marksData, exam, adminUserId 
         }
 
         // Update notification delivery status
+        const sentAt = new Date().toISOString();
         await supabase
           .from(TABLES.NOTIFICATIONS)
           .update({
             delivery_status: 'Sent',
-            sent_at: new Date().toISOString()
+            sent_at: sentAt
           })
           .eq('id', notification.id);
+
+        // Update notification recipient delivery status
+        await supabase
+          .from(TABLES.NOTIFICATION_RECIPIENTS)
+          .update({
+            delivery_status: 'Sent',
+            sent_at: sentAt
+          })
+          .eq('notification_id', notification.id)
+          .eq('recipient_id', parent.id);
 
         // Create message record
         const { error: messageError } = await supabase

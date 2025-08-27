@@ -10,6 +10,7 @@ import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 const MarksManagement = () => {
   const [loading, setLoading] = useState(true);
   const [classes, setClasses] = useState([]);
+  const [sections, setSections] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [examTypes, setExamTypes] = useState(['Unit Test', 'Term Exam', 'Final Exam']);
   const [students, setStudents] = useState([]);
@@ -46,8 +47,8 @@ const MarksManagement = () => {
       setClasses(classData);
 
       // Extract unique sections from classData
-      const uniqueSections = [...new Set(classData.map(cls => cls.section))];
-      setSections(uniqueSections.map(s => ({ id: s, section_name: s }))); // Format for Picker
+      const uniqueSections = [...new Set(classData.map(cls => cls.section).filter(s => s))];
+      setSections(uniqueSections); // Store as simple array
 
       // Load subjects
       const { data: subjectData, error: subjectError } = await supabase
@@ -279,8 +280,8 @@ const MarksManagement = () => {
                 enabled={!!selectedClass}
               >
                 <Picker.Item label="Select Section" value={null} />
-                {sections.map(section => (
-                  <Picker.Item key={section} label={section} value={section} />
+                {sections.map((section, index) => (
+                  <Picker.Item key={index} label={section || 'A'} value={section || 'A'} />
                 ))}
               </Picker>
             </View>
