@@ -84,13 +84,25 @@ const ImageViewer = ({ visible, imageData, onClose }) => {
   // Handle image download
   const handleDownload = async () => {
     try {
+      console.log('🚀 Starting image download process...');
+      console.log('📄 Image data:', { imageUrl, imageName, fileSize });
+      
       setLoading(true);
+      
+      // Verify we have a valid image URL
+      if (!imageUrl) {
+        throw new Error('No image URL provided');
+      }
       
       // Create downloads directory
       const downloadDir = FileSystem.documentDirectory + 'Downloads/';
+      console.log('📁 Download directory:', downloadDir);
+      
       const dirInfo = await FileSystem.getInfoAsync(downloadDir);
+      console.log('📁 Directory info:', dirInfo);
       
       if (!dirInfo.exists) {
+        console.log('📁 Creating downloads directory...');
         await FileSystem.makeDirectoryAsync(downloadDir, { intermediates: true });
       }
       
@@ -99,24 +111,53 @@ const ImageViewer = ({ visible, imageData, onClose }) => {
       const extension = imageName.split('.').pop() || 'jpg';
       const fileName = `${imageName.replace(/\.[^/.]+$/, '')}_${timestamp}.${extension}`;
       const localUri = downloadDir + fileName;
+      console.log('📝 Generated filename:', fileName);
+      console.log('📍 Local URI:', localUri);
       
       // Download the image
+      console.log('⬇️ Starting download from:', imageUrl);
       const downloadResult = await FileSystem.downloadAsync(imageUrl, localUri);
+      console.log('✅ Download result:', downloadResult);
       
+      // Verify the file was downloaded
+      const fileInfo = await FileSystem.getInfoAsync(localUri);
+      console.log('📄 Downloaded file info:', fileInfo);
+      
+      if (fileInfo.exists) {
+        console.log('✅ File successfully downloaded!');
+        Alert.alert(
+          'Download Complete',
+          `Image saved successfully!\n\nFile: ${fileName}\nSize: ${fileInfo.size ? formatFileSize(fileInfo.size) : 'Unknown'}\nLocation: ${localUri}`,
+          [
+            { text: 'OK' },
+            {
+              text: 'Share',
+              onPress: () => handleShare(downloadResult.uri)
+            }
+          ]
+        );
+      } else {
+        throw new Error('File was not created after download');
+      }
+    } catch (error) {
+      console.error('💥 Download error:', error);
+      console.error('💥 Error details:', {
+        message: error.message,
+        stack: error.stack,
+        imageUrl,
+        imageName
+      });
       Alert.alert(
-        'Download Complete',
-        `Image saved as: ${fileName}`,
+        'Download Failed', 
+        `Failed to download image: ${error.message}\n\nImage: ${imageName}\nURL: ${imageUrl}`,
         [
           { text: 'OK' },
           {
-            text: 'Share',
-            onPress: () => handleShare(downloadResult.uri)
+            text: 'Retry',
+            onPress: handleDownload
           }
         ]
       );
-    } catch (error) {
-      console.error('Download error:', error);
-      Alert.alert('Download Failed', 'Failed to download image: ' + error.message);
     } finally {
       setLoading(false);
     }

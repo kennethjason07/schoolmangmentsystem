@@ -14,6 +14,7 @@ import { formatToLocalTime } from '../../utils/timeUtils';
 import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from '../../utils/chatFileUpload';
 import { badgeNotifier } from '../../utils/badgeNotifier';
 import { testRealtimeConnection, testUserFilteredConnection, insertTestMessage } from '../../utils/testRealtime';
+import ImageViewer from '../../components/ImageViewer';
 
 const ChatWithTeacher = () => {
   const { user } = useAuth();
@@ -31,6 +32,8 @@ const ChatWithTeacher = () => {
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [messageSubscription, setMessageSubscription] = useState(null);
   const [realtimeTestCleanup, setRealtimeTestCleanup] = useState(null);
+  const [showImageViewer, setShowImageViewer] = useState(false);
+  const [selectedImageData, setSelectedImageData] = useState(null);
   const flatListRef = useRef(null);
 
   // Helper function to get teacher's user ID (exact copy from student logic)
@@ -212,7 +215,8 @@ const ChatWithTeacher = () => {
           teachers!classes_class_teacher_id_fkey(
             id,
             name,
-            qualification
+            qualification,
+            phone
           )
         `)
         .eq('id', student.class_id)
@@ -233,6 +237,7 @@ const ChatWithTeacher = () => {
               id: classInfo.teachers.id,
               userId: teacherUserId,
               name: classInfo.teachers.name,
+              phone: classInfo.teachers.phone,
               subject: 'Class Teacher',
               role: 'class_teacher',
               className: `${student.classes.class_name} ${student.classes.section}`,
@@ -251,6 +256,7 @@ const ChatWithTeacher = () => {
               id: classInfo.teachers.id,
               userId: null,
               name: classInfo.teachers.name + ' (No Account)',
+              phone: classInfo.teachers.phone,
               subject: 'Class Teacher',
               role: 'class_teacher',
               className: `${student.classes.class_name} ${student.classes.section}`,
@@ -273,7 +279,7 @@ const ChatWithTeacher = () => {
         console.log('Trying direct teacher fetch for class_id:', student.class_id);
         const { data: directClassTeacher, error: directTeacherError } = await supabase
           .from(TABLES.TEACHERS)
-          .select('id, name, qualification, is_class_teacher, assigned_class_id')
+          .select('id, name, qualification, is_class_teacher, assigned_class_id, phone')
           .eq('assigned_class_id', student.class_id)
           .eq('is_class_teacher', true);
         
@@ -287,6 +293,7 @@ const ChatWithTeacher = () => {
                 id: teacher.id,
                 userId: teacherUserId,
                 name: teacher.name,
+                phone: teacher.phone,
                 subject: 'Class Teacher',
                 role: 'class_teacher',
                 className: `${student.classes.class_name} ${student.classes.section}`,
@@ -298,19 +305,20 @@ const ChatWithTeacher = () => {
               });
             } catch (userIdError) {
               console.log('❌ Could not get user ID for direct class teacher:', userIdError.message);
-              uniqueTeachers.push({
-                id: teacher.id,
-                userId: null,
-                name: teacher.name + ' (No Account)',
-                subject: 'Class Teacher',
-                role: 'class_teacher',
-                className: `${student.classes.class_name} ${student.classes.section}`,
-                studentName: student.name,
-                messages: [],
-                lastMessageTime: null,
-                canMessage: false,
-                hasUserAccount: false
-              });
+                uniqueTeachers.push({
+                  id: teacher.id,
+                  userId: null,
+                  name: teacher.name + ' (No Account)',
+                  phone: teacher.phone,
+                  subject: 'Class Teacher',
+                  role: 'class_teacher',
+                  className: `${student.classes.class_name} ${student.classes.section}`,
+                  studentName: student.name,
+                  messages: [],
+                  lastMessageTime: null,
+                  canMessage: false,
+                  hasUserAccount: false
+                });
             }
             seen.add(teacher.id);
           }
@@ -341,7 +349,8 @@ const ChatWithTeacher = () => {
                 id,
                 name,
                 qualification,
-                is_class_teacher
+                is_class_teacher,
+                phone
               )
             `)
             .eq('subject_id', subject.id);
@@ -363,6 +372,7 @@ const ChatWithTeacher = () => {
                     id: assignment.teachers.id,
                     userId: teacherUserId,
                     name: assignment.teachers.name,
+                    phone: assignment.teachers.phone,
                     subject: subject.name,
                     role: 'subject_teacher',
                     className: `${student.classes.class_name} ${student.classes.section}`,
@@ -380,6 +390,7 @@ const ChatWithTeacher = () => {
                     id: assignment.teachers.id,
                     userId: null,
                     name: assignment.teachers.name + ' (No Account)',
+                    phone: assignment.teachers.phone,
                     subject: subject.name,
                     role: 'subject_teacher',
                     className: `${student.classes.class_name} ${student.classes.section}`,
@@ -1162,6 +1173,45 @@ const ChatWithTeacher = () => {
     };
   }, [messages]);
 
+  // Function to handle calling teacher
+  const handleCallTeacher = (teacher) => {
+    if (!teacher.phone || teacher.phone.trim() === '') {
+      Alert.alert(
+        'No Phone Number',
+        `${teacher.name} does not have a phone number on file. Please contact the school administration to get their contact information.`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    const phoneNumber = teacher.phone.replace(/\D/g, ''); // Remove non-digit characters
+    const telURL = `tel:${phoneNumber}`;
+
+    Alert.alert(
+      'Call Teacher',
+      `Do you want to call ${teacher.name}?\nPhone: ${teacher.phone}`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Call',
+          onPress: () => {
+            Linking.openURL(telURL).catch((err) => {
+              console.error('Failed to open dialer:', err);
+              Alert.alert(
+                'Cannot Make Call',
+                'Your device does not support making phone calls or the phone app is not available.',
+                [{ text: 'OK' }]
+              );
+            });
+          }
+        }
+      ]
+    );
+  };
+
   // Delete message function
   const handleDeleteMessage = async (messageId) => {
     Alert.alert(
@@ -1379,6 +1429,20 @@ const ChatWithTeacher = () => {
                         </View>
                       </View>
                       <View style={styles.chatActions}>
+                        {/* Call Button */}
+                        <TouchableOpacity
+                          style={styles.callButton}
+                          onPress={() => handleCallTeacher(item)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons 
+                            name="call" 
+                            size={18} 
+                            color={item.phone ? "#4CAF50" : "#ccc"} 
+                          />
+                        </TouchableOpacity>
+                        
+                        {/* Chat Icon */}
                         <View style={styles.chatIconContainer}>
                           <Ionicons name="chatbubbles" size={20} color={hasUnread ? "#f44336" : "#9c27b0"} />
                           {hasUnread && (
@@ -1389,7 +1453,10 @@ const ChatWithTeacher = () => {
                             </View>
                           )}
                         </View>
-                        <Ionicons name="chevron-forward" size={16} color="#ccc" style={{ marginTop: 2 }} />
+                        
+                        <View style={styles.chevronContainer}>
+                          <Ionicons name="chevron-forward" size={16} color="#ccc" />
+                        </View>
                       </View>
                     </TouchableOpacity>
                   </View>
@@ -1430,6 +1497,19 @@ const ChatWithTeacher = () => {
                 {selectedTeacher.subject}
               </Text>
             </View>
+            {/* Call Button in Chat Header */}
+            <TouchableOpacity
+              style={styles.chatHeaderCallButton}
+              onPress={() => handleCallTeacher(selectedTeacher)}
+              activeOpacity={0.7}
+            >
+              <Ionicons 
+                name="call" 
+                size={20} 
+                color={selectedTeacher.phone ? "#4CAF50" : "#ccc"} 
+              />
+            </TouchableOpacity>
+            
             {/* Real-time Test Button */}
             <TouchableOpacity 
               style={styles.testButton}
@@ -1527,8 +1607,25 @@ const ChatWithTeacher = () => {
                     {/* Image Messages */}
                     {item.message_type === 'image' && item.file_url && (
                       <TouchableOpacity onPress={() => {
-                        // Open image in full screen
-                        Alert.alert('Image', 'Image viewer coming soon');
+                        console.log('📱 Image tapped! Item data:', {
+                          id: item.id,
+                          message_type: item.message_type,
+                          file_url: item.file_url,
+                          file_name: item.file_name,
+                          file_size: item.file_size,
+                          fullItem: item
+                        });
+                        
+                        // Open image in full screen viewer with download functionality
+                        const imageData = {
+                          file_url: item.file_url,
+                          file_name: item.file_name || 'image.jpg',
+                          file_size: item.file_size
+                        };
+                        
+                        console.log('📱 Setting image data:', imageData);
+                        setSelectedImageData(imageData);
+                        setShowImageViewer(true);
                       }}>
                         <Image 
                           source={{ uri: item.file_url }} 
@@ -1668,6 +1765,16 @@ const ChatWithTeacher = () => {
           </Animatable.View>
         </Animatable.View>
       )}
+      
+      {/* Image Viewer Modal with Download Functionality */}
+      <ImageViewer
+        visible={showImageViewer}
+        imageData={selectedImageData}
+        onClose={() => {
+          setShowImageViewer(false);
+          setSelectedImageData(null);
+        }}
+      />
     </View>
   );
 };
@@ -1889,8 +1996,11 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   chatActions: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingLeft: 8,
+    minWidth: 80,
   },
   messageIndicator: {
     alignItems: 'center',
@@ -2113,6 +2223,31 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: 'rgba(255, 152, 0, 0.1)',
     marginLeft: 8,
+  },
+
+  // Call Button Styles
+  callButton: {
+    padding: 8,
+    marginRight: 12,
+    borderRadius: 20,
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+  },
+  chatHeaderCallButton: {
+    padding: 10,
+    marginRight: 8,
+    borderRadius: 25,
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  
+  // Chevron Container
+  chevronContainer: {
+    marginLeft: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 20,
+    height: 20,
   },
 });
 

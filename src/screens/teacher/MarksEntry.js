@@ -419,18 +419,26 @@ export default function MarksEntry({ navigation }) {
   return (
     <View style={styles.container}>
       <Header title="Marks Entry" showBack={true} />
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              loadTeacherData().finally(() => setRefreshing(false));
-            }}
-          />
-        }
+      <KeyboardAvoidingView 
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
       >
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollViewContent}
+          showsVerticalScrollIndicator={true}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                loadTeacherData().finally(() => setRefreshing(false));
+              }}
+            />
+          }
+        >
         <View style={styles.content}>
           {classes.length === 0 ? (
             <View style={styles.noDataContainer}>
@@ -600,7 +608,8 @@ export default function MarksEntry({ navigation }) {
             </>
           )}
         </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -610,8 +619,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+  keyboardAvoidingView: {
+    flex: 1,
+  },
   scrollView: {
     flex: 1,
+  },
+  scrollViewContent: {
+    flexGrow: 1,
+    paddingBottom: Platform.OS === 'ios' ? 50 : 80, // Extra padding for keyboard
   },
   content: {
     padding: 16,

@@ -75,8 +75,7 @@ const ParentAccountManagement = ({ navigation }) => {
         .from(TABLES.STUDENTS)
         .select(`
           *,
-          classes(id, class_name, section),
-          parents:parent_id(id, name, phone, email)
+          classes(id, class_name, section)
         `)
         .order('name');
 
@@ -101,8 +100,26 @@ const ParentAccountManagement = ({ navigation }) => {
       const studentsWithParentAccountStatus = (studentsData || []).map(student => {
         const hasParentAccount = existingAccounts?.some(account => account.linked_parent_of === student.id);
         const parentAccountInfo = existingAccounts?.find(account => account.linked_parent_of === student.id);
-        const hasParentRecord = parentRecords?.some(parent => parent.student_id === student.id);
-        const parentRecordInfo = parentRecords?.find(parent => parent.student_id === student.id);
+        
+        // Get all parent records for this student and filter out placeholder names
+        const allParentRecords = parentRecords?.filter(parent => 
+          parent.student_id === student.id && 
+          parent.name &&
+          parent.name.trim() !== '' &&
+          parent.name.toLowerCase() !== 'justus parent' &&
+          parent.name.toLowerCase() !== 'n/a' &&
+          !parent.name.toLowerCase().includes('placeholder') &&
+          !parent.name.toLowerCase().includes('test') &&
+          !parent.name.toLowerCase().includes('sample')
+        ) || [];
+        
+        const hasParentRecord = allParentRecords.length > 0;
+        const parentRecordInfo = allParentRecords[0]; // Get first valid parent record
+        
+        // Get father and mother specifically
+        const fatherRecord = allParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'father');
+        const motherRecord = allParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'mother');
+        const guardianRecord = allParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'guardian');
 
         // Determine overall status
         let parentStatus = 'none';
@@ -120,6 +137,10 @@ const ParentAccountManagement = ({ navigation }) => {
           hasParentRecord,
           parentAccountInfo,
           parentRecordInfo,
+          allParentRecords,
+          fatherRecord,
+          motherRecord,
+          guardianRecord,
           parentStatus
         };
       });
@@ -155,10 +176,10 @@ const ParentAccountManagement = ({ navigation }) => {
   const openCreateAccountModal = (student) => {
     setSelectedStudent(student);
     setAccountForm({
-      full_name: `${student.name} Parent`, // Default parent name
+      full_name: '', // Don't set a default - let admin enter actual parent name
       email: '',
       phone: '',
-      relation: 'Guardian',
+      relation: 'Father', // Default to Father instead of Guardian
       password: '',
       confirmPassword: ''
     });
@@ -445,15 +466,25 @@ const ParentAccountManagement = ({ navigation }) => {
           Roll No: {item.roll_no || 'N/A'}
         </Text>
 
-        {/* Show parent record information */}
-        {item.hasParentRecord && item.parentRecordInfo && (
+        {/* Show parent record information - Display all valid parents */}
+        {item.hasParentRecord && item.allParentRecords && item.allParentRecords.length > 0 && (
           <>
-            <Text style={styles.studentDetail}>
-              Parent: {item.parentRecordInfo.name} ({item.parentRecordInfo.relation})
-            </Text>
-            {item.parentRecordInfo.phone && (
+            {item.fatherRecord && (
               <Text style={styles.studentDetail}>
-                Parent Phone: {item.parentRecordInfo.phone}
+                Father: {item.fatherRecord.name}
+                {item.fatherRecord.phone && ` • ${item.fatherRecord.phone}`}
+              </Text>
+            )}
+            {item.motherRecord && (
+              <Text style={styles.studentDetail}>
+                Mother: {item.motherRecord.name}
+                {item.motherRecord.phone && ` • ${item.motherRecord.phone}`}
+              </Text>
+            )}
+            {item.guardianRecord && (
+              <Text style={styles.studentDetail}>
+                Guardian: {item.guardianRecord.name}
+                {item.guardianRecord.phone && ` • ${item.guardianRecord.phone}`}
               </Text>
             )}
           </>

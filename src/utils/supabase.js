@@ -478,7 +478,7 @@ export const dbHelpers = {
       }
 
       // 2. Get teacher role ID
-      const { data: teacherRole, error: roleError } = await supabase
+      let { data: teacherRole, error: roleError } = await supabase
         .from(TABLES.ROLES)
         .select('id')
         .eq('role_name', 'teacher')

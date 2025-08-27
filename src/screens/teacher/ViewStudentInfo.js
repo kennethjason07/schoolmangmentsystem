@@ -37,12 +37,34 @@ const ViewStudentInfo = () => {
       setLoading(true);
       setError(null);
 
+      console.log('ViewStudentInfo: Starting fetch with user ID:', user?.id);
+
+      if (!user?.id) {
+        throw new Error('User not logged in');
+      }
+
       // Get teacher info using the helper function
+      console.log('ViewStudentInfo: Fetching teacher data...');
       const { data: teacherData, error: teacherError } = await dbHelpers.getTeacherByUserId(user.id);
+
+      console.log('ViewStudentInfo: Teacher query result:', { teacherData, teacherError });
 
       if (teacherError || !teacherData) {
         console.error('ViewStudentInfo: Teacher not found:', teacherError);
-        throw new Error('Teacher not found');
+        // Check if this user has a teacher account at all
+        const { data: userData, error: userError } = await supabase
+          .from(TABLES.USERS)
+          .select('id, email, linked_teacher_id, role_id')
+          .eq('id', user.id)
+          .single();
+        
+        console.log('ViewStudentInfo: User data check:', { userData, userError });
+        
+        if (!userData?.linked_teacher_id) {
+          throw new Error('This user account is not linked to a teacher profile. Please contact an administrator.');
+        }
+        
+        throw new Error(teacherError?.message || 'Teacher data could not be retrieved');
       }
 
       console.log('ViewStudentInfo: Teacher data:', teacherData);
@@ -124,9 +146,9 @@ const ViewStudentInfo = () => {
 
       console.log('ViewStudentInfo: All unique classes:', uniqueClassesArray);
 
-      // Get students from all classes (both subject and class teacher)
+      // Optimized single query to get students with their parent information
       const studentPromises = uniqueClassesArray.map(classInfo => {
-        console.log('ViewStudentInfo: Fetching students for class:', classInfo.id, `(${classInfo.type})`);
+        console.log('ViewStudentInfo: Fetching students with parents for class:', classInfo.id, `(${classInfo.type})`);
         return supabase
           .from(TABLES.STUDENTS)
           .select(`
@@ -138,7 +160,14 @@ const ViewStudentInfo = () => {
             gender,
             admission_no,
             academic_year,
-            classes(class_name, section)
+            classes(class_name, section),
+            parents!parents_student_id_fkey(
+              id,
+              name,
+              phone,
+              email,
+              relation
+            )
           `)
           .eq('class_id', classInfo.id)
           .order('roll_no')
@@ -146,71 +175,122 @@ const ViewStudentInfo = () => {
       });
 
       const studentResults = await Promise.all(studentPromises);
-      console.log('ViewStudentInfo: Student results:', studentResults);
+      console.log('ViewStudentInfo: Student results with parents:', studentResults);
+
+      // Process all students and their parent information
       const allStudents = [];
-
-      // Collect all student IDs for parent data fetching
-      const allStudentIds = [];
+      
       studentResults.forEach((result) => {
         if (result.data && result.classInfo) {
           result.data.forEach(student => {
-            allStudentIds.push(student.id);
-          });
-        }
-      });
-
-      // Fetch parent user data for all students
-      console.log('ViewStudentInfo: Fetching parent data for', allStudentIds.length, 'students');
-      const { data: parentUsers, error: parentError } = await supabase
-        .from(TABLES.USERS)
-        .select('id, full_name, email, phone, linked_parent_of')
-        .in('linked_parent_of', allStudentIds);
-
-      if (parentError) {
-        console.error('ViewStudentInfo: Error fetching parent data:', parentError);
-      }
-
-      console.log('ViewStudentInfo: Parent users found:', parentUsers?.length || 0);
-
-      // Create a map of student ID to parent data
-      const parentMap = {};
-      if (parentUsers) {
-        parentUsers.forEach(parent => {
-          if (parent.linked_parent_of) {
-            parentMap[parent.linked_parent_of] = {
-              name: parent.full_name,
-              email: parent.email,
-              phone: parent.phone
-            };
-          }
-        });
-      }
-
-      studentResults.forEach((result) => {
-        if (result.data && result.classInfo) {
-          const classInfo = result.classInfo;
-          const classSection = `${classInfo.class_name} - ${classInfo.section}`;
-          console.log('ViewStudentInfo: Processing students for class:', classSection, 'Count:', result.data.length, `(${classInfo.type})`);
-
-          result.data.forEach(student => {
-            allStudents.push({
-              ...student,
-              classSection,
-              className: classInfo.class_name,
-              sectionName: classInfo.section,
-              teacherRole: classInfo.type, // 'subject' or 'class_teacher'
-              parents: parentMap[student.id] || null // Add correct parent data
+            allStudents.push({ 
+              ...student, 
+              classInfo: result.classInfo,
+              parentInfo: student.parents // Direct parent info from the join
             });
+            
+            // Log parent information for debugging
+            if (student.parents) {
+              console.log(`✅ Student ${student.name} -> Parent: ${student.parents.name} (${student.parents.relation || 'Unknown relation'})`);
+              console.log(`   📞 Phone: ${student.parents.phone || 'N/A'}, 📧 Email: ${student.parents.email || 'N/A'}`);
+            } else {
+              console.log(`❌ Student ${student.name} -> No parent information found (parent_id: ${student.parent_id || 'null'})`);
+            }
           });
         }
       });
 
-      // Remove duplicates
-      const uniqueStudents = allStudents.filter((student, index, self) =>
+      console.log('ViewStudentInfo: Found students:', allStudents.length);
+      console.log('ViewStudentInfo: Students with parent info:', allStudents.filter(s => s.parentInfo).length);
+      
+      // Process all students and add properly formatted parent information
+      const finalStudents = [];
+      allStudents.forEach(student => {
+        const classInfo = student.classInfo;
+        const classSection = `${classInfo.class_name} - ${classInfo.section}`;
+        
+        // Process multiple parents for each student (father, mother, guardian)
+        let parentInfo = null;
+        let fatherInfo = null;
+        let motherInfo = null;
+        let guardianInfo = null;
+        
+        if (student.parents) {
+          // Check if parents is an array (multiple parents) or single object
+          const parentsArray = Array.isArray(student.parents) ? student.parents : [student.parents];
+          
+          // Organize parents by relation and clean up invalid data
+          parentsArray.forEach(parent => {
+            // Skip invalid or placeholder parent names
+            const isValidParentName = parent.name && 
+              parent.name.trim() !== '' && 
+              parent.name.toLowerCase() !== 'justus parent' &&
+              parent.name.toLowerCase() !== 'n/a' &&
+              !parent.name.toLowerCase().includes('placeholder');
+            
+            if (isValidParentName) {
+              const parentData = {
+                name: parent.name,
+                phone: parent.phone,
+                email: parent.email,
+                relation: parent.relation
+              };
+              
+              if (parent.relation === 'Father') {
+                fatherInfo = parentData;
+              } else if (parent.relation === 'Mother') {
+                motherInfo = parentData;
+              } else if (parent.relation === 'Guardian') {
+                guardianInfo = parentData;
+              }
+            } else {
+              // Log invalid parent data for debugging
+              console.log(`⚠️ Skipping invalid parent name for student ${student.name}: "${parent.name}"`);
+            }
+          });
+          
+          // Create combined parent info with separate father/mother details
+          parentInfo = {
+            father: fatherInfo,
+            mother: motherInfo,
+            guardian: guardianInfo,
+            // For backward compatibility, use first available parent
+            name: fatherInfo?.name || motherInfo?.name || guardianInfo?.name || 'N/A',
+            phone: fatherInfo?.phone || motherInfo?.phone || guardianInfo?.phone || 'N/A',
+            email: fatherInfo?.email || motherInfo?.email || guardianInfo?.email || 'N/A',
+            relation: fatherInfo?.relation || motherInfo?.relation || guardianInfo?.relation || 'N/A'
+          };
+        }
+        
+        finalStudents.push({
+          ...student,
+          classSection,
+          className: classInfo.class_name,
+          sectionName: classInfo.section,
+          teacherRole: classInfo.type, // 'subject' or 'class_teacher'
+          parents: parentInfo // Use the processed parent info
+        });
+        
+        // Log for debugging
+        if (parentInfo) {
+          const parentDetails = [];
+          if (fatherInfo) parentDetails.push(`Father: ${fatherInfo.name}`);
+          if (motherInfo) parentDetails.push(`Mother: ${motherInfo.name}`);
+          if (guardianInfo) parentDetails.push(`Guardian: ${guardianInfo.name}`);
+          
+          console.log(`🔗 Student ${student.name} -> ${parentDetails.join(', ') || 'No specific relation'}`);
+        } else {
+          console.log(`⚠️ Student ${student.name} has no parent information`);
+        }
+      });
+
+      // Remove duplicates by student ID
+      const uniqueStudents = finalStudents.filter((student, index, self) =>
         index === self.findIndex(s => s.id === student.id)
       );
 
       console.log('ViewStudentInfo: Final unique students:', uniqueStudents.length);
+      console.log('ViewStudentInfo: Students with parent info:', uniqueStudents.filter(s => s.parents).length);
       setStudents(uniqueStudents);
       setFilteredStudents(uniqueStudents);
 
@@ -809,20 +889,74 @@ const ViewStudentInfo = () => {
 
                 <View style={styles.detailSection}>
                   <Text style={styles.detailTitle}>Parent Information</Text>
+                  
+                  {/* Father Information */}
+                  {selectedStudent.parents?.father && selectedStudent.parents.father.name && selectedStudent.parents.father.name !== 'justus parent' ? (
+                    <View style={styles.parentSubSection}>
+                      <Text style={styles.parentRelationTitle}>👨 Father</Text>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Name:</Text>
+                        <Text style={styles.detailValue}>{selectedStudent.parents.father.name}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Phone:</Text>
+                        <Text style={styles.detailValue}>{selectedStudent.parents.father.phone || 'N/A'}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Email:</Text>
+                        <Text style={styles.detailValue}>{selectedStudent.parents.father.email || 'N/A'}</Text>
+                      </View>
+                    </View>
+                  ) : null}
+                  
+                  {/* Mother Information */}
+                  {selectedStudent.parents?.mother ? (
+                    <View style={styles.parentSubSection}>
+                      <Text style={styles.parentRelationTitle}>👩 Mother</Text>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Name:</Text>
+                        <Text style={styles.detailValue}>{selectedStudent.parents.mother.name}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Phone:</Text>
+                        <Text style={styles.detailValue}>{selectedStudent.parents.mother.phone || 'N/A'}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Email:</Text>
+                        <Text style={styles.detailValue}>{selectedStudent.parents.mother.email || 'N/A'}</Text>
+                      </View>
+                    </View>
+                  ) : null}
+                  
+                  {/* Guardian Information */}
+                  {selectedStudent.parents?.guardian ? (
+                    <View style={styles.parentSubSection}>
+                      <Text style={styles.parentRelationTitle}>🤝 Guardian</Text>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Name:</Text>
+                        <Text style={styles.detailValue}>{selectedStudent.parents.guardian.name}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Phone:</Text>
+                        <Text style={styles.detailValue}>{selectedStudent.parents.guardian.phone || 'N/A'}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Email:</Text>
+                        <Text style={styles.detailValue}>{selectedStudent.parents.guardian.email || 'N/A'}</Text>
+                      </View>
+                    </View>
+                  ) : null}
+                  
+                  {/* Show message if no parents found */}
+                  {!selectedStudent.parents?.father && !selectedStudent.parents?.mother && !selectedStudent.parents?.guardian ? (
+                    <View style={styles.noParentInfo}>
+                      <Text style={styles.noParentText}>No parent information available</Text>
+                    </View>
+                  ) : null}
+                  
+                  {/* Student Address */}
                   <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Name:</Text>
-                    <Text style={styles.detailValue}>{selectedStudent.parents?.name || selectedStudent.users?.full_name || 'N/A'}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Phone:</Text>
-                    <Text style={styles.detailValue}>{selectedStudent.parents?.phone || selectedStudent.users?.phone || 'N/A'}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Email:</Text>
-                    <Text style={styles.detailValue}>{selectedStudent.parents?.email || selectedStudent.users?.email || 'N/A'}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Address:</Text>
+                    <Text style={styles.detailLabel}>Student Address:</Text>
                     <Text style={styles.detailValue}>{selectedStudent.address || 'N/A'}</Text>
                   </View>
                 </View>
@@ -1209,6 +1343,31 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     paddingBottom: 20,
+  },
+  parentSubSection: {
+    marginBottom: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 12,
+  },
+  parentRelationTitle: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#1976d2',
+    marginBottom: 8,
+    textAlign: 'left',
+  },
+  noParentInfo: {
+    backgroundColor: '#fff3e0',
+    borderRadius: 8,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  noParentText: {
+    color: '#f57c00',
+    fontSize: 14,
+    fontStyle: 'italic',
   },
 });
 

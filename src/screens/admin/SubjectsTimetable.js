@@ -674,6 +674,16 @@ const SubjectsTimetable = ({ route }) => {
         teacherId = teacherSubject.teacher_id;
       }
 
+      // If no teacher is assigned to the subject, show error and return
+      if (!teacherId) {
+        Alert.alert(
+          'No Teacher Assigned',
+          'This subject has no teacher assigned. Please assign a teacher to this subject first, or select a different subject.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
       // Get current academic year
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;

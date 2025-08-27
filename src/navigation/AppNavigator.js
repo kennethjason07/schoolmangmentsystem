@@ -59,6 +59,8 @@ import MarksEntryStudentsScreen from '../screens/teacher/MarksEntryStudentsScree
 import StudentAttendanceScreen from '../screens/teacher/StudentAttendanceScreen';
 import StudentMarksScreen from '../screens/teacher/StudentMarksScreen';
 import ViewSubmissions from '../screens/teacher/ViewSubmissions';
+import DatabaseSetup from '../screens/teacher/DatabaseSetup';
+import NotificationDebugScreen from '../screens/teacher/NotificationDebugScreen';
 
 // Parent Screens
 import ParentDashboard from '../screens/parent/ParentDashboard';
@@ -367,7 +369,7 @@ export default function AppNavigator() {
         ) : (
           // Role-based Stacks - when user is authenticated
           <>
-            {userType === 'Admin' && (
+            {userType === 'admin' && (
               <>
                 <Stack.Screen name="AdminTabs" component={AdminTabNavigator} />
                 <Stack.Screen name="SchoolDetails" component={SchoolDetails} />
@@ -399,7 +401,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="StudentList" component={StudentList} />
               </>
             )}
-            {userType === 'Teacher' && (
+            {userType === 'teacher' && (
               <>
                 <Stack.Screen name="TeacherTabs" component={TeacherTabNavigator} />
                 <Stack.Screen name="TeacherTimetable" component={TeacherTimetable} />
@@ -409,11 +411,13 @@ export default function AppNavigator() {
                 <Stack.Screen name="StudentAttendanceScreen" component={StudentAttendanceScreen} />
                 <Stack.Screen name="StudentMarksScreen" component={StudentMarksScreen} />
                 <Stack.Screen name="ViewSubmissions" component={ViewSubmissions} />
+                <Stack.Screen name="DatabaseSetup" component={DatabaseSetup} />
+                <Stack.Screen name="NotificationDebug" component={NotificationDebugScreen} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
               </>
             )}
-            {userType === 'Parent' && (
+            {userType === 'parent' && (
               <>
                 <Stack.Screen name="StudentSelection" component={StudentSelectionScreen} />
                 <Stack.Screen name="ParentTabs" component={ParentTabNavigator} />
@@ -425,7 +429,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="Settings" component={SettingsScreen} />
               </>
             )}
-            {userType === 'Student' && (
+            {userType === 'student' && (
               <>
                 <Stack.Screen name="StudentTabs" component={StudentTabNavigator} />
                 <Stack.Screen name="StudentNotifications" component={StudentNotifications} />

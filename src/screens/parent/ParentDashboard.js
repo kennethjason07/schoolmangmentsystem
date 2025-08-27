@@ -207,9 +207,14 @@ const ParentDashboard = ({ navigation }) => {
     
     try {
       console.log('Parent Dashboard - Fetching data for selected student:', student.name);
+      console.log('Parent Dashboard - Student profile_url from context:', student.profile_url);
       
       // Set the student data from the selected student context
-      setStudentData(student);
+      // Ensure profile_url is preserved from the context
+      setStudentData({
+        ...student,
+        profile_url: student.profile_url // Explicitly preserve the profile URL from context
+      });
       
       // Get notifications for parent (independent of student)
       await refreshNotifications();
@@ -351,20 +356,91 @@ const ParentDashboard = ({ navigation }) => {
         setMarks([]);
       }
 
-      // Get fee information
+
+      // Get fee information from fee_structure table (aligned with FeePayment component)
       try {
-        const { data: feesData, error: feesError } = await supabase
-          .from(TABLES.FEES)
-          .select('*')
-          .eq('student_id', student.id)
+        console.log('=== PARENT DASHBOARD FEE DATA FETCH (Selected Student) ===');
+        console.log('Student ID:', student.id);
+        console.log('Class ID:', student.class_id);
+        
+        // Get fee structure for the student's class (same approach as FeePayment)
+        const { data: feeStructureData, error: feeStructureError } = await supabase
+          .from('fee_structure')
+          .select(`
+            *,
+            classes(id, class_name, section, academic_year)
+          `)
+          .or(`class_id.eq.${student.class_id},student_id.eq.${student.id}`)
           .order('due_date', { ascending: true });
 
-        if (feesError && feesError.code !== '42P01') {
-          console.log('Fees error:', feesError);
+        if (feeStructureError) {
+          console.log('Fee structure error:', feeStructureError);
         }
-        setFees(feesData || []);
+        
+        console.log('Fee structure records found:', feeStructureData?.length || 0);
+        
+        // Get payment history from student_fees table
+        const { data: studentPayments, error: paymentsError } = await supabase
+          .from('student_fees')
+          .select(`
+            *,
+            students(name, admission_no),
+            fee_structure(*)
+          `)
+          .eq('student_id', student.id)
+          .order('payment_date', { ascending: false });
+
+        if (paymentsError) {
+          console.log('Student payments error:', paymentsError);
+        }
+        
+        console.log('Student payment records found:', studentPayments?.length || 0);
+        
+        // Transform fee structure data (same logic as FeePayment)
+        const feesToProcess = feeStructureData || [];
+        const transformedFees = feesToProcess.map(fee => {
+          const feeComponent = fee.fee_component || fee.name || 'General Fee';
+          
+          // Find payments for this fee component
+          const payments = studentPayments?.filter(p =>
+            p.fee_component === feeComponent &&
+            p.academic_year === fee.academic_year
+          ) || [];
+
+          const totalPaidAmount = payments.reduce((sum, payment) => sum + Number(payment.amount_paid || 0), 0);
+          const feeAmount = Number(fee.amount || 0);
+          const remainingAmount = feeAmount - totalPaidAmount;
+
+          let status = 'unpaid';
+          if (totalPaidAmount >= feeAmount) {
+            status = 'paid';
+          } else if (totalPaidAmount > 0) {
+            status = 'partial';
+          }
+
+          return {
+            id: fee.id || `fee-${Date.now()}-${Math.random()}`,
+            name: feeComponent,
+            amount: feeAmount,
+            status: status,
+            due_date: fee.due_date,
+            paidAmount: totalPaidAmount,
+            remainingAmount: remainingAmount,
+            academic_year: fee.academic_year
+          };
+        });
+        
+        console.log('Transformed fees for dashboard (selected student):', transformedFees.map(f => ({ 
+          name: f.name, 
+          amount: f.amount, 
+          status: f.status, 
+          due_date: f.due_date 
+        })));
+        console.log('=======================================================');
+        
+        setFees(transformedFees || []);
       } catch (err) {
-        console.log('Fees fetch error:', err);
+        console.log('Fee fetch error:', err);
         setFees([]);
       }
 
@@ -626,60 +702,304 @@ const ParentDashboard = ({ navigation }) => {
             console.error('Parent Dashboard - Error fetching student profile photo:', err);
           }
           
-          // Fetch parent information from parents table
+          // Fetch parent information using the junction table approach
           try {
-            console.log('Parent Dashboard - Fetching parent information for student ID:', studentDetails.id);
+            console.log('Parent Dashboard - Fetching parent information using junction table for student ID:', studentDetails.id);
             
-            const { data: parentsData, error: parentsError } = await supabase
-              .from('parents')
-              .select('name, relation, phone, email')
+            // Method 1: Try the new junction table approach first
+            const { data: relationshipsData, error: relationshipsError } = await supabase
+              .from('parent_student_relationships')
+              .select(`
+                id,
+                relationship_type,
+                is_primary_contact,
+                is_emergency_contact,
+                notes,
+                parents!parent_student_relationships_parent_id_fkey(
+                  id,
+                  name,
+                  phone,
+                  email
+                )
+              `)
               .eq('student_id', studentDetails.id);
             
-            if (!parentsError && parentsData && parentsData.length > 0) {
-              console.log('Parent Dashboard - Found parent information:', parentsData);
+            let parentDataFound = false;
+            
+            if (!relationshipsError && relationshipsData && relationshipsData.length > 0) {
+              console.log('🔍 Parent Dashboard - Found parent relationships via junction table:', relationshipsData.length, 'relationships');
+              console.log('📊 Parent Dashboard - Relationship details:', relationshipsData.map(r => ({
+                type: r.relationship_type,
+                name: r.parents?.name,
+                phone: r.parents?.phone,
+                email: r.parents?.email,
+                is_primary: r.is_primary_contact
+              })));
               
-              // Map parent information based on relation
-              let fatherName = null;
-              let motherName = null;
-              let guardianName = null;
-              let parentPhone = null;
-              let parentEmail = null;
+              // Process relationships to extract parent information
+              let fatherInfo = null;
+              let motherInfo = null;
+              let guardianInfo = null;
+              let primaryContactInfo = null;
               
-              parentsData.forEach(parent => {
-                if (parent.relation === 'Father') {
-                  fatherName = parent.name;
-                  if (!parentPhone) parentPhone = parent.phone;
-                  if (!parentEmail) parentEmail = parent.email;
-                } else if (parent.relation === 'Mother') {
-                  motherName = parent.name;
-                  if (!parentPhone) parentPhone = parent.phone;
-                  if (!parentEmail) parentEmail = parent.email;
-                } else if (parent.relation === 'Guardian') {
-                  guardianName = parent.name;
-                  if (!parentPhone) parentPhone = parent.phone;
-                  if (!parentEmail) parentEmail = parent.email;
+              relationshipsData.forEach(rel => {
+                if (rel.parents && rel.parents.name) {
+                  const parent = rel.parents;
+                  const relation = rel.relationship_type;
+                  
+                  console.log('🔄 Processing relationship:', { 
+                    parent_name: parent.name, 
+                    relation: relation, 
+                    phone: parent.phone, 
+                    email: parent.email,
+                    is_primary: rel.is_primary_contact,
+                    is_emergency: rel.is_emergency_contact
+                  });
+                  
+                  // Skip invalid or placeholder parent names
+                  const isValidParentName = parent.name && 
+                    parent.name.trim() !== '' && 
+                    parent.name.toLowerCase() !== 'justus parent' &&
+                    parent.name.toLowerCase() !== 'n/a' &&
+                    !parent.name.toLowerCase().includes('placeholder');
+                  
+                  if (isValidParentName) {
+                    const parentData = {
+                      id: parent.id,
+                      name: parent.name,
+                      phone: parent.phone,
+                      email: parent.email,
+                      relation: relation,
+                      photo_url: parent.photo_url,
+                      is_primary_contact: rel.is_primary_contact,
+                      is_emergency_contact: rel.is_emergency_contact,
+                      notes: rel.notes
+                    };
+                    
+                    // Organize by relationship type
+                    if (relation === 'Father') {
+                      fatherInfo = parentData;
+                      console.log('✅ Found Father:', parent.name);
+                    } else if (relation === 'Mother') {
+                      motherInfo = parentData;
+                      console.log('✅ Found Mother:', parent.name);
+                    } else if (relation === 'Guardian') {
+                      guardianInfo = parentData;
+                      console.log('✅ Found Guardian:', parent.name);
+                    }
+                    
+                    // Track primary contact
+                    if (rel.is_primary_contact) {
+                      primaryContactInfo = parentData;
+                      console.log('📞 Primary Contact:', parent.name, `(${relation})`);
+                    }
+                    
+                    parentDataFound = true;
+                  } else {
+                    console.log(`⚠️ Skipping invalid parent name for student ${studentDetails.name}: "${parent.name}"`);
+                  }
                 }
               });
               
-              // Add parent information to student details
-              studentDetails.father_name = fatherName;
-              studentDetails.mother_name = motherName;
-              studentDetails.guardian_name = guardianName;
-              studentDetails.parent_phone = parentPhone;
-              studentDetails.parent_email = parentEmail;
-              
-              console.log('Parent Dashboard - Mapped parent info:', {
-                father_name: fatherName,
-                mother_name: motherName,
-                guardian_name: guardianName,
-                parent_phone: parentPhone,
-                parent_email: parentEmail
-              });
+              if (parentDataFound) {
+                // Create combined parent info with priority: Father > Mother > Guardian
+                const parentInfo = {
+                  father: fatherInfo,
+                  mother: motherInfo,
+                  guardian: guardianInfo,
+                  primary_contact: primaryContactInfo,
+                  // For backward compatibility, use primary contact first, then father, mother, guardian
+                  name: primaryContactInfo?.name || fatherInfo?.name || motherInfo?.name || guardianInfo?.name || 'N/A',
+                  phone: primaryContactInfo?.phone || fatherInfo?.phone || motherInfo?.phone || guardianInfo?.phone || 'N/A',
+                  email: primaryContactInfo?.email || fatherInfo?.email || motherInfo?.email || guardianInfo?.email || 'N/A',
+                  relation: primaryContactInfo?.relation || fatherInfo?.relation || motherInfo?.relation || guardianInfo?.relation || 'N/A'
+                };
+                
+                // Add parent information to student details
+                studentDetails.father_name = fatherInfo?.name || 'N/A';
+                studentDetails.mother_name = motherInfo?.name || 'N/A';
+                studentDetails.guardian_name = guardianInfo?.name || 'N/A';
+                studentDetails.father_phone = fatherInfo?.phone || 'N/A';
+                studentDetails.mother_phone = motherInfo?.phone || 'N/A';
+                studentDetails.guardian_phone = guardianInfo?.phone || 'N/A';
+                studentDetails.father_email = fatherInfo?.email || 'N/A';
+                studentDetails.mother_email = motherInfo?.email || 'N/A';
+                studentDetails.guardian_email = guardianInfo?.email || 'N/A';
+                studentDetails.parent_phone = parentInfo.phone;
+                studentDetails.parent_email = parentInfo.email;
+                
+                // Override student fields with parent data if available and student data is missing
+                if (parentInfo.phone && parentInfo.phone !== 'N/A' && !studentDetails.phone) {
+                  studentDetails.phone = parentInfo.phone;
+                }
+                if (parentInfo.email && parentInfo.email !== 'N/A' && !studentDetails.email) {
+                  studentDetails.email = parentInfo.email;
+                }
+                
+                // Log parent details for debugging
+                const parentDetails = [];
+                if (fatherInfo) parentDetails.push(`Father: ${fatherInfo.name}`);
+                if (motherInfo) parentDetails.push(`Mother: ${motherInfo.name}`);
+                if (guardianInfo) parentDetails.push(`Guardian: ${guardianInfo.name}`);
+                
+                console.log('🎉 Parent Dashboard - SUCCESS: Parent data found via junction table:', {
+                  student_name: studentDetails.name,
+                  parent_details: parentDetails.join(', ') || 'No specific relation',
+                  father_name: fatherInfo?.name || 'N/A',
+                  mother_name: motherInfo?.name || 'N/A',
+                  guardian_name: guardianInfo?.name || 'N/A',
+                  primary_phone: parentInfo.phone,
+                  primary_email: parentInfo.email
+                });
+              }
             } else {
-              console.log('Parent Dashboard - No parent information found in parents table:', parentsError);
+              console.log('Parent Dashboard - No relationships found in junction table:', relationshipsError);
+            }
+            
+            // Method 2: Fallback to direct parents table query if junction table fails or no data
+            if (!parentDataFound) {
+              console.log('Parent Dashboard - Falling back to direct parents table query...');
+              
+              // Query parents table using exact schema fields
+              const { data: directParentsData, error: directParentsError } = await supabase
+                .from('parents')
+                .select('id, name, phone, email, relation, student_id, created_at')
+                .eq('student_id', studentDetails.id);
+              
+              if (!directParentsError && directParentsData && directParentsData.length > 0) {
+                console.log('Parent Dashboard - Found parent information via direct query:', directParentsData.length, 'records');
+                console.log('Parent Dashboard - Raw parent data:', directParentsData);
+                
+                // Process all found parents and try to categorize by relation if available
+                let fatherInfo = null;
+                let motherInfo = null;
+                let guardianInfo = null;
+                
+                directParentsData.forEach(parent => {
+                  console.log(`\n=== DETAILED PARENT DEBUG ===`);
+                  console.log(`Parent ID: ${parent.id}`);
+                  console.log(`Parent Name: "${parent.name}"`);
+                  console.log(`Parent Relation: "${parent.relation}"`);
+                  console.log(`Parent Phone: "${parent.phone}"`);
+                  console.log(`Parent Email: "${parent.email}"`);
+                  console.log(`Student ID: ${parent.student_id}`);
+                  
+                  // Filter out placeholder/invalid parent names
+                  const isValidParentName = parent.name && 
+                    parent.name.trim() !== '' && 
+                    parent.name.toLowerCase() !== 'n/a' &&
+                    parent.name.toLowerCase() !== 'justus parent' &&
+                    !parent.name.toLowerCase().includes('placeholder') &&
+                    !parent.name.toLowerCase().includes('test') &&
+                    !parent.name.toLowerCase().includes('sample');
+                  
+                  console.log(`Valid Parent Name: ${isValidParentName}`);
+                  
+                  if (isValidParentName) {
+                    const relation = parent.relation ? parent.relation.toLowerCase().trim() : null;
+                    console.log(`Normalized Relation: "${relation}"`);
+                    
+                    const parentData = {
+                      id: parent.id,
+                      name: parent.name,
+                      phone: parent.phone || 'N/A',
+                      email: parent.email || 'N/A',
+                      relation: parent.relation || 'Parent'
+                    };
+                    
+                    console.log(`Parent Data Created:`, parentData);
+                    
+                    // Match case-insensitive relation types
+                    if (relation === 'father') {
+                      fatherInfo = parentData;
+                      console.log('🎉 ✅ FATHER ASSIGNED:', parent.name);
+                    } else if (relation === 'mother') {
+                      motherInfo = parentData;
+                      console.log('🎉 ✅ MOTHER ASSIGNED:', parent.name);
+                    } else if (relation === 'guardian') {
+                      guardianInfo = parentData;
+                      console.log('🎉 ✅ GUARDIAN ASSIGNED:', parent.name);
+                    } else {
+                      console.log(`❌ RELATION NOT MATCHED: "${relation}" for parent: ${parent.name}`);
+                    }
+                    
+                    parentDataFound = true;
+                  } else {
+                    console.log(`⚠️ Skipping invalid parent name: "${parent.name}"`);
+                  }
+                  console.log(`=== END PARENT DEBUG ===\n`);
+                });
+                
+                if (parentDataFound) {
+                  // Assign parent information to student details
+                  studentDetails.father_name = fatherInfo?.name || 'N/A';
+                  studentDetails.mother_name = motherInfo?.name || 'N/A';
+                  studentDetails.guardian_name = guardianInfo?.name || 'N/A';
+                  studentDetails.father_phone = fatherInfo?.phone || 'N/A';
+                  studentDetails.mother_phone = motherInfo?.phone || 'N/A';
+                  studentDetails.guardian_phone = guardianInfo?.phone || 'N/A';
+                  studentDetails.father_email = fatherInfo?.email || 'N/A';
+                  studentDetails.mother_email = motherInfo?.email || 'N/A';
+                  studentDetails.guardian_email = guardianInfo?.email || 'N/A';
+                  
+                  // Set primary contact info (prioritize father, then mother, then guardian)
+                  const primaryParent = fatherInfo || motherInfo || guardianInfo;
+                  studentDetails.parent_phone = primaryParent?.phone || 'N/A';
+                  studentDetails.parent_email = primaryParent?.email || 'N/A';
+                  
+                  // Add address and pin code if available
+                  if (primaryParent?.address) {
+                    studentDetails.parent_address = primaryParent.address;
+                  }
+                  if (primaryParent?.pin_code) {
+                    studentDetails.parent_pin_code = primaryParent.pin_code;
+                  }
+                  
+                  console.log('🎉 Parent Dashboard - SUCCESS: Parent data found via direct query:', {
+                    student_name: studentDetails.name,
+                    father_name: fatherInfo?.name || 'N/A',
+                    mother_name: motherInfo?.name || 'N/A',
+                    guardian_name: guardianInfo?.name || 'N/A',
+                    parent_phone: primaryParent?.phone,
+                    parent_email: primaryParent?.email,
+                    parent_address: primaryParent?.address || 'Not available',
+                    parent_pin_code: primaryParent?.pin_code || 'Not available'
+                  });
+                }
+              } else {
+                console.log('Parent Dashboard - No parent data found via direct query:', directParentsError);
+              }
+            }
+            
+            // If still no parent data found, set defaults
+            if (!parentDataFound) {
+              console.log('⚠️ Parent Dashboard - No parent information found through any method');
+              studentDetails.father_name = 'N/A';
+              studentDetails.mother_name = 'N/A';
+              studentDetails.guardian_name = 'N/A';
+              studentDetails.father_phone = 'N/A';
+              studentDetails.mother_phone = 'N/A';
+              studentDetails.guardian_phone = 'N/A';
+              studentDetails.father_email = 'N/A';
+              studentDetails.mother_email = 'N/A';
+              studentDetails.guardian_email = 'N/A';
+              studentDetails.parent_phone = 'N/A';
+              studentDetails.parent_email = 'N/A';
             }
           } catch (err) {
             console.error('Parent Dashboard - Error fetching parent information:', err);
+            // Set default values on error
+            studentDetails.father_name = 'N/A';
+            studentDetails.mother_name = 'N/A';
+            studentDetails.guardian_name = 'N/A';
+            studentDetails.father_phone = 'N/A';
+            studentDetails.mother_phone = 'N/A';
+            studentDetails.guardian_phone = 'N/A';
+            studentDetails.father_email = 'N/A';
+            studentDetails.mother_email = 'N/A';
+            studentDetails.guardian_email = 'N/A';
+            studentDetails.parent_phone = 'N/A';
+            studentDetails.parent_email = 'N/A';
           }
         }
         
@@ -903,20 +1223,90 @@ const ParentDashboard = ({ navigation }) => {
           setMarks([]);
         }
 
-        // Get fee information
+        // Get fee information from fee_structure table (aligned with FeePayment component)
         try {
-          const { data: feesData, error: feesError } = await supabase
-            .from(TABLES.FEES)
-            .select('*')
-            .eq('student_id', studentDetails.id)
+          console.log('=== PARENT DASHBOARD FEE DATA FETCH ===');
+          console.log('Student ID:', studentDetails.id);
+          console.log('Class ID:', studentDetails.class_id);
+          
+          // Get fee structure for the student's class (same approach as FeePayment)
+          const { data: feeStructureData, error: feeStructureError } = await supabase
+            .from('fee_structure')
+            .select(`
+              *,
+              classes(id, class_name, section, academic_year)
+            `)
+            .or(`class_id.eq.${studentDetails.class_id},student_id.eq.${studentDetails.id}`)
             .order('due_date', { ascending: true });
 
-          if (feesError && feesError.code !== '42P01') {
-            console.log('Fees error:', feesError);
+          if (feeStructureError) {
+            console.log('Fee structure error:', feeStructureError);
           }
-          setFees(feesData || []);
+          
+          console.log('Fee structure records found:', feeStructureData?.length || 0);
+          
+          // Get payment history from student_fees table
+          const { data: studentPayments, error: paymentsError } = await supabase
+            .from('student_fees')
+            .select(`
+              *,
+              students(name, admission_no),
+              fee_structure(*)
+            `)
+            .eq('student_id', studentDetails.id)
+            .order('payment_date', { ascending: false });
+
+          if (paymentsError) {
+            console.log('Student payments error:', paymentsError);
+          }
+          
+          console.log('Student payment records found:', studentPayments?.length || 0);
+          
+          // Transform fee structure data (same logic as FeePayment)
+          const feesToProcess = feeStructureData || [];
+          const transformedFees = feesToProcess.map(fee => {
+            const feeComponent = fee.fee_component || fee.name || 'General Fee';
+            
+            // Find payments for this fee component
+            const payments = studentPayments?.filter(p =>
+              p.fee_component === feeComponent &&
+              p.academic_year === fee.academic_year
+            ) || [];
+
+            const totalPaidAmount = payments.reduce((sum, payment) => sum + Number(payment.amount_paid || 0), 0);
+            const feeAmount = Number(fee.amount || 0);
+            const remainingAmount = feeAmount - totalPaidAmount;
+
+            let status = 'unpaid';
+            if (totalPaidAmount >= feeAmount) {
+              status = 'paid';
+            } else if (totalPaidAmount > 0) {
+              status = 'partial';
+            }
+
+            return {
+              id: fee.id || `fee-${Date.now()}-${Math.random()}`,
+              name: feeComponent,
+              amount: feeAmount,
+              status: status,
+              due_date: fee.due_date,
+              paidAmount: totalPaidAmount,
+              remainingAmount: remainingAmount,
+              academic_year: fee.academic_year
+            };
+          });
+          
+          console.log('Transformed fees for dashboard:', transformedFees.map(f => ({ 
+            name: f.name, 
+            amount: f.amount, 
+            status: f.status, 
+            due_date: f.due_date 
+          })));
+          console.log('=========================================');
+          
+          setFees(transformedFees || []);
         } catch (err) {
-          console.log('Fees fetch error:', err);
+          console.log('Fee fetch error:', err);
           setFees([]);
         }
 
@@ -955,10 +1345,29 @@ const ParentDashboard = ({ navigation }) => {
   console.log('Unread count:', unreadCount);
   console.log('============================================');
 
-  // Calculate attendance percentage - SIMPLE METHOD (only count 'Present' as attended)
-  const totalRecords = attendance.length;
-  const presentOnlyCount = attendance.filter(a => a.status === 'Present').length;
-  const absentCount = attendance.filter(item => item.status === 'Absent').length;
+  // Calculate attendance percentage - handle Sunday exclusion and case sensitivity
+  // Filter out any Sunday records as they shouldn't count in attendance
+  const validAttendanceRecords = attendance.filter(record => {
+    if (!record.date) return false;
+    try {
+      const recordDate = new Date(record.date);
+      const dayOfWeek = recordDate.getDay(); // 0 = Sunday
+      return dayOfWeek !== 0; // Exclude Sundays from attendance calculation
+    } catch (err) {
+      return true; // Keep records with invalid dates for safety
+    }
+  });
+  
+  const totalRecords = validAttendanceRecords.length;
+  // Handle case sensitivity (status might be 'Present', 'present', etc.)
+  const presentOnlyCount = validAttendanceRecords.filter(a => {
+    const status = a.status ? a.status.toLowerCase() : '';
+    return status === 'present';
+  }).length;
+  const absentCount = validAttendanceRecords.filter(item => {
+    const status = item.status ? item.status.toLowerCase() : '';
+    return status === 'absent';
+  }).length;
   const attendancePercentage = totalRecords > 0 ? Math.round((presentOnlyCount / totalRecords) * 100) : 0;
 
   // Calculate attendance data for pie chart with safe values
@@ -984,37 +1393,78 @@ const ParentDashboard = ({ navigation }) => {
     ? safeAttendanceData
     : [{ name: 'No Data', population: 1, color: '#E0E0E0', legendFontColor: '#999', legendFontSize: 14 }];
 
-  console.log('=== PARENT DASHBOARD PERCENTAGE CALCULATION ===');
-  console.log('Total records:', totalRecords);
-  console.log('Present records:', presentOnlyCount);
-  console.log('Calculated percentage:', attendancePercentage);
-  console.log('===============================================');
-
-  // Get fee status
+  // Get fee status (moved before debug logging) - Fixed to check correct fee statuses
   const getFeeStatus = () => {
     if (fees.length === 0) return 'No fees';
 
-    const pendingFees = fees.filter(fee => fee.status === 'pending');
-    if (pendingFees.length === 0) return 'All paid';
+    // Check for unpaid and partial fees (matching FeePayment component logic)
+    const unpaidFees = fees.filter(fee => 
+      fee.status === 'pending' || fee.status === 'Pending' || 
+      fee.status === 'unpaid' || fee.status === 'partial'
+    );
+    
+    if (unpaidFees.length === 0) return 'All paid';
 
-    const totalPending = pendingFees.reduce((sum, fee) => sum + (fee.amount || 0), 0);
-    return `₹${totalPending.toLocaleString()}`;
+    const totalPending = unpaidFees.reduce((sum, fee) => sum + (fee.amount || 0), 0);
+    return totalPending > 0 ? `₹${totalPending.toLocaleString()}` : 'All paid';
   };
 
-  // Get fee subtitle
+  // Get fee subtitle (moved before debug logging) - Fixed to check correct fee statuses
   const getFeeSubtitle = () => {
     if (fees.length === 0) return 'No fees due';
 
-    const pendingFees = fees.filter(fee => fee.status === 'pending');
-    if (pendingFees.length === 0) return 'All fees paid';
+    // Check for unpaid and partial fees (matching FeePayment component logic)
+    const unpaidFees = fees.filter(fee => 
+      fee.status === 'pending' || fee.status === 'Pending' || 
+      fee.status === 'unpaid' || fee.status === 'partial'
+    );
+    
+    if (unpaidFees.length === 0) return 'All fees paid';
+    
+    // Check for actual amount due
+    const totalPending = unpaidFees.reduce((sum, fee) => sum + (fee.amount || 0), 0);
+    if (totalPending <= 0) return 'No amount due';
 
-    const nextDue = pendingFees.sort((a, b) => new Date(a.due_date) - new Date(b.due_date))[0];
+    const nextDue = unpaidFees.sort((a, b) => new Date(a.due_date) - new Date(b.due_date))[0];
+    if (!nextDue || !nextDue.due_date) return 'Payment required';
+    
     const daysUntilDue = Math.ceil((new Date(nextDue.due_date) - new Date()) / (1000 * 60 * 60 * 24));
 
     if (daysUntilDue < 0) return 'Overdue';
     if (daysUntilDue === 0) return 'Due today';
     return `Due in ${daysUntilDue} days`;
   };
+
+  console.log('=== PARENT DASHBOARD PERCENTAGE CALCULATION ===');
+  console.log('Raw attendance records:', attendance.length);
+  console.log('Valid attendance records (excluding Sundays):', totalRecords);
+  console.log('Present records:', presentOnlyCount);
+  console.log('Absent records:', absentCount);
+  console.log('Calculated percentage:', attendancePercentage);
+  console.log('===============================================');
+  
+  // Debug fee data - Updated to check all relevant statuses
+  console.log('=== PARENT DASHBOARD FEE DEBUG ===');
+  console.log('Total fees:', fees.length);
+  console.log('Fee data:', fees.map(f => ({ name: f.name, amount: f.amount, status: f.status, due_date: f.due_date, paidAmount: f.paidAmount, remainingAmount: f.remainingAmount })));
+  
+  // Check for all unpaid/partial fees
+  const unpaidFeesDebug = fees.filter(fee => 
+    fee.status === 'pending' || fee.status === 'Pending' || 
+    fee.status === 'unpaid' || fee.status === 'partial'
+  );
+  console.log('Unpaid/partial fees:', unpaidFeesDebug.length);
+  console.log('Unpaid/partial fee details:', unpaidFeesDebug.map(f => ({ name: f.name, amount: f.amount, status: f.status, remainingAmount: f.remainingAmount })));
+  
+  const totalUnpaidDebug = unpaidFeesDebug.reduce((sum, fee) => sum + (fee.remainingAmount || fee.amount || 0), 0);
+  console.log('Total unpaid amount (using remainingAmount):', totalUnpaidDebug);
+  
+  const totalPendingDebug = unpaidFeesDebug.reduce((sum, fee) => sum + (fee.amount || 0), 0);
+  console.log('Total pending amount (using full amount):', totalPendingDebug);
+  
+  console.log('Fee status will show:', getFeeStatus());
+  console.log('Fee subtitle will show:', getFeeSubtitle());
+  console.log('================================');
 
   // Get average marks
   const getAverageMarks = () => {
@@ -1062,7 +1512,10 @@ const ParentDashboard = ({ navigation }) => {
       title: 'Fee Status',
       value: getFeeStatus(),
       icon: 'card',
-      color: fees.filter(f => f.status === 'pending').length > 0 ? '#FF9800' : '#4CAF50',
+      color: fees.filter(f => 
+        (f.status === 'pending' || f.status === 'Pending' || f.status === 'unpaid' || f.status === 'partial') && 
+        (f.amount > 0)
+      ).length > 0 ? '#FF9800' : '#4CAF50',
       subtitle: getFeeSubtitle(),
       onPress: () => navigation.navigate('Fees')
     },
@@ -1193,7 +1646,15 @@ const ParentDashboard = ({ navigation }) => {
   }
 
   // Use student profile photo if available, otherwise fallback to default
+  console.log('🖼️ ParentDashboard - Image Debug:', {
+    studentDataExists: !!studentData,
+    profileUrl: studentData?.profile_url,
+    hasImage: !!studentData?.profile_url
+  });
+  
   const studentImage = studentData?.profile_url ? { uri: studentData.profile_url } : require('../../../assets/icon.png');
+  
+  console.log('🖼️ ParentDashboard - Final image source:', studentImage);
 
   return (
     <View style={styles.container}>
