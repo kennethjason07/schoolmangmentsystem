@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   Alert,
   Dimensions,
@@ -11,6 +10,7 @@ import {
   FlatList,
   ActivityIndicator,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isToday } from 'date-fns';
@@ -18,6 +18,7 @@ import { LineChart, BarChart } from 'react-native-chart-kit';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import Header from '../../components/Header';
+import ResponsiveScrollView, { ResponsiveGrid, ResponsiveContainer, ResponsiveModal, isPC, isLargeScreen } from '../../components/ResponsiveScrollView';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers, isValidUUID, safeQuery } from '../../utils/supabase';
 import { getCurrentMonthAttendance, calculateAttendanceStats, generateSampleAttendanceData } from '../../services/attendanceService';

@@ -574,7 +574,16 @@ const ParentAccountManagement = ({ navigation }) => {
     <View style={styles.container}>
       <Header title="Parent Account Management" showBack={true} onBack={() => navigation.goBack()} />
       
-      <View style={styles.content}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        keyboardShouldPersistTaps="handled"
+        bounces={Platform.OS !== 'web'}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {/* Class Selection Dropdown */}
         <View style={styles.classFilterContainer}>
           <Ionicons name="school" size={20} color="#666" style={styles.classFilterIcon} />
@@ -608,22 +617,22 @@ const ParentAccountManagement = ({ navigation }) => {
         </View>
 
         {/* Students List */}
-        <FlatList
-          data={filteredStudents}
-          keyExtractor={(item) => item.id}
-          renderItem={renderStudentItem}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="people" size={48} color="#BDBDBD" />
-              <Text style={styles.emptyText}>No students found</Text>
-            </View>
-          }
-          showsVerticalScrollIndicator={false}
-        />
-      </View>
+        <View style={styles.studentsSection}>
+          <FlatList
+            data={filteredStudents}
+            keyExtractor={(item) => item.id}
+            renderItem={renderStudentItem}
+            scrollEnabled={false}
+            showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="people" size={48} color="#BDBDBD" />
+                <Text style={styles.emptyText}>No students found</Text>
+              </View>
+            }
+          />
+        </View>
+      </ScrollView>
 
       {/* Create Account Modal */}
       <Modal
@@ -801,7 +810,20 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      maxHeight: '100vh',
+      overflowY: 'auto',
+    }),
+  },
+  scrollContent: {
     padding: 16,
+    paddingBottom: 100,
+    ...(Platform.OS === 'web' && {
+      minHeight: '100%',
+    }),
+  },
+  studentsSection: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,

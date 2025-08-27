@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TextInput,
   TouchableOpacity,
   Alert,
@@ -12,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActionSheetIOS,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -444,18 +444,14 @@ const SchoolDetails = ({ navigation }) => {
     <View style={styles.container}>
       <Header title="School Details" showBack={true} onBack={() => navigation.goBack()} />
       
-      <KeyboardAvoidingView 
-        style={styles.flex1}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        keyboardShouldPersistTaps="handled"
+        bounces={Platform.OS !== 'web'}
       >
-        <ScrollView 
-          style={styles.scrollView} 
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          bounces={true}
-        >
-          <View style={styles.content}>
+        <View style={styles.content}>
           {/* Logo Section */}
           <View style={styles.logoSection}>
             <Text style={styles.sectionTitle}>Logo</Text>
@@ -712,9 +708,8 @@ const SchoolDetails = ({ navigation }) => {
               </>
             )}
           </TouchableOpacity>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </View>
+      </ScrollView>
     </View>
   );
 };
@@ -723,6 +718,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    ...(Platform.OS === 'web' && {
+      height: '100vh', // Full viewport height on web
+      overflow: 'hidden', // Prevent body scrolling
+    })
   },
   loadingContainer: {
     flex: 1,
@@ -739,13 +738,23 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      maxHeight: '100vh', // Set max height for web
+      overflowY: 'auto',  // Enable vertical scrolling on web
+    })
   },
   scrollContent: {
     flexGrow: 1,
+    ...(Platform.OS === 'web' && {
+      minHeight: '100%',  // Ensure content takes full height on web
+    })
   },
   content: {
     padding: 20,
-    paddingBottom: 40, // Extra padding at bottom for better scroll experience
+    paddingBottom: Platform.OS === 'web' ? 80 : 40, // Extra bottom padding for web to ensure save button is visible
+    ...(Platform.OS === 'web' && {
+      minHeight: 'calc(100vh - 100px)', // Ensure content is tall enough to scroll properly on web
+    })
   },
   section: {
     backgroundColor: '#fff',

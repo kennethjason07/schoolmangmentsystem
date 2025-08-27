@@ -1094,18 +1094,22 @@ const AttendanceManagement = () => {
         </View>
       </View>
 
-      <ScrollView
-        style={styles.scrollContainer}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={loading}
-            onRefresh={loadAllData}
-            colors={['#1976d2']}
-          />
-        }
-      >
+      <View style={styles.scrollWrapper}>
+        <ScrollView
+          style={styles.scrollContainer}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          keyboardShouldPersistTaps="handled"
+          bounces={Platform.OS !== 'web'}
+          refreshControl={
+            <RefreshControl
+              refreshing={loading}
+              onRefresh={loadAllData}
+              colors={['#1976d2']}
+              tintColor="#1976d2"
+            />
+          }
+        >
         {/* Content Section without tabs (tabs moved to top) */}
         {renderMainContent()}
 
@@ -1150,126 +1154,8 @@ const AttendanceManagement = () => {
           </View>
         )}
 
-        {/* Enhanced Attendance Analytics */}
-        {(analytics.present > 0 || analytics.absent > 0) && (
-          <View style={styles.analyticsContainer}>
-            <View style={styles.analyticsHeader}>
-              <Ionicons name="analytics" size={24} color="#1976d2" />
-              <Text style={styles.analyticsTitle}>Live Attendance Summary</Text>
-            </View>
-
-            {/* Quick Stats Cards */}
-            <View style={styles.quickStatsContainer}>
-              <Animatable.View animation="fadeInLeft" delay={200} style={styles.statCard}>
-                <View style={styles.statIconContainer}>
-                  <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
-                </View>
-                <Text style={styles.statNumber}>{analytics.present}</Text>
-                <Text style={styles.statLabel}>Present</Text>
-              </Animatable.View>
-
-              <Animatable.View animation="fadeInRight" delay={400} style={styles.statCard}>
-                <View style={styles.statIconContainer}>
-                  <Ionicons name="close-circle" size={24} color="#F44336" />
-                </View>
-                <Text style={styles.statNumber}>{analytics.absent}</Text>
-                <Text style={styles.statLabel}>Absent</Text>
-              </Animatable.View>
-
-              <Animatable.View animation="fadeInUp" delay={600} style={styles.statCard}>
-                <View style={styles.statIconContainer}>
-                  <Ionicons name="people" size={24} color="#1976d2" />
-                </View>
-                <Text style={styles.statNumber}>{analytics.present + analytics.absent}</Text>
-                <Text style={styles.statLabel}>Total</Text>
-              </Animatable.View>
-            </View>
-
-            {/* Attendance Percentage Bar */}
-            {(analytics.present + analytics.absent) > 0 && (
-              <View style={styles.percentageContainer}>
-                <Text style={styles.percentageTitle}>Attendance Rate</Text>
-                <View style={styles.progressBarContainer}>
-                  <View style={styles.progressBarBackground}>
-                    <Animatable.View
-                      animation="slideInLeft"
-                      delay={800}
-                      style={[
-                        styles.progressBarFill,
-                        {
-                          width: `${(analytics.present / (analytics.present + analytics.absent)) * 100}%`
-                        }
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.percentageText}>
-                    {Math.round((analytics.present / (analytics.present + analytics.absent)) * 100)}%
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* Pie Chart for larger screens */}
-            {Platform.OS !== 'web' && Dimensions.get('window').width > 400 && (
-              <View style={styles.pieChartWrapper}>
-                <CrossPlatformPieChart
-                      data={[
-                        {
-                          name: 'Present',
-                          population: analytics.present,
-                          color: '#4CAF50'
-                        },
-                        {
-                          name: 'Absent',
-                          population: analytics.absent,
-                          color: '#F44336'
-                        }
-                      ].filter(item => item.population > 0)}
-                      width={Math.min(Dimensions.get('window').width - 48, 300)}
-                      height={200}
-                      chartConfig={{
-                        backgroundColor: '#ffffff',
-                        backgroundGradientFrom: '#f8f9fa',
-                        backgroundGradientTo: '#ffffff',
-                        backgroundGradientFromOpacity: 0.1,
-                        backgroundGradientToOpacity: 0.1,
-                        color: (opacity = 1) => `rgba(33, 150, 243, ${opacity})`,
-                        strokeWidth: 2,
-                        barPercentage: 0.5,
-                        useShadowColorFromDataset: false,
-                      }}
-                      accessor="population"
-                      backgroundColor="transparent"
-                      paddingLeft="20"
-                      center={[0, 0]}
-                      absolute={false}
-                      hasLegend={false}
-                      style={{
-                        borderRadius: 16,
-                      }}
-                    />
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Show text analytics only when pie chart is not displayed (web or no data) */}
-        {(Platform.OS === 'web' || (analytics.present === 0 && analytics.absent === 0)) && (
-          <View style={styles.analyticsContainer}>
-            <Text style={styles.analyticsTitle}>Attendance Analytics</Text>
-            <View style={styles.analyticsContent}>
-              <View style={styles.analyticsItem}>
-                <View style={styles.analyticsDot} />
-                <Text style={styles.analyticsText}>{analytics.present} Present</Text>
-              </View>
-              <View style={styles.analyticsItem}>
-                <View style={[styles.analyticsDot, styles.absentDot]} />
-                <Text style={styles.analyticsText}>{analytics.absent} Absent</Text>
-              </View>
-            </View>
-          </View>
-        )}
-      </ScrollView>
+        </ScrollView>
+      </View>
 
       {/* Date Pickers */}
       {showDatePicker && (
@@ -1570,11 +1456,27 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fafafa',
   },
+  scrollWrapper: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: 'calc(100vh - 160px)',
+      maxHeight: 'calc(100vh - 160px)',
+      minHeight: '400px',
+      overflow: 'hidden',
+    })
+  },
   scrollContainer: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      overflowY: 'auto'
+    })
   },
   scrollContent: {
-    paddingBottom: 20,
+    paddingBottom: 300,
+    flexGrow: 1,
+    ...(Platform.OS === 'web' && {
+      paddingBottom: 600
+    })
   },
   loadingContainer: {
     flex: 1,
@@ -2040,6 +1942,10 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
     overflow: 'hidden',
+    minHeight: 350,
+    ...(Platform.OS === 'web' && {
+      minHeight: 400,
+    })
   },
   analyticsHeader: {
     flexDirection: 'row',

@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 import { supabase, authHelpers, dbHelpers } from './supabase';
 
 const AuthContext = createContext({});
@@ -15,6 +16,12 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [userType, setUserType] = useState(null); // 'admin', 'teacher', 'student', 'parent'
+  const isSigningInRef = useRef(false); // Prevent auth listener interference
+
+  // Web-specific debugging
+  if (Platform.OS === 'web') {
+    console.log('🌐 AuthProvider state:', { user: !!user, userType, loading });
+  }
 
   useEffect(() => {
     // Initialize auth state
@@ -45,11 +52,19 @@ export const AuthProvider = ({ children }) => {
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (event === 'SIGNED_IN' && session?.user) {
+        console.log('🔊 Auth state change event:', event, 'isSigningIn:', isSigningInRef.current);
+        
+        // Don't handle SIGNED_IN if we're in the middle of a manual sign-in process
+        if (event === 'SIGNED_IN' && session?.user && !isSigningInRef.current) {
+          console.log('🔊 Handling auth state change for SIGNED_IN');
           await handleAuthChange(session.user);
+        } else if (event === 'SIGNED_IN' && isSigningInRef.current) {
+          console.log('⏭️ Skipping auth state handler - manual sign-in in progress');
         } else if (event === 'SIGNED_OUT') {
+          console.log('🔊 Handling auth state change for SIGNED_OUT');
           setUser(null);
           setUserType(null);
+          isSigningInRef.current = false;
         }
       }
     );
@@ -67,17 +82,37 @@ export const AuthProvider = ({ children }) => {
         console.log('❌ No auth user provided, clearing state');
         setUser(null);
         setUserType(null);
+        setLoading(false); // Ensure loading is false when no user
         return;
       }
 
       console.log('👤 Fetching user profile for:', authUser.email);
       // First get user profile without roles join to avoid foreign key issues during signup
-      // Use case-insensitive search for email
-      const { data: userProfile, error } = await supabase
-        .from('users')
-        .select('*')
-        .ilike('email', authUser.email)
-        .maybeSingle();
+      // Use case-insensitive search for email with timeout
+      let userProfile = null;
+      let error = null;
+      
+      try {
+        console.log('🔍 Starting user profile query...');
+        const profileQuery = supabase
+          .from('users')
+          .select('*')
+          .ilike('email', authUser.email)
+          .maybeSingle();
+        
+        // Add timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('User profile query timeout')), 10000);
+        });
+        
+        const result = await Promise.race([profileQuery, timeoutPromise]);
+        userProfile = result.data;
+        error = result.error;
+        console.log('📄 User profile query completed successfully');
+      } catch (queryError) {
+        console.error('❌ User profile query failed or timed out:', queryError);
+        error = queryError;
+      }
 
       console.log('📄 User profile query result:', { userProfile, error });
 
@@ -155,15 +190,18 @@ export const AuthProvider = ({ children }) => {
 
       setUser(userData);
       setUserType(roleName);
+      setLoading(false); // Ensure loading is false after successful auth state update
       console.log('✅ Auth state updated successfully');
     } catch (error) {
       console.error('💥 Error in handleAuthChange:', error);
+      setLoading(false); // Ensure loading is false on error
     }
   };
 
   const signIn = async (email, password, selectedRole) => {
     try {
       setLoading(true);
+      isSigningInRef.current = true; // Prevent auth listener from interfering
       
       // Sign in with Supabase Auth
       const { data: { session, user }, error: authError } = await supabase.auth.signInWithPassword({
@@ -253,11 +291,42 @@ export const AuthProvider = ({ children }) => {
         id: user.id,
         email: user.email,
         role_id: userProfile.role_id,
+        photo_url: userProfile?.photo_url || null,
+        full_name: userProfile?.full_name || '',
+        phone: userProfile?.phone || '',
+        created_at: userProfile?.created_at || new Date().toISOString(),
         ...userProfile
       };
 
+      console.log('📋 Setting user and userType directly from signIn');
+      console.log('🌐 Platform:', Platform.OS);
+      console.log('👤 About to set user:', userData);
+      console.log('🎭 About to set userType:', actualRoleName ? actualRoleName.toLowerCase() : 'user');
+      
       setUser(userData);
       setUserType(actualRoleName ? actualRoleName.toLowerCase() : 'user');
+      
+      // Don't wait for auth state change listener - set loading to false immediately
+      setLoading(false);
+      
+      console.log('✅ State updated - loading set to false');
+      
+      // Clear the signing in flag after a short delay to allow auth listener to see it
+      setTimeout(() => {
+        isSigningInRef.current = false;
+        console.log('🚩 isSigningIn flag cleared');
+      }, 100);
+      
+      // Web-specific debugging
+      if (Platform.OS === 'web') {
+        setTimeout(() => {
+          console.log('🌐 Web debug - final state check:', { 
+            user: !!userData, 
+            userType: actualRoleName ? actualRoleName.toLowerCase() : 'user', 
+            loading: false 
+          });
+        }, 100);
+      }
       
       return { data: userData, error: null };
     } catch (error) {
@@ -265,6 +334,7 @@ export const AuthProvider = ({ children }) => {
       return { data: null, error: { message: 'Sign in failed' } };
     } finally {
       setLoading(false);
+      isSigningInRef.current = false;
     }
   };
 

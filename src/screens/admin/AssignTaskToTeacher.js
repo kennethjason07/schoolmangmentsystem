@@ -401,6 +401,7 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
       <FlatList
         data={filteredTasks}
         keyExtractor={item => item.id}
+        style={styles.flatList}
         renderItem={({ item }) => {
           const priorityInfo = getPriorityInfo(item.priority);
           const statusInfo = getStatusInfo(item.status);
@@ -507,7 +508,9 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
           );
         }}
         contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        keyboardShouldPersistTaps="handled"
+        bounces={Platform.OS !== 'web'}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <MaterialIcons name="assignment" size={64} color="#E0E0E0" />
@@ -904,9 +907,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   // Task List
+  flatList: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      maxHeight: '100vh',
+      overflowY: 'auto',
+    }),
+  },
   listContainer: {
     padding: 16,
     paddingBottom: 100,
+    ...(Platform.OS === 'web' && {
+      minHeight: '100%',
+    }),
   },
   taskCard: {
     backgroundColor: '#fff',

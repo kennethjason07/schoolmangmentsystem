@@ -275,7 +275,9 @@ const TeacherAccountManagement = ({ navigation }) => {
       <ScrollView
         style={styles.content}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        keyboardShouldPersistTaps="handled"
+        bounces={Platform.OS !== 'web'}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
@@ -515,9 +517,16 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      maxHeight: '100vh',
+      overflowY: 'auto',
+    }),
   },
   scrollContent: {
     paddingBottom: 100,
+    ...(Platform.OS === 'web' && {
+      minHeight: '100%',
+    }),
   },
   loadingContainer: {
     flex: 1,

@@ -8,6 +8,7 @@ import {
   Dimensions,
   Alert,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ActivityIndicator as PaperActivityIndicator } from 'react-native-paper';
@@ -444,7 +445,10 @@ const AnalyticsReports = ({ navigation }) => {
 
       <ScrollView
         style={styles.scrollView}
-        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        keyboardShouldPersistTaps="handled"
+        bounces={Platform.OS !== 'web'}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
@@ -567,6 +571,16 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      maxHeight: '100vh',
+      overflowY: 'auto',
+    }),
+  },
+  scrollContent: {
+    paddingBottom: 20,
+    ...(Platform.OS === 'web' && {
+      minHeight: '100%',
+    }),
   },
   // Period Selector
   periodSelector: {

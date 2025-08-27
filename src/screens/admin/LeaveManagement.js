@@ -823,45 +823,57 @@ const LeaveManagement = ({ navigation }) => {
         activeAdvancedFilters={advancedFilters}
       />
 
-      {/* Add Leave Button */}
-      <View style={styles.addButtonContainer}>
-        <TouchableOpacity
-          onPress={() => setShowAddLeaveModal(true)}
-          style={styles.addButtonTouchable}
-        >
-          <LinearGradient
-            colors={['#4F46E5', '#7C3AED', '#EC4899']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.addButton}
-          >
-            <Ionicons name="add" size={20} color="#FFFFFF" />
-            <Text style={styles.addButtonText}>Add Leave for Teacher</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
-
-      {/* Leave Applications List */}
-      <FlatList
-        data={filteredApplications}
-        renderItem={renderLeaveApplication}
-        keyExtractor={(item) => item.id}
+      <ScrollView
+        style={styles.scrollContainer}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        keyboardShouldPersistTaps="handled"
+        bounces={Platform.OS !== 'web'}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
-        contentContainerStyle={styles.listContainer}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons name="document-text" size={64} color="#CCCCCC" />
-            <Text style={styles.emptyText}>No leave applications found</Text>
-            <Text style={styles.emptySubtext}>
-              {selectedStatus === 'All' 
-                ? 'No leave applications have been submitted yet'
-                : `No ${selectedStatus.toLowerCase()} leave applications`}
-            </Text>
-          </View>
-        }
-      />
+      >
+        {/* Add Leave Button */}
+        <View style={styles.addButtonContainer}>
+          <TouchableOpacity
+            onPress={() => setShowAddLeaveModal(true)}
+            style={styles.addButtonTouchable}
+          >
+            <LinearGradient
+              colors={['#4F46E5', '#7C3AED', '#EC4899']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.addButton}
+            >
+              <Ionicons name="add" size={20} color="#FFFFFF" />
+              <Text style={styles.addButtonText}>Add Leave for Teacher</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+
+        {/* Leave Applications List */}
+        <View style={styles.leaveListSection}>
+          <FlatList
+            data={filteredApplications}
+            renderItem={renderLeaveApplication}
+            keyExtractor={(item) => item.id}
+            scrollEnabled={false}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.listContainer}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="document-text" size={64} color="#CCCCCC" />
+                <Text style={styles.emptyText}>No leave applications found</Text>
+                <Text style={styles.emptySubtext}>
+                  {selectedStatus === 'All' 
+                    ? 'No leave applications have been submitted yet'
+                    : `No ${selectedStatus.toLowerCase()} leave applications`}
+                </Text>
+              </View>
+            }
+          />
+        </View>
+      </ScrollView>
 
       {/* Add Leave Modal */}
       <Modal
@@ -1300,6 +1312,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8FAFC',
+  },
+  scrollContainer: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      maxHeight: '100vh',
+      overflowY: 'auto',
+    }),
+  },
+  scrollContent: {
+    paddingBottom: 100,
+    ...(Platform.OS === 'web' && {
+      minHeight: '100%',
+    }),
+  },
+  leaveListSection: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,

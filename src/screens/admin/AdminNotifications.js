@@ -7,7 +7,8 @@ import {
   TouchableOpacity,
   Alert,
   RefreshControl,
-  ActivityIndicator
+  ActivityIndicator,
+  Platform
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -339,7 +340,7 @@ const AdminNotifications = ({ navigation }) => {
             </Text>
           </View>
         )}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
       />
     </View>
   );
@@ -394,9 +395,16 @@ const styles = StyleSheet.create({
   },
   notificationsList: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      maxHeight: '100vh',
+      overflowY: 'auto',
+    }),
   },
   listContainer: {
     padding: 16,
+    ...(Platform.OS === 'web' && {
+      minHeight: '100%',
+    }),
   },
   notificationCard: {
     backgroundColor: '#fff',

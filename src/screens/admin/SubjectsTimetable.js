@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, TextInput, Button, Alert, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, TextInput, Button, Alert, ScrollView, ActivityIndicator, RefreshControl, Platform, Dimensions } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -62,6 +62,16 @@ const SubjectsTimetable = ({ route }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [copiedDayData, setCopiedDayData] = useState(null);
   const [copiedSourceDay, setCopiedSourceDay] = useState('');
+  const [screenData, setScreenData] = useState(Dimensions.get('window'));
+
+  // Add screen dimension change listener
+  useEffect(() => {
+    const subscription = Dimensions.addEventListener('change', ({ window }) => {
+      setScreenData(window);
+    });
+
+    return () => subscription?.remove();
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -1071,6 +1081,26 @@ const SubjectsTimetable = ({ route }) => {
     }
   };
 
+  // Helper function for responsive styles
+  const getResponsiveStyles = () => {
+    const { width, height } = screenData;
+    const isTablet = width >= 768;
+    const isLandscape = width > height;
+    const isMobile = width < 768;
+    const isWeb = Platform.OS === 'web';
+
+    return {
+      isTablet,
+      isLandscape,
+      isMobile,
+      isWeb,
+      contentPadding: isTablet ? 24 : 16,
+      modalWidth: isTablet ? '70%' : '90%',
+      maxHeight: isWeb ? '75vh' : height * 0.75,
+      gridColumns: isTablet && isLandscape ? 2 : 1,
+    };
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -1101,22 +1131,24 @@ const SubjectsTimetable = ({ route }) => {
         </TouchableOpacity>
       </View>
       {tab === 'subjects' ? (
-        <View style={styles.content}>
-          <FlatList
-            data={subjects}
-            keyExtractor={item => item.id}
-            style={{ width: '100%', marginTop: 16 }}
-            contentContainerStyle={{ paddingBottom: 100 }}
-            refreshControl={
-              <RefreshControl 
-                refreshing={refreshing} 
-                onRefresh={onRefresh} 
-                colors={['#4CAF50']}
-                tintColor="#4CAF50"
-              />
-            }
-            renderItem={({ item }) => (
-              <View style={styles.subjectRow}>
+        <ScrollView 
+          style={styles.content}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          keyboardShouldPersistTaps="handled"
+          bounces={Platform.OS !== 'web'}
+          refreshControl={
+            <RefreshControl 
+              refreshing={refreshing} 
+              onRefresh={onRefresh} 
+              colors={['#4CAF50']}
+              tintColor="#4CAF50"
+            />
+          }
+        >
+          <View style={styles.subjectsSection}>
+            {subjects.map((item) => (
+              <View key={item.id} style={styles.subjectRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.subjectName}>{item.name}</Text>
                   <Text style={styles.subjectClass}>Class: {item.classes ? `${item.classes.class_name} - ${item.classes.section}` : 'No Class Assigned'}</Text>
@@ -1129,11 +1161,11 @@ const SubjectsTimetable = ({ route }) => {
                   <Ionicons name="trash" size={20} color="#d32f2f" />
                 </TouchableOpacity>
               </View>
-            )}
-          />
+            ))}
+          </View>
           <Modal visible={modalVisible} animationType="slide" transparent>
             <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
+              <View style={[styles.modalContent, { width: getResponsiveStyles().modalWidth }]}>
                 <Text style={styles.modalTitle}>{editSubject ? 'Edit Subject' : 'Add Subject'}</Text>
                 <TextInput
                   placeholder="Subject Name"
@@ -1184,12 +1216,12 @@ const SubjectsTimetable = ({ route }) => {
           <TouchableOpacity style={styles.fab} onPress={openAddSubject}>
             <Text style={styles.fabIcon}>+</Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       ) : (
         <ScrollView 
           style={styles.timetableContainer} 
           contentContainerStyle={styles.timetableScrollContent}
-          showsVerticalScrollIndicator={false}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
           refreshControl={
             <RefreshControl 
               refreshing={refreshing} 
@@ -1244,87 +1276,85 @@ const SubjectsTimetable = ({ route }) => {
             </ScrollView>
           </View>
 
-          {/* Period Entry List */}
-          <ScrollView style={styles.periodsList} showsVerticalScrollIndicator={false}>
-            <View style={styles.periodsContainer}>
-              <View style={styles.periodsHeader}>
-                <Text style={styles.periodsTitle}>Periods for {selectedDay}</Text>
-                <View style={styles.headerActions}>
+          {/* Period Entry List - Remove nested ScrollView */}
+          <View style={styles.periodsContainer}>
+            <View style={styles.periodsHeader}>
+              <Text style={styles.periodsTitle}>Periods for {selectedDay}</Text>
+              <View style={styles.headerActions}>
+                <TouchableOpacity 
+                  style={styles.copyDayButton}
+                  onPress={() => openCopyDayModal()}
+                >
+                  <Ionicons name="copy" size={16} color="#2196F3" />
+                  <Text style={styles.copyDayText}>Copy Day</Text>
+                </TouchableOpacity>
+                {copiedDayData && copiedDayData.length > 0 && (
                   <TouchableOpacity 
-                    style={styles.copyDayButton}
-                    onPress={() => openCopyDayModal()}
+                    style={styles.pasteDayButton}
+                    onPress={() => pasteDayTimetable()}
                   >
-                    <Ionicons name="copy" size={16} color="#2196F3" />
-                    <Text style={styles.copyDayText}>Copy Day</Text>
+                    <Ionicons name="clipboard" size={16} color="#4CAF50" />
+                    <Text style={styles.pasteDayText}>Paste</Text>
                   </TouchableOpacity>
-                  {copiedDayData && copiedDayData.length > 0 && (
-                    <TouchableOpacity 
-                      style={styles.pasteDayButton}
-                      onPress={() => pasteDayTimetable()}
-                    >
-                      <Ionicons name="clipboard" size={16} color="#4CAF50" />
-                      <Text style={styles.pasteDayText}>Paste</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
+                )}
               </View>
-              
-              {/* Period Settings Button - Below header */}
-              <TouchableOpacity 
-                style={styles.settingsButtonLarge}
-                onPress={() => openPeriodSettingsModal()}
-              >
-                <Ionicons name="settings" size={18} color="#2196F3" />
-                <Text style={styles.settingsTextLarge}>Configure Period Timings</Text>
-                <Ionicons name="chevron-right" size={16} color="#2196F3" />
-              </TouchableOpacity>
-
-              {/* Pre-defined time slots */}
-              {getTimeSlots().map((slot, index) => {
-                const existingPeriod = timetables[selectedClass]?.[selectedDay]?.find(
-                  p => p.startTime === slot.startTime
-                );
-                return (
-                  <View key={index} style={styles.periodSlot}>
-                    <View style={styles.periodTimeSlot}>
-                      <Text style={styles.periodNumber}>Period {slot.number}</Text>
-                      <Text style={styles.periodTime}>
-                        {formatTime(slot.startTime)} - {formatTime(slot.endTime)}
-                      </Text>
-                      <Text style={styles.periodDuration}>({slot.duration} min)</Text>
-                    </View>
-                    <View style={styles.subjectSelector}>
-                      <View style={styles.subjectPickerWrapper}>
-                        <Picker
-                          key={`${selectedDay}-${slot.startTime}-${existingPeriod?.subjectId || 'empty'}`}
-                          selectedValue={existingPeriod?.subjectId || ''}
-                          style={styles.subjectPicker}
-                          onValueChange={(subjectId) => handleSubjectChange(selectedDay, slot, subjectId)}
-                        >
-                          <Picker.Item label="Select Subject" value="" />
-                          {getClassSubjects().map(subject => (
-                            <Picker.Item 
-                              key={subject.id} 
-                              label={subject.name} 
-                              value={subject.id} 
-                            />
-                          ))}
-                        </Picker>
-                      </View>
-                      {existingPeriod && (
-                        <TouchableOpacity
-                          style={styles.removeSubjectButton}
-                          onPress={() => removePeriod(selectedDay, existingPeriod.id)}
-                        >
-                          <Ionicons name="trash" size={16} color="#f44336" />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  </View>
-                );
-              })}
             </View>
-          </ScrollView>
+            
+            {/* Period Settings Button - Below header */}
+            <TouchableOpacity 
+              style={styles.settingsButtonLarge}
+              onPress={() => openPeriodSettingsModal()}
+            >
+              <Ionicons name="settings" size={18} color="#2196F3" />
+              <Text style={styles.settingsTextLarge}>Configure Period Timings</Text>
+              <Ionicons name="chevron-right" size={16} color="#2196F3" />
+            </TouchableOpacity>
+
+            {/* Pre-defined time slots */}
+            {getTimeSlots().map((slot, index) => {
+              const existingPeriod = timetables[selectedClass]?.[selectedDay]?.find(
+                p => p.startTime === slot.startTime
+              );
+              return (
+                <View key={index} style={styles.periodSlot}>
+                  <View style={styles.periodTimeSlot}>
+                    <Text style={styles.periodNumber}>Period {slot.number}</Text>
+                    <Text style={styles.periodTime}>
+                      {formatTime(slot.startTime)} - {formatTime(slot.endTime)}
+                    </Text>
+                    <Text style={styles.periodDuration}>({slot.duration} min)</Text>
+                  </View>
+                  <View style={styles.subjectSelector}>
+                    <View style={styles.subjectPickerWrapper}>
+                      <Picker
+                        key={`${selectedDay}-${slot.startTime}-${existingPeriod?.subjectId || 'empty'}`}
+                        selectedValue={existingPeriod?.subjectId || ''}
+                        style={styles.subjectPicker}
+                        onValueChange={(subjectId) => handleSubjectChange(selectedDay, slot, subjectId)}
+                      >
+                        <Picker.Item label="Select Subject" value="" />
+                        {getClassSubjects().map(subject => (
+                          <Picker.Item 
+                            key={subject.id} 
+                            label={subject.name} 
+                            value={subject.id} 
+                          />
+                        ))}
+                      </Picker>
+                    </View>
+                    {existingPeriod && (
+                      <TouchableOpacity
+                        style={styles.removeSubjectButton}
+                        onPress={() => removePeriod(selectedDay, existingPeriod.id)}
+                      >
+                        <Ionicons name="trash" size={16} color="#f44336" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
 
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
@@ -1631,7 +1661,18 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      maxHeight: '75vh',
+      overflowY: 'auto'
+    })
+  },
+  scrollContent: {
     padding: 16,
+    paddingBottom: 120,
+  },
+  subjectsSection: {
+    paddingTop: 16,
+    paddingBottom: 100,
   },
   subjectRow: {
     flexDirection: 'row',
@@ -1725,6 +1766,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
+    zIndex: 1000,
+    ...(Platform.OS === 'web' && {
+      position: 'fixed',
+      zIndex: 9999,
+      right: '24px',
+      bottom: '24px',
+    })
   },
   fabIcon: {
     color: '#fff',
@@ -1806,9 +1854,14 @@ const styles = StyleSheet.create({
   timetableContainer: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+    ...(Platform.OS === 'web' && {
+      maxHeight: '75vh',
+      overflowY: 'auto'
+    })
   },
   timetableScrollContent: {
     paddingBottom: 120,
+    flexGrow: 1,
   },
   timetableHeader: {
     backgroundColor: '#fff',
@@ -1912,13 +1965,10 @@ const styles = StyleSheet.create({
   selectedDayTabText: {
     color: '#fff',
   },
-  periodsList: {
-    flex: 1,
-    paddingTop: 16,
-  },
   periodsContainer: {
     paddingHorizontal: 16,
     paddingBottom: 250,
+    paddingTop: 16,
   },
   periodsHeader: {
     flexDirection: 'row',

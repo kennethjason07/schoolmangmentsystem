@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   Dimensions,
   ActivityIndicator,
@@ -14,6 +13,7 @@ import {
   RefreshControl,
   FlatList,
   Image,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
@@ -24,6 +24,7 @@ import NoSchoolDetailsState from '../../components/NoSchoolDetailsState';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import CrossPlatformBarChart from '../../components/CrossPlatformBarChart';
+import ResponsiveScrollView, { ResponsiveGrid, ResponsiveContainer, ResponsiveModal, isPC, isLargeScreen } from '../../components/ResponsiveScrollView';
 import { supabase, dbHelpers } from '../../utils/supabase';
 import { format, addMonths } from 'date-fns';
 import { getEventDisplayProps } from '../../utils/eventIcons';
@@ -40,11 +41,21 @@ const AdminDashboard = ({ navigation }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [schoolDetails, setSchoolDetails] = useState(null);
 
+  // Debug logs for web
+  console.log('🏠 AdminDashboard - Component rendered');
+  console.log('🏠 AdminDashboard - Current user:', user?.email);
+  console.log('🏠 AdminDashboard - Loading state:', loading);
+  console.log('🏠 AdminDashboard - Error state:', error);
+  console.log('🏠 AdminDashboard - Stats length:', stats.length);
+  console.log('🏠 AdminDashboard - Platform:', Platform.OS);
+
   // Load real-time data from Supabase using actual schema
   const loadDashboardData = async () => {
+    console.log('🏠 loadDashboardData - Starting data load');
     try {
       setLoading(true);
       setError(null);
+      console.log('🏠 loadDashboardData - Set loading to true, error to null');
 
       // Load school details
       console.log('🏫 === SCHOOL DETAILS DEBUGGING ===');
@@ -236,10 +247,12 @@ const AdminDashboard = ({ navigation }) => {
       setActivities(recentActivities.slice(0, 5));
 
     } catch (error) {
-      console.error('Error loading dashboard data:', error);
+      console.error('🏠 Error loading dashboard data:', error);
       setError('Failed to load dashboard data');
+      console.log('🏠 loadDashboardData - Set error state:', 'Failed to load dashboard data');
     } finally {
       setLoading(false);
+      console.log('🏠 loadDashboardData - Set loading to false');
     }
   };
 
@@ -583,6 +596,7 @@ const AdminDashboard = ({ navigation }) => {
   };
 
   if (loading) {
+    console.log('🏠 AdminDashboard - Rendering loading screen');
     return (
       <View style={styles.container}>
         <Header title="Admin Dashboard" />
@@ -595,6 +609,7 @@ const AdminDashboard = ({ navigation }) => {
   }
 
   if (error) {
+    console.log('🏠 AdminDashboard - Rendering error screen:', error);
     return (
       <View style={styles.container}>
         <Header title="Admin Dashboard" />
@@ -613,6 +628,10 @@ const AdminDashboard = ({ navigation }) => {
     );
   }
 
+  console.log('🏠 AdminDashboard - Rendering main dashboard');
+  console.log('🏠 AdminDashboard - Stats to render:', stats.length);
+  console.log('🏠 AdminDashboard - School details:', !!schoolDetails);
+  
   return (
     <View style={styles.container}>
       <Header 
@@ -622,7 +641,7 @@ const AdminDashboard = ({ navigation }) => {
         onNotificationsPress={() => navigation.navigate('AdminNotifications')}
       />
 
-      <ScrollView
+      <ResponsiveScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -930,7 +949,7 @@ const AdminDashboard = ({ navigation }) => {
                             <Text style={styles.selectionCountText}>
                               {(eventInput.selectedClasses || []).length} of {(allClasses || []).length} classes selected
                             </Text>
-                            <ScrollView 
+                            <ResponsiveScrollView 
                               style={styles.classScrollView} 
                               showsVerticalScrollIndicator={true}
                               nestedScrollEnabled={true}
@@ -976,7 +995,7 @@ const AdminDashboard = ({ navigation }) => {
                                   <Text style={styles.noClassesText}>No classes found</Text>
                                 </View>
                               )}
-                            </ScrollView>
+                            </ResponsiveScrollView>
                           </View>
                         </View>
                       )}
@@ -1057,7 +1076,7 @@ const AdminDashboard = ({ navigation }) => {
           </View>
         </View>
 
-      </ScrollView>
+      </ResponsiveScrollView>
     </View>
   );
 };

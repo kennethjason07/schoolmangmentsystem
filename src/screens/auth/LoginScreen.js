@@ -5,18 +5,19 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  ScrollView,
   Alert,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   RefreshControl,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase } from '../../utils/supabase';
 import * as Animatable from 'react-native-animatable';
+import ResponsiveScrollView, { ResponsiveContainer, isPC, isLargeScreen } from '../../components/ResponsiveScrollView';
 
 const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
@@ -148,143 +149,280 @@ const LoginScreen = ({ navigation }) => {
       style={styles.container} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        style={styles.gradient}
-      >
-        <ScrollView 
-          contentContainerStyle={styles.scrollContent}
-          refreshControl={
-            <RefreshControl refreshing={isLoading} onRefresh={() => {}} />
-          }
-        >
-          <Animatable.View 
-            style={styles.logoContainer}
-            animation="fadeInDown"
-            duration={1000}
+      {Platform.OS === 'web' ? (
+        <View style={styles.webGradient}>
+          <ResponsiveScrollView 
+            contentContainerStyle={styles.scrollContent}
+            refreshControl={
+              <RefreshControl refreshing={isLoading} onRefresh={() => {}} />
+            }
           >
-            <Ionicons name="school" size={80} color="#fff" />
-            <Text style={styles.appTitle}>School Management</Text>
-            <Text style={styles.appSubtitle}>Login to your account</Text>
-          </Animatable.View>
+            <Animatable.View 
+              style={styles.logoContainer}
+              animation="fadeInDown"
+              duration={1000}
+            >
+              <Ionicons name="school" size={80} color="#fff" />
+              <Text style={styles.appTitle}>School Management</Text>
+              <Text style={styles.appSubtitle}>Login to your account</Text>
+            </Animatable.View>
 
-          <Animatable.View style={styles.formContainer} animation="fadeInUp" duration={800}>
-            {/* Role Selection */}
-            <View style={styles.roleContainer}>
-              <Text style={styles.roleLabel}>Select Role</Text>
-              <View style={styles.roleButtons}>
-                {roles.map((role) => (
-                  <TouchableOpacity
-                    key={role.key}
-                    style={[
-                      styles.roleButton,
-                      selectedRole === role.key && { backgroundColor: role.color }
-                    ]}
-                    onPress={() => setSelectedRole(role.key)}
-                  >
-                    <Ionicons 
-                      name={role.icon} 
-                      size={24} 
-                      color={selectedRole === role.key ? '#fff' : '#666'} 
-                    />
-                    <Text style={[
-                      styles.roleButtonText,
-                      selectedRole === role.key && { color: '#fff' }
-                    ]}>
-                      {role.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+            <Animatable.View style={styles.formContainer} animation="fadeInUp" duration={800}>
+              {/* Role Selection */}
+              <View style={styles.roleContainer}>
+                <Text style={styles.roleLabel}>Select Role</Text>
+                <View style={styles.roleButtons}>
+                  {roles.map((role) => (
+                    <TouchableOpacity
+                      key={role.key}
+                      style={[
+                        styles.roleButton,
+                        selectedRole === role.key && { backgroundColor: role.color }
+                      ]}
+                      onPress={() => setSelectedRole(role.key)}
+                    >
+                      <Ionicons 
+                        name={role.icon} 
+                        size={24} 
+                        color={selectedRole === role.key ? '#fff' : '#666'} 
+                      />
+                      <Text style={[
+                        styles.roleButtonText,
+                        selectedRole === role.key && { color: '#fff' }
+                      ]}>
+                        {role.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
-            </View>
 
-            {/* Email Input */}
-            <View style={styles.inputContainer}>
-              <Ionicons name="mail" size={24} color="#666" />
-              <TextInput
-                style={styles.input}
-                placeholder="Email"
-                placeholderTextColor="#666"
-                value={email}
-                onChangeText={(text) => {
-                  setEmail(text);
-                  validateEmail(text);
-                }}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-            {emailError && (
-              <Text style={styles.errorText}>{emailError}</Text>
-            )}
-
-            {/* Password Input */}
-            <View style={styles.inputContainer}>
-              <Ionicons name="lock-closed" size={24} color="#666" />
-              <TextInput
-                style={styles.input}
-                placeholder="Password"
-                placeholderTextColor="#666"
-                value={password}
-                onChangeText={(text) => {
-                  setPassword(text);
-                  validatePassword(text);
-                }}
-                secureTextEntry={!showPassword}
-              />
-              <TouchableOpacity
-                style={styles.showPasswordButton}
-                onPress={() => setShowPassword(!showPassword)}
-              >
-                <Ionicons
-                  name={showPassword ? "eye-off" : "eye"}
-                  size={24}
-                  color="#666"
+              {/* Email Input */}
+              <View style={styles.inputContainer}>
+                <Ionicons name="mail" size={24} color="#666" />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Email"
+                  placeholderTextColor="#666"
+                  value={email}
+                  onChangeText={(text) => {
+                    setEmail(text);
+                    validateEmail(text);
+                  }}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
                 />
-              </TouchableOpacity>
-            </View>
-            {passwordError && (
-              <Text style={styles.errorText}>{passwordError}</Text>
-            )}
-
-            {/* Login Button */}
-            <TouchableOpacity
-              style={[
-                styles.loginButton,
-                isLoading && styles.loginButtonDisabled
-              ]}
-              onPress={handleLogin}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <>
-                  <Ionicons name="log-in" size={24} color="#fff" />
-                  <Text style={styles.loginButtonText}>Login</Text>
-                </>
+              </View>
+              {emailError && (
+                <Text style={styles.errorText}>{emailError}</Text>
               )}
-            </TouchableOpacity>
 
-            {/* Forgot Password */}
-            <TouchableOpacity
-              style={styles.forgotPasswordButton}
-              onPress={() => navigation.navigate('ForgotPassword')}
-            >
-              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-            </TouchableOpacity>
+              {/* Password Input */}
+              <View style={styles.inputContainer}>
+                <Ionicons name="lock-closed" size={24} color="#666" />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Password"
+                  placeholderTextColor="#666"
+                  value={password}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    validatePassword(text);
+                  }}
+                  secureTextEntry={!showPassword}
+                />
+                <TouchableOpacity
+                  style={styles.showPasswordButton}
+                  onPress={() => setShowPassword(!showPassword)}
+                >
+                  <Ionicons
+                    name={showPassword ? "eye-off" : "eye"}
+                    size={24}
+                    color="#666"
+                  />
+                </TouchableOpacity>
+              </View>
+              {passwordError && (
+                <Text style={styles.errorText}>{passwordError}</Text>
+              )}
 
-            {/* Sign Up */}
-            <View style={styles.signupContainer}>
-              <Text style={styles.signupText}>Don't have an account? </Text>
-              <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
-                <Text style={styles.signupLink}>Sign Up</Text>
+              {/* Login Button */}
+              <TouchableOpacity
+                style={[
+                  styles.loginButton,
+                  isLoading && styles.loginButtonDisabled
+                ]}
+                onPress={handleLogin}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="log-in" size={24} color="#fff" />
+                    <Text style={styles.loginButtonText}>Login</Text>
+                  </>
+                )}
               </TouchableOpacity>
-            </View>
-          </Animatable.View>
-        </ScrollView>
-      </LinearGradient>
+
+              {/* Forgot Password */}
+              <TouchableOpacity
+                style={styles.forgotPasswordButton}
+                onPress={() => navigation.navigate('ForgotPassword')}
+              >
+                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+              </TouchableOpacity>
+
+              {/* Sign Up */}
+              <View style={styles.signupContainer}>
+                <Text style={styles.signupText}>Don't have an account? </Text>
+                <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
+                  <Text style={styles.signupLink}>Sign Up</Text>
+                </TouchableOpacity>
+              </View>
+            </Animatable.View>
+          </ResponsiveScrollView>
+        </View>
+      ) : (
+        <LinearGradient
+          colors={['#667eea', '#764ba2']}
+          style={styles.gradient}
+        >
+          <ResponsiveScrollView 
+            contentContainerStyle={styles.scrollContent}
+            refreshControl={
+              <RefreshControl refreshing={isLoading} onRefresh={() => {}} />
+            }
+          >
+            <Animatable.View 
+              style={styles.logoContainer}
+              animation="fadeInDown"
+              duration={1000}
+            >
+              <Ionicons name="school" size={80} color="#fff" />
+              <Text style={styles.appTitle}>School Management</Text>
+              <Text style={styles.appSubtitle}>Login to your account</Text>
+            </Animatable.View>
+
+            <Animatable.View style={styles.formContainer} animation="fadeInUp" duration={800}>
+              {/* Role Selection */}
+              <View style={styles.roleContainer}>
+                <Text style={styles.roleLabel}>Select Role</Text>
+                <View style={styles.roleButtons}>
+                  {roles.map((role) => (
+                    <TouchableOpacity
+                      key={role.key}
+                      style={[
+                        styles.roleButton,
+                        selectedRole === role.key && { backgroundColor: role.color }
+                      ]}
+                      onPress={() => setSelectedRole(role.key)}
+                    >
+                      <Ionicons 
+                        name={role.icon} 
+                        size={24} 
+                        color={selectedRole === role.key ? '#fff' : '#666'} 
+                      />
+                      <Text style={[
+                        styles.roleButtonText,
+                        selectedRole === role.key && { color: '#fff' }
+                      ]}>
+                        {role.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Email Input */}
+              <View style={styles.inputContainer}>
+                <Ionicons name="mail" size={24} color="#666" />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Email"
+                  placeholderTextColor="#666"
+                  value={email}
+                  onChangeText={(text) => {
+                    setEmail(text);
+                    validateEmail(text);
+                  }}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+              {emailError && (
+                <Text style={styles.errorText}>{emailError}</Text>
+              )}
+
+              {/* Password Input */}
+              <View style={styles.inputContainer}>
+                <Ionicons name="lock-closed" size={24} color="#666" />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Password"
+                  placeholderTextColor="#666"
+                  value={password}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    validatePassword(text);
+                  }}
+                  secureTextEntry={!showPassword}
+                />
+                <TouchableOpacity
+                  style={styles.showPasswordButton}
+                  onPress={() => setShowPassword(!showPassword)}
+                >
+                  <Ionicons
+                    name={showPassword ? "eye-off" : "eye"}
+                    size={24}
+                    color="#666"
+                  />
+                </TouchableOpacity>
+              </View>
+              {passwordError && (
+                <Text style={styles.errorText}>{passwordError}</Text>
+              )}
+
+              {/* Login Button */}
+              <TouchableOpacity
+                style={[
+                  styles.loginButton,
+                  isLoading && styles.loginButtonDisabled
+                ]}
+                onPress={handleLogin}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="log-in" size={24} color="#fff" />
+                    <Text style={styles.loginButtonText}>Login</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {/* Forgot Password */}
+              <TouchableOpacity
+                style={styles.forgotPasswordButton}
+                onPress={() => navigation.navigate('ForgotPassword')}
+              >
+                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+              </TouchableOpacity>
+
+              {/* Sign Up */}
+              <View style={styles.signupContainer}>
+                <Text style={styles.signupText}>Don't have an account? </Text>
+                <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
+                  <Text style={styles.signupLink}>Sign Up</Text>
+                </TouchableOpacity>
+              </View>
+            </Animatable.View>
+          </ResponsiveScrollView>
+        </LinearGradient>
+      )}
     </KeyboardAvoidingView>
   );
 };
@@ -328,6 +466,12 @@ const styles = StyleSheet.create({
     },
     shadowOpacity: 0.25,
     shadowRadius: 14,
+    // Web-specific enhancements
+    ...(Platform.OS === 'web' && {
+      backdropFilter: 'blur(10px)',
+      border: '1px solid rgba(255, 255, 255, 0.2)',
+      boxShadow: '0 15px 35px rgba(0, 0, 0, 0.1)',
+    }),
   },
   roleContainer: {
     marginBottom: 20,
@@ -356,6 +500,12 @@ const styles = StyleSheet.create({
     minWidth: '48%',
     flex: 1,
     marginBottom: 8,
+    // Web-specific enhancements
+    ...(Platform.OS === 'web' && {
+      cursor: 'pointer',
+      transition: 'all 0.2s ease-in-out',
+      boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+    }),
   },
   roleButtonText: {
     fontSize: 14,
@@ -394,6 +544,16 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 15,
     marginTop: 20,
+    // Web-specific enhancements
+    ...(Platform.OS === 'web' && {
+      cursor: 'pointer',
+      transition: 'all 0.2s ease-in-out',
+      ':hover': {
+        backgroundColor: '#1565c0',
+        transform: 'translateY(-1px)',
+        boxShadow: '0 4px 8px rgba(25, 118, 210, 0.3)',
+      },
+    }),
   },
   loginButtonDisabled: {
     opacity: 0.7,
@@ -427,6 +587,18 @@ const styles = StyleSheet.create({
     color: '#1976d2',
     fontSize: 14,
     fontWeight: '600',
+  },
+  // Web-specific gradient styles
+  webGradient: {
+    flex: 1,
+    backgroundColor: '#667eea',
+    ...(Platform.OS === 'web' && {
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      backgroundAttachment: 'fixed',
+    }),
+  },
+  webGradientOverlay: {
+    // This will be empty as we're using CSS background on webGradient directly
   },
 });
 
