@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
+  Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -85,7 +86,8 @@ const ManageTeachers = ({ navigation, route }) => {
             id,
             full_name,
             email,
-            phone
+            phone,
+            profile_url
           )
         `)
         .order('created_at', { ascending: false });
@@ -190,6 +192,17 @@ const ManageTeachers = ({ navigation, route }) => {
         teachers: processedTeachers?.length || 0,
         classes: classesData?.length || 0,
         subjects: uniqueSubjects?.length || 0
+      });
+      
+      // Debug teacher photo data
+      console.log('🖼️ Teacher photo debug:');
+      processedTeachers?.forEach(teacher => {
+        console.log(`Teacher: ${teacher.name}`);
+        console.log(`  - Has user data: ${!!teacher.users}`);
+        console.log(`  - User full_name: ${teacher.users?.full_name || 'N/A'}`);
+        console.log(`  - Profile URL: ${teacher.users?.profile_url || 'N/A'}`);
+        console.log(`  - User ID: ${teacher.users?.id || 'N/A'}`);
+        console.log('---');
       });
       
       // 📊 Performance monitoring
@@ -745,11 +758,23 @@ const ManageTeachers = ({ navigation, route }) => {
       >
         <View style={styles.teacherInfo}>
           <View style={styles.teacherAvatar}>
-            <View style={styles.profileContainer}>
-              <Text style={styles.profileInitials}>
-                {item.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
-              </Text>
-            </View>
+            {item.users?.profile_url ? (
+              <View style={styles.profileImageContainer}>
+                <Image
+                  source={{ uri: item.users.profile_url }}
+                  style={styles.profileImage}
+                  onError={() => {
+                    console.log('Failed to load teacher profile image:', item.users.profile_url);
+                  }}
+                />
+              </View>
+            ) : (
+              <View style={styles.profileContainer}>
+                <Text style={styles.profileInitials}>
+                  {item.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
+                </Text>
+              </View>
+            )}
             <View style={styles.iconOverlay}>
               <Ionicons name="person" size={16} color="#4CAF50" />
             </View>
@@ -1429,6 +1454,22 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,
     shadowRadius: 1.5,
+  },
+  profileImageContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    overflow: 'hidden',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.5,
+  },
+  profileImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
   },
   profileInitials: {
     fontSize: 16,

@@ -11,7 +11,8 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
-  Platform
+  Platform,
+  Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
@@ -121,7 +122,7 @@ const ManageStudents = () => {
     try {
       console.log('🚀 Loading students with optimized query...');
       
-      // Use a single JOIN query to get all student data with related information
+      // Use a single JOIN query to get all student data with related information including profile photos
       const { data: studentsData, error } = await supabase
         .from(TABLES.STUDENTS)
         .select(`
@@ -138,6 +139,32 @@ const ManageStudents = () => {
           )
         `)
         .order('created_at', { ascending: false });
+
+      console.log('📸 Fetching student profile photos from users table...');
+      
+      // Get profile photos for all students from users table
+      const { data: userProfileData, error: profileError } = await supabase
+        .from(TABLES.USERS)
+        .select('linked_student_id, profile_url')
+        .in('linked_student_id', studentsData?.map(s => s.id) || [])
+        .not('linked_student_id', 'is', null);
+      
+      console.log('📸 Profile photos query result:', {
+        error: profileError,
+        recordCount: userProfileData?.length || 0,
+        sampleData: userProfileData?.slice(0, 3) || []
+      });
+      
+      // Create profile photo lookup map
+      const profilePhotoLookup = {};
+      (userProfileData || []).forEach(record => {
+        if (record.linked_student_id && record.profile_url) {
+          profilePhotoLookup[record.linked_student_id] = record.profile_url;
+        }
+      });
+      
+      console.log('📸 Profile photo lookup created for', Object.keys(profilePhotoLookup).length, 'students');
+      console.log('📸 Sample profile URLs:', Object.values(profilePhotoLookup).slice(0, 2));
 
       if (error) {
         throw error;
@@ -279,6 +306,11 @@ const ManageStudents = () => {
         const academicPercentage = academicInfo.average;
         const hasMarks = academicInfo.subjectCount > 0;
 
+        // Get profile photo URL from lookup
+        const profileUrl = profilePhotoLookup[student.id] || null;
+        
+        console.log(`📸 Student ${student.name} profile photo:`, profileUrl || 'No photo');
+
         return {
           ...student,
           attendancePercentage,
@@ -288,7 +320,8 @@ const ManageStudents = () => {
           parentPhone: parentInfo.phone,
           feesStatus: feesStatus,
           academicPercentage,
-          hasMarks
+          hasMarks,
+          profile_url: profileUrl // Add profile photo URL
         };
       });
 
@@ -1066,7 +1099,15 @@ const ManageStudents = () => {
         <View style={styles.studentInfoRow}>
           <View style={styles.leftSection}>
             <View style={styles.avatarContainer}>
-              <Ionicons name="person" size={24} color="#2196F3" />
+              {item.profile_url ? (
+                <Image
+                  source={{ uri: item.profile_url }}
+                  style={styles.avatarImage}
+                  onError={() => console.log('📸 Failed to load profile image for', item.name)}
+                />
+              ) : (
+                <Ionicons name="person" size={24} color="#2196F3" />
+              )}
             </View>
 
             <View style={styles.studentDetails}>
@@ -1887,6 +1928,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+  },
+  avatarImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#f0f0f0',
   },
   studentDetails: {
     flex: 1,
