@@ -835,22 +835,40 @@ const AttendanceManagement = () => {
               </TouchableOpacity>
             </View>
 
-            <Animatable.View animation="fadeInUp" delay={400}>
+            <Animatable.View animation="fadeInUp" delay={300}>
               <TouchableOpacity
                 style={[
                   styles.submitButtonCard,
                   !selectedClass && styles.disabledSubmitButton
                 ]}
                 onPress={() => {
-                  handleMarkAttendance();
+                  if (selectedClass) {
+                    loadStudentsForClass(selectedClass);
+                  }
                 }}
                 disabled={!selectedClass}
                 activeOpacity={0.8}
               >
-                <Ionicons name="save-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                <Ionicons name="people-outline" size={20} color="#fff" style={styles.buttonIcon} />
                 <Text style={styles.submitButtonText}>
-                  {selectedClass ? 'Load Students' : 'Select Class First'}
+                  {selectedClass ? 'Load Students for Attendance' : 'Select Class First'}
                 </Text>
+              </TouchableOpacity>
+            </Animatable.View>
+            
+            <Animatable.View animation="fadeInUp" delay={500}>
+              <TouchableOpacity
+                style={[
+                  styles.submitButtonCard,
+                  styles.submitStudentButtonCard
+                ]}
+                onPress={() => {
+                  handleMarkAttendance();
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="save-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.submitButtonText}>Submit Attendance</Text>
               </TouchableOpacity>
             </Animatable.View>
           </View>
@@ -873,16 +891,30 @@ const AttendanceManagement = () => {
               </TouchableOpacity>
             </View>
 
-            <Animatable.View animation="fadeInUp" delay={400}>
+            <Animatable.View animation="fadeInUp" delay={300}>
               <TouchableOpacity
                 style={styles.submitButtonCard}
+                onPress={loadAllData}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="people-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.submitButtonText}>Load Teachers for Attendance</Text>
+              </TouchableOpacity>
+            </Animatable.View>
+            
+            <Animatable.View animation="fadeInUp" delay={500}>
+              <TouchableOpacity
+                style={[
+                  styles.submitButtonCard,
+                  styles.submitTeacherButtonCard
+                ]}
                 onPress={() => {
                   handleTeacherMarkAttendance();
                 }}
                 activeOpacity={0.8}
               >
                 <Ionicons name="save-outline" size={20} color="#fff" style={styles.buttonIcon} />
-                <Text style={styles.submitButtonText}>Load Teachers</Text>
+                <Text style={styles.submitButtonText}>Submit Attendance</Text>
               </TouchableOpacity>
             </Animatable.View>
           </View>
@@ -1095,15 +1127,26 @@ const AttendanceManagement = () => {
 
         {tab === 'teacher' && teachers.length > 0 && (
           <View style={styles.viewButtonContainer}>
-            <TouchableOpacity
-              style={styles.viewButton}
-              onPress={() => {
-                setTeacherViewDate(teacherDate);
-                setTeacherViewModalVisible(true);
-              }}
-            >
-              <Text style={styles.viewButtonText}>View Attendance</Text>
-            </TouchableOpacity>
+            <View style={styles.teacherButtonsRow}>
+              <TouchableOpacity
+                style={styles.submitTeacherButton}
+                onPress={() => {
+                  handleTeacherMarkAttendance();
+                }}
+              >
+                <Ionicons name="save-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.viewButtonText}>Submit Attendance</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.viewButton}
+                onPress={() => {
+                  setTeacherViewDate(teacherDate);
+                  setTeacherViewModalVisible(true);
+                }}
+              >
+                <Text style={styles.viewButtonText}>View Attendance</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -1283,18 +1326,45 @@ const AttendanceManagement = () => {
             
             <FlatList
               data={studentsForClass}
-              renderItem={({ item }) => (
-                <View style={styles.modalTableRow}>
-                  <Text style={[styles.modalTableCell, { flex: 0.7 }]}>{item.roll_no || '-'}</Text>
-                  <Text style={[styles.modalTableCell, { flex: 2 }]}>{item.full_name || item.name}</Text>
-                  <Text style={[styles.modalTableCell, { flex: 1 }]}>{formatSafeDate(viewDate, 'dd-MM-yyyy')}</Text>
-                  <Text style={[styles.modalTableCell, { flex: 1 }]}>{attendanceMark[item.id] === 'Present' ? 'P' : 'A'}</Text>
-                </View>
-              )}
+              renderItem={({ item, index }) => {
+                const currentStatus = attendanceMark[item.id];
+                return (
+                  <View style={styles.modalTableRow}>
+                    <Text style={[styles.modalTableCell, { flex: 0.7 }]}>{item.roll_no || (index + 1)}</Text>
+                    <Text style={[styles.modalTableCell, { flex: 2 }]}>{item.full_name || item.name}</Text>
+                    <Text style={[styles.modalTableCell, { flex: 1 }]}>{formatSafeDate(viewDate, 'dd-MM-yyyy')}</Text>
+                    <View style={[styles.modalTableCell, { flex: 1, flexDirection: 'row', justifyContent: 'center' }]}>
+                      <TouchableOpacity
+                        style={[
+                          styles.modalStatusButton,
+                          currentStatus === 'Present' ? styles.modalPresentButton : styles.modalAbsentButton
+                        ]}
+                        onPress={() => toggleStudentAttendance(item.id, currentStatus === 'Present' ? 'Absent' : 'Present')}
+                      >
+                        <Text style={[
+                          styles.modalStatusText,
+                          currentStatus === 'Present' ? styles.modalPresentText : styles.modalAbsentText
+                        ]}>
+                          {currentStatus === 'Present' ? 'P' : 'A'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              }}
               keyExtractor={item => item.id}
             />
             
             <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.submitModalButton}
+                onPress={() => {
+                  handleMarkAttendance();
+                  setViewModalVisible(false);
+                }}
+              >
+                <Text style={styles.submitModalButtonText}>Submit Attendance</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.exportButton}
                 onPress={exportToPDF}
@@ -1348,18 +1418,45 @@ const AttendanceManagement = () => {
             
             <FlatList
               data={teachers}
-              renderItem={({ item, index }) => (
-                <View style={styles.modalTableRow}>
-                  <Text style={[styles.modalTableCell, { flex: 0.7 }]}>{index + 1}</Text>
-                  <Text style={[styles.modalTableCell, { flex: 2 }]}>{item.name}</Text>
-                  <Text style={[styles.modalTableCell, { flex: 1 }]}>{formatSafeDate(teacherViewDate, 'dd-MM-yyyy')}</Text>
-                  <Text style={[styles.modalTableCell, { flex: 1 }]}>{teacherAttendanceMark[item.id] === 'Present' ? 'P' : 'A'}</Text>
-                </View>
-              )}
+              renderItem={({ item, index }) => {
+                const currentStatus = teacherAttendanceMark[item.id];
+                return (
+                  <View style={styles.modalTableRow}>
+                    <Text style={[styles.modalTableCell, { flex: 0.7 }]}>{index + 1}</Text>
+                    <Text style={[styles.modalTableCell, { flex: 2 }]}>{item.name}</Text>
+                    <Text style={[styles.modalTableCell, { flex: 1 }]}>{formatSafeDate(teacherViewDate, 'dd-MM-yyyy')}</Text>
+                    <View style={[styles.modalTableCell, { flex: 1, flexDirection: 'row', justifyContent: 'center' }]}>
+                      <TouchableOpacity
+                        style={[
+                          styles.modalStatusButton,
+                          currentStatus === 'Present' ? styles.modalPresentButton : styles.modalAbsentButton
+                        ]}
+                        onPress={() => toggleTeacherAttendance(item.id, currentStatus === 'Present' ? 'Absent' : 'Present')}
+                      >
+                        <Text style={[
+                          styles.modalStatusText,
+                          currentStatus === 'Present' ? styles.modalPresentText : styles.modalAbsentText
+                        ]}>
+                          {currentStatus === 'Present' ? 'P' : 'A'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              }}
               keyExtractor={item => item.id}
             />
             
             <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.submitModalButton}
+                onPress={() => {
+                  handleTeacherMarkAttendance();
+                  setTeacherViewModalVisible(false);
+                }}
+              >
+                <Text style={styles.submitModalButtonText}>Submit Attendance</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.exportButton}
                 onPress={exportTeacherToPDF}
@@ -1901,6 +1998,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 8,
     alignItems: 'center',
+    flex: 1,
   },
   viewButtonText: {
     color: '#fff',
@@ -1911,6 +2009,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginVertical: 16,
     marginHorizontal: 16,
+  },
+  teacherButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    gap: 12,
+  },
+  submitTeacherButton: {
+    backgroundColor: '#FF9800',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    flex: 1,
   },
   analyticsContainer: {
     backgroundColor: '#fff',
@@ -2401,5 +2515,57 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#333',
     textAlign: 'center',
+  },
+  // Modal status button styles
+  modalStatusButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+  },
+  modalPresentButton: {
+    backgroundColor: '#4CAF50',
+    borderColor: '#4CAF50',
+  },
+  modalAbsentButton: {
+    backgroundColor: '#F44336',
+    borderColor: '#F44336',
+  },
+  modalStatusText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  modalPresentText: {
+    color: '#fff',
+  },
+  modalAbsentText: {
+    color: '#fff',
+  },
+  // Submit modal button styles
+  submitModalButton: {
+    backgroundColor: '#FF9800',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    flex: 1,
+    marginRight: 8,
+    alignItems: 'center',
+  },
+  submitModalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // Teacher submit button card style
+  submitTeacherButtonCard: {
+    backgroundColor: '#FF9800',
+    marginTop: 8,
+  },
+  // Student submit button card style
+  submitStudentButtonCard: {
+    backgroundColor: '#4CAF50',
+    marginTop: 8,
   },
 });

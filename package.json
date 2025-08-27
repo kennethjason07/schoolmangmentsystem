@@ -28,7 +28,7 @@
     "chart.js": "^4.5.0",
     "date-fns": "^4.1.0",
     "datetimepicker": "^0.1.39",
-    "expo": "~53.0.13",
+    "expo": "53.0.22",
     "expo-blur": "^14.1.5",
     "expo-clipboard": "~7.1.0",
     "expo-document-picker": "~13.1.6",
