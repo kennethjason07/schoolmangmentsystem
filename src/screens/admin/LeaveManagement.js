@@ -857,20 +857,44 @@ const LeaveManagement = ({ navigation }) => {
           <FlatList
             data={filteredApplications}
             renderItem={renderLeaveApplication}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
             scrollEnabled={false}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listContainer}
+            removeClippedSubviews={Platform.OS === 'android'}
+            initialNumToRender={10}
+            maxToRenderPerBatch={5}
+            windowSize={10}
+            getItemLayout={Platform.OS === 'android' ? undefined : (data, index) => (
+              { length: 200, offset: 200 * index, index }
+            )}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <Ionicons name="document-text" size={64} color="#CCCCCC" />
                 <Text style={styles.emptyText}>No leave applications found</Text>
                 <Text style={styles.emptySubtext}>
-                  {selectedStatus === 'All' 
-                    ? 'No leave applications have been submitted yet'
-                    : `No ${selectedStatus.toLowerCase()} leave applications`}
+                  {searchQuery || activeQuickFilters.length > 0 || advancedFilters.status !== 'All' || advancedFilters.leaveType !== 'all' || advancedFilters.duration !== 'all'
+                    ? 'No applications match your current filters'
+                    : 'No leave applications have been submitted yet'}
                 </Text>
+                {(searchQuery || activeQuickFilters.length > 0 || advancedFilters.status !== 'All' || advancedFilters.leaveType !== 'all' || advancedFilters.duration !== 'all') && (
+                  <TouchableOpacity 
+                    style={styles.clearFiltersButton} 
+                    onPress={clearAllFilters}
+                  >
+                    <Text style={styles.clearFiltersText}>Clear All Filters</Text>
+                  </TouchableOpacity>
+                )}
               </View>
+            }
+            ListHeaderComponent={
+              loading ? null : (
+                <View style={styles.listHeader}>
+                  <Text style={styles.listHeaderText}>
+                    Showing {filteredApplications.length} of {leaveApplications.length} applications
+                  </Text>
+                </View>
+              )
             }
           />
         </View>
@@ -1780,6 +1804,42 @@ const styles = StyleSheet.create({
   pickerModalItemTextSelected: {
     color: '#2196F3',
     fontWeight: '600',
+  },
+  scrollWrapper: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  addButtonTouchable: {
+    borderRadius: 8,
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  clearFiltersButton: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    backgroundColor: '#2196F3',
+    borderRadius: 8,
+    alignSelf: 'center',
+  },
+  clearFiltersText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  listHeader: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+  },
+  listHeaderText: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
   },
 });
 

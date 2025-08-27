@@ -18,11 +18,11 @@ import { LineChart, BarChart } from 'react-native-chart-kit';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import Header from '../../components/Header';
-import ResponsiveScrollView, { ResponsiveGrid, ResponsiveContainer, ResponsiveModal, isPC, isLargeScreen } from '../../components/ResponsiveScrollView';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers, isValidUUID, safeQuery } from '../../utils/supabase';
 import { getCurrentMonthAttendance, calculateAttendanceStats, generateSampleAttendanceData } from '../../services/attendanceService';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
+import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
 
 const { width } = Dimensions.get('window');
 
@@ -1449,11 +1449,13 @@ const AttendanceSummary = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, webContainerStyle]}>
       <Header title="Attendance Summary" showBack={true} />
       
       <ScrollView
-        style={styles.content}
+        style={[styles.content, webScrollViewStyles.scrollView]}
+        contentContainerStyle={webScrollViewStyles.scrollViewContent}
+        {...getWebScrollProps()}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

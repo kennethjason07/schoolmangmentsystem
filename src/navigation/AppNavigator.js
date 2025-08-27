@@ -417,7 +417,11 @@ export default function AppNavigator() {
                 <Stack.Screen name="AcademicPerformance" component={AcademicPerformance} />
                 <Stack.Screen name="FeeCollection" component={FeeCollection} />
                 <Stack.Screen name="ReportCardGeneration" component={ReportCardGeneration} />
-                <Stack.Screen name="Profile" component={ProfileScreen} />
+                <Stack.Screen 
+                  name="Profile" 
+                  component={ProfileScreen} 
+                  initialParams={{ fromAdmin: true }}
+                />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
                 <Stack.Screen name="StudentDetails" component={StudentDetails} />
                 <Stack.Screen name="StudentList" component={StudentList} />

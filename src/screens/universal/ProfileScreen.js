@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -22,8 +22,13 @@ import { useAuth } from '../../utils/AuthContext';
 import Header from '../../components/Header';
 import { supabase, dbHelpers } from '../../utils/supabase';
 import { format } from 'date-fns';
+import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
 
-const ProfileScreen = () => {
+const ProfileScreen = ({ navigation, route }) => {
+  // Track if the user navigated from admin context
+  const isFromAdmin = route?.params?.fromAdmin || false;
+  // Create a ref to access the ScrollView directly
+  const scrollViewRef = useRef(null);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -40,7 +45,6 @@ const ProfileScreen = () => {
   const [scrollY, setScrollY] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
   const [scrollViewHeight, setScrollViewHeight] = useState(0);
-  const navigation = useNavigation();
   const { signOut, user: authUser } = useAuth();
 
   // Load user data
@@ -94,6 +98,34 @@ const ProfileScreen = () => {
   // Subscribe to real-time updates
   useEffect(() => {
     loadUserData();
+    
+    // Inject CSS for web to ensure scrolling works
+    if (Platform.OS === 'web') {
+      const style = document.createElement('style');
+      style.textContent = `
+        .profile-scroll-container {
+          height: 100vh !important;
+          overflow-y: auto !important;
+          overflow-x: hidden !important;
+          -webkit-overflow-scrolling: touch !important;
+          scroll-behavior: smooth !important;
+        }
+        
+        body {
+          overflow: hidden !important;
+        }
+        
+        #root, [data-reactroot] {
+          height: 100vh !important;
+          overflow: hidden !important;
+        }
+      `;
+      document.head.appendChild(style);
+      
+      return () => {
+        document.head.removeChild(style);
+      };
+    }
 
     const subscription = supabase
       .channel('profile-updates')
@@ -413,24 +445,27 @@ const ProfileScreen = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, webContainerStyle, Platform.OS === 'web' && { minHeight: '100vh', height: 'auto' }]}>
       <Header title="Profile" showBack={true} />
       <KeyboardAvoidingView 
-        style={styles.keyboardAvoidingView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={[styles.keyboardAvoidingView, Platform.OS === 'web' && { flex: 1, height: '100%', overflow: 'visible' }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'web' ? undefined : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        enabled={Platform.OS !== 'web'} // Disable KeyboardAvoidingView on web for better scrolling
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          ref={scrollViewRef}
+          style={[webScrollViewStyles.scrollView, Platform.OS === 'web' && { 
+            overflowY: 'auto !important',
+            WebkitOverflowScrolling: 'touch',
+            height: isFromAdmin ? 'calc(100vh - 80px)' : '100vh',
+          }]}
+          className={Platform.OS === 'web' ? 'profile-scroll-container' : undefined}
+          contentContainerStyle={[styles.scrollContent, webScrollViewStyles.scrollViewContent]}
+          {...getWebScrollProps()}
           refreshControl={
             <RefreshControl refreshing={loading} onRefresh={loadUserData} />
           }
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={true}
-          scrollEventThrottle={16}
-          bounces={true}
-          alwaysBounceVertical={true}
-          nestedScrollEnabled={true}
           onScroll={(event) => {
             setScrollY(event.nativeEvent.contentOffset.y);
           }}

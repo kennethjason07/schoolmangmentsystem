@@ -658,6 +658,7 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
                   )}
                 </View>
               </ScrollView>
+            </View>
 
             {/* Attendance Summary */}
             {attendance && (

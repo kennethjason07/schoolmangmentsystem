@@ -24,11 +24,11 @@ import NoSchoolDetailsState from '../../components/NoSchoolDetailsState';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import CrossPlatformBarChart from '../../components/CrossPlatformBarChart';
-import ResponsiveScrollView, { ResponsiveGrid, ResponsiveContainer, ResponsiveModal, isPC, isLargeScreen } from '../../components/ResponsiveScrollView';
 import { supabase, dbHelpers } from '../../utils/supabase';
 import { format, addMonths } from 'date-fns';
 import { getEventDisplayProps } from '../../utils/eventIcons';
 import { useAuth } from '../../utils/AuthContext';
+import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
 
 const { width } = Dimensions.get('window');
 
@@ -633,7 +633,7 @@ const AdminDashboard = ({ navigation }) => {
   console.log('🏠 AdminDashboard - School details:', !!schoolDetails);
   
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, webContainerStyle]}>
       <Header 
         title="Admin Dashboard" 
         showNotifications={true}
@@ -641,8 +641,10 @@ const AdminDashboard = ({ navigation }) => {
         onNotificationsPress={() => navigation.navigate('AdminNotifications')}
       />
 
-      <ResponsiveScrollView
-        style={styles.scrollView}
+      <ScrollView
+        style={[styles.scrollView, webScrollViewStyles.scrollView]}
+        contentContainerStyle={webScrollViewStyles.scrollViewContent}
+        {...getWebScrollProps()}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -796,11 +798,9 @@ const AdminDashboard = ({ navigation }) => {
             <View style={styles.modalOverlay}>
               <View style={styles.modalContainer}>
                 <ScrollView 
-                  style={styles.modalScrollView}
-                  showsVerticalScrollIndicator={true}
-                  bounces={false}
-                  keyboardShouldPersistTaps="handled"
-                  contentContainerStyle={styles.modalScrollContent}
+                  style={[styles.modalScrollView, webScrollViewStyles.modalScrollView]}
+                  contentContainerStyle={[styles.modalScrollContent, webScrollViewStyles.modalScrollViewContent]}
+                  {...getWebScrollProps({ isModal: true })}
                 >
                   <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>{editEventIndex !== null ? 'Edit Event' : 'Add Event'}</Text>
                 <TextInput
@@ -962,13 +962,10 @@ const AdminDashboard = ({ navigation }) => {
                             <Text style={styles.selectionCountText}>
                               {(eventInput.selectedClasses || []).length} of {(allClasses || []).length} classes selected
                             </Text>
-                            <ResponsiveScrollView 
-                              style={styles.classScrollView} 
-                              showsVerticalScrollIndicator={true}
-                              nestedScrollEnabled={true}
-                              bounces={false}
-                              keyboardShouldPersistTaps="handled"
-                              contentContainerStyle={{ paddingBottom: 8 }}
+                            <ScrollView 
+                              style={[styles.classScrollView, webScrollViewStyles.nestedScrollView]} 
+                              contentContainerStyle={[{ paddingBottom: 8 }, webScrollViewStyles.nestedScrollViewContent]}
+                              {...getWebScrollProps({ isNested: true })}
                             >
                               {(allClasses || []).map((classItem) => {
                                 const isSelected = (eventInput.selectedClasses || []).includes(classItem.id);
@@ -1008,7 +1005,7 @@ const AdminDashboard = ({ navigation }) => {
                                   <Text style={styles.noClassesText}>No classes found</Text>
                                 </View>
                               )}
-                            </ResponsiveScrollView>
+                            </ScrollView>
                           </View>
                         </View>
                       )}
@@ -1089,7 +1086,7 @@ const AdminDashboard = ({ navigation }) => {
           </View>
         </View>
 
-      </ResponsiveScrollView>
+      </ScrollView>
     </View>
   );
 };
