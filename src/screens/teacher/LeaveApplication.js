@@ -40,6 +40,7 @@ const LeaveApplication = ({ navigation }) => {
 
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+  const [showLeaveTypeDropdown, setShowLeaveTypeDropdown] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const leaveTypes = [
@@ -51,10 +52,19 @@ const LeaveApplication = ({ navigation }) => {
     loadData();
   }, []);
 
+  useEffect(() => {
+    // Reload leave applications and balance when teacherProfile changes
+    if (teacherProfile?.linked_teacher_id) {
+      loadMyLeaves();
+      loadLeaveBalance();
+    }
+  }, [teacherProfile]);
+
   const loadData = async () => {
     try {
       setLoading(true);
-      await Promise.all([loadTeacherProfile(), loadMyLeaves(), loadLeaveBalance()]);
+      // Load teacher profile first, then the dependent data will load via useEffect
+      await loadTeacherProfile();
     } catch (error) {
       console.error('Error loading data:', error);
       Alert.alert('Error', 'Failed to load leave application data');
@@ -234,7 +244,37 @@ const LeaveApplication = ({ navigation }) => {
 
       if (error) throw error;
 
-      Alert.alert('Success', 'Leave application submitted successfully. You will be notified once it is reviewed.');
+      // Create notification for admins about the new leave request
+      try {
+        console.log('📧 Creating notification for admins about new leave request...');
+        
+        const notificationMessage = `${teacherProfile.teacher?.name || teacherProfile.full_name} has submitted a ${applicationForm.leave_type} request from ${format(applicationForm.start_date, 'MMM dd, yyyy')} to ${format(applicationForm.end_date, 'MMM dd, yyyy')} (${totalDays} ${totalDays === 1 ? 'day' : 'days'}).`;
+
+        // Create the notification for admin review
+        const enhancedMessage = `[LEAVE_REQUEST] ${notificationMessage} Reason: ${applicationForm.reason.trim()}`;
+        
+        const { data: notification, error: notificationError } = await supabase
+          .from('notifications')
+          .insert({
+            message: enhancedMessage,
+            type: 'General',
+            sent_by: user.id
+          })
+          .select()
+          .single();
+
+        if (notificationError) {
+          console.error('❌ Error creating admin notification:', notificationError);
+          // Don't fail the entire leave submission if notification fails
+        } else {
+          console.log('✅ Admin notification created successfully for leave request');
+        }
+      } catch (notificationError) {
+        console.error('❌ Error in notification creation process:', notificationError);
+        // Don't fail the entire operation if notification fails
+      }
+
+      Alert.alert('Success', 'Leave application submitted successfully. Administrators have been notified and you will be notified once it is reviewed.');
       setShowApplicationForm(false);
       resetApplicationForm();
       await loadMyLeaves();
@@ -254,6 +294,7 @@ const LeaveApplication = ({ navigation }) => {
       reason: '',
       attachment_url: null,
     });
+    setShowLeaveTypeDropdown(false);
   };
 
   const getStatusColor = (status) => {
@@ -457,6 +498,7 @@ const LeaveApplication = ({ navigation }) => {
               <TouchableOpacity
                 onPress={() => {
                   setShowApplicationForm(false);
+                  setShowLeaveTypeDropdown(false);
                   resetApplicationForm();
                 }}
               >
@@ -470,20 +512,53 @@ const LeaveApplication = ({ navigation }) => {
                 <Text style={styles.inputLabel}>Leave Type</Text>
                 <TouchableOpacity
                   style={styles.picker}
-                  onPress={() => {
-                    Alert.alert(
-                      'Select Leave Type',
-                      'Choose the type of leave you want to apply for',
-                      leaveTypes.map(type => ({
-                        text: type,
-                        onPress: () => setApplicationForm({ ...applicationForm, leave_type: type })
-                      })).concat([{ text: 'Cancel', style: 'cancel' }])
-                    );
-                  }}
+                  onPress={() => setShowLeaveTypeDropdown(!showLeaveTypeDropdown)}
                 >
                   <Text style={styles.pickerText}>{applicationForm.leave_type}</Text>
-                  <Ionicons name="chevron-down" size={20} color="#666" />
+                  <Ionicons 
+                    name={showLeaveTypeDropdown ? "chevron-up" : "chevron-down"} 
+                    size={20} 
+                    color="#666" 
+                  />
                 </TouchableOpacity>
+                
+                {/* Dropdown Options */}
+                {showLeaveTypeDropdown && (
+                  <View style={styles.dropdown}>
+                    <ScrollView 
+                      style={styles.dropdownScrollView}
+                      showsVerticalScrollIndicator={true}
+                      nestedScrollEnabled={true}
+                      bounces={false}
+                      keyboardShouldPersistTaps="handled"
+                    >
+                      {leaveTypes.map((type, index) => (
+                        <TouchableOpacity
+                          key={index}
+                          style={[
+                            styles.dropdownItem,
+                            applicationForm.leave_type === type && styles.dropdownItemSelected,
+                            index === leaveTypes.length - 1 && styles.dropdownItemLast
+                          ]}
+                          onPress={() => {
+                            setApplicationForm({ ...applicationForm, leave_type: type });
+                            setShowLeaveTypeDropdown(false);
+                          }}
+                        >
+                          <Text style={[
+                            styles.dropdownItemText,
+                            applicationForm.leave_type === type && styles.dropdownItemTextSelected
+                          ]}>
+                            {type}
+                          </Text>
+                          {applicationForm.leave_type === type && (
+                            <Ionicons name="checkmark" size={16} color="#2196F3" />
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
               </View>
 
               {/* Date Selection */}
@@ -561,6 +636,7 @@ const LeaveApplication = ({ navigation }) => {
                 style={styles.cancelButton}
                 onPress={() => {
                   setShowApplicationForm(false);
+                  setShowLeaveTypeDropdown(false);
                   resetApplicationForm();
                 }}
               >
@@ -877,8 +953,9 @@ const styles = StyleSheet.create({
   modalContainer: {
     backgroundColor: '#FFFFFF',
     borderRadius: 15,
-    width: width - 40,
-    maxHeight: '80%',
+    width: width - 30,
+    maxHeight: '90%',
+    minHeight: '70%',
     elevation: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 5 },
@@ -901,6 +978,7 @@ const styles = StyleSheet.create({
   modalContent: {
     flex: 1,
     padding: 20,
+    maxHeight: '100%',
   },
   inputGroup: {
     marginBottom: 20,
@@ -1043,6 +1121,53 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  // Dropdown styles
+  dropdown: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#DDD',
+    borderTopWidth: 0,
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    maxHeight: 200,
+    zIndex: 1000,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  dropdownItemSelected: {
+    backgroundColor: '#E3F2FD',
+  },
+  dropdownItemText: {
+    fontSize: 16,
+    color: '#333',
+    flex: 1,
+  },
+  dropdownItemTextSelected: {
+    color: '#2196F3',
+    fontWeight: '600',
+  },
+  dropdownScrollView: {
+    maxHeight: 200,
+  },
+  dropdownItemLast: {
+    borderBottomWidth: 0,
   },
 });
 

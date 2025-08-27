@@ -986,10 +986,36 @@ function groupAndSortSchedule(schedule) {
     });
   };
 
+  // Notifications for teacher
+  const [unreadCount, setUnreadCount] = React.useState(0);
+  React.useEffect(() => {
+    const fetchUnread = async () => {
+      try {
+        if (!user?.id) return;
+        const { data, error } = await supabase
+          .from('notification_recipients')
+          .select('id, is_read')
+          .eq('recipient_type', 'Teacher')
+          .eq('recipient_id', user.id)
+          .eq('is_read', false);
+        if (!error && data) setUnreadCount(data.length);
+      } catch (e) {
+        console.log('Error fetching unread notifications:', e);
+        // silent fail for UI, but log for debugging
+      }
+    };
+    fetchUnread();
+  }, [user?.id]);
+
   if (loading) {
     return (
       <View style={styles.container}>
-        <Header title="Teacher Dashboard" />
+        <Header 
+          title="Teacher Dashboard" 
+          showNotifications={true}
+          unreadCount={unreadCount}
+          onNotificationsPress={() => navigation.navigate('TeacherNotifications')}
+        />
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           <ActivityIndicator size="large" color="#1976d2" />
           <Text style={{ marginTop: 10, color: '#1976d2' }}>Loading dashboard...</Text>
@@ -1000,7 +1026,12 @@ function groupAndSortSchedule(schedule) {
   if (error) {
     return (
       <View style={styles.container}>
-        <Header title="Teacher Dashboard" />
+        <Header 
+          title="Teacher Dashboard" 
+          showNotifications={true}
+          unreadCount={unreadCount}
+          onNotificationsPress={() => navigation.navigate('TeacherNotifications')}
+        />
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           <Text style={{ color: '#d32f2f', fontSize: 16, marginBottom: 20 }}>Error: {error}</Text>
           <TouchableOpacity style={{ backgroundColor: '#1976d2', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }} onPress={fetchDashboardData}>
@@ -1013,7 +1044,12 @@ function groupAndSortSchedule(schedule) {
 
   return (
     <View style={styles.container}>
-      <Header title="Teacher Dashboard" />
+      <Header 
+        title="Teacher Dashboard" 
+        showNotifications={true}
+        unreadCount={unreadCount}
+        onNotificationsPress={() => navigation.navigate('TeacherNotifications')}
+      />
       <ScrollView 
         style={styles.scrollView} 
         showsVerticalScrollIndicator={false}
@@ -1199,6 +1235,16 @@ function groupAndSortSchedule(schedule) {
               <Text style={styles.actionSubtitle}>Grade assignments</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={() => navigation.navigate('LeaveApplication')}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#4CAF50' }]}>
+                <Ionicons name="calendar-outline" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionTitle}>Leave Request</Text>
+              <Text style={styles.actionSubtitle}>Apply for leave</Text>
+            </TouchableOpacity>
 
           </View>
         </View>

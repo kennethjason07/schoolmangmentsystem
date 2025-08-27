@@ -27,10 +27,12 @@ import CrossPlatformBarChart from '../../components/CrossPlatformBarChart';
 import { supabase, dbHelpers } from '../../utils/supabase';
 import { format, addMonths } from 'date-fns';
 import { getEventDisplayProps } from '../../utils/eventIcons';
+import { useAuth } from '../../utils/AuthContext';
 
 const { width } = Dimensions.get('window');
 
 const AdminDashboard = ({ navigation }) => {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stats, setStats] = useState([]);
@@ -302,7 +304,8 @@ const AdminDashboard = ({ navigation }) => {
     try {
       await Promise.all([
         loadDashboardData(),
-        loadChartData()
+        loadChartData(),
+        fetchUnreadNotificationCount()
       ]);
     } catch (error) {
       console.error('Error refreshing dashboard:', error);
@@ -527,6 +530,43 @@ const AdminDashboard = ({ navigation }) => {
     { text: 'Exam scheduled: Mathematics for Class 4A', time: '1 day ago', icon: 'calendar' },
   ]);
 
+  // Admin notifications state
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  
+  // Fetch unread notification count for admin
+  const fetchUnreadNotificationCount = async () => {
+    try {
+      if (!user?.id) return;
+      
+      // Get count of notifications that are relevant to admins
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('id, message')
+        .or(`sent_by.is.null,type.eq.General`)
+        .order('created_at', { ascending: false });
+      
+      if (!error && data) {
+        // For now, we'll consider all these notifications as potentially unread
+        // In a real implementation, you'd want to track read status per admin
+        // We can prioritize leave requests by checking the message field
+        const notifications = data || [];
+        const leaveRequestCount = notifications.filter(item => 
+          item.message && item.message.includes('[LEAVE_REQUEST]')
+        ).length;
+        
+        // Show at least leave requests, or total count if no leave requests
+        setUnreadNotificationCount(Math.max(leaveRequestCount, notifications.length));
+      }
+    } catch (error) {
+      console.error('Error fetching admin notification count:', error);
+      // Silent fail for UI
+    }
+  };
+
+  useEffect(() => {
+    fetchUnreadNotificationCount();
+  }, [user?.id]);
+
   const openAddActivityModal = () => {
     // This function is not fully implemented in the original file,
     // so it's not added to the new_code.
@@ -575,7 +615,12 @@ const AdminDashboard = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <Header title="Admin Dashboard" />
+      <Header 
+        title="Admin Dashboard" 
+        showNotifications={true}
+        unreadCount={unreadNotificationCount}
+        onNotificationsPress={() => navigation.navigate('AdminNotifications')}
+      />
 
       <ScrollView
         style={styles.scrollView}

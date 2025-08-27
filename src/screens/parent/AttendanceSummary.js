@@ -239,15 +239,15 @@ const AttendanceSummary = () => {
   if (!studentDetails) {
     console.log('AttendanceSummary - No student data found, using sample data');
     studentDetails = {
-      id: 'sample-student-id',
+      id: '00000000-0000-0000-0000-000000000001', // Valid UUID format for sample data
       name: 'Sample Student',
       admission_no: 'ADM2024001',
       roll_no: 42,
       profile_url: null, // Add profile picture field
-      class_id: 'sample-class-id',
+      class_id: '00000000-0000-0000-0000-000000000002', // Valid UUID format for sample class
       academic_year: '2024-2025',
       classes: {
-        id: 'sample-class-id',
+        id: '00000000-0000-0000-0000-000000000002',
         class_name: 'Class 10',
         section: 'A',
         academic_year: '2024-2025'
@@ -465,14 +465,14 @@ const AttendanceSummary = () => {
 
       // Use sample data on error
       const sampleStudent = {
-        id: 'sample-student-id',
+        id: '00000000-0000-0000-0000-000000000001', // Valid UUID format for sample data
         name: 'Sample Student',
         admission_no: 'ADM2024001',
-        class_id: 'sample-class-id',
+        class_id: '00000000-0000-0000-0000-000000000002', // Valid UUID format for sample class
         roll_no: 42,
         academic_year: '2024-2025',
         classes: {
-          id: 'sample-class-id',
+          id: '00000000-0000-0000-0000-000000000002',
           class_name: 'Class 10',
           section: 'A',
           academic_year: '2024-2025'

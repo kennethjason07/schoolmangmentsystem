@@ -19,19 +19,19 @@ export const generateSampleAttendanceData = (startDate, endDate) => {
       const isPresent = seededRandom() > 0.15; // 85% attendance rate
       sampleData.push({
         id: `sample-${currentDate.getTime()}`,
-        student_id: 'sample-student-id',
-        class_id: 'sample-class-id',
+        student_id: '00000000-0000-0000-0000-000000000001', // Valid UUID format for sample data
+        class_id: '00000000-0000-0000-0000-000000000002', // Valid UUID format for sample class
         date: currentDate.toISOString().split('T')[0],
         status: isPresent ? 'Present' : 'Absent',
-        marked_by: 'sample-teacher-id',
+        marked_by: '00000000-0000-0000-0000-000000000003', // Valid UUID format for sample teacher
         created_at: currentDate.toISOString(),
         students: {
-          id: 'sample-student-id',
+          id: '00000000-0000-0000-0000-000000000001',
           name: 'Sample Student',
           admission_no: 'ADM2024001'
         },
         classes: {
-          id: 'sample-class-id',
+          id: '00000000-0000-0000-0000-000000000002',
           class_name: 'Class 10',
           section: 'A'
         }

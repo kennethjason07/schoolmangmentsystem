@@ -33,6 +33,7 @@ import StudentAccountManagement from '../screens/admin/StudentAccountManagement'
 import ParentAccountManagement from '../screens/admin/ParentAccountManagement';
 import LinkExistingParent from '../screens/admin/LinkExistingParent';
 import LeaveManagement from '../screens/admin/LeaveManagement';
+import AdminNotifications from '../screens/admin/AdminNotifications';
 
 import FeeClassDetails from '../screens/admin/FeeClassDetails';
 import ClassStudentDetails from '../screens/admin/ClassStudentDetails';
@@ -61,6 +62,8 @@ import StudentMarksScreen from '../screens/teacher/StudentMarksScreen';
 import ViewSubmissions from '../screens/teacher/ViewSubmissions';
 import DatabaseSetup from '../screens/teacher/DatabaseSetup';
 import NotificationDebugScreen from '../screens/teacher/NotificationDebugScreen';
+import LeaveApplication from '../screens/teacher/LeaveApplication';
+import TeacherNotifications from '../screens/teacher/TeacherNotifications';
 
 // Parent Screens
 import ParentDashboard from '../screens/parent/ParentDashboard';
@@ -388,6 +391,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="ParentAccountManagement" component={ParentAccountManagement} />
                 <Stack.Screen name="LinkExistingParent" component={LinkExistingParent} />
                 <Stack.Screen name="LeaveManagement" component={LeaveManagement} />
+                <Stack.Screen name="AdminNotifications" component={AdminNotifications} />
 
                 <Stack.Screen name="AssignTaskToTeacher" component={AssignTaskToTeacher} />
                 <Stack.Screen name="AttendanceReport" component={AttendanceReport} />
@@ -413,6 +417,8 @@ export default function AppNavigator() {
                 <Stack.Screen name="ViewSubmissions" component={ViewSubmissions} />
                 <Stack.Screen name="DatabaseSetup" component={DatabaseSetup} />
                 <Stack.Screen name="NotificationDebug" component={NotificationDebugScreen} />
+                <Stack.Screen name="LeaveApplication" component={LeaveApplication} />
+                <Stack.Screen name="TeacherNotifications" component={TeacherNotifications} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
               </>

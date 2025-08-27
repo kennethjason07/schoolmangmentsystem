@@ -237,8 +237,8 @@ export const AuthProvider = ({ children }) => {
       
       console.log('Role validation:', { actualRole: actualRoleName, expectedRole, selectedRole });
       
-      // Only validate role if we have both values
-      if (actualRoleName && expectedRole && actualRoleName !== expectedRole) {
+      // Only validate role if we have both values (case-insensitive comparison)
+      if (actualRoleName && expectedRole && actualRoleName.toLowerCase() !== expectedRole.toLowerCase()) {
         console.log('Role mismatch:', actualRoleName, 'vs expected:', expectedRole);
         return { data: null, error: { message: `Invalid role for this user. User has role: ${actualRoleName}, but trying to sign in as: ${expectedRole}` } };
       }

@@ -369,9 +369,126 @@ const LeaveManagement = ({ navigation }) => {
         return;
       }
       
-      if (userType !== 'Admin') {
+      if (userType && userType.toLowerCase() !== 'admin') {
         Alert.alert('Authorization Error', 'Only administrators can review leave applications.');
         return;
+      }
+
+      // Check leave balance before approving (only for trackable leave types)
+      if (reviewForm.status === 'Approved' && 
+          ['Sick Leave', 'Casual Leave', 'Earned Leave'].includes(selectedLeave.leave_type)) {
+        
+        console.log('🔍 Checking leave balance before approval...');
+        
+        try {
+          // Get teacher's current leave balance
+          const { data: balance, error: balanceError } = await supabase
+            .from('teacher_leave_balance')
+            .select('*')
+            .eq('teacher_id', selectedLeave.teacher_id)
+            .eq('academic_year', selectedLeave.academic_year)
+            .single();
+
+          let currentUsed = 0;
+          let totalAllowed = 0;
+          
+          if (!balanceError && balance) {
+            // Get current usage and total for the specific leave type
+            switch (selectedLeave.leave_type) {
+              case 'Sick Leave':
+                currentUsed = balance.sick_leave_used;
+                totalAllowed = balance.sick_leave_total;
+                break;
+              case 'Casual Leave':
+                currentUsed = balance.casual_leave_used;
+                totalAllowed = balance.casual_leave_total;
+                break;
+              case 'Earned Leave':
+                currentUsed = balance.earned_leave_used;
+                totalAllowed = balance.earned_leave_total;
+                break;
+            }
+            
+            const availableLeave = totalAllowed - currentUsed;
+            
+            if (selectedLeave.total_days > availableLeave) {
+              Alert.alert(
+                'Insufficient Leave Balance',
+                `Teacher has only ${availableLeave} ${selectedLeave.leave_type.toLowerCase()} days remaining, but applied for ${selectedLeave.total_days} days.\n\nOptions:`,
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { 
+                    text: 'Reject Application', 
+                    style: 'destructive',
+                    onPress: () => {
+                      setReviewForm({ ...reviewForm, status: 'Rejected', admin_remarks: reviewForm.admin_remarks + ` [Insufficient leave balance: ${availableLeave} days available]` });
+                    }
+                  },
+                  {
+                    text: 'Admin Override - Approve Anyway',
+                    style: 'default',
+                    onPress: () => {
+                      Alert.alert(
+                        'Admin Override Confirmation',
+                        `You are about to approve a leave request that exceeds the teacher's available balance by ${selectedLeave.total_days - availableLeave} days.\n\nThis will result in negative leave balance. Continue?`,
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Override and Approve',
+                            style: 'destructive',
+                            onPress: () => {
+                              setReviewForm({ 
+                                ...reviewForm, 
+                                status: 'Approved', 
+                                admin_remarks: reviewForm.admin_remarks + ` [ADMIN OVERRIDE: Approved despite insufficient balance - ${availableLeave} days available, ${selectedLeave.total_days} days requested]` 
+                              });
+                              console.log('⚠️ Admin override: Proceeding with approval despite insufficient balance');
+                            }
+                          }
+                        ]
+                      );
+                    }
+                  }
+                ]
+              );
+              return;
+            }
+          } else {
+            // No balance record exists, create one with default values
+            console.log('📝 Creating default balance record for teacher...');
+            
+            const { error: createBalanceError } = await supabase
+              .from('teacher_leave_balance')
+              .insert({
+                teacher_id: selectedLeave.teacher_id,
+                academic_year: selectedLeave.academic_year,
+                // Default values are set by the schema
+              });
+            
+            if (createBalanceError) {
+              console.error('Error creating balance record:', createBalanceError);
+              Alert.alert(
+                'Balance Record Error',
+                'Could not create leave balance record. Please ensure teacher has a balance record before approving leave.',
+                [{ text: 'OK' }]
+              );
+              return;
+            }
+            
+            console.log('✅ Balance record created with defaults');
+          }
+        } catch (balanceCheckError) {
+          console.error('Error checking leave balance:', balanceCheckError);
+          Alert.alert(
+            'Balance Check Failed',
+            'Could not verify leave balance. Do you want to proceed anyway?',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Proceed', onPress: () => console.log('Proceeding without balance check') }
+            ]
+          );
+          return;
+        }
       }
 
       const updateData = {
@@ -389,6 +506,82 @@ const LeaveManagement = ({ navigation }) => {
         .eq('id', selectedLeave.id);
 
       if (error) throw error;
+
+      // Create notification for the teacher about leave status update
+      if (selectedLeave?.teacher_id) {
+        try {
+          console.log(`📧 Creating notification for teacher about leave ${reviewForm.status.toLowerCase()}...`);
+          
+          // Get the teacher's linked user account
+          const { data: teacherData, error: teacherError } = await supabase
+            .from('teachers')
+            .select('id, name')
+            .eq('id', selectedLeave.teacher_id)
+            .single();
+
+          if (teacherError) {
+            console.error('❌ Error fetching teacher data:', teacherError);
+            throw new Error('Could not find teacher information');
+          }
+
+          // Now find the user account that is linked to this teacher
+          const { data: userData, error: userError } = await supabase
+            .from('users')
+            .select('id, full_name')
+            .eq('linked_teacher_id', selectedLeave.teacher_id)
+            .single();
+
+          if (userError || !userData) {
+            console.warn('⚠️ Teacher does not have a linked user account, cannot send notification');
+            return;
+          }
+          
+          // Create comprehensive notification message
+          const baseMessage = reviewForm.status === 'Approved' 
+            ? `Your ${selectedLeave.leave_type} request from ${format(parseISO(selectedLeave.start_date), 'MMM dd, yyyy')} to ${format(parseISO(selectedLeave.end_date), 'MMM dd, yyyy')} has been approved.`
+            : `Your ${selectedLeave.leave_type} request from ${format(parseISO(selectedLeave.start_date), 'MMM dd, yyyy')} to ${format(parseISO(selectedLeave.end_date), 'MMM dd, yyyy')} has been rejected.`;
+
+          // Add admin remarks if provided
+          const fullMessage = reviewForm.admin_remarks.trim() 
+            ? `${baseMessage} Admin remarks: ${reviewForm.admin_remarks.trim()}`
+            : baseMessage;
+
+          // Add status prefix for filtering (similar to leave requests)
+          const enhancedMessage = `[LEAVE_${reviewForm.status.toUpperCase()}] ${fullMessage}`;
+
+          // Create the notification
+          console.log('🔄 Creating notification with message:', enhancedMessage);
+          
+          const { data: notification, error: notificationError } = await supabase
+            .from('notifications')
+            .insert({
+              message: enhancedMessage,
+              type: 'General',
+              delivery_mode: 'InApp',
+              delivery_status: 'Sent',
+              sent_by: user.id,
+              created_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+          if (notificationError) {
+            console.error('❌ Error creating notification:', notificationError);
+            throw notificationError;
+          }
+
+          console.log(`✅ Notification created successfully for teacher ${teacherData.name} (User ID: ${userData.id})`);
+          console.log(`   Status: ${reviewForm.status}`);
+          console.log(`   Notification ID: ${notification.id}`);
+          console.log(`   Message: ${enhancedMessage}`);
+          console.log(`   Leave details: ${selectedLeave.leave_type}, ${format(parseISO(selectedLeave.start_date), 'MMM dd, yyyy')} - ${format(parseISO(selectedLeave.end_date), 'MMM dd, yyyy')}`);
+          
+        } catch (notificationError) {
+          console.error('❌ Error creating teacher notification:', notificationError);
+          // Don't fail the entire leave review operation if notification fails
+          console.log('⚠️ Leave review completed but teacher notification failed');
+        }
+      }
 
       Alert.alert('Success', `Leave application ${reviewForm.status.toLowerCase()} successfully`);
       setShowReviewModal(false);
