@@ -1,7 +1,10 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../utils/AuthContext';
+import Theme from '../constants/Theme';
+import Colors from '../constants/Colors';
 
 const StatCard = ({
   title,
@@ -85,14 +88,15 @@ const StatCard = ({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16, // Original padding for non-teacher dashboards
-    marginVertical: 8,
-    marginHorizontal: 4,
-    borderLeftWidth: 5,
-    minHeight: 110, // Original height for non-teacher dashboards
+    backgroundColor: Colors.surface,
+    borderRadius: Theme.BorderRadius.lg,
+    padding: Theme.Spacing.base,
+    marginVertical: Theme.Spacing.sm,
+    marginHorizontal: Theme.Spacing.xs,
+    borderLeftWidth: 4,
+    minHeight: 110,
     position: 'relative',
+    ...Theme.Shadows.base,
   },
   cardTeacher: {
     padding: 24, // Much more padding for very large teacher text
@@ -116,13 +120,13 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   title: {
-    fontSize: 14,
-    color: '#444',
-    fontWeight: '600',
-    marginRight: 8,
+    fontSize: Theme.Typography.sizes.base,
+    color: Colors.text,
+    fontWeight: Theme.Typography.weights.semibold,
+    marginRight: Theme.Spacing.sm,
     flexShrink: 1,
     lineHeight: 20,
-    marginBottom: 2,
+    marginBottom: Theme.Spacing.xs,
   },
   titleTeacher: {
     fontSize: 28, // Very large size for teachers (100% increase from original 14px)
@@ -132,51 +136,51 @@ const styles = StyleSheet.create({
     textAlign: 'left', // Ensure proper alignment
   },
   trendContainer: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    padding: 3,
+    backgroundColor: Colors.lightGray,
+    borderRadius: Theme.BorderRadius.base,
+    padding: Theme.Spacing.xs,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 4,
+    marginTop: Theme.Spacing.xs,
     alignSelf: 'flex-start',
   },
   iconContainer: {
     position: 'absolute',
-    top: 12,
-    right: 12,
+    top: Theme.Spacing.md,
+    right: Theme.Spacing.md,
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: Theme.BorderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
   content: {
     flex: 1,
     justifyContent: 'center',
-    marginTop: 4,
+    marginTop: Theme.Spacing.xs,
   },
   value: {
-    fontSize: 24,
-    fontWeight: '800',
-    marginBottom: 4,
+    fontSize: Theme.Typography.sizes['3xl'],
+    fontWeight: Theme.Typography.weights.extrabold,
+    marginBottom: Theme.Spacing.xs,
     letterSpacing: -0.5,
     lineHeight: 28,
-    marginTop: 2,
+    marginTop: Theme.Spacing.xs,
   },
   subtitle: {
-    fontSize: 11,
-    color: '#666',
+    fontSize: Theme.Typography.sizes.xs,
+    color: Colors.textSecondary,
     lineHeight: 15,
-    fontWeight: '500',
+    fontWeight: Theme.Typography.weights.medium,
     opacity: 0.8,
   },
   actionIndicator: {
     position: 'absolute',
-    bottom: 16,
-    right: 16,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    padding: 4,
+    bottom: Theme.Spacing.base,
+    right: Theme.Spacing.base,
+    backgroundColor: Colors.background,
+    borderRadius: Theme.BorderRadius.md,
+    padding: Theme.Spacing.xs,
   },
 });
 

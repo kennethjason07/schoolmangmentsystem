@@ -32,6 +32,7 @@ import TeacherAccountManagement from '../screens/admin/TeacherAccountManagement'
 import StudentAccountManagement from '../screens/admin/StudentAccountManagement';
 import ParentAccountManagement from '../screens/admin/ParentAccountManagement';
 import LinkExistingParent from '../screens/admin/LinkExistingParent';
+import LeaveManagement from '../screens/admin/LeaveManagement';
 
 import FeeClassDetails from '../screens/admin/FeeClassDetails';
 import ClassStudentDetails from '../screens/admin/ClassStudentDetails';
@@ -384,6 +385,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="StudentAccountManagement" component={StudentAccountManagement} />
                 <Stack.Screen name="ParentAccountManagement" component={ParentAccountManagement} />
                 <Stack.Screen name="LinkExistingParent" component={LinkExistingParent} />
+                <Stack.Screen name="LeaveManagement" component={LeaveManagement} />
 
                 <Stack.Screen name="AssignTaskToTeacher" component={AssignTaskToTeacher} />
                 <Stack.Screen name="AttendanceReport" component={AttendanceReport} />
