@@ -20,6 +20,7 @@ import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import { format } from 'date-fns';
 import * as Animatable from 'react-native-animatable';
+import { createGradeNotification } from '../../utils/gradeNotificationHelpers';
 
 export default function MarksEntry({ navigation }) {
   const [classes, setClasses] = useState([]);
@@ -94,7 +95,7 @@ export default function MarksEntry({ navigation }) {
         }
       });
 
-      // Get students for each class
+      // Get students for each class with parent information
       for (const [classKey, classData] of classMap) {
         const { data: studentsData, error: studentsError } = await supabase
           .from(TABLES.STUDENTS)
@@ -102,13 +103,80 @@ export default function MarksEntry({ navigation }) {
             id,
             name,
             roll_no,
+            parent_id,
             classes(class_name, section)
           `)
           .eq('class_id', classData.classId)
           .order('roll_no');
 
         if (studentsError) throw studentsError;
-        classData.students = studentsData || [];
+        
+        // Get parent records separately for this class (same approach as admin screen)
+        const studentIds = (studentsData || []).map(s => s.id);
+        const { data: parentRecords, error: parentRecordsError } = await supabase
+          .from(TABLES.PARENTS)
+          .select('id, name, relation, phone, email, student_id')
+          .in('student_id', studentIds);
+
+        if (parentRecordsError) {
+          console.error('Error loading parent records:', parentRecordsError);
+        }
+        
+        // Process students data to include parent information
+        const processedStudents = (studentsData || []).map(student => {
+          // Find parent records for this student and filter out placeholder names
+          const studentParentRecords = (parentRecords || []).filter(parent => 
+            parent.student_id === student.id && 
+            parent.name &&
+            parent.name.trim() !== '' &&
+            parent.name.toLowerCase() !== 'n/a' &&
+            !parent.name.toLowerCase().includes('placeholder') &&
+            !parent.name.toLowerCase().includes('test') &&
+            !parent.name.toLowerCase().includes('sample')
+          );
+          
+          // Get the first valid parent record
+          const primaryParent = studentParentRecords[0];
+          
+          // Get father, mother, guardian specifically
+          const fatherRecord = studentParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'father');
+          const motherRecord = studentParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'mother');
+          const guardianRecord = studentParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'guardian');
+          
+          // Determine which parent info to show (priority: Father > Mother > Guardian > Any)
+          // Always prioritize Father if available
+          let displayParent;
+          if (fatherRecord) {
+            displayParent = fatherRecord;
+          } else if (motherRecord) {
+            displayParent = motherRecord;
+          } else if (guardianRecord) {
+            displayParent = guardianRecord;
+          } else {
+            displayParent = primaryParent;
+          }
+          
+          return {
+            ...student,
+            parentName: displayParent?.name || 'No Parent Info',
+            parentEmail: displayParent?.email || null,
+            parentPhone: displayParent?.phone || null,
+            parentRelation: displayParent?.relation || null,
+            allParentRecords: studentParentRecords,
+            fatherRecord,
+            motherRecord,
+            guardianRecord
+          };
+        });
+        
+        classData.students = processedStudents;
+        
+        console.log(`✅ Loaded ${processedStudents.length} students for class ${classData.name}`);
+        console.log('Students with parent info:', processedStudents.map(s => ({
+          name: s.name,
+          parentName: s.parentName,
+          parentEmail: s.parentEmail
+        })));
       }
 
       setClasses(Array.from(classMap.values()));
@@ -379,7 +447,46 @@ export default function MarksEntry({ navigation }) {
 
       if (upsertError) throw upsertError;
 
-      Alert.alert('Success', `Marks saved successfully!\n\nExam: ${selectedExamData.name}\nStudents: ${studentsWithMarks.length}`);
+      console.log('✅ Marks saved successfully, triggering parent notifications...');
+
+      // Get teacher ID for notification
+      const { data: teacherData } = await dbHelpers.getTeacherByUserId(user.id);
+      
+      // Trigger notification to parents
+      try {
+        // Extract student IDs who got marks
+        const studentIds = studentsWithMarks.map(student => student.id);
+        
+        const notificationResult = await createGradeNotification({
+          classId: selectedClass,
+          subjectId: selectedSubject,
+          examId: selectedExam,
+          teacherId: user.id, // Use current user ID as teacher
+          studentIds: studentIds
+        });
+
+        if (notificationResult.success) {
+          Alert.alert(
+            'Success', 
+            `Marks saved successfully and ${notificationResult.recipientCount || 0} parents notified!\n\nExam: ${selectedExamData.name}\nStudents: ${studentsWithMarks.length}`
+          );
+          console.log('✅ Parent notifications sent successfully:', notificationResult.recipientCount);
+        } else {
+          Alert.alert(
+            'Success', 
+            `Marks saved successfully!\n\nExam: ${selectedExamData.name}\nStudents: ${studentsWithMarks.length}\n\nNote: Parent notifications may have failed to send.`
+          );
+          console.log('⚠️ Parent notifications failed:', notificationResult.error);
+        }
+      } catch (notificationError) {
+        // Don't fail the marks saving if notification fails
+        Alert.alert(
+          'Success', 
+          `Marks saved successfully!\n\nExam: ${selectedExamData.name}\nStudents: ${studentsWithMarks.length}\n\nNote: Parent notifications may have failed to send.`
+        );
+        console.log('⚠️ Notification error:', notificationError);
+      }
+      
       setMarks({});
       
     } catch (err) {
@@ -787,6 +894,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginTop: 2,
+  },
+  parentName: {
+    fontSize: 12,
+    color: '#4CAF50',
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
+  noParentInfo: {
+    fontSize: 12,
+    color: '#FF9800',
+    marginTop: 2,
+    fontWeight: 'bold',
   },
   marksInputContainer: {
     flexDirection: 'row',

@@ -224,7 +224,6 @@ const ViewStudentInfo = () => {
             // Skip invalid or placeholder parent names
             const isValidParentName = parent.name && 
               parent.name.trim() !== '' && 
-              parent.name.toLowerCase() !== 'justus parent' &&
               parent.name.toLowerCase() !== 'n/a' &&
               !parent.name.toLowerCase().includes('placeholder');
             
@@ -891,7 +890,7 @@ const ViewStudentInfo = () => {
                   <Text style={styles.detailTitle}>Parent Information</Text>
                   
                   {/* Father Information */}
-                  {selectedStudent.parents?.father && selectedStudent.parents.father.name && selectedStudent.parents.father.name !== 'justus parent' ? (
+                  {selectedStudent.parents?.father && selectedStudent.parents.father.name ? (
                     <View style={styles.parentSubSection}>
                       <Text style={styles.parentRelationTitle}>👨 Father</Text>
                       <View style={styles.detailRow}>

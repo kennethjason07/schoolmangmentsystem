@@ -24,7 +24,7 @@ import * as Animatable from 'react-native-animatable';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import CrossPlatformDatePicker from '../../components/CrossPlatformDatePicker';
 import * as Print from 'expo-print';
-import { sendAbsenceNotificationToParent } from '../../services/notificationService';
+import { createBulkAttendanceNotifications } from '../../utils/attendanceNotificationHelpers';
 
 const AttendanceManagement = () => {
   const [loading, setLoading] = useState(true);
@@ -107,6 +107,7 @@ const AttendanceManagement = () => {
   const [newClassSection, setNewClassSection] = useState('');
   const [newAcademicYear, setNewAcademicYear] = useState('2024-25');
   const [addingClass, setAddingClass] = useState(false);
+  const [submittingFromModal, setSubmittingFromModal] = useState(false);
 
   // Handle adding new class
   const handleAddClass = async () => {
@@ -292,9 +293,17 @@ const AttendanceManagement = () => {
   // Mark attendance for all students in modal
   const handleMarkAttendance = async () => {
     try {
+      if (loading) {
+        console.log('⚠️ [ADMIN ATTENDANCE] Already submitting, ignoring duplicate request');
+        return; // Prevent double submission
+      }
+      
+      setLoading(true);
+      
       // Validate inputs before proceeding
       if (!selectedClass || selectedClass === '' || selectedClass === null) {
         Alert.alert('Error', 'Please select a class first.');
+        setLoading(false);
         return;
       }
 
@@ -338,52 +347,34 @@ const AttendanceManagement = () => {
         .from(TABLES.STUDENT_ATTENDANCE)
         .insert(records);
 
-      // Send absence notifications to parents
+      // Send absence notifications to parents using new system
       console.log('📧 [ADMIN ATTENDANCE] Checking for absent students to notify parents...');
 
       const absentRecords = records.filter(record => record.status === 'Absent');
       console.log(`📧 [ADMIN ATTENDANCE] Found ${absentRecords.length} absent students`);
 
-      let notificationResults = [];
+      let notificationResults = { success: false, totalRecipients: 0, results: [] };
 
       if (absentRecords.length > 0) {
-        console.log('📧 [ADMIN ATTENDANCE] Sending absence notifications...');
+        console.log('📧 [ADMIN ATTENDANCE] Sending absence notifications using new system...');
 
-        for (const absentRecord of absentRecords) {
-          try {
-            console.log(`📧 [ADMIN ATTENDANCE] Sending notification for student: ${absentRecord.student_id}`);
+        try {
+          // Use the new bulk notification system
+          notificationResults = await createBulkAttendanceNotifications(
+            absentRecords,
+            null // Admin user ID - you can pass actual admin user ID here
+          );
 
-            const result = await sendAbsenceNotificationToParent(
-              absentRecord.student_id,
-              absentRecord.date,
-              absentRecord.marked_by
-            );
-
-            notificationResults.push({
-              studentId: absentRecord.student_id,
-              success: result.success,
-              message: result.message || result.error
-            });
-
-            if (result.success) {
-              console.log(`✅ [ADMIN ATTENDANCE] Notification sent for student ${absentRecord.student_id}: ${result.message}`);
-            } else {
-              console.log(`❌ [ADMIN ATTENDANCE] Failed to send notification for student ${absentRecord.student_id}: ${result.error}`);
-            }
-          } catch (notificationError) {
-            console.error(`❌ [ADMIN ATTENDANCE] Error sending notification for student ${absentRecord.student_id}:`, notificationError);
-            notificationResults.push({
-              studentId: absentRecord.student_id,
-              success: false,
-              message: notificationError.message
-            });
-          }
+          console.log(`📊 [ADMIN ATTENDANCE] Bulk notification results:`, notificationResults);
+        } catch (notificationError) {
+          console.error('❌ [ADMIN ATTENDANCE] Error sending bulk notifications:', notificationError);
+          notificationResults = {
+            success: false,
+            totalRecipients: 0,
+            results: [],
+            error: notificationError.message
+          };
         }
-
-        const successCount = notificationResults.filter(r => r.success).length;
-        const failureCount = notificationResults.filter(r => !r.success).length;
-
-        console.log(`📊 [ADMIN ATTENDANCE] Notification results: ${successCount} sent, ${failureCount} failed`);
       }
 
       // Update local state
@@ -394,39 +385,37 @@ const AttendanceManagement = () => {
 
       // Direct editing enabled - no edit mode needed
 
-      // Show confirmation popup with notification results
+      // Show simple success message
+      Alert.alert('Success', 'Attendance saved successfully!');
+      
+      // Log notification results in background (for debugging)
       if (absentRecords.length > 0) {
-        const successCount = notificationResults.filter(r => r.success).length;
-        const failureCount = notificationResults.filter(r => !r.success).length;
-
-        if (successCount > 0) {
-          Alert.alert(
-            'Success',
-            `Attendance saved successfully!\n\n✅ Absence notifications sent to ${successCount} parent(s)\n✅ Absence messages sent to ${successCount} parent(s)\n\nParents will see both notifications and messages about their child's absence.\n\nYou can now edit individual records using the pencil icon.`
-          );
-        } else if (failureCount > 0) {
-          Alert.alert(
-            'Partial Success',
-            `Attendance saved successfully!\n\n⚠️ Note: ${failureCount} absence notification(s) and message(s) could not be sent (no parent mapping found).\n\nTo enable notifications for these students, add their parent mappings to the system.\n\nYou can now edit individual records using the pencil icon.`
-          );
-        } else {
-          Alert.alert('Success', 'Attendance saved successfully! You can now edit individual records using the pencil icon.');
-        }
-      } else {
-        Alert.alert('Success', 'Attendance saved successfully! You can now edit individual records using the pencil icon.');
+        const successCount = notificationResults?.results ? notificationResults.results.filter(r => r.success).length : 0;
+        const failureCount = notificationResults?.results ? notificationResults.results.filter(r => !r.success).length : 0;
+        console.log(`📊 [ADMIN ATTENDANCE] Notification summary: ${successCount} successful, ${failureCount} failed`);
       }
     } catch (error) {
       console.error('Error saving attendance:', error);
       Alert.alert('Error', 'Failed to save attendance');
+    } finally {
+      setLoading(false);
     }
   };
 
   // Handle teacher attendance marking
   const handleTeacherMarkAttendance = async () => {
     try {
+      if (loading) {
+        console.log('⚠️ [ADMIN TEACHER ATTENDANCE] Already submitting, ignoring duplicate request');
+        return; // Prevent double submission
+      }
+      
+      setLoading(true);
+      
       // Validate date before proceeding
       if (!isValidDate(teacherDate)) {
         Alert.alert('Error', 'Invalid date selected. Please select a valid date.');
+        setLoading(false);
         return;
       }
 
@@ -459,11 +448,13 @@ const AttendanceManagement = () => {
 
       // Direct editing enabled - no edit mode needed
 
-      // Show confirmation popup
-      Alert.alert('Success', 'Teacher attendance saved successfully! You can now edit individual records using the pencil icon.');
+      // Show simple success message
+      Alert.alert('Success', 'Teacher attendance saved successfully!');
     } catch (error) {
       console.error('Error saving teacher attendance:', error);
       Alert.alert('Error', 'Failed to save teacher attendance');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1244,10 +1235,20 @@ const AttendanceManagement = () => {
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={styles.submitModalButton}
-                onPress={() => {
-                  handleMarkAttendance();
-                  setViewModalVisible(false);
+                onPress={async () => {
+                  if (submittingFromModal || loading) {
+                    console.log('⚠️ [ADMIN MODAL] Already submitting, ignoring duplicate request');
+                    return;
+                  }
+                  setSubmittingFromModal(true);
+                  try {
+                    await handleMarkAttendance();
+                    setViewModalVisible(false);
+                  } finally {
+                    setSubmittingFromModal(false);
+                  }
                 }}
+                disabled={submittingFromModal || loading}
               >
                 <Text style={styles.submitModalButtonText}>Submit Attendance</Text>
               </TouchableOpacity>
@@ -1336,10 +1337,20 @@ const AttendanceManagement = () => {
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={styles.submitModalButton}
-                onPress={() => {
-                  handleTeacherMarkAttendance();
-                  setTeacherViewModalVisible(false);
+                onPress={async () => {
+                  if (submittingFromModal || loading) {
+                    console.log('⚠️ [ADMIN TEACHER MODAL] Already submitting, ignoring duplicate request');
+                    return;
+                  }
+                  setSubmittingFromModal(true);
+                  try {
+                    await handleTeacherMarkAttendance();
+                    setTeacherViewModalVisible(false);
+                  } finally {
+                    setSubmittingFromModal(false);
+                  }
                 }}
+                disabled={submittingFromModal || loading}
               >
                 <Text style={styles.submitModalButtonText}>Submit Attendance</Text>
               </TouchableOpacity>

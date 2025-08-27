@@ -115,7 +115,8 @@ const ParentDashboard = ({ navigation }) => {
       if (notificationsError && notificationsError.code !== '42P01') {
         console.log('Notifications refresh error:', notificationsError);
       } else {
-        const mappedNotifications = (notificationsData || []).map(n => {
+        // First, map all notifications
+        const allMappedNotifications = (notificationsData || []).map(n => {
           // Create proper title and message for absence notifications
           let title, message;
           if (n.notifications.type === 'Absentee') {
@@ -130,18 +131,56 @@ const ParentDashboard = ({ navigation }) => {
           }
 
           return {
-            id: n.id,
+            id: n.notifications.id, // Use notification ID for deduplication
+            recipientId: n.id, // Keep recipient ID for read/unread operations
             title: title,
             message: message,
+            originalMessage: n.notifications.message, // Keep original for deduplication
             type: n.notifications.type || 'general',
             created_at: n.notifications.created_at,
             is_read: n.is_read || false,
             read_at: n.read_at
           };
         });
-        console.log('Mapped notifications count:', mappedNotifications.length);
-        console.log('Unread notifications count:', mappedNotifications.filter(n => !n.is_read).length);
-        setNotifications(mappedNotifications);
+        
+        // Deduplicate notifications by notification ID (in case same notification has multiple recipient records)
+        const notificationMap = new Map();
+        allMappedNotifications.forEach(notification => {
+          const existing = notificationMap.get(notification.id);
+          if (!existing) {
+            // First occurrence of this notification
+            notificationMap.set(notification.id, notification);
+          } else {
+            // Keep the unread one if available, or the most recent recipient record
+            if (!existing.is_read && notification.is_read) {
+              // Keep existing (unread)
+            } else if (existing.is_read && !notification.is_read) {
+              // Replace with unread version
+              notificationMap.set(notification.id, notification);
+            } else {
+              // Keep the one with more recent recipient data
+              const existingTime = new Date(existing.read_at || existing.created_at);
+              const currentTime = new Date(notification.read_at || notification.created_at);
+              if (currentTime > existingTime) {
+                notificationMap.set(notification.id, notification);
+              }
+            }
+          }
+        });
+        
+        const deduplicatedNotifications = Array.from(notificationMap.values())
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        
+        console.log('Raw notification recipient records:', notificationsData?.length || 0);
+        console.log('Mapped notifications count:', allMappedNotifications.length);
+        console.log('Deduplicated notifications count:', deduplicatedNotifications.length);
+        console.log('Unread notifications count:', deduplicatedNotifications.filter(n => !n.is_read).length);
+        
+        if (allMappedNotifications.length !== deduplicatedNotifications.length) {
+          console.log('✅ [PARENT DASHBOARD] Removed', allMappedNotifications.length - deduplicatedNotifications.length, 'duplicate notifications from bell count!');
+        }
+        
+        setNotifications(deduplicatedNotifications);
       }
     } catch (err) {
       console.log('Notifications refresh fetch error:', err);
