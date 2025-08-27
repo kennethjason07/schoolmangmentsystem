@@ -1063,13 +1063,18 @@ const FeeManagement = () => {
           </View>
 
           {/* Content */}
-          {tab === 'structure' && (
-            <ScrollView 
-              style={styles.contentContainer}
+          <View style={styles.scrollWrapper}>
+            <ScrollView
+              style={styles.scrollContainer}
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={Platform.OS === 'web'}
               refreshControl={
                 <RefreshControl refreshing={refreshing} onRefresh={loadAllData} />
               }
+              keyboardShouldPersistTaps="handled"
+              bounces={Platform.OS !== 'web'}
             >
+              {tab === 'structure' && (
               <View style={styles.structureContent}>
                 {feeStructures.map((classData) => (
                   <View key={classData.classId} style={styles.classCard}>
@@ -1120,15 +1125,8 @@ const FeeManagement = () => {
                 {/* Add bottom padding to ensure last card is fully visible */}
                 <View style={styles.bottomSpacer} />
               </View>
-            </ScrollView>
-          )}
-          {tab === 'payments' && (
-            <ScrollView 
-              style={styles.contentContainer}
-              refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={loadAllData} />
-              }
-            >
+              )}
+              {tab === 'payments' && (
               <View style={styles.paymentsContent}>
                 {/* Payment Summary Cards */}
                 <View style={styles.paymentSummaryContainer}>
@@ -1233,15 +1231,8 @@ const FeeManagement = () => {
                 </View>
 
               </View>
-            </ScrollView>
-          )}
-          {tab === 'recent' && (
-            <ScrollView 
-              style={styles.contentContainer}
-              refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={loadAllData} />
-              }
-            >
+              )}
+              {tab === 'recent' && (
               <View style={styles.paymentsContent}>
                 {/* Recent Payments */}
                 <View style={styles.recentPaymentsContainer}>
@@ -1277,8 +1268,9 @@ const FeeManagement = () => {
                   )}
                 </View>
               </View>
+              )}
             </ScrollView>
-          )}
+          </View>
         </View>
       )}
       {tab === 'structure' && (
@@ -2212,6 +2204,35 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     fontStyle: 'italic',
+  },
+  // Scroll wrapper styles to fix scrolling issues
+  scrollWrapper: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        height: 'calc(100vh - 160px)',
+        maxHeight: 'calc(100vh - 160px)',
+        minHeight: 400,
+        overflow: 'hidden',
+      },
+    }),
+  },
+  scrollContainer: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        overflowY: 'auto',
+      },
+    }),
+  },
+  scrollContent: {
+    padding: 16,
+    flexGrow: 1,
+    ...Platform.select({
+      web: {
+        paddingBottom: 40,
+      },
+    }),
   },
 });
 

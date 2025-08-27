@@ -11,6 +11,7 @@ import {
   Dimensions,
   FlatList,
   TextInput,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -19,7 +20,7 @@ import ExportModal from '../../../components/ExportModal';
 import { supabase, TABLES } from '../../../utils/supabase';
 import { exportFeeData, EXPORT_FORMATS } from '../../../utils/exportUtils';
 import { PieChart, BarChart } from 'react-native-chart-kit';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import CrossPlatformDatePicker, { DatePickerButton } from '../../../components/CrossPlatformDatePicker';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -494,25 +495,53 @@ const FeeCollection = ({ navigation }) => {
 
           {selectedDateRange === 'custom' && (
             <View style={styles.customDateRow}>
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => setShowStartDatePicker(true)}
-              >
-                <Text style={styles.dateButtonText}>
-                  Start: {formatDate(startDate)}
-                </Text>
-                <Ionicons name="calendar" size={16} color="#666" />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => setShowEndDatePicker(true)}
-              >
-                <Text style={styles.dateButtonText}>
-                  End: {formatDate(endDate)}
-                </Text>
-                <Ionicons name="calendar" size={16} color="#666" />
-              </TouchableOpacity>
+              {Platform.OS === 'web' ? (
+                <>
+                  <View style={styles.dateInputWrapper}>
+                    <CrossPlatformDatePicker
+                      label="Start Date"
+                      value={startDate}
+                      onChange={(event, date) => handleDateChange(event, date, 'start')}
+                      mode="date"
+                      placeholder="Select Start Date"
+                      containerStyle={{ flex: 1, marginRight: 8 }}
+                    />
+                  </View>
+                  <View style={styles.dateInputWrapper}>
+                    <CrossPlatformDatePicker
+                      label="End Date"
+                      value={endDate}
+                      onChange={(event, date) => handleDateChange(event, date, 'end')}
+                      mode="date"
+                      placeholder="Select End Date"
+                      containerStyle={{ flex: 1, marginLeft: 8 }}
+                    />
+                  </View>
+                </>
+              ) : (
+                <>
+                  <DatePickerButton
+                    label="Start Date"
+                    value={startDate}
+                    onPress={() => setShowStartDatePicker(true)}
+                    placeholder="Select Start Date"
+                    mode="date"
+                    style={styles.dateButton}
+                    containerStyle={{ flex: 1, marginRight: 8 }}
+                    displayFormat={(date) => `Start: ${formatDate(date)}`}
+                  />
+                  <DatePickerButton
+                    label="End Date"
+                    value={endDate}
+                    onPress={() => setShowEndDatePicker(true)}
+                    placeholder="Select End Date"
+                    mode="date"
+                    style={styles.dateButton}
+                    containerStyle={{ flex: 1, marginLeft: 8 }}
+                    displayFormat={(date) => `End: ${formatDate(date)}`}
+                  />
+                </>
+              )}
             </View>
           )}
         </View>
@@ -682,9 +711,9 @@ const FeeCollection = ({ navigation }) => {
         </View>
       </ScrollView>
 
-      {/* Date Pickers */}
-      {showStartDatePicker && (
-        <DateTimePicker
+      {/* Date Pickers - Only show on mobile platforms */}
+      {Platform.OS !== 'web' && showStartDatePicker && (
+        <CrossPlatformDatePicker
           value={startDate}
           mode="date"
           display="default"
@@ -692,8 +721,8 @@ const FeeCollection = ({ navigation }) => {
         />
       )}
 
-      {showEndDatePicker && (
-        <DateTimePicker
+      {Platform.OS !== 'web' && showEndDatePicker && (
+        <CrossPlatformDatePicker
           value={endDate}
           mode="date"
           display="default"

@@ -17,7 +17,7 @@ import {
 import { Picker } from '@react-native-picker/picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import Header from '../../components/Header';
 import { supabase } from '../../utils/supabase';
 import { format, parseISO, isAfter, isBefore } from 'date-fns';
@@ -823,16 +823,17 @@ const LeaveManagement = ({ navigation }) => {
         activeAdvancedFilters={advancedFilters}
       />
 
-      <ScrollView
-        style={styles.scrollContainer}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={Platform.OS === 'web'}
-        keyboardShouldPersistTaps="handled"
-        bounces={Platform.OS !== 'web'}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
+      <View style={styles.scrollWrapper}>
+        <ScrollView
+          style={styles.scrollContainer}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          keyboardShouldPersistTaps="handled"
+          bounces={Platform.OS !== 'web'}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
         {/* Add Leave Button */}
         <View style={styles.addButtonContainer}>
           <TouchableOpacity
@@ -873,7 +874,8 @@ const LeaveManagement = ({ navigation }) => {
             }
           />
         </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
 
       {/* Add Leave Modal */}
       <Modal
@@ -935,33 +937,57 @@ const LeaveManagement = ({ navigation }) => {
             </View>
 
             {/* Date Selection */}
-            <View style={styles.dateRow}>
-              <View style={styles.dateInputGroup}>
-                <Text style={styles.inputLabel}>Start Date</Text>
-                <TouchableOpacity
-                  style={styles.dateInput}
-                  onPress={() => setShowStartDatePicker(true)}
-                >
-                  <Text style={styles.dateInputText}>
-                    {format(newLeaveForm.start_date, 'MMM dd, yyyy')}
-                  </Text>
-                  <Ionicons name="calendar" size={20} color="#666" />
-                </TouchableOpacity>
+            {Platform.OS === 'web' ? (
+              <View style={styles.dateRow}>
+                <View style={styles.dateInputGroup}>
+                  <CrossPlatformDatePicker
+                    label="Start Date"
+                    value={newLeaveForm.start_date}
+                    onChange={(event, date) => {
+                      if (date) {
+                        setNewLeaveForm({ ...newLeaveForm, start_date: date });
+                      }
+                    }}
+                    mode="date"
+                    placeholder="Select Start Date"
+                  />
+                </View>
+                <View style={styles.dateInputGroup}>
+                  <CrossPlatformDatePicker
+                    label="End Date"
+                    value={newLeaveForm.end_date}
+                    onChange={(event, date) => {
+                      if (date) {
+                        setNewLeaveForm({ ...newLeaveForm, end_date: date });
+                      }
+                    }}
+                    mode="date"
+                    placeholder="Select End Date"
+                  />
+                </View>
               </View>
-
-              <View style={styles.dateInputGroup}>
-                <Text style={styles.inputLabel}>End Date</Text>
-                <TouchableOpacity
-                  style={styles.dateInput}
-                  onPress={() => setShowEndDatePicker(true)}
-                >
-                  <Text style={styles.dateInputText}>
-                    {format(newLeaveForm.end_date, 'MMM dd, yyyy')}
-                  </Text>
-                  <Ionicons name="calendar" size={20} color="#666" />
-                </TouchableOpacity>
+            ) : (
+              <View style={styles.dateRow}>
+                <View style={styles.dateInputGroup}>
+                  <DatePickerButton
+                    label="Start Date"
+                    value={newLeaveForm.start_date}
+                    onPress={() => setShowStartDatePicker(true)}
+                    placeholder="Select Start Date"
+                    mode="date"
+                  />
+                </View>
+                <View style={styles.dateInputGroup}>
+                  <DatePickerButton
+                    label="End Date"
+                    value={newLeaveForm.end_date}
+                    onPress={() => setShowEndDatePicker(true)}
+                    placeholder="Select End Date"
+                    mode="date"
+                  />
+                </View>
               </View>
-            </View>
+            )}
 
             {/* Reason */}
             <View style={styles.inputGroup}>
@@ -1028,9 +1054,9 @@ const LeaveManagement = ({ navigation }) => {
           </View>
         </View>
 
-        {/* Date Pickers */}
-        {showStartDatePicker && (
-          <DateTimePicker
+        {/* Date Pickers - Only show on mobile platforms */}
+        {Platform.OS !== 'web' && showStartDatePicker && (
+          <CrossPlatformDatePicker
             value={newLeaveForm.start_date}
             mode="date"
             display={Platform.OS === 'ios' ? 'spinner' : 'default'}
@@ -1043,8 +1069,8 @@ const LeaveManagement = ({ navigation }) => {
           />
         )}
 
-        {showEndDatePicker && (
-          <DateTimePicker
+        {Platform.OS !== 'web' && showEndDatePicker && (
+          <CrossPlatformDatePicker
             value={newLeaveForm.end_date}
             mode="date"
             display={Platform.OS === 'ios' ? 'spinner' : 'default'}

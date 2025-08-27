@@ -11,6 +11,7 @@ import {
   Modal,
   ActivityIndicator,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
@@ -475,7 +476,14 @@ const ManageClasses = ({ navigation }) => {
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
-          <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+          <View style={styles.scrollWrapper}>
+            <ScrollView 
+              style={styles.scrollContainer}
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={Platform.OS === 'web'}
+              keyboardShouldPersistTaps="handled"
+              bounces={Platform.OS !== 'web'}
+            >
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
                 {isEdit ? 'Edit Class' : 'Add New Class'}
@@ -568,7 +576,8 @@ const ManageClasses = ({ navigation }) => {
                 </Text>
               </TouchableOpacity>
             </View>
-          </ScrollView>
+            </ScrollView>
+          </View>
         </View>
       </View>
     </Modal>
@@ -592,7 +601,14 @@ const ManageClasses = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
-        <ScrollView style={styles.detailsContent}>
+        <View style={styles.scrollWrapper}>
+          <ScrollView 
+            style={[styles.scrollContainer, styles.detailsContent]}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={Platform.OS === 'web'}
+            keyboardShouldPersistTaps="handled"
+            bounces={Platform.OS !== 'web'}
+          >
           <View style={styles.classInfoSection}>
             <Text style={styles.sectionTitle}>Class Information</Text>
             <Text style={styles.infoText}>Section: {selectedClassDetails?.section}</Text>
@@ -623,7 +639,8 @@ const ManageClasses = ({ navigation }) => {
               <Text style={styles.noSubjectsText}>No subjects assigned to this class</Text>
             )}
           </View>
-        </ScrollView>
+          </ScrollView>
+        </View>
 
         <TouchableOpacity
           style={styles.timetableButton}
@@ -997,6 +1014,34 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
   },
+  // Scroll wrapper styles to fix scrolling issues
+  scrollWrapper: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        height: 'calc(100vh - 160px)',
+        maxHeight: 'calc(100vh - 160px)',
+        minHeight: 400,
+        overflow: 'hidden',
+      },
+    }),
+  },
+  scrollContainer: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        overflowY: 'auto',
+      },
+    }),
+  },
+  scrollContent: {
+    flexGrow: 1,
+    ...Platform.select({
+      web: {
+        paddingBottom: 40,
+      },
+    }),
+  },
 });
 
-export default ManageClasses; 
+export default ManageClasses;

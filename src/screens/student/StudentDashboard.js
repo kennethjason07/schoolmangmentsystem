@@ -752,18 +752,22 @@ const StudentDashboard = ({ navigation }) => {
         onNotificationsPress={handleNotificationsPress}
       />
 
-      <ScrollView 
-        style={styles.scrollView} 
-        showsVerticalScrollIndicator={false} 
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#1976d2']}
-            tintColor="#1976d2"
-          />
-        }
-      >
+      <View style={styles.scrollWrapper}>
+        <ScrollView 
+          style={styles.scrollContainer}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={Platform.OS === 'web'} 
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#1976d2']}
+              tintColor="#1976d2"
+            />
+          }
+          keyboardShouldPersistTaps="handled"
+          bounces={Platform.OS !== 'web'}
+        >
 
         {/* School Details Card */}
         {schoolDetails && (
@@ -1070,7 +1074,8 @@ const StudentDashboard = ({ navigation }) => {
           </View>
         )}
 
-      </ScrollView>
+        </ScrollView>
+      </View>
 
       {/* Student Details Modal */}
       {showStudentDetailsModal && (

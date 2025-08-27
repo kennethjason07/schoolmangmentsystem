@@ -5,7 +5,7 @@ import Header from '../../components/Header';
 import { LineChart } from 'react-native-chart-kit';
 import { Dimensions } from 'react-native';
 import StatCard from '../../components/StatCard';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import { Platform } from 'react-native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
@@ -1964,28 +1964,11 @@ function groupAndSortSchedule(schedule) {
               </View>
 
               <Text style={styles.addTaskFieldLabel}>Due Date</Text>
-              <TouchableOpacity
-                onPress={() => setShowDatePicker(true)}
-                style={styles.addTaskDatePicker}
-              >
-                <Ionicons name="calendar-outline" size={20} color="#666" />
-                <Text style={[styles.addTaskDateText, newTask.due && styles.addTaskDateTextSelected]}>
-                  {newTask.due ? new Date(newTask.due).toLocaleDateString('en-US', {
-                    weekday: 'short',
-                    year: 'numeric',
-                    month: 'short',
-                    day: 'numeric'
-                  }) : 'Select Due Date'}
-                </Text>
-                <Ionicons name="chevron-down" size={16} color="#666" />
-              </TouchableOpacity>
-              {showDatePicker && (
-                <DateTimePicker
+              {Platform.OS === 'web' ? (
+                <CrossPlatformDatePicker
+                  label="Due Date"
                   value={newTask.due ? new Date(newTask.due) : new Date()}
-                  mode="date"
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                   onChange={(event, selectedDate) => {
-                    setShowDatePicker(false);
                     if (selectedDate) {
                       const yyyy = selectedDate.getFullYear();
                       const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
@@ -1993,7 +1976,43 @@ function groupAndSortSchedule(schedule) {
                       setNewTask(t => ({ ...t, due: `${yyyy}-${mm}-${dd}` }));
                     }
                   }}
+                  mode="date"
+                  placeholder="Select Due Date"
+                  containerStyle={styles.addTaskDatePicker}
                 />
+              ) : (
+                <>
+                  <DatePickerButton
+                    label="Due Date"
+                    value={newTask.due ? new Date(newTask.due) : new Date()}
+                    onPress={() => setShowDatePicker(true)}
+                    placeholder="Select Due Date"
+                    mode="date"
+                    style={styles.addTaskDatePicker}
+                    displayFormat={(date) => date.toLocaleDateString('en-US', {
+                      weekday: 'short',
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric'
+                    })}
+                  />
+                  {showDatePicker && (
+                    <CrossPlatformDatePicker
+                      value={newTask.due ? new Date(newTask.due) : new Date()}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      onChange={(event, selectedDate) => {
+                        setShowDatePicker(false);
+                        if (selectedDate) {
+                          const yyyy = selectedDate.getFullYear();
+                          const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                          const dd = String(selectedDate.getDate()).padStart(2, '0');
+                          setNewTask(t => ({ ...t, due: `${yyyy}-${mm}-${dd}` }));
+                        }
+                      }}
+                    />
+                  )}
+                </>
               )}
             </ScrollView>
 

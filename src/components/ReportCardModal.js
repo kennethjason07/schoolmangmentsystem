@@ -18,6 +18,14 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 
 const { width, height } = Dimensions.get('window');
+const isTablet = width >= 768;
+const isWeb = Platform.OS === 'web';
+const getResponsiveWidth = () => {
+  if (isWeb && width > 1200) return Math.min(width * 0.85, 1000);
+  if (isTablet) return width * 0.9;
+  return width;
+};
+const responsiveWidth = getResponsiveWidth();
 
 const ReportCardModal = ({ visible, student, examId, onClose }) => {
   const [loading, setLoading] = useState(true);
@@ -541,7 +549,13 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
             <Text style={styles.loadingText}>Loading report card...</Text>
           </View>
         ) : (
-          <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView 
+            style={styles.content} 
+            contentContainerStyle={[styles.contentContainer, isWeb && styles.webContentContainer]}
+            showsVerticalScrollIndicator={false}
+            bounces={Platform.OS === 'ios'}
+            alwaysBounceVertical={false}
+          >
             {/* School Header */}
             <View style={styles.schoolHeader}>
               <Text style={styles.schoolName}>
@@ -600,44 +614,50 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
             {/* Marks Table */}
             <View style={styles.marksSection}>
               <Text style={styles.sectionTitle}>Academic Performance</Text>
-              <View style={styles.marksTable}>
-                <View style={styles.tableHeader}>
-                  <Text style={[styles.tableCell, styles.headerCell, { flex: 2 }]}>Subject</Text>
-                  <Text style={[styles.tableCell, styles.headerCell, { flex: 1 }]}>Marks</Text>
-                  <Text style={[styles.tableCell, styles.headerCell, { flex: 1 }]}>Total</Text>
-                  <Text style={[styles.tableCell, styles.headerCell, { flex: 1 }]}>%</Text>
-                  <Text style={[styles.tableCell, styles.headerCell, { flex: 1 }]}>Grade</Text>
-                </View>
-                
-                {subjects.map(subject => {
-                  const mark = getSubjectMark(subject.id);
-                  const marksObtained = mark?.marks_obtained || 0;
-                  const maxMarks = examDetails?.max_marks || 100; // Use exam's max_marks
-                  const percentage = maxMarks > 0 ? ((marksObtained / maxMarks) * 100).toFixed(1) : 0;
-                  const grade = mark?.grade || calculateGrade(percentage);
-                  
-                  return (
-                    <View key={subject.id} style={styles.tableRow}>
-                      <Text style={[styles.tableCell, { flex: 2 }]}>{subject.name}</Text>
-                      <Text style={[styles.tableCell, { flex: 1 }]}>{marksObtained}</Text>
-                      <Text style={[styles.tableCell, { flex: 1 }]}>{maxMarks}</Text>
-                      <Text style={[styles.tableCell, { flex: 1 }]}>{percentage}%</Text>
-                      <Text style={[styles.tableCell, { flex: 1 }]}>{grade}</Text>
-                    </View>
-                  );
-                })}
-                
-                {totals && (
-                  <View style={[styles.tableRow, styles.totalRow]}>
-                    <Text style={[styles.tableCell, styles.totalCell, { flex: 2 }]}>TOTAL</Text>
-                    <Text style={[styles.tableCell, styles.totalCell, { flex: 1 }]}>{totals.totalMarksObtained}</Text>
-                    <Text style={[styles.tableCell, styles.totalCell, { flex: 1 }]}>{totals.totalMaxMarks}</Text>
-                    <Text style={[styles.tableCell, styles.totalCell, { flex: 1 }]}>{totals.percentage}%</Text>
-                    <Text style={[styles.tableCell, styles.totalCell, { flex: 1 }]}>{totals.grade}</Text>
+              <ScrollView 
+                horizontal={!isTablet} 
+                showsHorizontalScrollIndicator={false}
+                bounces={Platform.OS === 'ios'}
+                style={styles.tableScrollContainer}
+              >
+                <View style={[styles.marksTable, !isTablet && styles.marksTableMobile]}>
+                  <View style={styles.tableHeader}>
+                    <Text style={[styles.tableCell, styles.headerCell, isTablet ? { flex: 2 } : styles.tableCellFixed]}>Subject</Text>
+                    <Text style={[styles.tableCell, styles.headerCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>Marks</Text>
+                    <Text style={[styles.tableCell, styles.headerCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>Total</Text>
+                    <Text style={[styles.tableCell, styles.headerCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>%</Text>
+                    <Text style={[styles.tableCell, styles.headerCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>Grade</Text>
                   </View>
-                )}
-              </View>
-            </View>
+                
+                  {subjects.map(subject => {
+                    const mark = getSubjectMark(subject.id);
+                    const marksObtained = mark?.marks_obtained || 0;
+                    const maxMarks = examDetails?.max_marks || 100; // Use exam's max_marks
+                    const percentage = maxMarks > 0 ? ((marksObtained / maxMarks) * 100).toFixed(1) : 0;
+                    const grade = mark?.grade || calculateGrade(percentage);
+                    
+                    return (
+                      <View key={subject.id} style={styles.tableRow}>
+                        <Text style={[styles.tableCell, isTablet ? { flex: 2 } : styles.tableCellFixed]}>{subject.name}</Text>
+                        <Text style={[styles.tableCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{marksObtained}</Text>
+                        <Text style={[styles.tableCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{maxMarks}</Text>
+                        <Text style={[styles.tableCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{percentage}%</Text>
+                        <Text style={[styles.tableCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{grade}</Text>
+                      </View>
+                    );
+                  })}
+                  
+                  {totals && (
+                    <View style={[styles.tableRow, styles.totalRow]}>
+                      <Text style={[styles.tableCell, styles.totalCell, isTablet ? { flex: 2 } : styles.tableCellFixed]}>TOTAL</Text>
+                      <Text style={[styles.tableCell, styles.totalCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{totals.totalMarksObtained}</Text>
+                      <Text style={[styles.tableCell, styles.totalCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{totals.totalMaxMarks}</Text>
+                      <Text style={[styles.tableCell, styles.totalCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{totals.percentage}%</Text>
+                      <Text style={[styles.tableCell, styles.totalCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{totals.grade}</Text>
+                    </View>
+                  )}
+                </View>
+              </ScrollView>
 
             {/* Attendance Summary */}
             {attendance && (
@@ -887,6 +907,24 @@ const styles = StyleSheet.create({
   },
   percentageText: {
     color: '#1976d2',
+  },
+  // Responsive styles
+  contentContainer: {
+    paddingBottom: 20,
+  },
+  webContentContainer: {
+    alignSelf: 'center',
+    width: responsiveWidth,
+  },
+  tableScrollContainer: {
+    marginHorizontal: isTablet ? 0 : -8,
+  },
+  marksTableMobile: {
+    minWidth: width * 1.2,
+  },
+  tableCellFixed: {
+    width: width * 0.2,
+    minWidth: 80,
   },
 });
 

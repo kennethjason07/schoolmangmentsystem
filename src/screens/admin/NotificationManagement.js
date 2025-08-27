@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, TextInput, ScrollView, ActivityIndicator, Modal, Button } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, TextInput, ScrollView, ActivityIndicator, Modal, Button, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import Header from '../../components/Header';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import { formatToLocalTime } from '../../utils/timeUtils';
 const roles = ['teacher', 'parent', 'student', 'admin'];
 const notificationTypes = ['General', 'Urgent', 'Fee Reminder', 'Event', 'Homework', 'Attendance', 'Absentee', 'Exam'];
@@ -479,55 +479,61 @@ const NotificationManagement = () => {
       
       {/* Notifications List */}
       {!loading && !error && (
-        <FlatList
-          data={filteredNotifications}
-          keyExtractor={item => item.id}
-          style={{ width: '100%', marginTop: 8 }}
-          contentContainerStyle={{ paddingBottom: 80 }}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No notifications found</Text>
-            </View>
-          }
-          renderItem={({ item }) => (
-            <TouchableOpacity 
-              style={[
-                styles.notificationCard,
-                { borderLeftWidth: 4, borderLeftColor: getNotificationTypeColor(item.type) }
-              ]} 
-              onPress={() => openViewModal(item)}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={[
-                  styles.notificationType,
-                  { color: getNotificationTypeColor(item.type) }
-                ]}>
-                  {(item.type || 'general').toUpperCase()}
-                </Text>
-                <Text style={styles.notificationMsg}>{item.message}</Text>
-                <Text style={styles.notificationMeta}>
-                  Recipients: {item.notification_recipients?.length || 0}
-                  {item.scheduled_at ? ` | Scheduled: ${formatToLocalTime(item.scheduled_at)}` : ''}
-                  {item.sent_at ? ` | Sent: ${formatToLocalTime(item.sent_at)}` : ''}
-                </Text>
-                <Text style={styles.notificationStatus}>
-                  Status: {item.delivery_status || 'Pending'}
-                  {item.notification_recipients && (
-                    ` | Sent: ${item.notification_recipients.filter(r => r.delivery_status === 'Sent').length}/${item.notification_recipients.length}`
-                  )}
-                </Text>
+        <View style={styles.scrollWrapper}>
+          <ScrollView
+            style={styles.scrollContainer}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={Platform.OS === 'web'}
+            keyboardShouldPersistTaps="handled"
+            bounces={Platform.OS !== 'web'}
+          >
+            {filteredNotifications.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>No notifications found</Text>
               </View>
-              <View style={styles.iconCol}>
-                <TouchableOpacity onPress={() => openEditModal(item)}>
-                  <Ionicons name="pencil" size={20} color="#1976d2" />
+            ) : (
+              filteredNotifications.map((item) => (
+                <TouchableOpacity 
+                  key={item.id}
+                  style={[
+                    styles.notificationCard,
+                    { borderLeftWidth: 4, borderLeftColor: getNotificationTypeColor(item.type) }
+                  ]} 
+                  onPress={() => openViewModal(item)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={[
+                      styles.notificationType,
+                      { color: getNotificationTypeColor(item.type) }
+                    ]}>
+                      {(item.type || 'general').toUpperCase()}
+                    </Text>
+                    <Text style={styles.notificationMsg}>{item.message}</Text>
+                    <Text style={styles.notificationMeta}>
+                      Recipients: {item.notification_recipients?.length || 0}
+                      {item.scheduled_at ? ` | Scheduled: ${formatToLocalTime(item.scheduled_at)}` : ''}
+                      {item.sent_at ? ` | Sent: ${formatToLocalTime(item.sent_at)}` : ''}
+                    </Text>
+                    <Text style={styles.notificationStatus}>
+                      Status: {item.delivery_status || 'Pending'}
+                      {item.notification_recipients && (
+                        ` | Sent: ${item.notification_recipients.filter(r => r.delivery_status === 'Sent').length}/${item.notification_recipients.length}`
+                      )}
+                    </Text>
+                  </View>
+                  <View style={styles.iconCol}>
+                    <TouchableOpacity onPress={() => openEditModal(item)}>
+                      <Ionicons name="pencil" size={20} color="#1976d2" />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDelete(item.id)} style={{ marginTop: 8 }}>
+                      <Ionicons name="trash" size={20} color="#f44336" />
+                    </TouchableOpacity>
+                  </View>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDelete(item.id)} style={{ marginTop: 8 }}>
-                  <Ionicons name="trash" size={20} color="#f44336" />
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          )}
-        />
+              ))
+            )}
+          </ScrollView>
+        </View>
       )}
       {/* Floating Add Button */}
        <TouchableOpacity style={styles.fab} onPress={openCreateModal}>
@@ -600,24 +606,91 @@ const NotificationManagement = () => {
                     );
                   })}
                 </ScrollView>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TouchableOpacity
-                    style={[styles.input, { flex: 1, flexDirection: 'row', alignItems: 'center' }]}
-                    onPress={() => setShowDatePicker(true)}
-                  >
-                    <Text style={{ color: date ? '#222' : '#888' }}>{date ? date : 'Date (DD-MM-YYYY)'}</Text>
-                    <Ionicons name="calendar-outline" size={20} color="#888" style={{ marginLeft: 8 }} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.input, { flex: 1, flexDirection: 'row', alignItems: 'center' }]}
-                    onPress={() => setShowTimePicker(true)}
-                  >
-                    <Text style={{ color: time ? '#222' : '#888' }}>{time ? time : 'Time (12hr format)'}</Text>
-                    <Ionicons name="time-outline" size={20} color="#888" style={{ marginLeft: 8 }} />
-                  </TouchableOpacity>
-                </View>
-                {showDatePicker && (
-                  <DateTimePicker
+                <Text style={{ marginTop: 8, marginBottom: 4 }}>Schedule Notification (Optional):</Text>
+                {Platform.OS === 'web' ? (
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <View style={{ flex: 1 }}>
+                      <CrossPlatformDatePicker
+                        label="Date"
+                        value={date ? (() => {
+                          const [dd, mm, yyyy] = date.split('-');
+                          return new Date(yyyy, mm - 1, dd);
+                        })() : null}
+                        onChange={(event, selectedDate) => {
+                          if (selectedDate) {
+                            const dd = String(selectedDate.getDate()).padStart(2, '0');
+                            const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                            const yyyy = selectedDate.getFullYear();
+                            setDate(`${dd}-${mm}-${yyyy}`);
+                          }
+                        }}
+                        mode="date"
+                        placeholder="Select Date"
+                        containerStyle={{ marginBottom: 8 }}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <CrossPlatformDatePicker
+                        label="Time"
+                        value={time ? (() => {
+                          const [timeStr, ampm] = time.split(' ');
+                          const [hours12, minutes] = timeStr.split(':');
+                          let hours24 = parseInt(hours12);
+                          if (ampm === 'PM' && hours24 !== 12) hours24 += 12;
+                          if (ampm === 'AM' && hours24 === 12) hours24 = 0;
+                          return new Date(1970, 0, 1, hours24, parseInt(minutes));
+                        })() : new Date()}
+                        onChange={(event, selectedDate) => {
+                          if (selectedDate) {
+                            let hours = selectedDate.getHours();
+                            const minutes = String(selectedDate.getMinutes()).padStart(2, '0');
+                            const ampm = hours >= 12 ? 'PM' : 'AM';
+                            hours = hours % 12;
+                            hours = hours ? hours : 12;
+                            setTime(`${hours}:${minutes} ${ampm}`);
+                          }
+                        }}
+                        mode="time"
+                        placeholder="Select Time"
+                        containerStyle={{ marginBottom: 8 }}
+                      />
+                    </View>
+                  </View>
+                ) : (
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <DatePickerButton
+                      label="Date"
+                      value={date ? (() => {
+                        const [dd, mm, yyyy] = date.split('-');
+                        return new Date(yyyy, mm - 1, dd);
+                      })() : null}
+                      onPress={() => setShowDatePicker(true)}
+                      placeholder="Date (DD-MM-YYYY)"
+                      mode="date"
+                      style={{ flex: 1 }}
+                      containerStyle={{ flex: 1, marginBottom: 8 }}
+                    />
+                    <DatePickerButton
+                      label="Time"
+                      value={time ? (() => {
+                        const [timeStr, ampm] = time.split(' ');
+                        const [hours12, minutes] = timeStr.split(':');
+                        let hours24 = parseInt(hours12);
+                        if (ampm === 'PM' && hours24 !== 12) hours24 += 12;
+                        if (ampm === 'AM' && hours24 === 12) hours24 = 0;
+                        return new Date(1970, 0, 1, hours24, parseInt(minutes));
+                      })() : new Date()}
+                      onPress={() => setShowTimePicker(true)}
+                      placeholder="Time (12hr format)"
+                      mode="time"
+                      style={{ flex: 1 }}
+                      containerStyle={{ flex: 1, marginBottom: 8 }}
+                    />
+                  </View>
+                )}
+                {/* Mobile Date/Time Pickers - Only show on mobile platforms */}
+                {Platform.OS !== 'web' && showDatePicker && (
+                  <CrossPlatformDatePicker
                     value={date ? (
                       // Convert DD-MM-YYYY to Date object
                       date.includes('-') ? 
@@ -640,8 +713,8 @@ const NotificationManagement = () => {
                     }}
                   />
                 )}
-                {showTimePicker && (
-                  <DateTimePicker
+                {Platform.OS !== 'web' && showTimePicker && (
+                  <CrossPlatformDatePicker
                     value={time ? (
                       // Convert 12-hour format to Date object for picker
                       time.includes('AM') || time.includes('PM') ? 
@@ -656,7 +729,6 @@ const NotificationManagement = () => {
                       : new Date(`1970-01-01T${time}:00`)
                     ) : new Date()}
                     mode="time"
-                    is24Hour={false}
                     display="clock"
                     onChange={(event, selectedDate) => {
                       setShowTimePicker(false);
@@ -736,6 +808,36 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  // Scroll wrapper styles to fix scrolling issues (matching ManageClasses pattern)
+  scrollWrapper: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        height: 'calc(100vh - 200px)',
+        maxHeight: 'calc(100vh - 200px)',
+        minHeight: 400,
+        overflow: 'hidden',
+      },
+    }),
+  },
+  scrollContainer: {
+    flex: 1,
+    marginTop: 8,
+    ...Platform.select({
+      web: {
+        overflowY: 'auto',
+      },
+    }),
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 16,
+    ...Platform.select({
+      web: {
+        paddingBottom: 80,
+      },
+    }),
   },
   tabBar: {
     flexDirection: 'row',

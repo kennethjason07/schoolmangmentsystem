@@ -18,7 +18,8 @@ import ExportModal from '../../../components/ExportModal';
 import { supabase, TABLES } from '../../../utils/supabase';
 import { exportAttendanceData, exportIndividualAttendanceRecord, EXPORT_FORMATS } from '../../../utils/exportUtils';
 import { LineChart, BarChart } from 'react-native-chart-kit';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import CrossPlatformDatePicker, { DatePickerButton } from '../../../components/CrossPlatformDatePicker';
+import { Platform } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -450,25 +451,53 @@ const AttendanceReport = ({ navigation }) => {
 
           {selectedDateRange === 'custom' && (
             <View style={styles.customDateRow}>
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => setShowStartDatePicker(true)}
-              >
-                <Text style={styles.dateButtonText}>
-                  Start: {formatDate(startDate)}
-                </Text>
-                <Ionicons name="calendar" size={16} color="#666" />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => setShowEndDatePicker(true)}
-              >
-                <Text style={styles.dateButtonText}>
-                  End: {formatDate(endDate)}
-                </Text>
-                <Ionicons name="calendar" size={16} color="#666" />
-              </TouchableOpacity>
+              {Platform.OS === 'web' ? (
+                <>
+                  <View style={styles.dateInputWrapper}>
+                    <CrossPlatformDatePicker
+                      label="Start Date"
+                      value={startDate}
+                      onChange={(event, date) => handleDateChange(event, date, 'start')}
+                      mode="date"
+                      placeholder="Select Start Date"
+                      containerStyle={{ flex: 1, marginRight: 8 }}
+                    />
+                  </View>
+                  <View style={styles.dateInputWrapper}>
+                    <CrossPlatformDatePicker
+                      label="End Date"
+                      value={endDate}
+                      onChange={(event, date) => handleDateChange(event, date, 'end')}
+                      mode="date"
+                      placeholder="Select End Date"
+                      containerStyle={{ flex: 1, marginLeft: 8 }}
+                    />
+                  </View>
+                </>
+              ) : (
+                <>
+                  <DatePickerButton
+                    label="Start Date"
+                    value={startDate}
+                    onPress={() => setShowStartDatePicker(true)}
+                    placeholder="Select Start Date"
+                    mode="date"
+                    style={styles.dateButton}
+                    containerStyle={{ flex: 1, marginRight: 8 }}
+                    displayFormat={(date) => `Start: ${formatDate(date)}`}
+                  />
+                  <DatePickerButton
+                    label="End Date"
+                    value={endDate}
+                    onPress={() => setShowEndDatePicker(true)}
+                    placeholder="Select End Date"
+                    mode="date"
+                    style={styles.dateButton}
+                    containerStyle={{ flex: 1, marginLeft: 8 }}
+                    displayFormat={(date) => `End: ${formatDate(date)}`}
+                  />
+                </>
+              )}
             </View>
           )}
         </View>
@@ -566,9 +595,9 @@ const AttendanceReport = ({ navigation }) => {
         </View>
       </ScrollView>
 
-      {/* Date Pickers */}
-      {showStartDatePicker && (
-        <DateTimePicker
+      {/* Date Pickers - Only show on mobile platforms */}
+      {Platform.OS !== 'web' && showStartDatePicker && (
+        <CrossPlatformDatePicker
           value={startDate}
           mode="date"
           display="default"
@@ -576,8 +605,8 @@ const AttendanceReport = ({ navigation }) => {
         />
       )}
 
-      {showEndDatePicker && (
-        <DateTimePicker
+      {Platform.OS !== 'web' && showEndDatePicker && (
+        <CrossPlatformDatePicker
           value={endDate}
           mode="date"
           display="default"

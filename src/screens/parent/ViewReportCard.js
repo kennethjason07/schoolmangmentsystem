@@ -22,7 +22,15 @@ import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
+const isTablet = width >= 768;
+const isWeb = Platform.OS === 'web';
+const getResponsiveWidth = () => {
+  if (isWeb && width > 1200) return Math.min(width * 0.9, 1200);
+  if (isTablet) return width * 0.95;
+  return width;
+};
+const responsiveWidth = getResponsiveWidth();
 
 const ViewReportCard = () => {
   const [student, setStudent] = useState(null);
@@ -631,27 +639,36 @@ const ViewReportCard = () => {
           </Text>
         </View>
 
-        <View style={styles.subjectsHeader}>
-          <Text style={styles.subjectHeaderText}>Subject</Text>
-          <Text style={styles.subjectHeaderText}>Marks</Text>
-          <Text style={styles.subjectHeaderText}>Total</Text>
-          <Text style={styles.subjectHeaderText}>Grade</Text>
-        </View>
+        <ScrollView 
+          horizontal={!isTablet} 
+          showsHorizontalScrollIndicator={false}
+          bounces={Platform.OS === 'ios'}
+          style={styles.tableScrollContainer}
+        >
+          <View style={[styles.marksTableContainer, !isTablet && styles.marksTableContainerMobile]}>
+            <View style={styles.subjectsHeader}>
+              <Text style={[styles.subjectHeaderText, isTablet ? null : styles.subjectHeaderTextFixed]}>Subject</Text>
+              <Text style={[styles.subjectHeaderText, isTablet ? null : styles.subjectHeaderTextFixed]}>Marks</Text>
+              <Text style={[styles.subjectHeaderText, isTablet ? null : styles.subjectHeaderTextFixed]}>Total</Text>
+              <Text style={[styles.subjectHeaderText, isTablet ? null : styles.subjectHeaderTextFixed]}>Grade</Text>
+            </View>
 
-        {reportCard.subjects.map((subjectMark, index) => (
-          <View key={index} style={styles.subjectRow}>
-            <Text style={styles.subjectName}>{subjectMark.subject?.name}</Text>
-            <Text style={styles.subjectMarks}>
-              {subjectMark.marks_obtained}
-            </Text>
-            <Text style={styles.subjectTotal}>
-              {subjectMark.max_marks}
-            </Text>
-            <Text style={[styles.subjectGrade, { color: getGradeColor(subjectMark.grade) }]}>
-              {subjectMark.grade || 'N/A'}
-            </Text>
+            {reportCard.subjects.map((subjectMark, index) => (
+              <View key={index} style={styles.subjectRow}>
+                <Text style={[styles.subjectName, isTablet ? null : styles.subjectNameFixed]}>{subjectMark.subject?.name}</Text>
+                <Text style={[styles.subjectMarks, isTablet ? null : styles.subjectMarksFixed]}>
+                  {subjectMark.marks_obtained}
+                </Text>
+                <Text style={[styles.subjectTotal, isTablet ? null : styles.subjectTotalFixed]}>
+                  {subjectMark.max_marks}
+                </Text>
+                <Text style={[styles.subjectGrade, { color: getGradeColor(subjectMark.grade) }, isTablet ? null : styles.subjectGradeFixed]}>
+                  {subjectMark.grade || 'N/A'}
+                </Text>
+              </View>
+            ))}
           </View>
-        ))}
+        </ScrollView>
 
         <View style={styles.summarySection}>
           <View style={styles.summaryItem}>
@@ -1719,6 +1736,38 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
   },
+  // Responsive styles
+  tableScrollContainer: {
+    marginHorizontal: isTablet ? 0 : -8,
+  },
+  marksTableContainer: {
+    minWidth: '100%',
+  },
+  marksTableContainerMobile: {
+    minWidth: width * 1.2,
+  },
+  subjectHeaderTextFixed: {
+    width: width * 0.25,
+    minWidth: 80,
+  },
+  subjectNameFixed: {
+    width: width * 0.25,
+    minWidth: 80,
+    textAlign: 'left',
+    paddingLeft: 8,
+  },
+  subjectMarksFixed: {
+    width: width * 0.2,
+    minWidth: 60,
+  },
+  subjectTotalFixed: {
+    width: width * 0.2,
+    minWidth: 60,
+  },
+  subjectGradeFixed: {
+    width: width * 0.2,
+    minWidth: 60,
+  },
 });
 
-export default ViewReportCard; 
+export default ViewReportCard;

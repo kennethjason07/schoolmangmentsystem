@@ -22,7 +22,7 @@ import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import { format } from 'date-fns';
 import * as Animatable from 'react-native-animatable';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import CrossPlatformDatePicker from '../../components/CrossPlatformDatePicker';
 import * as Print from 'expo-print';
 import { sendAbsenceNotificationToParent } from '../../services/notificationService';
 
@@ -1157,9 +1157,9 @@ const AttendanceManagement = () => {
         </ScrollView>
       </View>
 
-      {/* Date Pickers */}
-      {showDatePicker && (
-        <DateTimePicker
+      {/* Date Pickers - Only show on mobile platforms */}
+      {Platform.OS !== 'web' && showDatePicker && (
+        <CrossPlatformDatePicker
           value={selectedDate}
           mode="date"
           display="default"
@@ -1167,8 +1167,8 @@ const AttendanceManagement = () => {
         />
       )}
 
-      {teacherShowDatePicker && (
-        <DateTimePicker
+      {Platform.OS !== 'web' && teacherShowDatePicker && (
+        <CrossPlatformDatePicker
           value={teacherDate}
           mode="date"
           display="default"

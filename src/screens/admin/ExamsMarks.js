@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import { supabase } from '../../utils/supabase';
 // Helper functions for date formatting
 const formatDate = (dateString) => {
@@ -183,8 +183,20 @@ const ExamsMarks = () => {
 
   // Load data on component mount
   useEffect(() => {
+    console.log('📚 ExamsMarks component mounted');
     loadAllData();
   }, []);
+
+  // Add debugging for button functions
+  useEffect(() => {
+    console.log('📊 ExamsMarks state:', {
+      loading,
+      examsCount: exams.length,
+      classesCount: classes.length,
+      studentsCount: students.length,
+      subjectsCount: subjects.length
+    });
+  }, [loading, exams.length, classes.length, students.length, subjects.length]);
 
   // Helper functions
   const getStudentsForClass = (classId) => {
@@ -200,27 +212,53 @@ const ExamsMarks = () => {
   // Add exam (schema.txt: exams table)
   const handleAddExam = async () => {
     try {
-      if (!examForm.name || examForm.selected_classes.length === 0 || !examForm.start_date || !examForm.end_date) {
-        Alert.alert('Error', 'Please fill required fields and select at least one class');
+      console.log('📝 handleAddExam called with form:', examForm);
+      
+      // Validate required fields
+      if (!examForm.name || !examForm.name.trim()) {
+        Alert.alert('Validation Error', 'Please enter an exam name');
+        return;
+      }
+      
+      if (examForm.selected_classes.length === 0) {
+        Alert.alert('Validation Error', 'Please select at least one class');
+        return;
+      }
+      
+      if (!examForm.start_date) {
+        Alert.alert('Validation Error', 'Please select a start date');
+        return;
+      }
+      
+      if (!examForm.end_date) {
+        Alert.alert('Validation Error', 'Please select an end date');
         return;
       }
 
       // Create exam records for each selected class
       const examRecords = examForm.selected_classes.map(classId => ({
-        name: examForm.name,
+        name: examForm.name.trim(),
         class_id: classId,
         academic_year: examForm.academic_year || '2024-25',
         start_date: examForm.start_date,
         end_date: examForm.end_date,
-        remarks: examForm.description || examForm.remarks,
+        remarks: examForm.description?.trim() || null,
         max_marks: parseInt(examForm.max_marks) || 100
       }));
 
-      const { error } = await supabase
+      console.log('📝 Inserting exam records:', examRecords);
+      
+      const { data, error } = await supabase
         .from('exams')
-        .insert(examRecords);
+        .insert(examRecords)
+        .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Database error:', error);
+        throw error;
+      }
+
+      console.log('✅ Exam created successfully:', data);
 
       const classNames = examForm.selected_classes.map(classId => {
         const classItem = classes.find(c => c.id === classId);
@@ -228,6 +266,8 @@ const ExamsMarks = () => {
       }).join(', ');
 
       Alert.alert('Success', `Exam "${examForm.name}" created for ${examForm.selected_classes.length} class(es):\n${classNames}`);
+      
+      // Reset form and close modal
       setAddExamModalVisible(false);
       setExamForm({
         name: '',
@@ -238,10 +278,13 @@ const ExamsMarks = () => {
         description: '',
         max_marks: '100'
       });
-      loadAllData();
+      
+      // Reload data
+      await loadAllData();
 
     } catch (error) {
-      Alert.alert('Error', error.message);
+      console.error('❌ Error in handleAddExam:', error);
+      Alert.alert('Error', `Failed to create exam: ${error.message || 'Unknown error'}`);
     }
   };
 
@@ -296,6 +339,7 @@ const ExamsMarks = () => {
 
   // Delete exam (schema.txt: exams and marks tables)
   const handleDeleteExam = (exam) => {
+    console.log('🗑️ handleDeleteExam called with exam:', exam);
     Alert.alert(
       'Delete Exam',
       `Delete "${exam.name}"?`,
@@ -387,6 +431,7 @@ const ExamsMarks = () => {
 
   // UI helper functions
   const openEditExamModal = (exam) => {
+    console.log('🔧 openEditExamModal called with exam:', exam);
     setSelectedExam(exam);
     // For editing, find all exams with the same name to pre-select all classes
     const relatedExams = exams.filter(e => e.name === exam.name);
@@ -404,6 +449,7 @@ const ExamsMarks = () => {
   };
 
   const openMarksModal = (exam) => {
+    console.log('📝 openMarksModal called with exam:', exam);
     // Find the class for this exam
     const examClass = classes.find(c => c.id === exam.class_id);
     if (!examClass) {
@@ -465,15 +511,53 @@ const ExamsMarks = () => {
     setMarksModalVisible(true);
   };
 
-  const handleDateChange = (_, selectedDate) => {
+  const handleDateChange = (event, selectedDate) => {
+    console.log('DateTimePicker onChange triggered:', { event, selectedDate, datePickerType });
+    
+    // Always hide the date picker first
     setShowDatePicker(false);
-    if (selectedDate) {
-      const formattedDate = formatDateForDb(selectedDate);
-      setExamForm(prev => ({
-        ...prev,
-        [datePickerType === 'start' ? 'start_date' : 'end_date']: formattedDate
-      }));
+    
+    // On Android, check if user cancelled
+    if (Platform.OS === 'android' && event?.type === 'dismissed') {
+      console.log('User cancelled date selection');
+      return;
     }
+    
+    if (selectedDate && selectedDate instanceof Date && !isNaN(selectedDate.getTime())) {
+      const formattedDate = formatDateForDb(selectedDate);
+      console.log('Date selected:', selectedDate, 'Formatted:', formattedDate, 'Type:', datePickerType);
+      
+      if (datePickerType === 'start') {
+        setExamForm(prev => ({ ...prev, start_date: formattedDate }));
+      } else if (datePickerType === 'end') {
+        setExamForm(prev => ({ ...prev, end_date: formattedDate }));
+      }
+    } else {
+      console.log('Invalid date selected');
+    }
+  };
+
+  // Helper function to safely parse date for DateTimePicker
+  const getDatePickerValue = () => {
+    const dateField = datePickerType === 'start' ? 'start_date' : 'end_date';
+    const dateValue = examForm[dateField];
+    
+    console.log('getDatePickerValue called:', { dateField, dateValue, datePickerType });
+    
+    // If we have a date value, try to parse it
+    if (dateValue && dateValue.trim() !== '') {
+      const parsedDate = new Date(dateValue);
+      // Check if the parsed date is valid
+      if (!isNaN(parsedDate.getTime())) {
+        console.log('Using existing date:', parsedDate);
+        return parsedDate;
+      }
+    }
+    
+    // Fallback to current date if no valid date is available
+    const fallbackDate = new Date();
+    console.log('Using fallback date:', fallbackDate);
+    return fallbackDate;
   };
 
   const handleMarksChange = (studentId, subjectId, value) => {
@@ -941,7 +1025,10 @@ const ExamsMarks = () => {
       {/* Add Exam Floating Button */}
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => setAddExamModalVisible(true)}
+        onPress={() => {
+          console.log('➕ FAB (Add Exam) button pressed');
+          setAddExamModalVisible(true);
+        }}
       >
         <Ionicons name="add" size={32} color="#fff" />
       </TouchableOpacity>
@@ -1028,33 +1115,65 @@ const ExamsMarks = () => {
                 )}
               </View>
 
-              <Text style={styles.inputLabel}>Start Date *</Text>
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => {
-                  setDatePickerType('start');
-                  setShowDatePicker(true);
-                }}
-              >
-                <Text style={styles.dateText}>
-                  {examForm.start_date ? formatDate(examForm.start_date) : 'Select Start Date'}
-                </Text>
-                <Ionicons name="calendar" size={20} color="#666" />
-              </TouchableOpacity>
-
-              <Text style={styles.inputLabel}>End Date</Text>
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => {
-                  setDatePickerType('end');
-                  setShowDatePicker(true);
-                }}
-              >
-                <Text style={styles.dateText}>
-                  {examForm.end_date ? formatDate(examForm.end_date) : 'Select End Date'}
-                </Text>
-                <Ionicons name="calendar" size={20} color="#666" />
-              </TouchableOpacity>
+              {Platform.OS === 'web' ? (
+                <>
+                  <CrossPlatformDatePicker
+                    label="Start Date *"
+                    value={examForm.start_date ? new Date(examForm.start_date) : null}
+                    onChange={(event, date) => {
+                      console.log('Start date changed (web):', date);
+                      if (date) {
+                        const formattedDate = formatDateForDb(date);
+                        setExamForm(prev => ({ ...prev, start_date: formattedDate }));
+                      }
+                    }}
+                    mode="date"
+                    placeholder="Select Start Date"
+                    maximumDate={new Date(2030, 11, 31)}
+                    minimumDate={new Date(2020, 0, 1)}
+                  />
+                  <CrossPlatformDatePicker
+                    label="End Date"
+                    value={examForm.end_date ? new Date(examForm.end_date) : null}
+                    onChange={(event, date) => {
+                      console.log('End date changed (web):', date);
+                      if (date) {
+                        const formattedDate = formatDateForDb(date);
+                        setExamForm(prev => ({ ...prev, end_date: formattedDate }));
+                      }
+                    }}
+                    mode="date"
+                    placeholder="Select End Date"
+                    maximumDate={new Date(2030, 11, 31)}
+                    minimumDate={new Date(2020, 0, 1)}
+                  />
+                </>
+              ) : (
+                <>
+                  <DatePickerButton
+                    label="Start Date *"
+                    value={examForm.start_date ? new Date(examForm.start_date) : null}
+                    onPress={() => {
+                      console.log('Start date button pressed');
+                      setDatePickerType('start');
+                      setShowDatePicker(true);
+                    }}
+                    placeholder="Select Start Date"
+                    mode="date"
+                  />
+                  <DatePickerButton
+                    label="End Date"
+                    value={examForm.end_date ? new Date(examForm.end_date) : null}
+                    onPress={() => {
+                      console.log('End date button pressed');
+                      setDatePickerType('end');
+                      setShowDatePicker(true);
+                    }}
+                    placeholder="Select End Date"
+                    mode="date"
+                  />
+                </>
+              )}
 
               <Text style={styles.inputLabel}>Maximum Marks *</Text>
               <TextInput
@@ -1076,17 +1195,20 @@ const ExamsMarks = () => {
                 numberOfLines={3}
               />
 
-              {showDatePicker && (
-                <DateTimePicker
-                  value={examForm[datePickerType === 'start' ? 'start_date' : 'end_date']
-                    ? new Date(examForm[datePickerType === 'start' ? 'start_date' : 'end_date'])
-                    : new Date()}
-                  mode="date"
-                  display="default"
-                  onChange={handleDateChange}
-                />
-              )}
             </ScrollView>
+            
+            {/* Date Picker - Only show on mobile platforms */}
+            {Platform.OS !== 'web' && showDatePicker && (
+              <CrossPlatformDatePicker
+                testID="dateTimePicker"
+                value={getDatePickerValue()}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={handleDateChange}
+                maximumDate={new Date(2030, 11, 31)}
+                minimumDate={new Date(2020, 0, 1)}
+              />
+            )}
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.modalButton} onPress={handleAddExam}>
                 <Text style={styles.modalButtonText}>Create Exam</Text>
@@ -1193,33 +1315,65 @@ const ExamsMarks = () => {
                 )}
               </View>
 
-              <Text style={styles.inputLabel}>Start Date *</Text>
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => {
-                  setDatePickerType('start');
-                  setShowDatePicker(true);
-                }}
-              >
-                <Text style={styles.dateText}>
-                  {examForm.start_date ? formatDate(examForm.start_date) : 'Select Start Date'}
-                </Text>
-                <Ionicons name="calendar" size={20} color="#666" />
-              </TouchableOpacity>
-
-              <Text style={styles.inputLabel}>End Date</Text>
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => {
-                  setDatePickerType('end');
-                  setShowDatePicker(true);
-                }}
-              >
-                <Text style={styles.dateText}>
-                  {examForm.end_date ? formatDate(examForm.end_date) : 'Select End Date'}
-                </Text>
-                <Ionicons name="calendar" size={20} color="#666" />
-              </TouchableOpacity>
+              {Platform.OS === 'web' ? (
+                <>
+                  <CrossPlatformDatePicker
+                    label="Start Date *"
+                    value={examForm.start_date ? new Date(examForm.start_date) : null}
+                    onChange={(event, date) => {
+                      console.log('Edit - Start date changed (web):', date);
+                      if (date) {
+                        const formattedDate = formatDateForDb(date);
+                        setExamForm(prev => ({ ...prev, start_date: formattedDate }));
+                      }
+                    }}
+                    mode="date"
+                    placeholder="Select Start Date"
+                    maximumDate={new Date(2030, 11, 31)}
+                    minimumDate={new Date(2020, 0, 1)}
+                  />
+                  <CrossPlatformDatePicker
+                    label="End Date"
+                    value={examForm.end_date ? new Date(examForm.end_date) : null}
+                    onChange={(event, date) => {
+                      console.log('Edit - End date changed (web):', date);
+                      if (date) {
+                        const formattedDate = formatDateForDb(date);
+                        setExamForm(prev => ({ ...prev, end_date: formattedDate }));
+                      }
+                    }}
+                    mode="date"
+                    placeholder="Select End Date"
+                    maximumDate={new Date(2030, 11, 31)}
+                    minimumDate={new Date(2020, 0, 1)}
+                  />
+                </>
+              ) : (
+                <>
+                  <DatePickerButton
+                    label="Start Date *"
+                    value={examForm.start_date ? new Date(examForm.start_date) : null}
+                    onPress={() => {
+                      console.log('Edit - Start date button pressed');
+                      setDatePickerType('start');
+                      setShowDatePicker(true);
+                    }}
+                    placeholder="Select Start Date"
+                    mode="date"
+                  />
+                  <DatePickerButton
+                    label="End Date"
+                    value={examForm.end_date ? new Date(examForm.end_date) : null}
+                    onPress={() => {
+                      console.log('Edit - End date button pressed');
+                      setDatePickerType('end');
+                      setShowDatePicker(true);
+                    }}
+                    placeholder="Select End Date"
+                    mode="date"
+                  />
+                </>
+              )}
 
               <Text style={styles.inputLabel}>Maximum Marks *</Text>
               <TextInput
@@ -1241,17 +1395,20 @@ const ExamsMarks = () => {
                 numberOfLines={3}
               />
 
-              {showDatePicker && (
-                <DateTimePicker
-                  value={examForm[datePickerType === 'start' ? 'start_date' : 'end_date']
-                    ? new Date(examForm[datePickerType === 'start' ? 'start_date' : 'end_date'])
-                    : new Date()}
-                  mode="date"
-                  display="default"
-                  onChange={handleDateChange}
-                />
-              )}
             </ScrollView>
+            
+            {/* Date Picker - Only show on mobile platforms for Edit Modal */}
+            {Platform.OS !== 'web' && showDatePicker && (
+              <CrossPlatformDatePicker
+                testID="dateTimePickerEdit"
+                value={getDatePickerValue()}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={handleDateChange}
+                maximumDate={new Date(2030, 11, 31)}
+                minimumDate={new Date(2020, 0, 1)}
+              />
+            )}
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.modalButton} onPress={handleEditExam}>
                 <Text style={styles.modalButtonText}>Update Exam</Text>

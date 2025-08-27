@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, TextInput, Button, Alert, ScrollView, ActivityIndicator, RefreshControl, Platform, Dimensions } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import { format } from 'date-fns';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
@@ -1425,18 +1425,75 @@ const SubjectsTimetable = ({ route }) => {
                 />
               </>
             )}
-            <TouchableOpacity
-              style={styles.input}
-              onPress={() => openTimePicker('startTime', periodForm.startTime)}
-            >
-              <Text>{periodForm.startTime ? `Start Time: ${formatTime(periodForm.startTime)}` : 'Select Start Time'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.input}
-              onPress={() => openTimePicker('endTime', periodForm.endTime)}
-            >
-              <Text>{periodForm.endTime ? `End Time: ${formatTime(periodForm.endTime)}` : 'Select End Time'}</Text>
-            </TouchableOpacity>
+            {Platform.OS === 'web' ? (
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <CrossPlatformDatePicker
+                    label="Start Time"
+                    value={periodForm.startTime ? (() => {
+                      const [h, m] = periodForm.startTime.split(':').map(Number);
+                      return new Date(1970, 0, 1, h, m);
+                    })() : null}
+                    onChange={(event, selectedDate) => {
+                      if (selectedDate) {
+                        const h = selectedDate.getHours().toString().padStart(2, '0');
+                        const m = selectedDate.getMinutes().toString().padStart(2, '0');
+                        setPeriodForm(f => ({ ...f, startTime: `${h}:${m}` }));
+                      }
+                    }}
+                    mode="time"
+                    placeholder="Select Start Time"
+                    containerStyle={{ marginBottom: 8 }}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <CrossPlatformDatePicker
+                    label="End Time"
+                    value={periodForm.endTime ? (() => {
+                      const [h, m] = periodForm.endTime.split(':').map(Number);
+                      return new Date(1970, 0, 1, h, m);
+                    })() : null}
+                    onChange={(event, selectedDate) => {
+                      if (selectedDate) {
+                        const h = selectedDate.getHours().toString().padStart(2, '0');
+                        const m = selectedDate.getMinutes().toString().padStart(2, '0');
+                        setPeriodForm(f => ({ ...f, endTime: `${h}:${m}` }));
+                      }
+                    }}
+                    mode="time"
+                    placeholder="Select End Time"
+                    containerStyle={{ marginBottom: 8 }}
+                  />
+                </View>
+              </View>
+            ) : (
+              <>
+                <DatePickerButton
+                  label="Start Time"
+                  value={periodForm.startTime ? (() => {
+                    const [h, m] = periodForm.startTime.split(':').map(Number);
+                    return new Date(1970, 0, 1, h, m);
+                  })() : null}
+                  onPress={() => openTimePicker('startTime', periodForm.startTime)}
+                  placeholder="Select Start Time"
+                  mode="time"
+                  style={styles.input}
+                  containerStyle={{ marginBottom: 8 }}
+                />
+                <DatePickerButton
+                  label="End Time"
+                  value={periodForm.endTime ? (() => {
+                    const [h, m] = periodForm.endTime.split(':').map(Number);
+                    return new Date(1970, 0, 1, h, m);
+                  })() : null}
+                  onPress={() => openTimePicker('endTime', periodForm.endTime)}
+                  placeholder="Select End Time"
+                  mode="time"
+                  style={styles.input}
+                  containerStyle={{ marginBottom: 8 }}
+                />
+              </>
+            )}
 
             {periodForm.type === 'subject' && (
               <TextInput
@@ -1446,8 +1503,8 @@ const SubjectsTimetable = ({ route }) => {
                 style={styles.input}
               />
             )}
-            {showTimePicker.visible && (
-              <DateTimePicker
+            {Platform.OS !== 'web' && showTimePicker.visible && (
+              <CrossPlatformDatePicker
                 value={showTimePicker.value}
                 mode="time"
                 is24Hour={true}
@@ -1483,45 +1540,95 @@ const SubjectsTimetable = ({ route }) => {
                     </TouchableOpacity>
                   </View>
                   
-                  <View style={styles.timeInputRow}>
-                    <TouchableOpacity
-                      style={styles.timeInput}
-                      onPress={() => {
-                        const [h, m] = period.startTime.split(':').map(Number);
-                        const date = new Date();
-                        date.setHours(h, m);
-                        setShowTimePicker({ 
-                          visible: true, 
-                          field: `period_${index}_start`,
-                          value: date 
-                        });
-                      }}
-                    >
-                      <Text style={styles.timeInputText}>{formatTime(period.startTime)}</Text>
-                    </TouchableOpacity>
-                    
-                    <Text style={styles.timeSeparator}>to</Text>
-                    
-                    <TouchableOpacity
-                      style={styles.timeInput}
-                      onPress={() => {
-                        const [h, m] = period.endTime.split(':').map(Number);
-                        const date = new Date();
-                        date.setHours(h, m);
-                        setShowTimePicker({ 
-                          visible: true, 
-                          field: `period_${index}_end`,
-                          value: date 
-                        });
-                      }}
-                    >
-                      <Text style={styles.timeInputText}>{formatTime(period.endTime)}</Text>
-                    </TouchableOpacity>
-                    
-                    <View style={styles.durationDisplay}>
-                      <Text style={styles.durationText}>{period.duration} min</Text>
+                  {Platform.OS === 'web' ? (
+                    <View style={styles.timeInputRow}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <CrossPlatformDatePicker
+                          label="Start Time"
+                          value={(() => {
+                            const [h, m] = period.startTime.split(':').map(Number);
+                            return new Date(1970, 0, 1, h, m);
+                          })()}
+                          onChange={(event, selectedDate) => {
+                            if (selectedDate) {
+                              const h = selectedDate.getHours().toString().padStart(2, '0');
+                              const m = selectedDate.getMinutes().toString().padStart(2, '0');
+                              updatePeriodSlot(index, 'startTime', `${h}:${m}`);
+                            }
+                          }}
+                          mode="time"
+                          placeholder="Start Time"
+                          containerStyle={{ marginBottom: 8 }}
+                        />
+                      </View>
+                      
+                      <Text style={styles.timeSeparator}>to</Text>
+                      
+                      <View style={{ flex: 1, marginLeft: 8 }}>
+                        <CrossPlatformDatePicker
+                          label="End Time"
+                          value={(() => {
+                            const [h, m] = period.endTime.split(':').map(Number);
+                            return new Date(1970, 0, 1, h, m);
+                          })()}
+                          onChange={(event, selectedDate) => {
+                            if (selectedDate) {
+                              const h = selectedDate.getHours().toString().padStart(2, '0');
+                              const m = selectedDate.getMinutes().toString().padStart(2, '0');
+                              updatePeriodSlot(index, 'endTime', `${h}:${m}`);
+                            }
+                          }}
+                          mode="time"
+                          placeholder="End Time"
+                          containerStyle={{ marginBottom: 8 }}
+                        />
+                      </View>
+                      
+                      <View style={styles.durationDisplay}>
+                        <Text style={styles.durationText}>{period.duration} min</Text>
+                      </View>
                     </View>
-                  </View>
+                  ) : (
+                    <View style={styles.timeInputRow}>
+                      <TouchableOpacity
+                        style={styles.timeInput}
+                        onPress={() => {
+                          const [h, m] = period.startTime.split(':').map(Number);
+                          const date = new Date();
+                          date.setHours(h, m);
+                          setShowTimePicker({ 
+                            visible: true, 
+                            field: `period_${index}_start`,
+                            value: date 
+                          });
+                        }}
+                      >
+                        <Text style={styles.timeInputText}>{formatTime(period.startTime)}</Text>
+                      </TouchableOpacity>
+                      
+                      <Text style={styles.timeSeparator}>to</Text>
+                      
+                      <TouchableOpacity
+                        style={styles.timeInput}
+                        onPress={() => {
+                          const [h, m] = period.endTime.split(':').map(Number);
+                          const date = new Date();
+                          date.setHours(h, m);
+                          setShowTimePicker({ 
+                            visible: true, 
+                            field: `period_${index}_end`,
+                            value: date 
+                          });
+                        }}
+                      >
+                        <Text style={styles.timeInputText}>{formatTime(period.endTime)}</Text>
+                      </TouchableOpacity>
+                      
+                      <View style={styles.durationDisplay}>
+                        <Text style={styles.durationText}>{period.duration} min</Text>
+                      </View>
+                    </View>
+                  )}
                 </View>
               ))}
               
@@ -1534,8 +1641,8 @@ const SubjectsTimetable = ({ route }) => {
               </TouchableOpacity>
             </ScrollView>
             
-            {showTimePicker.visible && showTimePicker.field.startsWith('period_') && (
-              <DateTimePicker
+            {Platform.OS !== 'web' && showTimePicker.visible && showTimePicker.field.startsWith('period_') && (
+              <CrossPlatformDatePicker
                 value={showTimePicker.value}
                 mode="time"
                 is24Hour={true}

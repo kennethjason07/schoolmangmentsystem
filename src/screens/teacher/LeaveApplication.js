@@ -14,7 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import Header from '../../components/Header';
 import { supabase } from '../../utils/supabase';
 import { format, parseISO, isAfter, differenceInDays } from 'date-fns';
@@ -565,28 +565,58 @@ const LeaveApplication = ({ navigation }) => {
               <View style={styles.dateRow}>
                 <View style={styles.dateInputGroup}>
                   <Text style={styles.inputLabel}>Start Date</Text>
-                  <TouchableOpacity
-                    style={styles.dateInput}
-                    onPress={() => setShowStartDatePicker(true)}
-                  >
-                    <Text style={styles.dateInputText}>
-                      {format(applicationForm.start_date, 'MMM dd, yyyy')}
-                    </Text>
-                    <Ionicons name="calendar" size={20} color="#666" />
-                  </TouchableOpacity>
+                  {Platform.OS === 'web' ? (
+                    <CrossPlatformDatePicker
+                      value={applicationForm.start_date}
+                      onChange={(event, date) => {
+                        if (date) {
+                          setApplicationForm({ 
+                            ...applicationForm, 
+                            start_date: date,
+                            end_date: date > applicationForm.end_date ? date : applicationForm.end_date
+                          });
+                        }
+                      }}
+                      mode="date"
+                      placeholder="Select Start Date"
+                      containerStyle={styles.dateInput}
+                    />
+                  ) : (
+                    <DatePickerButton
+                      value={applicationForm.start_date}
+                      onPress={() => setShowStartDatePicker(true)}
+                      mode="date"
+                      style={styles.dateInput}
+                      displayFormat={(date) => format(date, 'MMM dd, yyyy')}
+                      iconName="calendar"
+                    />
+                  )}
                 </View>
 
                 <View style={styles.dateInputGroup}>
                   <Text style={styles.inputLabel}>End Date</Text>
-                  <TouchableOpacity
-                    style={styles.dateInput}
-                    onPress={() => setShowEndDatePicker(true)}
-                  >
-                    <Text style={styles.dateInputText}>
-                      {format(applicationForm.end_date, 'MMM dd, yyyy')}
-                    </Text>
-                    <Ionicons name="calendar" size={20} color="#666" />
-                  </TouchableOpacity>
+                  {Platform.OS === 'web' ? (
+                    <CrossPlatformDatePicker
+                      value={applicationForm.end_date}
+                      onChange={(event, date) => {
+                        if (date) {
+                          setApplicationForm({ ...applicationForm, end_date: date });
+                        }
+                      }}
+                      mode="date"
+                      placeholder="Select End Date"
+                      containerStyle={styles.dateInput}
+                    />
+                  ) : (
+                    <DatePickerButton
+                      value={applicationForm.end_date}
+                      onPress={() => setShowEndDatePicker(true)}
+                      mode="date"
+                      style={styles.dateInput}
+                      displayFormat={(date) => format(date, 'MMM dd, yyyy')}
+                      iconName="calendar"
+                    />
+                  )}
                 </View>
               </View>
 
@@ -659,9 +689,9 @@ const LeaveApplication = ({ navigation }) => {
             </View>
           </View>
 
-          {/* Date Pickers */}
-          {showStartDatePicker && (
-            <DateTimePicker
+          {/* Date Pickers - Only show on mobile platforms */}
+          {Platform.OS !== 'web' && showStartDatePicker && (
+            <CrossPlatformDatePicker
               value={applicationForm.start_date}
               mode="date"
               display={Platform.OS === 'ios' ? 'spinner' : 'default'}
@@ -678,8 +708,8 @@ const LeaveApplication = ({ navigation }) => {
             />
           )}
 
-          {showEndDatePicker && (
-            <DateTimePicker
+          {Platform.OS !== 'web' && showEndDatePicker && (
+            <CrossPlatformDatePicker
               value={applicationForm.end_date}
               mode="date"
               display={Platform.OS === 'ios' ? 'spinner' : 'default'}

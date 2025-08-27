@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { PieChart } from 'react-native-chart-kit';
 import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import { supabase, dbHelpers } from '../../utils/supabase';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth } from 'date-fns';
@@ -658,18 +658,22 @@ const ExpenseManagement = ({ navigation }) => {
     <View style={styles.container}>
       <Header title="Expense Management" navigation={navigation} showBack={true} />
       
-      <ScrollView
-        style={styles.scrollView}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#2196F3']}
-            tintColor="#2196F3"
-          />
-        }
-      >
+      <View style={styles.scrollWrapper}>
+        <ScrollView
+          style={styles.scrollContainer}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#2196F3']}
+              tintColor="#2196F3"
+            />
+          }
+          keyboardShouldPersistTaps="handled"
+          bounces={Platform.OS !== 'web'}
+        >
         {/* View Tabs */}
         <View style={styles.tabContainer}>
           <TouchableOpacity 
@@ -810,11 +814,12 @@ const ExpenseManagement = ({ navigation }) => {
             </View>
           )}
         </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
 
-      {/* Month Picker Modal */}
-      {showMonthPicker && Platform.OS !== 'web' && (
-        <DateTimePicker
+      {/* Month Picker Modal - Only show on mobile platforms */}
+      {Platform.OS !== 'web' && showMonthPicker && (
+        <CrossPlatformDatePicker
           value={selectedMonth}
           mode="date"
           display="default"
@@ -827,9 +832,9 @@ const ExpenseManagement = ({ navigation }) => {
         />
       )}
 
-      {/* Expense Date Picker Modal */}
-      {showExpenseDatePicker && Platform.OS !== 'web' && (
-        <DateTimePicker
+      {/* Expense Date Picker Modal - Only show on mobile platforms */}
+      {Platform.OS !== 'web' && showExpenseDatePicker && (
+        <CrossPlatformDatePicker
           value={new Date(expenseInput.date)}
           mode="date"
           display="default"
@@ -903,15 +908,33 @@ const ExpenseManagement = ({ navigation }) => {
 
               {/* Date Picker */}
               <Text style={styles.inputLabel}>Expense Date *</Text>
-              <TouchableOpacity 
-                style={styles.datePickerButton}
-                onPress={() => setShowExpenseDatePicker(true)}
-              >
-                <Ionicons name="calendar" size={20} color="#2196F3" />
-                <Text style={styles.datePickerText}>
-                  {format(new Date(expenseInput.date), 'MMM dd, yyyy')}
-                </Text>
-              </TouchableOpacity>
+              {Platform.OS === 'web' ? (
+                <CrossPlatformDatePicker
+                  label="Expense Date"
+                  value={new Date(expenseInput.date)}
+                  onChange={(event, selectedDate) => {
+                    if (selectedDate) {
+                      setExpenseInput({ 
+                        ...expenseInput, 
+                        date: format(selectedDate, 'yyyy-MM-dd') 
+                      });
+                    }
+                  }}
+                  mode="date"
+                  placeholder="Select Expense Date"
+                  containerStyle={{ marginBottom: 16 }}
+                />
+              ) : (
+                <DatePickerButton
+                  label="Expense Date"
+                  value={new Date(expenseInput.date)}
+                  onPress={() => setShowExpenseDatePicker(true)}
+                  placeholder="Select Expense Date"
+                  mode="date"
+                  style={styles.datePickerButton}
+                  displayFormat={(date) => format(date, 'MMM dd, yyyy')}
+                />
+              )}
 
               <View style={styles.modalButtons}>
                 <TouchableOpacity 
@@ -1112,6 +1135,29 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f0f4f8',
+  },
+  scrollWrapper: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: 'calc(100vh - 160px)',
+      maxHeight: 'calc(100vh - 160px)',
+      minHeight: '400px',
+      overflow: 'hidden',
+    })
+  },
+  scrollContainer: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      overflowY: 'auto'
+    })
+  },
+  scrollContent: {
+    padding: 18,
+    paddingBottom: 300,
+    flexGrow: 1,
+    ...(Platform.OS === 'web' && {
+      paddingBottom: 600
+    })
   },
   scrollView: {
     flex: 1,

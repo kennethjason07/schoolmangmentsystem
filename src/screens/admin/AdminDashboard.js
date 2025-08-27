@@ -21,7 +21,7 @@ import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
 import LogoDisplay from '../../components/LogoDisplay';
 import NoSchoolDetailsState from '../../components/NoSchoolDetailsState';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import CrossPlatformBarChart from '../../components/CrossPlatformBarChart';
 import ResponsiveScrollView, { ResponsiveGrid, ResponsiveContainer, ResponsiveModal, isPC, isLargeScreen } from '../../components/ResponsiveScrollView';
@@ -817,23 +817,36 @@ const AdminDashboard = ({ navigation }) => {
                   multiline
                   numberOfLines={3}
                 />
-                {/* Date Picker Button for Events */}
+                {/* Date Picker for Events */}
                 {Platform.OS === 'web' ? (
-                  <input
-                    type="date"
-                    value={eventInput.date}
-                    onChange={e => setEventInput({ ...eventInput, date: e.target.value })}
-                    style={{ ...styles.input, padding: 10, fontSize: 15, borderRadius: 8, borderWidth: 1, borderColor: '#e0e0e0', marginBottom: 12 }}
+                  <CrossPlatformDatePicker
+                    label="Event Date"
+                    value={eventInput.date ? new Date(eventInput.date) : null}
+                    onChange={(event, selectedDate) => {
+                      if (selectedDate) {
+                        const dd = String(selectedDate.getDate()).padStart(2, '0');
+                        const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                        const yyyy = selectedDate.getFullYear();
+                        setEventInput({ ...eventInput, date: `${yyyy}-${mm}-${dd}` });
+                      }
+                    }}
+                    mode="date"
+                    placeholder="Select Event Date"
+                    containerStyle={{ marginBottom: 12 }}
                   />
                 ) : (
-                  <TouchableOpacity style={styles.input} onPress={() => setShowEventDatePicker(true)}>
-                  <Text style={{ color: eventInput.date ? '#333' : '#aaa' }}>
-                    {eventInput.date ? (() => { const [y, m, d] = eventInput.date.split('-'); return `${d}-${m}-${y}`; })() : 'Select Date'}
-                  </Text>
-                </TouchableOpacity>
+                  <DatePickerButton
+                    label="Event Date"
+                    value={eventInput.date ? new Date(eventInput.date) : null}
+                    onPress={() => setShowEventDatePicker(true)}
+                    placeholder="Select Event Date"
+                    mode="date"
+                    style={styles.input}
+                    containerStyle={{ marginBottom: 12 }}
+                  />
                 )}
-                {showEventDatePicker && Platform.OS !== 'web' && (
-                  <DateTimePicker
+                {Platform.OS !== 'web' && showEventDatePicker && (
+                  <CrossPlatformDatePicker
                     value={eventInput.date ? new Date(eventInput.date) : new Date()}
                     mode="date"
                     display="default"
@@ -843,7 +856,7 @@ const AdminDashboard = ({ navigation }) => {
                         const dd = String(selectedDate.getDate()).padStart(2, '0');
                         const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
                         const yyyy = selectedDate.getFullYear();
-                        setEventInput({ ...eventInput, date: `${yyyy}-${mm}-${dd}` }); // keep storage as yyyy-mm-dd
+                        setEventInput({ ...eventInput, date: `${yyyy}-${mm}-${dd}` });
                       }
                     }}
                   />

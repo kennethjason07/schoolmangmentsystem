@@ -11,6 +11,7 @@ import {
   Modal,
   Dimensions,
   Platform,
+  FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -18,7 +19,15 @@ import Header from '../../components/Header';
 import { supabase } from '../../utils/supabase';
 import ReportCardModal from '../../components/ReportCardModal';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
+const isTablet = width >= 768;
+const isWeb = Platform.OS === 'web';
+const getResponsiveWidth = () => {
+  if (isWeb && width > 1200) return Math.min(width * 0.8, 1200);
+  if (isTablet) return width * 0.9;
+  return width;
+};
+const responsiveWidth = getResponsiveWidth();
 
 const ReportCardGeneration = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
@@ -178,15 +187,16 @@ const ReportCardGeneration = ({ navigation }) => {
   const renderStudent = (student) => (
     <TouchableOpacity
       key={student.id}
-      style={styles.studentCard}
+      style={[styles.studentCard, isTablet && styles.studentCardTablet]}
       onPress={() => handleStudentPress(student)}
+      activeOpacity={0.7}
     >
       <View style={styles.studentInfo}>
-        <Text style={styles.studentName}>{student.name}</Text>
-        <Text style={styles.studentDetails}>
+        <Text style={styles.studentName} numberOfLines={2}>{student.name}</Text>
+        <Text style={styles.studentDetails} numberOfLines={1}>
           Admission No: {student.admission_no}
         </Text>
-        <Text style={styles.studentDetails}>
+        <Text style={styles.studentDetails} numberOfLines={1}>
           Parent: {student.parents?.name || 'N/A'}
         </Text>
       </View>
@@ -215,10 +225,13 @@ const ReportCardGeneration = ({ navigation }) => {
       
       <ScrollView
         style={styles.content}
+        contentContainerStyle={[styles.contentContainer, isWeb && styles.webContentContainer]}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         showsVerticalScrollIndicator={false}
+        bounces={Platform.OS === 'ios'}
+        alwaysBounceVertical={false}
       >
         {/* Filters Section */}
         <View style={styles.filtersSection}>
@@ -326,7 +339,19 @@ const ReportCardGeneration = ({ navigation }) => {
               </View>
             ) : (
               <View style={styles.studentsList}>
-                {students.map(renderStudent)}
+                {isTablet || isWeb ? (
+                  <FlatList
+                    data={students}
+                    renderItem={({ item }) => renderStudent(item)}
+                    keyExtractor={(item) => item.id.toString()}
+                    numColumns={isWeb && width > 1200 ? 3 : isTablet ? 2 : 1}
+                    columnWrapperStyle={isTablet || isWeb ? styles.studentRow : null}
+                    scrollEnabled={false}
+                    contentContainerStyle={styles.studentsGrid}
+                  />
+                ) : (
+                  students.map(renderStudent)
+                )}
               </View>
             )}
           </View>
@@ -369,7 +394,14 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: 16,
+    paddingHorizontal: isWeb ? Math.max(16, (width - responsiveWidth) / 2) : 16,
+  },
+  contentContainer: {
+    paddingBottom: 20,
+  },
+  webContentContainer: {
+    alignSelf: 'center',
+    width: responsiveWidth,
   },
   loadingContainer: {
     flex: 1,
@@ -584,6 +616,20 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontStyle: 'italic',
     textAlign: 'center',
+  },
+  // Responsive styles for tablets and large screens
+  studentRow: {
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  studentsGrid: {
+    gap: 12,
+  },
+  studentCardTablet: {
+    flex: isWeb && width > 1200 ? 0.32 : isTablet ? 0.48 : 1,
+    marginHorizontal: isWeb && width > 1200 ? 4 : isTablet ? 4 : 0,
+    marginBottom: 8,
+    minHeight: 120,
   },
 });
 

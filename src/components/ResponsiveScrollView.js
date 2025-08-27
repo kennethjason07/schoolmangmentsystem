@@ -32,6 +32,25 @@ const ResponsiveScrollView = ({
       backgroundColor: '#f5f5f5',
       ...style,
     },
+    scrollWrapper: {
+      flex: 1,
+      ...Platform.select({
+        web: {
+          height: 'calc(100vh - 160px)',
+          maxHeight: 'calc(100vh - 160px)',
+          minHeight: 400,
+          overflow: 'hidden',
+        },
+      }),
+    },
+    scrollContainer: {
+      flex: 1,
+      ...Platform.select({
+        web: {
+          overflowY: 'auto',
+        },
+      }),
+    },
     scrollViewContent: {
       flexGrow: 1,
       paddingHorizontal: isLargeScreen ? Math.max(padding, 20) : padding,
@@ -39,6 +58,11 @@ const ResponsiveScrollView = ({
       ...(isPC && centerContent && {
         alignItems: 'center',
         justifyContent: 'flex-start',
+      }),
+      ...Platform.select({
+        web: {
+          paddingBottom: 40,
+        },
       }),
       ...contentContainerStyle,
     },
@@ -51,23 +75,27 @@ const ResponsiveScrollView = ({
 
   return (
     <View style={responsiveStyles.container}>
-      <ScrollView
-        contentContainerStyle={responsiveStyles.scrollViewContent}
-        showsVerticalScrollIndicator={showsVerticalScrollIndicator}
-        showsHorizontalScrollIndicator={showsHorizontalScrollIndicator}
-        keyboardShouldPersistTaps={keyboardShouldPersistTaps}
-        refreshControl={refreshControl}
-        scrollEventThrottle={16}
-        {...props}
-      >
-        {isPC && centerContent ? (
-          <View style={responsiveStyles.contentWrapper}>
-            {children}
-          </View>
-        ) : (
-          children
-        )}
-      </ScrollView>
+      <View style={responsiveStyles.scrollWrapper}>
+        <ScrollView
+          style={responsiveStyles.scrollContainer}
+          contentContainerStyle={responsiveStyles.scrollViewContent}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          showsHorizontalScrollIndicator={showsHorizontalScrollIndicator}
+          keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+          refreshControl={refreshControl}
+          scrollEventThrottle={16}
+          bounces={Platform.OS !== 'web'}
+          {...props}
+        >
+          {isPC && centerContent ? (
+            <View style={responsiveStyles.contentWrapper}>
+              {children}
+            </View>
+          ) : (
+            children
+          )}
+        </ScrollView>
+      </View>
     </View>
   );
 };
