@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator, Alert, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
@@ -19,6 +19,7 @@ const StudentNotifications = () => {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const navigation = useNavigation();
 
@@ -32,30 +33,29 @@ const StudentNotifications = () => {
       console.log('User ID:', user.id);
       console.log('Linked Student ID:', user.linked_student_id);
 
-      // Use linked_student_id if available, fallback to user.id
-      const studentId = user.linked_student_id || user.id;
-      console.log('🔍 [STUDENT NOTIFICATIONS] Fetching notifications for student ID:', studentId);
-
-      // Get notifications with recipients for this student ONLY
+      // Fetch all notifications from admins (role_id = 1) - all notification types
+      // Filter out leave notifications manually below
       const { data: notificationsData, error: notifError } = await supabase
-        .from(TABLES.NOTIFICATION_RECIPIENTS)
+        .from('notifications')
         .select(`
           id,
-          is_read,
-          sent_at,
-          read_at,
-          notifications!inner(
+          message,
+          type,
+          created_at,
+          sent_by,
+          delivery_status,
+          delivery_mode,
+          users!sent_by(
             id,
-            message,
-            type,
-            created_at,
-            sent_by
+            role_id,
+            full_name
           )
         `)
-        .eq('recipient_type', 'Student')
-        .eq('recipient_id', studentId)
-        .order('sent_at', { ascending: false })
+        .in('type', ['General', 'Urgent', 'Fee Reminder', 'Event', 'Homework', 'Attendance', 'Absentee', 'Exam', 'GRADE_ENTERED', 'HOMEWORK_UPLOADED'])
+        .eq('users.role_id', 1)
+        .order('created_at', { ascending: false })
         .limit(50);
+      
 
       console.log(`✅ [STUDENT NOTIFICATIONS] Found ${notificationsData?.length || 0} notifications for student ${user.id}`);
 
@@ -70,20 +70,126 @@ const StudentNotifications = () => {
         return;
       }
 
-      // Transform the data to match the expected format
-      const transformedNotifications = notificationsData.map(notificationRecord => {
-        const notification = notificationRecord.notifications;
+      // Update delivery status to 'Sent' for any InApp notifications that are still 'Pending'
+      const pendingNotifications = notificationsData.filter(n => 
+        n.delivery_status === 'Pending' && n.delivery_mode === 'InApp'
+      );
+      
+      if (pendingNotifications.length > 0) {
+        console.log(`🔄 Updating ${pendingNotifications.length} notifications from Pending to Sent status`);
+        
+        const { error: updateError } = await supabase
+          .from('notifications')
+          .update({
+            delivery_status: 'Sent',
+            sent_at: new Date().toISOString()
+          })
+          .in('id', pendingNotifications.map(n => n.id))
+          .eq('delivery_mode', 'InApp');
+        
+        if (updateError) {
+          console.error('Error updating notification status:', updateError);
+        } else {
+          console.log('✅ Successfully updated notification delivery status');
+          // Update the local data to reflect the change
+          notificationsData.forEach(n => {
+            if (pendingNotifications.some(p => p.id === n.id)) {
+              n.delivery_status = 'Sent';
+              n.sent_at = new Date().toISOString();
+            }
+          });
+        }
+      }
 
+      // Get read status for these notifications from notification_recipients table
+      const notificationIds = notificationsData.map(n => n.id);
+      let readStatusData = [];
+      
+      if (notificationIds.length > 0) {
+        const { data: readData } = await supabase
+          .from('notification_recipients')
+          .select('notification_id, is_read, id')
+          .eq('recipient_id', user.id)
+          .eq('recipient_type', 'Student')
+          .in('notification_id', notificationIds);
+        
+        readStatusData = readData || [];
+        
+        // Create recipient records for notifications that don't have them yet
+        const missingRecords = notificationsData.filter(notification => 
+          !readStatusData.some(record => record.notification_id === notification.id)
+        );
+        
+        if (missingRecords.length > 0) {
+          console.log(`📝 Creating recipient records for ${missingRecords.length} notifications`);
+          
+          const newRecords = missingRecords.map(notification => ({
+            notification_id: notification.id,
+            recipient_id: user.id,
+            recipient_type: 'Student',
+            is_read: false,
+            delivery_status: 'Sent' // Mark as sent since we're showing it to the student
+          }));
+          
+          const { data: insertedRecords, error: insertError } = await supabase
+            .from('notification_recipients')
+            .insert(newRecords)
+            .select('notification_id, is_read, id');
+          
+          if (insertError) {
+            console.error('Error creating recipient records:', insertError);
+          } else {
+            console.log(`✅ Created ${insertedRecords?.length || 0} new recipient records`);
+            // Add the new records to our read status data
+            readStatusData = [...readStatusData, ...(insertedRecords || [])];
+          }
+        }
+      }
+
+      // Log all notifications to debug what we're getting
+      console.log('Raw notifications from database:', notificationsData.map(n => ({
+        id: n.id,
+        type: n.type,
+        message: n.message.substring(0, 100),
+        sender_role: n.users?.role_id,
+        sender_name: n.users?.full_name
+      })));
+
+      // Filter out leave notifications (which might be marked as General but contain leave-related content)
+      const filteredNotifications = notificationsData.filter(notification => {
+        const message = notification.message.toLowerCase();
+        const isLeaveNotification = message.includes('leave') || 
+                                   message.includes('absent') || 
+                                   message.includes('vacation') || 
+                                   message.includes('sick') ||
+                                   message.includes('time off');
+        
+        if (isLeaveNotification) {
+          console.log(`🚫 Filtering out leave notification: ${notification.message.substring(0, 50)}...`);
+          return false;
+        }
+        return true;
+      });
+
+      console.log(`📋 After filtering: ${filteredNotifications.length} out of ${notificationsData.length} notifications`);
+
+      // Transform the data to match the expected format
+      const transformedNotifications = filteredNotifications.map(notification => {
+        const readRecord = readStatusData.find(r => r.notification_id === notification.id);
+        
         return {
           id: notification.id,
           title: notification.message.substring(0, 50) + (notification.message.length > 50 ? '...' : ''),
           message: notification.message,
-          type: notification.type || 'general',
+          type: notification.type || 'General',
           created_at: notification.created_at,
-          read: notificationRecord.is_read || false,
+          read: readRecord?.is_read || false,
           date: notification.created_at,
-          important: notification.type === 'Urgent' || notification.type === 'Important',
-          recipientId: notificationRecord.id
+          important: notification.type === 'Urgent' || notification.type === 'Exam',
+          recipientId: readRecord?.id || null,
+          delivery_status: notification.delivery_status,
+          delivery_mode: notification.delivery_mode,
+          sender: notification.users
         };
       });
 
@@ -109,6 +215,18 @@ const StudentNotifications = () => {
       notifSub.unsubscribe();
     };
   }, []);
+
+  // Handle pull-to-refresh
+  const onRefresh = async () => {
+    try {
+      setRefreshing(true);
+      await fetchNotifications();
+    } catch (err) {
+      console.error('Error refreshing notifications:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const filteredNotifications = notifications.filter(n => {
     if (filter === 'unread') return !n.read;
@@ -182,27 +300,72 @@ const StudentNotifications = () => {
     }
   };
 
-  const renderNotification = ({ item }) => (
-    <View style={[styles.card, item.read ? styles.cardRead : styles.cardUnread]}>
-      <View style={styles.cardHeader}>
-        <Ionicons name={item.read ? 'mail-open' : 'mail'} size={22} color={item.read ? '#888' : '#1976d2'} style={{ marginRight: 10 }} />
-        <Text style={[styles.title, item.read && { color: '#888' }]}>{item.title}</Text>
-        {item.important && (
-          <Ionicons name="star" size={18} color="#FFD700" style={{ marginLeft: 6 }} />
-        )}
-        <Text style={styles.date}>{item.date ? (item.date.split('T')[0] || item.date) : ''}</Text>
+  const renderNotification = ({ item }) => {
+    const getTypeColor = (type) => {
+      switch (type) {
+        case 'Urgent': return '#F44336';
+        case 'Fee Reminder': return '#FF9800';
+        case 'General': return '#4CAF50';
+        case 'Event': return '#9C27B0';
+        case 'Homework': return '#2196F3';
+        case 'Attendance': return '#607D8B';
+        case 'Absentee': return '#E91E63';
+        case 'Exam': return '#FF5722';
+        case 'GRADE_ENTERED': return '#00BCD4';
+        case 'HOMEWORK_UPLOADED': return '#795548';
+        default: return '#9E9E9E';
+      }
+    };
+
+    const getDeliveryStatusColor = (status) => {
+      switch (status) {
+        case 'Sent': return '#4CAF50';
+        case 'Pending': return '#FF9800';
+        case 'Failed': return '#F44336';
+        default: return '#9E9E9E';
+      }
+    };
+
+    return (
+      <View style={[styles.card, item.read ? styles.cardRead : styles.cardUnread]}>
+        <View style={styles.cardHeader}>
+          <Ionicons name={item.read ? 'mail-open' : 'mail'} size={22} color={item.read ? '#888' : '#1976d2'} style={{ marginRight: 10 }} />
+          <Text style={[styles.title, item.read && { color: '#888' }]}>{item.title}</Text>
+          {item.important && (
+            <Ionicons name="star" size={18} color="#FFD700" style={{ marginLeft: 6 }} />
+          )}
+          <Text style={styles.date}>{item.date ? (item.date.split('T')[0] || item.date) : ''}</Text>
+        </View>
+        
+        {/* Type and Delivery Status Badges */}
+        <View style={styles.badgeRow}>
+          <View style={[styles.typeBadge, { backgroundColor: getTypeColor(item.type) }]}>
+            <Text style={styles.badgeText}>{item.type.toUpperCase()}</Text>
+          </View>
+          {item.delivery_status && (
+            <View style={[styles.statusBadge, { backgroundColor: getDeliveryStatusColor(item.delivery_status) }]}>
+              <Text style={styles.badgeText}>{item.delivery_status}</Text>
+            </View>
+          )}
+          {item.delivery_mode && item.delivery_mode !== 'InApp' && (
+            <View style={[styles.modeBadge, { backgroundColor: '#9C27B0' }]}>
+              <Text style={styles.badgeText}>{item.delivery_mode}</Text>
+            </View>
+          )}
+        </View>
+        
+        <Text style={styles.message}>{item.message}</Text>
+        <View style={styles.actionsRow}>
+          {!item.read && (
+            <TouchableOpacity style={styles.actionBtn} onPress={() => markAsRead(item.id)}>
+              <Ionicons name="mail-open" size={18} color="#388e3c" />
+              <Text style={styles.actionText}>Mark as Read</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
-      <Text style={styles.message}>{item.message}</Text>
-      <View style={styles.actionsRow}>
-        {!item.read && (
-          <TouchableOpacity style={styles.actionBtn} onPress={() => markAsRead(item.id)}>
-            <Ionicons name="mail-open" size={18} color="#388e3c" />
-            <Text style={styles.actionText}>Mark as Read</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </View>
-  );
+    );
+  };
 
   if (loading) {
     return (
@@ -254,6 +417,14 @@ const StudentNotifications = () => {
         contentContainerStyle={{ paddingBottom: 24 }}
         ListEmptyComponent={<Text style={{ color: '#888', textAlign: 'center', marginTop: 40 }}>No notifications found.</Text>}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#1976d2']}
+            tintColor="#1976d2"
+          />
+        }
       />
       </View>
     </View>
@@ -375,6 +546,34 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 4,
     fontSize: 13,
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  typeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginRight: 6,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginRight: 6,
+  },
+  modeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginRight: 6,
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
 });
 

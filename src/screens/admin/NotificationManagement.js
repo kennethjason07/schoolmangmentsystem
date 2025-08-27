@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, TextInput, ScrollView, ActivityIndicator, Modal, Button, Platform } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, TextInput, ScrollView, ActivityIndicator, Modal, Button, Platform, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
@@ -25,6 +25,7 @@ const getNotificationTypeColor = (type) => {
 };
 
 const NotificationManagement = () => {
+  const { user } = useAuth(); // Get current admin user
   const [notifications, setNotifications] = useState([]);
   const [typeFilter, setTypeFilter] = useState('');
   const [modal, setModal] = useState({ visible: false, mode: 'view', notification: null });
@@ -40,6 +41,7 @@ const NotificationManagement = () => {
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
   // Load notifications from Supabase
@@ -51,6 +53,8 @@ const NotificationManagement = () => {
     setLoading(true);
     setError(null);
     try {
+      console.log('🔄 Loading notifications...');
+      
       // Load from notifications table with recipients
       const { data, error } = await supabase
         .from('notifications')
@@ -62,11 +66,18 @@ const NotificationManagement = () => {
             recipient_type,
             delivery_status,
             sent_at
+          ),
+          users!sent_by(
+            id,
+            full_name,
+            role_id
           )
         `)
         .order('created_at', { ascending: false });
       
       if (error) throw error;
+      
+      console.log(`✅ Loaded ${data?.length || 0} notifications`);
       setNotifications(data || []);
     } catch (err) {
       console.error('Error loading notifications:', err);
@@ -74,6 +85,52 @@ const NotificationManagement = () => {
       Alert.alert('Error', 'Failed to load notifications');
     } finally {
       setLoading(false);
+    }
+  };
+  
+  // Handle pull-to-refresh
+  const handleRefresh = async () => {
+    try {
+      setRefreshing(true);
+      console.log('🔄 Pull-to-refresh triggered in Notification Management');
+      
+      // Clear any existing errors
+      setError(null);
+      
+      // Load from notifications table with recipients
+      const { data, error } = await supabase
+        .from('notifications')
+        .select(`
+          *,
+          notification_recipients(
+            id,
+            recipient_id,
+            recipient_type,
+            delivery_status,
+            sent_at
+          ),
+          users!sent_by(
+            id,
+            full_name,
+            role_id
+          )
+        `)
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('Refresh error:', error);
+        setError('Failed to refresh notifications');
+        return;
+      }
+      
+      console.log(`✅ Refreshed ${data?.length || 0} notifications`);
+      setNotifications(data || []);
+      
+    } catch (err) {
+      console.error('Error refreshing notifications:', err);
+      setError('Failed to refresh notifications');
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -213,9 +270,9 @@ const NotificationManagement = () => {
       const duplicateNotification = {
         type: notification.type,
         message: notification.message,
-        sent_to_role: notification.sent_to_role,
-        sent_to_id: notification.sent_to_id,
-        delivery_status: 'Pending' // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
+        delivery_mode: 'InApp',
+        delivery_status: 'Pending', // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
+        sent_by: user?.id || null // Store current admin user ID
       };
       
       const { data, error } = await supabase
@@ -319,7 +376,7 @@ const NotificationManagement = () => {
         delivery_mode: 'InApp',
         delivery_status: createForm.status,
         scheduled_at: scheduledAt,
-        sent_by: null // Add current user ID if available
+        sent_by: user?.id || null // Store current admin user ID
       };
       
       const { data: notificationResult, error: notificationError } = await supabase
@@ -486,6 +543,16 @@ const NotificationManagement = () => {
             showsVerticalScrollIndicator={Platform.OS === 'web'}
             keyboardShouldPersistTaps="handled"
             bounces={Platform.OS !== 'web'}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                colors={['#1976d2', '#007bff']} // Android colors
+                tintColor="#1976d2" // iOS color
+                title="Pull to refresh" // iOS title
+                titleColor="#1976d2" // iOS title color
+              />
+            }
           >
             {filteredNotifications.length === 0 ? (
               <View style={styles.emptyContainer}>
@@ -924,6 +991,12 @@ const styles = StyleSheet.create({
   notificationMeta: {
     fontSize: 12,
     color: '#888',
+  },
+  notificationStatus: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    marginTop: 2,
   },
   iconCol: {
     flexDirection: 'column',
