@@ -39,6 +39,7 @@ const TakeAttendance = () => {
   const [error, setError] = useState(null);
   const [teacherInfo, setTeacherInfo] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [clearMode, setClearMode] = useState(false); // Track if user manually cleared attendance
   const { user } = useAuth();
 
   // Fetch teacher's assigned classes and students
@@ -134,6 +135,12 @@ const TakeAttendance = () => {
   const fetchExistingAttendance = async () => {
     if (!selectedClass || !selectedDate || students.length === 0) return;
     
+    // Skip fetching if user has manually cleared attendance
+    if (clearMode) {
+      console.log('Clear mode active - skipping attendance fetch');
+      return;
+    }
+    
     try {
       // Get existing attendance records
       const { data: attendanceData, error: attendanceError } = await supabase
@@ -206,6 +213,14 @@ const TakeAttendance = () => {
   useEffect(() => {
     fetchExistingAttendance();
   }, [selectedClass, selectedSection, selectedDate, students]);
+
+  // Reset clear mode when date or class changes
+  useEffect(() => {
+    if (clearMode) {
+      setClearMode(false);
+      console.log('Clear mode deactivated - date/class changed');
+    }
+  }, [selectedClass, selectedDate]);
 
   const handleMarkAttendance = async () => {
     try {
@@ -543,6 +558,13 @@ const TakeAttendance = () => {
                   const yyyy = selected.getFullYear(); 
                   const isoDate = `${yyyy}-${mm}-${dd}`;
                   const displayDate = `${dd}-${mm}-${yyyy}`;
+                  
+                  // Reset clear mode when date is changed via picker
+                  if (clearMode) {
+                    setClearMode(false);
+                    console.log('Clear mode deactivated - date changed via picker');
+                  }
+                  
                   setSelectedDate(isoDate); 
                   setDisplayDate(displayDate);
                 } 
@@ -567,6 +589,56 @@ const TakeAttendance = () => {
                 <View style={[styles.headerCellContainer, { flex: 3.5 }]}>
                   <Ionicons name="person" size={16} color="#1976d2" style={{ marginRight: 4 }} />
                   <Text style={styles.headerCell}>Student Details</Text>
+                  <TouchableOpacity 
+                    style={styles.clearButton}
+                    onPress={() => {
+                      Alert.alert(
+                        'Clear Attendance',
+                        'Are you sure you want to clear all attendance marks? This will permanently delete the attendance records for this date.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { 
+                            text: 'Clear All', 
+                            style: 'destructive',
+                            onPress: async () => {
+                              try {
+                                setLoading(true);
+                                
+                                // Delete attendance records from database
+                                const { error: deleteError } = await supabase
+                                  .from(TABLES.STUDENT_ATTENDANCE)
+                                  .delete()
+                                  .eq('date', selectedDate)
+                                  .eq('class_id', selectedClass);
+                                
+                                if (deleteError) {
+                                  console.error('Error deleting attendance records:', deleteError);
+                                  Alert.alert('Error', 'Failed to clear attendance records from database.');
+                                  return;
+                                }
+                                
+                                // Clear local state
+                                setAttendanceMark({});
+                                setClearMode(true);
+                                
+                                Alert.alert('Success', 'Attendance records cleared successfully!');
+                                console.log('Attendance records cleared from database and local state');
+                                
+                              } catch (error) {
+                                console.error('Error clearing attendance:', error);
+                                Alert.alert('Error', 'Failed to clear attendance records.');
+                              } finally {
+                                setLoading(false);
+                              }
+                            }
+                          }
+                        ]
+                      );
+                    }}
+                  >
+                    <Ionicons name="refresh" size={14} color="#ff9800" />
+                    <Text style={styles.clearButtonText}>Clear</Text>
+                  </TouchableOpacity>
                 </View>
                 <View style={[styles.headerCellContainer, { flex: 1 }]}>
                   <Ionicons name="close" size={18} color="#f44336" style={{ marginRight: 4 }} />
@@ -722,7 +794,14 @@ const TakeAttendance = () => {
                   <input 
                     type="date" 
                     value={viewDate} 
-                    onChange={e => setViewDate(e.target.value)} 
+                    onChange={e => {
+                      // Reset clear mode when date is changed via web input
+                      if (clearMode) {
+                        setClearMode(false);
+                        console.log('Clear mode deactivated - date changed via web input');
+                      }
+                      setViewDate(e.target.value);
+                    }} 
                     style={styles.webInput}
                   />
                 ) : (
@@ -1246,23 +1325,30 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     textAlign: 'center',
   },
-  // Instruction container styles
-  instructionContainer: {
+  // Clear button styles
+  clearButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#e3f2fd',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#2196F3',
-  },
-  instructionText: {
-    flex: 1,
+    backgroundColor: '#fff3e0',
+    borderWidth: 1,
+    borderColor: '#ffb74d',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     marginLeft: 8,
-    fontSize: 14,
-    color: '#1565c0',
-    lineHeight: 20,
+    elevation: 1,
+    shadowColor: '#ff9800',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  clearButtonText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#ff9800',
+    marginLeft: 3,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 });
 

@@ -12,6 +12,7 @@ import {
   RefreshControl,
   Platform,
 } from 'react-native';
+// import { WebView } from 'react-native-webview'; // Optional - using simple preview instead
 import { Ionicons } from '@expo/vector-icons';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isToday } from 'date-fns';
 import { LineChart, BarChart } from 'react-native-chart-kit';
@@ -47,13 +48,12 @@ const TERMS = generateTerms();
 
 
 
-// Generate months dynamically up to current month only
+// Generate months dynamically - include all months for navigation
 const generateMonths = () => {
   const months = [];
   const currentDate = new Date();
   const currentYear = currentDate.getFullYear();
-  const currentMonth = currentDate.getMonth(); // 0-indexed (0 = January)
-  const years = [currentYear - 1, currentYear]; // Previous and current year only
+  const years = [currentYear - 1, currentYear, currentYear + 1]; // Previous, current, and next year
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -62,14 +62,11 @@ const generateMonths = () => {
 
   years.forEach(year => {
     monthNames.forEach((monthName, index) => {
-      // Only include months up to current month
-      if (year < currentYear || (year === currentYear && index <= currentMonth)) {
-        const monthValue = `${year}-${String(index + 1).padStart(2, '0')}`;
-        months.push({
-          label: `${monthName} ${year}`,
-          value: monthValue
-        });
-      }
+      const monthValue = `${year}-${String(index + 1).padStart(2, '0')}`;
+      months.push({
+        label: `${monthName} ${year}`,
+        value: monthValue
+      });
     });
   });
 
@@ -132,6 +129,8 @@ const AttendanceSummary = () => {
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [showMonthSelect, setShowMonthSelect] = useState(false);
   const [showTermSelect, setShowTermSelect] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState('');
   
   // New state for Supabase data
   const [attendanceData, setAttendanceData] = useState({});
@@ -142,9 +141,15 @@ const AttendanceSummary = () => {
   const [dashboardAttendance, setDashboardAttendance] = useState([]);
   const { user } = useAuth();
 
-  // Pull-to-refresh functionality
+  // Pull-to-refresh functionality with enhanced reload
   const { refreshing, onRefresh } = usePullToRefresh(async () => {
+    console.log('🔄 Pull-to-refresh triggered - Reloading attendance data...');
+    setError(null);
     await fetchAttendanceData();
+    
+    // Only show real data - no generated attendance
+    
+    console.log('✅ Pull-to-refresh completed');
   });
 
   // Fetch attendance data with improved error handling
@@ -153,7 +158,8 @@ const AttendanceSummary = () => {
       setLoading(true);
       setError(null);
 
-      console.log('AttendanceSummary - Starting data fetch for user:', user?.id);
+      console.log('🔍 [DEBUG] AttendanceSummary - Starting data fetch for user:', user?.id);
+      console.log('🔍 [DEBUG] Current time:', new Date().toISOString());
 
       if (!user?.id) {
         throw new Error('No user logged in');
@@ -164,19 +170,20 @@ const AttendanceSummary = () => {
       let parentError = null;
 
       try {
-        // Strategy 1: Use the same method as ParentDashboard
-        const { data: parentUserData, error: parentErr } = await dbHelpers.getParentByUserId(user.id);
-        parentError = parentErr;
+        // Strategy 1: Check if user has linked_parent_of field directly
+        console.log('🔍 [STRATEGY 1] Getting user data to check linked_parent_of field');
+        const { data: userData, error: userError } = await supabase
+          .from(TABLES.USERS)
+          .select('id, email, full_name, linked_parent_of, linked_student_id, role_id')
+          .eq('id', user.id)
+          .single();
         
-        console.log('AttendanceSummary - Parent user data:', parentUserData);
-        console.log('AttendanceSummary - Parent error:', parentError);
+        console.log('🔍 [USER DATA] User data result:', { userData, userError });
         
-        if (!parentError && parentUserData) {
-          if (parentUserData.students && parentUserData.students.length > 0) {
-            studentDetails = parentUserData.students[0];
-            console.log('AttendanceSummary - Found student via students array:', studentDetails.name);
-          } else if (parentUserData.linked_parent_of) {
-            console.log('AttendanceSummary - Trying linked_parent_of:', parentUserData.linked_parent_of);
+        if (!userError && userData) {
+          // Check if this user is linked as a parent
+          if (userData.linked_parent_of) {
+            console.log('🔍 [PARENT LINK] User is linked as parent of student ID:', userData.linked_parent_of);
             
             const { data: studentData, error: studentError } = await supabase
               .from(TABLES.STUDENTS)
@@ -188,73 +195,126 @@ const AttendanceSummary = () => {
                 dob,
                 gender,
                 address,
-                profile_url,
                 class_id,
                 classes(id, class_name, section)
               `)
-              .eq('id', parentUserData.linked_parent_of)
+              .eq('id', userData.linked_parent_of)
               .single();
+              
+            console.log('🔍 [STUDENT QUERY] Student query result:', { studentData, studentError });
               
             if (!studentError && studentData) {
               studentDetails = studentData;
-              console.log('AttendanceSummary - Found student via linked_parent_of:', studentDetails.name);
+              console.log('✅ [STUDENT FOUND] Found student via linked_parent_of:', studentDetails.name);
+              console.log('✅ [STUDENT FOUND] Student ID:', studentDetails.id);
+              console.log('✅ [STUDENT FOUND] Class ID:', studentDetails.class_id);
+            } else {
+              console.log('❌ [STUDENT ERROR] Failed to fetch student data:', studentError);
             }
           }
+          
+          // Strategy 1B: Check if this user is linked as a student
+          if (!studentDetails && userData.linked_student_id) {
+            console.log('🔍 [STUDENT LINK] User is linked as student ID:', userData.linked_student_id);
+            
+            const { data: studentData, error: studentError } = await supabase
+              .from(TABLES.STUDENTS)
+              .select(`
+                id,
+                name,
+                admission_no,
+                roll_no,
+                dob,
+                gender,
+                address,
+                class_id,
+                classes(id, class_name, section)
+              `)
+              .eq('id', userData.linked_student_id)
+              .single();
+              
+            console.log('🔍 [STUDENT QUERY] Student query result:', { studentData, studentError });
+              
+            if (!studentError && studentData) {
+              studentDetails = studentData;
+              console.log('✅ [STUDENT FOUND] Found student via linked_student_id:', studentDetails.name);
+              console.log('✅ [STUDENT FOUND] Student ID:', studentDetails.id);
+              console.log('✅ [STUDENT FOUND] Class ID:', studentDetails.class_id);
+            } else {
+              console.log('❌ [STUDENT ERROR] Failed to fetch student data:', studentError);
+            }
+          }
+        } else {
+          console.log('❌ [USER ERROR] Failed to fetch user data:', userError);
+          parentError = userError;
         }
       } catch (err) {
-        console.error('AttendanceSummary - Error in parent/student lookup:', err);
+        console.error('AttendanceSummary - Error in user/student lookup:', err);
         parentError = err;
       }
 
-      // Strategy 2: Direct student lookup if user is a student
+      // Strategy 2: Check parents table for this user's email
       if (!studentDetails) {
         try {
-          console.log('AttendanceSummary - Trying direct student lookup');
-          const { data: directStudentData, error: directStudentError } = await supabase
-            .from(TABLES.STUDENTS)
+          console.log('🔍 [STRATEGY 2] Checking parents table for user email:', user.email);
+          const { data: parentRecords, error: parentsError } = await supabase
+            .from(TABLES.PARENTS)
             .select(`
               id,
+              student_id,
               name,
-              admission_no,
-              roll_no,
-              dob,
-              gender,
-              address,
-              profile_url,
-              class_id,
-              classes(id, class_name, section)
+              relation,
+              students(
+                id,
+                name,
+                admission_no,
+                roll_no,
+                dob,
+                gender,
+                address,
+                class_id,
+                classes(id, class_name, section)
+              )
             `)
-            .eq('user_id', user.id)
-            .single();
+            .eq('email', user.email);
             
-          if (!directStudentError && directStudentData) {
-            studentDetails = directStudentData;
-            console.log('AttendanceSummary - Found student via direct lookup:', studentDetails.name);
+          console.log('🔍 [PARENTS QUERY] Parents query result:', { parentRecords, parentsError });
+          
+          if (!parentsError && parentRecords && parentRecords.length > 0) {
+            const parentRecord = parentRecords[0]; // Take the first one if multiple
+            if (parentRecord.students) {
+              studentDetails = parentRecord.students;
+              console.log('✅ [STUDENT FOUND] Found student via parents table:', studentDetails.name);
+              console.log('✅ [STUDENT FOUND] Student ID:', studentDetails.id);
+              console.log('✅ [STUDENT FOUND] Class ID:', studentDetails.class_id);
+            }
+          } else {
+            console.log('❌ [PARENTS ERROR] No parent record found for email:', user.email);
           }
         } catch (err) {
-          console.log('AttendanceSummary - Direct student lookup failed:', err);
+          console.log('❌ [PARENTS LOOKUP] Parents table lookup failed:', err);
         }
       }
       
-  // If we still don't have student data, use sample data
-  if (!studentDetails) {
-    console.log('AttendanceSummary - No student data found, using sample data');
-    studentDetails = {
-      id: '00000000-0000-0000-0000-000000000001', // Valid UUID format for sample data
-      name: 'Sample Student',
-      admission_no: 'ADM2024001',
-      roll_no: 42,
-      profile_url: null, // Add profile picture field
-      class_id: '00000000-0000-0000-0000-000000000002', // Valid UUID format for sample class
-      academic_year: '2024-2025',
-      classes: {
-        id: '00000000-0000-0000-0000-000000000002',
-        class_name: 'Class 10',
-        section: 'A',
-        academic_year: '2024-2025'
+      // Log final student details status
+      if (studentDetails) {
+        console.log('🎯 [FINAL STUDENT] Using REAL student data:', {
+          id: studentDetails.id,
+          name: studentDetails.name,
+          admission_no: studentDetails.admission_no,
+          class_id: studentDetails.class_id,
+          isRealData: !studentDetails.id.startsWith('00000000')
+        });
+      } else {
+        console.log('⚠️ [NO STUDENT] No student data found anywhere!');
+        console.log('🔍 [DEBUG] No student data found via any lookup strategy');
+        
+        // No student data found - set error and return
+        console.log('❌ [NO DATA] No student data found. Cannot proceed without proper parent-student linkage.');
+        setError('No student linked to this parent account. Please contact school administration.');
+        setLoading(false);
+        return;
       }
-    };
-  }
 
       setStudentData(studentDetails);
 
@@ -263,18 +323,29 @@ const AttendanceSummary = () => {
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth() + 1; // getMonth() returns 0-11, so add 1
 
-      // Now fetch attendance data with multiple fallback strategies
-      try {
-        console.log('AttendanceSummary - Fetching attendance for student:', studentDetails.id);
+        // Only proceed with real student data - no fallback to sample data
+          console.log('✅ [REAL DATA] Student ID appears to be real. Proceeding with database query.');
+          console.log('✅ [REAL DATA] Real Student ID:', studentDetails.id);
         
-        let allAttendanceData = null;
-        let attendanceError = null;
-        
-        // Strategy 1: Try the configured table name
-        try {
-          console.log('AttendanceSummary - TABLES.STUDENT_ATTENDANCE value:', TABLES.STUDENT_ATTENDANCE);
+          // Now fetch attendance data with multiple fallback strategies
+          try {
+            console.log('🔍 [ATTENDANCE FETCH] Starting attendance fetch for student:', studentDetails.id);
+            console.log('🔍 [ATTENDANCE FETCH] Student details:', {
+              id: studentDetails.id,
+              name: studentDetails.name,
+              class_id: studentDetails.class_id,
+              admission_no: studentDetails.admission_no
+            });
+            
+            let allAttendanceData = null;
+            let attendanceError = null;
+            
+            // Strategy 1: Use student_attendance table as per schema
+            try {
+              console.log('🔍 [ATTENDANCE FETCH] Strategy 1: Using student_attendance table');
+          
           const { data, error } = await supabase
-            .from(TABLES.STUDENT_ATTENDANCE)
+            .from('student_attendance')
             .select(`
               id,
               student_id,
@@ -287,14 +358,42 @@ const AttendanceSummary = () => {
             .eq('student_id', studentDetails.id)
             .order('date', { ascending: false });
             
+        console.log('🔍 [ATTENDANCE FETCH] Strategy 1 - Raw response:', {
+            data: data,
+            error: error,
+            dataLength: data ? data.length : 0
+          });
+          
+          // Add detailed logging of fetched data
+          if (data && data.length > 0) {
+            console.log('📋 [DETAILED DATA] Raw attendance records:', JSON.stringify(data, null, 2));
+            console.log('📋 [DATA STRUCTURE] First record structure:', {
+              id: data[0].id,
+              student_id: data[0].student_id,
+              class_id: data[0].class_id,
+              date: data[0].date,
+              status: data[0].status,
+              marked_by: data[0].marked_by,
+              created_at: data[0].created_at
+            });
+          }
+            
           if (!error) {
             allAttendanceData = data;
-            console.log('AttendanceSummary - Found attendance via TABLES.STUDENT_ATTENDANCE');
+            console.log('✅ [ATTENDANCE FETCH] Strategy 1 SUCCESS - Found', data?.length || 0, 'records');
+            if (data && data.length > 0) {
+              console.log('📊 [ATTENDANCE FETCH] Sample records:', data.slice(0, 3));
+              console.log('📊 [ATTENDANCE FETCH] Date range:', {
+                earliest: data[data.length - 1]?.date,
+                latest: data[0]?.date
+              });
+            }
           } else {
+            console.log('❌ [ATTENDANCE FETCH] Strategy 1 ERROR:', error);
             attendanceError = error;
           }
         } catch (err) {
-          console.log('AttendanceSummary - TABLES.STUDENT_ATTENDANCE failed:', err);
+          console.log('❌ [ATTENDANCE FETCH] Strategy 1 EXCEPTION:', err);
           attendanceError = err;
         }
         
@@ -366,21 +465,109 @@ const AttendanceSummary = () => {
         console.log('=== FETCHED ATTENDANCE DATA FROM student_attendance TABLE ===');
         console.log('Total records found:', allAttendanceData?.length || 0);
         console.log('Sample records:', allAttendanceData?.slice(0, 3));
+        
+        // Log each record in detail with attendance status analysis
+        if (allAttendanceData && allAttendanceData.length > 0) {
+          console.log('📊 [ALL RECORDS] Complete attendance data:');
+          console.log('=' .repeat(80));
+          
+          allAttendanceData.forEach((record, index) => {
+            const recordDate = new Date(record.date + 'T00:00:00');
+            const dayOfWeek = recordDate.getDay(); // 0=Sunday, 6=Saturday
+            const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek];
+            const markedTime = record.created_at ? new Date(record.created_at).toLocaleTimeString() : 'Not recorded';
+            const isPresent = record.status === 'Present';
+            const isAbsent = record.status === 'Absent';
+            
+            // Basic record info
+            console.log(`\n📝 [RECORD ${index + 1}/${allAttendanceData.length}] Attendance Details:`);
+            console.log(`   📅 Date: ${record.date} (${dayName})`);
+            console.log(`   👨‍🎓 Student ID: ${record.student_id}`);
+            console.log(`   🏫 Class ID: ${record.class_id}`);
+            console.log(`   🆔 Record ID: ${record.id}`);
+            
+            // Attendance status with detailed analysis
+            if (isPresent) {
+              console.log(`   ✅ STATUS: PRESENT`);
+              console.log(`   🟢 [PRESENT DETAILS]:`);
+              console.log(`      ⏰ Marked at: ${markedTime}`);
+              console.log(`      👤 Marked by: ${record.marked_by || 'System'}`);
+              console.log(`      📊 Status Code: ${record.status}`);
+              console.log(`      🎯 Attendance Result: Student was IN SCHOOL`);
+            } else if (isAbsent) {
+              console.log(`   ❌ STATUS: ABSENT`);
+              console.log(`   🔴 [ABSENT DETAILS]:`);
+              console.log(`      ⏰ Marked at: ${markedTime}`);
+              console.log(`      👤 Marked by: ${record.marked_by || 'System'}`);
+              console.log(`      📊 Status Code: ${record.status}`);
+              console.log(`      🚫 Attendance Result: Student was NOT IN SCHOOL`);
+            } else {
+              console.log(`   ⚠️ STATUS: UNKNOWN (${record.status})`);
+              console.log(`   🟡 [UNKNOWN DETAILS]:`);
+              console.log(`      ⏰ Marked at: ${markedTime}`);
+              console.log(`      👤 Marked by: ${record.marked_by || 'System'}`);
+              console.log(`      📊 Status Code: ${record.status}`);
+              console.log(`      ❓ Attendance Result: UNCLEAR STATUS`);
+            }
+            
+            // Day analysis
+            console.log(`   📆 Day Analysis:`);
+            console.log(`      🗓️ Day of Week: ${dayName} (${dayOfWeek})`);
+            console.log(`      🏫 School Day: ${dayOfWeek === 0 ? 'NO (Sunday - Holiday)' : dayOfWeek === 6 ? 'YES (Saturday)' : 'YES (Weekday)'}`);
+            
+            // Record timestamp analysis
+            if (record.created_at) {
+              const createdDate = new Date(record.created_at);
+              const timeDiff = new Date() - createdDate;
+              const daysAgo = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+              console.log(`   ⏱️ Record Age: ${daysAgo} days ago`);
+              console.log(`   📝 Created: ${createdDate.toLocaleString()}`);
+            }
+            
+            console.log(`   ${'─'.repeat(60)}`);
+          });
+          
+          // Summary statistics
+          const totalRecords = allAttendanceData.length;
+          const presentCount = allAttendanceData.filter(r => r.status === 'Present').length;
+          const absentCount = allAttendanceData.filter(r => r.status === 'Absent').length;
+          const unknownCount = totalRecords - presentCount - absentCount;
+          const attendancePercentage = totalRecords > 0 ? Math.round((presentCount / totalRecords) * 100) : 0;
+          
+          console.log(`\n📈 [ATTENDANCE SUMMARY]:`);
+          console.log(`   📊 Total Records: ${totalRecords}`);
+          console.log(`   ✅ Present Days: ${presentCount}`);
+          console.log(`   ❌ Absent Days: ${absentCount}`);
+          console.log(`   ⚠️ Unknown Status: ${unknownCount}`);
+          console.log(`   📈 Attendance Percentage: ${attendancePercentage}%`);
+          console.log(`   🎯 Attendance Grade: ${attendancePercentage >= 90 ? 'Excellent' : attendancePercentage >= 75 ? 'Good' : attendancePercentage >= 60 ? 'Average' : 'Needs Improvement'}`);
+          
+          console.log('=' .repeat(80));
+        }
 
         // Process attendance data into calendar format - Skip Sundays entirely
         const processedAttendanceData = {};
         const monthlyStats = {};
 
-        (allAttendanceData || []).forEach(record => {
+        (allAttendanceData || []).forEach((record, index) => {
+          console.log(`🔄 [PROCESSING] Record ${index + 1}/${allAttendanceData.length}:`, {
+            date: record.date,
+            status: record.status,
+            student_id: record.student_id
+          });
+          
           // Safety check for valid date format
           if (!record.date || typeof record.date !== 'string') {
-            console.warn('Invalid date format in attendance record:', record.date);
+            console.warn('❌ Invalid date format in attendance record:', record.date);
             return;
           }
           
           try {
             const recordDate = new Date(record.date + 'T00:00:00'); // Add time to avoid timezone issues
             const dayOfWeek = recordDate.getDay(); // 0 = Sunday, 6 = Saturday
+            const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek];
+            
+            console.log(`📅 [DATE ANALYSIS] ${record.date} is a ${dayName} (dayOfWeek: ${dayOfWeek})`);
             
             // Skip Sundays completely - they shouldn't be in attendance records
             if (dayOfWeek === 0) {
@@ -391,31 +578,46 @@ const AttendanceSummary = () => {
             const monthKey = format(recordDate, 'yyyy-MM');
             const dateKey = record.date;
             
+            console.log(`🗂️ [GROUPING] Adding to monthKey: ${monthKey}, dateKey: ${dateKey}`);
+            
             // Initialize month data if not exists
             if (!processedAttendanceData[monthKey]) {
               processedAttendanceData[monthKey] = {};
+              console.log(`📁 [NEW MONTH] Created new month data for ${monthKey}`);
             }
             if (!monthlyStats[monthKey]) {
               monthlyStats[monthKey] = { present: 0, absent: 0, total: 0 };
+              console.log(`📊 [NEW STATS] Created new stats for ${monthKey}`);
             }
             
-            // Store attendance record
-            processedAttendanceData[monthKey][dateKey] = {
-              status: record.status.toLowerCase(), // Normalize to lowercase
+            // Store attendance record - status from schema is 'Present' or 'Absent' (capitalized)
+            const processedRecord = {
+              status: record.status.toLowerCase(), // Convert to lowercase for UI consistency
               time: record.created_at ? format(new Date(record.created_at), 'HH:mm') : 'N/A',
               marked_by: record.marked_by,
               record_id: record.id
             };
+            
+            processedAttendanceData[monthKey][dateKey] = processedRecord;
+            console.log(`✅ [STORED] Record stored:`, {
+              monthKey,
+              dateKey,
+              originalStatus: record.status,
+              processedStatus: processedRecord.status,
+              time: processedRecord.time
+            });
 
-            // Update monthly stats (excluding Sundays)
+            // Update monthly stats (excluding Sundays) - check capitalized status as per schema
             monthlyStats[monthKey].total++;
             if (record.status === 'Present') {
               monthlyStats[monthKey].present++;
+              console.log(`📈 [STATS] Incremented present count for ${monthKey}:`, monthlyStats[monthKey]);
             } else if (record.status === 'Absent') {
               monthlyStats[monthKey].absent++;
+              console.log(`📉 [STATS] Incremented absent count for ${monthKey}:`, monthlyStats[monthKey]);
             }
           } catch (err) {
-            console.warn('Error processing attendance record:', record.date, err);
+            console.warn('❌ Error processing attendance record:', record.date, err);
           }
         });
 
@@ -428,78 +630,63 @@ const AttendanceSummary = () => {
         console.log('=== PROCESSED ATTENDANCE DATA ===');
         console.log('Months with data:', Object.keys(processedAttendanceData));
         console.log('Monthly stats:', monthlyStats);
-        console.log('Current month data sample:', processedAttendanceData[format(currentDate, 'yyyy-MM')]);
+        
+        const currentMonthKey = format(currentDate, 'yyyy-MM');
+        console.log(`📅 [CURRENT MONTH] Looking for data in month: ${currentMonthKey}`);
+        console.log('Current month data sample:', processedAttendanceData[currentMonthKey]);
+        
+        // Log detailed breakdown of processed data
+        Object.keys(processedAttendanceData).forEach(monthKey => {
+          const monthData = processedAttendanceData[monthKey];
+          const dateKeys = Object.keys(monthData);
+          console.log(`📊 [MONTH DETAIL] ${monthKey}:`, {
+            totalDays: dateKeys.length,
+            dates: dateKeys.sort(),
+            stats: monthlyStats[monthKey]
+          });
+          
+          // Show first few records for this month
+          dateKeys.slice(0, 3).forEach(dateKey => {
+            console.log(`  📝 [SAMPLE] ${dateKey}:`, monthData[dateKey]);
+          });
+        });
+        
         console.log('=================================');
 
         // Set processed data
         setAttendanceData(processedAttendanceData);
         
-        // Set current month records for dashboard display (excluding Sundays)
-        const currentMonthKey = format(currentDate, 'yyyy-MM');
-        const currentMonthRecords = (allAttendanceData || []).filter(record => {
-          if (!record.date) return false;
-          
-          try {
-            const recordDate = new Date(record.date + 'T00:00:00');
-            const dayOfWeek = recordDate.getDay();
-            
-            // Skip Sundays
-            if (dayOfWeek === 0) return false;
-            
-            const recordMonthKey = format(recordDate, 'yyyy-MM');
-            return recordMonthKey === currentMonthKey;
+            // Set current month records for dashboard display (excluding Sundays)
+            const dashboardMonthKey = format(currentDate, 'yyyy-MM');
+            const currentMonthRecords = (allAttendanceData || []).filter(record => {
+              if (!record.date) return false;
+              
+              try {
+                const recordDate = new Date(record.date + 'T00:00:00');
+                const dayOfWeek = recordDate.getDay();
+                
+                // Skip Sundays
+                if (dayOfWeek === 0) return false;
+                
+                const recordMonthKey = format(recordDate, 'yyyy-MM');
+                return recordMonthKey === currentMonthKey;
+              } catch (err) {
+                return false;
+              }
+            });
+
+            setDashboardAttendance(currentMonthRecords || []);
+
           } catch (err) {
-            return false;
+            console.error('AttendanceSummary - Error fetching attendance data:', err);
+            setDashboardAttendance([]);
+            setAttendanceData({});
+            setError('Failed to fetch attendance data. Please try again.');
           }
-        });
-
-        setDashboardAttendance(currentMonthRecords || []);
-
-      } catch (err) {
-        console.error('AttendanceSummary - Error fetching attendance data:', err);
-        setDashboardAttendance([]);
-        setAttendanceData({});
-      }
 
     } catch (err) {
       console.error('AttendanceSummary - Error fetching attendance data:', err);
-
-      // Use sample data on error
-      const sampleStudent = {
-        id: '00000000-0000-0000-0000-000000000001', // Valid UUID format for sample data
-        name: 'Sample Student',
-        admission_no: 'ADM2024001',
-        class_id: '00000000-0000-0000-0000-000000000002', // Valid UUID format for sample class
-        roll_no: 42,
-        academic_year: '2024-2025',
-        classes: {
-          id: '00000000-0000-0000-0000-000000000002',
-          class_name: 'Class 10',
-          section: 'A',
-          academic_year: '2024-2025'
-        }
-      };
-
-      setStudentData(sampleStudent);
-
-      // Generate sample attendance data
-      const currentDate = new Date();
-      const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-      const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-      const sampleAttendance = generateSampleAttendanceData(monthStart, monthEnd);
-
-      setDashboardAttendance(sampleAttendance);
-
-      // Set sample monthly data
-      const monthKey = format(currentDate, 'yyyy-MM');
-      const sampleMonthlyData = {};
-      sampleMonthlyData[monthKey] = sampleAttendance.reduce((acc, record) => {
-        acc[record.date] = record.status;
-        return acc;
-      }, {});
-      setAttendanceData(sampleMonthlyData);
-
-      setError('Using sample data - connection issue');
+      setError('Failed to load attendance data. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -517,13 +704,12 @@ const AttendanceSummary = () => {
 
       // Validate student ID before making database query
       if (!isValidUUID(studentId)) {
-        console.log('AttendanceSummary - Invalid student ID, using sample data:', studentId);
-        const sampleAttendance = generateSampleAttendanceData(monthStart, monthEnd);
-        setDashboardAttendance(sampleAttendance);
+        console.log('AttendanceSummary - Invalid student ID:', studentId);
+        setDashboardAttendance([]);
         return;
       }
 
-      // Query using proper schema: student_attendance table with joins
+      // Query student_attendance table as per schema (without joins to avoid complexity)
       const { data: attendanceData, error: attendanceError } = await supabase
         .from('student_attendance')
         .select(`
@@ -533,17 +719,7 @@ const AttendanceSummary = () => {
           date,
           status,
           marked_by,
-          created_at,
-          students!inner (
-            id,
-            name,
-            admission_no
-          ),
-          classes!inner (
-            id,
-            class_name,
-            section
-          )
+          created_at
         `)
         .eq('student_id', studentId)
         .gte('date', monthStart.toISOString().split('T')[0])
@@ -552,9 +728,7 @@ const AttendanceSummary = () => {
 
       if (attendanceError) {
         console.log('AttendanceSummary - Database error:', attendanceError);
-        // Use sample data on database error
-        const sampleAttendance = generateSampleAttendanceData(monthStart, monthEnd);
-        setDashboardAttendance(sampleAttendance);
+        setDashboardAttendance([]);
         return;
       }
 
@@ -563,19 +737,12 @@ const AttendanceSummary = () => {
       if (attendanceData && attendanceData.length > 0) {
         setDashboardAttendance(attendanceData);
       } else {
-        // No real data found, use sample data
-        console.log('AttendanceSummary - No attendance records found, using sample data');
-        const sampleAttendance = generateSampleAttendanceData(monthStart, monthEnd);
-        setDashboardAttendance(sampleAttendance);
+        console.log('AttendanceSummary - No attendance records found');
+        setDashboardAttendance([]);
       }
     } catch (err) {
       console.log('AttendanceSummary - Error fetching dashboard attendance:', err);
-      // Use sample data on error
-      const currentDate = new Date();
-      const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-      const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-      const sampleAttendance = generateSampleAttendanceData(monthStart, monthEnd);
-      setDashboardAttendance(sampleAttendance);
+      setDashboardAttendance([]);
     }
   };
 
@@ -586,32 +753,8 @@ const AttendanceSummary = () => {
 
       // Validate student ID before making database query
       if (!isValidUUID(studentId)) {
-        console.log('AttendanceSummary - Invalid student ID, using sample data:', studentId);
-        // Generate sample data for the past 6 months
-        const organizedData = {};
-        const currentDate = new Date();
-
-        for (let i = 0; i < 6; i++) {
-          const monthDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
-          const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() - i + 1, 0);
-          const monthKey = format(monthDate, 'yyyy-MM');
-
-          const sampleAttendance = generateSampleAttendanceData(monthDate, monthEnd);
-          organizedData[monthKey] = {};
-
-          sampleAttendance.forEach(record => {
-            organizedData[monthKey][record.date] = {
-              status: record.status === 'Present' ? 'present' : 'absent',
-              subject: 'All',
-              reason: null,
-              marked_by: record.marked_by,
-              record_id: record.id,
-              raw_record: record
-            };
-          });
-        }
-
-        setAttendanceData(organizedData);
+        console.log('AttendanceSummary - Invalid student ID:', studentId);
+        setAttendanceData({});
         return;
       }
 
@@ -642,31 +785,7 @@ const AttendanceSummary = () => {
 
       if (attendanceError) {
         console.log('AttendanceSummary - Database error fetching records:', attendanceError);
-        // Use sample data on error
-        const organizedData = {};
-        const currentDate = new Date();
-
-        for (let i = 0; i < 6; i++) {
-          const monthDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
-          const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() - i + 1, 0);
-          const monthKey = format(monthDate, 'yyyy-MM');
-
-          const sampleAttendance = generateSampleAttendanceData(monthDate, monthEnd);
-          organizedData[monthKey] = {};
-
-          sampleAttendance.forEach(record => {
-            organizedData[monthKey][record.date] = {
-              status: record.status === 'Present' ? 'present' : 'absent',
-              subject: 'All',
-              reason: null,
-              marked_by: record.marked_by,
-              record_id: record.id,
-              raw_record: record
-            };
-          });
-        }
-
-        setAttendanceData(organizedData);
+        setAttendanceData({});
         return;
       }
 
@@ -863,65 +982,49 @@ const AttendanceSummary = () => {
     }
   };
 
-  // Generate Saturday attendance data manually
-  const generateSaturdayAttendance = () => {
-    const currentDate = new Date();
-    const currentMonth = currentDate.getMonth();
-    const currentYear = currentDate.getFullYear();
-    const monthKey = format(currentDate, 'yyyy-MM');
-
-    // Find all Saturdays in current month
-    const saturdays = [];
-    for (let day = 1; day <= 31; day++) {
-      const testDate = new Date(currentYear, currentMonth, day);
-      if (testDate.getMonth() === currentMonth && testDate.getDay() === 6) {
-        saturdays.push(testDate);
-      }
-    }
-
-    console.log(`🎯 Found ${saturdays.length} Saturdays in current month:`, saturdays.map(d => d.toDateString()));
-
-    // Generate attendance for each Saturday
-    const saturdayAttendance = {};
-    saturdays.forEach((saturday, index) => {
-      const dateStr = format(saturday, 'yyyy-MM-dd');
-      const isPresent = index % 2 === 0; // Alternate Present/Absent for demo
-
-      saturdayAttendance[dateStr] = {
-        status: isPresent ? 'present' : 'absent',
-        subject: 'Saturday Classes',
-        reason: null,
-        marked_by: 'system',
-        record_id: `saturday-${saturday.getTime()}`,
-        created_at: saturday.toISOString()
-      };
-
-      console.log(`🎯 Generated Saturday attendance: ${dateStr} - ${isPresent ? 'Present' : 'Absent'}`);
-    });
-
-    // Update attendance data with Saturday records
-    setAttendanceData(prevData => ({
-      ...prevData,
-      [monthKey]: {
-        ...prevData[monthKey],
-        ...saturdayAttendance
-      }
-    }));
-
-    console.log('🎯 Saturday attendance data added to state');
-  };
+  // Remove Saturday attendance generation - only show real data
 
   // Fetch data on component mount
   useEffect(() => {
     fetchAttendanceData();
   }, []);
-
-  // Generate Saturday attendance after initial data load
+  
+  // Set up real-time subscription when student data is available
   useEffect(() => {
-    if (!loading && studentData) {
-      generateSaturdayAttendance();
-    }
-  }, [loading, studentData]);
+    if (!studentData?.id) return;
+    
+    console.log('🔄 Setting up real-time subscription for student:', studentData.id);
+    
+    // Set up real-time subscription to listen for attendance updates
+    const attendanceSubscription = supabase
+      .channel('parent-attendance-updates')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'student_attendance'
+      }, (payload) => {
+        console.log('🔄 Real-time attendance update received:', payload);
+        
+        // Check if this update is for our student
+        if (payload.new && payload.new.student_id === studentData.id) {
+          console.log('📊 Refreshing attendance data due to real-time update');
+          // Refresh attendance data when our student's attendance changes
+          fetchAttendanceData();
+        } else if (payload.old && payload.old.student_id === studentData.id) {
+          console.log('📊 Refreshing attendance data due to real-time update (deleted record)');
+          // Also refresh for deleted records
+          fetchAttendanceData();
+        }
+      })
+      .subscribe();
+
+    return () => {
+      console.log('🔌 Cleaning up attendance subscription for student:', studentData.id);
+      attendanceSubscription.unsubscribe();
+    };
+  }, [studentData?.id]);
+
+  // Removed Saturday attendance generation - only show real data from database
 
   // Fetch subjects when student data is available
   useEffect(() => {
@@ -1074,6 +1177,12 @@ const AttendanceSummary = () => {
     total: Object.values(currentMonthData).length
   };
   const currentMonthPercentage = currentMonthStats.total > 0 ? Math.round((currentMonthStats.present / currentMonthStats.total) * 100) : 0;
+  
+  // Log current month data analysis
+  console.log('🔍 [CURRENT MONTH ANALYSIS] Current month data keys:', Object.keys(currentMonthData));
+  console.log('🔍 [CURRENT MONTH ANALYSIS] Current month data values:', Object.values(currentMonthData));
+  console.log('🔍 [CURRENT MONTH ANALYSIS] Filtering for present:', Object.values(currentMonthData).filter(day => day.status === 'present'));
+  console.log('🔍 [CURRENT MONTH ANALYSIS] Filtering for absent:', Object.values(currentMonthData).filter(day => day.status === 'absent'));
 
   console.log('=== ATTENDANCE SUMMARY CALCULATION (INCLUDES SATURDAY) ===');
   console.log('Dashboard records (Mon-Sat):', totalRecords);
@@ -1597,40 +1706,20 @@ const AttendanceSummary = () => {
               </TouchableOpacity>
               
               <TouchableOpacity
-                style={[
-                  styles.modernNavButton,
-                  // Check if we can navigate to next month
-                  displayMonth.getTime() >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() &&
-                  styles.disabledModernNavButton
-                ]}
+                style={styles.modernNavButton}
                 onPress={() => {
                   const newMonth = new Date(displayMonth);
-                  const currentDate = new Date();
                   newMonth.setMonth(newMonth.getMonth() + 1);
-
-                  // Only allow navigation if the new month is not in the future
-                  if (newMonth.getTime() <= new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getTime()) {
-                    setDisplayMonth(newMonth);
-                  }
+                  setDisplayMonth(newMonth);
                 }}
-                disabled={
-                  displayMonth.getTime() >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime()
-                }
                 activeOpacity={0.7}
               >
                 <View style={styles.navButtonContent}>
-                  <Text style={[
-                    styles.navButtonText,
-                    displayMonth.getTime() >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() &&
-                    styles.disabledNavText
-                  ]}>Next</Text>
+                  <Text style={styles.navButtonText}>Next</Text>
                   <Ionicons 
                     name="chevron-forward" 
                     size={20} 
-                    color={
-                      displayMonth.getTime() >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime()
-                        ? "#bdc1c6" : "#4285F4"
-                    } 
+                    color="#4285F4"
                   />
                 </View>
               </TouchableOpacity>
@@ -1672,6 +1761,18 @@ const AttendanceSummary = () => {
                     const isSaturday = day.getDay() === 6;
                     const dayNumber = format(day, 'd');
                     const dayKey = `${dateStr}-${uniqueKey}`; // Ensure absolute uniqueness
+                    
+                    // Log calendar day processing for current month only
+                    if (isCurrentMonth && (attendance || isSunday)) {
+                      console.log(`📅 [CALENDAR DAY] ${dateStr}:`, {
+                        dayNumber,
+                        isCurrentDay,
+                        isSunday,
+                        isSaturday,
+                        hasAttendance: !!attendance,
+                        attendanceData: attendance
+                      });
+                    }
 
                     return (
                       <TouchableOpacity
@@ -1680,6 +1781,10 @@ const AttendanceSummary = () => {
                           styles.googleCalendarDay,
                           isCurrentDay && styles.googleTodayDay,
                           !isCurrentMonth && styles.googleOtherMonthDay,
+                          // Add background colors based on attendance status
+                          attendance && isCurrentMonth && !isSunday && attendance.status === 'present' && styles.presentDay,
+                          attendance && isCurrentMonth && !isSunday && attendance.status === 'absent' && styles.absentDay,
+                          isSunday && isCurrentMonth && styles.holidayDay,
                         ]}
                         onPress={() => {
                           if (attendance && isCurrentMonth) {
@@ -1832,6 +1937,31 @@ const AttendanceSummary = () => {
           >
             <Ionicons name="download" size={20} color="#fff" />
             <Text style={styles.actionButtonText}>Download Report</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[styles.actionButton, { backgroundColor: '#4CAF50', marginLeft: 12 }]}
+            onPress={async () => {
+              console.log('🔄 Manual refresh requested');
+              console.log('Current student data:', {
+                id: studentData?.id,
+                name: studentData?.name,
+                class_id: studentData?.class_id
+              });
+              
+              setLoading(true);
+              await fetchAttendanceData();
+              setLoading(false);
+              
+              Alert.alert(
+                'Refresh Complete',
+                `Student: ${studentData?.name || 'Unknown'}\nID: ${studentData?.id || 'Unknown'}\nAttendance records: ${Object.keys(attendanceData).length} months`,
+                [{ text: 'OK' }]
+              );
+            }}
+          >
+            <Ionicons name="refresh" size={20} color="#fff" />
+            <Text style={styles.actionButtonText}>Refresh Data</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -1997,19 +2127,8 @@ const AttendanceSummary = () => {
                   onPress={() => {
                     setShowMonthSelect(false);
                     setTimeout(async () => {
-                      // Use actual school and student info
-                      const schoolName = schoolInfo.name;
-                      const schoolLogoUrl = schoolInfo.logoUrl;
-                      const studentName = STUDENT_INFO.name;
-                      const profilePicUrl = STUDENT_INFO.profilePicUrl;
-                      console.log('DEBUG PDF - STUDENT_INFO values:', {
-                        name: STUDENT_INFO.name,
-                        rollNo: STUDENT_INFO.rollNo,
-                        admissionNo: STUDENT_INFO.admissionNo,
-                        profilePicUrl: STUDENT_INFO.profilePicUrl
-                      });
+                      // Generate HTML content for preview
                       const monthLabel = m.label;
-                      // Attendance data for the selected month
                       const [year, month] = m.value.split('-').map(Number);
                       const monthData = attendanceData[m.value] || {};
                       const firstDay = new Date(year, month - 1, 1);
@@ -2028,14 +2147,14 @@ const AttendanceSummary = () => {
                         if ((startWeekday + day) % 7 === 0) calendarTable += '</tr><tr>';
                       }
                       calendarTable += '</tr></table>';
-                      // Legend HTML - Only show Present and Absent (no late/excused)
+                      
                       const legendHtml = `
                         <div style="display:flex;gap:16px;margin-top:16px;align-items:center;justify-content:center;">
                           <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#4CAF50;border-radius:4px;margin-right:6px;"></span>Present</span>
                           <span style="display:flex;align-items:center;"><span style="display:inline-block;width:16px;height:16px;background:#F44336;border-radius:4px;margin-right:6px;"></span>Absent</span>
                         </div>
                       `;
-                      // Enhanced Profile picture HTML - using base64 or placeholder with better styling
+                      
                       const profilePic = STUDENT_INFO.profilePicUrl && STUDENT_INFO.profilePicUrl.trim()
                         ? `<div style="width:80px;height:80px;border-radius:50%;overflow:hidden;border:3px solid #2196F3;margin-right:16px;display:flex;align-items:center;justify-content:center;background:#f0f0f0;">
                              <img src="${STUDENT_INFO.profilePicUrl}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';this.parentElement.innerHTML='<div style=\"font-size:24px;color:#666;font-weight:bold;\">${STUDENT_INFO.name.charAt(0).toUpperCase()}</div>';"/>
@@ -2044,7 +2163,6 @@ const AttendanceSummary = () => {
                              <span style="color:white;font-size:28px;font-weight:bold;">${STUDENT_INFO.name.charAt(0).toUpperCase()}</span>
                            </div>`;
                       
-                      // Enhanced School logo HTML with better placeholder
                       const schoolLogo = schoolInfo.logoUrl && schoolInfo.logoUrl.trim()
                         ? `<div style="width:70px;height:70px;border-radius:12px;overflow:hidden;border:2px solid #ddd;margin-right:20px;display:flex;align-items:center;justify-content:center;background:#fff;">
                              <img src="${schoolInfo.logoUrl}" style="width:100%;height:100%;object-fit:contain;" onerror="this.style.display='none';this.parentElement.innerHTML='<div style=\"font-size:16px;color:#666;font-weight:bold;text-align:center;\">LOGO</div>';"/>
@@ -2058,6 +2176,7 @@ const AttendanceSummary = () => {
                         <html>
                           <head>
                             <meta charset="UTF-8">
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
                             <title>Attendance Report - ${STUDENT_INFO.name}</title>
                             <style>
                               body { 
@@ -2065,6 +2184,7 @@ const AttendanceSummary = () => {
                                 margin: 20px; 
                                 background: #f8f9fa;
                                 color: #333;
+                                line-height: 1.6;
                               }
                               .header-container {
                                 background: white;
@@ -2124,6 +2244,7 @@ const AttendanceSummary = () => {
                                 text-align: center; 
                                 border: 1px solid #e0e0e0;
                                 font-weight: 500;
+                                vertical-align: middle;
                               }
                               th { 
                                 background: linear-gradient(135deg, #2196F3, #1976D2);
@@ -2140,6 +2261,17 @@ const AttendanceSummary = () => {
                                 font-weight: bold;
                                 margin-bottom: 24px;
                                 text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                              }
+                              .calendar-section {
+                                background: white;
+                                padding: 20px;
+                                border-radius: 12px;
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                              }
+                              .calendar-title {
+                                color: #1976d2;
+                                margin-top: 0;
+                                margin-bottom: 16px;
                               }
                             </style>
                           </head>
@@ -2163,23 +2295,18 @@ const AttendanceSummary = () => {
                                 </div>
                               </div>
                             </div>
-                            <div style="background:white;padding:20px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
-                              <h3 style="color:#1976d2;margin-top:0;">📅 Attendance Calendar</h3>
+                            <div class="calendar-section">
+                              <h3 class="calendar-title">📅 Attendance Calendar</h3>
                               ${calendarTable}
                               ${legendHtml}
                             </div>
                           </body>
                         </html>
                       `;
-                      try {
-                        const { uri } = await Print.printToFileAsync({ html: htmlContent });
-                        await Sharing.shareAsync(uri, {
-                          mimeType: 'application/pdf',
-                          dialogTitle: 'Share Attendance Report',
-                        });
-                      } catch (error) {
-                        Alert.alert('Error', 'Failed to generate PDF');
-                      }
+                      
+                      // Show preview first
+                      setPreviewHtml(htmlContent);
+                      setShowPreview(true);
                     }, 300);
                   }}
                 >
@@ -2194,6 +2321,111 @@ const AttendanceSummary = () => {
               <Text style={styles.downloadCancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
+        </View>
+      </Modal>
+
+      {/* Simple Report Preview Modal without WebView */}
+      <Modal
+        visible={showPreview}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => setShowPreview(false)}
+      >
+        <View style={styles.previewContainer}>
+          <View style={styles.previewHeader}>
+            <TouchableOpacity 
+              style={styles.previewCloseButton}
+              onPress={() => setShowPreview(false)}
+            >
+              <Ionicons name="close" size={24} color="#666" />
+              <Text style={styles.previewHeaderText}>Close</Text>
+            </TouchableOpacity>
+            <Text style={styles.previewTitle}>Attendance Report Preview</Text>
+            <TouchableOpacity 
+              style={styles.previewDownloadButton}
+              onPress={async () => {
+                try {
+                  const { uri } = await Print.printToFileAsync({ html: previewHtml });
+                  await Sharing.shareAsync(uri, {
+                    mimeType: 'application/pdf',
+                    dialogTitle: 'Share Attendance Report',
+                  });
+                  setShowPreview(false);
+                } catch (error) {
+                  Alert.alert('Error', 'Failed to generate PDF');
+                }
+              }}
+            >
+              <Ionicons name="download" size={20} color="#fff" />
+              <Text style={styles.previewDownloadText}>Download PDF</Text>
+            </TouchableOpacity>
+          </View>
+          
+          {/* Simple preview content without WebView */}
+          <ScrollView style={styles.simplePreview} showsVerticalScrollIndicator={true}>
+            <View style={styles.previewCard}>
+              <View style={styles.previewSchoolHeader}>
+                <View style={styles.previewSchoolLogo}>
+                  <Ionicons name="school" size={24} color="#2196F3" />
+                </View>
+                <View>
+                  <Text style={styles.previewSchoolName}>{schoolInfo.name}</Text>
+                  <Text style={styles.previewSchoolAddress}>{schoolInfo.address}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.previewStudentInfo}>
+                <View style={styles.previewStudentAvatar}>
+                  <Text style={styles.previewAvatarText}>{STUDENT_INFO.name.charAt(0).toUpperCase()}</Text>
+                </View>
+                <View>
+                  <Text style={styles.previewStudentName}>{STUDENT_INFO.name}</Text>
+                  <Text style={styles.previewStudentDetails}>Class: {STUDENT_INFO.class} | Roll: {STUDENT_INFO.rollNo}</Text>
+                  <Text style={styles.previewStudentDetails}>Section: {STUDENT_INFO.section} | Admission: {STUDENT_INFO.admissionNo}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.previewStatsSection}>
+                <Text style={styles.previewSectionTitle}>📊 Attendance Statistics</Text>
+                <View style={styles.previewStatsGrid}>
+                  <View style={styles.previewStatBox}>
+                    <Ionicons name="checkmark-circle" size={32} color="#4CAF50" />
+                    <Text style={styles.previewStatNumber}>{getAttendanceStats().present}</Text>
+                    <Text style={styles.previewStatLabel}>Present</Text>
+                  </View>
+                  <View style={styles.previewStatBox}>
+                    <Ionicons name="close-circle" size={32} color="#F44336" />
+                    <Text style={styles.previewStatNumber}>{getAttendanceStats().absent}</Text>
+                    <Text style={styles.previewStatLabel}>Absent</Text>
+                  </View>
+                  <View style={styles.previewStatBox}>
+                    <Ionicons name="trending-up" size={32} color="#2196F3" />
+                    <Text style={styles.previewStatNumber}>{getAttendanceStats().percentage}%</Text>
+                    <Text style={styles.previewStatLabel}>Attendance</Text>
+                  </View>
+                </View>
+              </View>
+              
+              <View style={styles.previewCalendarSection}>
+                <Text style={styles.previewSectionTitle}>📅 Current Month Overview</Text>
+                <View style={styles.previewCalendarInfo}>
+                  <Text style={styles.previewCalendarText}>Month: {format(displayMonth, 'MMMM yyyy')}</Text>
+                  <Text style={styles.previewCalendarText}>School Days: {currentMonthStats.total}</Text>
+                  <Text style={styles.previewCalendarText}>Present Days: {currentMonthStats.present}</Text>
+                  <Text style={styles.previewCalendarText}>Absent Days: {currentMonthStats.absent}</Text>
+                  <Text style={styles.previewCalendarText}>Monthly Percentage: {currentMonthPercentage}%</Text>
+                </View>
+              </View>
+              
+              <View style={styles.previewNotesSection}>
+                <Text style={styles.previewSectionTitle}>📝 Report Notes</Text>
+                <Text style={styles.previewNoteText}>• This report includes Saturday attendance as working days</Text>
+                <Text style={styles.previewNoteText}>• Sundays are marked as holidays (no school)</Text>
+                <Text style={styles.previewNoteText}>• PDF will include detailed calendar with all attendance records</Text>
+                <Text style={styles.previewNoteText}>• Report generated on {format(new Date(), 'dd/MM/yyyy')} at {format(new Date(), 'HH:mm')}</Text>
+              </View>
+            </View>
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -3105,13 +3337,24 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
 
+  // Background color styles for attendance status
+  presentDay: {
+    backgroundColor: '#e8f5e8', // Light green background for present days
+  },
+  absentDay: {
+    backgroundColor: '#ffebee', // Light red background for absent days
+  },
+  holidayDay: {
+    backgroundColor: '#fff3e0', // Light orange background for holidays (Sundays)
+  },
+
   // Modern Navigation Header Styles
   modernCalendarNavHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 20,
-    paddingHorizontal: 8,
+    paddingHorizontal: 12,
     paddingVertical: 12,
     backgroundColor: '#f8f9fa',
     borderRadius: 12,
@@ -3121,7 +3364,7 @@ const styles = StyleSheet.create({
   modernNavButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 8,
     backgroundColor: '#ffffff',
@@ -3132,7 +3375,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 1,
-    minWidth: 80,
+    minWidth: 70,
+    maxWidth: 80,
   },
   disabledModernNavButton: {
     backgroundColor: '#f8f9fa',
@@ -3156,7 +3400,7 @@ const styles = StyleSheet.create({
   monthYearSelector: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 12,
     backgroundColor: '#ffffff',
     borderRadius: 8,
@@ -3167,8 +3411,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 1,
-    gap: 8,
-    minWidth: 160,
+    gap: 6,
+    flex: 1,
+    marginHorizontal: 8,
     justifyContent: 'center',
   },
   monthYearText: {
@@ -3176,6 +3421,224 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#3c4043',
     textAlign: 'center',
+  },
+
+  // Preview Modal Styles
+  previewContainer: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  previewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  previewCloseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  previewHeaderText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666',
+    marginLeft: 6,
+  },
+  previewTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+    flex: 1,
+    marginHorizontal: 16,
+  },
+  previewDownloadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#2196F3',
+    shadowColor: '#2196F3',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  previewDownloadText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    marginLeft: 6,
+  },
+  previewWebView: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  webViewLoading: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  webViewLoadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+  },
+
+  // Simple Preview Styles (without WebView)
+  simplePreview: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  previewCard: {
+    backgroundColor: '#fff',
+    margin: 16,
+    borderRadius: 12,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  previewSchoolHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  previewSchoolLogo: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#e3f2fd',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  previewSchoolName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2196F3',
+    marginBottom: 4,
+  },
+  previewSchoolAddress: {
+    fontSize: 14,
+    color: '#666',
+  },
+  previewStudentInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  previewStudentAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#2196F3',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  previewAvatarText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  previewStudentName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  previewStudentDetails: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2,
+  },
+  previewStatsSection: {
+    marginBottom: 24,
+  },
+  previewSectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 16,
+  },
+  previewStatsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  previewStatBox: {
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    minWidth: 80,
+  },
+  previewStatNumber: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  previewStatLabel: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  previewCalendarSection: {
+    marginBottom: 24,
+  },
+  previewCalendarInfo: {
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 8,
+  },
+  previewCalendarText: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 8,
+  },
+  previewNotesSection: {
+    backgroundColor: '#fff3e0',
+    padding: 16,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9800',
+  },
+  previewNoteText: {
+    fontSize: 13,
+    color: '#5d4037',
+    marginBottom: 6,
+    lineHeight: 18,
   },
 });
 

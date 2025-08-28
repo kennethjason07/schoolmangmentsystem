@@ -27,7 +27,6 @@ const MessageBadge = ({ userType, style, textStyle }) => {
         .eq('is_read', false);
 
       if (error) {
-        console.log('❌ MessageBadge: Error fetching unread messages:', error);
         return;
       }
 
@@ -36,7 +35,6 @@ const MessageBadge = ({ userType, style, textStyle }) => {
       setUnreadCount(count);
 
     } catch (error) {
-      console.log('💥 MessageBadge: Error in fetchUnreadCount:', error);
     }
   }, [user?.id, userType]);
 
@@ -116,11 +114,10 @@ const MessageBadge = ({ userType, style, textStyle }) => {
           if (status === 'SUBSCRIBED') {
             // console.log(`✅ MessageBadge (${userType}): Real-time working! (Bonus)`);
           } else if (status === 'CHANNEL_ERROR') {
-            console.log(`❌ MessageBadge (${userType}): Real-time failed, relying on polling`);
+            // Real-time failed, relying on polling
           }
         });
     } catch (error) {
-      console.log(`❌ MessageBadge (${userType}): Real-time setup failed:`, error);
     }
 
     // Cleanup function
@@ -133,7 +130,6 @@ const MessageBadge = ({ userType, style, textStyle }) => {
         try {
           realtimeSubscription.unsubscribe();
         } catch (error) {
-          console.log('Error unsubscribing:', error);
         }
       }
     };
