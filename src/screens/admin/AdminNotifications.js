@@ -93,16 +93,44 @@ const AdminNotifications = ({ navigation }) => {
       setReadNotifications(readIds);
 
       // Get notifications from notification_recipients table first (preferred method)
-      // Since admin notifications are stored with recipient_type 'Parent' as workaround
-      const { data: recipientNotifications, error: recipientError } = await supabase
+      // Try with 'Admin' recipient_type first, then fallback to 'Parent' if constraint not updated
+      let recipientNotifications = null;
+      let recipientError = null;
+      
+      // Try with Admin recipient type first
+      const { data: adminNotifications, error: adminError } = await supabase
         .from('notification_recipients')
         .select(`
           *,
           notification:notifications(*)
         `)
         .eq('recipient_id', user.id)
-        .eq('recipient_type', 'Parent') // Admin notifications use Parent type as workaround
+        .eq('recipient_type', 'Admin')
         .order('sent_at', { ascending: false });
+        
+      if (!adminError) {
+        recipientNotifications = adminNotifications;
+        console.log('✅ Using Admin recipient type for admin notifications');
+      } else {
+        console.log('🔄 Admin recipient type failed, trying Parent fallback...');
+        // Fallback to Parent type if Admin constraint not updated yet
+        const { data: fallbackNotifications, error: fallbackError } = await supabase
+          .from('notification_recipients')
+          .select(`
+            *,
+            notification:notifications(*)
+          `)
+          .eq('recipient_id', user.id)
+          .eq('recipient_type', 'Parent')
+          .order('sent_at', { ascending: false });
+          
+        recipientNotifications = fallbackNotifications;
+        recipientError = fallbackError;
+        
+        if (!fallbackError) {
+          console.log('✅ Using Parent fallback for admin notifications');
+        }
+      }
 
       let allNotifications = [];
 
@@ -124,15 +152,18 @@ const AdminNotifications = ({ navigation }) => {
       }
 
       // Also get general notifications not specifically targeted (fallback method)
+      // BUT exclude notifications sent by this admin to avoid seeing their own approval notifications
       const { data: generalNotifications, error: generalError } = await supabase
         .from('notifications')
         .select('*')
         .or(`sent_by.is.null,type.eq.General`)
+        .neq('sent_by', user.id) // Exclude notifications sent by this admin
         .order('created_at', { ascending: false });
 
       if (!generalError && generalNotifications) {
         const generalNotifs = generalNotifications
           .filter(item => !allNotifications.some(existing => existing.id === item.id)) // Avoid duplicates
+          .filter(item => item.sent_by !== user.id) // Additional safety check to exclude admin's own notifications
           .map(item => ({
             id: item.id,
             title: getNotificationTitle(item.type, item.message),
@@ -172,11 +203,32 @@ const AdminNotifications = ({ navigation }) => {
 
   const markAsRead = async (notificationId) => {
     try {
-      // Update the readNotifications set
+      console.log('🔔 Admin: Marking notification as read:', notificationId);
+      
+      // Update the notification_recipients table in the database
+      const { error: dbError } = await supabase
+        .from('notification_recipients')
+        .update({ 
+          is_read: true,
+          read_at: new Date().toISOString()
+        })
+        .eq('notification_id', notificationId)
+        .eq('recipient_id', user.id)
+        .eq('recipient_type', 'Admin');
+        
+      if (dbError) {
+        console.error('❌ Error updating notification in database:', dbError);
+        Alert.alert('Error', 'Failed to mark notification as read');
+        return;
+      }
+      
+      console.log('✅ Admin: Notification marked as read in database');
+      
+      // Update the readNotifications set for local state
       const newReadNotifications = new Set([...readNotifications, notificationId.toString()]);
       setReadNotifications(newReadNotifications);
       
-      // Save to AsyncStorage
+      // Save to AsyncStorage as backup
       await saveReadNotifications(newReadNotifications);
       
       // Update local state
@@ -189,24 +241,46 @@ const AdminNotifications = ({ navigation }) => {
       );
     } catch (error) {
       console.error('Error marking notification as read:', error);
+      Alert.alert('Error', 'Failed to mark notification as read');
     }
   };
 
   const markAllAsRead = async () => {
     try {
-      const unreadCount = notifications.filter(notif => !notif.isRead).length;
+      const unreadNotifications = notifications.filter(notif => !notif.isRead);
 
-      if (unreadCount === 0) {
+      if (unreadNotifications.length === 0) {
         Alert.alert('Info', 'All notifications are already read.');
         return;
       }
+
+      console.log('🔔 Admin: Marking all notifications as read, count:', unreadNotifications.length);
+      
+      // Update all unread notifications in the database
+      const { error: dbError } = await supabase
+        .from('notification_recipients')
+        .update({ 
+          is_read: true,
+          read_at: new Date().toISOString()
+        })
+        .eq('recipient_id', user.id)
+        .eq('recipient_type', 'Admin')
+        .eq('is_read', false);
+        
+      if (dbError) {
+        console.error('❌ Error marking all notifications as read in database:', dbError);
+        Alert.alert('Error', 'Failed to mark all notifications as read');
+        return;
+      }
+      
+      console.log('✅ Admin: All notifications marked as read in database');
 
       // Get all notification IDs
       const allNotificationIds = notifications.map(notif => notif.id.toString());
       const newReadNotifications = new Set(allNotificationIds);
       setReadNotifications(newReadNotifications);
       
-      // Save to AsyncStorage
+      // Save to AsyncStorage as backup
       await saveReadNotifications(newReadNotifications);
       
       // Update local state

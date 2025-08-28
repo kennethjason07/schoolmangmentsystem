@@ -29,7 +29,7 @@ import { format, addMonths } from 'date-fns';
 import { getEventDisplayProps } from '../../utils/eventIcons';
 import { useAuth } from '../../utils/AuthContext';
 import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
-import { useUnreadMessageCount } from '../../hooks/useUnreadMessageCount';
+import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCount';
 
 const { width } = Dimensions.get('window');
 
@@ -320,6 +320,10 @@ const AdminDashboard = ({ navigation }) => {
         loadDashboardData(),
         loadChartData()
       ]);
+      // Also refresh notification count
+      if (refreshNotificationCount) {
+        refreshNotificationCount();
+      }
     } catch (error) {
       console.error('Error refreshing dashboard:', error);
     } finally {
@@ -543,8 +547,24 @@ const AdminDashboard = ({ navigation }) => {
     { text: 'Exam scheduled: Mathematics for Class 4A', time: '1 day ago', icon: 'calendar' },
   ]);
 
-  // Use custom hook for unread message count
-  const { unreadCount: unreadMessageCount = 0 } = useUnreadMessageCount() || {};
+  // Use custom hook for unread notification count from notification_recipients table
+  const { unreadCount = 0, loading: notificationLoading, error: notificationError, refresh: refreshNotificationCount } = useUnreadNotificationCount('Admin') || {};
+  
+  // Debug the notification count only when needed
+  // console.log('📱 AdminDashboard - Notification count debug:', {
+  //   unreadCount,
+  //   notificationLoading,
+  //   notificationError,
+  //   userId: user?.id
+  // });
+
+  // Force refresh notification count when dashboard loads
+  useEffect(() => {
+    if (user?.id && refreshNotificationCount) {
+      // console.log('🔄 Force refreshing notification count on admin dashboard load');
+      refreshNotificationCount();
+    }
+  }, [user?.id, refreshNotificationCount]);
 
   const openAddActivityModal = () => {
     // This function is not fully implemented in the original file,
@@ -603,7 +623,7 @@ const AdminDashboard = ({ navigation }) => {
       <Header 
         title="Admin Dashboard" 
         showNotifications={true}
-        unreadCount={unreadMessageCount}
+        unreadCount={unreadCount}
         onNotificationsPress={() => navigation.navigate('AdminNotifications')}
       />
 

@@ -26,7 +26,6 @@ const LeaveApplication = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [myLeaves, setMyLeaves] = useState([]);
-  const [leaveBalance, setLeaveBalance] = useState(null);
   const [showApplicationForm, setShowApplicationForm] = useState(false);
   const [teacherProfile, setTeacherProfile] = useState(null);
 
@@ -54,10 +53,9 @@ const LeaveApplication = ({ navigation }) => {
   }, []);
 
   useEffect(() => {
-    // Reload leave applications and balance when teacherProfile changes
+    // Reload leave applications when teacherProfile changes
     if (teacherProfile?.linked_teacher_id) {
       loadMyLeaves();
-      loadLeaveBalance();
     }
   }, [teacherProfile]);
 
@@ -124,42 +122,6 @@ const LeaveApplication = ({ navigation }) => {
     }
   };
 
-  const loadLeaveBalance = async () => {
-    try {
-      if (!teacherProfile?.linked_teacher_id) return;
-
-      const currentYear = new Date().getFullYear().toString();
-      const { data, error } = await supabase
-        .from('teacher_leave_balance')
-        .select('*')
-        .eq('teacher_id', teacherProfile.linked_teacher_id)
-        .eq('academic_year', currentYear)
-        .single();
-
-      if (error && error.code !== 'PGRST116') {
-        throw error;
-      }
-
-      // If no balance record exists, create one with default values
-      if (!data) {
-        const { data: newBalance, error: insertError } = await supabase
-          .from('teacher_leave_balance')
-          .insert([{
-            teacher_id: teacherProfile.linked_teacher_id,
-            academic_year: currentYear,
-          }])
-          .select()
-          .single();
-
-        if (insertError) throw insertError;
-        setLeaveBalance(newBalance);
-      } else {
-        setLeaveBalance(data);
-      }
-    } catch (error) {
-      console.error('Error loading leave balance:', error);
-    }
-  };
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -181,39 +143,6 @@ const LeaveApplication = ({ navigation }) => {
 
       // Calculate total days
       const totalDays = differenceInDays(applicationForm.end_date, applicationForm.start_date) + 1;
-
-      // Check leave balance for specific leave types
-      if (leaveBalance && ['Sick Leave', 'Casual Leave', 'Earned Leave'].includes(applicationForm.leave_type)) {
-        let availableBalance = 0;
-        let usedBalance = 0;
-
-        switch (applicationForm.leave_type) {
-          case 'Sick Leave':
-            availableBalance = leaveBalance.sick_leave_total - leaveBalance.sick_leave_used;
-            usedBalance = leaveBalance.sick_leave_used;
-            break;
-          case 'Casual Leave':
-            availableBalance = leaveBalance.casual_leave_total - leaveBalance.casual_leave_used;
-            usedBalance = leaveBalance.casual_leave_used;
-            break;
-          case 'Earned Leave':
-            availableBalance = leaveBalance.earned_leave_total - leaveBalance.earned_leave_used;
-            usedBalance = leaveBalance.earned_leave_used;
-            break;
-        }
-
-        if (totalDays > availableBalance) {
-          Alert.alert(
-            'Insufficient Leave Balance',
-            `You have only ${availableBalance} days available for ${applicationForm.leave_type}. You are requesting ${totalDays} days.`,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Apply Anyway', onPress: () => submitApplication(totalDays) }
-            ]
-          );
-          return;
-        }
-      }
 
       await submitApplication(totalDays);
     } catch (error) {
@@ -315,40 +244,6 @@ const LeaveApplication = ({ navigation }) => {
     }
   };
 
-  const renderLeaveBalance = () => {
-    if (!leaveBalance) return null;
-
-    return (
-      <View style={styles.balanceContainer}>
-        <Text style={styles.balanceTitle}>Leave Balance ({leaveBalance.academic_year})</Text>
-        <View style={styles.balanceCards}>
-          <View style={styles.balanceCard}>
-            <Text style={styles.balanceCardTitle}>Sick Leave</Text>
-            <Text style={styles.balanceCardValue}>
-              {leaveBalance.sick_leave_total - leaveBalance.sick_leave_used}/{leaveBalance.sick_leave_total}
-            </Text>
-            <Text style={styles.balanceCardSubtitle}>Days Available</Text>
-          </View>
-          
-          <View style={styles.balanceCard}>
-            <Text style={styles.balanceCardTitle}>Casual Leave</Text>
-            <Text style={styles.balanceCardValue}>
-              {leaveBalance.casual_leave_total - leaveBalance.casual_leave_used}/{leaveBalance.casual_leave_total}
-            </Text>
-            <Text style={styles.balanceCardSubtitle}>Days Available</Text>
-          </View>
-          
-          <View style={styles.balanceCard}>
-            <Text style={styles.balanceCardTitle}>Earned Leave</Text>
-            <Text style={styles.balanceCardValue}>
-              {leaveBalance.earned_leave_total - leaveBalance.earned_leave_used}/{leaveBalance.earned_leave_total}
-            </Text>
-            <Text style={styles.balanceCardSubtitle}>Days Available</Text>
-          </View>
-        </View>
-      </View>
-    );
-  };
 
   const renderLeaveApplication = ({ item }) => {
     const startDate = parseISO(item.start_date);
@@ -449,8 +344,6 @@ const LeaveApplication = ({ navigation }) => {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={styles.scrollContainer}
       >
-        {/* Leave Balance Section */}
-        {renderLeaveBalance()}
 
         {/* Apply Leave Button */}
         <View style={styles.actionSection}>
@@ -640,23 +533,6 @@ const LeaveApplication = ({ navigation }) => {
                 />
               </View>
 
-              {/* Leave Balance Warning */}
-              {leaveBalance && ['Sick Leave', 'Casual Leave', 'Earned Leave'].includes(applicationForm.leave_type) && (
-                <View style={styles.balanceWarning}>
-                  <Ionicons name="information-circle" size={20} color="#2196F3" />
-                  <View style={styles.balanceWarningText}>
-                    <Text style={styles.balanceWarningTitle}>Leave Balance Check</Text>
-                    <Text style={styles.balanceWarningSubtitle}>
-                      {applicationForm.leave_type === 'Sick Leave' && 
-                        `Available: ${leaveBalance.sick_leave_total - leaveBalance.sick_leave_used} days`}
-                      {applicationForm.leave_type === 'Casual Leave' && 
-                        `Available: ${leaveBalance.casual_leave_total - leaveBalance.casual_leave_used} days`}
-                      {applicationForm.leave_type === 'Earned Leave' && 
-                        `Available: ${leaveBalance.earned_leave_total - leaveBalance.earned_leave_used} days`}
-                    </Text>
-                  </View>
-                </View>
-              )}
             </ScrollView>
 
             <View style={styles.modalActions}>
@@ -763,54 +639,6 @@ const styles = StyleSheet.create({
   scrollContainer: {
     flexGrow: 1,
     padding: 15,
-  },
-  balanceContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 15,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  balanceTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 15,
-  },
-  balanceCards: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  balanceCard: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 15,
-    paddingHorizontal: 10,
-    backgroundColor: '#F8F9FA',
-    borderRadius: 8,
-    marginHorizontal: 5,
-  },
-  balanceCardTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  balanceCardValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2196F3',
-    marginBottom: 4,
-  },
-  balanceCardSubtitle: {
-    fontSize: 10,
-    color: '#999',
-    textAlign: 'center',
   },
   actionSection: {
     marginBottom: 15,
@@ -1088,28 +916,6 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     minHeight: 100,
     lineHeight: 22,
-  },
-  balanceWarning: {
-    flexDirection: 'row',
-    backgroundColor: '#E3F2FD',
-    borderRadius: 8,
-    padding: 15,
-    marginBottom: 10,
-    alignItems: 'flex-start',
-  },
-  balanceWarningText: {
-    flex: 1,
-    marginLeft: 10,
-  },
-  balanceWarningTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1976D2',
-    marginBottom: 2,
-  },
-  balanceWarningSubtitle: {
-    fontSize: 13,
-    color: '#1976D2',
   },
   modalActions: {
     flexDirection: 'row',

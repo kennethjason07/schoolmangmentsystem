@@ -151,121 +151,6 @@ class LeaveService {
     }
   }
 
-  /**
-   * Get teacher leave balance
-   * @param {string} teacherId - Teacher ID
-   * @param {string} academicYear - Academic year (optional, defaults to current year)
-   * @returns {Object} Response with leave balance data
-   */
-  async getTeacherLeaveBalance(teacherId, academicYear = null) {
-    try {
-      const year = academicYear || new Date().getFullYear().toString();
-      
-      let { data, error } = await supabase
-        .from('teacher_leave_balance')
-        .select('*')
-        .eq('teacher_id', teacherId)
-        .eq('academic_year', year)
-        .single();
-
-      if (error && error.code === 'PGRST116') {
-        // No balance record exists, create one with default values
-        const { data: newBalance, error: insertError } = await supabase
-          .from('teacher_leave_balance')
-          .insert([{
-            teacher_id: teacherId,
-            academic_year: year,
-          }])
-          .select()
-          .single();
-
-        if (insertError) throw insertError;
-        data = newBalance;
-      } else if (error) {
-        throw error;
-      }
-
-      return {
-        success: true,
-        data,
-        message: 'Leave balance retrieved successfully'
-      };
-    } catch (error) {
-      console.error('Error fetching leave balance:', error);
-      return {
-        success: false,
-        error: error.message,
-        message: 'Failed to fetch leave balance'
-      };
-    }
-  }
-
-  /**
-   * Update teacher leave balance
-   * @param {string} teacherId - Teacher ID
-   * @param {string} leaveType - Type of leave
-   * @param {number} days - Number of days to add/subtract
-   * @param {string} academicYear - Academic year (optional)
-   * @returns {Object} Response with success status
-   */
-  async updateLeaveBalance(teacherId, leaveType, days, academicYear = null) {
-    try {
-      const year = academicYear || new Date().getFullYear().toString();
-      
-      // First, get current balance
-      const balanceResponse = await this.getTeacherLeaveBalance(teacherId, year);
-      if (!balanceResponse.success) {
-        throw new Error(balanceResponse.error);
-      }
-
-      const currentBalance = balanceResponse.data;
-      let updateData = {};
-
-      // Determine which field to update based on leave type
-      switch (leaveType) {
-        case 'Sick Leave':
-          updateData.sick_leave_used = Math.max(0, currentBalance.sick_leave_used + days);
-          break;
-        case 'Casual Leave':
-          updateData.casual_leave_used = Math.max(0, currentBalance.casual_leave_used + days);
-          break;
-        case 'Earned Leave':
-          updateData.earned_leave_used = Math.max(0, currentBalance.earned_leave_used + days);
-          break;
-        default:
-          // For other leave types, we don't track balance
-          return {
-            success: true,
-            message: 'Leave type does not require balance tracking'
-          };
-      }
-
-      updateData.updated_at = new Date().toISOString();
-
-      const { data, error } = await supabase
-        .from('teacher_leave_balance')
-        .update(updateData)
-        .eq('teacher_id', teacherId)
-        .eq('academic_year', year)
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      return {
-        success: true,
-        data,
-        message: 'Leave balance updated successfully'
-      };
-    } catch (error) {
-      console.error('Error updating leave balance:', error);
-      return {
-        success: false,
-        error: error.message,
-        message: 'Failed to update leave balance'
-      };
-    }
-  }
 
   /**
    * Get leave statistics for dashboard
@@ -470,8 +355,6 @@ export const {
   submitLeaveApplication,
   getLeaveApplications,
   updateLeaveStatus,
-  getTeacherLeaveBalance,
-  updateLeaveBalance,
   getLeaveStatistics,
   getUpcomingLeaves,
   checkTeacherAvailability,

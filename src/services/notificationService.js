@@ -556,12 +556,11 @@ export const createLeaveRequestNotificationForAdmins = async (leaveData, teacher
 
     // Step 3: Create notification recipients for all admins
     if (adminUsers && adminUsers.length > 0) {
-      // Since notification_recipients table only supports Student/Parent recipient_type,
-      // we use 'Parent' as a workaround for admin notifications
+      // Use proper Admin recipient_type for admin notifications
       const adminRecipients = adminUsers.map(admin => ({
         notification_id: notification.id,
         recipient_id: admin.id,
-        recipient_type: 'Parent', // Workaround: Use Parent type for admins
+        recipient_type: 'Admin', // Now using proper Admin recipient type
         delivery_status: 'Sent',
         sent_at: new Date().toISOString(),
         is_read: false
@@ -884,11 +883,11 @@ export const createLeaveStatusNotificationForTeacher = async (leaveData, status,
     console.log('✅ [LEAVE STATUS] Notification created:', notification.id);
 
     // Step 2: Create notification recipient for the teacher
-    // Since teachers are not directly supported in recipient_type, use 'Student' as workaround
+    // Now using proper Teacher recipient_type
     const recipientData = {
       notification_id: notification.id,
       recipient_id: teacherUser.id,
-      recipient_type: 'Student', // Workaround: Use Student type for teacher notifications
+      recipient_type: 'Teacher', // Now using proper Teacher recipient type
       delivery_status: 'Sent',
       sent_at: new Date().toISOString(),
       is_read: false

@@ -9,7 +9,6 @@ import {
   RefreshControl,
   ActivityIndicator
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { useAuth } from '../../utils/AuthContext';
@@ -19,7 +18,6 @@ const TeacherNotifications = ({ navigation }) => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [readNotifications, setReadNotifications] = useState(new Set());
   const { user } = useAuth();
 
   const getNotificationTitle = (type, message) => {
@@ -50,29 +48,6 @@ const TeacherNotifications = ({ navigation }) => {
     }
   };
 
-  // Load read notifications from AsyncStorage
-  const loadReadNotifications = async () => {
-    try {
-      if (!user?.id) return new Set();
-      const key = `teacher_read_notifications_${user.id}`;
-      const stored = await AsyncStorage.getItem(key);
-      return stored ? new Set(JSON.parse(stored)) : new Set();
-    } catch (error) {
-      console.error('Error loading read notifications:', error);
-      return new Set();
-    }
-  };
-
-  // Save read notifications to AsyncStorage
-  const saveReadNotifications = async (readIds) => {
-    try {
-      if (!user?.id) return;
-      const key = `teacher_read_notifications_${user.id}`;
-      await AsyncStorage.setItem(key, JSON.stringify([...readIds]));
-    } catch (error) {
-      console.error('Error saving read notifications:', error);
-    }
-  };
 
   const fetchNotifications = async () => {
     try {
@@ -81,7 +56,7 @@ const TeacherNotifications = ({ navigation }) => {
       console.log('📱 Fetching notifications for teacher user ID:', user.id);
 
       // Method: Use notification_recipients table to get notifications for this teacher
-      // Teachers use 'Student' recipient_type as workaround due to schema limitations
+      // Now using proper Teacher recipient_type after database constraint update
       const { data: teacherNotificationRecipients, error: recipientError } = await supabase
         .from('notification_recipients')
         .select(`
@@ -106,7 +81,7 @@ const TeacherNotifications = ({ navigation }) => {
           )
         `)
         .eq('recipient_id', user.id)
-        .eq('recipient_type', 'Student') // Teachers use Student type as workaround
+        .eq('recipient_type', 'Teacher') // Now using proper Teacher recipient type
         .order('sent_at', { ascending: false });
 
       if (recipientError) {
@@ -116,14 +91,37 @@ const TeacherNotifications = ({ navigation }) => {
       }
 
       console.log(`📨 Found ${teacherNotificationRecipients?.length || 0} notifications from recipients table`);
+      
+      // Debug: Check for duplicates by notification_id
+      if (teacherNotificationRecipients && teacherNotificationRecipients.length > 0) {
+        const notificationIds = teacherNotificationRecipients.map(r => r.notification_id);
+        const uniqueNotificationIds = [...new Set(notificationIds)];
+        
+        if (notificationIds.length !== uniqueNotificationIds.length) {
+          console.log('⚠️ DUPLICATE NOTIFICATIONS DETECTED!');
+          console.log('📊 Total recipients:', notificationIds.length);
+          console.log('📊 Unique notifications:', uniqueNotificationIds.length);
+          console.log('📋 All notification IDs:', notificationIds);
+          console.log('📋 Duplicate IDs:', notificationIds.filter((id, index) => notificationIds.indexOf(id) !== index));
+        }
+      }
 
       const teacherNotifications = [];
 
       if (teacherNotificationRecipients && teacherNotificationRecipients.length > 0) {
         // Transform recipient records into notification objects
+        const seenNotificationIds = new Set(); // Track seen notification IDs to prevent duplicates
+        
         for (const recipient of teacherNotificationRecipients) {
           const notification = recipient.notifications;
           if (!notification) continue;
+
+          // Skip if we've already processed this notification ID
+          if (seenNotificationIds.has(notification.id)) {
+            console.log('⚠️ Skipping duplicate notification ID:', notification.id);
+            continue;
+          }
+          seenNotificationIds.add(notification.id);
 
           // Determine type based on message content
           let notificationType = 'general';
@@ -148,6 +146,8 @@ const TeacherNotifications = ({ navigation }) => {
             source: 'notification_recipients'
           });
         }
+        
+        console.log('📊 Processed notifications after deduplication:', teacherNotifications.length);
       }
 
       // Sort notifications by creation date (newest first)
@@ -224,7 +224,7 @@ const TeacherNotifications = ({ navigation }) => {
           read_at: new Date().toISOString()
         })
         .eq('recipient_id', user.id)
-        .eq('recipient_type', 'Student') // Teachers use Student type as workaround
+        .eq('recipient_type', 'Teacher') // Now using proper Teacher recipient type
         .eq('is_read', false);
       
       if (updateError) {

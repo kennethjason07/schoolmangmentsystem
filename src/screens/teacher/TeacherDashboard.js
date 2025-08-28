@@ -10,6 +10,7 @@ import { Platform } from 'react-native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import MessageBadge from '../../components/MessageBadge';
+import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCount';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -986,36 +987,24 @@ function groupAndSortSchedule(schedule) {
     });
   };
 
-  // Notifications for teacher
-  const [unreadCount, setUnreadCount] = React.useState(0);
-  React.useEffect(() => {
-    const fetchUnread = async () => {
-      try {
-        if (!user?.id) return;
-        console.log('🔔 Fetching unread notification count for teacher:', user.id);
-        const { data, error } = await supabase
-          .from('notification_recipients')
-          .select('id, is_read')
-          .eq('recipient_type', 'Student') // Teachers use Student type as workaround
-          .eq('recipient_id', user.id)
-          .eq('is_read', false);
-        if (!error && data) {
-          setUnreadCount(data.length);
-          console.log(`🔔 Found ${data.length} unread notifications`);
-        } else if (error) {
-          console.error('❌ Error fetching unread notifications:', error);
-        }
-      } catch (e) {
-        console.log('Error fetching unread notifications:', e);
-        // silent fail for UI, but log for debugging
-      }
-    };
-    fetchUnread();
-    
-    // Set up interval to refresh notification count every 30 seconds
-    const interval = setInterval(fetchUnread, 30000);
-    return () => clearInterval(interval);
-  }, [user?.id]);
+  // Use custom hook for unread notification count from notification_recipients table
+  const { unreadCount = 0, loading: notificationLoading, error: notificationError, refresh: refreshNotificationCount } = useUnreadNotificationCount('Teacher') || {};
+  
+  // Debug the notification count only when needed
+  // console.log('📱 TeacherDashboard - Notification count debug:', {
+  //   unreadCount,
+  //   notificationLoading,
+  //   notificationError,
+  //   userId: user?.id
+  // });
+
+  // Force refresh notification count when dashboard loads
+  useEffect(() => {
+    if (user?.id && refreshNotificationCount) {
+      // console.log('🔄 Force refreshing notification count on dashboard load');
+      refreshNotificationCount();
+    }
+  }, [user?.id, refreshNotificationCount]);
 
   if (loading) {
     return (
