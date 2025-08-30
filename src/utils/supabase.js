@@ -1,11 +1,44 @@
 import { createClient } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 // Supabase configuration
 const supabaseUrl = 'https://dmagnsbdjsnzsddxqrwd.supabase.co';
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRtYWduc2JkanNuenNkZHhxcndkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI2NTQ2MTEsImV4cCI6MjA2ODIzMDYxMX0.VAo64FAcg1Mo4qA22FWwC7Kdq6AAiLTNeBOjFB9XTi8';
 
-// Create Supabase client
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Custom storage adapter for persistent sessions
+const customStorageAdapter = {
+  getItem: (key) => {
+    if (Platform.OS === 'web') {
+      return globalThis?.localStorage?.getItem(key) ?? null;
+    }
+    return AsyncStorage.getItem(key);
+  },
+  setItem: (key, value) => {
+    if (Platform.OS === 'web') {
+      globalThis?.localStorage?.setItem(key, value);
+      return;
+    }
+    return AsyncStorage.setItem(key, value);
+  },
+  removeItem: (key) => {
+    if (Platform.OS === 'web') {
+      globalThis?.localStorage?.removeItem(key);
+      return;
+    }
+    return AsyncStorage.removeItem(key);
+  },
+};
+
+// Create Supabase client with persistent session configuration
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    storage: customStorageAdapter,
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: Platform.OS === 'web',
+  },
+});
 
 // Utility functions
 export const isValidUUID = (uuid) => {

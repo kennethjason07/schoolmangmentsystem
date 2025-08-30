@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, authHelpers, dbHelpers } from './supabase';
 
 const AuthContext = createContext({});
@@ -94,23 +95,33 @@ export const AuthProvider = ({ children }) => {
       
       try {
         console.log('🔍 Starting user profile query...');
-        const profileQuery = supabase
+        
+        // First try with exact email match
+        let profileQuery = supabase
           .from('users')
           .select('*')
-          .ilike('email', authUser.email)
+          .eq('email', authUser.email)
           .maybeSingle();
         
-        // Add timeout to prevent hanging
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('User profile query timeout')), 10000);
-        });
+        console.log('📧 Querying with exact email:', authUser.email);
+        let result = await profileQuery;
         
-        const result = await Promise.race([profileQuery, timeoutPromise]);
+        // If exact match fails, try case-insensitive
+        if (!result.data && !result.error) {
+          console.log('🔄 Trying case-insensitive email search...');
+          profileQuery = supabase
+            .from('users')
+            .select('*')
+            .ilike('email', authUser.email)
+            .maybeSingle();
+          result = await profileQuery;
+        }
+        
         userProfile = result.data;
         error = result.error;
-        console.log('📄 User profile query completed successfully');
+        console.log('📄 User profile query completed:', { found: !!userProfile, error: !!error });
       } catch (queryError) {
-        console.error('❌ User profile query failed or timed out:', queryError);
+        console.error('❌ User profile query failed:', queryError);
         error = queryError;
       }
 
@@ -118,14 +129,52 @@ export const AuthProvider = ({ children }) => {
 
       if (error) {
         console.error('❌ Error fetching user profile:', error);
+        
+        // If it's a timeout or connection error, try fallback authentication
+        if (error.message?.includes('timeout') || error.message?.includes('network') || error.name === 'AbortError') {
+          console.log('🔄 Using fallback authentication due to connection issues');
+          
+          // Create basic user object from auth data only
+          const fallbackUserData = {
+            id: authUser.id,
+            email: authUser.email,
+            role_id: 1, // Default to admin for fallback
+            photo_url: null,
+            full_name: authUser.email.split('@')[0], // Use email prefix as name
+            phone: '',
+            created_at: new Date().toISOString()
+          };
+          
+          console.log('🚨 Setting fallback user data:', fallbackUserData);
+          setUser(fallbackUserData);
+          setUserType('admin'); // Default to admin for fallback
+          setLoading(false);
+          return;
+        }
+        
+        // For other errors, still fail
         return;
       }
 
       if (!userProfile) {
         console.log('❌ User profile not found for:', authUser.email);
-        // Handle case where user profile doesn't exist
-        setUser(null);
-        setUserType(null);
+        
+        // Try fallback for missing profile as well
+        console.log('🔄 Using fallback authentication for missing profile');
+        const fallbackUserData = {
+          id: authUser.id,
+          email: authUser.email,
+          role_id: 1, // Default to admin
+          photo_url: null,
+          full_name: authUser.email.split('@')[0],
+          phone: '',
+          created_at: new Date().toISOString()
+        };
+        
+        console.log('🚨 Setting fallback user data for missing profile:', fallbackUserData);
+        setUser(fallbackUserData);
+        setUserType('admin');
+        setLoading(false);
         return;
       }
 

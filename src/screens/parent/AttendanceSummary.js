@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Platform,
+  ScrollView,
 } from 'react-native';
 // import { WebView } from 'react-native-webview'; // Optional - using simple preview instead
 import { Ionicons } from '@expo/vector-icons';

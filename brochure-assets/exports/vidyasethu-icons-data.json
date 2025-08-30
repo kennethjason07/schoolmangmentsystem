@@ -1,0 +1,229 @@
+{
+  "meta": {
+    "name": "VidyaSethu Feature Icons",
+    "version": "1.0.0",
+    "description": "Official icons used in the VidyaSethu school management app",
+    "lastUpdated": "2025-08-28",
+    "library": "@expo/vector-icons (Ionicons)",
+    "brandColors": {
+      "primary": "#2196F3",
+      "success": "#4CAF50",
+      "warning": "#FF9800",
+      "purple": "#9C27B0",
+      "danger": "#F44336"
+    }
+  },
+  "icons": [
+    {
+      "id": "academic-management",
+      "feature": "Academic Management",
+      "ionicon": "school",
+      "color": "#4CAF50",
+      "colorName": "success",
+      "description": "Student & teacher profiles, classes, subjects, exams, grades",
+      "usageContext": [
+        "Student management",
+        "Teacher management", 
+        "Class management",
+        "Subject management",
+        "Exam management",
+        "Grade tracking"
+      ],
+      "alternativeIcons": ["book", "library"],
+      "sizes": {
+        "small": "16-24px",
+        "medium": "32-48px", 
+        "large": "64-128px",
+        "extraLarge": "256px+"
+      },
+      "webClass": "vidyasethu-icon vidyasethu-icon--academic",
+      "reactNative": "<Ionicons name=\"school\" size={24} color=\"#4CAF50\" />"
+    },
+    {
+      "id": "attendance-tracking",
+      "feature": "Attendance Tracking",
+      "ionicon": "checkmark-circle",
+      "color": "#4CAF50",
+      "colorName": "success",
+      "description": "Daily attendance for students & staff with analytics",
+      "usageContext": [
+        "Student attendance",
+        "Teacher attendance",
+        "Attendance analytics",
+        "Daily marking",
+        "Attendance reports"
+      ],
+      "alternativeIcons": ["time", "calendar", "close-circle"],
+      "sizes": {
+        "small": "16-24px",
+        "medium": "32-48px",
+        "large": "64-128px", 
+        "extraLarge": "256px+"
+      },
+      "webClass": "vidyasethu-icon vidyasethu-icon--attendance",
+      "reactNative": "<Ionicons name=\"checkmark-circle\" size={22} color=\"#4CAF50\" />"
+    },
+    {
+      "id": "finance-fees",
+      "feature": "Finance & Fees",
+      "ionicon": "card",
+      "color": "#2196F3",
+      "colorName": "primary",
+      "description": "Digital fee collection, expense tracking, reports",
+      "usageContext": [
+        "Fee payment",
+        "Fee collection",
+        "Expense tracking",
+        "Financial reports",
+        "Payment methods"
+      ],
+      "alternativeIcons": ["receipt-outline", "cash", "wallet"],
+      "sizes": {
+        "small": "16-24px",
+        "medium": "32-48px",
+        "large": "64-128px",
+        "extraLarge": "256px+"
+      },
+      "webClass": "vidyasethu-icon vidyasethu-icon--finance",
+      "reactNative": "<Ionicons name=\"card\" size={20} color=\"#2196F3\" />"
+    },
+    {
+      "id": "communication",
+      "feature": "Communication",
+      "ionicon": "chatbubbles",
+      "color": "#9C27B0",
+      "colorName": "purple",
+      "description": "In-App chat, SMS & WhatsApp notifications",
+      "usageContext": [
+        "Teacher-parent chat",
+        "Student communication",
+        "SMS notifications",
+        "WhatsApp integration",
+        "In-app messaging"
+      ],
+      "alternativeIcons": ["send", "notifications", "mail"],
+      "sizes": {
+        "small": "16-24px",
+        "medium": "32-48px",
+        "large": "64-128px",
+        "extraLarge": "256px+"
+      },
+      "webClass": "vidyasethu-icon vidyasethu-icon--communication",
+      "reactNative": "<Ionicons name=\"chatbubbles\" size={20} color=\"#9C27B0\" />"
+    },
+    {
+      "id": "reports-analytics", 
+      "feature": "Reports & Analytics",
+      "ionicon": "bar-chart",
+      "color": "#2196F3", 
+      "colorName": "primary",
+      "description": "Real-time dashboards, report cards, custom reports",
+      "usageContext": [
+        "Dashboard analytics",
+        "Academic reports",
+        "Attendance reports",
+        "Financial reports",
+        "Custom reports",
+        "Performance tracking"
+      ],
+      "alternativeIcons": ["analytics", "trending-up", "document-text"],
+      "sizes": {
+        "small": "16-24px",
+        "medium": "32-48px",
+        "large": "64-128px",
+        "extraLarge": "256px+"
+      },
+      "webClass": "vidyasethu-icon vidyasethu-icon--reports",
+      "reactNative": "<Ionicons name=\"bar-chart\" size={20} color=\"#2196F3\" />"
+    },
+    {
+      "id": "administration-tools",
+      "feature": "Administration Tools", 
+      "ionicon": "people",
+      "color": "#2196F3",
+      "colorName": "primary", 
+      "description": "Roles, events, tasks, leave management",
+      "usageContext": [
+        "User management",
+        "Role assignment", 
+        "Event management",
+        "Task management",
+        "Leave management",
+        "Administrative functions"
+      ],
+      "alternativeIcons": ["person", "settings", "cog"],
+      "sizes": {
+        "small": "16-24px",
+        "medium": "32-48px",
+        "large": "64-128px",
+        "extraLarge": "256px+"
+      },
+      "webClass": "vidyasethu-icon vidyasethu-icon--administration",
+      "reactNative": "<Ionicons name=\"people\" size={24} color=\"#2196F3\" />"
+    },
+    {
+      "id": "mobile-friendly",
+      "feature": "Mobile-Friendly",
+      "ionicon": "phone-portrait", 
+      "color": "#2196F3",
+      "colorName": "primary",
+      "description": "Access anytime via app with live updates",
+      "usageContext": [
+        "Mobile accessibility",
+        "Cross-platform support",
+        "Real-time sync",
+        "App features",
+        "Device compatibility"
+      ],
+      "alternativeIcons": ["desktop", "tablet-portrait", "devices"],
+      "sizes": {
+        "small": "16-24px",
+        "medium": "32-48px", 
+        "large": "64-128px",
+        "extraLarge": "256px+"
+      },
+      "webClass": "vidyasethu-icon vidyasethu-icon--mobile",
+      "reactNative": "<Ionicons name=\"phone-portrait\" size={20} color=\"#2196F3\" />"
+    }
+  ],
+  "cssClasses": {
+    "base": "vidyasethu-icon",
+    "sizes": {
+      "small": "vidyasethu-icon--small",
+      "medium": "vidyasethu-icon--medium", 
+      "large": "vidyasethu-icon--large",
+      "extraLarge": "vidyasethu-icon--xl"
+    },
+    "colors": {
+      "academic": "vidyasethu-icon--academic",
+      "attendance": "vidyasethu-icon--attendance",
+      "finance": "vidyasethu-icon--finance", 
+      "communication": "vidyasethu-icon--communication",
+      "reports": "vidyasethu-icon--reports",
+      "administration": "vidyasethu-icon--administration",
+      "mobile": "vidyasethu-icon--mobile"
+    }
+  },
+  "usageGuidelines": {
+    "do": [
+      "Use exact colors from the color palette",
+      "Maintain icon proportions",
+      "Keep consistent sizing within the same document",
+      "Use appropriate backgrounds",
+      "Follow feature descriptions provided"
+    ],
+    "dont": [
+      "Change icon colors arbitrarily",
+      "Stretch icons (maintain aspect ratio)",
+      "Use low-resolution versions",
+      "Mix with competing icon styles", 
+      "Use for features not described"
+    ]
+  },
+  "exportFormats": {
+    "svg": "vidyasethu-icons.svg",
+    "png": "Generated via IconExporter.js script",
+    "json": "vidyasethu-icons-data.json"
+  },
+  "brandConsistency": "These icons are extracted directly from the VidyaSethu app codebase to ensure 100% consistency between marketing materials and the actual application interface."
+}

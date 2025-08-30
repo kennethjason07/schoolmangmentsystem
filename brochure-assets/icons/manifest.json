@@ -1,0 +1,109 @@
+﻿{
+    "meta":  {
+                 "created":  "2025-08-28 22:29:39",
+                 "description":  "Icons from VidyaSethu school management app",
+                 "name":  "VidyaSethu Feature Icons",
+                 "version":  "1.0.0",
+                 "totalFiles":  42
+             },
+    "icons":  [
+                  {
+                      "color":  "#4CAF50",
+                      "ionicon":  "school",
+                      "fileName":  "academic-management",
+                      "sizes":  [
+                                    24,
+                                    32,
+                                    48,
+                                    64,
+                                    128,
+                                    256
+                                ],
+                      "feature":  "Academic Management"
+                  },
+                  {
+                      "color":  "#4CAF50",
+                      "ionicon":  "checkmark-circle",
+                      "fileName":  "attendance-tracking",
+                      "sizes":  [
+                                    24,
+                                    32,
+                                    48,
+                                    64,
+                                    128,
+                                    256
+                                ],
+                      "feature":  "Attendance Tracking"
+                  },
+                  {
+                      "color":  "#2196F3",
+                      "ionicon":  "card",
+                      "fileName":  "finance-fees",
+                      "sizes":  [
+                                    24,
+                                    32,
+                                    48,
+                                    64,
+                                    128,
+                                    256
+                                ],
+                      "feature":  "Finance \u0026 Fees"
+                  },
+                  {
+                      "color":  "#9C27B0",
+                      "ionicon":  "chatbubbles",
+                      "fileName":  "communication",
+                      "sizes":  [
+                                    24,
+                                    32,
+                                    48,
+                                    64,
+                                    128,
+                                    256
+                                ],
+                      "feature":  "Communication"
+                  },
+                  {
+                      "color":  "#2196F3",
+                      "ionicon":  "bar-chart",
+                      "fileName":  "reports-analytics",
+                      "sizes":  [
+                                    24,
+                                    32,
+                                    48,
+                                    64,
+                                    128,
+                                    256
+                                ],
+                      "feature":  "Reports \u0026 Analytics"
+                  },
+                  {
+                      "color":  "#2196F3",
+                      "ionicon":  "people",
+                      "fileName":  "administration-tools",
+                      "sizes":  [
+                                    24,
+                                    32,
+                                    48,
+                                    64,
+                                    128,
+                                    256
+                                ],
+                      "feature":  "Administration Tools"
+                  },
+                  {
+                      "color":  "#2196F3",
+                      "ionicon":  "phone-portrait",
+                      "fileName":  "mobile-friendly",
+                      "sizes":  [
+                                    24,
+                                    32,
+                                    48,
+                                    64,
+                                    128,
+                                    256
+                                ],
+                      "feature":  "Mobile-Friendly"
+                  }
+              ]
+}

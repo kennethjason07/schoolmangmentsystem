@@ -1,0 +1,224 @@
+{
+  "meta": {
+    "name": "VidyaSethu Feature Icons (PNG)",
+    "version": "1.0.0",
+    "description": "Proper PNG icons for VidyaSethu with actual shapes",
+    "total_files": 42,
+    "formats": [
+      "PNG"
+    ],
+    "sizes": [
+      24,
+      32,
+      48,
+      64,
+      128,
+      256
+    ]
+  },
+  "icons": {
+    "Academic Management": {
+      "color": "#4CAF50",
+      "files": [
+        {
+          "size": 24,
+          "filename": "vidyasethu-academic-management-24px.png"
+        },
+        {
+          "size": 32,
+          "filename": "vidyasethu-academic-management-32px.png"
+        },
+        {
+          "size": 48,
+          "filename": "vidyasethu-academic-management-48px.png"
+        },
+        {
+          "size": 64,
+          "filename": "vidyasethu-academic-management-64px.png"
+        },
+        {
+          "size": 128,
+          "filename": "vidyasethu-academic-management-128px.png"
+        },
+        {
+          "size": 256,
+          "filename": "vidyasethu-academic-management-256px.png"
+        }
+      ]
+    },
+    "Attendance Tracking": {
+      "color": "#4CAF50",
+      "files": [
+        {
+          "size": 24,
+          "filename": "vidyasethu-attendance-tracking-24px.png"
+        },
+        {
+          "size": 32,
+          "filename": "vidyasethu-attendance-tracking-32px.png"
+        },
+        {
+          "size": 48,
+          "filename": "vidyasethu-attendance-tracking-48px.png"
+        },
+        {
+          "size": 64,
+          "filename": "vidyasethu-attendance-tracking-64px.png"
+        },
+        {
+          "size": 128,
+          "filename": "vidyasethu-attendance-tracking-128px.png"
+        },
+        {
+          "size": 256,
+          "filename": "vidyasethu-attendance-tracking-256px.png"
+        }
+      ]
+    },
+    "Finance & Fees": {
+      "color": "#2196F3",
+      "files": [
+        {
+          "size": 24,
+          "filename": "vidyasethu-finance-fees-24px.png"
+        },
+        {
+          "size": 32,
+          "filename": "vidyasethu-finance-fees-32px.png"
+        },
+        {
+          "size": 48,
+          "filename": "vidyasethu-finance-fees-48px.png"
+        },
+        {
+          "size": 64,
+          "filename": "vidyasethu-finance-fees-64px.png"
+        },
+        {
+          "size": 128,
+          "filename": "vidyasethu-finance-fees-128px.png"
+        },
+        {
+          "size": 256,
+          "filename": "vidyasethu-finance-fees-256px.png"
+        }
+      ]
+    },
+    "Communication": {
+      "color": "#9C27B0",
+      "files": [
+        {
+          "size": 24,
+          "filename": "vidyasethu-communication-24px.png"
+        },
+        {
+          "size": 32,
+          "filename": "vidyasethu-communication-32px.png"
+        },
+        {
+          "size": 48,
+          "filename": "vidyasethu-communication-48px.png"
+        },
+        {
+          "size": 64,
+          "filename": "vidyasethu-communication-64px.png"
+        },
+        {
+          "size": 128,
+          "filename": "vidyasethu-communication-128px.png"
+        },
+        {
+          "size": 256,
+          "filename": "vidyasethu-communication-256px.png"
+        }
+      ]
+    },
+    "Reports & Analytics": {
+      "color": "#2196F3",
+      "files": [
+        {
+          "size": 24,
+          "filename": "vidyasethu-reports-analytics-24px.png"
+        },
+        {
+          "size": 32,
+          "filename": "vidyasethu-reports-analytics-32px.png"
+        },
+        {
+          "size": 48,
+          "filename": "vidyasethu-reports-analytics-48px.png"
+        },
+        {
+          "size": 64,
+          "filename": "vidyasethu-reports-analytics-64px.png"
+        },
+        {
+          "size": 128,
+          "filename": "vidyasethu-reports-analytics-128px.png"
+        },
+        {
+          "size": 256,
+          "filename": "vidyasethu-reports-analytics-256px.png"
+        }
+      ]
+    },
+    "Administration Tools": {
+      "color": "#2196F3",
+      "files": [
+        {
+          "size": 24,
+          "filename": "vidyasethu-administration-tools-24px.png"
+        },
+        {
+          "size": 32,
+          "filename": "vidyasethu-administration-tools-32px.png"
+        },
+        {
+          "size": 48,
+          "filename": "vidyasethu-administration-tools-48px.png"
+        },
+        {
+          "size": 64,
+          "filename": "vidyasethu-administration-tools-64px.png"
+        },
+        {
+          "size": 128,
+          "filename": "vidyasethu-administration-tools-128px.png"
+        },
+        {
+          "size": 256,
+          "filename": "vidyasethu-administration-tools-256px.png"
+        }
+      ]
+    },
+    "Mobile-Friendly": {
+      "color": "#2196F3",
+      "files": [
+        {
+          "size": 24,
+          "filename": "vidyasethu-mobile-friendly-24px.png"
+        },
+        {
+          "size": 32,
+          "filename": "vidyasethu-mobile-friendly-32px.png"
+        },
+        {
+          "size": 48,
+          "filename": "vidyasethu-mobile-friendly-48px.png"
+        },
+        {
+          "size": 64,
+          "filename": "vidyasethu-mobile-friendly-64px.png"
+        },
+        {
+          "size": 128,
+          "filename": "vidyasethu-mobile-friendly-128px.png"
+        },
+        {
+          "size": 256,
+          "filename": "vidyasethu-mobile-friendly-256px.png"
+        }
+      ]
+    }
+  }
+}

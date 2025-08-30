@@ -11,12 +11,16 @@ import {
   Platform,
   ActivityIndicator,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase } from '../../utils/supabase';
 import * as Animatable from 'react-native-animatable';
+
+// Import VidyaSethu logo with fallback
+const VidyaSethuLogo = require('../../../assets/logo-white.png');
 
 const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
@@ -26,6 +30,7 @@ const LoginScreen = ({ navigation }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [logoError, setLogoError] = useState(false); // Try to load PNG logo first
   const { signIn } = useAuth();
 
   const roles = [
@@ -163,9 +168,38 @@ const LoginScreen = ({ navigation }) => {
             animation="fadeInDown"
             duration={1000}
           >
-            <Ionicons name="school" size={80} color="#fff" />
-            <Text style={styles.appTitle}>School Management</Text>
-            <Text style={styles.appSubtitle}>Login to your account</Text>
+            {/* VidyaSethu Logo - Replace with your custom logo */}
+            {!logoError ? (
+              <Image
+                source={VidyaSethuLogo}
+                style={styles.logoImage}
+                resizeMode="contain"
+                onError={(error) => {
+                  console.log('Logo file error:', error.nativeEvent.error);
+                  setLogoError(true);
+                }}
+                onLoad={() => {
+                  console.log('Logo loaded successfully');
+                }}
+              />
+            ) : (
+              // Fallback logo design when PNG logo fails to load
+              <View style={styles.logoFallback}>
+                {/* Beautiful text-based logo design */}
+                <View style={styles.textLogoContainer}>
+                  <View style={styles.textLogoCircle}>
+                    <Text style={styles.textLogoMain}>VS</Text>
+                  </View>
+                  <View style={styles.bridgeSymbol}>
+                    <View style={styles.bridgeLine} />
+                    <Ionicons name="school-outline" size={24} color="rgba(255,255,255,0.8)" />
+                    <View style={styles.bridgeLine} />
+                  </View>
+                </View>
+              </View>
+            )}
+            <Text style={styles.appTitle}>VidyaSetu</Text>
+            <Text style={styles.appSubtitle}>Bridge of Knowledge</Text>
           </Animatable.View>
 
           <Animatable.View style={styles.formContainer} animation="fadeInUp" duration={800}>
@@ -304,6 +338,58 @@ const styles = StyleSheet.create({
   logoContainer: {
     alignItems: 'center',
     marginBottom: 40,
+  },
+  logoImage: {
+    width: 80,
+    height: 80,
+    // Remove tintColor to show actual logo colors
+  },
+  logoFallback: {
+    width: 80,
+    height: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textLogoContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textLogoCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  textLogoMain: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#fff',
+    letterSpacing: 1,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  bridgeSymbol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  bridgeLine: {
+    width: 20,
+    height: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    marginHorizontal: 4,
   },
   appTitle: {
     fontSize: 28,

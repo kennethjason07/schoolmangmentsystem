@@ -1,4 +1,4 @@
-// Enhanced Theme System for School Management System
+// Enhanced Theme System for VidyaSethu
 import { Platform } from 'react-native';
 import Colors from './Colors';
 

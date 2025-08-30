@@ -1,12 +1,68 @@
-import React from 'react';
-import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, ActivityIndicator, StyleSheet, Text, Image } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import * as Animatable from 'react-native-animatable';
+import { LinearGradient } from 'expo-linear-gradient';
+
+// Import VidyaSethu logo
+// TODO: Add your logo file to assets/logo-white.png
+const VidyaSethuLogo = require('../../assets/logo-white.png');
 
 const LoadingScreen = () => {
+  const logoRef = useRef(null);
+
+  useEffect(() => {
+    // Start a continuous pulse animation for the logo
+    if (logoRef.current) {
+      logoRef.current.pulse(1500);
+      const interval = setInterval(() => {
+        if (logoRef.current) {
+          logoRef.current.pulse(1500);
+        }
+      }, 2000);
+
+      return () => clearInterval(interval);
+    }
+  }, []);
+
   return (
-    <View style={styles.container}>
-      <ActivityIndicator size="large" color="#2196F3" />
-      <Text style={styles.loadingText}>Loading...</Text>
-    </View>
+    <LinearGradient
+      colors={['#667eea', '#764ba2']}
+      style={styles.container}
+    >
+      <Animatable.View 
+        ref={logoRef}
+        style={styles.logoContainer}
+        animation="fadeInDown"
+        duration={1000}
+      >
+        {/* VidyaSethu Logo - Replace with your custom logo */}
+        <Image
+          source={VidyaSethuLogo}
+          style={styles.logoImage}
+          resizeMode="contain"
+          onError={() => {
+            // Fallback to icon if logo file is not found
+            console.log('Logo file not found, using fallback icon');
+          }}
+        />
+        <Text style={styles.appTitle}>VidyaSethu</Text>
+        <Text style={styles.subtitle}>Bridge of Knowledge</Text>
+      </Animatable.View>
+      
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#fff" />
+        <Animatable.Text 
+          style={styles.loadingText}
+          animation="fadeIn"
+          iterationCount="infinite"
+          direction="alternate"
+          duration={1000}
+        >
+          Loading your dashboard...
+        </Animatable.Text>
+      </View>
+    </LinearGradient>
   );
 };
 
@@ -15,13 +71,39 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
+  },
+  logoContainer: {
+    alignItems: 'center',
+    marginBottom: 60,
+  },
+  logoImage: {
+    width: 100,
+    height: 100,
+    tintColor: '#fff', // Makes logo white for dark background
+  },
+  appTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginTop: 20,
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginTop: 8,
+    textAlign: 'center',
+    fontWeight: '300',
+  },
+  loadingContainer: {
+    alignItems: 'center',
   },
   loadingText: {
-    marginTop: 16,
+    marginTop: 20,
     fontSize: 16,
-    color: '#666',
-    fontWeight: '500',
+    color: '#fff',
+    fontWeight: '400',
+    textAlign: 'center',
   },
 });
 
