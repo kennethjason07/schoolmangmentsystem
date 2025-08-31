@@ -31,6 +31,7 @@ const FeePayment = () => {
   const [feeStructure, setFeeStructure] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [studentData, setStudentData] = useState(null);
+  const [schoolDetails, setSchoolDetails] = useState(null);
   const [selectedTab, setSelectedTab] = useState('overview');
   const [selectedFee, setSelectedFee] = useState(null);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
@@ -46,6 +47,13 @@ const FeePayment = () => {
       setLoading(true);
       setError(null);
       try {
+        // Load school details first
+        console.log('🏫 FeePayment - Loading school details');
+        const { data: schoolData, error: schoolError } = await dbHelpers.getSchoolDetails();
+        console.log('🏫 FeePayment - School data loaded:', schoolData);
+        console.log('🏫 FeePayment - Logo URL:', schoolData?.logo_url);
+        setSchoolDetails(schoolData);
+
         // Get student data directly using linked_student_id
         const { data: studentDetails, error: studentError } = await supabase
           .from(TABLES.STUDENTS)
@@ -114,13 +122,12 @@ const FeePayment = () => {
         if (studentDetails && isValidUUID(studentDetails.id)) {
           console.log('Student FeePayment - Fetching payment history for student:', studentDetails.id);
 
-          // Get student fees with fee structure details using easy.txt recommendation
+          // Get student fees without problematic join - we'll get fee structure separately
           const paymentResult = await supabase
             .from('student_fees')
             .select(`
               *,
-              students(name, admission_no),
-              fee_structure(*)
+              students(name, admission_no)
             `)
             .eq('student_id', studentDetails.id)
             .order('payment_date', { ascending: false });
@@ -468,8 +475,8 @@ const FeePayment = () => {
     if (!selectedReceipt) return;
 
     try {
-      // Generate receipt HTML
-      const htmlContent = generateReceiptHTML(selectedReceipt);
+      // Generate receipt HTML (now async)
+      const htmlContent = await generateReceiptHTML(selectedReceipt);
       
       // Generate PDF
       const { uri } = await Print.printToFileAsync({
@@ -548,101 +555,269 @@ const FeePayment = () => {
     }
   };
 
-  const generateReceiptHTML = (receipt) => {
-    return `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <title>Fee Receipt</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              margin: 0;
-              padding: 20px;
-              color: #333;
-            }
-            .header {
-              text-align: center;
-              border-bottom: 2px solid #2196F3;
-              padding-bottom: 20px;
-              margin-bottom: 30px;
-            }
-            .school-name {
-              font-size: 24px;
-              font-weight: bold;
-              color: #2196F3;
-              margin-bottom: 5px;
-            }
-            .receipt-title {
-              font-size: 20px;
-              font-weight: bold;
-              margin-bottom: 10px;
-            }
-            .receipt-info {
-              background-color: #f8f9fa;
-              padding: 15px;
-              border-radius: 8px;
-              margin-bottom: 20px;
-            }
-            .info-row {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 5px;
-            }
-            .amount-section {
-              text-align: center;
-              margin: 20px 0;
-              padding: 20px;
-              background-color: #e3f2fd;
-              border-radius: 8px;
-            }
-            .amount {
-              font-size: 24px;
-              font-weight: bold;
-              color: #2196F3;
-            }
-            .footer {
-              margin-top: 30px;
-              text-align: center;
-              font-size: 12px;
-              color: #666;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="school-name">ABC School</div>
-            <div class="receipt-title">Fee Receipt</div>
-          </div>
+  // Helper function to load logo as base64 for receipt
+  const getLogoBase64 = async (logoUrl) => {
+    try {
+      if (!logoUrl || !logoUrl.startsWith('http')) {
+        console.log('🖼️ Invalid logo URL for receipt:', logoUrl);
+        return null;
+      }
 
-          <div class="receipt-info">
-            <div class="info-row">
-              <span><strong>Student Name:</strong> ${feeStructure?.studentName || 'Student Name'}</span>
-              <span><strong>Class:</strong> ${feeStructure?.class || 'Class'}</span>
-            </div>
-            <div class="info-row">
-              <span><strong>Fee Type:</strong> ${receipt.feeName}</span>
-              <span><strong>Payment Date:</strong> ${formatDateForReceipt(receipt.paymentDate)}</span>
-            </div>
-            <div class="info-row">
-              <span><strong>Transaction ID:</strong> ${receipt.transactionId}</span>
-              <span><strong>Payment Method:</strong> ${receipt.paymentMethod}</span>
-            </div>
-          </div>
+      console.log('🖼️ Loading logo for receipt:', logoUrl);
+      
+      // Use FileSystem.downloadAsync for React Native compatibility
+      const fileUri = FileSystem.cacheDirectory + 'temp_logo_' + Date.now() + '.jpg';
+      
+      const downloadResult = await FileSystem.downloadAsync(logoUrl, fileUri);
+      console.log('🖼️ Logo downloaded to:', downloadResult.uri);
+      
+      // Convert to base64 using FileSystem
+      const base64String = await FileSystem.readAsStringAsync(downloadResult.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      
+      // Clean up the temporary file
+      try {
+        await FileSystem.deleteAsync(downloadResult.uri);
+      } catch (deleteError) {
+        console.warn('Failed to delete temp logo file:', deleteError);
+      }
+      
+      // Determine MIME type based on URL or default to JPEG
+      let mimeType = 'image/jpeg';
+      if (logoUrl.toLowerCase().includes('.png')) {
+        mimeType = 'image/png';
+      } else if (logoUrl.toLowerCase().includes('.gif')) {
+        mimeType = 'image/gif';
+      } else if (logoUrl.toLowerCase().includes('.webp')) {
+        mimeType = 'image/webp';
+      }
+      
+      const dataUrl = `data:${mimeType};base64,${base64String}`;
+      console.log('✅ Logo converted to base64 for receipt, size:', base64String.length);
+      
+      return dataUrl;
+    } catch (error) {
+      console.log('❌ Error loading logo for receipt:', error);
+      return null;
+    }
+  };
 
-          <div class="amount-section">
-            <div class="amount">₹${receipt.amount}</div>
-            <div>Amount Paid</div>
-          </div>
+  const generateReceiptHTML = async (receipt) => {
+    try {
+      // Get school logo as base64 if available
+      let logoBase64 = null;
+      if (schoolDetails?.logo_url) {
+        logoBase64 = await getLogoBase64(schoolDetails.logo_url);
+      }
 
-          <div class="footer">
-            <p>This is a computer generated receipt. No signature required.</p>
-            <p>Thank you for your payment!</p>
-          </div>
-        </body>
-      </html>
-    `;
+      const schoolName = schoolDetails?.name || 'School Name';
+      const logoSection = logoBase64 
+        ? `<img src="${logoBase64}" alt="School Logo" style="width: 60px; height: 60px; margin-bottom: 10px; border-radius: 30px; object-fit: cover;">` 
+        : '';
+
+      return `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Fee Receipt</title>
+            <style>
+              body {
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 20px;
+                color: #333;
+              }
+              .header {
+                text-align: center;
+                border-bottom: 2px solid #2196F3;
+                padding-bottom: 20px;
+                margin-bottom: 30px;
+              }
+              .school-logo {
+                width: 60px;
+                height: 60px;
+                margin: 0 auto 10px auto;
+                border-radius: 30px;
+                object-fit: cover;
+                display: block;
+              }
+              .school-name {
+                font-size: 24px;
+                font-weight: bold;
+                color: #2196F3;
+                margin-bottom: 5px;
+              }
+              .receipt-title {
+                font-size: 20px;
+                font-weight: bold;
+                margin-bottom: 10px;
+              }
+              .receipt-info {
+                background-color: #f8f9fa;
+                padding: 15px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+              }
+              .info-row {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 5px;
+              }
+              .amount-section {
+                text-align: center;
+                margin: 20px 0;
+                padding: 20px;
+                background-color: #e3f2fd;
+                border-radius: 8px;
+              }
+              .amount {
+                font-size: 24px;
+                font-weight: bold;
+                color: #2196F3;
+              }
+              .footer {
+                margin-top: 30px;
+                text-align: center;
+                font-size: 12px;
+                color: #666;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              ${logoSection}
+              <div class="school-name">${schoolName}</div>
+              <div class="receipt-title">Fee Receipt</div>
+            </div>
+
+            <div class="receipt-info">
+              <div class="info-row">
+                <span><strong>Student Name:</strong> ${feeStructure?.studentName || 'Student Name'}</span>
+                <span><strong>Class:</strong> ${feeStructure?.class || 'Class'}</span>
+              </div>
+              <div class="info-row">
+                <span><strong>Fee Type:</strong> ${receipt.feeName}</span>
+                <span><strong>Payment Date:</strong> ${formatDateForReceipt(receipt.paymentDate)}</span>
+              </div>
+              <div class="info-row">
+                <span><strong>Transaction ID:</strong> ${receipt.transactionId}</span>
+                <span><strong>Payment Method:</strong> ${receipt.paymentMethod}</span>
+              </div>
+            </div>
+
+            <div class="amount-section">
+              <div class="amount">₹${receipt.amount}</div>
+              <div>Amount Paid</div>
+            </div>
+
+            <div class="footer">
+              <p>This is a computer generated receipt. No signature required.</p>
+              <p>Thank you for your payment!</p>
+            </div>
+          </body>
+        </html>
+      `;
+    } catch (error) {
+      console.error('Error generating receipt HTML with logo:', error);
+      // Fallback to basic HTML without logo
+      const schoolName = schoolDetails?.name || 'School Name';
+      return `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Fee Receipt</title>
+            <style>
+              body {
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 20px;
+                color: #333;
+              }
+              .header {
+                text-align: center;
+                border-bottom: 2px solid #2196F3;
+                padding-bottom: 20px;
+                margin-bottom: 30px;
+              }
+              .school-name {
+                font-size: 24px;
+                font-weight: bold;
+                color: #2196F3;
+                margin-bottom: 5px;
+              }
+              .receipt-title {
+                font-size: 20px;
+                font-weight: bold;
+                margin-bottom: 10px;
+              }
+              .receipt-info {
+                background-color: #f8f9fa;
+                padding: 15px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+              }
+              .info-row {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 5px;
+              }
+              .amount-section {
+                text-align: center;
+                margin: 20px 0;
+                padding: 20px;
+                background-color: #e3f2fd;
+                border-radius: 8px;
+              }
+              .amount {
+                font-size: 24px;
+                font-weight: bold;
+                color: #2196F3;
+              }
+              .footer {
+                margin-top: 30px;
+                text-align: center;
+                font-size: 12px;
+                color: #666;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <div class="school-name">${schoolName}</div>
+              <div class="receipt-title">Fee Receipt</div>
+            </div>
+
+            <div class="receipt-info">
+              <div class="info-row">
+                <span><strong>Student Name:</strong> ${feeStructure?.studentName || 'Student Name'}</span>
+                <span><strong>Class:</strong> ${feeStructure?.class || 'Class'}</span>
+              </div>
+              <div class="info-row">
+                <span><strong>Fee Type:</strong> ${receipt.feeName}</span>
+                <span><strong>Payment Date:</strong> ${formatDateForReceipt(receipt.paymentDate)}</span>
+              </div>
+              <div class="info-row">
+                <span><strong>Transaction ID:</strong> ${receipt.transactionId}</span>
+                <span><strong>Payment Method:</strong> ${receipt.paymentMethod}</span>
+              </div>
+            </div>
+
+            <div class="amount-section">
+              <div class="amount">₹${receipt.amount}</div>
+              <div>Amount Paid</div>
+            </div>
+
+            <div class="footer">
+              <p>This is a computer generated receipt. No signature required.</p>
+              <p>Thank you for your payment!</p>
+            </div>
+          </body>
+        </html>
+      `;
+    }
   };
 
   // Get payment methods available (informational for students)
@@ -934,7 +1109,7 @@ const FeePayment = () => {
               <ScrollView style={styles.receiptPreviewContent}>
                 <View style={styles.receiptPreview}>
                   <View style={styles.receiptHeader}>
-                    <Text style={styles.receiptSchoolName}>ABC School</Text>
+                    <Text style={styles.receiptSchoolName}>{schoolDetails?.name || 'School Name'}</Text>
                     <Text style={styles.receiptTitle}>Fee Receipt</Text>
                   </View>
 

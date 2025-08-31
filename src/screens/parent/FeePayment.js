@@ -16,12 +16,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import Header from '../../components/Header';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 import { supabase, TABLES, dbHelpers, isValidUUID } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
+import { format } from 'date-fns';
 
 const { width } = Dimensions.get('window');
 
@@ -41,11 +43,64 @@ const FeePayment = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
+  // Add state and function for school details similar to AdminDashboard
+  const [schoolData, setSchoolData] = useState(null);
+
+  // Fetch school details
+  const fetchSchoolData = async () => {
+    try {
+      const { data: schools, error } = await supabase
+        .from('school_details')
+        .select('*')
+        .single();
+
+      if (error) {
+        console.log('Error fetching school data:', error);
+        return null;
+      }
+
+      setSchoolData(schools);
+      return schools;
+    } catch (error) {
+      console.error('Error in fetchSchoolData:', error);
+      return null;
+    }
+  };
+
+  // Helper function to convert image URL to base64
+  const fetchImageAsBase64 = async (imageUrl) => {
+    try {
+      if (!imageUrl) return null;
+      
+      // Create a fetch request to get the image
+      const response = await fetch(imageUrl);
+      if (!response.ok) {
+        console.log('Failed to fetch image:', response.status);
+        return null;
+      }
+      
+      // Get the image as blob
+      const blob = await response.blob();
+      
+      // Convert blob to base64
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.readAsDataURL(blob);
+      });
+    } catch (error) {
+      console.error('Error converting image to base64:', error);
+      return null;
+    }
+  };
+
   // Move fetchFeeData outside useEffect to make it accessible throughout component
   const fetchFeeData = async () => {
       setLoading(true);
       setError(null);
       try {
+        // Fetch school data alongside fee data
+        await fetchSchoolData();
         // Get parent's student data using the helper function
         const { data: parentUserData, error: parentError } = await dbHelpers.getParentByUserId(user.id);
         if (parentError || !parentUserData) {
@@ -139,12 +194,48 @@ const FeePayment = () => {
         console.log('FeePayment - Raw payment data:');
         console.log('- Payments found:', studentPayments?.length || 0);
         console.log('- Payment details:', studentPayments);
+        // Debug receipt numbers specifically
+        studentPayments?.forEach((payment, index) => {
+          console.log(`Payment ${index + 1}:`);
+          console.log('  - ID:', payment.id);
+          console.log('  - Receipt Number:', payment.receipt_number);
+          console.log('  - Fee Component:', payment.fee_component);
+          console.log('  - Amount:', payment.amount_paid);
+        });
         
-        // If no fee structure found, show empty state instead of sample data
+        // If no fee structure found, use sample data for development
         let feesToProcess = classFees || [];
         if (!feesToProcess || feesToProcess.length === 0) {
-          console.log('FeePayment - No fee structure found, showing empty state');
-          feesToProcess = [];
+          console.log('FeePayment - No fee structure found, using sample data for development');
+          feesToProcess = [
+            {
+              id: 'sample-fee-1',
+              fee_component: 'Tuition Fee',
+              amount: 15000,
+              due_date: '2024-12-31',
+              academic_year: '2024-2025',
+              class_id: studentDetails?.class_id,
+              created_at: '2024-08-01T00:00:00.000Z'
+            },
+            {
+              id: 'sample-fee-2', 
+              fee_component: 'Library Fee',
+              amount: 2000,
+              due_date: '2024-10-31',
+              academic_year: '2024-2025',
+              class_id: studentDetails?.class_id,
+              created_at: '2024-08-01T00:00:00.000Z'
+            },
+            {
+              id: 'sample-fee-3',
+              fee_component: 'Transport Fee', 
+              amount: 8000,
+              due_date: '2024-09-30',
+              academic_year: '2024-2025',
+              class_id: studentDetails?.class_id,
+              created_at: '2024-08-01T00:00:00.000Z'
+            }
+          ];
         }
 
         // Transform fee structure data based on schema
@@ -152,11 +243,27 @@ const FeePayment = () => {
           // Safely get fee component name
           const feeComponent = fee.fee_component || fee.name || 'General Fee';
           
-          // Find payments for this fee component
-          const payments = studentPayments?.filter(p =>
-            p.fee_component === feeComponent &&
-            p.academic_year === fee.academic_year
-          ) || [];
+          // Find payments for this fee component - check both real and sample payments
+          let payments = [];
+          if (studentPayments?.length > 0) {
+            // Use real payments from database
+            payments = studentPayments.filter(p =>
+              p.fee_component === feeComponent &&
+              p.academic_year === fee.academic_year
+            ) || [];
+          } else {
+            // Use sample payments if no real payments exist
+            const samplePaymentAmount = feeComponent === 'Tuition Fee' ? 5000 : 
+                                       feeComponent === 'Library Fee' ? 2000 : 0;
+            if (samplePaymentAmount > 0) {
+              payments = [{
+                id: `sample-payment-${feeComponent}`,
+                fee_component: feeComponent,
+                amount_paid: samplePaymentAmount,
+                academic_year: fee.academic_year
+              }];
+            }
+          }
 
           const totalPaidAmount = payments.reduce((sum, payment) => sum + Number(payment.amount_paid || 0), 0);
           const feeAmount = Number(fee.amount || 0);
@@ -240,6 +347,7 @@ const FeePayment = () => {
               paymentDate: payment.payment_date || new Date().toISOString().split('T')[0],
               paymentMethod: payment.payment_mode || 'Online',
               transactionId: payment.id ? `TXN${payment.id.slice(-8).toUpperCase()}` : `TXN${Date.now()}`,
+              receiptNumber: payment.receipt_number || null,
               status: 'completed',
               receiptUrl: null,
               remarks: payment.remarks || '',
@@ -248,12 +356,49 @@ const FeePayment = () => {
             };
           });
         } else {
-          // No payment history found - show empty state
-          console.log('FeePayment - No payment history found, showing empty state');
-          transformedPayments = [];
+          // No payment history found - add sample payment history for development
+          console.log('FeePayment - No payment history found, using sample payment history');
+          transformedPayments = [
+            {
+              id: 'sample-payment-1',
+              feeName: 'Tuition Fee',
+              amount: 5000,
+              paymentDate: '2024-08-15',
+              paymentMethod: 'Card',
+              transactionId: 'TXN12345678',
+              receiptNumber: 1001,
+              status: 'completed',
+              receiptUrl: null,
+              remarks: 'Partial payment for tuition fee',
+              academicYear: '2024-2025',
+              createdAt: '2024-08-15T10:30:00.000Z'
+            },
+            {
+              id: 'sample-payment-2',
+              feeName: 'Library Fee', 
+              amount: 2000,
+              paymentDate: '2024-08-20',
+              paymentMethod: 'UPI',
+              transactionId: 'TXN87654321',
+              receiptNumber: 1002,
+              status: 'completed',
+              receiptUrl: null,
+              remarks: 'Full payment for library fee',
+              academicYear: '2024-2025',
+              createdAt: '2024-08-20T14:15:00.000Z'
+            }
+          ];
         }
 
         console.log('FeePayment - Payment history loaded:', transformedPayments.length, 'payments');
+        // Debug transformed payments with receipt numbers
+        transformedPayments.forEach((payment, index) => {
+          console.log(`Transformed Payment ${index + 1}:`);
+          console.log('  - ID:', payment.id);
+          console.log('  - Receipt Number:', payment.receiptNumber);
+          console.log('  - Fee Name:', payment.feeName);
+          console.log('  - Amount:', payment.amount);
+        });
         setPaymentHistory(transformedPayments);
       } catch (err) {
         console.error('Error fetching fee data:', err);
@@ -413,102 +558,342 @@ const FeePayment = () => {
         return;
       }
 
-      console.log('Setting selected fee and opening modal');
+      console.log('Setting selected fee and opening payment form');
       setSelectedFee(fee);
+      setSelectedFeeComponent(fee);
+      setPaymentAmount(fee.remainingAmount?.toString() || fee.amount?.toString() || '');
+      setPaymentDate(new Date());
+      setPaymentMode('Card');
+      setPaymentRemarks('');
       setPaymentModalVisible(true);
-      console.log('Payment modal should now be visible');
+      console.log('Payment form modal should now be visible');
     } catch (error) {
       console.error('Error in handlePayment:', error);
-      Alert.alert('Error', `Failed to open payment options: ${error.message}`);
+      Alert.alert('Error', `Failed to open payment form: ${error.message}`);
     }
   };
 
-  // Handle payment method selection - Navigate to dedicated screens
+  // State for admin-style payment recording
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentDate, setPaymentDate] = useState(new Date());
+  const [paymentMode, setPaymentMode] = useState('Card');
+  const [selectedFeeComponent, setSelectedFeeComponent] = useState(null);
+  const [paymentRemarks, setPaymentRemarks] = useState('');
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [lastPaymentRecord, setLastPaymentRecord] = useState(null);
+  const [receiptModal, setReceiptModal] = useState(false);
+  const [schoolDetails, setSchoolDetails] = useState(null);
+  const [schoolLogo, setSchoolLogo] = useState(null);
+  const [feeComponents, setFeeComponents] = useState([]);
+
+  // Missing state variables for legacy payment modal flow
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null);
+  const [paymentFormData, setPaymentFormData] = useState({});
+  const [paymentMethodModalVisible, setPaymentMethodModalVisible] = useState(false);
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
+  const [receiptData, setReceiptData] = useState(null);
+  const [receiptModalVisible2, setReceiptModalVisible2] = useState(false);
+
+  // Load school details and logo
+  const loadSchoolDetails = async () => {
+    try {
+      const { data: schoolData, error } = await supabase
+        .from('school_details')
+        .select('*')
+        .limit(1)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error loading school details:', error);
+        return;
+      }
+
+      if (schoolData) {
+        setSchoolDetails(schoolData);
+        
+        // Load school logo if available
+        if (schoolData.logo_url) {
+          try {
+            const { data: logoData } = await supabase.storage
+              .from('school-assets')
+              .getPublicUrl(schoolData.logo_url);
+            
+            if (logoData?.publicUrl) {
+              setSchoolLogo(logoData.publicUrl);
+            }
+          } catch (logoError) {
+            console.error('Error loading school logo:', logoError);
+          }
+        }
+      } else {
+        setSchoolDetails({
+          name: 'School Management System',
+          type: 'School',
+          address: '',
+          phone: '',
+          email: ''
+        });
+      }
+    } catch (error) {
+      console.error('Error in loadSchoolDetails:', error);
+      setSchoolDetails({
+        name: 'School Management System',
+        type: 'School',
+        address: '',
+        phone: '',
+        email: ''
+      });
+    }
+  };
+
+  // Load school details on component mount
+  useEffect(() => {
+    loadSchoolDetails();
+  }, []);
+
+  // Admin-style payment recording functions
+  const handleSubmitPayment = async () => {
+    try {
+      // Validation
+      if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
+        Alert.alert('Validation Error', 'Please enter a valid payment amount');
+        return;
+      }
+
+      if (!selectedFeeComponent) {
+        Alert.alert('Validation Error', 'Please select a fee component');
+        return;
+      }
+
+      setPaymentLoading(true);
+
+      // Generate receipt number
+      const receiptNumber = await getNextReceiptNumber();
+
+      // Prepare payment data
+      const paymentData = {
+        student_id: studentData?.id,
+        academic_year: selectedFeeComponent.academicYear || '2024-2025',
+        fee_component: selectedFeeComponent.name,
+        amount_paid: parseFloat(paymentAmount),
+        payment_date: paymentDate.toISOString().split('T')[0],
+        payment_mode: paymentMode,
+        receipt_number: receiptNumber,
+        remarks: paymentRemarks || `Payment for ${selectedFeeComponent.name}`
+      };
+
+      // Save to database
+      if (studentData?.id && isValidUUID(studentData.id)) {
+        const { data, error } = await supabase
+          .from('student_fees')
+          .insert([paymentData])
+          .select();
+
+        if (error) {
+          console.error('Error saving payment:', error);
+          Alert.alert('Error', 'Failed to save payment. Please try again.');
+          return;
+        }
+
+        console.log('Payment saved successfully:', data);
+      }
+
+      // Create receipt data
+      const receiptInfo = {
+        receipt_no: receiptNumber,
+        student_name: studentData?.name || 'Student',
+        student_admission_no: studentData?.admission_no || 'N/A',
+        student_roll_no: studentData?.roll_no || 'N/A',
+        fee_component: selectedFeeComponent.name,
+        amount_paid: parseFloat(paymentAmount),
+        payment_date: paymentDate.toISOString().split('T')[0],
+        payment_date_formatted: formatSafeDate(paymentDate),
+        payment_mode: paymentMode,
+        academic_year: selectedFeeComponent.academicYear || '2024-2025',
+        transaction_id: `PAY${Date.now()}`,
+        payment_details: `${paymentMode} payment`,
+        amount_in_words: numberToWords(parseFloat(paymentAmount))
+      };
+
+      setLastPaymentRecord(receiptInfo);
+      setPaymentModalVisible(false);
+      setReceiptModal(true);
+
+      // Refresh fee data
+      await fetchFeeData();
+
+      // Reset form
+      setPaymentAmount('');
+      setPaymentRemarks('');
+      setSelectedFeeComponent(null);
+
+    } catch (error) {
+      console.error('Error processing payment:', error);
+      Alert.alert('Error', 'Failed to process payment. Please try again.');
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
+  // Handle date selection
+  const handleDateChange = (event, date) => {
+    setShowDatePicker(false);
+    if (date) {
+      setPaymentDate(date);
+    }
+  };
+
+  // Get payment mode options
+  const getPaymentModes = () => {
+    return ['Card', 'UPI', 'Bank Transfer'];
+  };
+
+  // Render fee component chips
+  const renderFeeComponentChips = () => {
+    if (!feeStructure?.fees) return null;
+
+    const unpaidFees = feeStructure.fees.filter(fee => fee.status !== 'paid');
+
+    return (
+      <View style={styles.feeChipsContainer}>
+        <Text style={styles.feeChipsTitle}>Select Fee Component</Text>
+        <View style={styles.feeChips}>
+          {unpaidFees.map((fee) => (
+            <TouchableOpacity
+              key={fee.id}
+              style={[
+                styles.feeChip,
+                selectedFeeComponent?.id === fee.id && styles.selectedFeeChip
+              ]}
+              onPress={() => {
+                setSelectedFeeComponent(fee);
+                setPaymentAmount(fee.remainingAmount?.toString() || fee.amount?.toString() || '');
+              }}
+            >
+              <Text style={[
+                styles.feeChipText,
+                selectedFeeComponent?.id === fee.id && styles.selectedFeeChipText
+              ]}>
+                {fee.name}
+              </Text>
+              <Text style={[
+                styles.feeChipAmount,
+                selectedFeeComponent?.id === fee.id && styles.selectedFeeChipAmount
+              ]}>
+                ₹{fee.remainingAmount || fee.amount}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
+  // Handle print receipt for admin-style receipt
+  const handlePrintAdminReceipt = async () => {
+    try {
+      if (!lastPaymentRecord) {
+        Alert.alert('Error', 'No receipt data available');
+        return;
+      }
+      
+      const pdfUri = await generateReceiptPDF(lastPaymentRecord);
+      await Print.printAsync({ uri: pdfUri });
+    } catch (error) {
+      console.error('Error printing receipt:', error);
+      Alert.alert('Error', 'Failed to print receipt');
+    }
+  };
+
+  // Handle share receipt for admin-style receipt
+  const handleShareAdminReceipt = async () => {
+    try {
+      if (!lastPaymentRecord) {
+        Alert.alert('Error', 'No receipt data available');
+        return;
+      }
+      
+      const pdfUri = await generateReceiptPDF(lastPaymentRecord);
+      
+      if (await Sharing.isAvailableAsync()) {
+        const fileName = `Receipt_${lastPaymentRecord.receipt_no}_${lastPaymentRecord.student_name.replace(/\s+/g, '_')}.pdf`;
+        const newPath = FileSystem.documentDirectory + fileName;
+        
+        await FileSystem.copyAsync({
+          from: pdfUri,
+          to: newPath
+        });
+        
+        await Sharing.shareAsync(newPath, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Share Receipt'
+        });
+      } else {
+        Alert.alert('Error', 'Sharing is not available on this device');
+      }
+    } catch (error) {
+      console.error('Error sharing receipt:', error);
+      Alert.alert('Error', 'Failed to share receipt');
+    }
+  };
+
+  // Handle admin receipt modal close
+  const handleAdminReceiptDone = () => {
+    setReceiptModal(false);
+    setLastPaymentRecord(null);
+  };
+
+  // Convert number to words (simple implementation)
+  const numberToWords = (amount) => {
+    const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+    const teens = ['ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+    const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+    
+    if (amount === 0) return 'zero';
+    if (amount < 10) return ones[amount];
+    if (amount < 20) return teens[amount - 10];
+    if (amount < 100) return tens[Math.floor(amount / 10)] + (amount % 10 !== 0 ? ' ' + ones[amount % 10] : '');
+    if (amount < 1000) {
+      const hundreds = Math.floor(amount / 100);
+      const remainder = amount % 100;
+      return ones[hundreds] + ' hundred' + (remainder !== 0 ? ' ' + numberToWords(remainder) : '');
+    }
+    if (amount < 100000) {
+      const thousands = Math.floor(amount / 1000);
+      const remainder = amount % 1000;
+      return numberToWords(thousands) + ' thousand' + (remainder !== 0 ? ' ' + numberToWords(remainder) : '');
+    }
+    if (amount < 10000000) {
+      const lakhs = Math.floor(amount / 100000);
+      const remainder = amount % 100000;
+      return numberToWords(lakhs) + ' lakh' + (remainder !== 0 ? ' ' + numberToWords(remainder) : '');
+    }
+    
+    return amount.toString(); // Fallback for very large numbers
+  };
+
+  // Format date safely
+  const formatSafeDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    try {
+      return format(new Date(dateString), 'dd MMM yyyy');
+    } catch (error) {
+      return 'Invalid Date';
+    }
+  };
+
+  // Handle payment method selection - Open specific payment modal
   const handlePaymentMethodSelect = (method) => {
     try {
       console.log('=== PAYMENT METHOD SELECTED ===');
       console.log('Method:', JSON.stringify(method, null, 2));
       console.log('Selected fee:', JSON.stringify(selectedFee, null, 2));
-      console.log('Student data:', JSON.stringify(studentData, null, 2));
-      console.log('Navigation object:', navigation);
 
-      setPaymentModalVisible(false); // Close modal first
-
-      // Validate method data
-      if (!method || !method.id) {
-        console.error('Invalid payment method data:', method);
-        Alert.alert('Error', 'Invalid payment method selected');
-        return;
-      }
-
-      // Validate required data before navigation
-      if (!selectedFee) {
-        console.error('No fee selected for payment');
-        Alert.alert('Error', 'No fee selected for payment');
-        return;
-      }
-
-      // Ensure we have valid student data
-      const safeStudentData = studentData || {
-        id: 'sample-student-id',
-        name: 'Sample Student',
-        class_id: 'sample-class-id',
-        roll_no: 42,
-        admission_no: 'ADM2024001'
-      };
-
-      console.log('Using safe student data:', JSON.stringify(safeStudentData, null, 2));
-
-      // Navigate to appropriate payment screen
-      console.log('Starting navigation for method:', method.id);
-
-      switch (method.id) {
-        case 'Card':
-          try {
-            console.log('Navigating to CardPayment screen');
-            navigation.navigate('CardPayment', {
-              selectedFee,
-              studentData: safeStudentData
-            });
-            console.log('CardPayment navigation successful');
-          } catch (navError) {
-            console.error('CardPayment navigation error:', navError);
-            Alert.alert('Error', 'Failed to open card payment screen. Please try again.');
-          }
-          break;
-
-        case 'UPI':
-          try {
-            console.log('Navigating to UPIPayment screen');
-            navigation.navigate('UPIPayment', {
-              selectedFee,
-              studentData: safeStudentData
-            });
-            console.log('UPIPayment navigation successful');
-          } catch (navError) {
-            console.error('UPIPayment navigation error:', navError);
-            Alert.alert('Error', 'Failed to open UPI payment screen. Please try again.');
-          }
-          break;
-
-        case 'Online':
-          try {
-            console.log('Navigating to OnlineBankingPayment screen');
-            navigation.navigate('OnlineBankingPayment', {
-              selectedFee,
-              studentData: safeStudentData
-            });
-            console.log('OnlineBankingPayment navigation successful');
-          } catch (navError) {
-            console.error('OnlineBankingPayment navigation error:', navError);
-            Alert.alert('Error', 'Failed to open online banking screen. Please try again.');
-          }
-          break;
-
-        default:
-          console.log('Unsupported payment method:', method.id);
-          Alert.alert('Error', `Payment method "${method.name}" is not supported yet`);
-      }
+      setPaymentModalVisible(false); // Close payment selection modal
+      setSelectedPaymentMethod(method);
+      setPaymentFormData(getInitialFormData(method.id));
+      setPaymentMethodModalVisible(true); // Open specific payment method modal
     } catch (error) {
       console.error('Payment method selection error:', error);
       Alert.alert('Error', `Failed to process payment method selection: ${error.message}`);
@@ -584,6 +969,38 @@ const FeePayment = () => {
     return null;
   };
 
+  // Get next receipt number from database
+  const getNextReceiptNumber = async () => {
+    try {
+      // Try to get the maximum receipt number from existing records
+      const { data: maxReceiptData, error: maxError } = await supabase
+        .from('student_fees')
+        .select('receipt_number')
+        .not('receipt_number', 'is', null)
+        .order('receipt_number', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (maxError && maxError.code !== 'PGRST116') {
+        console.error('Error getting max receipt number:', maxError);
+        // Fallback: start from 1000
+        return 1000;
+      }
+      
+      const maxReceiptNumber = maxReceiptData?.receipt_number || 999;
+      const nextReceiptNumber = maxReceiptNumber + 1;
+      
+      console.log('Max receipt number found:', maxReceiptNumber);
+      console.log('Next receipt number will be:', nextReceiptNumber);
+      
+      return nextReceiptNumber;
+    } catch (error) {
+      console.error('Error in getNextReceiptNumber:', error);
+      // Fallback: start from 1000
+      return 1000;
+    }
+  };
+
   // Process payment and save to database
   const processPayment = async (paymentData) => {
     try {
@@ -599,12 +1016,17 @@ const FeePayment = () => {
           success: true,
           data: {
             id: `sample-payment-${Date.now()}`,
-            message: 'Payment processed successfully (demo mode)'
+            message: 'Payment processed successfully (demo mode)',
+            receipt_number: await getNextReceiptNumber()
           }
         };
       }
 
-      // Insert new student fee record using easy.txt recommendation
+      // Generate receipt number in frontend
+      const receiptNumber = await getNextReceiptNumber();
+      console.log('Generated receipt number:', receiptNumber);
+
+      // Insert new student fee record with the generated receipt number
       const { data, error } = await supabase
         .from('student_fees')
         .insert([
@@ -615,6 +1037,7 @@ const FeePayment = () => {
             amount_paid: Number(paymentData.amount),
             payment_date: paymentData.paymentDate || new Date().toISOString().split('T')[0],
             payment_mode: paymentData.paymentMode || 'Online',
+            receipt_number: receiptNumber,
             remarks: paymentData.remarks || `Payment for ${paymentData.feeComponent}`
           }
         ])
@@ -852,6 +1275,34 @@ const FeePayment = () => {
   };
 
   const handleDownloadReceipt = async (receipt) => {
+    console.log('=== RECEIPT DOWNLOAD DEBUG ===');
+    console.log('Selected Receipt Object:', JSON.stringify(receipt, null, 2));
+    console.log('Receipt Number from Object:', receipt.receiptNumber);
+    console.log('Receipt ID:', receipt.id);
+    console.log('School Data:', schoolData);
+    
+    // If receipt number is missing, try to fetch it directly from the database
+    if (!receipt.receiptNumber && receipt.id) {
+      console.log('Receipt number missing, fetching from database...');
+      try {
+        const { data: freshData, error } = await supabase
+          .from('student_fees')
+          .select('receipt_number')
+          .eq('id', receipt.id)
+          .single();
+          
+        if (!error && freshData?.receipt_number) {
+          console.log('Found receipt number in database:', freshData.receipt_number);
+          // Update the receipt object with the fresh receipt number
+          receipt.receiptNumber = freshData.receipt_number;
+        } else {
+          console.log('No receipt number found in database for ID:', receipt.id);
+        }
+      } catch (fetchError) {
+        console.error('Error fetching receipt number:', fetchError);
+      }
+    }
+    
     setSelectedReceipt(receipt);
     setReceiptModalVisible(true);
   };
@@ -861,7 +1312,7 @@ const FeePayment = () => {
 
     try {
       // Generate receipt HTML
-      const htmlContent = generateReceiptHTML(selectedReceipt);
+      const htmlContent = await generateReceiptHTML(selectedReceipt);
       
       // Generate PDF
       const { uri } = await Print.printToFileAsync({
@@ -869,7 +1320,9 @@ const FeePayment = () => {
         base64: false
       });
 
-      const fileName = `Receipt_${selectedReceipt.feeName.replace(/\s+/g, '_')}.pdf`;
+      const fileName = selectedReceipt.receiptNumber ? 
+        `Receipt_${selectedReceipt.receiptNumber}.pdf` : 
+        `Receipt_${selectedReceipt.feeName.replace(/\s+/g, '_')}.pdf`;
 
       if (Platform.OS === 'android') {
         try {
@@ -940,7 +1393,15 @@ const FeePayment = () => {
     }
   };
 
-  const generateReceiptHTML = (receipt) => {
+  const generateReceiptHTML = async (receipt) => {
+    console.log('=== GENERATE RECEIPT HTML DEBUG ===');
+    console.log('Receipt object in generateReceiptHTML:', JSON.stringify(receipt, null, 2));
+    console.log('Receipt number being used:', receipt.receiptNumber);
+    console.log('School data:', schoolData);
+    
+    // Get school logo as base64 if available
+    const logoBase64 = schoolData?.logo_url ? await fetchImageAsBase64(schoolData.logo_url) : null;
+    
     return `
       <!DOCTYPE html>
       <html>
@@ -960,6 +1421,12 @@ const FeePayment = () => {
               padding-bottom: 20px;
               margin-bottom: 30px;
             }
+            .school-logo {
+              width: 60px;
+              height: 60px;
+              margin: 0 auto 10px;
+              display: block;
+            }
             .school-name {
               font-size: 24px;
               font-weight: bold;
@@ -969,6 +1436,11 @@ const FeePayment = () => {
             .receipt-title {
               font-size: 20px;
               font-weight: bold;
+              margin-bottom: 10px;
+            }
+            .receipt-number {
+              font-size: 16px;
+              color: #666;
               margin-bottom: 10px;
             }
             .receipt-info {
@@ -1004,8 +1476,10 @@ const FeePayment = () => {
         </head>
         <body>
           <div class="header">
-            <div class="school-name">ABC School</div>
+            ${logoBase64 ? `<img src="${logoBase64}" alt="School Logo" class="school-logo" />` : ''}
+            <div class="school-name">${schoolData?.school_name || 'ABC School'}</div>
             <div class="receipt-title">Fee Receipt</div>
+            ${receipt.receiptNumber ? `<div class="receipt-number">Receipt No: ${receipt.receiptNumber}</div>` : ''}
           </div>
 
           <div class="receipt-info">
@@ -1021,6 +1495,11 @@ const FeePayment = () => {
               <span><strong>Transaction ID:</strong> ${receipt.transactionId}</span>
               <span><strong>Payment Method:</strong> ${receipt.paymentMethod}</span>
             </div>
+            ${receipt.receiptNumber ? `
+            <div class="info-row">
+              <span><strong>Receipt Number:</strong> ${receipt.receiptNumber}</span>
+              <span><strong>Academic Year:</strong> ${receipt.academicYear || '2024-2025'}</span>
+            </div>` : ''}
           </div>
 
           <div class="amount-section">
@@ -1103,6 +1582,517 @@ const FeePayment = () => {
       </TouchableOpacity>
     </View>
   );
+
+  // Handle specific payment method processing
+  const handlePaymentMethodSubmit = async () => {
+    try {
+      const validationError = validatePaymentForm(selectedPaymentMethod.id, paymentFormData);
+      if (validationError) {
+        Alert.alert('Validation Error', validationError);
+        return;
+      }
+
+      setPaymentProcessing(true);
+      
+      let paymentResult;
+      switch (selectedPaymentMethod.id) {
+        case 'Card':
+          paymentResult = await processCardPayment(paymentFormData);
+          break;
+        case 'UPI':
+          paymentResult = await processUPIPayment(paymentFormData);
+          break;
+        case 'Online':
+          paymentResult = await processOnlinePayment(paymentFormData);
+          break;
+        default:
+          throw new Error('Unsupported payment method');
+      }
+
+      if (paymentResult.success) {
+        // Generate receipt number
+        const receiptNumber = await getNextReceiptNumber();
+        const currentDate = new Date().toISOString().split('T')[0];
+        
+        // Save payment to database
+        if (studentData && studentData.id && studentData.id !== 'sample-student-id') {
+          try {
+            const { data, error } = await supabase
+              .from('student_fees')
+              .insert([
+                {
+                  student_id: studentData.id,
+                  academic_year: selectedFee.academicYear || '2024-2025',
+                  fee_component: selectedFee.name,
+                  amount_paid: Number(selectedFee.remainingAmount || selectedFee.amount),
+                  payment_date: currentDate,
+                  payment_mode: selectedPaymentMethod.name,
+                  receipt_number: receiptNumber,
+                  remarks: `${selectedPaymentMethod.name} payment`
+                }
+              ])
+              .select();
+              
+            if (error) {
+              console.error('Error saving payment:', error);
+            }
+          } catch (saveError) {
+            console.error('Error saving payment to database:', saveError);
+          }
+        }
+        
+        // Prepare receipt data
+        const receiptInfo = {
+          receipt_no: receiptNumber,
+          student_name: studentData.name,
+          student_admission_no: studentData.admission_no,
+          student_roll_no: studentData.roll_no,
+          fee_component: selectedFee.name,
+          amount_paid: Number(selectedFee.remainingAmount || selectedFee.amount),
+          payment_date: currentDate,
+          payment_date_formatted: formatSafeDate(currentDate),
+          payment_mode: selectedPaymentMethod.name,
+          academic_year: selectedFee.academicYear || '2024-2025',
+          transaction_id: paymentResult.transactionId,
+          payment_details: getPaymentDetailsString(selectedPaymentMethod.id, paymentFormData),
+          amount_in_words: numberToWords(parseFloat(selectedFee.remainingAmount || selectedFee.amount))
+        };
+        
+        setReceiptData(receiptInfo);
+        setPaymentMethodModalVisible(false);
+        setReceiptModalVisible2(true);
+        
+        // Refresh fee data
+        await fetchFeeData();
+      } else {
+        Alert.alert('Payment Failed', paymentResult.error || 'Payment processing failed');
+      }
+    } catch (error) {
+      console.error('Error processing payment:', error);
+      Alert.alert('Error', 'An error occurred while processing your payment. Please try again.');
+    } finally {
+      setPaymentProcessing(false);
+    }
+  };
+
+  // Get payment details string for receipt
+  const getPaymentDetailsString = (methodId, formData) => {
+    switch (methodId) {
+      case 'Card':
+        return `Card: ****-****-****-${formData.cardNumber?.slice(-4) || '****'}`;
+      case 'UPI':
+        return `UPI ID: ${formData.upiId || 'N/A'}`;
+      case 'Online':
+        return `Bank: ${formData.bankName || 'N/A'}`;
+      default:
+        return 'Payment processed';
+    }
+  };
+
+  // Generate receipt PDF for new payments
+  const generateReceiptPDF = async (receiptInfo) => {
+    try {
+      const logoBase64 = schoolLogo ? `<img src="${schoolLogo}" style="width: 60px; height: 60px; object-fit: contain;">` : '';
+      
+      const html = `
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <style>
+            body { 
+              font-family: Arial, sans-serif; 
+              margin: 0; 
+              padding: 20px;
+              background: white;
+            }
+            .receipt-container {
+              max-width: 600px;
+              margin: 0 auto;
+              border: 2px solid #ddd;
+              padding: 20px;
+              background: white;
+            }
+            .header {
+              text-align: center;
+              border-bottom: 2px solid #ddd;
+              padding-bottom: 20px;
+              margin-bottom: 20px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              gap: 15px;
+            }
+            .school-details {
+              text-align: center;
+            }
+            .school-name {
+              font-size: 24px;
+              font-weight: bold;
+              color: #2196F3;
+              margin: 0;
+            }
+            .school-info {
+              font-size: 14px;
+              color: #666;
+              margin: 5px 0;
+            }
+            .receipt-title {
+              font-size: 20px;
+              font-weight: bold;
+              text-align: center;
+              margin: 20px 0;
+              color: #333;
+            }
+            .receipt-details {
+              margin: 20px 0;
+            }
+            .detail-row {
+              display: flex;
+              justify-content: space-between;
+              padding: 8px 0;
+              border-bottom: 1px dotted #ccc;
+            }
+            .detail-label {
+              font-weight: 500;
+              color: #333;
+              flex: 1;
+            }
+            .detail-value {
+              color: #666;
+              flex: 1;
+              text-align: right;
+            }
+            .amount-row {
+              background-color: #f5f5f5;
+              padding: 15px;
+              border-radius: 8px;
+              margin: 20px 0;
+            }
+            .amount-label {
+              font-size: 18px;
+              font-weight: bold;
+              color: #333;
+            }
+            .amount-value {
+              font-size: 24px;
+              font-weight: bold;
+              color: #FF9800;
+            }
+            .amount-words {
+              font-style: italic;
+              color: #666;
+              margin-top: 5px;
+              font-size: 14px;
+            }
+            .footer {
+              text-align: center;
+              margin-top: 30px;
+              padding-top: 20px;
+              border-top: 2px solid #ddd;
+              font-size: 12px;
+              color: #999;
+            }
+            .signature {
+              text-align: right;
+              margin-top: 40px;
+            }
+            .signature-line {
+              border-top: 1px solid #333;
+              width: 200px;
+              margin-left: auto;
+              margin-top: 40px;
+              text-align: center;
+              padding-top: 5px;
+              font-size: 12px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="receipt-container">
+            <div class="header">
+              ${logoBase64}
+              <div class="school-details">
+                <h1 class="school-name">${schoolDetails?.name || 'School Management System'}</h1>
+                <p class="school-info">${schoolDetails?.type || 'Educational Institution'}</p>
+                ${schoolDetails?.address ? `<p class="school-info">${schoolDetails.address}</p>` : ''}
+                <p class="school-info">
+                  ${schoolDetails?.phone ? `Phone: ${schoolDetails.phone}` : ''}
+                  ${schoolDetails?.phone && schoolDetails?.email ? ' | ' : ''}
+                  ${schoolDetails?.email ? `Email: ${schoolDetails.email}` : ''}
+                </p>
+              </div>
+            </div>
+            
+            <div class="receipt-title">Fee Payment Receipt</div>
+            
+            <div class="receipt-details">
+              <div class="detail-row">
+                <span class="detail-label">Receipt No:</span>
+                <span class="detail-value">${receiptInfo.receipt_no}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Date:</span>
+                <span class="detail-value">${receiptInfo.payment_date_formatted}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Student Name:</span>
+                <span class="detail-value">${receiptInfo.student_name}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Admission No:</span>
+                <span class="detail-value">${receiptInfo.student_admission_no}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Roll No:</span>
+                <span class="detail-value">${receiptInfo.student_roll_no}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Academic Year:</span>
+                <span class="detail-value">${receiptInfo.academic_year}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Fee Component:</span>
+                <span class="detail-value">${receiptInfo.fee_component}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Payment Mode:</span>
+                <span class="detail-value">${receiptInfo.payment_mode}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Transaction ID:</span>
+                <span class="detail-value">${receiptInfo.transaction_id}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Payment Details:</span>
+                <span class="detail-value">${receiptInfo.payment_details}</span>
+              </div>
+            </div>
+            
+            <div class="amount-row">
+              <div class="detail-row" style="border: none; padding: 0; margin-bottom: 10px;">
+                <span class="amount-label">Amount Paid:</span>
+                <span class="amount-value">₹${receiptInfo.amount_paid.toFixed(2)}</span>
+              </div>
+              <div class="amount-words">
+                Amount in words: ${receiptInfo.amount_in_words.toUpperCase()} RUPEES ONLY
+              </div>
+            </div>
+            
+            <div class="signature">
+              <div class="signature-line">
+                Authorized Signature
+              </div>
+            </div>
+            
+            <div class="footer">
+              <p>This is a computer-generated receipt and does not require a physical signature.</p>
+              <p>Generated on ${format(new Date(), 'dd MMM yyyy HH:mm:ss')}</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+      
+      const { uri } = await Print.printToFileAsync({ html });
+      return uri;
+    } catch (error) {
+      console.error('Error generating receipt PDF:', error);
+      throw error;
+    }
+  };
+
+  // Handle print receipt
+  const handlePrintReceipt = async () => {
+    try {
+      if (!receiptData) {
+        Alert.alert('Error', 'No receipt data available');
+        return;
+      }
+      
+      await generateReceiptPDF(receiptData);
+      await Print.printAsync({ uri: await generateReceiptPDF(receiptData) });
+    } catch (error) {
+      console.error('Error printing receipt:', error);
+      Alert.alert('Error', 'Failed to print receipt');
+    }
+  };
+
+  // Handle share receipt
+  const handleShareReceipt = async () => {
+    try {
+      if (!receiptData) {
+        Alert.alert('Error', 'No receipt data available');
+        return;
+      }
+      
+      const pdfUri = await generateReceiptPDF(receiptData);
+      
+      if (await Sharing.isAvailableAsync()) {
+        const fileName = `Receipt_${receiptData.receipt_no}_${receiptData.student_name.replace(/\s+/g, '_')}.pdf`;
+        const newPath = FileSystem.documentDirectory + fileName;
+        
+        await FileSystem.copyAsync({
+          from: pdfUri,
+          to: newPath
+        });
+        
+        await Sharing.shareAsync(newPath, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Share Receipt'
+        });
+      } else {
+        Alert.alert('Error', 'Sharing is not available on this device');
+      }
+    } catch (error) {
+      console.error('Error sharing receipt:', error);
+      Alert.alert('Error', 'Failed to share receipt');
+    }
+  };
+
+  // Handle receipt modal close
+  const handleReceiptDone = () => {
+    setReceiptModalVisible2(false);
+    setReceiptData(null);
+    setSelectedFee(null);
+  };
+
+  // Get popular banks for online banking
+  const getPopularBanks = () => {
+    return [
+      { name: 'State Bank of India', code: 'SBI' },
+      { name: 'HDFC Bank', code: 'HDFC' },
+      { name: 'ICICI Bank', code: 'ICICI' },
+      { name: 'Axis Bank', code: 'AXIS' },
+      { name: 'Punjab National Bank', code: 'PNB' },
+      { name: 'Bank of Baroda', code: 'BOB' },
+      { name: 'Canara Bank', code: 'CANARA' },
+      { name: 'Union Bank of India', code: 'UNION' },
+    ];
+  };
+
+  // Render payment form based on selected method
+  const renderPaymentForm = () => {
+    if (!selectedPaymentMethod) return null;
+
+    switch (selectedPaymentMethod.id) {
+      case 'Card':
+        return (
+          <View>
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Card Number</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="1234 5678 9012 3456"
+                value={paymentFormData.cardNumber}
+                onChangeText={(text) => setPaymentFormData({...paymentFormData, cardNumber: text.replace(/\s/g, '')})}
+                keyboardType="numeric"
+                maxLength={16}
+              />
+            </View>
+            
+            <View style={styles.formRow}>
+              <View style={[styles.formGroup, {flex: 1, marginRight: 8}]}>
+                <Text style={styles.formLabel}>Expiry Date</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="MM/YY"
+                  value={paymentFormData.expiryDate}
+                  onChangeText={(text) => {
+                    const formatted = text.replace(/\D/g, '').replace(/(\d{2})(\d{0,2})/, '$1/$2');
+                    setPaymentFormData({...paymentFormData, expiryDate: formatted});
+                  }}
+                  keyboardType="numeric"
+                  maxLength={5}
+                />
+              </View>
+              
+              <View style={[styles.formGroup, {flex: 1, marginLeft: 8}]}>
+                <Text style={styles.formLabel}>CVV</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="123"
+                  value={paymentFormData.cvv}
+                  onChangeText={(text) => setPaymentFormData({...paymentFormData, cvv: text.replace(/\D/g, '')})}
+                  keyboardType="numeric"
+                  maxLength={4}
+                  secureTextEntry
+                />
+              </View>
+            </View>
+            
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Card Holder Name</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="John Doe"
+                value={paymentFormData.cardHolderName}
+                onChangeText={(text) => setPaymentFormData({...paymentFormData, cardHolderName: text})}
+                autoCapitalize="words"
+              />
+            </View>
+          </View>
+        );
+        
+      case 'UPI':
+        return (
+          <View>
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>UPI ID</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="yourname@paytm"
+                value={paymentFormData.upiId}
+                onChangeText={(text) => setPaymentFormData({...paymentFormData, upiId: text.toLowerCase()})}
+                autoCapitalize="none"
+              />
+              <View style={styles.upiInfo}>
+                <Ionicons name="information-circle" size={16} color="#1976d2" />
+                <Text style={styles.upiInfoText}>
+                  Enter your UPI ID (e.g., yourname@paytm, yourname@gpay)
+                </Text>
+              </View>
+            </View>
+          </View>
+        );
+        
+      case 'Online':
+        return (
+          <View>
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Select Your Bank</Text>
+              <View style={styles.bankSelector}>
+                {getPopularBanks().map((bank) => (
+                  <TouchableOpacity
+                    key={bank.code}
+                    style={[
+                      styles.bankOption,
+                      paymentFormData.bankName === bank.name && styles.selectedBankOption
+                    ]}
+                    onPress={() => setPaymentFormData({...paymentFormData, bankName: bank.name})}
+                  >
+                    <Text style={[
+                      styles.bankOptionText,
+                      paymentFormData.bankName === bank.name && styles.selectedBankOptionText
+                    ]}>
+                      {bank.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.cashInfo}>
+                <Ionicons name="information-circle" size={16} color="#f57c00" />
+                <Text style={styles.cashInfoText}>
+                  You will be redirected to your bank's secure website to complete the payment.
+                </Text>
+              </View>
+            </View>
+          </View>
+        );
+        
+      default:
+        return null;
+    }
+  };
 
   if (loading) {
     return (
@@ -1238,61 +2228,280 @@ const FeePayment = () => {
       <Modal
         visible={paymentModalVisible}
         animationType="slide"
-        transparent={true}
+        transparent={false}
         onRequestClose={() => setPaymentModalVisible(false)}
+      >
+        <View style={styles.fullScreenModalContainer}>
+            <View style={styles.fullScreenHeader}>
+              <TouchableOpacity onPress={() => setPaymentModalVisible(false)} style={styles.backButton}>
+                <Ionicons name="arrow-back" size={24} color="#333" />
+              </TouchableOpacity>
+              <Text style={styles.fullScreenTitle}>Make Payment</Text>
+              <View style={styles.headerSpacer} />
+            </View>
+            
+            <ScrollView style={styles.fullScreenScrollView} contentContainerStyle={styles.fullScreenContent}>
+              {selectedFee && (
+                <View style={styles.paymentFormContainer}>
+                  {/* Fee Details Header */}
+                  <View style={styles.feeDetailsHeader}>
+                    <Text style={styles.feeDetailsTitle}>{selectedFee.name}</Text>
+                    <Text style={styles.feeDetailsAmount}>₹{selectedFee.remainingAmount || selectedFee.amount}</Text>
+                  </View>
+
+                  {/* Payment Amount Input */}
+                  <View style={styles.adminFormGroup}>
+                    <Text style={styles.adminFormLabel}>Payment Amount *</Text>
+                    <TextInput
+                      style={styles.adminFormInput}
+                      value={paymentAmount}
+                      onChangeText={setPaymentAmount}
+                      placeholder="Enter amount"
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+
+                  {/* Payment Date Picker */}
+                  <View style={styles.adminFormGroup}>
+                    <Text style={styles.adminFormLabel}>Payment Date *</Text>
+                    <TouchableOpacity
+                      style={styles.datePickerButton}
+                      onPress={() => setShowDatePicker(true)}
+                    >
+                      <Text style={styles.datePickerText}>
+                        {format(paymentDate, 'dd MMM yyyy')}
+                      </Text>
+                      <Ionicons name="calendar" size={20} color="#666" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Payment Mode Selector */}
+                  <View style={styles.adminFormGroup}>
+                    <Text style={styles.adminFormLabel}>Payment Mode *</Text>
+                    <View style={styles.paymentModeContainer}>
+                      {getPaymentModes().map((mode) => (
+                        <TouchableOpacity
+                          key={mode}
+                          style={[
+                            styles.paymentModeChip,
+                            paymentMode === mode && styles.selectedPaymentModeChip
+                          ]}
+                          onPress={() => setPaymentMode(mode)}
+                        >
+                          <Text style={[
+                            styles.paymentModeChipText,
+                            paymentMode === mode && styles.selectedPaymentModeChipText
+                          ]}>
+                            {mode}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  {/* Fee Component Selection */}
+                  {renderFeeComponentChips()}
+
+                  {/* Payment Remarks */}
+                  <View style={styles.adminFormGroup}>
+                    <Text style={styles.adminFormLabel}>Remarks (Optional)</Text>
+                    <TextInput
+                      style={styles.adminFormTextArea}
+                      value={paymentRemarks}
+                      onChangeText={setPaymentRemarks}
+                      placeholder="Add any additional remarks..."
+                      multiline
+                      numberOfLines={3}
+                      textAlignVertical="top"
+                    />
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+            
+            {/* Payment Form Footer */}
+            <View style={styles.fullScreenFooter}>
+              <TouchableOpacity 
+                style={[styles.fullScreenSubmitButton, paymentLoading && styles.disabledButton]} 
+                onPress={handleSubmitPayment}
+                disabled={paymentLoading || !selectedFeeComponent || !paymentAmount}
+              >
+                {paymentLoading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark" size={20} color="#fff" />
+                    <Text style={styles.fullScreenSubmitButtonText}>Record Payment</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* Date Picker Modal */}
+            {showDatePicker && (
+              <DateTimePicker
+                value={paymentDate}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={handleDateChange}
+                maximumDate={new Date()}
+              />
+            )}
+
+        </View>
+      </Modal>
+
+      {/* Payment Method Modal */}
+      <Modal
+        visible={paymentMethodModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setPaymentMethodModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Make Payment</Text>
-              <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
+              <Text style={styles.modalTitle}>
+                {selectedPaymentMethod?.name || 'Payment'}
+              </Text>
+              <TouchableOpacity onPress={() => setPaymentMethodModalVisible(false)}>
                 <Ionicons name="close" size={24} color="#666" />
               </TouchableOpacity>
             </View>
             
-            {selectedFee ? (
-              <View style={styles.paymentContent}>
-                <View style={styles.paymentFeeInfo}>
-                  <Text style={styles.paymentFeeName}>{selectedFee.name || 'Fee Payment'}</Text>
-                  <Text style={styles.paymentFeeDescription}>{selectedFee.description || 'School fee payment'}</Text>
-                  <Text style={styles.paymentAmount}>₹{selectedFee.remainingAmount || selectedFee.amount || 0}</Text>
+            <ScrollView style={styles.paymentMethodContent}>
+              {selectedFee && (
+                <View style={styles.paymentSummary}>
+                  <Text style={styles.paymentSummaryTitle}>Payment Summary</Text>
+                  <View style={styles.paymentSummaryRow}>
+                    <Text style={styles.paymentSummaryLabel}>Fee:</Text>
+                    <Text style={styles.paymentSummaryValue}>{selectedFee.name}</Text>
+                  </View>
+                  <View style={styles.paymentSummaryRow}>
+                    <Text style={styles.paymentSummaryLabel}>Amount:</Text>
+                    <Text style={styles.paymentSummaryValue}>₹{selectedFee.remainingAmount || selectedFee.amount}</Text>
+                  </View>
+                  <View style={styles.paymentSummaryRow}>
+                    <Text style={styles.paymentSummaryLabel}>Due Date:</Text>
+                    <Text style={styles.paymentSummaryValue}>{formatSafeDate(selectedFee.dueDate)}</Text>
+                  </View>
                 </View>
+              )}
+              
+              {renderPaymentForm()}
+            </ScrollView>
+            
+            <View style={styles.paymentMethodFooter}>
+              <TouchableOpacity 
+                style={styles.cancelPaymentButton} 
+                onPress={() => setPaymentMethodModalVisible(false)}
+              >
+                <Text style={styles.cancelPaymentButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.submitPaymentButton, paymentProcessing && styles.disabledButton]} 
+                onPress={handlePaymentMethodSubmit}
+                disabled={paymentProcessing}
+              >
+                {paymentProcessing ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="card" size={20} color="#fff" />
+                    <Text style={styles.submitPaymentButtonText}>Pay Now</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
-                <View style={styles.paymentMethods}>
-                  <Text style={styles.paymentMethodsTitle}>Select Payment Method</Text>
-                  {getPaymentMethods().map((method) => (
-                    <TouchableOpacity
-                      key={method.id}
-                      style={styles.paymentMethod}
-                      onPress={() => {
-                        console.log('Payment method button pressed:', method.id);
-                        handlePaymentMethodSelect(method);
-                      }}
-                    >
-                      <Ionicons
-                        name={method.icon}
-                        size={24}
-                        color="#2196F3"
-                      />
-                      <View style={styles.paymentMethodInfo}>
-                        <Text style={styles.paymentMethodText}>
-                          {method.name}
-                        </Text>
-                        <Text style={styles.paymentMethodDescription}>
-                          {method.description}
-                        </Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={20} color="#666" />
-                    </TouchableOpacity>
-                  ))}
+      {/* New Receipt Modal */}
+      <Modal
+        visible={receiptModalVisible2}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={handleReceiptDone}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Payment Successful</Text>
+              <TouchableOpacity onPress={handleReceiptDone}>
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
+            {receiptData && (
+              <ScrollView style={styles.receiptPreviewContent}>
+                <View style={styles.successIcon}>
+                  <Ionicons name="checkmark-circle" size={64} color="#4CAF50" />
+                  <Text style={styles.successMessage}>Payment completed successfully!</Text>
                 </View>
-              </View>
-            ) : (
-              <View style={styles.paymentContent}>
-                <Text style={styles.errorText}>No fee selected. Please close and try again.</Text>
-              </View>
+                
+                <View style={styles.receiptPreview}>
+                  <View style={styles.receiptHeader}>
+                    <Text style={styles.receiptSchoolName}>{schoolDetails?.name || 'School Management System'}</Text>
+                    <Text style={styles.receiptTitle}>Fee Payment Receipt</Text>
+                    <Text style={styles.receiptNumber}>Receipt No: {receiptData.receipt_no}</Text>
+                  </View>
+
+                  <View style={styles.receiptInfo}>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Date:</Text>
+                      <Text style={styles.receiptInfoValue}>{receiptData.payment_date_formatted}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Student:</Text>
+                      <Text style={styles.receiptInfoValue}>{receiptData.student_name}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Admission No:</Text>
+                      <Text style={styles.receiptInfoValue}>{receiptData.student_admission_no}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Fee Component:</Text>
+                      <Text style={styles.receiptInfoValue}>{receiptData.fee_component}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Payment Mode:</Text>
+                      <Text style={styles.receiptInfoValue}>{receiptData.payment_mode}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Transaction ID:</Text>
+                      <Text style={styles.receiptInfoValue}>{receiptData.transaction_id}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Payment Details:</Text>
+                      <Text style={styles.receiptInfoValue}>{receiptData.payment_details}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.receiptAmountSection}>
+                    <Text style={styles.receiptAmount}>₹{receiptData.amount_paid.toFixed(2)}</Text>
+                    <Text style={styles.receiptAmountLabel}>Amount Paid</Text>
+                    <Text style={styles.amountInWords}>
+                      {receiptData.amount_in_words.toUpperCase()} RUPEES ONLY
+                    </Text>
+                  </View>
+                </View>
+              </ScrollView>
             )}
 
+            <View style={styles.receiptModalFooter}>
+              <TouchableOpacity style={styles.shareReceiptButton} onPress={handleShareReceipt}>
+                <Ionicons name="share" size={20} color="#2196F3" />
+                <Text style={styles.shareReceiptButtonText}>Share</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.printReceiptButton} onPress={handlePrintReceipt}>
+                <Ionicons name="print" size={20} color="#2196F3" />
+                <Text style={styles.printReceiptButtonText}>Print</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.doneReceiptButton} onPress={handleReceiptDone}>
+                <Text style={styles.doneReceiptButtonText}>Done</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1317,8 +2526,11 @@ const FeePayment = () => {
               <ScrollView style={styles.receiptPreviewContent}>
                 <View style={styles.receiptPreview}>
                   <View style={styles.receiptHeader}>
-                    <Text style={styles.receiptSchoolName}>ABC School</Text>
+                    <Text style={styles.receiptSchoolName}>{schoolData?.school_name || 'ABC School'}</Text>
                     <Text style={styles.receiptTitle}>Fee Receipt</Text>
+                    {selectedReceipt.receiptNumber && (
+                      <Text style={styles.receiptNumber}>Receipt No: {selectedReceipt.receiptNumber}</Text>
+                    )}
                   </View>
 
                   <View style={styles.receiptInfo}>
@@ -1346,6 +2558,12 @@ const FeePayment = () => {
                       <Text style={styles.receiptInfoLabel}>Payment Method:</Text>
                       <Text style={styles.receiptInfoValue}>{selectedReceipt.paymentMethod}</Text>
                     </View>
+                    {selectedReceipt.receiptNumber && (
+                      <View style={styles.receiptInfoRow}>
+                        <Text style={styles.receiptInfoLabel}>Receipt Number:</Text>
+                        <Text style={styles.receiptInfoValue}>{selectedReceipt.receiptNumber}</Text>
+                      </View>
+                    )}
                     <View style={styles.receiptInfoRow}>
                       <Text style={styles.receiptInfoLabel}>Status:</Text>
                       <View style={styles.receiptStatusRow}>
@@ -1379,6 +2597,95 @@ const FeePayment = () => {
               <TouchableOpacity style={styles.downloadReceiptButton} onPress={handleConfirmDownload}>
                 <Ionicons name="download" size={20} color="#fff" />
                 <Text style={styles.downloadReceiptButtonText}>Download PDF</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Admin-style Receipt Modal */}
+      <Modal
+        visible={receiptModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={handleAdminReceiptDone}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Payment Successful</Text>
+              <TouchableOpacity onPress={handleAdminReceiptDone}>
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
+            {lastPaymentRecord && (
+              <ScrollView style={styles.receiptPreviewContent}>
+                <View style={styles.successIcon}>
+                  <Ionicons name="checkmark-circle" size={64} color="#4CAF50" />
+                  <Text style={styles.successMessage}>Payment recorded successfully!</Text>
+                </View>
+                
+                <View style={styles.receiptPreview}>
+                  <View style={styles.receiptHeader}>
+                    <Text style={styles.receiptSchoolName}>{schoolDetails?.name || 'School Management System'}</Text>
+                    <Text style={styles.receiptTitle}>Fee Payment Receipt</Text>
+                    <Text style={styles.receiptNumber}>Receipt No: {lastPaymentRecord.receipt_no}</Text>
+                  </View>
+
+                  <View style={styles.receiptInfo}>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Date:</Text>
+                      <Text style={styles.receiptInfoValue}>{lastPaymentRecord.payment_date_formatted}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Student:</Text>
+                      <Text style={styles.receiptInfoValue}>{lastPaymentRecord.student_name}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Admission No:</Text>
+                      <Text style={styles.receiptInfoValue}>{lastPaymentRecord.student_admission_no}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Fee Component:</Text>
+                      <Text style={styles.receiptInfoValue}>{lastPaymentRecord.fee_component}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Payment Mode:</Text>
+                      <Text style={styles.receiptInfoValue}>{lastPaymentRecord.payment_mode}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Transaction ID:</Text>
+                      <Text style={styles.receiptInfoValue}>{lastPaymentRecord.transaction_id}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRow}>
+                      <Text style={styles.receiptInfoLabel}>Payment Details:</Text>
+                      <Text style={styles.receiptInfoValue}>{lastPaymentRecord.payment_details}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.receiptAmountSection}>
+                    <Text style={styles.receiptAmount}>₹{lastPaymentRecord.amount_paid.toFixed(2)}</Text>
+                    <Text style={styles.receiptAmountLabel}>Amount Paid</Text>
+                    <Text style={styles.amountInWords}>
+                      {lastPaymentRecord.amount_in_words.toUpperCase()} RUPEES ONLY
+                    </Text>
+                  </View>
+                </View>
+              </ScrollView>
+            )}
+
+            <View style={styles.receiptModalFooter}>
+              <TouchableOpacity style={styles.shareReceiptButton} onPress={handleShareAdminReceipt}>
+                <Ionicons name="share" size={20} color="#2196F3" />
+                <Text style={styles.shareReceiptButtonText}>Share</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.printReceiptButton} onPress={handlePrintAdminReceipt}>
+                <Ionicons name="print" size={20} color="#2196F3" />
+                <Text style={styles.printReceiptButtonText}>Print</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.doneReceiptButton} onPress={handleAdminReceiptDone}>
+                <Text style={styles.doneReceiptButtonText}>Done</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1856,6 +3163,12 @@ const styles = StyleSheet.create({
     color: '#333',
     textAlign: 'center',
   },
+  receiptNumber: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+    textAlign: 'center',
+  },
   receiptInfo: {
     backgroundColor: '#f8f9fa',
     padding: 16,
@@ -2093,6 +3406,406 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
+  // Payment Method Modal Styles
+  paymentMethodContent: {
+    flex: 1,
+    padding: 20,
+  },
+  paymentSummary: {
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  paymentSummaryTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  paymentSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  paymentSummaryLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  paymentSummaryValue: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  paymentMethodFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    backgroundColor: '#fff',
+  },
+  cancelPaymentButton: {
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flex: 1,
+    marginRight: 8,
+    alignItems: 'center',
+  },
+  cancelPaymentButtonText: {
+    color: '#666',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  submitPaymentButton: {
+    backgroundColor: '#2196F3',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    marginLeft: 8,
+  },
+  submitPaymentButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+  disabledButton: {
+    backgroundColor: '#ccc',
+  },
+  // Success and Receipt Modal Styles
+  successIcon: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  successMessage: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  amountInWords: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  shareReceiptButton: {
+    backgroundColor: '#fff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    marginRight: 4,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+  },
+  shareReceiptButtonText: {
+    color: '#2196F3',
+    fontSize: 14,
+    fontWeight: '500',
+    marginLeft: 4,
+  },
+  printReceiptButton: {
+    backgroundColor: '#fff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+  },
+  printReceiptButtonText: {
+    color: '#2196F3',
+    fontSize: 14,
+    fontWeight: '500',
+    marginLeft: 4,
+  },
+  doneReceiptButton: {
+    backgroundColor: '#2196F3',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    marginLeft: 4,
+  },
+  doneReceiptButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  // Admin-style payment form styles
+  paymentFormScrollView: {
+    flex: 1,
+    maxHeight: 450,
+  },
+  paymentFormContainer: {
+    padding: 20,
+  },
+  feeDetailsHeader: {
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  feeDetailsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  feeDetailsAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2196F3',
+  },
+  adminFormGroup: {
+    marginBottom: 16,
+  },
+  adminFormLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  adminFormInput: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 16,
+    backgroundColor: '#fff',
+  },
+  adminFormTextArea: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 16,
+    backgroundColor: '#fff',
+    height: 80,
+  },
+  datePickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+  },
+  datePickerText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  paymentModeContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  paymentModeChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 20,
+    backgroundColor: '#fff',
+  },
+  selectedPaymentModeChip: {
+    backgroundColor: '#2196F3',
+    borderColor: '#2196F3',
+  },
+  paymentModeChipText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  selectedPaymentModeChipText: {
+    color: '#fff',
+  },
+  feeChipsContainer: {
+    marginBottom: 16,
+  },
+  feeChipsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  feeChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  feeChip: {
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 12,
+    minWidth: 120,
+  },
+  selectedFeeChip: {
+    backgroundColor: '#2196F3',
+    borderColor: '#2196F3',
+  },
+  feeChipText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 4,
+  },
+  selectedFeeChipText: {
+    color: '#fff',
+  },
+  feeChipAmount: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#2196F3',
+  },
+  selectedFeeChipAmount: {
+    color: '#fff',
+  },
+  adminFormFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    backgroundColor: '#fff',
+  },
+  cancelAdminButton: {
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flex: 1,
+    marginRight: 8,
+    alignItems: 'center',
+  },
+  cancelAdminButtonText: {
+    color: '#666',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  submitAdminButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    marginLeft: 8,
+  },
+  submitAdminButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+  // Full-screen modal styles
+  fullScreenModalContainer: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  fullScreenHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  backButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#f5f5f5',
+  },
+  fullScreenTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    flex: 1,
+    textAlign: 'center',
+  },
+  headerSpacer: {
+    width: 40, // Same width as back button to center title
+  },
+  fullScreenScrollView: {
+    flex: 1,
+  },
+  fullScreenContent: {
+    padding: 20,
+    paddingBottom: 100, // Space for footer button
+  },
+  fullScreenFooter: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  fullScreenSubmitButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 16,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  fullScreenSubmitButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
 });
 
-export default FeePayment; 
+export default FeePayment;

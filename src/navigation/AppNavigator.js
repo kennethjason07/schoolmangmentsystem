@@ -22,6 +22,7 @@ import ExamsMarks from '../screens/admin/ExamsMarks';
 import AdminMarksEntry from '../screens/admin/MarksEntry';
 import AttendanceManagement from '../screens/admin/AttendanceManagement';
 import FeeManagement from '../screens/admin/FeeManagement';
+import DiscountManagement from '../screens/admin/DiscountManagement';
 import AnalyticsReports from '../screens/admin/AnalyticsReports';
 import NotificationManagement from '../screens/admin/NotificationManagement';
 import ExpenseManagement from '../screens/admin/ExpenseManagement';
@@ -75,10 +76,6 @@ import ChatWithTeacher from '../screens/parent/ChatWithTeacher';
 import StudentSelectionScreen from '../screens/parent/StudentSelectionScreen';
 import ParentViewHomework from '../screens/parent/ParentViewHomework';
 
-// Payment Screens
-import CardPayment from '../screens/parent/CardPayment';
-import OnlineBankingPayment from '../screens/parent/OnlineBankingPayment';
-import UPIPayment from '../screens/parent/UPIPayment';
 
 // Student Screens
 import StudentDashboard from '../screens/student/StudentDashboard';
@@ -88,9 +85,6 @@ import StudentMarks from '../screens/student/StudentMarks';
 import StudentNotifications from '../screens/student/StudentNotifications';
 import StudentChatWithTeacher from '../screens/student/StudentChatWithTeacher';
 import StudentFeePayment from '../screens/student/FeePayment';
-import StudentCardPayment from '../screens/student/CardPayment';
-import StudentOnlineBankingPayment from '../screens/student/OnlineBankingPayment';
-import StudentUPIPayment from '../screens/student/UPIPayment';
 
 // Universal Screens
 import ProfileScreen from '../screens/universal/ProfileScreen';
@@ -398,6 +392,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="SubjectsTimetable" component={SubjectsTimetable} />
                 <Stack.Screen name="AttendanceManagement" component={AttendanceManagement} />
                 <Stack.Screen name="FeeManagement" component={FeeManagement} />
+                <Stack.Screen name="DiscountManagement" component={DiscountManagement} />
                 <Stack.Screen name="FeeClassDetails" component={FeeClassDetails} />
                 <Stack.Screen name="ClassStudentDetails" component={ClassStudentDetails} />
                 <Stack.Screen name="ExamsMarks" component={ExamsMarks} />
@@ -452,9 +447,6 @@ export default function AppNavigator() {
                 <Stack.Screen name="ParentTabs" component={ParentTabNavigator} />
                 <Stack.Screen name="ParentNotifications" component={Notifications} />
                 <Stack.Screen name="ParentViewHomework" component={ParentViewHomework} />
-                <Stack.Screen name="CardPayment" component={CardPayment} />
-                <Stack.Screen name="OnlineBankingPayment" component={OnlineBankingPayment} />
-                <Stack.Screen name="UPIPayment" component={UPIPayment} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
               </>
@@ -464,9 +456,6 @@ export default function AppNavigator() {
                 <Stack.Screen name="StudentTabs" component={StudentTabNavigator} />
                 <Stack.Screen name="StudentNotifications" component={StudentNotifications} />
                 <Stack.Screen name="StudentFeePayment" component={StudentFeePayment} />
-                <Stack.Screen name="CardPayment" component={StudentCardPayment} />
-                <Stack.Screen name="OnlineBankingPayment" component={StudentOnlineBankingPayment} />
-                <Stack.Screen name="UPIPayment" component={StudentUPIPayment} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
                 <Stack.Screen name="StudentDetails" component={StudentDetails} />

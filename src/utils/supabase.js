@@ -77,6 +77,7 @@ export const TABLES = {
   FEES: 'fees',
   SCHOOL_EXPENSES: 'school_expenses',
   EXPENSE_CATEGORIES: 'expense_categories',
+  STUDENT_DISCOUNTS: 'student_discounts',
 };
 
 // Authentication helper functions
@@ -2313,6 +2314,250 @@ export const dbHelpers = {
     } catch (error) {
       return { data: null, error };
     }
+  },
+
+  // ========================================
+  // STUDENT FEE CONCESSION MANAGEMENT FUNCTIONS
+  // ========================================
+
+  // Get all fee concessions for a class
+  async getDiscountsByClass(classId, academicYear = '2024-25') {
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .select(`
+          *,
+          students(id, name, admission_no, roll_no),
+          classes(class_name, section)
+        `)
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Get fee concessions for a specific student
+  async getDiscountsByStudent(studentId, academicYear = '2024-25') {
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .select(`
+          *,
+          students(id, name, admission_no, roll_no),
+          classes(class_name, section)
+        `)
+        .eq('student_id', studentId)
+        .eq('academic_year', academicYear)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Create a new fee concession for a student
+  async createStudentDiscount(discountData) {
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .insert(discountData)
+        .select(`
+          *,
+          students(id, name, admission_no, roll_no),
+          classes(class_name, section)
+        `)
+        .single();
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Create bulk fee concessions for multiple students
+  async createBulkStudentDiscounts(discountDataArray) {
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .insert(discountDataArray)
+        .select(`
+          *,
+          students(id, name, admission_no, roll_no),
+          classes(class_name, section)
+        `);
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Update a fee concession
+  async updateStudentDiscount(discountId, updates) {
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .update(updates)
+        .eq('id', discountId)
+        .select(`
+          *,
+          students(id, name, admission_no, roll_no),
+          classes(class_name, section)
+        `)
+        .single();
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Delete/Deactivate a fee concession
+  async deleteStudentDiscount(discountId, hardDelete = false) {
+    try {
+      if (hardDelete) {
+        const { error } = await supabase
+          .from(TABLES.STUDENT_DISCOUNTS)
+          .delete()
+          .eq('id', discountId);
+        return { error };
+      } else {
+        // Soft delete by setting is_active to false
+        const { data, error } = await supabase
+          .from(TABLES.STUDENT_DISCOUNTS)
+          .update({ is_active: false })
+          .eq('id', discountId)
+          .select()
+          .single();
+        return { data, error };
+      }
+    } catch (error) {
+      return { error };
+    }
+  },
+
+  // Get students with their fee concession information for a class
+  async getStudentsWithDiscounts(classId, academicYear = '2024-25') {
+    try {
+      const { data, error } = await supabase.rpc('get_students_with_discounts', {
+        p_class_id: classId,
+        p_academic_year: academicYear
+      });
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Calculate fee with concession for a student
+  async calculateStudentFee(studentId, classId, academicYear, feeComponent, baseAmount) {
+    try {
+      const { data, error } = await supabase.rpc('calculate_student_fee', {
+        p_student_id: studentId,
+        p_class_id: classId,
+        p_academic_year: academicYear,
+        p_fee_component: feeComponent,
+        p_base_amount: baseAmount
+      });
+      return { data: data && data.length > 0 ? data[0] : null, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Apply fee concession to fee structure
+  async applyDiscountToFeeStructure(studentId, classId, academicYear) {
+    try {
+      const { data, error } = await supabase.rpc('apply_discount_to_fee_structure', {
+        p_student_id: studentId,
+        p_class_id: classId,
+        p_academic_year: academicYear
+      });
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Get fee concession summary view
+  async getDiscountSummary(filters = {}) {
+    try {
+      let query = supabase.from('discount_summary').select('*');
+      
+      if (filters.classId) {
+        query = query.eq('class_id', filters.classId);
+      }
+      if (filters.academicYear) {
+        query = query.eq('academic_year', filters.academicYear);
+      }
+      if (filters.isActive !== undefined) {
+        query = query.eq('is_active', filters.isActive);
+      }
+      
+      const { data, error } = await query.order('created_at', { ascending: false });
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Get fee components for fee concession selection
+  async getFeeComponents(classId = null, academicYear = '2024-25') {
+    try {
+      let query = supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .select('fee_component')
+        .eq('academic_year', academicYear);
+      
+      if (classId) {
+        query = query.eq('class_id', classId);
+      }
+      
+      const { data, error } = await query;
+      
+      if (error) return { data: null, error };
+      
+      // Return unique fee components
+      const uniqueComponents = [...new Set(data.map(item => item.fee_component))]
+        .filter(component => component && component.trim())
+        .sort();
+      
+      return { data: uniqueComponents, error: null };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Validate fee concession data before creation
+  validateDiscountData(discountData) {
+    const errors = [];
+    
+    if (!discountData.student_id) errors.push('Student ID is required');
+    if (!discountData.class_id) errors.push('Class ID is required');
+    if (!discountData.academic_year) errors.push('Academic year is required');
+    if (!discountData.discount_type) errors.push('Fee concession type is required');
+    if (discountData.discount_value === undefined || discountData.discount_value === null) {
+      errors.push('Fee concession value is required');
+    }
+    
+    if (discountData.discount_type === 'percentage') {
+      if (discountData.discount_value < 0 || discountData.discount_value > 100) {
+        errors.push('Percentage fee concession must be between 0 and 100');
+      }
+    } else if (discountData.discount_type === 'fixed_amount') {
+      if (discountData.discount_value < 0) {
+        errors.push('Fixed amount fee concession must be positive');
+      }
+    } else {
+      errors.push('Fee concession type must be either "percentage" or "fixed_amount"');
+    }
+    
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
   },
 };
 

@@ -10,10 +10,15 @@ import {
   Alert,
   RefreshControl,
   Modal,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Picker } from '@react-native-picker/picker';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 import Header from '../../components/Header';
-import { supabase, TABLES } from '../../utils/supabase';
+import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { formatCurrency } from '../../utils/helpers';
 import { format } from 'date-fns';
 
@@ -37,10 +42,127 @@ const ClassStudentDetails = ({ route, navigation }) => {
   const [paymentRemarks, setPaymentRemarks] = useState('');
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [feeComponents, setFeeComponents] = useState([]);
+  const [selectedFeeComponent, setSelectedFeeComponent] = useState('');
+  const [receiptModal, setReceiptModal] = useState(false);
+  const [lastPaymentRecord, setLastPaymentRecord] = useState(null);
+  const [individualReceiptModal, setIndividualReceiptModal] = useState(false);
+  const [selectedPaymentForReceipt, setSelectedPaymentForReceipt] = useState(null);
+  const [schoolDetails, setSchoolDetails] = useState(null);
+  const [schoolLogo, setSchoolLogo] = useState(null);
 
   useEffect(() => {
+    loadSchoolDetails();
     loadClassStudentDetails();
   }, []);
+
+  // Load school details and logo
+  const loadSchoolDetails = async () => {
+    try {
+      console.log('🏫 Loading school details...');
+      
+      const { data: schoolData, error } = await supabase
+        .from('school_details')
+        .select('*')
+        .limit(1)
+        .single();
+
+      console.log('🏫 School details query result:', { schoolData, error });
+
+      if (error && error.code !== 'PGRST116') {
+        console.error('❌ Error loading school details:', error);
+        Alert.alert(
+          'School Details Error', 
+          `Failed to load school details: ${error.message}\n\nCode: ${error.code}`
+        );
+        return;
+      }
+
+      if (schoolData) {
+        console.log('✅ School details loaded:', schoolData);
+        console.log('📸 Logo URL from database:', schoolData.logo_url);
+        setSchoolDetails(schoolData);
+        
+        // Load school logo if available
+        if (schoolData.logo_url) {
+          try {
+            console.log('🔄 Attempting to load logo from:', schoolData.logo_url);
+            
+            // First, let's check if the file exists
+            const { data: fileInfo, error: fileError } = await supabase.storage
+              .from('school-assets')
+              .list('', {
+                limit: 100,
+                search: schoolData.logo_url
+              });
+            
+            console.log('📁 Storage file check:', { fileInfo, fileError });
+            
+            // Get public URL regardless of file check result
+            const { data: logoData } = await supabase.storage
+              .from('school-assets')
+              .getPublicUrl(schoolData.logo_url);
+            
+            console.log('🌐 Public URL data:', logoData);
+            
+            if (logoData?.publicUrl) {
+              console.log('✅ School logo URL generated:', logoData.publicUrl);
+              setSchoolLogo(logoData.publicUrl);
+              
+              // Test if the image actually loads
+              fetch(logoData.publicUrl, { method: 'HEAD' })
+                .then(response => {
+                  console.log('🖼️ Logo accessibility test:', {
+                    status: response.status,
+                    ok: response.ok,
+                    headers: Object.fromEntries(response.headers.entries())
+                  });
+                  if (!response.ok) {
+                    console.warn('⚠️ Logo URL is not accessible:', response.status);
+                  }
+                })
+                .catch(fetchError => {
+                  console.error('❌ Logo fetch test failed:', fetchError);
+                });
+            } else {
+              console.warn('⚠️ No public URL generated for logo');
+            }
+          } catch (logoError) {
+            console.error('❌ Error loading school logo:', logoError);
+            Alert.alert(
+              'Logo Loading Error', 
+              `Failed to load school logo: ${logoError.message}\n\nLogo path: ${schoolData.logo_url}`
+            );
+          }
+        } else {
+          console.log('ℹ️ No logo URL found in school details');
+        }
+      } else {
+        console.log('ℹ️ No school details found, using default');
+        setSchoolDetails({
+          name: 'School Management System',
+          type: 'School',
+          address: '',
+          phone: '',
+          email: ''
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error in loadSchoolDetails:', error);
+      Alert.alert(
+        'School Details Error', 
+        `Unexpected error: ${error.message}`
+      );
+      // Set default school details
+      setSchoolDetails({
+        name: 'School Management System',
+        type: 'School',
+        address: '',
+        phone: '',
+        email: ''
+      });
+    }
+  };
 
   // Format currency safely in Indian Rupees
   const formatSafeCurrency = (amount) => {
@@ -112,7 +234,30 @@ const ClassStudentDetails = ({ route, navigation }) => {
       const totalFeeStructure = feeStructureData.reduce((sum, fee) => 
         sum + (parseFloat(fee.amount) || 0), 0);
 
-      // Process student data with payment details
+      // Get fee concessions for all students in this class - simplified approach
+      const studentIds = studentsData.map(s => s.id);
+      let concessionsData = [];
+      
+      console.log('🎫 Fetching concessions for students:', studentIds);
+      console.log('🎫 Academic Year:', academicYear);
+      
+      if (studentIds.length > 0) {
+        const { data: concessions, error: concessionsError } = await supabase
+          .from('student_discounts')
+          .select('student_id, discount_value, discount_type, fee_component, description')
+          .in('student_id', studentIds)
+          .eq('is_active', true);
+        
+        console.log('🎫 Raw concessions from DB:', concessions);
+        console.log('🎫 Concessions error:', concessionsError);
+        
+        if (!concessionsError && concessions) {
+          concessionsData = concessions;
+          console.log('🎫 Total concessions found:', concessionsData.length);
+        }
+      }
+
+      // Process student data with payment details and concessions
       const processedStudents = studentsData.map(student => {
         // Filter payments for current academic year
         const currentYearPayments = student.student_fees?.filter(
@@ -123,12 +268,25 @@ const ClassStudentDetails = ({ route, navigation }) => {
         const totalPaid = currentYearPayments.reduce((sum, payment) => 
           sum + (parseFloat(payment.amount_paid) || 0), 0);
 
-        // Calculate outstanding amount
-        const outstanding = Math.max(0, totalFeeStructure - totalPaid);
+        // Calculate concessions for this student - simplified approach
+        const studentConcessions = concessionsData.filter(c => c.student_id === student.id);
+        const totalConcessions = studentConcessions.reduce((sum, concession) => 
+          sum + (parseFloat(concession.discount_value) || 0), 0);
+        
+        // Debug concessions for this student
+        console.log(`🎫 Student ${student.name} (ID: ${student.id}) concessions:`, {
+          studentConcessions,
+          totalConcessions,
+          concessionsFound: studentConcessions.length
+        });
 
-        // Calculate payment percentage
-        const paymentPercentage = totalFeeStructure > 0 ? 
-          Math.min(100, (totalPaid / totalFeeStructure) * 100) : 0;
+        // Calculate outstanding amount (no adjustment, just display concession separately)
+        const outstanding = Math.max(0, totalFeeStructure - totalPaid);
+        const adjustedFeeAmount = Math.max(0, totalFeeStructure - totalConcessions);
+
+        // Calculate payment percentage based on adjusted fee amount
+        const paymentPercentage = adjustedFeeAmount > 0 ? 
+          Math.min(100, (totalPaid / adjustedFeeAmount) * 100) : 0;
 
         // Get payment status - Fixed logic to prevent showing 'Paid' for all students
         let paymentStatus;
@@ -169,7 +327,9 @@ const ClassStudentDetails = ({ route, navigation }) => {
           latestPaymentDate: latestPayment?.payment_date,
           latestPaymentMode: latestPayment?.payment_mode,
           payments: currentYearPayments,
-          paymentCount: currentYearPayments.length
+          paymentCount: currentYearPayments.length,
+          totalConcessions,
+          adjustedFeeAmount
         };
       });
 
@@ -254,6 +414,68 @@ const ClassStudentDetails = ({ route, navigation }) => {
     setStudentHistoryModal(true);
   };
 
+  // Load fee components for the class
+  const loadFeeComponents = async () => {
+    try {
+      console.log('💰 Loading fee components for class:', classData.classId);
+      
+      const { data: feeComponentsData, error } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .select('*')
+        .eq('class_id', classData.classId);
+
+      console.log('💰 Fee components query result:', { feeComponentsData, error });
+      
+      if (error) {
+        console.error('💰 Error loading fee components:', error);
+        throw error;
+      }
+
+      if (feeComponentsData && feeComponentsData.length > 0) {
+        console.log('💰 Fee components loaded:', feeComponentsData.map(c => c.fee_component));
+        setFeeComponents(feeComponentsData);
+      } else {
+        console.log('💰 No fee components found for class');
+        setFeeComponents([]);
+      }
+    } catch (error) {
+      console.error('Error loading fee components:', error);
+      Alert.alert('Debug Info', `Fee Components Error: ${error.message}\n\nClass ID: ${classData.classId}\n\nTable: ${TABLES.FEE_STRUCTURE}`);
+    }
+  };
+
+  // Get next receipt number from database
+  const getNextReceiptNumber = async () => {
+    try {
+      // Try to get the maximum receipt number from existing records
+      const { data: maxReceiptData, error: maxError } = await supabase
+        .from('student_fees')
+        .select('receipt_number')
+        .not('receipt_number', 'is', null)
+        .order('receipt_number', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (maxError && maxError.code !== 'PGRST116') {
+        console.error('Error getting max receipt number:', maxError);
+        // Fallback: start from 1000
+        return 1000;
+      }
+      
+      const maxReceiptNumber = maxReceiptData?.receipt_number || 999;
+      const nextReceiptNumber = maxReceiptNumber + 1;
+      
+      console.log('Admin - Max receipt number found:', maxReceiptNumber);
+      console.log('Admin - Next receipt number will be:', nextReceiptNumber);
+      
+      return nextReceiptNumber;
+    } catch (error) {
+      console.error('Error in getNextReceiptNumber:', error);
+      // Fallback: start from 1000
+      return 1000;
+    }
+  };
+
   // Handle mark as paid button click
   const handleMarkAsPaid = (student) => {
     setSelectedStudent(student);
@@ -261,12 +483,353 @@ const ClassStudentDetails = ({ route, navigation }) => {
     setPaymentAmount('');
     setPaymentMode('Cash');
     setPaymentRemarks('');
+    setSelectedFeeComponent('');
     setPaymentModal(true);
+    
+    // Load fee components when modal opens
+    loadFeeComponents();
+  };
+
+  // Handle fee concession button click
+  const handleFeeConcesssionClick = (student) => {
+    // Navigate to DiscountManagement screen with student context
+    navigation.navigate('DiscountManagement', {
+      classId: classData.classId,
+      className: classData.className,
+      studentId: student.id,
+      studentName: student.name,
+      openIndividualDiscount: true
+    });
   };
 
   // Format date for display
   const formatDateForDisplay = (date) => {
     return format(date, 'dd MMM yyyy');
+  };
+
+  // Handle individual receipt generation
+  const handleGenerateIndividualReceipt = async (payment) => {
+    if (!selectedStudent || !payment) return;
+    
+    // Use the actual receipt number from the payment record if available
+    let receiptNumber = payment.receipt_number;
+    
+    // If no receipt number exists in the payment record, generate one
+    if (!receiptNumber) {
+      receiptNumber = await getNextReceiptNumber();
+      console.log('Generated new receipt number for existing payment:', receiptNumber);
+    }
+    
+    const receiptData = {
+      ...payment,
+      student_name: selectedStudent.name,
+      student_admission_no: selectedStudent.admissionNo,
+      student_roll_no: selectedStudent.rollNo,
+      class_name: classData.className,
+      receipt_no: receiptNumber,
+      payment_date_formatted: formatSafeDate(payment.payment_date),
+      amount_in_words: numberToWords(parseFloat(payment.amount_paid))
+    };
+    
+    setSelectedPaymentForReceipt(receiptData);
+    setIndividualReceiptModal(true);
+  };
+
+  // Convert number to words (simple implementation)
+  const numberToWords = (amount) => {
+    const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+    const teens = ['ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+    const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+    
+    if (amount === 0) return 'zero';
+    if (amount < 10) return ones[amount];
+    if (amount < 20) return teens[amount - 10];
+    if (amount < 100) return tens[Math.floor(amount / 10)] + (amount % 10 !== 0 ? ' ' + ones[amount % 10] : '');
+    if (amount < 1000) {
+      const hundreds = Math.floor(amount / 100);
+      const remainder = amount % 100;
+      return ones[hundreds] + ' hundred' + (remainder !== 0 ? ' ' + numberToWords(remainder) : '');
+    }
+    if (amount < 100000) {
+      const thousands = Math.floor(amount / 1000);
+      const remainder = amount % 1000;
+      return numberToWords(thousands) + ' thousand' + (remainder !== 0 ? ' ' + numberToWords(remainder) : '');
+    }
+    if (amount < 10000000) {
+      const lakhs = Math.floor(amount / 100000);
+      const remainder = amount % 100000;
+      return numberToWords(lakhs) + ' lakh' + (remainder !== 0 ? ' ' + numberToWords(remainder) : '');
+    }
+    
+    return amount.toString(); // Fallback for very large numbers
+  };
+
+  // Generate PDF receipt
+  const generateReceiptPDF = async (receiptData) => {
+    try {
+      const schoolName = schoolDetails?.name || 'School Management System';
+      const schoolAddress = schoolDetails?.address || '';
+      const schoolPhone = schoolDetails?.phone || '';
+      const schoolEmail = schoolDetails?.email || '';
+      
+      const logoHtml = schoolLogo 
+        ? `<img src="${schoolLogo}" style="width: 80px; height: 80px; margin-bottom: 10px;" />` 
+        : '';
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Payment Receipt</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              margin: 0;
+              padding: 20px;
+              background-color: #fff;
+            }
+            .receipt-container {
+              max-width: 600px;
+              margin: 0 auto;
+              border: 2px solid #2196F3;
+              border-radius: 10px;
+              padding: 30px;
+            }
+            .header {
+              text-align: center;
+              border-bottom: 2px solid #2196F3;
+              padding-bottom: 20px;
+              margin-bottom: 30px;
+            }
+            .school-name {
+              font-size: 28px;
+              font-weight: bold;
+              color: #2196F3;
+              margin: 10px 0;
+            }
+            .school-info {
+              font-size: 12px;
+              color: #666;
+              margin: 5px 0;
+            }
+            .receipt-title {
+              font-size: 24px;
+              font-weight: bold;
+              color: #333;
+              margin: 15px 0 10px 0;
+              letter-spacing: 2px;
+            }
+            .receipt-number {
+              font-size: 14px;
+              color: #2196F3;
+              font-weight: bold;
+              margin-top: 10px;
+            }
+            .details-section {
+              margin: 20px 0;
+            }
+            .detail-row {
+              display: flex;
+              justify-content: space-between;
+              padding: 8px 0;
+              border-bottom: 1px solid #eee;
+            }
+            .detail-label {
+              font-weight: 600;
+              color: #666;
+            }
+            .detail-value {
+              font-weight: 600;
+              color: #333;
+            }
+            .payment-section {
+              background-color: #f8f9fa;
+              padding: 20px;
+              border-radius: 8px;
+              margin: 20px 0;
+            }
+            .payment-title {
+              font-size: 18px;
+              font-weight: bold;
+              text-align: center;
+              color: #333;
+              margin-bottom: 15px;
+            }
+            .amount-section {
+              background-color: #e8f5e8;
+              border: 2px solid #4CAF50;
+              border-radius: 8px;
+              padding: 15px;
+              margin-top: 15px;
+            }
+            .amount-row {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 10px;
+            }
+            .amount-label {
+              font-size: 18px;
+              font-weight: bold;
+              color: #333;
+            }
+            .amount-value {
+              font-size: 24px;
+              font-weight: bold;
+              color: #4CAF50;
+            }
+            .amount-words {
+              font-size: 12px;
+              color: #666;
+              font-style: italic;
+              text-align: center;
+              text-transform: capitalize;
+            }
+            .footer {
+              border-top: 1px solid #eee;
+              padding-top: 20px;
+              margin-top: 30px;
+              text-align: center;
+            }
+            .footer-text {
+              font-size: 10px;
+              color: #999;
+              margin: 5px 0;
+            }
+            .thank-you {
+              font-size: 16px;
+              font-weight: bold;
+              color: #4CAF50;
+              margin-top: 15px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="receipt-container">
+            <div class="header">
+              ${logoHtml}
+              <div class="school-name">${schoolName}</div>
+              ${schoolAddress ? `<div class="school-info">${schoolAddress}</div>` : ''}
+              ${schoolPhone ? `<div class="school-info">Phone: ${schoolPhone}</div>` : ''}
+              ${schoolEmail ? `<div class="school-info">Email: ${schoolEmail}</div>` : ''}
+              <div class="receipt-title">PAYMENT RECEIPT</div>
+              <div class="receipt-number">Receipt No: ${receiptData.receipt_no}</div>
+            </div>
+
+            <div class="details-section">
+              <div class="detail-row">
+                <span class="detail-label">Date:</span>
+                <span class="detail-value">${receiptData.payment_date_formatted}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Student Name:</span>
+                <span class="detail-value">${receiptData.student_name}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Admission No:</span>
+                <span class="detail-value">${receiptData.student_admission_no}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Roll No:</span>
+                <span class="detail-value">${receiptData.student_roll_no || 'N/A'}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Class:</span>
+                <span class="detail-value">${receiptData.class_name}</span>
+              </div>
+            </div>
+
+            <div class="payment-section">
+              <div class="payment-title">Payment Details</div>
+              <div class="detail-row">
+                <span class="detail-label">Fee Component:</span>
+                <span class="detail-value">${receiptData.fee_component}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Payment Mode:</span>
+                <span class="detail-value">${receiptData.payment_mode}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Academic Year:</span>
+                <span class="detail-value">${receiptData.academic_year}</span>
+              </div>
+              
+              <div class="amount-section">
+                <div class="amount-row">
+                  <span class="amount-label">Amount Paid:</span>
+                  <span class="amount-value">₹${parseFloat(receiptData.amount_paid).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div class="amount-words">
+                  (In words: ${receiptData.amount_in_words} rupees only)
+                </div>
+              </div>
+            </div>
+
+            <div class="footer">
+              <div class="footer-text">This is a computer generated receipt.</div>
+              <div class="footer-text">Payment ID: ${receiptData.id}</div>
+              <div class="thank-you">Thank you for your payment!</div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      return htmlContent;
+    } catch (error) {
+      console.error('Error generating PDF content:', error);
+      throw error;
+    }
+  };
+
+  // Handle print receipt
+  const handlePrintReceipt = async (receiptData) => {
+    try {
+      const htmlContent = await generateReceiptPDF(receiptData);
+      
+      const { uri } = await Print.printToFileAsync({
+        html: htmlContent,
+        base64: false
+      });
+      
+      await Print.printAsync({ uri });
+    } catch (error) {
+      console.error('Error printing receipt:', error);
+      Alert.alert('Print Error', 'Failed to print receipt. Please try again.');
+    }
+  };
+
+  // Handle share receipt
+  const handleShareReceipt = async (receiptData) => {
+    try {
+      const htmlContent = await generateReceiptPDF(receiptData);
+      
+      const { uri } = await Print.printToFileAsync({
+        html: htmlContent,
+        base64: false
+      });
+
+      const fileName = `receipt_${receiptData.receipt_no.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+      const newUri = `${FileSystem.documentDirectory}${fileName}`;
+      
+      await FileSystem.moveAsync({
+        from: uri,
+        to: newUri
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(newUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Share Payment Receipt'
+        });
+      } else {
+        Alert.alert('Share Not Available', 'Sharing is not available on this device.');
+      }
+    } catch (error) {
+      console.error('Error sharing receipt:', error);
+      Alert.alert('Share Error', 'Failed to share receipt. Please try again.');
+    }
   };
 
   // Submit payment record
@@ -276,28 +839,59 @@ const ClassStudentDetails = ({ route, navigation }) => {
       return;
     }
 
+    if (!selectedFeeComponent) {
+      Alert.alert('Validation Error', 'Please select a fee component.');
+      return;
+    }
+
     try {
       setPaymentLoading(true);
       
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
 
+      // Generate sequential receipt number
+      const receiptNumber = await getNextReceiptNumber();
+      console.log('Admin - Generated receipt number for new payment:', receiptNumber);
+
       // Insert payment record
-      const { error } = await supabase
+      const feeComponentName = selectedFeeComponent === 'custom' 
+        ? (paymentRemarks || 'General Fee Payment')
+        : selectedFeeComponent || 'General Fee Payment';
+
+      const { data: paymentData, error } = await supabase
         .from(TABLES.STUDENT_FEES)
         .insert({
           student_id: selectedStudent.id,
-          fee_component: paymentRemarks || 'General Fee Payment',
+          fee_component: feeComponentName,
           amount_paid: parseFloat(paymentAmount),
           payment_date: paymentDate.toISOString().split('T')[0],
           payment_mode: paymentMode,
           academic_year: academicYear,
-        });
+          receipt_number: receiptNumber,
+        })
+        .select()
+        .single();
 
       if (error) throw error;
 
-      Alert.alert('Success', 'Payment recorded successfully!');
+      // Store payment record for receipt
+      const receiptData = {
+        ...paymentData,
+        student_name: selectedStudent.name,
+        student_admission_no: selectedStudent.admissionNo,
+        student_roll_no: selectedStudent.rollNo,
+        class_name: classData.className,
+        receipt_no: receiptNumber,
+        payment_date_formatted: formatDateForDisplay(paymentDate),
+        amount_in_words: numberToWords(parseFloat(paymentAmount))
+      };
+      
+      setLastPaymentRecord(receiptData);
       setPaymentModal(false);
+      
+      // Show receipt modal
+      setReceiptModal(true);
       
       // Refresh the data to show updated payment status
       await loadClassStudentDetails();
@@ -533,8 +1127,16 @@ const ClassStudentDetails = ({ route, navigation }) => {
                     <Text style={styles.feeLabel}>Total Fee:</Text>
                     <Text style={styles.feeValue}>{formatSafeCurrency(student.totalFeeStructure)}</Text>
                   </View>
+                  {student.totalConcessions > 0 && (
+                    <View style={styles.feeRow}>
+                      <Text style={styles.feeLabel}>Fee Concession:</Text>
+                      <Text style={[styles.feeValue, { color: '#FF9800' }]}>
+                        -{formatSafeCurrency(student.totalConcessions)}
+                      </Text>
+                    </View>
+                  )}
                   <View style={styles.feeRow}>
-                    <Text style={styles.feeLabel}>Paid:</Text>
+                    <Text style={styles.feeLabel}>Amount Paid:</Text>
                     <Text style={[styles.feeValue, { color: '#4CAF50' }]}>
                       {formatSafeCurrency(student.totalPaid)}
                     </Text>
@@ -545,27 +1147,30 @@ const ClassStudentDetails = ({ route, navigation }) => {
                       {formatSafeCurrency(student.outstanding)}
                     </Text>
                   </View>
-                  <View style={styles.feeRow}>
-                    <Text style={styles.feeLabel}>Progress:</Text>
-                    <Text style={styles.feeValue}>{student.paymentPercentage}%</Text>
-                  </View>
                 </View>
 
-                {/* Progress Bar */}
-                <View style={styles.progressContainer}>
-                  <View style={styles.progressBar}>
-                    <View
-                      style={[
-                        styles.progressFill,
-                        {
-                          width: `${Math.min(student.paymentPercentage, 100)}%`,
-                          backgroundColor: student.paymentStatus === 'Paid' ? '#4CAF50' :
-                            student.paymentStatus === 'Partial' ? '#FF9800' : '#F44336'
-                        }
-                      ]}
-                    />
+                {/* Fee Concession Display */}
+                {student.totalConcessions > 0 && (
+                  <View style={styles.concessionsContainer}>
+                    <View style={styles.concessionsHeader}>
+                      <View style={styles.concessionsIconContainer}>
+                        <Ionicons name="pricetags" size={18} color="#FF9800" />
+                        <Text style={styles.concessionsHeaderText}>Fee Concession Applied</Text>
+                      </View>
+                      <View style={styles.concessionsStats}>
+                        <Text style={styles.concessionsAmount}>
+                          {formatSafeCurrency(student.totalConcessions)}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.concessionsDetails}>
+                      <Text style={styles.concessionsDetailsText}>
+                        Adjusted fee after concession: {formatSafeCurrency(student.adjustedFeeAmount)}
+                      </Text>
+                    </View>
                   </View>
-                </View>
+                )}
+
 
                 {/* Payment History */}
                 {student.payments.length > 0 && (
@@ -602,21 +1207,39 @@ const ClassStudentDetails = ({ route, navigation }) => {
                   </Text>
                 )}
 
-                {/* Mark as Paid Button */}
+                {/* Action Buttons */}
                 {student.outstanding > 0 && (
-                  <TouchableOpacity
-                    style={styles.markAsPaidButton}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      handleMarkAsPaid(student);
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons name="card" size={16} color="#fff" style={{ marginRight: 6 }} />
-                    <Text style={styles.markAsPaidButtonText}>
-                      Pay
-                    </Text>
-                  </TouchableOpacity>
+                  <View style={styles.actionButtonsContainer}>
+                    {/* Pay Button */}
+                    <TouchableOpacity
+                      style={styles.markAsPaidButton}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleMarkAsPaid(student);
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="card" size={16} color="#fff" style={{ marginRight: 6 }} />
+                      <Text style={styles.markAsPaidButtonText}>
+                        Pay
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* Fee Concession Button */}
+                    <TouchableOpacity
+                      style={styles.feeConcessionButton}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleFeeConcesssionClick(student);
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="pricetags" size={16} color="#fff" style={{ marginRight: 6 }} />
+                      <Text style={styles.feeConcessionButtonText}>
+                        Fee Concession
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
               </TouchableOpacity>
             ))
@@ -873,27 +1496,16 @@ const ClassStudentDetails = ({ route, navigation }) => {
                         {formatSafeCurrency(selectedStudent.outstanding)}
                       </Text>
                     </View>
-                    <View style={styles.paymentSummaryItem}>
-                      <Text style={styles.paymentSummaryLabel}>Progress</Text>
-                      <Text style={styles.paymentSummaryValue}>{selectedStudent.paymentPercentage}%</Text>
-                    </View>
+                    {selectedStudent.totalConcessions > 0 && (
+                      <View style={styles.paymentSummaryItem}>
+                        <Text style={styles.paymentSummaryLabel}>Fee Concession</Text>
+                        <Text style={[styles.paymentSummaryValue, { color: '#FF9800' }]}>
+                          {formatSafeCurrency(selectedStudent.totalConcessions)}
+                        </Text>
+                      </View>
+                    )}
                   </View>
 
-                  {/* Progress Bar */}
-                  <View style={styles.modalProgressContainer}>
-                    <View style={styles.modalProgressBar}>
-                      <View
-                        style={[
-                          styles.modalProgressFill,
-                          {
-                            width: `${Math.min(selectedStudent.paymentPercentage, 100)}%`,
-                            backgroundColor: selectedStudent.paymentStatus === 'Paid' ? '#4CAF50' :
-                              selectedStudent.paymentStatus === 'Partial' ? '#FF9800' : '#F44336'
-                          }
-                        ]}
-                      />
-                    </View>
-                  </View>
                 </View>
 
                 {/* Payment History */}
@@ -935,6 +1547,16 @@ const ClassStudentDetails = ({ route, navigation }) => {
                               )}
                             </View>
                           </View>
+                          
+                          {/* Generate Receipt Button */}
+                          <TouchableOpacity
+                            style={styles.generateReceiptButton}
+                            onPress={() => handleGenerateIndividualReceipt(payment)}
+                            activeOpacity={0.8}
+                          >
+                            <Ionicons name="receipt" size={16} color="#2196F3" style={{ marginRight: 6 }} />
+                            <Text style={styles.generateReceiptButtonText}>Generate Receipt</Text>
+                          </TouchableOpacity>
                         </View>
                       ))
                   )}
@@ -984,7 +1606,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
                   
                   {/* Amount Input */}
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Amount *</Text>
+                    <Text style={styles.inputLabel}>Payment Amount *</Text>
                     <TextInput
                       style={styles.textInput}
                       placeholder="Enter payment amount"
@@ -992,7 +1614,53 @@ const ClassStudentDetails = ({ route, navigation }) => {
                       onChangeText={setPaymentAmount}
                       keyboardType="numeric"
                       placeholderTextColor="#999"
+                      editable={true}
                     />
+                    {selectedFeeComponent && selectedFeeComponent !== 'custom' && (() => {
+                      const selectedComponent = feeComponents.find(c => c.fee_component === selectedFeeComponent);
+                      if (!selectedComponent) return null;
+                      
+                      const paidForThisComponent = selectedStudent.payments
+                        .filter(payment => payment.fee_component === selectedFeeComponent)
+                        .reduce((sum, payment) => sum + (parseFloat(payment.amount_paid) || 0), 0);
+                      
+                      const remainingForComponent = Math.max(0, selectedComponent.amount - paidForThisComponent);
+                      
+                      return (
+                        <View style={styles.feeComponentReference}>
+                          <Text style={styles.feeReferenceLabel}>
+                            {selectedFeeComponent} - Payment Summary:
+                          </Text>
+                          <View style={styles.feeBreakdown}>
+                            <View style={styles.feeBreakdownRow}>
+                              <Text style={styles.feeBreakdownLabel}>Total Fee:</Text>
+                              <Text style={styles.feeBreakdownValue}>
+                                {formatSafeCurrency(selectedComponent.amount)}
+                              </Text>
+                            </View>
+                            <View style={styles.feeBreakdownRow}>
+                              <Text style={styles.feeBreakdownLabel}>Already Paid:</Text>
+                              <Text style={[styles.feeBreakdownValue, { color: '#4CAF50' }]}>
+                                {formatSafeCurrency(paidForThisComponent)}
+                              </Text>
+                            </View>
+                            <View style={[styles.feeBreakdownRow, styles.remainingRow]}>
+                              <Text style={styles.remainingLabel}>Remaining Amount:</Text>
+                              <Text style={styles.remainingAmount}>
+                                {formatSafeCurrency(remainingForComponent)}
+                              </Text>
+                            </View>
+                          </View>
+                          {remainingForComponent === 0 && (
+                            <View style={styles.fullyPaidBanner}>
+                              <Text style={styles.fullyPaidBannerText}>
+                                ✅ This fee component is fully paid!
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })()}
                   </View>
 
                   {/* Payment Date */}
@@ -1033,12 +1701,109 @@ const ClassStudentDetails = ({ route, navigation }) => {
                     </ScrollView>
                   </View>
 
-                  {/* Fee Component / Remarks */}
+                  {/* Fee Component Selection */}
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Fee Component / Remarks</Text>
+                    <Text style={styles.inputLabel}>Fee Component</Text>
+                    {feeComponents.length > 0 ? (
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                        {feeComponents.map((component, index) => {
+                          // Calculate remaining amount for this specific component
+                          const paidForThisComponent = selectedStudent.payments
+                            .filter(payment => payment.fee_component === component.fee_component)
+                            .reduce((sum, payment) => sum + (parseFloat(payment.amount_paid) || 0), 0);
+                          
+                          const remainingForComponent = Math.max(0, component.amount - paidForThisComponent);
+                          
+                          return (
+                            <TouchableOpacity
+                              key={index}
+                              style={[
+                                styles.feeComponentChip,
+                                selectedFeeComponent === component.fee_component && styles.activeFeeComponentChip,
+                                remainingForComponent === 0 && styles.fullyPaidFeeChip
+                              ]}
+                              onPress={() => {
+                                setSelectedFeeComponent(component.fee_component);
+                                // Suggest the remaining amount but don't auto-fill
+                                setPaymentRemarks(`Payment for ${component.fee_component}`);
+                              }}
+                              disabled={remainingForComponent === 0}
+                            >
+                              <Text style={[
+                                styles.feeComponentChipText,
+                                selectedFeeComponent === component.fee_component && styles.activeFeeComponentChipText,
+                                remainingForComponent === 0 && styles.fullyPaidFeeChipText
+                              ]}>
+                                {component.fee_component}
+                                {remainingForComponent === 0 && ' ✓'}
+                              </Text>
+                              <Text style={[
+                                styles.feeComponentChipAmount,
+                                selectedFeeComponent === component.fee_component && styles.activeFeeComponentChipAmount,
+                                remainingForComponent === 0 && styles.fullyPaidFeeChipAmount
+                              ]}>
+                                {remainingForComponent === 0 ? (
+                                  <Text style={styles.fullyPaidText}>Fully Paid</Text>
+                                ) : (
+                                  <>
+                                    <Text style={styles.remainingAmountText}>
+                                      Remaining: {formatSafeCurrency(remainingForComponent)}
+                                    </Text>
+                                    <Text style={styles.totalAmountText}>
+                                      (Total: {formatSafeCurrency(component.amount)})
+                                    </Text>
+                                  </>
+                                )}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                        {/* Custom/Other option */}
+                        <TouchableOpacity
+                          style={[
+                            styles.feeComponentChip,
+                            styles.customFeeChip,
+                            selectedFeeComponent === 'custom' && styles.activeFeeComponentChip
+                          ]}
+                          onPress={() => {
+                            setSelectedFeeComponent('custom');
+                            setPaymentRemarks('Custom payment');
+                          }}
+                        >
+                          <Text style={[
+                            styles.feeComponentChipText,
+                            styles.customFeeChipText,
+                            selectedFeeComponent === 'custom' && styles.activeFeeComponentChipText
+                          ]}>
+                            Other
+                          </Text>
+                        </TouchableOpacity>
+                      </ScrollView>
+                    ) : (
+                      <TouchableOpacity
+                        style={[
+                          styles.feeComponentChip,
+                          styles.customFeeChip,
+                          styles.activeFeeComponentChip
+                        ]}
+                        onPress={() => {
+                          setSelectedFeeComponent('custom');
+                          setPaymentRemarks('General payment');
+                        }}
+                      >
+                        <Text style={[styles.feeComponentChipText, styles.activeFeeComponentChipText]}>
+                          General Payment
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Additional Remarks */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Additional Remarks (Optional)</Text>
                     <TextInput
                       style={[styles.textInput, { height: 80 }]}
-                      placeholder="e.g., Tuition Fee, Books Fee, etc."
+                      placeholder="Any additional notes or remarks..."
                       value={paymentRemarks}
                       onChangeText={setPaymentRemarks}
                       multiline
@@ -1071,6 +1836,294 @@ const ClassStudentDetails = ({ route, navigation }) => {
                   </TouchableOpacity>
                 </View>
               </>
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Receipt Modal */}
+      <Modal
+        visible={receiptModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setReceiptModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              Payment Receipt
+            </Text>
+            <TouchableOpacity
+              onPress={() => setReceiptModal(false)}
+              style={styles.closeButton}
+            >
+              <Ionicons name="close" size={24} color="#666" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent}>
+            {lastPaymentRecord && (
+              <View style={styles.receiptContainer}>
+                {/* Receipt Header */}
+                <View style={styles.receiptHeader}>
+                  <View style={styles.schoolInfo}>
+                    {schoolLogo && (
+                      <Image 
+                        source={{ uri: schoolLogo }} 
+                        style={styles.schoolLogo}
+                        resizeMode="contain"
+                      />
+                    )}
+                    <Text style={styles.schoolName}>
+                      {schoolDetails?.name || 'School Management System'}
+                    </Text>
+                    {schoolDetails?.address && (
+                      <Text style={styles.schoolAddress}>{schoolDetails.address}</Text>
+                    )}
+                    {schoolDetails?.phone && (
+                      <Text style={styles.schoolContact}>Phone: {schoolDetails.phone}</Text>
+                    )}
+                    {schoolDetails?.email && (
+                      <Text style={styles.schoolContact}>Email: {schoolDetails.email}</Text>
+                    )}
+                    <Text style={styles.receiptTitle}>PAYMENT RECEIPT</Text>
+                  </View>
+                  <View style={styles.receiptNumber}>
+                    <Text style={styles.receiptNumberLabel}>Receipt No.</Text>
+                    <Text style={styles.receiptNumberValue}>{lastPaymentRecord.receipt_no}</Text>
+                  </View>
+                </View>
+
+                {/* Receipt Details */}
+                <View style={styles.receiptDetailsSection}>
+                  <View style={styles.receiptDetailRow}>
+                    <Text style={styles.receiptDetailLabel}>Date:</Text>
+                    <Text style={styles.receiptDetailValue}>{lastPaymentRecord.payment_date_formatted}</Text>
+                  </View>
+                  
+                  <View style={styles.receiptDetailRow}>
+                    <Text style={styles.receiptDetailLabel}>Student Name:</Text>
+                    <Text style={styles.receiptDetailValue}>{lastPaymentRecord.student_name}</Text>
+                  </View>
+                  
+                  <View style={styles.receiptDetailRow}>
+                    <Text style={styles.receiptDetailLabel}>Admission No:</Text>
+                    <Text style={styles.receiptDetailValue}>{lastPaymentRecord.student_admission_no}</Text>
+                  </View>
+                  
+                  <View style={styles.receiptDetailRow}>
+                    <Text style={styles.receiptDetailLabel}>Roll No:</Text>
+                    <Text style={styles.receiptDetailValue}>{lastPaymentRecord.student_roll_no || 'N/A'}</Text>
+                  </View>
+                  
+                  <View style={styles.receiptDetailRow}>
+                    <Text style={styles.receiptDetailLabel}>Class:</Text>
+                    <Text style={styles.receiptDetailValue}>{lastPaymentRecord.class_name}</Text>
+                  </View>
+                </View>
+
+                {/* Payment Details */}
+                <View style={styles.paymentDetailsSection}>
+                  <Text style={styles.paymentSectionTitle}>Payment Details</Text>
+                  
+                  <View style={styles.paymentDetailRow}>
+                    <Text style={styles.paymentDetailLabel}>Fee Component:</Text>
+                    <Text style={styles.paymentDetailValue}>{lastPaymentRecord.fee_component}</Text>
+                  </View>
+                  
+                  <View style={styles.paymentDetailRow}>
+                    <Text style={styles.paymentDetailLabel}>Payment Mode:</Text>
+                    <Text style={styles.paymentDetailValue}>{lastPaymentRecord.payment_mode}</Text>
+                  </View>
+                  
+                  <View style={styles.paymentDetailRow}>
+                    <Text style={styles.paymentDetailLabel}>Academic Year:</Text>
+                    <Text style={styles.paymentDetailValue}>{lastPaymentRecord.academic_year}</Text>
+                  </View>
+                  
+                  <View style={styles.amountSection}>
+                    <View style={styles.amountRow}>
+                      <Text style={styles.amountLabel}>Amount Paid:</Text>
+                      <Text style={styles.amountValue}>{formatSafeCurrency(lastPaymentRecord.amount_paid)}</Text>
+                    </View>
+                    <Text style={styles.amountInWords}>
+                      (In words: {lastPaymentRecord.amount_in_words} rupees only)
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Receipt Footer */}
+                <View style={styles.receiptFooter}>
+                  <Text style={styles.receiptFooterText}>This is a computer generated receipt.</Text>
+                  <Text style={styles.receiptFooterText}>Payment ID: {lastPaymentRecord.id}</Text>
+                  <Text style={styles.thankYouText}>Thank you for your payment!</Text>
+                </View>
+
+                {/* Action Buttons */}
+                <View style={styles.receiptActions}>
+                  <TouchableOpacity
+                    style={styles.printButton}
+                    onPress={() => handlePrintReceipt(lastPaymentRecord)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="print" size={20} color="#fff" style={{ marginRight: 8 }} />
+                    <Text style={styles.printButtonText}>Print Receipt</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={styles.shareButton}
+                    onPress={() => handleShareReceipt(lastPaymentRecord)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="share" size={20} color="#fff" style={{ marginRight: 8 }} />
+                    <Text style={styles.shareButtonText}>Share PDF</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Individual Receipt Modal for Payment History */}
+      <Modal
+        visible={individualReceiptModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setIndividualReceiptModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              Payment Receipt
+            </Text>
+            <TouchableOpacity
+              onPress={() => setIndividualReceiptModal(false)}
+              style={styles.closeButton}
+            >
+              <Ionicons name="close" size={24} color="#666" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent}>
+            {selectedPaymentForReceipt && (
+              <View style={styles.receiptContainer}>
+                {/* Receipt Header */}
+                <View style={styles.receiptHeader}>
+                  <View style={styles.schoolInfo}>
+                    {schoolLogo && (
+                      <Image 
+                        source={{ uri: schoolLogo }} 
+                        style={styles.schoolLogo}
+                        resizeMode="contain"
+                      />
+                    )}
+                    <Text style={styles.schoolName}>
+                      {schoolDetails?.name || 'School Management System'}
+                    </Text>
+                    {schoolDetails?.address && (
+                      <Text style={styles.schoolAddress}>{schoolDetails.address}</Text>
+                    )}
+                    {schoolDetails?.phone && (
+                      <Text style={styles.schoolContact}>Phone: {schoolDetails.phone}</Text>
+                    )}
+                    {schoolDetails?.email && (
+                      <Text style={styles.schoolContact}>Email: {schoolDetails.email}</Text>
+                    )}
+                    <Text style={styles.receiptTitle}>PAYMENT RECEIPT</Text>
+                  </View>
+                  <View style={styles.receiptNumber}>
+                    <Text style={styles.receiptNumberLabel}>Receipt No.</Text>
+                    <Text style={styles.receiptNumberValue}>{selectedPaymentForReceipt.receipt_no}</Text>
+                  </View>
+                </View>
+
+                {/* Receipt Details */}
+                <View style={styles.receiptDetailsSection}>
+                  <View style={styles.receiptDetailRow}>
+                    <Text style={styles.receiptDetailLabel}>Date:</Text>
+                    <Text style={styles.receiptDetailValue}>{selectedPaymentForReceipt.payment_date_formatted}</Text>
+                  </View>
+                  
+                  <View style={styles.receiptDetailRow}>
+                    <Text style={styles.receiptDetailLabel}>Student Name:</Text>
+                    <Text style={styles.receiptDetailValue}>{selectedPaymentForReceipt.student_name}</Text>
+                  </View>
+                  
+                  <View style={styles.receiptDetailRow}>
+                    <Text style={styles.receiptDetailLabel}>Admission No:</Text>
+                    <Text style={styles.receiptDetailValue}>{selectedPaymentForReceipt.student_admission_no}</Text>
+                  </View>
+                  
+                  <View style={styles.receiptDetailRow}>
+                    <Text style={styles.receiptDetailLabel}>Roll No:</Text>
+                    <Text style={styles.receiptDetailValue}>{selectedPaymentForReceipt.student_roll_no || 'N/A'}</Text>
+                  </View>
+                  
+                  <View style={styles.receiptDetailRow}>
+                    <Text style={styles.receiptDetailLabel}>Class:</Text>
+                    <Text style={styles.receiptDetailValue}>{selectedPaymentForReceipt.class_name}</Text>
+                  </View>
+                </View>
+
+                {/* Payment Details */}
+                <View style={styles.paymentDetailsSection}>
+                  <Text style={styles.paymentSectionTitle}>Payment Details</Text>
+                  
+                  <View style={styles.paymentDetailRow}>
+                    <Text style={styles.paymentDetailLabel}>Fee Component:</Text>
+                    <Text style={styles.paymentDetailValue}>{selectedPaymentForReceipt.fee_component}</Text>
+                  </View>
+                  
+                  <View style={styles.paymentDetailRow}>
+                    <Text style={styles.paymentDetailLabel}>Payment Mode:</Text>
+                    <Text style={styles.paymentDetailValue}>{selectedPaymentForReceipt.payment_mode}</Text>
+                  </View>
+                  
+                  <View style={styles.paymentDetailRow}>
+                    <Text style={styles.paymentDetailLabel}>Academic Year:</Text>
+                    <Text style={styles.paymentDetailValue}>{selectedPaymentForReceipt.academic_year}</Text>
+                  </View>
+                  
+                  <View style={styles.amountSection}>
+                    <View style={styles.amountRow}>
+                      <Text style={styles.amountLabel}>Amount Paid:</Text>
+                      <Text style={styles.amountValue}>{formatSafeCurrency(selectedPaymentForReceipt.amount_paid)}</Text>
+                    </View>
+                    <Text style={styles.amountInWords}>
+                      (In words: {selectedPaymentForReceipt.amount_in_words} rupees only)
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Receipt Footer */}
+                <View style={styles.receiptFooter}>
+                  <Text style={styles.receiptFooterText}>This is a computer generated receipt.</Text>
+                  <Text style={styles.receiptFooterText}>Payment ID: {selectedPaymentForReceipt.id}</Text>
+                  <Text style={styles.thankYouText}>Thank you for your payment!</Text>
+                </View>
+
+                {/* Action Buttons */}
+                <View style={styles.receiptActions}>
+                  <TouchableOpacity
+                    style={styles.printButton}
+                    onPress={() => handlePrintReceipt(selectedPaymentForReceipt)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="print" size={20} color="#fff" style={{ marginRight: 8 }} />
+                    <Text style={styles.printButtonText}>Print Receipt</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={styles.shareButton}
+                    onPress={() => handleShareReceipt(selectedPaymentForReceipt)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="share" size={20} color="#fff" style={{ marginRight: 8 }} />
+                    <Text style={styles.shareButtonText}>Share PDF</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             )}
           </ScrollView>
         </View>
@@ -1808,6 +2861,14 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#2196F3',
   },
+  // Action Buttons Container
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    gap: 12,
+  },
   // Mark as Paid Button
   markAsPaidButton: {
     flexDirection: 'row',
@@ -1817,7 +2878,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 16,
-    marginTop: 12,
+    flex: 1,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -1825,6 +2886,27 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   markAsPaidButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // Fee Concession Button
+  feeConcessionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2196F3',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flex: 1,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  feeConcessionButtonText: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
@@ -1934,6 +3016,437 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   submitButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  // Fee Concession Display Styles
+  concessionsContainer: {
+    backgroundColor: '#fff8e1',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 8,
+    marginBottom: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9800',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  concessionsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  concessionsIconContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  concessionsHeaderText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FF8F00',
+    marginLeft: 6,
+  },
+  concessionsStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  concessionsAmount: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#FF8F00',
+  },
+  addConcessionButton: {
+    padding: 2,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 143, 0, 0.1)',
+  },
+  concessionsDetails: {
+    marginTop: 4,
+  },
+  concessionsDetailsText: {
+    fontSize: 12,
+    color: '#FF8F00',
+    fontStyle: 'italic',
+  },
+  // Fee Component Chips
+  feeComponentChip: {
+    backgroundColor: '#F0F0F0',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginRight: 8,
+    marginBottom: 8,
+    minWidth: 120,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  activeFeeComponentChip: {
+    backgroundColor: '#2196F3',
+    borderColor: '#1976D2',
+  },
+  customFeeChip: {
+    backgroundColor: '#F5F5F5',
+    borderStyle: 'dashed',
+    borderColor: '#999',
+    borderWidth: 1,
+  },
+  feeComponentChipText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  activeFeeComponentChipText: {
+    color: '#fff',
+  },
+  customFeeChipText: {
+    color: '#666',
+    fontSize: 13,
+  },
+  feeComponentChipAmount: {
+    fontSize: 12,
+    color: '#999',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  activeFeeComponentChipAmount: {
+    color: '#E3F2FD',
+  },
+  feeComponentReference: {
+    marginTop: 8,
+    padding: 12,
+    backgroundColor: '#E3F2FD',
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#2196F3',
+  },
+  feeReferenceLabel: {
+    fontSize: 13,
+    color: '#1976D2',
+    marginBottom: 8,
+    fontWeight: '600',
+  },
+  feeReferenceAmount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1976D2',
+  },
+  feeBreakdown: {
+    marginTop: 4,
+  },
+  feeBreakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  feeBreakdownLabel: {
+    fontSize: 12,
+    color: '#1976D2',
+    fontWeight: '500',
+  },
+  feeBreakdownValue: {
+    fontSize: 12,
+    color: '#1976D2',
+    fontWeight: '600',
+  },
+  remainingRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#BBDEFB',
+    paddingTop: 6,
+    marginTop: 4,
+  },
+  remainingLabel: {
+    fontSize: 13,
+    color: '#1976D2',
+    fontWeight: 'bold',
+  },
+  remainingAmount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#F44336',
+  },
+  fullyPaidBanner: {
+    marginTop: 8,
+    padding: 8,
+    backgroundColor: '#E8F5E8',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#4CAF50',
+  },
+  fullyPaidBannerText: {
+    fontSize: 12,
+    color: '#2E7D32',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  // Fully Paid Fee Component Styles
+  fullyPaidFeeChip: {
+    backgroundColor: '#E8F5E8',
+    borderColor: '#4CAF50',
+    opacity: 0.7,
+  },
+  fullyPaidFeeChipText: {
+    color: '#2E7D32',
+  },
+  fullyPaidFeeChipAmount: {
+    color: '#2E7D32',
+  },
+  fullyPaidText: {
+    fontSize: 10,
+    color: '#2E7D32',
+    fontWeight: 'bold',
+  },
+  remainingAmountText: {
+    fontSize: 11,
+    color: '#F44336',
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  totalAmountText: {
+    fontSize: 9,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  generateReceiptButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#E3F2FD',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+  },
+  generateReceiptButtonText: {
+    color: '#2196F3',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  // Receipt Styles
+  receiptContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    margin: 16,
+    padding: 20,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+  },
+  receiptHeader: {
+    borderBottomWidth: 2,
+    borderBottomColor: '#2196F3',
+    paddingBottom: 16,
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  schoolInfo: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  schoolLogo: {
+    width: 80,
+    height: 80,
+    marginBottom: 10,
+    alignSelf: 'center',
+  },
+  schoolName: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2196F3',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  schoolAddress: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  schoolContact: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  receiptTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    letterSpacing: 2,
+  },
+  receiptNumber: {
+    alignItems: 'center',
+  },
+  receiptNumberLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+  },
+  receiptNumberValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2196F3',
+  },
+  receiptDetailsSection: {
+    marginBottom: 20,
+  },
+  receiptDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  receiptDetailLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+    flex: 1,
+  },
+  receiptDetailValue: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+    textAlign: 'right',
+    flex: 1,
+  },
+  paymentDetailsSection: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+  },
+  paymentSectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  paymentDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  paymentDetailLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  paymentDetailValue: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+  },
+  amountSection: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#E8F5E8',
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#4CAF50',
+  },
+  amountRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  amountLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  amountValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  amountInWords: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    textTransform: 'capitalize',
+  },
+  receiptFooter: {
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+    paddingTop: 16,
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  receiptFooterText: {
+    fontSize: 10,
+    color: '#999',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  thankYouText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4CAF50',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  receiptActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  printButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2196F3',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    flex: 1,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  printButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4CAF50',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    flex: 1,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  shareButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',

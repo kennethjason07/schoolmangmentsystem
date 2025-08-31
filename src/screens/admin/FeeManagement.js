@@ -227,6 +227,22 @@ const FeeManagement = () => {
       const studentIds = allStudents?.map(s => s.id) || [];
       console.log('🎯 Student IDs from classes query:', studentIds.length > 0 ? studentIds.slice(0, 5) : 'No students found');
       
+      // Get all concessions for all students in a single query
+      let allConcessions = [];
+      if (studentIds.length > 0) {
+        const { data: concessions, error: concessionsError } = await supabase
+          .from(TABLES.STUDENT_DISCOUNTS)
+          .select('student_id, discount_value, fee_component')
+          .in('student_id', studentIds)
+          .eq('academic_year', academicYear)
+          .eq('is_active', true);
+        
+        if (!concessionsError && concessions) {
+          allConcessions = concessions;
+          console.log('🎫 Concessions found:', allConcessions.length);
+        }
+      }
+      
       // Debug the table reference issue
       console.log('🔍 Table reference being used:', TABLES.STUDENT_FEES);
       
@@ -308,6 +324,15 @@ const FeeManagement = () => {
         paymentsLookup[payment.student_id].push(payment);
       });
       
+      // Create concessions lookup
+      const concessionsLookup = {};
+      (allConcessions || []).forEach(concession => {
+        if (!concessionsLookup[concession.student_id]) {
+          concessionsLookup[concession.student_id] = [];
+        }
+        concessionsLookup[concession.student_id].push(concession);
+      });
+      
       // Debug total payments
       console.log('Class Payment Stats - Total payments:', allPayments?.length || 0);
       const totalPaymentsAmount = (allPayments || []).reduce((sum, p) => sum + (parseFloat(p.amount_paid || 0)), 0);
@@ -363,6 +388,27 @@ const FeeManagement = () => {
 
         // Calculate collection rate
         const collectionRate = totalExpectedFees > 0 ? (totalPaid / totalExpectedFees) * 100 : 0;
+        
+        // Calculate concessions for this class
+        let totalConcessions = 0;
+        let studentsWithConcessions = 0;
+        const concessionDetails = [];
+        
+        studentsInClass.forEach(student => {
+          const studentConcessions = concessionsLookup[student.id] || [];
+          if (studentConcessions.length > 0) {
+            studentsWithConcessions++;
+            const studentTotalConcession = studentConcessions.reduce((sum, concession) => 
+              sum + (parseFloat(concession.discount_value) || 0), 0);
+            totalConcessions += studentTotalConcession;
+            concessionDetails.push({
+              studentId: student.id,
+              studentName: student.name,
+              concessionAmount: studentTotalConcession,
+              concessions: studentConcessions
+            });
+          }
+        });
 
         return {
           classId: classData.id,
@@ -374,7 +420,10 @@ const FeeManagement = () => {
           collectionRate: Math.round(collectionRate * 100) / 100,
           studentsWithPayments,
           studentsWithoutPayments,
-          feeStructureAmount: totalFeeStructure
+          feeStructureAmount: totalFeeStructure,
+          totalConcessions,
+          studentsWithConcessions,
+          concessionDetails
         };
       });
 
@@ -1026,7 +1075,13 @@ const FeeManagement = () => {
 
   return (
     <View style={styles.container}>
-      <Header title="Fee Management" showBack={true} />
+      <Header 
+        title="Fee Management" 
+        showBack={true}
+        rightIcon="pricetags-outline"
+        rightIconOnPress={() => navigation.navigate('DiscountManagement')}
+        rightIconTitle="Manage Discounts"
+      />
       
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -1191,7 +1246,7 @@ const FeeManagement = () => {
                           </View>
 
                           <View style={styles.statRow}>
-                            <Text style={styles.statLabel}>Expected Fees:</Text>
+                            <Text style={styles.statLabel}>Total Fees:</Text>
                             <Text style={styles.statValue}>{formatSafeCurrency(classData.totalExpectedFees)}</Text>
                           </View>
 
@@ -1210,21 +1265,6 @@ const FeeManagement = () => {
                           </View>
                         </View>
 
-                        {/* Progress Bar */}
-                        <View style={styles.progressBarContainer}>
-                          <View style={styles.progressBarBackground}>
-                            <View
-                              style={[
-                                styles.progressBarFill,
-                                {
-                                  width: `${Math.min(classData.collectionRate, 100)}%`,
-                                  backgroundColor: classData.collectionRate >= 80 ? '#4CAF50' :
-                                    classData.collectionRate >= 50 ? '#FF9800' : '#F44336'
-                                }
-                              ]}
-                            />
-                          </View>
-                        </View>
                       </TouchableOpacity>
                     ))
                   )}
