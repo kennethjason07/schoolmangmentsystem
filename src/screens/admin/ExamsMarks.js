@@ -1054,7 +1054,7 @@ const ExamsMarks = () => {
               <Text style={styles.inputLabel}>Classes * (Select multiple)</Text>
               <View style={styles.classSelectionGrid}>
                 {classes.map(classItem => {
-                  const isSelected = examForm.selected_classes.includes(classItem.id);
+                  const isSelected = (examForm.selected_classes || []).includes(classItem.id);
                   return (
                     <TouchableOpacity
                       key={classItem.id}
@@ -1221,8 +1221,9 @@ const ExamsMarks = () => {
                     name: '',
                     start_date: '',
                     end_date: '',
-                    class_id: '',
-                    description: ''
+                    selected_classes: [],
+                    description: '',
+                    max_marks: '100'
                   });
                 }}
               >
