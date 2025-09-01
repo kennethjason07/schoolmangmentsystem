@@ -345,6 +345,8 @@ const AdminDashboard = ({ navigation }) => {
     { title: 'Exams & Marks', icon: 'document-text', color: '#795548', screen: 'ExamsMarks' }, // Stack screen
     { title: 'Report Cards', icon: 'document-text', color: '#E91E63', screen: 'ReportCardGeneration' }, // Stack screen
     { title: 'Notifications', icon: 'notifications', color: '#FF5722', screen: 'NotificationManagement' }, // Stack screen
+    { title: 'Hall Tickets', icon: 'card-outline', color: '#00BCD4', screen: 'HallTicketGeneration', banner: 'UPCOMING' }, // Stack screen
+    { title: 'Auto Grading', icon: 'checkmark-done', color: '#4CAF50', screen: 'AutoGrading', banner: 'UPCOMING' }, // Stack screen
   ];
 
   // State for chart data (only fee collection data now)
@@ -738,8 +740,15 @@ const AdminDashboard = ({ navigation }) => {
                 style={styles.quickActionCard}
                 onPress={() => navigation.navigate(action.screen)}
               >
-                <View style={[styles.actionIcon, { backgroundColor: action.color }]}>
-                  <Ionicons name={action.icon} size={24} color="#fff" />
+                <View style={styles.actionIconContainer}>
+                  <View style={[styles.actionIcon, { backgroundColor: action.color }]}>
+                    <Ionicons name={action.icon} size={24} color="#fff" />
+                  </View>
+                  {action.banner && (
+                    <View style={styles.bannerContainer}>
+                      <Text style={styles.bannerText}>{action.banner}</Text>
+                    </View>
+                  )}
                 </View>
                 <Text style={styles.actionTitle}>{action.title}</Text>
               </TouchableOpacity>
@@ -1420,13 +1429,39 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e9ecef',
   },
+  actionIconContainer: {
+    position: 'relative',
+    marginBottom: 8,
+  },
   actionIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+  },
+  bannerContainer: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#FF4444',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  bannerText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center',
   },
   actionTitle: {
     fontSize: 14,

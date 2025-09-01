@@ -24,6 +24,7 @@ import * as Print from 'expo-print';
 import { supabase, TABLES, dbHelpers, isValidUUID } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import { format } from 'date-fns';
+import { getSchoolLogoBase64, getLogoHTML, getReceiptHeaderCSS } from '../../utils/logoUtils';
 
 const { width } = Dimensions.get('window');
 
@@ -67,31 +68,10 @@ const FeePayment = () => {
     }
   };
 
-  // Helper function to convert image URL to base64
+  // Helper function to convert image URL to base64 (deprecated - use logoUtils)
   const fetchImageAsBase64 = async (imageUrl) => {
-    try {
-      if (!imageUrl) return null;
-      
-      // Create a fetch request to get the image
-      const response = await fetch(imageUrl);
-      if (!response.ok) {
-        console.log('Failed to fetch image:', response.status);
-        return null;
-      }
-      
-      // Get the image as blob
-      const blob = await response.blob();
-      
-      // Convert blob to base64
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.readAsDataURL(blob);
-      });
-    } catch (error) {
-      console.error('Error converting image to base64:', error);
-      return null;
-    }
+    console.warn('⚠️ fetchImageAsBase64 is deprecated, using getSchoolLogoBase64 instead');
+    return await getSchoolLogoBase64(imageUrl);
   };
 
   // Move fetchFeeData outside useEffect to make it accessible throughout component
@@ -1399,8 +1379,9 @@ const FeePayment = () => {
     console.log('Receipt number being used:', receipt.receiptNumber);
     console.log('School data:', schoolData);
     
-    // Get school logo as base64 if available
-    const logoBase64 = schoolData?.logo_url ? await fetchImageAsBase64(schoolData.logo_url) : null;
+    // Get school logo as base64 if available using standardized utility
+    const logoBase64 = schoolData?.logo_url ? await getSchoolLogoBase64(schoolData.logo_url) : null;
+    const logoHTML = getLogoHTML(logoBase64, { width: '80px', height: '80px' });
     
     return `
       <!DOCTYPE html>
@@ -1414,71 +1395,65 @@ const FeePayment = () => {
               margin: 0;
               padding: 20px;
               color: #333;
+              background-color: #fff;
             }
-            .header {
-              text-align: center;
-              border-bottom: 2px solid #2196F3;
-              padding-bottom: 20px;
-              margin-bottom: 30px;
-            }
-            .school-logo {
-              width: 60px;
-              height: 60px;
-              margin: 0 auto 10px;
-              display: block;
-            }
-            .school-name {
-              font-size: 24px;
-              font-weight: bold;
-              color: #2196F3;
-              margin-bottom: 5px;
-            }
-            .receipt-title {
-              font-size: 20px;
-              font-weight: bold;
-              margin-bottom: 10px;
-            }
-            .receipt-number {
-              font-size: 16px;
-              color: #666;
-              margin-bottom: 10px;
-            }
+            ${getReceiptHeaderCSS()}
             .receipt-info {
               background-color: #f8f9fa;
               padding: 15px;
               border-radius: 8px;
               margin-bottom: 20px;
+              border: 1px solid #e0e0e0;
             }
             .info-row {
               display: flex;
               justify-content: space-between;
-              margin-bottom: 5px;
+              margin-bottom: 8px;
+              padding: 4px 0;
+            }
+            .info-row:last-child {
+              margin-bottom: 0;
             }
             .amount-section {
               text-align: center;
-              margin: 20px 0;
+              margin: 25px 0;
               padding: 20px;
               background-color: #e3f2fd;
               border-radius: 8px;
+              border: 2px solid #2196F3;
             }
             .amount {
-              font-size: 24px;
+              font-size: 28px;
               font-weight: bold;
               color: #2196F3;
+              margin-bottom: 8px;
+            }
+            .amount-label {
+              font-size: 14px;
+              color: #666;
+              font-weight: 500;
             }
             .footer {
               margin-top: 30px;
               text-align: center;
               font-size: 12px;
               color: #666;
+              border-top: 1px solid #e0e0e0;
+              padding-top: 15px;
+            }
+            .footer p {
+              margin: 5px 0;
             }
           </style>
         </head>
         <body>
-          <div class="header">
-            ${logoBase64 ? `<img src="${logoBase64}" alt="School Logo" class="school-logo" />` : ''}
-            <div class="school-name">${schoolData?.school_name || 'ABC School'}</div>
-            <div class="receipt-title">Fee Receipt</div>
+          <div class="receipt-header">
+            ${logoHTML}
+            <div class="school-name">${schoolData?.name || schoolData?.school_name || 'ABC School'}</div>
+            ${schoolData?.address ? `<div class="school-info">${schoolData.address}</div>` : ''}
+            ${schoolData?.phone ? `<div class="school-info">Phone: ${schoolData.phone}</div>` : ''}
+            ${schoolData?.email ? `<div class="school-info">Email: ${schoolData.email}</div>` : ''}
+            <div class="receipt-title">FEE PAYMENT RECEIPT</div>
             ${receipt.receiptNumber ? `<div class="receipt-number">Receipt No: ${receipt.receiptNumber}</div>` : ''}
           </div>
 
@@ -1504,12 +1479,13 @@ const FeePayment = () => {
 
           <div class="amount-section">
             <div class="amount">₹${receipt.amount}</div>
-            <div>Amount Paid</div>
+            <div class="amount-label">Amount Paid</div>
           </div>
 
           <div class="footer">
             <p>This is a computer generated receipt. No signature required.</p>
             <p>Thank you for your payment!</p>
+            <p>Generated on ${format(new Date(), 'dd MMM yyyy HH:mm:ss')}</p>
           </div>
         </body>
       </html>
@@ -1692,7 +1668,9 @@ const FeePayment = () => {
   // Generate receipt PDF for new payments
   const generateReceiptPDF = async (receiptInfo) => {
     try {
-      const logoBase64 = schoolLogo ? `<img src="${schoolLogo}" style="width: 60px; height: 60px; object-fit: contain;">` : '';
+      // Get school logo using standardized utility
+      const logoBase64 = schoolData?.logo_url ? await getSchoolLogoBase64(schoolData.logo_url) : null;
+      const logoHTML = getLogoHTML(logoBase64, { width: '80px', height: '80px' });
       
       const html = `
         <html>
@@ -1708,41 +1686,12 @@ const FeePayment = () => {
             .receipt-container {
               max-width: 600px;
               margin: 0 auto;
-              border: 2px solid #ddd;
-              padding: 20px;
+              border: 2px solid #2196F3;
+              padding: 30px;
               background: white;
+              border-radius: 10px;
             }
-            .header {
-              text-align: center;
-              border-bottom: 2px solid #ddd;
-              padding-bottom: 20px;
-              margin-bottom: 20px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              gap: 15px;
-            }
-            .school-details {
-              text-align: center;
-            }
-            .school-name {
-              font-size: 24px;
-              font-weight: bold;
-              color: #2196F3;
-              margin: 0;
-            }
-            .school-info {
-              font-size: 14px;
-              color: #666;
-              margin: 5px 0;
-            }
-            .receipt-title {
-              font-size: 20px;
-              font-weight: bold;
-              text-align: center;
-              margin: 20px 0;
-              color: #333;
-            }
+            ${getReceiptHeaderCSS()}
             .receipt-details {
               margin: 20px 0;
             }
@@ -1761,36 +1710,44 @@ const FeePayment = () => {
               color: #666;
               flex: 1;
               text-align: right;
+              font-weight: 600;
             }
             .amount-row {
-              background-color: #f5f5f5;
-              padding: 15px;
+              background-color: #e8f5e8;
+              border: 2px solid #4CAF50;
               border-radius: 8px;
-              margin: 20px 0;
+              padding: 20px;
+              margin: 25px 0;
+              text-align: center;
             }
             .amount-label {
               font-size: 18px;
               font-weight: bold;
               color: #333;
+              margin-bottom: 10px;
             }
             .amount-value {
-              font-size: 24px;
+              font-size: 32px;
               font-weight: bold;
-              color: #FF9800;
+              color: #4CAF50;
+              margin-bottom: 10px;
             }
             .amount-words {
               font-style: italic;
               color: #666;
-              margin-top: 5px;
               font-size: 14px;
+              text-transform: capitalize;
             }
             .footer {
               text-align: center;
               margin-top: 30px;
               padding-top: 20px;
-              border-top: 2px solid #ddd;
+              border-top: 1px solid #e0e0e0;
               font-size: 12px;
               color: #999;
+            }
+            .footer p {
+              margin: 5px 0;
             }
             .signature {
               text-align: right;
@@ -1809,27 +1766,17 @@ const FeePayment = () => {
         </head>
         <body>
           <div class="receipt-container">
-            <div class="header">
-              ${logoBase64}
-              <div class="school-details">
-                <h1 class="school-name">${schoolDetails?.name || 'School Management System'}</h1>
-                <p class="school-info">${schoolDetails?.type || 'Educational Institution'}</p>
-                ${schoolDetails?.address ? `<p class="school-info">${schoolDetails.address}</p>` : ''}
-                <p class="school-info">
-                  ${schoolDetails?.phone ? `Phone: ${schoolDetails.phone}` : ''}
-                  ${schoolDetails?.phone && schoolDetails?.email ? ' | ' : ''}
-                  ${schoolDetails?.email ? `Email: ${schoolDetails.email}` : ''}
-                </p>
-              </div>
+            <div class="receipt-header">
+              ${logoHTML}
+              <div class="school-name">${schoolDetails?.name || 'School Management System'}</div>
+              ${schoolDetails?.address ? `<div class="school-info">${schoolDetails.address}</div>` : ''}
+              ${schoolDetails?.phone ? `<div class="school-info">Phone: ${schoolDetails.phone}</div>` : ''}
+              ${schoolDetails?.email ? `<div class="school-info">Email: ${schoolDetails.email}</div>` : ''}
+              <div class="receipt-title">FEE PAYMENT RECEIPT</div>
+              <div class="receipt-number">Receipt No: ${receiptInfo.receipt_no}</div>
             </div>
             
-            <div class="receipt-title">Fee Payment Receipt</div>
-            
             <div class="receipt-details">
-              <div class="detail-row">
-                <span class="detail-label">Receipt No:</span>
-                <span class="detail-value">${receiptInfo.receipt_no}</span>
-              </div>
               <div class="detail-row">
                 <span class="detail-label">Date:</span>
                 <span class="detail-value">${receiptInfo.payment_date_formatted}</span>
@@ -1869,12 +1816,10 @@ const FeePayment = () => {
             </div>
             
             <div class="amount-row">
-              <div class="detail-row" style="border: none; padding: 0; margin-bottom: 10px;">
-                <span class="amount-label">Amount Paid:</span>
-                <span class="amount-value">₹${receiptInfo.amount_paid.toFixed(2)}</span>
-              </div>
+              <div class="amount-label">Amount Paid</div>
+              <div class="amount-value">₹${receiptInfo.amount_paid.toFixed(2)}</div>
               <div class="amount-words">
-                Amount in words: ${receiptInfo.amount_in_words.toUpperCase()} RUPEES ONLY
+                ${receiptInfo.amount_in_words.toUpperCase()} RUPEES ONLY
               </div>
             </div>
             

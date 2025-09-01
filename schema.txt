@@ -31,9 +31,9 @@ CREATE TABLE public.assignments (
   academic_year text NOT NULL,
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT assignments_pkey PRIMARY KEY (id),
+  CONSTRAINT assignments_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
   CONSTRAINT assignments_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES public.teachers(id),
-  CONSTRAINT assignments_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
-  CONSTRAINT assignments_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id)
+  CONSTRAINT assignments_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id)
 );
 CREATE TABLE public.classes (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -96,6 +96,8 @@ CREATE TABLE public.fee_structure (
   amount numeric NOT NULL,
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   due_date date,
+  base_amount numeric NOT NULL,
+  discount_applied numeric DEFAULT 0,
   CONSTRAINT fee_structure_pkey PRIMARY KEY (id),
   CONSTRAINT fee_structure_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
   CONSTRAINT fee_structure_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
@@ -114,9 +116,9 @@ CREATE TABLE public.homeworks (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT homeworks_pkey PRIMARY KEY (id),
-  CONSTRAINT homeworks_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id),
+  CONSTRAINT homeworks_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
   CONSTRAINT homeworks_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
-  CONSTRAINT homeworks_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id)
+  CONSTRAINT homeworks_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id)
 );
 CREATE TABLE public.leave_applications (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -155,9 +157,9 @@ CREATE TABLE public.marks (
   remarks text,
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT marks_pkey PRIMARY KEY (id),
+  CONSTRAINT marks_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
   CONSTRAINT marks_exam_id_fkey FOREIGN KEY (exam_id) REFERENCES public.exams(id),
-  CONSTRAINT marks_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
-  CONSTRAINT marks_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id)
+  CONSTRAINT marks_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
 );
 CREATE TABLE public.messages (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -173,22 +175,22 @@ CREATE TABLE public.messages (
   file_size integer,
   file_type text,
   CONSTRAINT messages_pkey PRIMARY KEY (id),
-  CONSTRAINT messages_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
   CONSTRAINT messages_receiver_id_fkey FOREIGN KEY (receiver_id) REFERENCES public.users(id),
-  CONSTRAINT messages_sender_id_fkey FOREIGN KEY (sender_id) REFERENCES public.users(id)
+  CONSTRAINT messages_sender_id_fkey FOREIGN KEY (sender_id) REFERENCES public.users(id),
+  CONSTRAINT messages_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
 );
 CREATE TABLE public.notification_recipients (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   notification_id uuid NOT NULL,
   recipient_id uuid NOT NULL,
-  recipient_type text NOT NULL CHECK (recipient_type = ANY (ARRAY['Student'::text, 'Parent'::text])),
+  recipient_type text NOT NULL CHECK (recipient_type = ANY (ARRAY['Student'::text, 'Parent'::text, 'Teacher'::text, 'Admin'::text])),
   delivery_status text DEFAULT 'Pending'::text CHECK (delivery_status = ANY (ARRAY['Pending'::text, 'Sent'::text, 'Failed'::text])),
   sent_at timestamp without time zone,
   is_read boolean DEFAULT false,
   read_at timestamp without time zone,
   CONSTRAINT notification_recipients_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_notification FOREIGN KEY (notification_id) REFERENCES public.notifications(id),
-  CONSTRAINT fk_user FOREIGN KEY (recipient_id) REFERENCES public.users(id)
+  CONSTRAINT fk_user FOREIGN KEY (recipient_id) REFERENCES public.users(id),
+  CONSTRAINT fk_notification FOREIGN KEY (notification_id) REFERENCES public.notifications(id)
 );
 CREATE TABLE public.notifications (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -287,9 +289,26 @@ CREATE TABLE public.student_attendance (
   marked_by uuid,
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT student_attendance_pkey PRIMARY KEY (id),
+  CONSTRAINT student_attendance_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
   CONSTRAINT student_attendance_marked_by_fkey FOREIGN KEY (marked_by) REFERENCES public.users(id),
-  CONSTRAINT student_attendance_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
-  CONSTRAINT student_attendance_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id)
+  CONSTRAINT student_attendance_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
+);
+CREATE TABLE public.student_discounts (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  student_id uuid NOT NULL,
+  class_id uuid NOT NULL,
+  academic_year text NOT NULL,
+  discount_type text NOT NULL CHECK (discount_type = ANY (ARRAY['percentage'::text, 'fixed_amount'::text])),
+  discount_value numeric NOT NULL,
+  fee_component text,
+  description text,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  created_by uuid,
+  updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT student_discounts_pkey PRIMARY KEY (id),
+  CONSTRAINT student_discounts_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT student_discounts_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id)
 );
 CREATE TABLE public.student_fees (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -301,6 +320,7 @@ CREATE TABLE public.student_fees (
   payment_mode text CHECK (payment_mode = ANY (ARRAY['Cash'::text, 'Card'::text, 'Online'::text, 'UPI'::text])),
   remarks text,
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  receipt_number bigint NOT NULL DEFAULT nextval('receipt_number_seq'::regclass) UNIQUE,
   CONSTRAINT student_fees_pkey PRIMARY KEY (id),
   CONSTRAINT student_fees_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
 );
@@ -417,9 +437,9 @@ CREATE TABLE public.timetable_entries (
   academic_year text NOT NULL,
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT timetable_entries_pkey PRIMARY KEY (id),
-  CONSTRAINT timetable_entries_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id),
   CONSTRAINT timetable_entries_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
-  CONSTRAINT timetable_entries_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id)
+  CONSTRAINT timetable_entries_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
+  CONSTRAINT timetable_entries_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id)
 );
 CREATE TABLE public.users (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

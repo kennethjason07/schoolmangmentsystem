@@ -22,6 +22,7 @@ import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 import { supabase, TABLES, dbHelpers, isValidUUID } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
+import { getSchoolLogoBase64, getLogoHTML, getReceiptHeaderCSS } from '../../utils/logoUtils';
 
 const { width } = Dimensions.get('window');
 
@@ -555,66 +556,17 @@ const FeePayment = () => {
     }
   };
 
-  // Helper function to load logo as base64 for receipt
+  // Helper function to load logo as base64 for receipt (deprecated - use logoUtils)
   const getLogoBase64 = async (logoUrl) => {
-    try {
-      if (!logoUrl || !logoUrl.startsWith('http')) {
-        console.log('🖼️ Invalid logo URL for receipt:', logoUrl);
-        return null;
-      }
-
-      console.log('🖼️ Loading logo for receipt:', logoUrl);
-      
-      // Use FileSystem.downloadAsync for React Native compatibility
-      const fileUri = FileSystem.cacheDirectory + 'temp_logo_' + Date.now() + '.jpg';
-      
-      const downloadResult = await FileSystem.downloadAsync(logoUrl, fileUri);
-      console.log('🖼️ Logo downloaded to:', downloadResult.uri);
-      
-      // Convert to base64 using FileSystem
-      const base64String = await FileSystem.readAsStringAsync(downloadResult.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      
-      // Clean up the temporary file
-      try {
-        await FileSystem.deleteAsync(downloadResult.uri);
-      } catch (deleteError) {
-        console.warn('Failed to delete temp logo file:', deleteError);
-      }
-      
-      // Determine MIME type based on URL or default to JPEG
-      let mimeType = 'image/jpeg';
-      if (logoUrl.toLowerCase().includes('.png')) {
-        mimeType = 'image/png';
-      } else if (logoUrl.toLowerCase().includes('.gif')) {
-        mimeType = 'image/gif';
-      } else if (logoUrl.toLowerCase().includes('.webp')) {
-        mimeType = 'image/webp';
-      }
-      
-      const dataUrl = `data:${mimeType};base64,${base64String}`;
-      console.log('✅ Logo converted to base64 for receipt, size:', base64String.length);
-      
-      return dataUrl;
-    } catch (error) {
-      console.log('❌ Error loading logo for receipt:', error);
-      return null;
-    }
+    console.warn('⚠️ getLogoBase64 is deprecated, using getSchoolLogoBase64 instead');
+    return await getSchoolLogoBase64(logoUrl);
   };
 
   const generateReceiptHTML = async (receipt) => {
     try {
-      // Get school logo as base64 if available
-      let logoBase64 = null;
-      if (schoolDetails?.logo_url) {
-        logoBase64 = await getLogoBase64(schoolDetails.logo_url);
-      }
-
-      const schoolName = schoolDetails?.name || 'School Name';
-      const logoSection = logoBase64 
-        ? `<img src="${logoBase64}" alt="School Logo" style="width: 60px; height: 60px; margin-bottom: 10px; border-radius: 30px; object-fit: cover;">` 
-        : '';
+      // Get school logo using standardized utility
+      const logoBase64 = schoolDetails?.logo_url ? await getSchoolLogoBase64(schoolDetails.logo_url) : null;
+      const logoHTML = getLogoHTML(logoBase64, { width: '80px', height: '80px' });
 
       return `
         <!DOCTYPE html>
@@ -628,68 +580,65 @@ const FeePayment = () => {
                 margin: 0;
                 padding: 20px;
                 color: #333;
+                background-color: #fff;
               }
-              .header {
-                text-align: center;
-                border-bottom: 2px solid #2196F3;
-                padding-bottom: 20px;
-                margin-bottom: 30px;
-              }
-              .school-logo {
-                width: 60px;
-                height: 60px;
-                margin: 0 auto 10px auto;
-                border-radius: 30px;
-                object-fit: cover;
-                display: block;
-              }
-              .school-name {
-                font-size: 24px;
-                font-weight: bold;
-                color: #2196F3;
-                margin-bottom: 5px;
-              }
-              .receipt-title {
-                font-size: 20px;
-                font-weight: bold;
-                margin-bottom: 10px;
-              }
+              ${getReceiptHeaderCSS()}
               .receipt-info {
                 background-color: #f8f9fa;
                 padding: 15px;
                 border-radius: 8px;
                 margin-bottom: 20px;
+                border: 1px solid #e0e0e0;
               }
               .info-row {
                 display: flex;
                 justify-content: space-between;
-                margin-bottom: 5px;
+                margin-bottom: 8px;
+                padding: 4px 0;
+              }
+              .info-row:last-child {
+                margin-bottom: 0;
               }
               .amount-section {
                 text-align: center;
-                margin: 20px 0;
+                margin: 25px 0;
                 padding: 20px;
                 background-color: #e3f2fd;
                 border-radius: 8px;
+                border: 2px solid #2196F3;
               }
               .amount {
-                font-size: 24px;
+                font-size: 28px;
                 font-weight: bold;
                 color: #2196F3;
+                margin-bottom: 8px;
+              }
+              .amount-label {
+                font-size: 14px;
+                color: #666;
+                font-weight: 500;
               }
               .footer {
                 margin-top: 30px;
                 text-align: center;
                 font-size: 12px;
                 color: #666;
+                border-top: 1px solid #e0e0e0;
+                padding-top: 15px;
+              }
+              .footer p {
+                margin: 5px 0;
               }
             </style>
           </head>
           <body>
-            <div class="header">
-              ${logoSection}
-              <div class="school-name">${schoolName}</div>
-              <div class="receipt-title">Fee Receipt</div>
+            <div class="receipt-header">
+              ${logoHTML}
+              <div class="school-name">${schoolDetails?.name || 'School Management System'}</div>
+              ${schoolDetails?.address ? `<div class="school-info">${schoolDetails.address}</div>` : ''}
+              ${schoolDetails?.phone ? `<div class="school-info">Phone: ${schoolDetails.phone}</div>` : ''}
+              ${schoolDetails?.email ? `<div class="school-info">Email: ${schoolDetails.email}</div>` : ''}
+              <div class="receipt-title">FEE PAYMENT RECEIPT</div>
             </div>
 
             <div class="receipt-info">
@@ -709,7 +658,7 @@ const FeePayment = () => {
 
             <div class="amount-section">
               <div class="amount">₹${receipt.amount}</div>
-              <div>Amount Paid</div>
+              <div class="amount-label">Amount Paid</div>
             </div>
 
             <div class="footer">

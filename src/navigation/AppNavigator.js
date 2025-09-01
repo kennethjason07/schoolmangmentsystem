@@ -35,6 +35,8 @@ import ParentAccountManagement from '../screens/admin/ParentAccountManagement';
 import LinkExistingParent from '../screens/admin/LinkExistingParent';
 import LeaveManagement from '../screens/admin/LeaveManagement';
 import AdminNotifications from '../screens/admin/AdminNotifications';
+import HallTicketGeneration from '../screens/admin/HallTicketGeneration';
+import AutoGrading from '../screens/admin/AutoGrading';
 
 import FeeClassDetails from '../screens/admin/FeeClassDetails';
 import ClassStudentDetails from '../screens/admin/ClassStudentDetails';
@@ -406,6 +408,8 @@ export default function AppNavigator() {
                 <Stack.Screen name="LinkExistingParent" component={LinkExistingParent} />
                 <Stack.Screen name="LeaveManagement" component={LeaveManagement} />
                 <Stack.Screen name="AdminNotifications" component={AdminNotifications} />
+                <Stack.Screen name="HallTicketGeneration" component={HallTicketGeneration} />
+                <Stack.Screen name="AutoGrading" component={AutoGrading} />
 
                 <Stack.Screen name="AssignTaskToTeacher" component={AssignTaskToTeacher} />
                 <Stack.Screen name="AttendanceReport" component={AttendanceReport} />
