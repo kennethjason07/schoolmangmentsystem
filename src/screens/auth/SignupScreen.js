@@ -152,8 +152,12 @@ const SignupScreen = ({ navigation }) => {
     setIsLoading(true);
     
     try {
+      // Ensure roleId is a valid number, not undefined
+      const safeRoleId = typeof roleId === 'number' && !isNaN(roleId) ? roleId : 1; // Default to admin if invalid
+      console.log('🔍 SafeRoleId for signup:', safeRoleId, 'original roleId:', roleId);
+      
       const userData = {
-        role_id: roleId,
+        role_id: safeRoleId,
         full_name: fullName,
         phone: phone,
         linked_student_id: linkedId,

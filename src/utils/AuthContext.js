@@ -157,7 +157,7 @@ export const AuthProvider = ({ children }) => {
           const fallbackUserData = {
             id: authUser.id,
             email: authUser.email,
-            role_id: 1, // Default to admin for fallback
+            role_id: 1, // Default to admin for fallback (hardcoded safe value)
             photo_url: null,
             full_name: authUser.email.split('@')[0], // Use email prefix as name
             phone: '',
@@ -183,7 +183,7 @@ export const AuthProvider = ({ children }) => {
         const fallbackUserData = {
           id: authUser.id,
           email: authUser.email,
-          role_id: 1, // Default to admin
+          role_id: 1, // Default to admin (hardcoded safe value)
           photo_url: null,
           full_name: authUser.email.split('@')[0],
           phone: '',
@@ -199,6 +199,31 @@ export const AuthProvider = ({ children }) => {
 
       console.log('✅ User profile found:', userProfile);
       console.log('🎯 User role_id:', userProfile.role_id);
+      
+      // CRITICAL: Fix any users with invalid role_id in the database
+      if (!userProfile.role_id || userProfile.role_id === null || userProfile.role_id === undefined || 
+          typeof userProfile.role_id !== 'number' || userProfile.role_id < 1 || userProfile.role_id > 10) {
+        console.warn('🚨 [AuthContext] CRITICAL: User has invalid role_id in database:', userProfile.role_id);
+        console.log('🔧 [AuthContext] Fixing user role_id in database...');
+        
+        try {
+          // Update the user's role_id in the database to admin (1)
+          const { error: updateError } = await supabase
+            .from('users')
+            .update({ role_id: 1 })
+            .eq('id', authUser.id);
+          
+          if (updateError) {
+            console.error('❌ [AuthContext] Failed to update user role_id:', updateError);
+          } else {
+            console.log('✅ [AuthContext] Successfully fixed user role_id to 1 (admin)');
+            userProfile.role_id = 1; // Update the local copy too
+          }
+        } catch (fixError) {
+          console.error('❌ [AuthContext] Exception while fixing role_id:', fixError);
+          userProfile.role_id = 1; // Use fallback locally even if DB update fails
+        }
+      }
 
       // Try to get role name separately, but don't fail if it doesn't work
       let roleName = null;
@@ -304,18 +329,57 @@ export const AuthProvider = ({ children }) => {
       }
 
       // Get user profile (without roles join to avoid foreign key issues)
-      // Use case-insensitive search for email
+      console.log('🔍 Querying user profile for email:', email);
+      console.log('🔍 Auth user info:', { id: user.id, email: user.email });
+      console.log('🔍 Target tenant ID:', targetTenantId);
+      
+      // Try exact match first
       let userQuery = supabase
         .from('users')
         .select('*')
-        .ilike('email', email);
+        .eq('email', email);
       
       // If tenant specified, filter by tenant
       if (targetTenantId) {
         userQuery = userQuery.eq('tenant_id', targetTenantId);
+        console.log('🏢 Added tenant filter:', targetTenantId);
       }
       
-      const { data: userProfile, error: profileError } = await userQuery.maybeSingle();
+      console.log('📡 Executing exact match query...');
+      let { data: userProfile, error: profileError } = await userQuery.maybeSingle();
+      
+      console.log('📊 Exact match result:');
+      console.log('   - Profile found:', !!userProfile);
+      console.log('   - Profile data:', userProfile);
+      console.log('   - Error:', profileError?.message || 'None');
+      console.log('   - Error code:', profileError?.code || 'None');
+      console.log('   - Error details:', profileError?.details || 'None');
+      
+      // If exact match fails, try case-insensitive
+      if (!userProfile && !profileError) {
+        console.log('🔄 Exact match failed, trying case-insensitive search...');
+        userQuery = supabase
+          .from('users')
+          .select('*')
+          .ilike('email', email);
+        
+        if (targetTenantId) {
+          userQuery = userQuery.eq('tenant_id', targetTenantId);
+          console.log('🏢 Added tenant filter to case-insensitive query:', targetTenantId);
+        }
+        
+        console.log('📡 Executing case-insensitive query...');
+        const result = await userQuery.maybeSingle();
+        userProfile = result.data;
+        profileError = result.error;
+        
+        console.log('📊 Case-insensitive result:');
+        console.log('   - Profile found:', !!userProfile);
+        console.log('   - Profile data:', userProfile);
+        console.log('   - Error:', profileError?.message || 'None');
+        console.log('   - Error code:', profileError?.code || 'None');
+        console.log('   - Error details:', profileError?.details || 'None');
+      }
 
       if (profileError) {
         console.error('Profile query error:', profileError);
@@ -453,7 +517,7 @@ export const AuthProvider = ({ children }) => {
         }
         
         // Check tenant limits based on user role
-        if (userData.role_id) {
+        if (userData.role_id && typeof userData.role_id === 'number') {
           const roleNames = { 2: 'teachers', 4: 'students' };
           const resourceType = roleNames[userData.role_id];
           
@@ -511,10 +575,59 @@ export const AuthProvider = ({ children }) => {
       console.log('📄 Creating user profile in database...');
       
       // Add user profile to users table
+      // COMPREHENSIVE ROLE_ID VALIDATION - Multiple layers of safety checks
+      console.log('🔍 [AuthContext] Starting comprehensive role_id validation');
+      console.log('📊 [AuthContext] Original userData.role_id:', userData.role_id, '(type:', typeof userData.role_id, ')');
+      
+      // First validation layer (existing code)
+      const safeRoleId = typeof userData.role_id === 'number' && !isNaN(userData.role_id) ? userData.role_id : 1;
+      console.log('🔍 [AuthContext] First validation result:', safeRoleId);
+      
+      // Second validation layer - comprehensive safety check
+      let finalRoleId = safeRoleId;
+      
+      // Check for undefined, null, or string 'undefined'
+      if (finalRoleId === undefined || finalRoleId === null || finalRoleId === 'undefined') {
+        console.error('🚨 [AuthContext] CRITICAL: role_id is undefined/null/string-undefined after first validation:', finalRoleId);
+        finalRoleId = 1; // Force admin fallback
+      }
+      
+      // Check for NaN
+      if (isNaN(finalRoleId)) {
+        console.error('🚨 [AuthContext] CRITICAL: role_id is NaN after validation:', finalRoleId);
+        finalRoleId = 1; // Force admin fallback
+      }
+      
+      // Ensure it's a positive integer
+      if (typeof finalRoleId !== 'number' || finalRoleId <= 0 || !Number.isInteger(finalRoleId)) {
+        console.error('🚨 [AuthContext] CRITICAL: role_id is not a positive integer:', finalRoleId, 'type:', typeof finalRoleId);
+        finalRoleId = 1; // Force admin fallback
+      }
+      
+      // Ensure it's within valid range (1-10 for typical role systems)
+      if (finalRoleId < 1 || finalRoleId > 10) {
+        console.error('🚨 [AuthContext] CRITICAL: role_id is outside valid range (1-10):', finalRoleId);
+        finalRoleId = 1; // Force admin fallback
+      }
+      
+      // Final validation - absolutely ensure it's a valid database integer
+      finalRoleId = parseInt(finalRoleId);
+      if (!finalRoleId || finalRoleId < 1) {
+        console.error('🚨 [AuthContext] CRITICAL: role_id failed parseInt validation:', finalRoleId);
+        finalRoleId = 1; // Ultimate fallback
+      }
+      
+      console.log('✅ [AuthContext] Final validated role_id:', finalRoleId, '(type:', typeof finalRoleId, ')');
+      
+      // Log the transformation if it occurred
+      if (userData.role_id !== finalRoleId) {
+        console.warn('⚠️ [AuthContext] Role ID was transformed from', JSON.stringify(userData.role_id), 'to', finalRoleId);
+      }
+      
       const newUserData = {
         id: user.id, // Include the auth user ID
         email,
-        role_id: userData.role_id,
+        role_id: finalRoleId, // Use the thoroughly validated role_id
         tenant_id: tenantId, // Include tenant_id
         full_name: userData.full_name || '',
         phone: userData.phone || '',

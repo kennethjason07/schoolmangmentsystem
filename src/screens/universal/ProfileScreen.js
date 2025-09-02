@@ -50,34 +50,117 @@ const ProfileScreen = ({ navigation, route }) => {
   // Load user data
   const loadUserData = async () => {
     try {
+      console.log('🚀 [ProfileScreen] Starting loadUserData...');
+      console.log('🔍 [ProfileScreen] AuthUser:', authUser ? { id: authUser.id, email: authUser.email } : 'null');
       setLoading(true);
       
       if (!authUser) {
-        console.log('No authenticated user found');
+        console.log('❌ [ProfileScreen] No authenticated user found');
         return;
       }
       
-      // Get user profile from users table
-      const { data: profileData, error: profileError } = await supabase
+      console.log('🔍 [ProfileScreen] AuthUser ID:', authUser.id);
+      console.log('🔍 [ProfileScreen] AuthUser Email:', authUser.email);
+      
+      // Try to get user profile by email first (more reliable with RLS)
+      console.log('📛 [ProfileScreen] Querying users table by email...');
+      let profileData = null;
+      
+      const { data: profileByEmail, error: emailError } = await supabase
         .from('users')
         .select('*')
-        .eq('id', authUser.id)
+        .eq('email', authUser.email)
         .maybeSingle();
-
-      if (profileError) {
-        console.error('Profile error:', profileError);
-        throw profileError;
+        
+      console.log('📊 [ProfileScreen] Profile by email result:');
+      console.log('📊 [ProfileScreen] - profileByEmail:', profileByEmail);
+      console.log('📊 [ProfileScreen] - emailError:', emailError);
+      
+      if (emailError) {
+        console.error('❌ [ProfileScreen] Email query error:', emailError);
+        // If email query fails due to RLS, show helpful message
+        Alert.alert(
+          'Profile Access Issue', 
+          'Unable to load your profile data. This might be due to database permissions. Please contact support or try logging out and back in.',
+          [
+            { text: 'OK' },
+            { text: 'Logout', onPress: signOut }
+          ]
+        );
+        return;
       }
+      
+      if (profileByEmail) {
+        console.log('✅ [ProfileScreen] Found user profile by email:', profileByEmail.id);
+        profileData = profileByEmail;
+      } else {
+        console.log('🔍 [ProfileScreen] No user found by email, trying by auth ID...');
+        
+        // Fallback: try to get user by auth ID
+        const { data: profileById, error: idError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', authUser.id)
+          .maybeSingle();
+          
+        if (idError) {
+          console.error('❌ [ProfileScreen] ID query error:', idError);
+        }
+        
+        if (profileById) {
+          console.log('✅ [ProfileScreen] Found user profile by ID:', profileById.id);
+          profileData = profileById;
+        } else {
+          console.log('❌ [ProfileScreen] No user profile found by email or ID');
+          Alert.alert(
+            'Profile Not Found', 
+            'Your user profile was not found in the database. This needs to be created manually. Please contact support.',
+            [
+              { text: 'OK' },
+              { text: 'Logout', onPress: signOut }
+            ]
+          );
+          return;
+        }
+      }
+      
+      console.log('✅ [ProfileScreen] Profile data loaded:', {
+        id: profileData.id,
+        email: profileData.email,
+        full_name: profileData.full_name,
+        role_id: profileData.role_id,
+        phone: profileData.phone
+      });
 
-      // Get user role name
-      const { data: roleData, error: roleError } = await supabase
-        .from('roles')
-        .select('role_name')
-        .eq('id', profileData?.role_id)
-        .single();
-
-      if (roleError) {
-        console.error('Role error:', roleError);
+      // Get user role name with role_id validation
+      let roleData = null;
+      let roleError = null;
+      
+      // Validate role_id before querying
+      if (profileData?.role_id && typeof profileData.role_id === 'number' && !isNaN(profileData.role_id)) {
+        console.log('🔍 [ProfileScreen] Querying role with valid role_id:', profileData.role_id);
+        
+        const roleResult = await supabase
+          .from('roles')
+          .select('role_name')
+          .eq('id', profileData.role_id)
+          .single();
+          
+        roleData = roleResult.data;
+        roleError = roleResult.error;
+        
+        if (roleError) {
+          console.error('🚨 [ProfileScreen] Role query error:', roleError);
+          // Use fallback role names for common role IDs
+          const fallbackRoles = { 1: 'Admin', 2: 'Teacher', 3: 'Parent', 4: 'Student' };
+          const fallbackRoleName = fallbackRoles[profileData.role_id] || 'User';
+          console.log('🔄 [ProfileScreen] Using fallback role name:', fallbackRoleName);
+          roleData = { role_name: fallbackRoleName };
+        }
+      } else {
+        console.warn('⚠️ [ProfileScreen] Invalid or missing role_id:', profileData?.role_id, typeof profileData?.role_id);
+        // Set default role for invalid role_id
+        roleData = { role_name: 'User' };
       }
 
       setUser(profileData);

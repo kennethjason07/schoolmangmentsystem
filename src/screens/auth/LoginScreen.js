@@ -65,10 +65,38 @@ const LoginScreen = ({ navigation }) => {
     return true;
   };
 
-  // Check if role exists in Supabase
+  // Check if database is properly setup and role exists in Supabase
   const validateRole = async (role) => {
     try {
       console.log('🔍 Validating role:', role);
+      
+      // First check if any roles exist in the database at all
+      const { data: allRoles, error: allRolesError } = await supabase
+        .from('roles')
+        .select('role_name, id')
+        .limit(10);
+
+      if (allRolesError) {
+        console.log('📝 Database error detected:', allRolesError);
+        console.error('💥 Database connection error:', allRolesError);
+        Alert.alert(
+          'Database Connection Error', 
+          'Unable to connect to the database. Please check your internet connection and try again.'
+        );
+        return false;
+      }
+
+      // If no roles exist in the database
+      if (!allRoles || allRoles.length === 0) {
+        console.log('⚠️ No roles found in database');
+        Alert.alert(
+          'Setup Required',
+          'No roles are configured in the system. Please contact your system administrator to set up user roles.'
+        );
+        return false;
+      }
+
+      console.log(`📊 Found ${allRoles.length} roles in database:`, allRoles.map(r => r.role_name));
       
       // Convert lowercase role to proper case for database lookup
       const roleMap = {
@@ -83,29 +111,20 @@ const LoginScreen = ({ navigation }) => {
       
       if (!properRoleName) {
         console.log('❌ Invalid role name provided:', role);
+        Alert.alert('Error', 'Invalid role selected. Please select a valid role.');
         return false;
       }
       
-      const { data, error } = await supabase
-        .from('roles')
-        .select('role_name')
-        .eq('role_name', properRoleName)
-        .maybeSingle();
-
-      console.log('🏷️ Role validation result:', { data, error });
-
-      if (error) {
-        if (error.code === 'PGRST116') {
-          console.log('⚠️ Role not found in database:', properRoleName);
-          Alert.alert('Error', `Role '${role}' not found in the system. Please contact the administrator.`);
-          return false;
-        }
-        throw error;
-      }
+      // Check if the specific role exists
+      const roleExists = allRoles.some(r => r.role_name === properRoleName);
       
-      if (!data) {
+      if (!roleExists) {
+        const availableRoles = allRoles.map(r => r.role_name).join(', ');
         console.log('⚠️ Role not found:', properRoleName);
-        Alert.alert('Error', `Role '${role}' not found in the system. Please contact the administrator.`);
+        Alert.alert(
+          'Role Not Available', 
+          `The role '${properRoleName}' is not configured in the system.\n\nAvailable roles: ${availableRoles}\n\nPlease contact the administrator to add this role.`
+        );
         return false;
       }
       
@@ -113,7 +132,10 @@ const LoginScreen = ({ navigation }) => {
       return true;
     } catch (error) {
       console.error('💥 Role validation error:', error);
-      Alert.alert('Error', 'Unable to validate role. Please try again.');
+      Alert.alert(
+        'Validation Error', 
+        'Unable to validate user role. Please check your internet connection and try again.\n\nIf the problem persists, contact your system administrator.'
+      );
       return false;
     }
   };

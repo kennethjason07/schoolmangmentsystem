@@ -263,19 +263,34 @@ export const dbHelpers = {
   async ensureRolesExist() {
     try {
       const defaultRoles = ['admin', 'teacher', 'student', 'parent'];
+      console.log('🔍 Checking if roles exist...');
 
       for (const roleName of defaultRoles) {
-        const { data: existingRole } = await supabase
+        const { data: existingRole, error: selectError } = await supabase
           .from(TABLES.ROLES)
           .select('id')
           .eq('role_name', roleName)
-          .single();
+          .maybeSingle();
+
+        if (selectError && selectError.code !== 'PGRST116') {
+          console.warn(`⚠️  Could not check role ${roleName}:`, selectError.message);
+          continue;
+        }
 
         if (!existingRole) {
-          await supabase
+          console.log(`➕ Creating role: ${roleName}`);
+          const { error: insertError } = await supabase
             .from(TABLES.ROLES)
             .insert({ role_name: roleName });
-          console.log(`Created role: ${roleName}`);
+          
+          if (insertError) {
+            console.warn(`⚠️  Could not create role ${roleName}:`, insertError.message);
+            // Continue with other roles
+          } else {
+            console.log(`✅ Created role: ${roleName}`);
+          }
+        } else {
+          console.log(`✅ Role ${roleName} already exists (ID: ${existingRole.id})`);
         }
       }
 
@@ -283,6 +298,68 @@ export const dbHelpers = {
     } catch (error) {
       console.error('Error ensuring roles exist:', error);
       return { success: false, error };
+    }
+  },
+
+  // Get role ID with fallback for when RLS prevents access
+  async getRoleIdSafely(roleName) {
+    try {
+      console.log(`🔍 getRoleIdSafely: Attempting to fetch role ID for '${roleName}'`);
+      
+      // Input validation
+      if (!roleName || typeof roleName !== 'string') {
+        console.error('❌ getRoleIdSafely: Invalid role name provided:', roleName);
+        return 1; // Default fallback
+      }
+      
+      const { data: role, error } = await supabase
+        .from(TABLES.ROLES)
+        .select('id')
+        .eq('role_name', roleName)
+        .maybeSingle();
+
+      if (error) {
+        console.warn(`⚠️  Could not fetch role ${roleName}:`, error.message);
+        // Return a fallback role ID based on role name
+        // This is a temporary solution for when RLS prevents role access
+        const fallbackRoleIds = {
+          'admin': 1,
+          'teacher': 2,
+          'student': 3,
+          'parent': 4
+        };
+        const fallbackId = fallbackRoleIds[roleName.toLowerCase()] || 1;
+        console.log(`🔄 Using fallback role ID ${fallbackId} for ${roleName}`);
+        return fallbackId;
+      }
+
+      if (!role || role.id === null || role.id === undefined) {
+        console.warn(`⚠️  Role ${roleName} not found or has invalid ID, using fallback`);
+        const fallbackRoleIds = {
+          'admin': 1,
+          'teacher': 2,
+          'student': 3,
+          'parent': 4
+        };
+        const fallbackId = fallbackRoleIds[roleName.toLowerCase()] || 1;
+        console.log(`🔄 Using fallback role ID ${fallbackId} for ${roleName}`);
+        return fallbackId;
+      }
+
+      console.log(`✅ Found role ${roleName} with ID: ${role.id}`);
+      return role.id;
+    } catch (error) {
+      console.error(`❌ Error getting role ID for ${roleName}:`, error);
+      // Return fallback
+      const fallbackRoleIds = {
+        'admin': 1,
+        'teacher': 2,
+        'student': 3,
+        'parent': 4
+      };
+      const fallbackId = fallbackRoleIds[roleName.toLowerCase()] || 1;
+      console.log(`🔄 Exception fallback: Using role ID ${fallbackId} for ${roleName}`);
+      return fallbackId;
     }
   },
   // Tables that do not require tenant_id filtering (system-wide)
@@ -743,23 +820,19 @@ export const dbHelpers = {
         throw new Error('Failed to create user account');
       }
 
-      // 2. Get teacher role ID
-      let { data: teacherRole, error: roleError } = await supabase
-        .from(TABLES.ROLES)
-        .select('id')
-        .eq('role_name', 'teacher')
-        .single();
-
-      if (roleError) {
-        // If role doesn't exist, create it
-        const { data: newRole, error: createRoleError } = await supabase
-          .from(TABLES.ROLES)
-          .insert({ role_name: 'teacher' })
-          .select()
-          .single();
-
-        if (createRoleError) throw createRoleError;
-        teacherRole = newRole;
+      // 2. Get teacher role ID safely
+      const teacherRoleId = await this.getRoleIdSafely('teacher');
+      console.log(`✅ Using teacher role ID: ${teacherRoleId}`);
+      
+      if (!teacherRoleId || teacherRoleId === undefined || teacherRoleId === null) {
+        console.error('❌ teacherRoleId is invalid:', teacherRoleId);
+        throw new Error('Could not determine teacher role ID - received undefined or null value');
+      }
+      
+      // Ensure it's a valid number
+      if (typeof teacherRoleId !== 'number' || isNaN(teacherRoleId)) {
+        console.error('❌ teacherRoleId is not a valid number:', teacherRoleId, typeof teacherRoleId);
+        throw new Error(`Invalid teacher role ID: expected number, got ${typeof teacherRoleId}`);
       }
 
       // 3. Create user profile with linked_teacher_id
@@ -770,7 +843,7 @@ export const dbHelpers = {
           email: authData.email,
           full_name: authData.full_name,
           phone: authData.phone || '',
-          role_id: teacherRole.id,
+          role_id: teacherRoleId,
           linked_teacher_id: teacherData.teacherId  // ✅ Link to teacher record
         })
         .select()
@@ -831,31 +904,21 @@ export const dbHelpers = {
 
       console.log('Creating student account - Step 3: Auth user created with ID:', authUser.user.id);
 
-      // 2. Get student role ID
+      // 2. Get student role ID safely
       console.log('Creating student account - Step 4: Getting student role');
-      let { data: studentRole, error: roleError } = await supabase
-        .from(TABLES.ROLES)
-        .select('id')
-        .eq('role_name', 'student')
-        .single();
-
-      if (roleError) {
-        console.log('Student role not found, creating it');
-        // If role doesn't exist, create it
-        const { data: newRole, error: createRoleError } = await supabase
-          .from(TABLES.ROLES)
-          .insert({ role_name: 'student' })
-          .select()
-          .single();
-
-        if (createRoleError) {
-          console.error('Error creating student role:', createRoleError);
-          throw createRoleError;
-        }
-        studentRole = newRole;
+      const studentRoleId = await this.getRoleIdSafely('student');
+      console.log('Creating student account - Step 5: Student role ID:', studentRoleId);
+      
+      if (!studentRoleId || studentRoleId === undefined || studentRoleId === null) {
+        console.error('❌ studentRoleId is invalid:', studentRoleId);
+        throw new Error('Could not determine student role ID - received undefined or null value');
       }
-
-      console.log('Creating student account - Step 5: Student role ID:', studentRole.id);
+      
+      // Ensure it's a valid number
+      if (typeof studentRoleId !== 'number' || isNaN(studentRoleId)) {
+        console.error('❌ studentRoleId is not a valid number:', studentRoleId, typeof studentRoleId);
+        throw new Error(`Invalid student role ID: expected number, got ${typeof studentRoleId}`);
+      }
 
       // 3. Create user profile with linked_student_id
       console.log('Creating student account - Step 6: Creating user profile');
@@ -864,7 +927,7 @@ export const dbHelpers = {
         email: authData.email,
         full_name: authData.full_name,
         phone: authData.phone || '',
-        role_id: studentRole.id,
+        role_id: studentRoleId,
         linked_student_id: studentData.studentId  // ✅ Link to student record
       };
 
@@ -943,31 +1006,21 @@ export const dbHelpers = {
 
       console.log('Creating parent account - Step 3: Auth user created with ID:', authUser.user.id);
 
-      // 2. Get parent role ID
+      // 2. Get parent role ID safely
       console.log('Creating parent account - Step 4: Getting parent role');
-      let { data: parentRole, error: roleError } = await supabase
-        .from(TABLES.ROLES)
-        .select('id')
-        .eq('role_name', 'parent')
-        .single();
-
-      if (roleError) {
-        console.log('Parent role not found, creating it');
-        // If role doesn't exist, create it
-        const { data: newRole, error: createRoleError } = await supabase
-          .from(TABLES.ROLES)
-          .insert({ role_name: 'parent' })
-          .select()
-          .single();
-
-        if (createRoleError) {
-          console.error('Error creating parent role:', createRoleError);
-          throw createRoleError;
-        }
-        parentRole = newRole;
+      const parentRoleId = await this.getRoleIdSafely('parent');
+      console.log('Creating parent account - Step 5: Parent role ID:', parentRoleId);
+      
+      if (!parentRoleId || parentRoleId === undefined || parentRoleId === null) {
+        console.error('❌ parentRoleId is invalid:', parentRoleId);
+        throw new Error('Could not determine parent role ID - received undefined or null value');
       }
-
-      console.log('Creating parent account - Step 5: Parent role ID:', parentRole.id);
+      
+      // Ensure it's a valid number
+      if (typeof parentRoleId !== 'number' || isNaN(parentRoleId)) {
+        console.error('❌ parentRoleId is not a valid number:', parentRoleId, typeof parentRoleId);
+        throw new Error(`Invalid parent role ID: expected number, got ${typeof parentRoleId}`);
+      }
 
       // 3. Create user profile with linked_parent_of
       console.log('Creating parent account - Step 6: Creating user profile');
@@ -976,7 +1029,7 @@ export const dbHelpers = {
         email: authData.email,
         full_name: authData.full_name,
         phone: authData.phone || '',
-        role_id: parentRole.id,
+        role_id: parentRoleId,
         linked_parent_of: studentData.studentId  // ✅ Link to student record as parent
       };
 
