@@ -599,12 +599,36 @@ const SubjectsTimetable = ({ route }) => {
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
       
+      // Get current user's tenant_id from auth context
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) {
+        console.warn('No authenticated user found for period settings fetch');
+        setPeriodSettings(getDefaultPeriods());
+        return;
+      }
+      
+      // Get user's tenant_id from their profile
+      const { data: userProfile, error: profileError } = await supabase
+        .from('users')
+        .select('tenant_id')
+        .eq('id', user.id)
+        .single();
+      
+      if (profileError || !userProfile) {
+        console.warn('Could not determine user tenant for period settings');
+        setPeriodSettings(getDefaultPeriods());
+        return;
+      }
+      
+      const tenantId = userProfile.tenant_id;
+      
       const { data: periodData, error: periodError } = await supabase
         .from('period_settings')
         .select('*')
         .eq('academic_year', academicYear)
         .eq('period_type', 'class')
         .eq('is_active', true)
+        .eq('tenant_id', tenantId)
         .order('start_time');
       
       if (periodError) {
@@ -994,13 +1018,33 @@ const SubjectsTimetable = ({ route }) => {
   // Save period settings to database
   const savePeriodSettingsToDatabase = async (periods, academicYear) => {
     try {
-      // First, delete existing periods for this academic year
+      // Get current user's tenant_id from auth context
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) {
+        throw new Error('No authenticated user found');
+      }
+      
+      // Get user's tenant_id from their profile
+      const { data: userProfile, error: profileError } = await supabase
+        .from('users')
+        .select('tenant_id')
+        .eq('id', user.id)
+        .single();
+      
+      if (profileError || !userProfile) {
+        throw new Error('Could not determine user tenant');
+      }
+      
+      const tenantId = userProfile.tenant_id;
+      
+      // First, delete existing periods for this academic year and tenant
       await supabase
         .from('period_settings')
         .delete()
-        .eq('academic_year', academicYear);
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId);
 
-      // Insert new period settings
+      // Insert new period settings with tenant_id
       const periodsToInsert = periods.map(period => ({
         period_number: period.number,
         start_time: period.startTime,
@@ -1008,6 +1052,7 @@ const SubjectsTimetable = ({ route }) => {
         period_name: period.name || `Period ${period.number}`,
         period_type: 'class',
         academic_year: academicYear,
+        tenant_id: tenantId,
         is_active: true
       }));
 

@@ -47,6 +47,70 @@ export const isValidUUID = (uuid) => {
   return uuidRegex.test(uuid);
 };
 
+// Tenant management utilities
+export const tenantHelpers = {
+  // Get current tenant ID from user session
+  async getCurrentTenantId() {
+    try {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error || !user) {
+        console.warn('No authenticated user found for tenant context');
+        return null;
+      }
+      
+      // Get tenant_id from user metadata or custom claims
+      const tenantId = user.app_metadata?.tenant_id || user.user_metadata?.tenant_id;
+      if (!tenantId) {
+        console.warn('No tenant_id found in user metadata');
+        return null;
+      }
+      
+      return tenantId;
+    } catch (error) {
+      console.error('Error getting current tenant ID:', error);
+      return null;
+    }
+  },
+
+  // Set tenant context for database queries
+  async setTenantContext(tenantId) {
+    try {
+      if (!tenantId) {
+        console.warn('Cannot set empty tenant context');
+        return { success: false };
+      }
+      
+      // Set tenant context using Supabase RPC function
+      const { error } = await supabase.rpc('set_tenant_context', { tenant_id: tenantId });
+      if (error) {
+        console.error('Error setting tenant context:', error);
+        return { success: false, error };
+      }
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error in setTenantContext:', error);
+      return { success: false, error };
+    }
+  },
+
+  // Validate tenant access for a user
+  async validateTenantAccess(userId, tenantId) {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('tenant_id')
+        .eq('id', userId)
+        .eq('tenant_id', tenantId)
+        .single();
+        
+      return { valid: !!data && !error, error };
+    } catch (error) {
+      return { valid: false, error };
+    }
+  }
+};
+
 // Database table names matching your schema
 export const TABLES = {
   USERS: 'users',
@@ -78,6 +142,7 @@ export const TABLES = {
   SCHOOL_EXPENSES: 'school_expenses',
   EXPENSE_CATEGORIES: 'expense_categories',
   STUDENT_DISCOUNTS: 'student_discounts',
+  LEAVE_APPLICATIONS: 'leave_applications',
 };
 
 // Authentication helper functions
@@ -137,6 +202,61 @@ export const authHelpers = {
   },
 };
 
+// User tenant helper function
+export const getUserTenantId = async () => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      console.warn('No authenticated user found for tenant context');
+      return null;
+    }
+
+    // First check user metadata for tenant_id
+    const metadataTenantId = user.app_metadata?.tenant_id || user.user_metadata?.tenant_id;
+    if (metadataTenantId) {
+      console.log(`Found tenant_id in user metadata: ${metadataTenantId}`);
+      return metadataTenantId;
+    }
+
+    // Try to get user's tenant_id from profile table
+    try {
+      const { data: userProfile, error: profileError } = await supabase
+        .from('users')
+        .select('tenant_id')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (!profileError && userProfile && userProfile.tenant_id) {
+        console.log(`Found tenant_id in user profile: ${userProfile.tenant_id}`);
+        return userProfile.tenant_id;
+      }
+
+      if (profileError) {
+        console.warn('Error accessing user profile table:', profileError);
+      } else {
+        console.warn('No tenant_id found in user profile');
+      }
+    } catch (profileError) {
+      console.warn('Could not access user profile table:', profileError);
+    }
+
+    // Use default tenant_id as fallback
+    const defaultTenantId = '00000000-0000-0000-0000-000000000001'; // UUID format for default tenant
+    console.warn(`Using default tenant_id as fallback: ${defaultTenantId}`);
+    
+    // Note: We don't attempt to create user profiles here due to RLS policies
+    // The application should handle user profile creation through proper admin channels
+    
+    return defaultTenantId;
+  } catch (error) {
+    console.error('Error in getUserTenantId:', error);
+    // Return default tenant as final fallback
+    const defaultTenantId = '00000000-0000-0000-0000-000000000001';
+    console.warn(`Using default tenant_id due to error: ${defaultTenantId}`);
+    return defaultTenantId;
+  }
+};
+
 // Database helper functions
 export const dbHelpers = {
   // Ensure default roles exist
@@ -165,9 +285,26 @@ export const dbHelpers = {
       return { success: false, error };
     }
   },
-  // Generic CRUD operations
-  async create(table, data) {
+  // Tables that do not require tenant_id filtering (system-wide)
+  getTenantFreeTable(table) {
+    const tenantFreeTables = ['tenants', 'roles'];
+    return tenantFreeTables.includes(table.toLowerCase());
+  },
+
+  // Generic CRUD operations - now tenant-aware
+  async create(table, data, options = {}) {
     try {
+      const { skipTenantId = false } = options;
+      
+      // Only add tenant_id if table requires it and not explicitly skipped
+      if (!this.getTenantFreeTable(table) && !skipTenantId) {
+        const tenantId = await tenantHelpers.getCurrentTenantId();
+        if (!tenantId) {
+          throw new Error('Tenant context required but not found');
+        }
+        data = { ...data, tenant_id: tenantId };
+      }
+      
       const { data: result, error } = await supabase
         .from(table)
         .insert(data)
@@ -178,11 +315,22 @@ export const dbHelpers = {
     }
   },
 
-  async read(table, filters = {}) {
+  async read(table, filters = {}, options = {}) {
     try {
-      let query = supabase.from(table).select('*');
+      const { skipTenantId = false, selectClause = '*' } = options;
+      let query = supabase.from(table).select(selectClause);
       
-      // Apply filters
+      // Add tenant_id filter for tenant-aware tables
+      if (!this.getTenantFreeTable(table) && !skipTenantId) {
+        const tenantId = await tenantHelpers.getCurrentTenantId();
+        if (tenantId) {
+          query = query.eq('tenant_id', tenantId);
+        } else {
+          console.warn(`No tenant context for reading from ${table}`);
+        }
+      }
+      
+      // Apply additional filters
       Object.keys(filters).forEach(key => {
         query = query.eq(key, filters[key]);
       });
@@ -194,47 +342,87 @@ export const dbHelpers = {
     }
   },
 
-  async update(table, id, updates) {
+  async update(table, id, updates, options = {}) {
     try {
-      const { data, error } = await supabase
-        .from(table)
-        .update(updates)
-        .eq('id', id)
-        .select();
+      const { skipTenantId = false } = options;
+      let query = supabase.from(table).update(updates).eq('id', id);
+      
+      // Add tenant_id constraint for tenant-aware tables
+      if (!this.getTenantFreeTable(table) && !skipTenantId) {
+        const tenantId = await tenantHelpers.getCurrentTenantId();
+        if (tenantId) {
+          query = query.eq('tenant_id', tenantId);
+        } else {
+          throw new Error('Tenant context required for update operation');
+        }
+      }
+      
+      const { data, error } = await query.select();
       return { data, error };
     } catch (error) {
       return { data: null, error };
     }
   },
 
-  async delete(table, id) {
+  async delete(table, id, options = {}) {
     try {
-      const { error } = await supabase
-        .from(table)
-        .delete()
-        .eq('id', id);
+      const { skipTenantId = false } = options;
+      let query = supabase.from(table).delete().eq('id', id);
+      
+      // Add tenant_id constraint for tenant-aware tables
+      if (!this.getTenantFreeTable(table) && !skipTenantId) {
+        const tenantId = await tenantHelpers.getCurrentTenantId();
+        if (tenantId) {
+          query = query.eq('tenant_id', tenantId);
+        } else {
+          throw new Error('Tenant context required for delete operation');
+        }
+      }
+      
+      const { error } = await query;
       return { error };
     } catch (error) {
       return { error };
     }
   },
 
-  // User management functions
-  async getUserByEmail(email) {
+  // User management functions - now tenant-aware
+  async getUserByEmail(email, options = {}) {
     try {
-      const { data, error } = await supabase
+      const { skipTenantId = false } = options;
+      let query = supabase
         .from(TABLES.USERS)
         .select('*')
-        .eq('email', email)
-        .single();
+        .eq('email', email);
+      
+      // Add tenant_id filter unless explicitly skipped
+      if (!skipTenantId) {
+        const tenantId = await tenantHelpers.getCurrentTenantId();
+        if (tenantId) {
+          query = query.eq('tenant_id', tenantId);
+        }
+      }
+      
+      const { data, error } = await query.single();
       return { data, error };
     } catch (error) {
       return { data: null, error };
     }
   },
 
-  async createUser(userData) {
+  async createUser(userData, options = {}) {
     try {
+      const { skipTenantId = false } = options;
+      
+      // Add tenant_id unless explicitly skipped
+      if (!skipTenantId) {
+        const tenantId = await tenantHelpers.getCurrentTenantId();
+        if (!tenantId) {
+          throw new Error('Tenant context required for user creation');
+        }
+        userData = { ...userData, tenant_id: tenantId };
+      }
+      
       const { data, error } = await supabase
         .from(TABLES.USERS)
         .insert(userData)
@@ -246,14 +434,12 @@ export const dbHelpers = {
     }
   },
 
-  // Class and Section management
+  // Class and Section management - now tenant-aware
   async getClasses() {
     try {
-      const { data, error } = await supabase
-        .from(TABLES.CLASSES)
-        .select('*')
-        .order('class_name');
-      return { data, error };
+      // Classes are tenant-specific, so this will automatically filter by tenant_id
+      // when using the tenant-aware read function
+      return await this.read(TABLES.CLASSES, {}, { selectClause: '*', orderBy: 'class_name' });
     } catch (error) {
       return { data: null, error };
     }
@@ -261,9 +447,15 @@ export const dbHelpers = {
 
   async getSectionsByClass(classId = null) {
     try {
+      const tenantId = await tenantHelpers.getCurrentTenantId();
       let query = supabase
         .from(TABLES.CLASSES)
         .select('section');
+      
+      // Add tenant_id filter
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
       
       if (classId) {
         query = query.eq('id', classId);
@@ -280,10 +472,12 @@ export const dbHelpers = {
     }
   },
 
-  // Student management
+  // Student management - now tenant-aware
   async getStudentsByClass(classId, sectionId = null) {
     try {
-      // First, get students without parent joins to avoid foreign key errors
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      
+      // First, get students with tenant filtering
       let query = supabase
         .from(TABLES.STUDENTS)
         .select(`
@@ -291,6 +485,11 @@ export const dbHelpers = {
           classes(class_name, section)
         `)
         .eq('class_id', classId);
+      
+      // Add tenant_id filter
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
 
       if (sectionId) {
         query = query.eq('classes.section', sectionId);
@@ -314,10 +513,17 @@ export const dbHelpers = {
       // Fetch parent data from parents table (for new parent relationships)
       let parentsLookup = {};
       if (parentIds.length > 0) {
-        const { data: parentsData, error: parentsError } = await supabase
+        let parentQuery = supabase
           .from(TABLES.PARENTS)
           .select('id, name, phone, email, student_id')
           .in('id', parentIds);
+          
+        // Add tenant filtering to parents query
+        if (tenantId) {
+          parentQuery = parentQuery.eq('tenant_id', tenantId);
+        }
+        
+        const { data: parentsData, error: parentsError } = await parentQuery;
         
         if (!parentsError && parentsData) {
           parentsData.forEach(parent => {
@@ -329,11 +535,18 @@ export const dbHelpers = {
       // Fetch parent user data from users table (for old parent relationships)
       let parentUsersLookup = {};
       if (studentIds.length > 0) {
-        const { data: parentUsers, error: parentUsersError } = await supabase
+        let userQuery = supabase
           .from(TABLES.USERS)
           .select('id, full_name, phone, email, linked_parent_of')
           .in('linked_parent_of', studentIds)
           .not('linked_parent_of', 'is', null);
+          
+        // Add tenant filtering to users query
+        if (tenantId) {
+          userQuery = userQuery.eq('tenant_id', tenantId);
+        }
+        
+        const { data: parentUsers, error: parentUsersError } = await userQuery;
         
         if (!parentUsersError && parentUsers) {
           parentUsers.forEach(user => {
@@ -377,14 +590,21 @@ export const dbHelpers = {
 
   async getStudentById(studentId) {
     try {
-      console.log('getStudentById: Fetching student with ID:', studentId);
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      console.log('getStudentById: Fetching student with ID:', studentId, 'for tenant:', tenantId);
 
-      // First try a simple query without joins
-      const { data: basicData, error: basicError } = await supabase
+      // First try a simple query without joins with tenant filtering
+      let studentQuery = supabase
         .from(TABLES.STUDENTS)
         .select('*')
-        .eq('id', studentId)
-        .single();
+        .eq('id', studentId);
+      
+      // Add tenant_id filter
+      if (tenantId) {
+        studentQuery = studentQuery.eq('tenant_id', tenantId);
+      }
+      
+      const { data: basicData, error: basicError } = await studentQuery.single();
 
       if (basicError) {
         console.error('getStudentById: Basic query failed:', basicError);
@@ -393,14 +613,20 @@ export const dbHelpers = {
 
       console.log('getStudentById: Basic student data:', basicData);
 
-      // Try to get class info separately
+      // Try to get class info separately with tenant filtering
       let classData = null;
       if (basicData.class_id) {
-        const { data: classInfo, error: classError } = await supabase
+        let classQuery = supabase
           .from(TABLES.CLASSES)
           .select('class_name, section')
-          .eq('id', basicData.class_id)
-          .single();
+          .eq('id', basicData.class_id);
+          
+        // Add tenant filtering to classes query
+        if (tenantId) {
+          classQuery = classQuery.eq('tenant_id', tenantId);
+        }
+        
+        const { data: classInfo, error: classError } = await classQuery.single();
 
         if (!classError) {
           classData = classInfo;
@@ -409,14 +635,20 @@ export const dbHelpers = {
         }
       }
 
-      // Try to get parent info separately
+      // Try to get parent info separately with tenant filtering
       let parentData = null;
       if (basicData.parent_id) {
-        const { data: parentInfo, error: parentError } = await supabase
+        let parentQuery = supabase
           .from(TABLES.PARENTS)
           .select('name, phone, email')
-          .eq('id', basicData.parent_id)
-          .single();
+          .eq('id', basicData.parent_id);
+          
+        // Add tenant filtering to parents query
+        if (tenantId) {
+          parentQuery = parentQuery.eq('tenant_id', tenantId);
+        }
+        
+        const { data: parentInfo, error: parentError } = await parentQuery.single();
 
         if (!parentError) {
           parentData = parentInfo;

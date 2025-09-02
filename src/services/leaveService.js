@@ -1,9 +1,10 @@
-import { supabase } from '../utils/supabase';
+import { supabase, dbHelpers, getUserTenantId, TABLES, tenantHelpers } from '../utils/supabase';
 import { format } from 'date-fns';
 
 /**
  * Leave Management Service
  * Handles all leave-related operations including CRUD, approvals, and balance management
+ * All operations are tenant-aware to ensure proper data isolation
  */
 
 class LeaveService {
@@ -14,9 +15,21 @@ class LeaveService {
    */
   async submitLeaveApplication(leaveData) {
     try {
+      // Get tenant ID for the current user
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        throw new Error('Tenant context required for leave application');
+      }
+
+      // Add tenant_id to the leave data
+      const leaveWithTenant = {
+        ...leaveData,
+        tenant_id: tenantId
+      };
+
       const { data, error } = await supabase
-        .from('leave_applications')
-        .insert([leaveData])
+        .from(TABLES.LEAVE_APPLICATIONS)
+        .insert([leaveWithTenant])
         .select(`
           *,
           teacher:teachers!leave_applications_teacher_id_fkey(id, name),
@@ -48,15 +61,22 @@ class LeaveService {
    */
   async getLeaveApplications(filters = {}) {
     try {
+      // Get tenant ID for the current user
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        throw new Error('Tenant context required to fetch leave applications');
+      }
+
       let query = supabase
-        .from('leave_applications')
+        .from(TABLES.LEAVE_APPLICATIONS)
         .select(`
           *,
           teacher:teachers!leave_applications_teacher_id_fkey(id, name),
           applied_by_user:users!leave_applications_applied_by_fkey(id, full_name),
           reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name),
           replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
-        `);
+        `)
+        .eq('tenant_id', tenantId); // Add tenant filtering
 
       // Apply filters
       if (filters.teacher_id) {
@@ -123,10 +143,17 @@ class LeaveService {
         updated_at: new Date().toISOString()
       };
 
+      // Ensure we only update within the current tenant
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        throw new Error('Tenant context required to update leave application');
+      }
+
       const { data, error } = await supabase
-        .from('leave_applications')
+        .from(TABLES.LEAVE_APPLICATIONS)
         .update(updatePayload)
         .eq('id', applicationId)
+        .eq('tenant_id', tenantId)
         .select(`
           *,
           teacher:teachers!leave_applications_teacher_id_fkey(id, name),
@@ -159,9 +186,15 @@ class LeaveService {
    */
   async getLeaveStatistics(filters = {}) {
     try {
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        throw new Error('Tenant context required to fetch leave statistics');
+      }
+
       let query = supabase
-        .from('leave_applications')
-        .select('id, status, leave_type, total_days, start_date, end_date');
+        .from(TABLES.LEAVE_APPLICATIONS)
+        .select('id, status, leave_type, total_days, start_date, end_date')
+        .eq('tenant_id', tenantId);
 
       // Apply filters
       if (filters.academic_year) {
@@ -230,13 +263,19 @@ class LeaveService {
    */
   async getUpcomingLeaves(startDate, endDate) {
     try {
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        throw new Error('Tenant context required to fetch upcoming leaves');
+      }
+
       const { data, error } = await supabase
-        .from('leave_applications')
+        .from(TABLES.LEAVE_APPLICATIONS)
         .select(`
           *,
           teacher:teachers!leave_applications_teacher_id_fkey(id, name),
           replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
         `)
+        .eq('tenant_id', tenantId)
         .eq('status', 'Approved')
         .gte('start_date', startDate)
         .lte('start_date', endDate)
@@ -267,9 +306,15 @@ class LeaveService {
    */
   async checkTeacherAvailability(teacherId, date) {
     try {
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        throw new Error('Tenant context required to check teacher availability');
+      }
+
       const { data, error } = await supabase
-        .from('leave_applications')
+        .from(TABLES.LEAVE_APPLICATIONS)
         .select('id, start_date, end_date, leave_type')
+        .eq('tenant_id', tenantId)
         .eq('teacher_id', teacherId)
         .eq('status', 'Approved')
         .lte('start_date', date)
@@ -306,10 +351,16 @@ class LeaveService {
   async cancelLeaveApplication(applicationId, userId) {
     try {
       // First check if the user has permission to cancel
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        throw new Error('Tenant context required to cancel leave application');
+      }
+
       const { data: application, error: fetchError } = await supabase
-        .from('leave_applications')
+        .from(TABLES.LEAVE_APPLICATIONS)
         .select('applied_by, status')
         .eq('id', applicationId)
+        .eq('tenant_id', tenantId)
         .single();
 
       if (fetchError) throw fetchError;
@@ -319,12 +370,13 @@ class LeaveService {
       }
 
       const { data, error } = await supabase
-        .from('leave_applications')
+        .from(TABLES.LEAVE_APPLICATIONS)
         .update({
           status: 'Cancelled',
           updated_at: new Date().toISOString()
         })
         .eq('id', applicationId)
+        .eq('tenant_id', tenantId)
         .select()
         .single();
 

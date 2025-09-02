@@ -13,6 +13,23 @@ export const useAuth = () => {
   return context;
 };
 
+// Helper function to count tenant resources
+const getTenantResourceCount = async (tenantId, resourceType) => {
+  try {
+    const tableName = resourceType === 'teachers' ? 'teachers' : 'students';
+    const { count, error } = await supabase
+      .from(tableName)
+      .select('*', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId);
+    
+    if (error) throw error;
+    return count || 0;
+  } catch (error) {
+    console.error('Error counting tenant resources:', error);
+    return 0;
+  }
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -92,6 +109,7 @@ export const AuthProvider = ({ children }) => {
       // Use case-insensitive search for email with timeout
       let userProfile = null;
       let error = null;
+      let tenantId = null;
       
       try {
         console.log('🔍 Starting user profile query...');
@@ -119,7 +137,8 @@ export const AuthProvider = ({ children }) => {
         
         userProfile = result.data;
         error = result.error;
-        console.log('📄 User profile query completed:', { found: !!userProfile, error: !!error });
+        tenantId = userProfile?.tenant_id;
+        console.log('📄 User profile query completed:', { found: !!userProfile, error: !!error, tenantId });
       } catch (queryError) {
         console.error('❌ User profile query failed:', queryError);
         error = queryError;
@@ -227,6 +246,7 @@ export const AuthProvider = ({ children }) => {
         id: authUser.id,
         email: authUser.email,
         role_id: userProfile?.role_id || null,
+        tenant_id: userProfile?.tenant_id || null,
         photo_url: userProfile?.photo_url || null,
         full_name: userProfile?.full_name || '',
         phone: userProfile?.phone || '',
@@ -247,10 +267,27 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const signIn = async (email, password, selectedRole) => {
+  const signIn = async (email, password, selectedRole, tenantSubdomain = null) => {
     try {
       setLoading(true);
       isSigningInRef.current = true; // Prevent auth listener from interfering
+      
+      // Resolve tenant if subdomain provided
+      let targetTenantId = null;
+      if (tenantSubdomain) {
+        const { data: tenant, error: tenantError } = await supabase
+          .from('tenants')
+          .select('id, status')
+          .eq('subdomain', tenantSubdomain.toLowerCase())
+          .eq('status', 'active')
+          .single();
+        
+        if (tenantError || !tenant) {
+          return { data: null, error: { message: 'Invalid or inactive tenant' } };
+        }
+        
+        targetTenantId = tenant.id;
+      }
       
       // Sign in with Supabase Auth
       const { data: { session, user }, error: authError } = await supabase.auth.signInWithPassword({
@@ -268,11 +305,17 @@ export const AuthProvider = ({ children }) => {
 
       // Get user profile (without roles join to avoid foreign key issues)
       // Use case-insensitive search for email
-      const { data: userProfile, error: profileError } = await supabase
+      let userQuery = supabase
         .from('users')
         .select('*')
-        .ilike('email', email)
-        .maybeSingle();
+        .ilike('email', email);
+      
+      // If tenant specified, filter by tenant
+      if (targetTenantId) {
+        userQuery = userQuery.eq('tenant_id', targetTenantId);
+      }
+      
+      const { data: userProfile, error: profileError } = await userQuery.maybeSingle();
 
       if (profileError) {
         console.error('Profile query error:', profileError);
@@ -280,8 +323,9 @@ export const AuthProvider = ({ children }) => {
       }
 
       if (!userProfile) {
-        console.log('No user profile found for:', email);
-        return { data: null, error: { message: 'User profile not found' } };
+        console.log('No user profile found for:', email, targetTenantId ? `in tenant: ${targetTenantId}` : '');
+        const errorMsg = targetTenantId ? 'User not found in the specified tenant' : 'User profile not found';
+        return { data: null, error: { message: errorMsg } };
       }
 
       console.log('User profile found:', { email: userProfile.email, role_id: userProfile.role_id });
@@ -340,6 +384,7 @@ export const AuthProvider = ({ children }) => {
         id: user.id,
         email: user.email,
         role_id: userProfile.role_id,
+        tenant_id: userProfile.tenant_id,
         photo_url: userProfile?.photo_url || null,
         full_name: userProfile?.full_name || '',
         phone: userProfile?.phone || '',
@@ -387,11 +432,41 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const signUp = async (email, password, userData) => {
+  const signUp = async (email, password, userData, tenantId = null) => {
     console.log('📝 Starting signup process for:', email);
     console.log('📁 User data provided:', userData);
+    console.log('🏢 Tenant ID provided:', tenantId);
     try {
       setLoading(true);
+      
+      // Validate tenant if provided
+      if (tenantId) {
+        const { data: tenant, error: tenantError } = await supabase
+          .from('tenants')
+          .select('id, status, max_students, max_teachers')
+          .eq('id', tenantId)
+          .eq('status', 'active')
+          .single();
+        
+        if (tenantError || !tenant) {
+          return { data: null, error: { message: 'Invalid or inactive tenant' } };
+        }
+        
+        // Check tenant limits based on user role
+        if (userData.role_id) {
+          const roleNames = { 2: 'teachers', 4: 'students' };
+          const resourceType = roleNames[userData.role_id];
+          
+          if (resourceType) {
+            const currentCount = await getTenantResourceCount(tenantId, resourceType);
+            const maxCount = resourceType === 'teachers' ? tenant.max_teachers : tenant.max_students;
+            
+            if (currentCount >= maxCount) {
+              return { data: null, error: { message: `Tenant has reached maximum ${resourceType} limit (${maxCount})` } };
+            }
+          }
+        }
+      }
       
       console.log('🔍 Checking if user already exists...');
       // First check if user already exists in our users table
@@ -440,9 +515,12 @@ export const AuthProvider = ({ children }) => {
         id: user.id, // Include the auth user ID
         email,
         role_id: userData.role_id,
+        tenant_id: tenantId, // Include tenant_id
         full_name: userData.full_name || '',
         phone: userData.phone || '',
-        linked_student_id: userData.linked_student_id || null
+        linked_student_id: userData.linked_student_id || null,
+        linked_teacher_id: userData.linked_teacher_id || null,
+        linked_parent_of: userData.linked_parent_of || null
       };
 
       console.log('📁 New user data to insert:', newUserData);
@@ -482,6 +560,7 @@ export const AuthProvider = ({ children }) => {
         id: user.id,
         email: user.email,
         role_id: userData.role_id,
+        tenant_id: tenantId,
         ...profileData
       };
 

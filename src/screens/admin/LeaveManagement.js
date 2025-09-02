@@ -19,7 +19,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import Header from '../../components/Header';
-import { supabase } from '../../utils/supabase';
+import { supabase, getUserTenantId } from '../../utils/supabase';
 import { format, parseISO, isAfter, isBefore } from 'date-fns';
 import ModernFilters from '../../components/ui/ModernFilters';
 import Colors from '../../constants/Colors';
@@ -102,6 +102,13 @@ const LeaveManagement = ({ navigation }) => {
 
   const loadLeaveApplications = async () => {
     try {
+      // Get current user's tenant_id using utility function
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        console.error('No tenant_id found for user');
+        return;
+      }
+
       const { data, error } = await supabase
         .from('leave_applications')
         .select(`
@@ -111,6 +118,7 @@ const LeaveManagement = ({ navigation }) => {
           reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name),
           replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
         `)
+        .eq('tenant_id', tenantId)
         .order('applied_date', { ascending: false });
 
       if (error) throw error;
@@ -122,9 +130,17 @@ const LeaveManagement = ({ navigation }) => {
 
   const loadTeachers = async () => {
     try {
+      // Get current user's tenant_id using utility function
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        console.error('No tenant_id found for user in teachers fetch');
+        return;
+      }
+
       const { data, error } = await supabase
         .from('teachers')
         .select('id, name')
+        .eq('tenant_id', tenantId)
         .order('name');
 
       if (error) throw error;
@@ -325,6 +341,14 @@ const LeaveManagement = ({ navigation }) => {
         userId = null;
       }
 
+      // Get user's tenant_id for insertion using utility function
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        console.error('No tenant_id found for user during leave insertion');
+        Alert.alert('Error', 'User tenant information not found');
+        return;
+      }
+
       const leaveData = {
         teacher_id: newLeaveForm.teacher_id,
         leave_type: newLeaveForm.leave_type,
@@ -338,6 +362,7 @@ const LeaveManagement = ({ navigation }) => {
         reviewed_by: userId,
         reviewed_at: new Date().toISOString(),
         admin_remarks: `Added by admin on behalf of teacher (Admin ID: ${user.id})`,
+        tenant_id: tenantId, // Include tenant_id for RLS compliance
       };
 
       const { error } = await supabase

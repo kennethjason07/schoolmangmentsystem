@@ -16,7 +16,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import Header from '../../components/Header';
-import { supabase } from '../../utils/supabase';
+import { supabase, getUserTenantId } from '../../utils/supabase';
 import { format, parseISO, isAfter, differenceInDays } from 'date-fns';
 import { createLeaveRequestNotificationForAdmins } from '../../services/notificationService';
 
@@ -104,6 +104,13 @@ const LeaveApplication = ({ navigation }) => {
     try {
       if (!teacherProfile?.linked_teacher_id) return;
 
+      // Get current user's tenant_id using utility function
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        console.error('No tenant_id found for user in teacher leaves fetch');
+        return;
+      }
+
       const { data, error } = await supabase
         .from('leave_applications')
         .select(`
@@ -113,6 +120,7 @@ const LeaveApplication = ({ navigation }) => {
           replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
         `)
         .eq('teacher_id', teacherProfile.linked_teacher_id)
+        .eq('tenant_id', tenantId)
         .order('applied_date', { ascending: false });
 
       if (error) throw error;
@@ -158,6 +166,13 @@ const LeaveApplication = ({ navigation }) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('User not authenticated');
 
+      // Get user's tenant_id for insertion using utility function
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        console.error('No tenant_id found for user during teacher leave insertion');
+        throw new Error('User tenant information not found');
+      }
+
       const leaveData = {
         teacher_id: teacherProfile.linked_teacher_id,
         leave_type: applicationForm.leave_type,
@@ -166,6 +181,7 @@ const LeaveApplication = ({ navigation }) => {
         reason: applicationForm.reason.trim(),
         applied_by: user.id,
         attachment_url: applicationForm.attachment_url,
+        tenant_id: tenantId, // Include tenant_id for RLS compliance
       };
 
       const { error } = await supabase
