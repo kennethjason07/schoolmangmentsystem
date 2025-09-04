@@ -435,6 +435,7 @@ export default function MarksEntry({ navigation }) {
       }
 
       // Prepare marks data with grade calculation
+      // Note: tenant_id will be automatically handled by RLS triggers
       const marksData = studentsWithMarks.map(student => {
         const marksObtained = parseInt(marks[student.id]);
         const maxMarks = selectedExamData.max_marks || 100; // Use exam's max_marks
@@ -447,24 +448,48 @@ export default function MarksEntry({ navigation }) {
           marks_obtained: marksObtained,
           max_marks: maxMarks, // Store exam's max_marks
           grade: grade,
-          remarks: selectedExamData.name,
-          tenant_id: userTenantId
+          remarks: selectedExamData.name
+          // tenant_id will be automatically set by RLS trigger
         };
       });
 
-      const { error: upsertError } = await supabase
-        .from(TABLES.MARKS)
-        .upsert(marksData, { 
-          onConflict: 'student_id,exam_id,subject_id',
-          ignoreDuplicates: false 
-        });
+      // Since marks table doesn't have a unique constraint (per schema.txt),
+      // we need to manually handle upsert logic
+      for (const markData of marksData) {
+        // First, try to find existing record
+        const { data: existingMark } = await supabase
+          .from(TABLES.MARKS)
+          .select('id')
+          .eq('student_id', markData.student_id)
+          .eq('exam_id', markData.exam_id)
+          .eq('subject_id', markData.subject_id)
+          .single();
 
-      if (upsertError) throw upsertError;
+        if (existingMark) {
+          // Update existing record
+          const { error: updateError } = await supabase
+            .from(TABLES.MARKS)
+            .update({
+              marks_obtained: markData.marks_obtained,
+              max_marks: markData.max_marks,
+              grade: markData.grade,
+              remarks: markData.remarks,
+              tenant_id: markData.tenant_id
+            })
+            .eq('id', existingMark.id);
+
+          if (updateError) throw updateError;
+        } else {
+          // Insert new record
+          const { error: insertError } = await supabase
+            .from(TABLES.MARKS)
+            .insert(markData);
+
+          if (insertError) throw insertError;
+        }
+      }
 
       console.log('✅ Marks saved successfully, triggering parent notifications...');
-
-      // Get teacher ID for notification
-      const { data: teacherData } = await dbHelpers.getTeacherByUserId(user.id);
       
       // Send notifications to parents silently in background
       try {
@@ -474,7 +499,7 @@ export default function MarksEntry({ navigation }) {
           classId: selectedClass,
           subjectId: selectedSubject,
           examId: selectedExam,
-          teacherId: user.id,
+          teacherId: user.id, // Use user.id directly instead of teacherData
           studentIds: studentIds
         });
       } catch (notificationError) {

@@ -1405,7 +1405,7 @@ export const dbHelpers = {
     try {
       const { data, error } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
-        .upsert(attendanceData, { onConflict: 'student_id,date' })
+        .upsert(attendanceData, { onConflict: 'student_id,date,tenant_id' })
         .select();
       return { data, error };
     } catch (error) {

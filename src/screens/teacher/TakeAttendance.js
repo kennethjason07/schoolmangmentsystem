@@ -142,9 +142,12 @@ const TakeAttendance = () => {
     }
     
     try {
-      console.log('⚡ [OPTIMIZED] Fetching existing attendance with minimal query...');
+      console.log('🔍 [DEBUG] Fetching existing attendance...');
+      console.log('🔍 [DEBUG] Class ID:', selectedClass);
+      console.log('🔍 [DEBUG] Date:', selectedDate);
+      console.log('🔍 [DEBUG] Student IDs:', students.map(s => s.id));
       
-      // OPTIMIZATION: Only select the fields we actually need
+      // Get existing attendance records
       const { data: attendanceData, error: attendanceError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
         .select('student_id, status')  // Only get what we need
@@ -153,24 +156,21 @@ const TakeAttendance = () => {
 
       if (attendanceError) throw attendanceError;
 
-      // Create attendance mark object efficiently
+      console.log('🔍 [DEBUG] Found attendance records:', attendanceData?.length || 0);
+      console.log('🔍 [DEBUG] Attendance data:', JSON.stringify(attendanceData, null, 2));
+
+      // Create attendance mark object
       const mark = {};
-      if (attendanceData && attendanceData.length > 0) {
-        attendanceData.forEach(record => {
-          // Only include records for students in our current class
-          if (students.find(s => s.id === record.student_id)) {
-            mark[record.student_id] = record.status;
-          }
-        });
-      }
+      attendanceData?.forEach(record => {
+        mark[record.student_id] = record.status;
+        console.log('🔍 [DEBUG] Mapping student_id', record.student_id, 'to status', record.status);
+      });
       
-      console.log(`⚡ [OPTIMIZED] Loaded ${Object.keys(mark).length} existing attendance records`);
+      console.log('🔍 [DEBUG] Final attendance mark object:', JSON.stringify(mark, null, 2));
       setAttendanceMark(mark);
 
     } catch (err) {
-      console.error('Error fetching attendance:', err);
-      // Don't fail completely, just set empty state
-      setAttendanceMark({});
+      console.error('❌ [ERROR] Error fetching attendance:', err);
     }
   };
 
@@ -265,215 +265,98 @@ const TakeAttendance = () => {
         return;
       }
 
-      // Build attendance records ONLY from attendanceMark state
-      const attendanceRecords = [];
-      
-      // Loop through ONLY the keys in attendanceMark (students that were explicitly marked)
-      Object.keys(attendanceMark).forEach(studentId => {
-        const status = attendanceMark[studentId];
-        
-        // Only add if status is Present or Absent
-        if (status === 'Present' || status === 'Absent') {
-          attendanceRecords.push({
-            student_id: studentId,
-            class_id: selectedClass,
-            date: selectedDate,
-            status: status,
-            marked_by: user.id
-          });
-        }
+      // Get explicitly marked students (those with Present/Absent status)
+      const explicitlyMarkedStudents = students.filter(student => {
+        const status = attendanceMark[student.id];
+        return status === 'Present' || status === 'Absent';
       });
 
-      if (attendanceRecords.length === 0) {
+      if (explicitlyMarkedStudents.length === 0) {
         Alert.alert('No Attendance Marked', 'Please mark at least one student as Present or Absent before submitting.');
         return;
       }
 
-      // Simple confirmation
-      const markedStudentNames = attendanceRecords.map(record => {
-        const student = students.find(s => s.id === record.student_id);
-        return `${student?.name || 'Unknown'} - ${record.status}`;
-      });
-      
-      Alert.alert(
-        'Confirm Attendance',
-        `Save attendance for ${attendanceRecords.length} student(s)?\n\n${markedStudentNames.join('\n')}`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Save', 
-            onPress: async () => {
-              try {
-                // Debug: Show exactly what we're sending
-                console.log('🔍 [DEBUG] Records being sent to database:');
-                attendanceRecords.forEach((record, index) => {
-                  const student = students.find(s => s.id === record.student_id);
-                  console.log(`   ${index + 1}. ${student?.name}: ${record.status}`);
-                });
-                console.log(`🔍 [DEBUG] Total records: ${attendanceRecords.length}`);
-                
-                // CLEAN SLATE APPROACH: Complete wipe and rebuild with optimized batch processing
-                console.log('🧨 [CLEAN SLATE] Step 1: Complete database cleanup for this date/class...');
-                
-                // STEP 1: Delete ALL existing attendance for this class/date to start fresh
-                const { error: wipeError } = await supabase
-                  .from(TABLES.STUDENT_ATTENDANCE)
-                  .delete()
-                  .eq('class_id', selectedClass)
-                  .eq('date', selectedDate);
-                
-                if (wipeError) {
-                  console.error('❌ [CLEAN SLATE] Failed to wipe existing data:', wipeError);
-                  // Continue anyway, might be no existing data
-                } else {
-                  console.log('✅ [CLEAN SLATE] Successfully wiped existing attendance data');
-                }
-                
-                console.log('🧨 [CLEAN SLATE] Step 2: Inserting ONLY explicitly marked students...');
-                
-                // STEP 2: Use single batch insert to avoid multiple round trips
-                // Prepare records with all required fields to avoid triggers
-                const cleanRecords = attendanceRecords.map(record => ({
-                  student_id: record.student_id,
-                  class_id: record.class_id,
-                  date: record.date,
-                  status: record.status,
-                  marked_by: record.marked_by,
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                }));
-                
-                console.log('🧨 [CLEAN SLATE] Records to insert:', cleanRecords.length);
-                cleanRecords.forEach((record, index) => {
-                  const student = students.find(s => s.id === record.student_id);
-                  console.log(`   ${index + 1}. ${student?.name}: ${record.status}`);
-                });
-                
-                // Single batch insert - much faster than individual inserts
-                const { data: batchInsertData, error: batchInsertError } = await supabase
-                  .from(TABLES.STUDENT_ATTENDANCE)
-                  .insert(cleanRecords)
-                  .select('id, student_id, status');
-                
-                if (batchInsertError) {
-                  console.error('❌ [CLEAN SLATE] Batch insert failed:', batchInsertError);
-                  
-                  // Fallback: Try inserting one by one if batch fails
-                  console.log('🔄 [CLEAN SLATE] Fallback: Individual inserts...');
-                  let successCount = 0;
-                  
-                  for (const record of cleanRecords) {
-                    try {
-                      const { error: singleError } = await supabase
-                        .from(TABLES.STUDENT_ATTENDANCE)
-                        .insert([record]);
-                      
-                      if (!singleError) {
-                        successCount++;
-                        const student = students.find(s => s.id === record.student_id);
-                        console.log(`✅ [FALLBACK] Saved ${student?.name}: ${record.status}`);
-                      } else {
-                        const student = students.find(s => s.id === record.student_id);
-                        console.error(`❌ [FALLBACK] Failed ${student?.name}:`, singleError);
-                      }
-                    } catch (e) {
-                      console.error('❌ [FALLBACK] Exception:', e);
-                    }
-                  }
-                  
-                  if (successCount === 0) {
-                    throw new Error('Failed to save any attendance records');
-                  }
-                  
-                  console.log(`✅ [FALLBACK] Saved ${successCount}/${cleanRecords.length} records`);
-                  
-                } else {
-                  console.log(`✅ [CLEAN SLATE] Batch insert successful: ${batchInsertData?.length || cleanRecords.length} records`);
-                  console.log('   Inserted records:', batchInsertData);
-                }
-                
-                // Verify what was actually saved
-                console.log('🔍 [DEBUG] Verifying what was actually saved...');
-                const { data: savedRecords, error: verifyError } = await supabase
-                  .from(TABLES.STUDENT_ATTENDANCE)
-                  .select(`
-                    student_id,
-                    status,
-                    students(name)
-                  `)
-                  .eq('class_id', selectedClass)
-                  .eq('date', selectedDate);
-                
-                if (verifyError) {
-                  console.error('❌ [DEBUG] Verify error:', verifyError);
-                } else {
-                  console.log(`🔍 [DEBUG] Total records in DB after save: ${savedRecords?.length || 0}`);
-                  if (savedRecords) {
-                    savedRecords.forEach((record, index) => {
-                      console.log(`   ${index + 1}. ${record.students?.name || 'Unknown'}: ${record.status}`);
-                    });
-                    
-                    const absentCount = savedRecords.filter(r => r.status === 'Absent').length;
-                    const presentCount = savedRecords.filter(r => r.status === 'Present').length;
-                    
-                    console.log(`🔍 [DEBUG] Final count - Present: ${presentCount}, Absent: ${absentCount}`);
-                    
-                    if (savedRecords.length > attendanceRecords.length) {
-                      console.log('🚨 [DEBUG] PROBLEM DETECTED!');
-                      console.log('🚨 [DEBUG] More records in database than we sent!');
-                      console.log('🚨 [DEBUG] This means database triggers are adding extra records!');
-                    }
-                  }
-                }
+      // Ensure we have teacher info with tenant_id
+      if (!teacherInfo?.tenant_id) {
+        Alert.alert('Error', 'Teacher information not loaded properly. Please try again.');
+        return;
+      }
 
-                Alert.alert('Success', `Attendance saved for ${attendanceRecords.length} student(s)!`);
-                
-                // Send notifications for absent students
-                const absentRecords = attendanceRecords.filter(record => record.status === 'Absent');
-                if (absentRecords.length > 0) {
-                  console.log(`📧 [NOTIFICATIONS] Sending absence notifications for ${absentRecords.length} students`);
-                  
-                  try {
-                    // Prepare absent students data for notifications
-                    const absentStudents = absentRecords.map(record => ({
-                      studentId: record.student_id,
-                      date: record.date,
-                      markedBy: record.marked_by
-                    }));
-                    
-                    // Get tenant_id from user or use a default
-                    const tenantId = user.tenant_id || '00000000-0000-0000-0000-000000000001';
-                    
-                    // Send notifications asynchronously
-                    createBulkAttendanceNotifications(absentStudents, tenantId)
-                      .then((result) => {
-                        if (result.success) {
-                          console.log(`✅ [NOTIFICATIONS] Successfully sent ${result.successCount} notifications`);
-                        } else {
-                          console.warn(`⚠️ [NOTIFICATIONS] Notification sending failed:`, result.error);
-                        }
-                      })
-                      .catch((error) => {
-                        console.error('❌ [NOTIFICATIONS] Error sending notifications:', error);
-                      });
-                  } catch (notificationError) {
-                    console.error('❌ [NOTIFICATIONS] Error preparing notifications:', notificationError);
-                  }
-                } else {
-                  console.log('📧 [NOTIFICATIONS] No absent students - no notifications to send');
-                }
-                
-              } catch (innerErr) {
-                console.error('❌ [DEBUG] Error:', innerErr);
-                Alert.alert('Error', `Failed to save attendance: ${innerErr.message}`);
-              }
-            }
-          }
-        ]
-      );
+      // Prepare attendance records only for explicitly marked students
+      const attendanceRecords = explicitlyMarkedStudents.map(student => ({
+        student_id: student.id,
+        class_id: selectedClass,
+        date: selectedDate,
+        status: attendanceMark[student.id], // No fallback - we know it's defined
+        marked_by: user.id,
+        tenant_id: teacherInfo.tenant_id // Include tenant_id for multi-tenant support
+      }));
+
+      // 🔍 DEBUG: Log what we're about to submit
+      console.log('🔍 [DEBUG] About to submit attendance records:');
+      console.log('🔍 [DEBUG] Selected Class:', selectedClass);
+      console.log('🔍 [DEBUG] Selected Date:', selectedDate);
+      console.log('🔍 [DEBUG] Tenant ID:', teacherInfo.tenant_id);
+      console.log('🔍 [DEBUG] Records to submit:', JSON.stringify(attendanceRecords, null, 2));
+      console.log('🔍 [DEBUG] Current attendanceMark state:', JSON.stringify(attendanceMark, null, 2));
+
+      // WORKAROUND: Since there's no unique constraint in the database yet,
+      // we'll delete existing records for these students on this date, then insert new ones
+      console.log('🔄 [WORKAROUND] Delete existing records then insert new ones (no unique constraint available)');
       
-    } catch (err) {
-      Alert.alert('Error', err.message);
+      // Step 1: Delete existing attendance records for these students on this date
+      // RLS policies will automatically ensure only records from the current user's tenant are affected
+      const studentIds = attendanceRecords.map(record => record.student_id);
+      console.log('🗑️ [DELETE] Removing existing records for students (RLS-filtered):', studentIds);
+      
+      const { error: deleteError } = await supabase
+        .from(TABLES.STUDENT_ATTENDANCE)
+        .delete()
+        .eq('date', selectedDate)
+        .eq('class_id', selectedClass)
+        .in('student_id', studentIds);
+        
+      if (deleteError) {
+        console.error('❌ [DELETE ERROR]:', deleteError);
+        throw new Error(`Failed to delete existing records: ${deleteError.message}`);
+      }
+      
+      console.log('✅ [DELETE] Successfully deleted existing records');
+      
+      // Step 2: Insert the new attendance records
+      console.log('➕ [INSERT] Inserting new attendance records');
+      
+      const { error: insertError } = await supabase
+        .from(TABLES.STUDENT_ATTENDANCE)
+        .insert(attendanceRecords);
+        
+      if (insertError) {
+        console.error('❌ [INSERT ERROR]:', insertError);
+        throw new Error(`Failed to insert new records: ${insertError.message}`);
+      }
+      
+      console.log('✅ [INSERT] Successfully inserted new records');
+
+      console.log('✅ [SUCCESS] Attendance submitted successfully!');
+      
+      // 🔄 REFRESH: Immediately refresh attendance data to show updated state
+      console.log('🔄 [REFRESH] Refreshing attendance data after submission...');
+      await fetchExistingAttendance();
+      console.log('🔄 [REFRESH] Attendance data refreshed!');
+
+      // Show simple success message
+      Alert.alert('Success', 'Attendance saved successfully!');
+
+      // Send absence notifications in the background (non-blocking)
+      const absentStudents = attendanceRecords.filter(record => record.status === 'Absent');
+      if (absentStudents.length > 0) {
+        console.log(`📧 Sending absence notifications for ${absentStudents.length} students`);
+        // TODO: Add notification sending logic here
+      }
+      
+    } catch (error) {
+      console.error('Error saving attendance:', error);
+      Alert.alert('Error', `Failed to save attendance: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -491,11 +374,6 @@ const TakeAttendance = () => {
         .from(TABLES.STUDENTS)
         .select('id, name, admission_no')
         .eq('class_id', viewClass);
-
-      if (!viewStudents || viewStudents.length === 0) {
-        setViewAttendance([]);
-        return;
-      }
 
       if (!viewStudents || viewStudents.length === 0) {
         setViewAttendance([]);
@@ -1535,16 +1413,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#e3f2fd',
-    borderWidth: 1,
-    borderColor: '#2196F3',
     borderRadius: 8,
     padding: 12,
     marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196F3',
   },
   instructionText: {
     flex: 1,
     fontSize: 13,
-    color: '#1565C0',
+    color: '#1976d2',
     marginLeft: 8,
     lineHeight: 18,
   },

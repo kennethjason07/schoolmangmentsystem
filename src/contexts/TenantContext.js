@@ -99,7 +99,7 @@ export const TenantProvider = ({ children }) => {
       // Get current session to check if user is authenticated
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      if (session && !sessionError) {  
+      if (!sessionError && session?.user) {  
         // Update JWT claims with tenant_id (this would typically be done server-side)
         // For now, we'll use a configuration setting
         try {
@@ -111,10 +111,8 @@ export const TenantProvider = ({ children }) => {
           // If the RPC doesn't exist, that's okay for now
           console.log('set_config RPC not available, using client-side tenant context');
         }
-      } else if (sessionError) {
-        console.log('Session error when setting tenant context:', sessionError.message);
       } else {
-        console.log('No active session found when setting tenant context');
+        console.log('No active session found, skipping RPC call');
       }
     } catch (error) {
       console.error('Error updating Supabase context:', error);
