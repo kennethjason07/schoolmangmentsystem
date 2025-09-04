@@ -384,12 +384,25 @@ const ExamsMarks = () => {
       }
 
       const marksToSave = [];
+      const examMaxMarks = selectedExam?.max_marks || 100;
+      let hasInvalidMarks = false;
+      let invalidMarkDetails = [];
 
       Object.entries(marksForm).forEach(([studentId, subjectMarks]) => {
         Object.entries(subjectMarks).forEach(([subjectId, marksObtained]) => {
-          if (marksObtained && !isNaN(parseFloat(marksObtained))) {
+          if (marksObtained && marksObtained.trim() !== '') {
             const marksValue = parseFloat(marksObtained);
-            const maxMarks = 100;
+            
+            // Validate marks: must be number, between 0 and exam max_marks (inclusive)
+            if (isNaN(marksValue) || marksValue < 0 || marksValue > examMaxMarks) {
+              hasInvalidMarks = true;
+              const student = students.find(s => s.id === studentId);
+              const subject = subjects.find(s => s.id === subjectId);
+              invalidMarkDetails.push(`${student?.name || 'Student'} - ${subject?.name || 'Subject'}: ${marksObtained}`);
+              return;
+            }
+            
+            const maxMarks = examMaxMarks; // Use exam's max_marks
             const percentage = (marksValue / maxMarks) * 100;
             let grade = 'F';
             if (percentage >= 90) grade = 'A+';
@@ -411,6 +424,16 @@ const ExamsMarks = () => {
         });
       });
 
+      // Show validation errors if any
+      if (hasInvalidMarks) {
+        Alert.alert(
+          'Invalid Marks Found', 
+          `Please enter valid marks (0-${examMaxMarks}) for:\n\n${invalidMarkDetails.slice(0, 5).join('\n')}${invalidMarkDetails.length > 5 ? '\n...and more' : ''}`,
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
       if (marksToSave.length > 0) {
         const { error } = await supabase
           .from('marks')
@@ -422,6 +445,8 @@ const ExamsMarks = () => {
         setMarksModalVisible(false);
         setMarksForm({});
         loadAllData();
+      } else {
+        Alert.alert('Info', 'No valid marks to save');
       }
 
     } catch (error) {

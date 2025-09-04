@@ -148,6 +148,22 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
   try {
     console.log('🚀 Creating attendance notification for student:', studentId, 'on:', attendanceDate);
     
+    // Get teacher info to get tenant_id
+    const { data: teacherUser, error: teacherUserError } = await supabase
+      .from(TABLES.USERS)
+      .select('tenant_id')
+      .eq('id', markedBy)
+      .single();
+    
+    if (teacherUserError || !teacherUser) {
+      console.error('Error fetching teacher user data:', teacherUserError);
+      return {
+        success: false,
+        error: 'Could not get teacher tenant information',
+        recipientCount: 0
+      };
+    }
+    
     // Find parent users for this student
     const parentUsers = await findParentUsersForStudent(studentId);
     
@@ -184,7 +200,8 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
         delivery_mode: 'InApp',
         delivery_status: 'Sent',
         sent_by: markedBy,
-        sent_at: new Date().toISOString()
+        sent_at: new Date().toISOString(),
+        tenant_id: teacherUser.tenant_id // Add tenant_id from teacher user
       }])
       .select()
       .single();
@@ -218,7 +235,8 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
       recipient_type: 'Parent',
       delivery_status: 'Sent',
       is_read: false,
-      sent_at: new Date().toISOString()
+      sent_at: new Date().toISOString(),
+      tenant_id: teacherUser.tenant_id // Add tenant_id from teacher user
     }));
     
     console.log(`📝 [NOTIFICATION] Creating ${recipientRecords.length} recipient records`);

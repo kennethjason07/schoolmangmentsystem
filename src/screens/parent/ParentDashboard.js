@@ -11,6 +11,7 @@ import {
   Alert,
   RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
@@ -44,6 +45,21 @@ const ParentDashboard = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [schoolDetails, setSchoolDetails] = useState(null);
+
+  // Academic year helper to align with FeePayment logic and avoid hard-coding
+  const getCurrentAcademicYear = () => {
+    // Prefer student's academic year if present
+    if (selectedStudent?.academic_year) return selectedStudent.academic_year;
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1; // 1-12
+    // Typical academic year in India: starts in April (4)
+    if (month >= 4) {
+      return `${year}-${year + 1}`;
+    } else {
+      return `${year - 1}-${year}`;
+    }
+  };
 
   // Utility function to format date from yyyy-mm-dd to dd-mm-yyyy
   const formatDateToDDMMYYYY = (dateString) => {
@@ -238,6 +254,549 @@ const ParentDashboard = ({ navigation }) => {
     }
   }, [selectedStudent?.id, studentLoading]);
 
+  // Force re-render counter to ensure StatCards update immediately
+  const [updateCounter, setUpdateCounter] = useState(0);
+  
+  // Force StatCard update function
+  const forceStatCardUpdate = () => {
+    console.log('🔄 [FORCE UPDATE] Triggering StatCard re-render, counter:', updateCounter);
+    setUpdateCounter(prev => {
+      const newCounter = prev + 1;
+      console.log('🔄 [FORCE UPDATE] Counter updated to:', newCounter);
+      return newCounter;
+    });
+  };
+
+  // Individual fetch functions for real-time updates
+  const fetchUpcomingExams = React.useCallback(async (classId) => {
+    if (!classId) return;
+    
+    try {
+      console.log('🔄 [REAL-TIME] Fetching updated exams for class:', classId);
+      
+      const today = new Date().toISOString().split('T')[0];
+      const { data: examsData, error: examsError } = await supabase
+        .from(TABLES.EXAMS)
+        .select(`
+          id,
+          name,
+          start_date,
+          end_date,
+          remarks,
+          class_id,
+          academic_year,
+          subjects(
+            id,
+            name
+          )
+        `)
+        .eq('class_id', classId)
+        .gte('start_date', today)
+        .order('start_date', { ascending: true })
+        .limit(5);
+
+      if (!examsError) {
+        console.log('✅ [REAL-TIME] Updated exams:', examsData?.length || 0);
+        setExams(examsData || []);
+        // Force StatCard update immediately
+        forceStatCardUpdate();
+      } else {
+        console.error('❌ [REAL-TIME] Error fetching updated exams:', examsError);
+      }
+    } catch (err) {
+      console.error('❌ [REAL-TIME] Error in fetchUpcomingExams:', err);
+    }
+  }, []);
+  
+  const fetchStudentAttendance = React.useCallback(async (studentId) => {
+    if (!studentId) return;
+    
+    try {
+      console.log('🔄 [REAL-TIME] Fetching updated attendance for student:', studentId);
+      
+      // Multiple strategies to fetch attendance data
+      let allAttendanceData = null;
+      let attendanceError = null;
+      
+      // Try the configured table name first
+      try {
+        const { data, error } = await supabase
+          .from(TABLES.STUDENT_ATTENDANCE)
+          .select(`
+            id,
+            student_id,
+            class_id,
+            date,
+            status,
+            marked_by,
+            created_at
+          `)
+          .eq('student_id', studentId)
+          .order('date', { ascending: false });
+          
+        if (!error) {
+          allAttendanceData = data;
+        } else {
+          attendanceError = error;
+        }
+      } catch (err) {
+        attendanceError = err;
+      }
+      
+      // Fallback to 'student_attendance' directly if TABLES.STUDENT_ATTENDANCE fails
+      if (!allAttendanceData) {
+        try {
+          const { data, error } = await supabase
+            .from('student_attendance')
+            .select(`
+              id,
+              student_id,
+              class_id,
+              date,
+              status,
+              marked_by,
+              created_at
+            `)
+            .eq('student_id', studentId)
+            .order('date', { ascending: false });
+            
+          if (!error) {
+            allAttendanceData = data;
+          } else {
+            attendanceError = error;
+          }
+        } catch (err) {
+          attendanceError = err;
+        }
+      }
+        
+      if (!attendanceError && allAttendanceData) {
+        // Filter to current month records
+        const currentDate = new Date();
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        
+        const currentMonthRecords = (allAttendanceData || []).filter(record => {
+          if (!record.date || typeof record.date !== 'string') return false;
+          
+          try {
+            let recordDate;
+            let recordYear, recordMonth;
+            
+            if (record.date.includes('T')) {
+              recordDate = new Date(record.date);
+              recordYear = recordDate.getFullYear();
+              recordMonth = recordDate.getMonth() + 1;
+            } else if (record.date.includes('-')) {
+              const parts = record.date.split('-');
+              if (parts.length === 3) {
+                if (parts[0].length === 4) {
+                  recordYear = parseInt(parts[0], 10);
+                  recordMonth = parseInt(parts[1], 10);
+                } else if (parts[2].length === 4) {
+                  recordYear = parseInt(parts[2], 10);
+                  recordMonth = parseInt(parts[1], 10);
+                } else {
+                  return false;
+                }
+              } else {
+                return false;
+              }
+            } else {
+              recordDate = new Date(record.date);
+              if (isNaN(recordDate.getTime())) return false;
+              recordYear = recordDate.getFullYear();
+              recordMonth = recordDate.getMonth() + 1;
+            }
+            
+            if (isNaN(recordYear) || isNaN(recordMonth)) return false;
+            
+            return recordYear === year && recordMonth === month;
+          } catch (err) {
+            return false;
+          }
+        });
+        
+        console.log('✅ [REAL-TIME] Updated attendance records:', currentMonthRecords.length);
+        setAttendance(currentMonthRecords);
+        // Force StatCard update immediately
+        forceStatCardUpdate();
+      } else {
+        console.error('❌ [REAL-TIME] Error fetching updated attendance:', attendanceError);
+      }
+    } catch (err) {
+      console.error('❌ [REAL-TIME] Error in fetchStudentAttendance:', err);
+    }
+  }, []);
+  
+  const fetchStudentFees = React.useCallback(async (studentId, classId) => {
+    if (!studentId || !classId) return;
+    
+    try {
+      const currentYear = getCurrentAcademicYear();
+      console.log('🔄 [REAL-TIME] Fetching updated fees for student:', studentId, 'for AY:', currentYear);
+      
+      // Fetch both fee structure and payments in parallel
+      const [feeResult, paymentResult] = await Promise.all([
+        supabase
+          .from('fee_structure')
+          .select(`
+            id,
+            academic_year,
+            class_id,
+            student_id,
+            fee_component,
+            amount,
+            base_amount,
+            discount_applied,
+            due_date,
+            created_at,
+            classes(id, class_name, section, academic_year)
+          `)
+          .or(`class_id.eq.${classId},student_id.eq.${studentId}`)
+          .eq('academic_year', currentYear)
+          .order('due_date', { ascending: true }),
+        
+        supabase
+          .from('student_fees')
+          .select(`
+            id,
+            student_id,
+            academic_year,
+            fee_component,
+            amount_paid,
+            payment_date,
+            payment_mode,
+            receipt_number,
+            remarks,
+            created_at
+          `)
+          .eq('student_id', studentId)
+          .eq('academic_year', currentYear)
+          .order('payment_date', { ascending: false })
+      ]);
+
+      const feeStructureData = feeResult.data;
+      const studentPayments = paymentResult.data;
+      
+      if (!feeResult.error && !paymentResult.error) {
+        // Handle sample data if no real data exists
+        let feesToProcess = feeStructureData || [];
+        if (!feesToProcess || feesToProcess.length === 0) {
+          feesToProcess = [
+            {
+              id: 'sample-fee-1',
+              fee_component: 'Tuition Fee',
+              amount: 15000,
+              due_date: '2024-12-31',
+              academic_year: '2024-2025',
+              class_id: classId,
+              created_at: '2024-08-01T00:00:00.000Z'
+            },
+            {
+              id: 'sample-fee-2',
+              fee_component: 'Library Fee',
+              amount: 2000,
+              due_date: '2024-10-31',
+              academic_year: '2024-2025',
+              class_id: classId,
+              created_at: '2024-08-01T00:00:00.000Z'
+            },
+            {
+              id: 'sample-fee-3',
+              fee_component: 'Transport Fee',
+              amount: 8000,
+              due_date: '2024-09-30',
+              academic_year: '2024-2025',
+              class_id: classId,
+              created_at: '2024-08-01T00:00:00.000Z'
+            }
+          ];
+        }
+        
+        // Transform fee data with enhanced debugging and accuracy
+        const transformedFees = feesToProcess.map(fee => {
+          const feeComponent = fee.fee_component || fee.name || 'General Fee';
+          
+          console.log(`🔄 [REAL-TIME FEE CALC] Processing fee: "${feeComponent}" - Amount: ₹${fee.amount}`);
+          
+          let payments = [];
+          if (studentPayments?.length > 0) {
+            // Enhanced payment matching with detailed logging
+            payments = studentPayments.filter(p => {
+              const paymentComponent = (p.fee_component || '').trim();
+              const feeComponentStr = feeComponent.trim();
+              const yearMatch = p.academic_year === fee.academic_year;
+              
+              const exactMatch = paymentComponent === feeComponentStr;
+              const caseInsensitiveMatch = paymentComponent.toLowerCase() === feeComponentStr.toLowerCase();
+              const containsMatch = paymentComponent.toLowerCase().includes(feeComponentStr.toLowerCase()) || 
+                                  feeComponentStr.toLowerCase().includes(paymentComponent.toLowerCase());
+              
+              const componentMatch = exactMatch || caseInsensitiveMatch || containsMatch;
+              
+              if (componentMatch && yearMatch) {
+                console.log(`  ✅ [REAL-TIME FEE CALC] Found matching payment: ₹${p.amount_paid} for "${feeComponent}"`);
+              }
+              
+              return componentMatch && yearMatch;
+            }) || [];
+            
+            console.log(`  📋 [REAL-TIME FEE CALC] Total payments found for "${feeComponent}": ${payments.length}`);
+          } else {
+            // Use sample payments if no real payments exist
+            const samplePaymentAmount = feeComponent === 'Tuition Fee' ? 5000 : 
+                                       feeComponent === 'Library Fee' ? 2000 : 0;
+            if (samplePaymentAmount > 0) {
+              payments = [{
+                id: `sample-payment-${feeComponent}`,
+                fee_component: feeComponent,
+                amount_paid: samplePaymentAmount,
+                academic_year: fee.academic_year || '2024-2025',
+                payment_date: '2024-08-15',
+                payment_mode: 'Sample',
+                receipt_number: 1000 + Math.floor(Math.random() * 100)
+              }];
+              console.log(`  📝 [REAL-TIME FEE CALC] Using sample payment: ₹${samplePaymentAmount} for "${feeComponent}"`);
+            }
+          }
+          
+          const totalPaidAmount = payments.reduce((sum, payment) => {
+            const amount = Number(payment.amount_paid || 0);
+            console.log(`    💰 [REAL-TIME FEE CALC] Adding payment: ₹${amount}`);
+            return sum + amount;
+          }, 0);
+          
+          const feeAmount = Number(fee.amount || 0);
+          const remainingAmount = Math.max(0, feeAmount - totalPaidAmount);
+
+          let status = 'unpaid';
+          if (totalPaidAmount >= feeAmount - 0.01) {
+            status = 'paid';
+          } else if (totalPaidAmount > 0.01) {
+            status = 'partial';
+          }
+          
+          console.log(`  💸 [REAL-TIME FEE CALC] Final calculation for "${feeComponent}":`);
+          console.log(`    Fee Amount: ₹${feeAmount}`);
+          console.log(`    Total Paid: ₹${totalPaidAmount}`);
+          console.log(`    Remaining: ₹${remainingAmount}`);
+          console.log(`    Status: ${status}`);
+          
+          // Determine category
+          let category = 'general';
+          if (feeComponent) {
+            const component = feeComponent.toLowerCase();
+            if (component.includes('tuition') || component.includes('academic')) {
+              category = 'tuition';
+            } else if (component.includes('book') || component.includes('library')) {
+              category = 'books';
+            } else if (component.includes('transport') || component.includes('bus')) {
+              category = 'transport';
+            }
+          }
+          
+          return {
+            id: fee.id,
+            name: feeComponent,
+            amount: feeAmount,
+            status: status,
+            due_date: fee.due_date,
+            paidAmount: totalPaidAmount,
+            remainingAmount: remainingAmount,
+            academic_year: fee.academic_year,
+            category: category,
+            payments: payments
+          };
+        });
+        
+        console.log('✅ [REAL-TIME] Updated fees:', transformedFees.length);
+        console.log('💰 [REAL-TIME FEE UPDATE] Setting fees state with data:', transformedFees.map(f => ({ name: f.name, remaining: f.remainingAmount, status: f.status })));
+        setFees(transformedFees);
+        // Force StatCard update immediately
+        console.log('⚡ [REAL-TIME] About to force StatCard update after setting fees');
+        forceStatCardUpdate();
+        // Additional forced re-render after a short delay to ensure state propagation
+        setTimeout(() => {
+          console.log('🔄 [REAL-TIME] Secondary StatCard update (delayed)');
+          forceStatCardUpdate();
+        }, 50);
+      } else {
+        console.error('❌ [REAL-TIME] Error fetching updated fees:', feeResult.error || paymentResult.error);
+      }
+    } catch (err) {
+      console.error('❌ [REAL-TIME] Error in fetchStudentFees:', err);
+    }
+  }, []);
+
+  // Set up real-time subscriptions for data changes
+  useEffect(() => {
+    let examSubscription = null;
+    let attendanceSubscription = null;
+    let feeSubscription = null;
+    let feeStructureSubscription = null;
+    
+    const setupRealTimeSubscriptions = async () => {
+      if (!selectedStudent?.class_id || !selectedStudent?.id) return;
+      
+      console.log('🔄 Setting up real-time subscriptions for:', {
+        studentId: selectedStudent.id,
+        classId: selectedStudent.class_id,
+        studentName: selectedStudent.name
+      });
+      
+      // Subscribe to exams changes
+      try {
+        console.log('🔔 Subscribing to exam changes for class:', selectedStudent.class_id);
+        examSubscription = supabase
+          .channel(`exam-changes-${selectedStudent.class_id}`)
+          .on('postgres_changes', {
+            event: '*', 
+            schema: 'public',
+            table: TABLES.EXAMS,
+            filter: `class_id=eq.${selectedStudent.class_id}`
+          }, (payload) => {
+            console.log('📣 Real-time exam update received:', payload);
+            fetchUpcomingExams(selectedStudent.class_id);
+          })
+          .subscribe((status) => {
+            console.log('📡 Exam subscription status:', status);
+          });
+      } catch (err) {
+        console.error('❌ Error setting up exam subscription:', err);
+      }
+      
+      // Subscribe to attendance changes
+      try {
+        console.log('🔔 Subscribing to attendance changes for student:', selectedStudent.id);
+        attendanceSubscription = supabase
+          .channel(`attendance-changes-${selectedStudent.id}`)
+          .on('postgres_changes', {
+            event: '*', 
+            schema: 'public',
+            table: TABLES.STUDENT_ATTENDANCE,
+            filter: `student_id=eq.${selectedStudent.id}`
+          }, (payload) => {
+            console.log('📣 Real-time attendance update received:', payload);
+            fetchStudentAttendance(selectedStudent.id);
+          })
+          .subscribe((status) => {
+            console.log('📡 Attendance subscription status:', status);
+          });
+      } catch (err) {
+        console.error('❌ Error setting up attendance subscription:', err);
+      }
+      
+      // Subscribe to fee payment changes - CRITICAL for immediate StatCard updates
+      try {
+        console.log('🔔 [FEE PAYMENT] Subscribing to fee payment changes for student:', selectedStudent.id);
+        feeSubscription = supabase
+          .channel(`fee-payment-changes-${selectedStudent.id}`)
+          .on('postgres_changes', {
+            event: '*', 
+            schema: 'public',
+            table: 'student_fees',
+            filter: `student_id=eq.${selectedStudent.id}`
+          }, (payload) => {
+            console.log('📣 [FEE PAYMENT] Real-time fee payment update received:', {
+              event: payload.eventType,
+              table: payload.table,
+              new: payload.new,
+              old: payload.old
+            });
+            // Immediate fetch to update StatCard optimistically
+            console.log('⚡ [FEE PAYMENT] Immediate fetch to refresh StatCard...');
+            fetchStudentFees(selectedStudent.id, selectedStudent.class_id);
+            // Follow-up fetch to ensure consistency after DB commit propagation
+            setTimeout(() => {
+              console.log('🔁 [FEE PAYMENT] Consistency fetch (200ms later)...');
+              fetchStudentFees(selectedStudent.id, selectedStudent.class_id);
+            }, 200);
+          })
+          .subscribe((status) => {
+            console.log('📡 [FEE PAYMENT] Fee payment subscription status:', status);
+          });
+      } catch (err) {
+        console.error('❌ Error setting up fee payment subscription:', err);
+      }
+      
+      // Subscribe to fee structure changes
+      try {
+        console.log('🔔 [FEE STRUCTURE] Subscribing to fee structure changes for class:', selectedStudent.class_id);
+        feeStructureSubscription = supabase
+          .channel(`fee-structure-changes-${selectedStudent.class_id}`)
+          .on('postgres_changes', {
+            event: '*', 
+            schema: 'public',
+            table: 'fee_structure',
+            filter: `class_id=eq.${selectedStudent.class_id}`
+          }, (payload) => {
+            console.log('📣 [FEE STRUCTURE] Real-time fee structure update received:', payload);
+            // Immediate fee data refresh
+            setTimeout(() => {
+              console.log('🔄 [FEE STRUCTURE] Triggering immediate fee data refresh...');
+              fetchStudentFees(selectedStudent.id, selectedStudent.class_id);
+            }, 100);
+          })
+          .subscribe((status) => {
+            console.log('📡 [FEE STRUCTURE] Fee structure subscription status:', status);
+          });
+      } catch (err) {
+        console.error('❌ Error setting up fee structure subscription:', err);
+      }
+
+      // Also subscribe to student-specific fee structure changes
+      try {
+        console.log('🔔 [STUDENT FEE STRUCTURE] Subscribing to student-specific fee structure changes for student:', selectedStudent.id);
+        const studentFeeStructureSubscription = supabase
+          .channel(`student-fee-structure-changes-${selectedStudent.id}`)
+          .on('postgres_changes', {
+            event: '*', 
+            schema: 'public',
+            table: 'fee_structure',
+            filter: `student_id=eq.${selectedStudent.id}`
+          }, (payload) => {
+            console.log('📣 [STUDENT FEE STRUCTURE] Real-time student fee structure update received:', payload);
+            // Immediate fee data refresh
+            setTimeout(() => {
+              console.log('🔄 [STUDENT FEE STRUCTURE] Triggering immediate fee data refresh...');
+              fetchStudentFees(selectedStudent.id, selectedStudent.class_id);
+            }, 100);
+          })
+          .subscribe((status) => {
+            console.log('📡 [STUDENT FEE STRUCTURE] Student fee structure subscription status:', status);
+          });
+      } catch (err) {
+        console.error('❌ Error setting up student fee structure subscription:', err);
+      }
+    };
+    
+    if (selectedStudent && !studentLoading) {
+      setupRealTimeSubscriptions();
+    }
+    
+    // Cleanup subscriptions when component unmounts or student changes
+    return () => {
+      console.log('🔄 Cleaning up real-time subscriptions for:', selectedStudent?.name);
+      if (examSubscription) {
+        console.log('🧹 Removing exam subscription');
+        supabase.removeChannel(examSubscription);
+      }
+      if (attendanceSubscription) {
+        console.log('🧹 Removing attendance subscription');
+        supabase.removeChannel(attendanceSubscription);
+      }
+      if (feeSubscription) {
+        console.log('🧹 Removing fee payment subscription');
+        supabase.removeChannel(feeSubscription);
+      }
+      if (feeStructureSubscription) {
+        console.log('🧹 Removing fee structure subscription');
+        supabase.removeChannel(feeStructureSubscription);
+      }
+    };
+  }, [selectedStudent?.id, selectedStudent?.class_id, studentLoading, fetchUpcomingExams, fetchStudentAttendance, fetchStudentFees]);
+
   // Function to fetch dashboard data for a specific student
   const fetchDashboardDataForStudent = async (student) => {
     if (!student) return;
@@ -259,12 +818,19 @@ const ParentDashboard = ({ navigation }) => {
       // Get notifications for parent (independent of student)
       await refreshNotifications();
       
-      // Get upcoming exams for student's class
-      try {
-        console.log('🔍 Parent Dashboard - Fetching upcoming exams for student class ID:', student.class_id);
-        
-        const today = new Date().toISOString().split('T')[0];
-        console.log('🔍 Parent Dashboard - Today date for exam filter:', today);
+        // Get upcoming exams for student's class
+        try {
+          console.log('🔍 Parent Dashboard - Fetching upcoming exams for student class ID:', student.class_id);
+          
+          const today = new Date().toISOString().split('T')[0];
+          console.log('🔍 Parent Dashboard - Today date for exam filter:', today);
+          console.log('🔍 Parent Dashboard - Current date details:', {
+            fullDate: new Date(),
+            isoString: new Date().toISOString(),
+            splitResult: today,
+            expectedExamDate: '2025-09-08',
+            shouldMatch: today <= '2025-09-08'
+          });
         
         const { data: examsData, error: examsError } = await supabase
           .from(TABLES.EXAMS)
@@ -595,38 +1161,64 @@ const ParentDashboard = ({ navigation }) => {
         console.log('Student ID:', student.id);
         console.log('Class ID:', student.class_id);
         
-        // Get fee structure for the student's class (same approach as FeePayment)
-        const { data: feeStructureData, error: feeStructureError } = await supabase
-          .from('fee_structure')
-          .select(`
-            *,
-            classes(id, class_name, section, academic_year)
-          `)
-          .or(`class_id.eq.${student.class_id},student_id.eq.${student.id}`)
-          .order('due_date', { ascending: true });
+          // Fetch both fee structure and payments in parallel for better performance (matching FeePayment)
+          const [feeResult, paymentResult] = await Promise.all([
+            // Get fee structure for class and individual student fees
+            supabase
+              .from('fee_structure')
+              .select(`
+                id,
+                academic_year,
+                class_id,
+                student_id,
+                fee_component,
+                amount,
+                base_amount,
+                discount_applied,
+                due_date,
+                created_at,
+                classes(id, class_name, section, academic_year)
+              `)
+              .or(`class_id.eq.${student.class_id},student_id.eq.${student.id}`)
+              .eq('academic_year', '2024-2025')
+              .order('due_date', { ascending: true }),
+            
+            // Get all payments for this student
+            supabase
+              .from('student_fees')
+              .select(`
+                id,
+                student_id,
+                academic_year,
+                fee_component,
+                amount_paid,
+                payment_date,
+                payment_mode,
+                receipt_number,
+                remarks,
+                created_at
+              `)
+              .eq('student_id', student.id)
+              .eq('academic_year', '2024-2025')
+              .order('payment_date', { ascending: false })
+          ]);
 
-        if (feeStructureError) {
-          console.log('Fee structure error:', feeStructureError);
-        }
-        
-        console.log('Fee structure records found:', feeStructureData?.length || 0);
-        
-        // Get payment history from student_fees table
-        const { data: studentPayments, error: paymentsError } = await supabase
-          .from('student_fees')
-          .select(`
-            *,
-            students(name, admission_no),
-            fee_structure(*)
-          `)
-          .eq('student_id', student.id)
-          .order('payment_date', { ascending: false });
+          const feeStructureData = feeResult.data;
+          const feeStructureError = feeResult.error;
+          const studentPayments = paymentResult.data;
+          const paymentsError = paymentResult.error;
 
-        if (paymentsError) {
-          console.log('Student payments error:', paymentsError);
-        }
-        
-        console.log('Student payment records found:', studentPayments?.length || 0);
+          if (feeStructureError) {
+            console.log('ParentDashboard - Fee structure error:', feeStructureError);
+          } else {
+            console.log('ParentDashboard - Fee structure records found:', feeStructureData?.length || 0);
+          }
+          
+          if (paymentsError) {
+            console.log('ParentDashboard - Student payments error:', paymentsError);
+          } else {
+            console.log('ParentDashboard - Student payment records found:', studentPayments?.length || 0);
+          }
         
         // If no fee structure found, use sample data for development (same as FeePayment)
         let feesToProcess = feeStructureData || [];
@@ -663,18 +1255,40 @@ const ParentDashboard = ({ navigation }) => {
           ];
         }
         
-        // Transform fee structure data (same logic as FeePayment)
+        // Transform fee structure data with improved matching logic (enhanced from FeePayment)
         const transformedFees = feesToProcess.map(fee => {
           const feeComponent = fee.fee_component || fee.name || 'General Fee';
           
-          // Find payments for this fee component - check both real and sample payments
+          // Find payments for this fee component with improved matching logic
           let payments = [];
           if (studentPayments?.length > 0) {
-            // Use real payments from database
-            payments = studentPayments.filter(p =>
-              p.fee_component === feeComponent &&
-              p.academic_year === fee.academic_year
-            ) || [];
+            // Use real payments from database with flexible matching
+            payments = studentPayments.filter(p => {
+              // Try exact match first, then fallback to case-insensitive match
+              const paymentComponent = (p.fee_component || '').trim();
+              const feeComponentStr = feeComponent.trim();
+              const yearMatch = p.academic_year === fee.academic_year;
+              
+              // Exact match
+              const exactMatch = paymentComponent === feeComponentStr;
+              // Case-insensitive match
+              const caseInsensitiveMatch = paymentComponent.toLowerCase() === feeComponentStr.toLowerCase();
+              // Contains match for partial names
+              const containsMatch = paymentComponent.toLowerCase().includes(feeComponentStr.toLowerCase()) || 
+                                  feeComponentStr.toLowerCase().includes(paymentComponent.toLowerCase());
+              
+              const componentMatch = exactMatch || caseInsensitiveMatch || containsMatch;
+              
+              return componentMatch && yearMatch;
+            }) || [];
+            
+            // Log payment summary for this component
+            if (payments.length > 0) {
+              console.log(`ParentDashboard - Found ${payments.length} payments for "${feeComponent}":`);
+              payments.forEach(p => {
+                console.log(`  - Payment ID: ${p.id}, Amount: ${p.amount_paid}, Date: ${p.payment_date}`);
+              });
+            }
           } else {
             // Use sample payments if no real payments exist (same as FeePayment)
             const samplePaymentAmount = feeComponent === 'Tuition Fee' ? 5000 : 
@@ -684,20 +1298,50 @@ const ParentDashboard = ({ navigation }) => {
                 id: `sample-payment-${feeComponent}`,
                 fee_component: feeComponent,
                 amount_paid: samplePaymentAmount,
-                academic_year: fee.academic_year
+                academic_year: fee.academic_year || '2024-2025',
+                payment_date: '2024-08-15',
+                payment_mode: 'Sample',
+                receipt_number: 1000 + Math.floor(Math.random() * 100)
               }];
             }
           }
 
-          const totalPaidAmount = payments.reduce((sum, payment) => sum + Number(payment.amount_paid || 0), 0);
+          // Calculate totals with improved precision
+          const totalPaidAmount = payments.reduce((sum, payment) => {
+            const paymentAmount = Number(payment.amount_paid || 0);
+            return sum + paymentAmount;
+          }, 0);
+          
           const feeAmount = Number(fee.amount || 0);
-          const remainingAmount = feeAmount - totalPaidAmount;
+          const remainingAmount = Math.max(0, feeAmount - totalPaidAmount);
 
+          // Improved status calculation with tolerance for rounding errors
           let status = 'unpaid';
-          if (totalPaidAmount >= feeAmount) {
+          if (totalPaidAmount >= feeAmount - 0.01) { // Allow 1 paisa tolerance
             status = 'paid';
-          } else if (totalPaidAmount > 0) {
+          } else if (totalPaidAmount > 0.01) { // More than 1 paisa paid
             status = 'partial';
+          }
+          
+          // Determine category based on fee component with improved categorization
+          let category = 'general';
+          if (feeComponent) {
+            const component = feeComponent.toLowerCase();
+            if (component.includes('tuition') || component.includes('academic') || component.includes('admission')) {
+              category = 'tuition';
+            } else if (component.includes('book') || component.includes('library') || component.includes('uniform')) {
+              category = 'books';
+            } else if (component.includes('transport') || component.includes('bus') || component.includes('vehicle')) {
+              category = 'transport';
+            } else if (component.includes('exam') || component.includes('test') || component.includes('assessment')) {
+              category = 'examination';
+            } else if (component.includes('activity') || component.includes('sport') || component.includes('games') || component.includes('co-curricular')) {
+              category = 'activities';
+            } else if (component.includes('facility') || component.includes('lab') || component.includes('computer') || component.includes('maintenance')) {
+              category = 'facilities';
+            } else if (component.includes('development') || component.includes('infrastructure') || component.includes('building')) {
+              category = 'facilities';
+            }
           }
 
           return {
@@ -708,7 +1352,16 @@ const ParentDashboard = ({ navigation }) => {
             due_date: fee.due_date,
             paidAmount: totalPaidAmount,
             remainingAmount: remainingAmount,
-            academic_year: fee.academic_year
+            academic_year: fee.academic_year,
+            category: category,
+            description: `${feeComponent} for ${fee.academic_year || '2024-25'}`,
+            isClassFee: fee.class_id ? true : false,
+            isIndividualFee: fee.student_id ? true : false,
+            payments: payments,
+            // Additional fields for better fee tracking
+            baseAmount: fee.base_amount || feeAmount,
+            discountApplied: fee.discount_applied || 0,
+            createdAt: fee.created_at
           };
         });
         
@@ -1356,17 +2009,84 @@ const ParentDashboard = ({ navigation }) => {
           setNotifications([]);
         }
 
-        // Get upcoming exams for student's class
+        // Get upcoming exams for student's class (consistent with fetchDashboardDataForStudent)
         try {
+          console.log('🔍 Parent Dashboard (Main) - Fetching upcoming exams for student class ID:', studentDetails.class_id);
+          
+          const today = new Date().toISOString().split('T')[0];
+          console.log('🔍 Parent Dashboard (Main) - Today date for exam filter:', today);
+          console.log('🔍 Parent Dashboard (Main) - Current date details:', {
+            fullDate: new Date(),
+            isoString: new Date().toISOString(),
+            splitResult: today,
+            expectedExamDate: '2025-09-08',
+            shouldMatch: today <= '2025-09-08',
+            studentClassId: studentDetails.class_id
+          });
+          
+          // First, let's see ALL exams for this class without date filtering
+          console.log('🕵️ Parent Dashboard (Main) - DEBUG: Fetching ALL exams for class (no date filter)');
+          const { data: allClassExams, error: allExamsError } = await supabase
+            .from(TABLES.EXAMS)
+            .select(`
+              id,
+              name,
+              start_date,
+              end_date,
+              remarks,
+              class_id,
+              academic_year,
+              subjects(
+                id,
+                name
+              )
+            `)
+            .eq('class_id', studentDetails.class_id)
+            .order('start_date', { ascending: true });
+            
+          if (!allExamsError && allClassExams) {
+            console.log('🕵️ Parent Dashboard (Main) - ALL CLASS EXAMS FOUND:', allClassExams.length);
+            allClassExams.forEach((exam, index) => {
+              const examDate = exam.start_date;
+              const isUpcoming = examDate >= today;
+              console.log(`   ${index + 1}. "${exam.name}" - Date: ${examDate}, Upcoming: ${isUpcoming}, Subject: ${exam.subjects?.name || 'No subject'}`);
+            });
+          } else {
+            console.log('🕵️ Parent Dashboard (Main) - Error fetching all exams:', allExamsError);
+          }
+          
           const { data: examsData, error: examsError } = await supabase
             .from(TABLES.EXAMS)
-            .select('*')
+            .select(`
+              id,
+              name,
+              start_date,
+              end_date,
+              remarks,
+              class_id,
+              academic_year,
+              subjects(
+                id,
+                name
+              )
+            `)
             .eq('class_id', studentDetails.class_id)
+            .gte('start_date', today)
             .order('start_date', { ascending: true })
             .limit(5);
 
+          console.log('📊 Parent Dashboard (Main) - Exams query result:', { examsData, examsError });
+          console.log('📊 Parent Dashboard (Main) - Exams found:', examsData?.length || 0);
+          
+          if (examsData && examsData.length > 0) {
+            console.log('📋 Parent Dashboard (Main) - Exam details:');
+            examsData.forEach((exam, index) => {
+              console.log(`   ${index + 1}. "${exam.name}" - Date: ${exam.start_date}, Subject: ${exam.subjects?.name || 'No subject'}`);
+            });
+          }
+
           if (examsError && examsError.code !== '42P01') {
-            console.log('Exams error:', examsError);
+            console.log('❌ Parent Dashboard (Main) - Exams error:', examsError);
           }
           setExams(examsData || []);
         } catch (err) {
@@ -1679,198 +2399,281 @@ const ParentDashboard = ({ navigation }) => {
   console.log('Unread message count from hook:', unreadMessageCount);
   console.log('============================================');
 
-  // Calculate attendance percentage - handle Sunday exclusion and case sensitivity
-  // Filter out any Sunday records as they shouldn't count in attendance
-  const validAttendanceRecords = attendance.filter(record => {
-    if (!record.date) return false;
-    try {
-      const recordDate = new Date(record.date);
-      const dayOfWeek = recordDate.getDay(); // 0 = Sunday
-      return dayOfWeek !== 0; // Exclude Sundays from attendance calculation
-    } catch (err) {
-      return true; // Keep records with invalid dates for safety
+  // Calculate attendance percentage with useMemo for better performance and updates
+  const attendanceStats = React.useMemo(() => {
+    console.log('🔄 STATCARD UPDATE - Recalculating attendance stats with data:', {
+      attendanceLength: attendance.length,
+      attendanceFirst3: attendance.slice(0, 3).map(a => ({ date: a.date, status: a.status }))
+    });
+    
+    // Filter out any Sunday records as they shouldn't count in attendance
+    const validAttendanceRecords = attendance.filter(record => {
+      if (!record.date) return false;
+      try {
+        const recordDate = new Date(record.date);
+        const dayOfWeek = recordDate.getDay(); // 0 = Sunday
+        return dayOfWeek !== 0; // Exclude Sundays from attendance calculation
+      } catch (err) {
+        return true; // Keep records with invalid dates for safety
+      }
+    });
+    
+    const totalRecords = validAttendanceRecords.length;
+    // Handle case sensitivity (status might be 'Present', 'present', etc.)
+    const presentOnlyCount = validAttendanceRecords.filter(a => {
+      const status = a.status ? a.status.toLowerCase() : '';
+      return status === 'present';
+    }).length;
+    const absentCount = validAttendanceRecords.filter(item => {
+      const status = item.status ? item.status.toLowerCase() : '';
+      return status === 'absent';
+    }).length;
+    const attendancePercentage = totalRecords > 0 ? Math.round((presentOnlyCount / totalRecords) * 100) : 0;
+    
+    console.log('✅ STATCARD UPDATE - Attendance calculation complete:', {
+      totalRecords,
+      presentOnlyCount,
+      absentCount,
+      attendancePercentage
+    });
+    
+    return {
+      totalRecords,
+      presentOnlyCount,
+      absentCount,
+      attendancePercentage,
+      validAttendanceRecords
+    };
+  }, [attendance]);
+
+  // Calculate fee stats with useMemo - EXACTLY matching fee distribution summary calculation
+  const feeStats = React.useMemo(() => {
+    console.log('🔄 STATCARD UPDATE - Recalculating fee stats with data:', {
+      feesLength: fees.length,
+      updateCounter: updateCounter,
+      feesSample: fees.slice(0, 3).map(f => ({ name: f.name, status: f.status, amount: f.amount, remainingAmount: f.remainingAmount }))
+    });
+    
+    if (fees.length === 0) {
+      console.log('✅ STATCARD UPDATE - No fees found');
+      return {
+        status: '₹0',
+        subtitle: '',
+        color: '#4CAF50',
+        unpaidCount: 0,
+        outstandingAmount: 0,
+        formattedOutstanding: '₹0'
+      };
     }
-  });
-  
-  const totalRecords = validAttendanceRecords.length;
-  // Handle case sensitivity (status might be 'Present', 'present', etc.)
-  const presentOnlyCount = validAttendanceRecords.filter(a => {
-    const status = a.status ? a.status.toLowerCase() : '';
-    return status === 'present';
-  }).length;
-  const absentCount = validAttendanceRecords.filter(item => {
-    const status = item.status ? item.status.toLowerCase() : '';
-    return status === 'absent';
-  }).length;
-  const attendancePercentage = totalRecords > 0 ? Math.round((presentOnlyCount / totalRecords) * 100) : 0;
 
-  // Calculate attendance data for pie chart with safe values
-  const safeAttendanceData = [
-    {
-      name: 'Present',
-      population: Number.isFinite(presentOnlyCount) ? presentOnlyCount : 0,
-      color: '#4CAF50',
-      legendFontColor: '#333',
-      legendFontSize: 14
-    },
-    {
-      name: 'Absent',
-      population: Number.isFinite(absentCount) ? absentCount : 0,
-      color: '#F44336',
-      legendFontColor: '#333',
-      legendFontSize: 14
-    },
-  ];
+    // EXACT SAME calculation as fee distribution summary "Outstanding" card
+    const totalOutstanding = fees.reduce((sum, fee) => sum + (fee.remainingAmount || 0), 0);
+    const formattedOutstanding = `₹${totalOutstanding.toLocaleString()}`;
+    
+    // Count fees by status (for potential subtitle use)
+    const paidCount = fees.filter(f => f.status === 'paid').length;
+    const partialCount = fees.filter(f => f.status === 'partial').length;
+    const unpaidCount = fees.filter(f => f.status === 'unpaid').length;
 
-  // Only show chart if we have valid data
-  const attendancePieData = safeAttendanceData.filter(item => item.population > 0).length > 0
-    ? safeAttendanceData
-    : [{ name: 'No Data', population: 1, color: '#E0E0E0', legendFontColor: '#999', legendFontSize: 14 }];
+    // Use same color logic as fee distribution summary
+    const color = totalOutstanding > 0 ? '#FF5722' : '#4CAF50';
+    
+    console.log('✅ STATCARD UPDATE - Fee calculation complete (matching distribution summary):', {
+      totalOutstanding,
+      formattedOutstanding,
+      color,
+      unpaidCount,
+      partialCount,
+      paidCount
+    });
+    
+    return {
+      status: formattedOutstanding,
+      subtitle: '',
+      color,
+      unpaidCount,
+      partialCount,
+      paidCount,
+      outstandingAmount: totalOutstanding,
+      formattedOutstanding
+    };
+  }, [fees, updateCounter]); // Add updateCounter to dependencies
 
-  // Get fee status (moved before debug logging) - Fixed to check correct fee statuses
-  const getFeeStatus = () => {
-    if (fees.length === 0) return 'No fees';
+  // Calculate marks stats with useMemo for better performance and updates
+  const marksStats = React.useMemo(() => {
+    console.log('🔄 STATCARD UPDATE - Recalculating marks stats with data:', {
+      marksLength: marks.length,
+      marksSample: marks.slice(0, 3).map(m => ({ subject: m.subjects?.name, obtained: m.marks_obtained, max: m.max_marks }))
+    });
+    
+    if (marks.length === 0) {
+      console.log('✅ STATCARD UPDATE - No marks found');
+      return {
+        average: 'No marks',
+        subtitle: 'No exams taken',
+        color: '#2196F3'
+      };
+    }
 
-    // Check for unpaid and partial fees (matching FeePayment component logic)
-    const unpaidFees = fees.filter(fee => 
-      fee.status === 'pending' || fee.status === 'Pending' || 
-      fee.status === 'unpaid' || fee.status === 'partial'
+    // Filter out marks with invalid data
+    const validMarks = marks.filter(mark => 
+      mark.marks_obtained !== null && 
+      mark.marks_obtained !== undefined && 
+      mark.max_marks !== null && 
+      mark.max_marks !== undefined &&
+      mark.max_marks > 0
     );
+
+    if (validMarks.length === 0) {
+      console.log('✅ STATCARD UPDATE - No valid marks found');
+      return {
+        average: 'No marks',
+        subtitle: 'No valid marks',
+        color: '#2196F3'
+      };
+    }
+
+    // Calculate percentage for each subject and then average them
+    const subjectPercentages = validMarks.map(mark => {
+      const percentage = (parseFloat(mark.marks_obtained) / parseFloat(mark.max_marks)) * 100;
+      return isNaN(percentage) ? 0 : percentage;
+    });
+
+    const averagePercentage = subjectPercentages.reduce((sum, percentage) => sum + percentage, 0) / subjectPercentages.length;
+    const average = `${Math.round(averagePercentage)}%`;
     
-    if (unpaidFees.length === 0) return 'All paid';
-
-    // Use remainingAmount instead of full amount to show actual outstanding balance
-    const totalPending = unpaidFees.reduce((sum, fee) => sum + (fee.remainingAmount || fee.amount || 0), 0);
-    return totalPending > 0 ? `₹${totalPending.toLocaleString()}` : 'All paid';
-  };
-
-  // Get fee subtitle (moved before debug logging) - Fixed to check correct fee statuses
-  const getFeeSubtitle = () => {
-    if (fees.length === 0) return 'No fees due';
-
-    // Check for unpaid and partial fees (matching FeePayment component logic)
-    const unpaidFees = fees.filter(fee => 
-      fee.status === 'pending' || fee.status === 'Pending' || 
-      fee.status === 'unpaid' || fee.status === 'partial'
-    );
-    
-    if (unpaidFees.length === 0) return 'All fees paid';
-    
-    // Check for actual amount due using remainingAmount
-    const totalPending = unpaidFees.reduce((sum, fee) => sum + (fee.remainingAmount || fee.amount || 0), 0);
-    if (totalPending <= 0) return 'No amount due';
-
-    const nextDue = unpaidFees.sort((a, b) => new Date(a.due_date) - new Date(b.due_date))[0];
-    if (!nextDue || !nextDue.due_date) return 'Payment required';
-    
-    const daysUntilDue = Math.ceil((new Date(nextDue.due_date) - new Date()) / (1000 * 60 * 60 * 24));
-
-    if (daysUntilDue < 0) return 'Overdue';
-    if (daysUntilDue === 0) return 'Due today';
-    return `Due in ${daysUntilDue} days`;
-  };
-
-  console.log('=== PARENT DASHBOARD PERCENTAGE CALCULATION ===');
-  console.log('Raw attendance records:', attendance.length);
-  console.log('Valid attendance records (excluding Sundays):', totalRecords);
-  console.log('Present records:', presentOnlyCount);
-  console.log('Absent records:', absentCount);
-  console.log('Calculated percentage:', attendancePercentage);
-  console.log('===============================================');
-  
-  // Debug fee data - Updated to check all relevant statuses
-  console.log('=== PARENT DASHBOARD FEE DEBUG ===');
-  console.log('Total fees:', fees.length);
-  console.log('Fee data:', fees.map(f => ({ name: f.name, amount: f.amount, status: f.status, due_date: f.due_date, paidAmount: f.paidAmount, remainingAmount: f.remainingAmount })));
-  
-  // Check for all unpaid/partial fees
-  const unpaidFeesDebug = fees.filter(fee => 
-    fee.status === 'pending' || fee.status === 'Pending' || 
-    fee.status === 'unpaid' || fee.status === 'partial'
-  );
-  console.log('Unpaid/partial fees:', unpaidFeesDebug.length);
-  console.log('Unpaid/partial fee details:', unpaidFeesDebug.map(f => ({ name: f.name, amount: f.amount, status: f.status, remainingAmount: f.remainingAmount })));
-  
-  const totalUnpaidDebug = unpaidFeesDebug.reduce((sum, fee) => sum + (fee.remainingAmount || fee.amount || 0), 0);
-  console.log('Total unpaid amount (using remainingAmount):', totalUnpaidDebug);
-  
-  const totalPendingDebug = unpaidFeesDebug.reduce((sum, fee) => sum + (fee.amount || 0), 0);
-  console.log('Total pending amount (using full amount):', totalPendingDebug);
-  
-  console.log('Fee status will show:', getFeeStatus());
-  console.log('Fee subtitle will show:', getFeeSubtitle());
-  console.log('================================');
-
-  // Get average marks
-  const getAverageMarks = () => {
-    if (marks.length === 0) return 'No marks';
-
-    const totalMarks = marks.reduce((sum, mark) => sum + (mark.marks_obtained || 0), 0);
-    const totalMaxMarks = marks.reduce((sum, mark) => sum + (mark.max_marks || 0), 0);
-
-    if (totalMaxMarks === 0) return 'No marks';
-
-    const percentage = Math.round((totalMarks / totalMaxMarks) * 100);
-    return `${percentage}%`;
-  };
-
-  // Get marks subtitle
-  const getMarksSubtitle = () => {
-    if (marks.length === 0) return 'No exams taken';
-
-    const recentMarks = marks.slice(0, 3);
+    // Calculate subtitle based on recent performance
+    const recentMarks = validMarks.slice(0, 3);
     const avgRecent = recentMarks.reduce((sum, mark) => {
       const percentage = (mark.marks_obtained / mark.max_marks) * 100;
       return sum + percentage;
     }, 0) / recentMarks.length;
 
-    if (avgRecent >= 90) return 'Excellent performance';
-    if (avgRecent >= 75) return 'Good performance';
-    if (avgRecent >= 60) return 'Average performance';
-    return 'Needs improvement';
-  };
+    let subtitle = 'No exams taken';
+    if (avgRecent >= 90) subtitle = 'Excellent performance';
+    else if (avgRecent >= 75) subtitle = 'Good performance';
+    else if (avgRecent >= 60) subtitle = 'Average performance';
+    else subtitle = 'Needs improvement';
+    
+    console.log('✅ STATCARD UPDATE - Marks calculation complete:', {
+      validMarksCount: validMarks.length,
+      averagePercentage,
+      average,
+      subtitle
+    });
+    
+    return {
+      average,
+      subtitle,
+      color: '#2196F3'
+    };
+  }, [marks]);
+
+  // Calculate exam stats with useMemo
+  const examStats = React.useMemo(() => {
+    console.log('🔄 STATCARD UPDATE - Recalculating exam stats with data:', {
+      examsLength: exams.length,
+      examsSample: exams.slice(0, 2).map(e => ({ name: e.name, date: e.start_date }))
+    });
+    
+    const count = String(exams.length);
+    const subtitle = exams.length > 0 ? `Next: ${exams[0]?.subjects?.name || exams[0]?.name || 'TBA'}` : 'No upcoming exams';
+    
+    console.log('✅ STATCARD UPDATE - Exam calculation complete:', {
+      count,
+      subtitle
+    });
+    
+    return {
+      count,
+      subtitle
+    };
+  }, [exams]);
+
+  // Calculate attendance data for pie chart with safe values
+  const attendancePieData = React.useMemo(() => {
+    const safeAttendanceData = [
+      {
+        name: 'Present',
+        population: Number.isFinite(attendanceStats.presentOnlyCount) ? attendanceStats.presentOnlyCount : 0,
+        color: '#4CAF50',
+        legendFontColor: '#333',
+        legendFontSize: 14
+      },
+      {
+        name: 'Absent',
+        population: Number.isFinite(attendanceStats.absentCount) ? attendanceStats.absentCount : 0,
+        color: '#F44336',
+        legendFontColor: '#333',
+        legendFontSize: 14
+      },
+    ];
+
+    // Only show chart if we have valid data
+    return safeAttendanceData.filter(item => item.population > 0).length > 0
+      ? safeAttendanceData
+      : [{ name: 'No Data', population: 1, color: '#E0E0E0', legendFontColor: '#999', legendFontSize: 14 }];
+  }, [attendanceStats]);
+
+  // Memoized StatCard data to ensure proper updates
+  const childStats = React.useMemo(() => {
+    console.log('🔄 STATCARD UPDATE - Creating childStats with current data:', {
+      updateCounter: updateCounter,
+      attendance: attendanceStats.attendancePercentage,
+      fees: feeStats.status,
+      feesFormattedOutstanding: feeStats.formattedOutstanding,
+      feesColor: feeStats.color,
+      marks: marksStats.average,
+      exams: examStats.count
+    });
+    
+    return [
+      {
+        title: 'Attendance',
+        value: `${attendanceStats.attendancePercentage}%`,
+        icon: 'checkmark-circle',
+        color: attendanceStats.attendancePercentage >= 75 ? '#4CAF50' : attendanceStats.attendancePercentage >= 60 ? '#FF9800' : '#F44336',
+        subtitle: `${attendanceStats.presentOnlyCount}/${attendanceStats.totalRecords} days present`,
+        onPress: () => navigation.navigate('Attendance')
+      },
+      {
+        title: 'Outstanding Fee',
+        value: feeStats.formattedOutstanding || feeStats.status,
+        icon: 'card',
+        color: feeStats.color,
+        subtitle: '',
+        onPress: () => navigation.navigate('Fees')
+      },
+      {
+        title: 'Average Marks',
+        value: marksStats.average,
+        icon: 'document-text',
+        color: marksStats.color,
+        subtitle: marksStats.subtitle,
+        onPress: () => navigation.navigate('Marks')
+      },
+      {
+        title: 'Upcoming Exams',
+        value: examStats.count,
+        icon: 'calendar',
+        color: '#9C27B0',
+        subtitle: examStats.subtitle,
+        onPress: () => setShowExamsModal(true)
+      },
+    ];
+  }, [attendanceStats, feeStats, marksStats, examStats, navigation, updateCounter]); // Add updateCounter to dependencies
+
+  // Debug logging for StatCard updates
+  console.log('=== STATCARD UPDATE DEBUG ===');
+  console.log('Attendance data changed, stats:', attendanceStats);
+  console.log('Fee data changed, stats:', feeStats);
+  console.log('Marks data changed, stats:', marksStats);
+  console.log('Exam data changed, stats:', examStats);
+  console.log('Final childStats:', childStats.map(s => ({ title: s.title, value: s.value, subtitle: s.subtitle })));
+  console.log('============================');
 
   // Find the next upcoming event
   const nextEvent = events && events.length > 0 ? events[0] : null;
-
-  // Update childStats for the event card
-  const childStats = [
-    {
-      title: 'Attendance',
-      value: `${attendancePercentage}%`,
-      icon: 'checkmark-circle',
-      color: attendancePercentage >= 75 ? '#4CAF50' : attendancePercentage >= 60 ? '#FF9800' : '#F44336',
-      subtitle: `${presentOnlyCount}/${attendance.length} days present`,
-      onPress: () => navigation.navigate('Attendance')
-    },
-    {
-      title: 'Fee Status',
-      value: getFeeStatus(),
-      icon: 'card',
-      color: fees.filter(f => 
-        (f.status === 'pending' || f.status === 'Pending' || f.status === 'unpaid' || f.status === 'partial') && 
-        (f.amount > 0)
-      ).length > 0 ? '#FF9800' : '#4CAF50',
-      subtitle: getFeeSubtitle(),
-      onPress: () => navigation.navigate('Fees')
-    },
-    {
-      title: 'Average Marks',
-      value: getAverageMarks(),
-      icon: 'document-text',
-      color: '#2196F3',
-      subtitle: getMarksSubtitle(),
-      onPress: () => navigation.navigate('Marks')
-    },
-    {
-      title: 'Upcoming Exams',
-      value: String(exams.length),
-      icon: 'calendar',
-      color: '#9C27B0',
-      subtitle: exams.length > 0 ? `Next: ${exams[0]?.name || 'TBA'}` : 'No upcoming exams',
-      onPress: () => setShowExamsModal(true)
-    },
-  ];
 
   const renderExamItem = ({ item, index }) => (
     <View style={styles.examItem}>
@@ -1992,13 +2795,14 @@ const ParentDashboard = ({ navigation }) => {
   console.log('🖼️ ParentDashboard - Final image source:', studentImage);
 
   return (
-    <View style={styles.container}>
-      <Header 
-        title="Parent Dashboard" 
-        showBack={false} 
-        showNotifications={true}
-        unreadCount={unreadMessageCount}
-      />
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={styles.container}>
+        <Header 
+          title="Parent Dashboard" 
+          showBack={false} 
+          showNotifications={true}
+          unreadCount={unreadMessageCount}
+        />
       
       {/* Student Switch Banner - Show when parent has multiple children */}
       {hasMultipleStudents && (
@@ -2197,12 +3001,233 @@ const ParentDashboard = ({ navigation }) => {
             />
             <View style={styles.chartSummary}>
               <Text style={styles.chartSummaryText}>
-                Present: {presentOnlyCount} days | Absent: {absentCount} days
+                Present: {attendanceStats.presentOnlyCount} days | Absent: {attendanceStats.absentCount} days
               </Text>
             </View>
           </View>
         </View>
 
+        {/* Fee Distribution Summary Cards */}
+        {fees.length > 0 && (() => {
+          const totalDue = fees.reduce((sum, fee) => sum + (fee.amount || 0), 0);
+          const totalPaid = fees.reduce((sum, fee) => sum + (fee.paidAmount || 0), 0);
+          const totalOutstanding = fees.reduce((sum, fee) => sum + (fee.remainingAmount || 0), 0);
+          const paidCount = fees.filter(f => f.status === 'paid').length;
+          const partialCount = fees.filter(f => f.status === 'partial').length;
+          const unpaidCount = fees.filter(f => f.status === 'unpaid').length;
+          
+          return (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Fee Overview</Text>
+                <TouchableOpacity onPress={() => navigation.navigate('Fees')}>
+                  <Text style={styles.viewAllText}>View Details</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* Fee Distribution Cards */}
+              <View style={styles.feeDistributionContainer}>
+                <View style={[styles.feeDistributionCard, { borderLeftColor: '#2196F3' }]}>
+                  <Text style={styles.feeDistributionLabel}>Total Due</Text>
+                  <Text style={[styles.feeDistributionAmount, { color: '#2196F3' }]}>₹{totalDue.toLocaleString()}</Text>
+                  <Text style={styles.feeDistributionSubtitle}>{fees.length} components</Text>
+                </View>
+                
+                <View style={[styles.feeDistributionCard, { borderLeftColor: '#4CAF50' }]}>
+                  <Text style={styles.feeDistributionLabel}>Paid</Text>
+                  <Text style={[styles.feeDistributionAmount, { color: '#4CAF50' }]}>₹{totalPaid.toLocaleString()}</Text>
+                  <Text style={styles.feeDistributionSubtitle}>{paidCount} complete</Text>
+                </View>
+                
+                <View style={[styles.feeDistributionCard, { borderLeftColor: totalOutstanding > 0 ? '#FF5722' : '#4CAF50' }]}>
+                  <Text style={styles.feeDistributionLabel}>Outstanding</Text>
+                  <Text style={[styles.feeDistributionAmount, { color: totalOutstanding > 0 ? '#FF5722' : '#4CAF50' }]}>₹{totalOutstanding.toLocaleString()}</Text>
+                  <Text style={styles.feeDistributionSubtitle}>
+                    {unpaidCount > 0 && `${unpaidCount} unpaid`}{partialCount > 0 && ` • ${partialCount} partial`}
+                    {totalOutstanding === 0 && 'All settled'}
+                  </Text>
+                </View>
+              </View>
+              
+              {/* Fee Progress Bar */}
+              <View style={styles.feeProgressContainer}>
+                <View style={styles.feeProgressHeader}>
+                  <Text style={styles.feeProgressLabel}>Payment Progress</Text>
+                  <Text style={styles.feeProgressPercentage}>
+                    {totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0}%
+                  </Text>
+                </View>
+                <View style={styles.feeProgressBar}>
+                  <View 
+                    style={[
+                      styles.feeProgressFill,
+                      { 
+                        width: totalDue > 0 ? `${Math.round((totalPaid / totalDue) * 100)}%` : '0%',
+                        backgroundColor: totalDue > 0 && totalPaid >= totalDue ? '#4CAF50' : '#2196F3'
+                      }
+                    ]} 
+                  />
+                </View>
+              </View>
+            </View>
+          );
+        })()}
+        
+        {/* Detailed Fee Structure */}
+        {fees.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Fee Structure</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Fees')}>
+                <Text style={styles.viewAllText}>Pay Now</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.feeStructureContainer}>
+              {fees.map((fee, index) => {
+                const getStatusColor = (status) => {
+                  switch (status) {
+                    case 'paid': return '#4CAF50';
+                    case 'partial': return '#FF9800';
+                    case 'unpaid': return '#F44336';
+                    default: return '#666';
+                  }
+                };
+                
+                const getStatusIcon = (status) => {
+                  switch (status) {
+                    case 'paid': return 'checkmark-circle';
+                    case 'partial': return 'time';
+                    case 'unpaid': return 'alert-circle';
+                    default: return 'help-circle';
+                  }
+                };
+                
+                const getCategoryIcon = (category) => {
+                  switch (category) {
+                    case 'tuition': return 'school';
+                    case 'books': return 'library';
+                    case 'transport': return 'bus';
+                    case 'examination': return 'document-text';
+                    case 'activities': return 'football';
+                    case 'facilities': return 'build';
+                    default: return 'card';
+                  }
+                };
+                
+                const formatDueDate = (dueDate) => {
+                  if (!dueDate) return 'No due date';
+                  const date = new Date(dueDate);
+                  const today = new Date();
+                  const diffTime = date - today;
+                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                  
+                  if (diffDays < 0) return 'Overdue';
+                  if (diffDays === 0) return 'Due today';
+                  if (diffDays === 1) return 'Due tomorrow';
+                  return `Due in ${diffDays} days`;
+                };
+                
+                return (
+                  <View key={fee.id || index} style={styles.feeStructureCard}>
+                    <View style={styles.feeStructureHeader}>
+                      <View style={styles.feeComponentInfo}>
+                        <View style={[styles.feeCategoryIcon, { backgroundColor: getStatusColor(fee.status) }]}>
+                          <Ionicons name={getCategoryIcon(fee.category)} size={20} color="#fff" />
+                        </View>
+                        <View style={styles.feeNameContainer}>
+                          <Text style={styles.feeComponentName}>{fee.name}</Text>
+                          <Text style={styles.feeComponentCategory}>{fee.category?.toUpperCase() || 'GENERAL'}</Text>
+                        </View>
+                      </View>
+                      
+                      <View style={styles.feeStatusContainer}>
+                        <View style={[styles.feeStatusBadge, { backgroundColor: getStatusColor(fee.status) }]}>
+                          <Ionicons name={getStatusIcon(fee.status)} size={12} color="#fff" />
+                          <Text style={styles.feeStatusBadgeText}>{fee.status.toUpperCase()}</Text>
+                        </View>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.feeAmountDetails}>
+                      <View style={styles.feeAmountRow}>
+                        <Text style={styles.feeAmountLabel}>Total Amount:</Text>
+                        <Text style={styles.feeAmountValue}>₹{fee.amount.toLocaleString()}</Text>
+                      </View>
+                      
+                      {fee.paidAmount > 0 && (
+                        <View style={styles.feeAmountRow}>
+                          <Text style={styles.feeAmountLabel}>Paid:</Text>
+                          <Text style={[styles.feeAmountValue, { color: '#4CAF50' }]}>₹{fee.paidAmount.toLocaleString()}</Text>
+                        </View>
+                      )}
+                      
+                      {fee.remainingAmount > 0 && (
+                        <View style={styles.feeAmountRow}>
+                          <Text style={styles.feeAmountLabel}>Remaining:</Text>
+                          <Text style={[styles.feeAmountValue, { color: '#FF5722', fontWeight: 'bold' }]}>₹{fee.remainingAmount.toLocaleString()}</Text>
+                        </View>
+                      )}
+                      
+                      {fee.discountApplied > 0 && (
+                        <View style={styles.feeAmountRow}>
+                          <Text style={styles.feeAmountLabel}>Discount:</Text>
+                          <Text style={[styles.feeAmountValue, { color: '#4CAF50' }]}>₹{fee.discountApplied.toLocaleString()}</Text>
+                        </View>
+                      )}
+                    </View>
+                    
+                    <View style={styles.feeDueDateContainer}>
+                      <Ionicons name="calendar-outline" size={16} color="#666" />
+                      <Text style={[
+                        styles.feeDueDateText,
+                        { color: fee.due_date && new Date(fee.due_date) < new Date() ? '#F44336' : '#666' }
+                      ]}>
+                        {formatDueDate(fee.due_date)}
+                      </Text>
+                    </View>
+                    
+                    {/* Payment History for this fee */}
+                    {fee.payments && fee.payments.length > 0 && (
+                      <View style={styles.feePaymentHistory}>
+                        <Text style={styles.feePaymentHistoryTitle}>Recent Payments:</Text>
+                        {fee.payments.slice(0, 2).map((payment, payIdx) => (
+                          <View key={payment.id || payIdx} style={styles.feePaymentItem}>
+                            <View style={styles.feePaymentInfo}>
+                              <Text style={styles.feePaymentAmount}>₹{Number(payment.amount_paid).toLocaleString()}</Text>
+                              <Text style={styles.feePaymentDate}>{formatDateToDDMMYYYY(payment.payment_date)}</Text>
+                            </View>
+                            <Text style={styles.feePaymentMode}>{payment.payment_mode || 'N/A'}</Text>
+                          </View>
+                        ))}
+                        {fee.payments.length > 2 && (
+                          <TouchableOpacity
+                            style={styles.viewMorePaymentsButton}
+                            onPress={() => navigation.navigate('Fees', { selectedFee: fee.id })}
+                          >
+                            <Text style={styles.viewMorePaymentsText}>View {fee.payments.length - 2} more payments</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    )}
+                    
+                    {/* Quick Action for this fee */}
+                    {fee.remainingAmount > 0 && (
+                      <TouchableOpacity
+                        style={styles.feeQuickPayButton}
+                        onPress={() => navigation.navigate('Fees', { selectedFee: fee.id, autoSelectPayment: true })}
+                      >
+                        <Ionicons name="card" size={16} color="#fff" />
+                        <Text style={styles.feeQuickPayText}>Pay ₹{fee.remainingAmount.toLocaleString()}</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )}
+        
         {/* Recent Marks */}
         {marks.length > 0 && (
           <View style={styles.section}>
@@ -2475,11 +3500,16 @@ const ParentDashboard = ({ navigation }) => {
           </View>
         </View>
       )}
-    </View>
+      </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#667eea',
+  },
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
@@ -2985,6 +4015,257 @@ const styles = StyleSheet.create({
   feeDueDate: {
     fontSize: 12,
     color: '#999',
+  },
+
+  // Fee Distribution Styles (matching FeePayment component)
+  feeDistributionContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  feeDistributionCard: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 4,
+    borderLeftWidth: 4,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  feeDistributionLabel: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  feeDistributionAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  feeDistributionSubtitle: {
+    fontSize: 11,
+    color: '#888',
+  },
+  feeProgressContainer: {
+    marginTop: 8,
+  },
+  feeProgressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  feeProgressLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  feeProgressPercentage: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#2196F3',
+  },
+  feeProgressBar: {
+    height: 8,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  feeProgressFill: {
+    height: '100%',
+    borderRadius: 4,
+    minWidth: 4,
+  },
+
+  // Detailed Fee Structure Styles
+  feeStructureContainer: {
+    marginTop: 8,
+  },
+  feeStructureCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 16,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  feeStructureHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  feeComponentInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  feeCategoryIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  feeNameContainer: {
+    flex: 1,
+  },
+  feeComponentName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 2,
+  },
+  feeComponentCategory: {
+    fontSize: 11,
+    color: '#888',
+    fontWeight: '500',
+    letterSpacing: 0.5,
+  },
+  feeStatusContainer: {
+    alignItems: 'flex-end',
+  },
+  feeStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  feeStatusBadgeText: {
+    fontSize: 10,
+    color: '#fff',
+    fontWeight: 'bold',
+    marginLeft: 4,
+    letterSpacing: 0.5,
+  },
+  feeAmountDetails: {
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  feeAmountRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  feeAmountLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  feeAmountValue: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: 'bold',
+  },
+  feeDueDateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  feeDueDateText: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+  feePaymentHistory: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  feePaymentHistoryTitle: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  feePaymentItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+    marginBottom: 6,
+  },
+  feePaymentInfo: {
+    flex: 1,
+  },
+  feePaymentAmount: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+    marginBottom: 2,
+  },
+  feePaymentDate: {
+    fontSize: 12,
+    color: '#666',
+  },
+  feePaymentMode: {
+    fontSize: 12,
+    color: '#888',
+    fontWeight: '500',
+    backgroundColor: '#e9ecef',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  viewMorePaymentsButton: {
+    alignItems: 'center',
+    paddingVertical: 8,
+    marginTop: 4,
+  },
+  viewMorePaymentsText: {
+    fontSize: 12,
+    color: '#2196F3',
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  feeQuickPayButton: {
+    backgroundColor: '#FF9800',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: '#FF9800',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  feeQuickPayText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginLeft: 6,
   },
 
   // Welcome Section - AdminDashboard Style
