@@ -142,6 +142,11 @@ const TakeAttendance = () => {
     }
     
     try {
+      console.log('🔍 [DEBUG] Fetching existing attendance...');
+      console.log('🔍 [DEBUG] Class ID:', selectedClass);
+      console.log('🔍 [DEBUG] Date:', selectedDate);
+      console.log('🔍 [DEBUG] Student IDs:', students.map(s => s.id));
+      
       // Get existing attendance records
       const { data: attendanceData, error: attendanceError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
@@ -152,15 +157,21 @@ const TakeAttendance = () => {
 
       if (attendanceError) throw attendanceError;
 
+      console.log('🔍 [DEBUG] Found attendance records:', attendanceData?.length || 0);
+      console.log('🔍 [DEBUG] Attendance data:', JSON.stringify(attendanceData, null, 2));
+
       // Create attendance mark object
       const mark = {};
-      attendanceData.forEach(record => {
+      attendanceData?.forEach(record => {
         mark[record.student_id] = record.status;
+        console.log('🔍 [DEBUG] Mapping student_id', record.student_id, 'to status', record.status);
       });
+      
+      console.log('🔍 [DEBUG] Final attendance mark object:', JSON.stringify(mark, null, 2));
       setAttendanceMark(mark);
 
     } catch (err) {
-      console.error('Error fetching attendance:', err);
+      console.error('❌ [ERROR] Error fetching attendance:', err);
     }
   };
 
@@ -249,6 +260,12 @@ const TakeAttendance = () => {
         return;
       }
 
+      // Ensure we have teacher info with tenant_id
+      if (!teacherInfo?.tenant_id) {
+        Alert.alert('Error', 'Teacher information not loaded properly. Please try again.');
+        return;
+      }
+
       // Prepare attendance records only for explicitly marked students
       const attendanceRecords = explicitlyMarkedStudents.map(student => ({
         student_id: student.id,
@@ -256,18 +273,60 @@ const TakeAttendance = () => {
         date: selectedDate,
         status: attendanceMark[student.id], // No fallback - we know it's defined
         marked_by: user.id,
-        tenant_id: teacherInfo.tenant_id // Add tenant_id from teacher info
+        tenant_id: teacherInfo.tenant_id // Include tenant_id for multi-tenant support
       }));
 
-      // Upsert attendance records (insert or update if exists)
-      const { error: upsertError } = await supabase
-        .from(TABLES.STUDENT_ATTENDANCE)
-        .upsert(attendanceRecords, {
-          onConflict: 'student_id,date',
-          ignoreDuplicates: false
-        });
+      // 🔍 DEBUG: Log what we're about to submit
+      console.log('🔍 [DEBUG] About to submit attendance records:');
+      console.log('🔍 [DEBUG] Selected Class:', selectedClass);
+      console.log('🔍 [DEBUG] Selected Date:', selectedDate);
+      console.log('🔍 [DEBUG] Tenant ID:', teacherInfo.tenant_id);
+      console.log('🔍 [DEBUG] Records to submit:', JSON.stringify(attendanceRecords, null, 2));
+      console.log('🔍 [DEBUG] Current attendanceMark state:', JSON.stringify(attendanceMark, null, 2));
 
-      if (upsertError) throw upsertError;
+      // WORKAROUND: Since there's no unique constraint in the database yet,
+      // we'll delete existing records for these students on this date, then insert new ones
+      console.log('🔄 [WORKAROUND] Delete existing records then insert new ones (no unique constraint available)');
+      
+      // Step 1: Delete existing attendance records for these students on this date
+      // RLS policies will automatically ensure only records from the current user's tenant are affected
+      const studentIds = attendanceRecords.map(record => record.student_id);
+      console.log('🗑️ [DELETE] Removing existing records for students (RLS-filtered):', studentIds);
+      
+      const { error: deleteError } = await supabase
+        .from(TABLES.STUDENT_ATTENDANCE)
+        .delete()
+        .eq('date', selectedDate)
+        .eq('class_id', selectedClass)
+        .in('student_id', studentIds);
+        
+      if (deleteError) {
+        console.error('❌ [DELETE ERROR]:', deleteError);
+        throw new Error(`Failed to delete existing records: ${deleteError.message}`);
+      }
+      
+      console.log('✅ [DELETE] Successfully deleted existing records');
+      
+      // Step 2: Insert the new attendance records
+      console.log('➕ [INSERT] Inserting new attendance records');
+      
+      const { error: insertError } = await supabase
+        .from(TABLES.STUDENT_ATTENDANCE)
+        .insert(attendanceRecords);
+        
+      if (insertError) {
+        console.error('❌ [INSERT ERROR]:', insertError);
+        throw new Error(`Failed to insert new records: ${insertError.message}`);
+      }
+      
+      console.log('✅ [INSERT] Successfully inserted new records');
+
+      console.log('✅ [SUCCESS] Attendance submitted successfully!');
+      
+      // 🔄 REFRESH: Immediately refresh attendance data to show updated state
+      console.log('🔄 [REFRESH] Refreshing attendance data after submission...');
+      await fetchExistingAttendance();
+      console.log('🔄 [REFRESH] Attendance data refreshed!');
 
       // Show simple success message
       Alert.alert('Success', 'Attendance saved successfully!');
@@ -1350,6 +1409,24 @@ const styles = StyleSheet.create({
     marginLeft: 3,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  // Instruction container styles
+  instructionContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e3f2fd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196F3',
+  },
+  instructionText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#1976d2',
+    marginLeft: 8,
+    lineHeight: 18,
   },
 });
 

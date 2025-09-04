@@ -17,7 +17,7 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import DropDownPicker from 'react-native-dropdown-picker';
-import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
+import { supabase, dbHelpers, TABLES, getUserTenantId } from '../../utils/supabase';
 
 const { width } = Dimensions.get('window');
 
@@ -191,20 +191,100 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
           assigned_teacher_ids: [form.teacher_ids]
         });
         
-        const { data: insertResult, error: insertError } = await supabase
+        // Get current tenant_id for RLS compliance
+        const tenantId = await getUserTenantId();
+        console.log('🔍 ADMIN: Using tenant_id for task creation:', tenantId);
+        console.log('🔍 ADMIN: Tenant ID type:', typeof tenantId);
+        console.log('🔍 ADMIN: Tenant ID length:', tenantId?.length);
+        
+        // Also try calling the database function directly
+        try {
+          const { data: dbTenantId, error: dbError } = await supabase.rpc('get_current_tenant_id');
+          console.log('🔍 ADMIN: DB function tenant_id:', dbTenantId);
+          console.log('🔍 ADMIN: DB function error:', dbError);
+        } catch (dbErr) {
+          console.log('🔍 ADMIN: DB function call failed:', dbErr);
+        }
+        
+        // Check current user info
+        const { data: { user } } = await supabase.auth.getUser();
+        console.log('🔍 ADMIN: Current user:', user?.id);
+        console.log('🔍 ADMIN: User metadata:', user?.user_metadata);
+        console.log('🔍 ADMIN: App metadata:', user?.app_metadata);
+        
+        const taskData = {
+          title: form.title,
+          description: form.description,
+          due_date: form.dueDate,
+          priority: form.priority,
+          status: form.status,
+          assigned_teacher_ids: [form.teacher_ids]
+        };
+        
+        // Always include tenant_id explicitly
+        taskData.tenant_id = tenantId;
+        
+        console.log('🔍 ADMIN: Final task data being inserted:', taskData);
+        
+        // Try insert with additional debugging
+        console.log('📡 ADMIN: Attempting insert with data:', taskData);
+        
+        let { data: insertResult, error: insertError } = await supabase
           .from(TABLES.TASKS)
-          .insert({
-            title: form.title,
-            description: form.description,
-            due_date: form.dueDate,
-            priority: form.priority,
-            status: form.status,
-            assigned_teacher_ids: [form.teacher_ids]
-          })
+          .insert(taskData)
           .select();
+        
+        // If RLS error, let's try to understand why
+        if (insertError && insertError.code === '42501') {
+          console.log('🛑 ADMIN: RLS blocked the insert. Let\'s try to debug...');
+          
+          // Try to check current RLS settings
+          try {
+            const { data: testQuery, error: testError } = await supabase
+              .rpc('get_current_tenant_id');
+            console.log('🔍 DB function test result:', testQuery, testError);
+          } catch (rpcErr) {
+            console.log('🔍 DB function test failed:', rpcErr);
+          }
+          
+          // Try to check if user has admin role
+          try {
+            const { data: isAdminResult, error: adminError } = await supabase
+              .rpc('is_admin_in_tenant');
+            console.log('🔍 Is admin check (is_admin_in_tenant):', isAdminResult, adminError);
+          } catch (adminErr) {
+            console.log('🔍 Is admin check failed:', adminErr);
+          }
+          
+          // Also try to check user's role directly from users table
+          try {
+            const { data: userRole, error: roleError } = await supabase
+              .from('users')
+              .select('role_id, roles(role_name)')
+              .eq('id', user.id)
+              .single();
+            console.log('🔍 User role check:', userRole, roleError);
+          } catch (roleErr) {
+            console.log('🔍 User role check failed:', roleErr);
+          }
+          
+          // Try a simple select on tasks table to see if we can read
+          try {
+            const { data: tasksRead, error: tasksError } = await supabase
+              .from(TABLES.TASKS)
+              .select('id, title')
+              .limit(1);
+            console.log('🔍 Tasks read test:', tasksRead?.length || 0, 'records, error:', tasksError);
+          } catch (readErr) {
+            console.log('🔍 Tasks read test failed:', readErr);
+          }
+        }
           
         console.log('🔍 ADMIN: Insert result:', insertResult);
         console.log('🔍 ADMIN: Insert error:', insertError);
+        console.log('🔍 ADMIN: Insert error details:', insertError?.details);
+        console.log('🔍 ADMIN: Insert error hint:', insertError?.hint);
+        console.log('🔍 ADMIN: Insert error message:', insertError?.message);
 
         if (insertError) throw insertError;
       }
