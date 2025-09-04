@@ -9,6 +9,7 @@ import {
   Image,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Animatable from 'react-native-animatable';
@@ -55,51 +56,56 @@ const StudentSelectionScreen = ({ navigation }) => {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <LinearGradient
-          colors={['#667eea', '#764ba2']}
-          style={styles.gradient}
-        >
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#fff" />
-            <Text style={styles.loadingText}>Loading your children...</Text>
-          </View>
-        </LinearGradient>
-      </View>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.container}>
+          <LinearGradient
+            colors={['#667eea', '#764ba2']}
+            style={styles.gradient}
+          >
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#fff" />
+              <Text style={styles.loadingText}>Loading your children...</Text>
+            </View>
+          </LinearGradient>
+        </View>
+      </SafeAreaView>
     );
   }
 
   if (availableStudents.length === 0) {
     return (
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.container}>
+          <LinearGradient
+            colors={['#667eea', '#764ba2']}
+            style={styles.gradient}
+          >
+            <View style={styles.centerContainer}>
+              <Ionicons name="school-outline" size={80} color="#fff" />
+              <Text style={styles.noStudentsTitle}>No Students Found</Text>
+              <Text style={styles.noStudentsSubtitle}>
+                No students are associated with your account. Please contact the school administration.
+              </Text>
+              <TouchableOpacity
+                style={styles.contactButton}
+                onPress={() => Alert.alert('Contact School', 'Please contact your school administration to link students to your account.')}
+              >
+                <Text style={styles.contactButtonText}>Contact School</Text>
+              </TouchableOpacity>
+            </View>
+          </LinearGradient>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.container}>
         <LinearGradient
           colors={['#667eea', '#764ba2']}
           style={styles.gradient}
         >
-          <View style={styles.centerContainer}>
-            <Ionicons name="school-outline" size={80} color="#fff" />
-            <Text style={styles.noStudentsTitle}>No Students Found</Text>
-            <Text style={styles.noStudentsSubtitle}>
-              No students are associated with your account. Please contact the school administration.
-            </Text>
-            <TouchableOpacity
-              style={styles.contactButton}
-              onPress={() => Alert.alert('Contact School', 'Please contact your school administration to link students to your account.')}
-            >
-              <Text style={styles.contactButtonText}>Contact School</Text>
-            </TouchableOpacity>
-          </View>
-        </LinearGradient>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.container}>
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        style={styles.gradient}
-      >
         <ScrollView 
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -191,10 +197,15 @@ const StudentSelectionScreen = ({ navigation }) => {
         </ScrollView>
       </LinearGradient>
     </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#667eea',
+  },
   container: {
     flex: 1,
   },

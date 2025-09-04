@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, Platform, Linking } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, Platform, Linking, KeyboardAvoidingView, RefreshControl, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import Header from '../../components/Header';
 import { dbHelpers, supabase } from '../../utils/supabase';
+import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
 
 const StudentDetails = ({ route }) => {
   const navigation = useNavigation();
@@ -35,144 +36,151 @@ const StudentDetails = ({ route }) => {
     );
   }
 
-  useEffect(() => {
-    const fetchStudentDetails = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        console.log('Fetching student details for ID:', student.id);
-        // Fetch student details from DB with class info
-        const { data, error } = await supabase
-          .from('students')
-          .select(`
-            *,
-            classes(class_name, section)
-          `)
-          .eq('id', student.id)
-          .single();
+  // Fetch student details function
+  const fetchStudentDetails = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      console.log('Fetching student details for ID:', student.id);
+      // Fetch student details from DB with class info
+      const { data, error } = await supabase
+        .from('students')
+        .select(`
+          *,
+          classes(class_name, section)
+        `)
+        .eq('id', student.id)
+        .single();
+      
+      if (error) {
+        console.error('Error fetching student:', error);
+        throw error;
+      }
+      
+      // Try multiple methods to get parent information
+      let parentData = null;
+      
+      // First check if parent info was already passed from ManageStudents
+      if (student.parentName && student.parentName !== 'Not Assigned' && student.parentName !== 'N/A') {
+        parentData = {
+          name: student.parentName,
+          phone: student.parentPhone || null,
+          relation: 'Guardian' // Default relation
+        };
+        console.log('Using parent info from student data:', parentData);
+      }
+      
+      // If no parent info from student data, try database queries
+      if (!parentData) {
+        // Method 1: Try parents table with student_id
+        const { data: parentsTableData, error: parentError } = await supabase
+          .from('parents')
+          .select('name, relation, phone, email')
+          .eq('student_id', student.id);
         
-        if (error) {
-          console.error('Error fetching student:', error);
-          throw error;
-        }
-        
-        // Try multiple methods to get parent information
-        let parentData = null;
-        
-        // First check if parent info was already passed from ManageStudents
-        if (student.parentName && student.parentName !== 'Not Assigned' && student.parentName !== 'N/A') {
+        if (parentsTableData && parentsTableData.length > 0 && !parentError) {
+          // Use the first parent record or combine multiple
+          const primaryParent = parentsTableData[0];
           parentData = {
-            name: student.parentName,
-            phone: student.parentPhone || null,
-            relation: 'Guardian' // Default relation
+            name: primaryParent.name,
+            relation: primaryParent.relation || 'Guardian',
+            phone: primaryParent.phone || null,
+            email: primaryParent.email || null
           };
-          console.log('Using parent info from student data:', parentData);
-        }
-        
-        // If no parent info from student data, try database queries
-        if (!parentData) {
-          // Method 1: Try parents table with student_id
-          const { data: parentsTableData, error: parentError } = await supabase
-            .from('parents')
-            .select('name, relation, phone, email')
-            .eq('student_id', student.id);
+          console.log('Found parent in parents table:', parentData);
+        } else {
+          console.log('No parent found in parents table for student:', student.id);
           
-          if (parentsTableData && parentsTableData.length > 0 && !parentError) {
-            // Use the first parent record or combine multiple
-            const primaryParent = parentsTableData[0];
-            parentData = {
-              name: primaryParent.name,
-              relation: primaryParent.relation || 'Guardian',
-              phone: primaryParent.phone || null,
-              email: primaryParent.email || null
-            };
-            console.log('Found parent in parents table:', parentData);
-          } else {
-            console.log('No parent found in parents table for student:', student.id);
+          // Method 2: Try via parent_id in students table
+          if (data.parent_id) {
+            const { data: parentTableData, error: parentTableError } = await supabase
+              .from('parents')
+              .select('name, relation, phone, email')
+              .eq('id', data.parent_id)
+              .single();
             
-            // Method 2: Try via parent_id in students table
-            if (data.parent_id) {
-              const { data: parentTableData, error: parentTableError } = await supabase
-                .from('parents')
-                .select('name, relation, phone, email')
-                .eq('id', data.parent_id)
-                .single();
-              
-              if (parentTableData && !parentTableError) {
-                parentData = {
-                  name: parentTableData.name,
-                  relation: parentTableData.relation || 'Guardian',
-                  phone: parentTableData.phone || null,
-                  email: parentTableData.email || null
-                };
-                console.log('Found parent in parents table via parent_id:', parentData);
-              } else {
-                console.log('No parent found in parents table for parent_id:', data.parent_id);
-              }
+            if (parentTableData && !parentTableError) {
+              parentData = {
+                name: parentTableData.name,
+                relation: parentTableData.relation || 'Guardian',
+                phone: parentTableData.phone || null,
+                email: parentTableData.email || null
+              };
+              console.log('Found parent in parents table via parent_id:', parentData);
+            } else {
+              console.log('No parent found in parents table for parent_id:', data.parent_id);
             }
+          }
+          
+          // Method 3: Try finding parent via users table linked_parent_of
+          if (!parentData) {
+            const { data: linkedParentData, error: linkedError } = await supabase
+              .from('users')
+              .select('full_name, email, phone')
+              .eq('linked_parent_of', student.id)
+              .single();
             
-            // Method 3: Try finding parent via users table linked_parent_of
-            if (!parentData) {
-              const { data: linkedParentData, error: linkedError } = await supabase
-                .from('users')
-                .select('full_name, email, phone')
-                .eq('linked_parent_of', student.id)
-                .single();
-              
-              if (linkedParentData && !linkedError) {
-                parentData = {
-                  name: linkedParentData.full_name,
-                  relation: 'Guardian',
-                  phone: linkedParentData.phone || null,
-                  email: linkedParentData.email || null
-                };
-                console.log('Found parent via linked_parent_of:', parentData);
-              } else {
-                console.log('No parent found via linked_parent_of for student:', student.id);
-              }
+            if (linkedParentData && !linkedError) {
+              parentData = {
+                name: linkedParentData.full_name,
+                relation: 'Guardian',
+                phone: linkedParentData.phone || null,
+                email: linkedParentData.email || null
+              };
+              console.log('Found parent via linked_parent_of:', parentData);
+            } else {
+              console.log('No parent found via linked_parent_of for student:', student.id);
             }
           }
         }
-        
-        // Combine the data
-        const combinedData = {
-          ...data,
-          parent_info: parentData
-        };
-        
-        console.log('Combined student data:', combinedData);
-        setStudentData(combinedData);
-
-        // Fetch fee status
-        console.log('Fetching fees for student ID:', student.id);
-        const { data: fees, error: feeError } = await dbHelpers.getStudentFees(student.id);
-        console.log('Fees data response:', { fees, feeError });
-        
-        let calculatedFeeStatus = 'Unpaid';
-        if (feeError) {
-          console.error('Error fetching fees:', feeError);
-          console.warn('Fee fetch failed, continuing without fee data');
-        } else if (fees && fees.length > 0) {
-          // Calculate total amount paid
-          const totalPaid = fees.reduce((sum, fee) => {
-            return sum + (fee.amount_paid ? parseFloat(fee.amount_paid) : 0);
-          }, 0);
-          
-          // If student has paid any amount, consider it as 'Paid'
-          calculatedFeeStatus = totalPaid > 0 ? 'Paid' : 'Unpaid';
-          console.log(`Fee calculation: Total paid = ${totalPaid}, Status = ${calculatedFeeStatus}`);
-        }
-        
-        setFeeStatus(calculatedFeeStatus);
-      } catch (err) {
-        console.error('Full error in fetchStudentDetails:', err);
-        setError(`Failed to load student details: ${err.message || err}`);
-      } finally {
-        setLoading(false);
       }
-    };
+      
+      // Combine the data
+      const combinedData = {
+        ...data,
+        parent_info: parentData
+      };
+      
+      console.log('Combined student data:', combinedData);
+      setStudentData(combinedData);
+
+      // Fetch fee status
+      console.log('Fetching fees for student ID:', student.id);
+      const { data: fees, error: feeError } = await dbHelpers.getStudentFees(student.id);
+      console.log('Fees data response:', { fees, feeError });
+      
+      let calculatedFeeStatus = 'Unpaid';
+      if (feeError) {
+        console.error('Error fetching fees:', feeError);
+        console.warn('Fee fetch failed, continuing without fee data');
+      } else if (fees && fees.length > 0) {
+        // Calculate total amount paid
+        const totalPaid = fees.reduce((sum, fee) => {
+          return sum + (fee.amount_paid ? parseFloat(fee.amount_paid) : 0);
+        }, 0);
+        
+        // If student has paid any amount, consider it as 'Paid'
+        calculatedFeeStatus = totalPaid > 0 ? 'Paid' : 'Unpaid';
+        console.log(`Fee calculation: Total paid = ${totalPaid}, Status = ${calculatedFeeStatus}`);
+      }
+      
+      setFeeStatus(calculatedFeeStatus);
+    } catch (err) {
+      console.error('Full error in fetchStudentDetails:', err);
+      setError(`Failed to load student details: ${err.message || err}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchStudentDetails();
   }, [student.id]);
+
+  // Refresh handler to reload student data
+  const onRefresh = async () => {
+    await fetchStudentDetails();
+  };
 
   // Helper function to format date
   const formatDate = (dateStr) => {
@@ -327,13 +335,32 @@ const StudentDetails = ({ route }) => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, webContainerStyle]}>
       {/* Use the proper Header component for consistent profile photo loading */}
       <Header title="Student Profile" showBack={true} />
       
-      <ScrollView style={styles.content}>
-        {/* Student Info Summary Card */}
-        <View style={styles.summaryCard}>
+      <KeyboardAvoidingView 
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        <ScrollView 
+          style={[styles.content, webScrollViewStyles.scrollView]}
+          contentContainerStyle={[styles.scrollContent, webScrollViewStyles.scrollViewContent]}
+          {...getWebScrollProps()}
+          refreshControl={
+            <RefreshControl 
+              refreshing={loading} 
+              onRefresh={onRefresh}
+              colors={['#2196F3']}
+              progressBackgroundColor="#fff"
+            />
+          }
+          showsVerticalScrollIndicator={true}
+          bounces={Platform.OS !== 'web'}
+        >
+          {/* Student Info Summary Card */}
+          <View style={styles.summaryCard}>
           <Text style={styles.studentName}>{studentData.name}</Text>
           <Text style={styles.classInfo}>
             {studentData.classes ? `${studentData.classes.class_name} - Section ${studentData.classes.section}` : 'Class not assigned'}
@@ -489,7 +516,8 @@ const StudentDetails = ({ route }) => {
         </View>
         
         <View style={styles.bottomSpacing} />
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 };
@@ -499,9 +527,21 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+  keyboardAvoidingView: {
+    flex: 1,
+  },
   content: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: '100%',
+      overflowY: 'auto',
+      overflowX: 'hidden',
+    }),
+  },
+  scrollContent: {
+    flexGrow: 1,
     padding: 16,
+    paddingBottom: Platform.OS === 'web' ? 40 : 20,
   },
   
   // Loading States

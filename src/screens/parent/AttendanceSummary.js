@@ -13,6 +13,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 // import { WebView } from 'react-native-webview'; // Optional - using simple preview instead
 import { Ionicons } from '@expo/vector-icons';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isToday } from 'date-fns';
@@ -1463,10 +1464,10 @@ const AttendanceSummary = () => {
         </head>
         <body>
           <div class="school-header">
-            <img src="${SCHOOL_INFO.logoUrl}" class="school-logo" />
+            <img src="${schoolInfo.logoUrl}" class="school-logo" />
             <div>
-              <h1 style="margin:0;">${SCHOOL_INFO.name}</h1>
-              <p style="margin:0;">${SCHOOL_INFO.address}</p>
+              <h1 style="margin:0;">${schoolInfo.name}</h1>
+              <p style="margin:0;">${schoolInfo.address}</p>
             </div>
           </div>
           <div class="student-info">
@@ -1534,33 +1535,38 @@ const AttendanceSummary = () => {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <Header title="Attendance Summary" showBack={true} />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1976d2" />
-          <Text style={styles.loadingText}>Loading attendance data...</Text>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.container}>
+          <Header title="Attendance Summary" showBack={true} />
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#1976d2" />
+            <Text style={styles.loadingText}>Loading attendance data...</Text>
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.container}>
-        <Header title="Attendance Summary" showBack={true} />
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Error: {error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={fetchAttendanceData}>
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.container}>
+          <Header title="Attendance Summary" showBack={true} />
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>Error: {error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={fetchAttendanceData}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={[styles.container, webContainerStyle]}>
-      <Header title="Attendance Summary" showBack={true} />
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={[styles.container, webContainerStyle]}>
+        <Header title="Attendance Summary" showBack={true} />
       
       <ScrollView
         style={[styles.content, webScrollViewStyles.scrollView]}
@@ -2430,10 +2436,15 @@ const AttendanceSummary = () => {
         </View>
       </Modal>
     </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',

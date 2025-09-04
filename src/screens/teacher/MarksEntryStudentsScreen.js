@@ -205,6 +205,29 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
   // Enhanced save function
   const saveMarks = async (currentMarks = marks, showAlert = true) => {
     try {
+      // According to schema.txt, users table has tenant_id NOT NULL (line 540)
+      // Get tenant_id directly from users table using authenticated user's ID
+      const { data: userData, error: userError } = await supabase
+        .from(TABLES.USERS)
+        .select('tenant_id')
+        .eq('id', user.id)
+        .single();
+      
+      if (userError) {
+        console.error('Error fetching user tenant_id:', userError);
+        Alert.alert('Error', `Failed to get user information: ${userError.message}`);
+        return;
+      }
+      
+      if (!userData || !userData.tenant_id) {
+        console.error('No tenant_id found for user:', user.id);
+        Alert.alert('Error', 'No tenant information found for this user. Please contact support.');
+        return;
+      }
+      
+      const tenant_id = userData.tenant_id;
+      console.log('Retrieved tenant_id from users table:', tenant_id);
+
       const marksToSave = [];
       
       Object.entries(currentMarks).forEach(([cellKey, value]) => {
@@ -218,7 +241,8 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
               subject_id: subjectId,
               marks_obtained: markValue,
               max_marks: 100,
-              exam_id: null
+              exam_id: null,
+              tenant_id: tenant_id // Add tenant_id from resolved source
             });
           }
         }
@@ -226,6 +250,7 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
       
       if (marksToSave.length > 0) {
         console.log('Saving marks:', marksToSave.length, 'entries');
+        console.log('Sample mark data:', marksToSave[0]); // Log first entry to verify structure
         
         // Use upsert with proper conflict resolution
         const { error: upsertError } = await supabase

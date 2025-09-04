@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import Header from '../../components/Header';
@@ -579,35 +580,40 @@ const Notifications = ({ navigation }) => {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <Header title="Notifications" showBack={true} />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1976d2" />
-          <Text style={styles.loadingText}>Loading notifications...</Text>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.container}>
+          <Header title="Notifications" showBack={true} />
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#1976d2" />
+            <Text style={styles.loadingText}>Loading notifications...</Text>
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.container}>
-        <Header title="Notifications" showBack={true} />
-        <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle" size={48} color="#F44336" />
-          <Text style={styles.errorText}>Failed to load notifications</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => window.location.reload()}>
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.container}>
+          <Header title="Notifications" showBack={true} />
+          <View style={styles.errorContainer}>
+            <Ionicons name="alert-circle" size={48} color="#F44336" />
+            <Text style={styles.errorText}>Failed to load notifications</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={() => window.location.reload()}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <Header title="Notifications" showBack={true} />
-      <View style={styles.content}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={styles.container}>
+        <Header title="Notifications" showBack={true} />
+        <View style={styles.content}>
         <View style={styles.filterRow}>
           {FILTERS.map(f => (
             <TouchableOpacity
@@ -658,10 +664,15 @@ const Notifications = ({ navigation }) => {
         />
       </View>
     </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#667eea',
+  },
   container: {
     flex: 1,
     backgroundColor: '#f5f7fa',

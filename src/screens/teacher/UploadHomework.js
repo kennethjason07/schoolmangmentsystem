@@ -276,6 +276,7 @@ const UploadHomework = () => {
         class_id: selectedClassData.id,
         subject_id: selectedSubject,
         teacher_id: teacherData.id,
+        tenant_id: teacherData.tenant_id, // Add tenant_id from teacher data
         assigned_students: selectedStudents,
         files: [] // Will be updated with uploaded file information
       };

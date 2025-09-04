@@ -842,6 +842,19 @@ function groupAndSortSchedule(schedule) {
     }
 
     try {
+      // Get user's tenant_id 
+      const { data: userData, error: userError } = await supabase
+        .from(TABLES.USERS)
+        .select('tenant_id')
+        .eq('id', user.id)
+        .single();
+      
+      if (userError || !userData) {
+        console.error('Error fetching user tenant_id:', userError);
+        Alert.alert('Error', 'Could not get user information. Please try again.');
+        return;
+      }
+
       const { data, error } = await supabase
         .from(TABLES.PERSONAL_TASKS)
         .insert([
@@ -852,7 +865,8 @@ function groupAndSortSchedule(schedule) {
             task_type: newTask.type,
             priority: newTask.priority,
             due_date: newTask.due,
-            status: 'pending'
+            status: 'pending',
+            tenant_id: userData.tenant_id // Add tenant_id from user data
           }
         ])
         .select();

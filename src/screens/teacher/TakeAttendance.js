@@ -255,7 +255,8 @@ const TakeAttendance = () => {
         class_id: selectedClass,
         date: selectedDate,
         status: attendanceMark[student.id], // No fallback - we know it's defined
-        marked_by: user.id
+        marked_by: user.id,
+        tenant_id: teacherInfo.tenant_id // Add tenant_id from teacher info
       }));
 
       // Upsert attendance records (insert or update if exists)

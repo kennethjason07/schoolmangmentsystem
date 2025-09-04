@@ -120,7 +120,7 @@ const ViewReportCard = () => {
       if (marksError) throw marksError;
       setMarks(marksData || []);
 
-      // Process report cards by exam
+      // Process report cards by exam with proper subject-wise max marks
       const reportCards = {};
       if (marksData) {
         marksData.forEach(mark => {
@@ -135,28 +135,43 @@ const ViewReportCard = () => {
             };
           }
           
-          // Use exam's max_marks instead of marks table max_marks
-          const examMaxMarks = mark.exams?.max_marks || 100;
+          // Use individual subject's max_marks from marks table, not exam's max_marks
+          const subjectMaxMarks = mark.max_marks || 100; // Use the subject-specific max marks
+          const marksObtained = parseFloat(mark.marks_obtained || 0);
+          const maxMarks = parseFloat(subjectMaxMarks);
+          
+          // Validate marks data
+          if (isNaN(marksObtained) || isNaN(maxMarks) || maxMarks <= 0) {
+            console.warn('Invalid marks data for subject:', mark.subjects?.name, {
+              marks_obtained: mark.marks_obtained,
+              max_marks: mark.max_marks,
+              parsed_obtained: marksObtained,
+              parsed_max: maxMarks
+            });
+            return; // Skip this record
+          }
           
           reportCards[examId].subjects.push({
             subject: mark.subjects,
-            marks_obtained: mark.marks_obtained,
-            max_marks: examMaxMarks, // Use exam's max_marks
+            marks_obtained: marksObtained,
+            max_marks: maxMarks, // Use subject-specific max_marks
             grade: mark.grade,
             remarks: mark.remarks
           });
           
-          reportCards[examId].totalMarks += parseFloat(mark.marks_obtained || 0);
-          reportCards[examId].totalMaxMarks += parseFloat(examMaxMarks);
+          reportCards[examId].totalMarks += marksObtained;
+          reportCards[examId].totalMaxMarks += maxMarks;
         });
       }
 
-      // Calculate percentages
+      // Calculate percentages with proper validation
       Object.keys(reportCards).forEach(examId => {
         const card = reportCards[examId];
-        card.percentage = card.totalMaxMarks > 0 
-          ? ((card.totalMarks / card.totalMaxMarks) * 100).toFixed(2)
-          : 0;
+        if (card.totalMaxMarks > 0) {
+          card.percentage = ((card.totalMarks / card.totalMaxMarks) * 100).toFixed(1);
+        } else {
+          card.percentage = 0;
+        }
       });
 
       setReportCards(reportCards);

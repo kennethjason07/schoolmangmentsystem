@@ -1,4 +1,4 @@
-import { supabase, TABLES } from '../utils/supabase';
+import { supabase, TABLES, getUserTenantId } from '../utils/supabase';
 
 /**
  * Automated Notification Service
@@ -355,6 +355,16 @@ const sendAbsenceMessageToParent = async (studentData, date, parentUserId, sende
  */
 const createNotificationForSpecificUser = async (studentData, date, markedBy, userId, parentName = 'Parent') => {
   try {
+    // Get tenant_id for the notification
+    const tenantId = await getUserTenantId();
+    if (!tenantId) {
+      console.error('❌ [SIMPLE NOTIFICATION] No tenant_id found for notification creation');
+      return {
+        success: false,
+        error: 'Tenant information not found'
+      };
+    }
+    
     // Format the date for display
     const formattedDate = new Date(date).toLocaleDateString('en-US', {
       weekday: 'long',
@@ -374,7 +384,8 @@ const createNotificationForSpecificUser = async (studentData, date, markedBy, us
       delivery_mode: 'InApp',
       delivery_status: 'Sent',
       scheduled_at: new Date().toISOString(),
-      sent_by: markedBy
+      sent_by: markedBy,
+      tenant_id: tenantId // Include tenant_id
     };
 
     console.log(`📧 [SIMPLE NOTIFICATION] Creating notification for user ${userId}`);
@@ -397,7 +408,8 @@ const createNotificationForSpecificUser = async (studentData, date, markedBy, us
       recipient_type: 'Parent',
       delivery_status: 'Pending',
       sent_at: null,
-      is_read: false
+      is_read: false,
+      tenant_id: tenantId // Include tenant_id for notification recipients
     };
 
     const { error: recipientError } = await supabase
@@ -519,6 +531,17 @@ export const createLeaveRequestNotificationForAdmins = async (leaveData, teacher
   try {
     console.log('📧 [LEAVE REQUEST] Creating notification for admins...');
     
+    // Get tenant_id for the notification
+    const tenantId = await getUserTenantId();
+    if (!tenantId) {
+      console.error('❌ [LEAVE REQUEST] No tenant_id found for notification creation');
+      return {
+        success: false,
+        error: 'Tenant information not found'
+      };
+    }
+    console.log('📧 [LEAVE REQUEST] Using tenant_id:', tenantId);
+    
     const notificationMessage = `[LEAVE_REQUEST] ${teacherData.teacher?.name || teacherData.full_name} has submitted a ${leaveData.leave_type} request from ${leaveData.start_date} to ${leaveData.end_date}. Reason: ${leaveData.reason}`;
     
     // Step 1: Create the main notification record
@@ -529,7 +552,8 @@ export const createLeaveRequestNotificationForAdmins = async (leaveData, teacher
         type: 'General',
         sent_by,
         delivery_mode: 'InApp',
-        delivery_status: 'Sent'
+        delivery_status: 'Sent',
+        tenant_id: tenantId // Include tenant_id
       })
       .select()
       .single();
@@ -563,7 +587,8 @@ export const createLeaveRequestNotificationForAdmins = async (leaveData, teacher
         recipient_type: 'Admin', // Now using proper Admin recipient type
         delivery_status: 'Sent',
         sent_at: new Date().toISOString(),
-        is_read: false
+        is_read: false,
+        tenant_id: tenantId // Include tenant_id for notification recipients
       }));
       
       const { error: recipientsError } = await supabase
@@ -602,6 +627,16 @@ export const createTestNotification = async (parentUserId, message = 'Test notif
   try {
     console.log(`🧪 [TEST] Creating test notification for parent: ${parentUserId}`);
 
+    // Get tenant_id for the notification
+    const tenantId = await getUserTenantId();
+    if (!tenantId) {
+      console.error('❌ [TEST] No tenant_id found for test notification creation');
+      return {
+        success: false,
+        error: 'Tenant information not found'
+      };
+    }
+
     // Create notification record
     const notificationData = {
       type: 'General',
@@ -610,7 +645,8 @@ export const createTestNotification = async (parentUserId, message = 'Test notif
       delivery_status: 'Sent',
       scheduled_at: new Date().toISOString(),
       sent_by: null,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      tenant_id: tenantId // Include tenant_id
     };
 
     const { data: notificationResult, error: notificationError } = await supabase
@@ -631,7 +667,8 @@ export const createTestNotification = async (parentUserId, message = 'Test notif
       recipient_type: 'Parent',
       delivery_status: 'Sent',
       sent_at: new Date().toISOString(),
-      is_read: false
+      is_read: false,
+      tenant_id: tenantId // Include tenant_id for notification recipients
     };
 
     const { error: recipientError } = await supabase
@@ -839,6 +876,17 @@ export const createLeaveStatusNotificationForTeacher = async (leaveData, status,
   try {
     console.log(`📧 [LEAVE STATUS] Creating ${status} notification for teacher...`);
     
+    // Get tenant_id for the notification
+    const tenantId = await getUserTenantId();
+    if (!tenantId) {
+      console.error('❌ [LEAVE STATUS] No tenant_id found for notification creation');
+      return {
+        success: false,
+        error: 'Tenant information not found'
+      };
+    }
+    console.log('📧 [LEAVE STATUS] Using tenant_id:', tenantId);
+    
     // Find the user account for the teacher
     const { data: teacherUser, error: teacherError } = await supabase
       .from('users')
@@ -870,7 +918,8 @@ export const createLeaveStatusNotificationForTeacher = async (leaveData, status,
         type: 'General',
         sent_by,
         delivery_mode: 'InApp',
-        delivery_status: 'Sent'
+        delivery_status: 'Sent',
+        tenant_id: tenantId // Include tenant_id
       })
       .select()
       .single();
@@ -890,7 +939,8 @@ export const createLeaveStatusNotificationForTeacher = async (leaveData, status,
       recipient_type: 'Teacher', // Now using proper Teacher recipient type
       delivery_status: 'Sent',
       sent_at: new Date().toISOString(),
-      is_read: false
+      is_read: false,
+      tenant_id: tenantId // Include tenant_id for notification recipients
     };
       
     const { error: recipientError } = await supabase

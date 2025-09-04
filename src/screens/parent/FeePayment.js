@@ -14,6 +14,7 @@ import {
   TextInput,
   RefreshControl
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -79,8 +80,11 @@ const FeePayment = () => {
       setLoading(true);
       setError(null);
       try {
+        console.log('FeePayment - Starting fetchFeeData...');
+        
         // Fetch school data alongside fee data
         await fetchSchoolData();
+        
         // Get parent's student data using the helper function
         const { data: parentUserData, error: parentError } = await dbHelpers.getParentByUserId(user.id);
         if (parentError || !parentUserData) {
@@ -91,33 +95,74 @@ const FeePayment = () => {
         const studentDetails = parentUserData.students;
         setStudentData(studentDetails);
 
-        // Debug student details first
         console.log('FeePayment - Student details:', studentDetails);
 
         let classFees = null;
         let feesError = null;
+        let studentPayments = null;
+        let paymentsError = null;
 
         // Only fetch data if we have valid student details
-        if (studentDetails && isValidUUID(studentDetails.id) && isValidUUID(studentDetails.class_id)) {
-          console.log('FeePayment - Fetching fee structure for student:', studentDetails.id, 'class:', studentDetails.class_id);
-
-          // Get fee structure for a class using easy.txt recommendation
-          const feeResult = await supabase
-            .from('fee_structure')
-            .select(`
-              *,
-              classes(id, class_name, section, academic_year)
-            `)
-            .or(`class_id.eq.${studentDetails.class_id},student_id.eq.${studentDetails.id}`)
-            .order('due_date', { ascending: true });
+        if (studentDetails && isValidUUID(studentDetails.id)) {
+          console.log('FeePayment - Fetching fee structure and payments for student:', studentDetails.id, 'class:', studentDetails.class_id);
+          
+          // Fetch both fee structure and payments in parallel for better performance
+          const [feeResult, paymentResult] = await Promise.all([
+            // Get fee structure for class and individual student fees
+            supabase
+              .from('fee_structure')
+              .select(`
+                id,
+                academic_year,
+                class_id,
+                student_id,
+                fee_component,
+                amount,
+                base_amount,
+                discount_applied,
+                due_date,
+                created_at,
+                classes(id, class_name, section, academic_year)
+              `)
+              .or(`class_id.eq.${studentDetails.class_id},student_id.eq.${studentDetails.id}`)
+              .eq('academic_year', '2024-2025')
+              .order('due_date', { ascending: true }),
+            
+            // Get all payments for this student
+            supabase
+              .from('student_fees')
+              .select(`
+                id,
+                student_id,
+                academic_year,
+                fee_component,
+                amount_paid,
+                payment_date,
+                payment_mode,
+                receipt_number,
+                remarks,
+                created_at
+              `)
+              .eq('student_id', studentDetails.id)
+              .eq('academic_year', '2024-2025')
+              .order('payment_date', { ascending: false })
+          ]);
 
           classFees = feeResult.data;
           feesError = feeResult.error;
+          studentPayments = paymentResult.data;
+          paymentsError = paymentResult.error;
 
           if (feesError) {
             console.log('FeePayment - Database error fetching fee structure:', feesError);
           } else {
             console.log('FeePayment - Loaded', classFees?.length || 0, 'fee structure records from database');
+          }
+          
+          if (paymentsError) {
+            console.log('FeePayment - Database error fetching payments:', paymentsError);
+          } else {
+            console.log('FeePayment - Loaded', studentPayments?.length || 0, 'payment records from database');
           }
         } else {
           console.log('FeePayment - Invalid student details, will use sample data');
@@ -128,44 +173,7 @@ const FeePayment = () => {
         if (feesError && feesError.code !== '42P01') {
           console.log('Fee structure error:', feesError);
         }
-
-        // Debug fee structure data
-        console.log('FeePayment - Raw fee structure data:');
-        console.log('- Student ID:', studentDetails?.id);
-        console.log('- Class ID:', studentDetails?.class_id);
-        console.log('- Fee structures found:', classFees?.length || 0);
-        console.log('- Fee structure details:', classFees);
-
-        // Get payment history using proper schema: student_fees table
-        let studentPayments = null;
-        let paymentsError = null;
-
-        if (studentDetails && isValidUUID(studentDetails.id)) {
-          console.log('FeePayment - Fetching payment history for student:', studentDetails.id);
-
-          // Get student fees with fee structure details using easy.txt recommendation
-          const paymentResult = await supabase
-            .from('student_fees')
-            .select(`
-              *,
-              students(name, admission_no),
-              fee_structure(*)
-            `)
-            .eq('student_id', studentDetails.id)
-            .order('payment_date', { ascending: false });
-
-          studentPayments = paymentResult.data;
-          paymentsError = paymentResult.error;
-
-          if (paymentsError) {
-            console.log('FeePayment - Database error fetching payments:', paymentsError);
-          } else {
-            console.log('FeePayment - Loaded', studentPayments?.length || 0, 'payment records from database');
-          }
-        } else {
-          console.log('FeePayment - Invalid student ID for payment history:', studentDetails?.id);
-        }
-
+        
         if (paymentsError && paymentsError.code !== '42P01') {
           console.log('Student payments error:', paymentsError);
         }
@@ -226,11 +234,28 @@ const FeePayment = () => {
           // Find payments for this fee component - check both real and sample payments
           let payments = [];
           if (studentPayments?.length > 0) {
-            // Use real payments from database
-            payments = studentPayments.filter(p =>
-              p.fee_component === feeComponent &&
-              p.academic_year === fee.academic_year
-            ) || [];
+            // Use real payments from database - improved matching logic
+            payments = studentPayments.filter(p => {
+              // More flexible matching - case insensitive and trimmed
+              const paymentComponent = (p.fee_component || '').trim().toLowerCase();
+              const feeComponentLower = feeComponent.trim().toLowerCase();
+              const yearMatch = p.academic_year === fee.academic_year;
+              const componentMatch = paymentComponent === feeComponentLower;
+              
+              // Debug payment matching
+              console.log(`FeePayment - Matching payment:`);
+              console.log(`  - Payment component: "${paymentComponent}"`);
+              console.log(`  - Fee component: "${feeComponentLower}"`);
+              console.log(`  - Component match: ${componentMatch}`);
+              console.log(`  - Year match: ${yearMatch}`);
+              
+              return componentMatch && yearMatch;
+            }) || [];
+            
+            console.log(`FeePayment - Found ${payments.length} payments for ${feeComponent}:`);
+            payments.forEach(p => {
+              console.log(`  - Payment ID: ${p.id}, Amount: ${p.amount_paid}`);
+            });
           } else {
             // Use sample payments if no real payments exist
             const samplePaymentAmount = feeComponent === 'Tuition Fee' ? 5000 : 
@@ -247,7 +272,7 @@ const FeePayment = () => {
 
           const totalPaidAmount = payments.reduce((sum, payment) => sum + Number(payment.amount_paid || 0), 0);
           const feeAmount = Number(fee.amount || 0);
-          const remainingAmount = feeAmount - totalPaidAmount;
+          const remainingAmount = Math.max(0, feeAmount - totalPaidAmount);
 
           let status = 'unpaid';
           if (totalPaidAmount >= feeAmount) {
@@ -255,6 +280,17 @@ const FeePayment = () => {
           } else if (totalPaidAmount > 0) {
             status = 'partial';
           }
+          
+          // Debug status calculation
+          console.log(`FeePayment - Status calculation for ${feeComponent}:`);
+          console.log(`  - Fee amount: ${feeAmount}`);
+          console.log(`  - Total paid: ${totalPaidAmount}`);
+          console.log(`  - Remaining: ${remainingAmount}`);
+          console.log(`  - Status: ${status}`);
+          console.log(`  - Payments count: ${payments.length}`);
+          payments.forEach((p, i) => {
+            console.log(`    Payment ${i + 1}: ${p.amount_paid} (${p.payment_date})`);
+          });
 
           // Determine category based on fee component
           let category = 'general';
@@ -648,12 +684,21 @@ const FeePayment = () => {
 
       setPaymentLoading(true);
 
+      console.log('FeePayment - Starting admin payment process...', {
+        student_id: studentData?.id,
+        fee_component: selectedFeeComponent.name,
+        amount: parseFloat(paymentAmount),
+        payment_mode: paymentMode
+      });
+
       // Generate receipt number
       const receiptNumber = await getNextReceiptNumber();
+      console.log('FeePayment - Generated receipt number:', receiptNumber);
 
       // Prepare payment data
       const paymentData = {
         student_id: studentData?.id,
+        tenant_id: user?.tenant_id || null,
         academic_year: selectedFeeComponent.academicYear || '2024-2025',
         fee_component: selectedFeeComponent.name,
         amount_paid: parseFloat(paymentAmount),
@@ -663,7 +708,9 @@ const FeePayment = () => {
         remarks: paymentRemarks || `Payment for ${selectedFeeComponent.name}`
       };
 
-      // Save to database
+      console.log('FeePayment - Payment data to insert:', paymentData);
+
+      // Save to database with better error handling
       if (studentData?.id && isValidUUID(studentData.id)) {
         const { data, error } = await supabase
           .from('student_fees')
@@ -671,12 +718,31 @@ const FeePayment = () => {
           .select();
 
         if (error) {
-          console.error('Error saving payment:', error);
-          Alert.alert('Error', 'Failed to save payment. Please try again.');
+          console.error('FeePayment - Database error saving payment:', error);
+          Alert.alert(
+            'Database Error', 
+            `Failed to save payment: ${error.message}\n\nPlease check your connection and try again.`,
+            [{ text: 'OK', style: 'default' }]
+          );
           return;
         }
 
-        console.log('Payment saved successfully:', data);
+        console.log('FeePayment - Payment saved successfully to database:', data);
+        
+        // Show success alert
+        Alert.alert(
+          'Payment Recorded',
+          `Payment of ₹${parseFloat(paymentAmount).toFixed(2)} has been successfully recorded for ${selectedFeeComponent.name}.`,
+          [{ text: 'OK', style: 'default' }]
+        );
+      } else {
+        console.log('FeePayment - Skipping database save (invalid student ID or demo mode)');
+        // Show demo mode success message
+        Alert.alert(
+          'Demo Payment Recorded',
+          `Demo payment of ₹${parseFloat(paymentAmount).toFixed(2)} recorded for ${selectedFeeComponent.name}.`,
+          [{ text: 'OK', style: 'default' }]
+        );
       }
 
       // Create receipt data
@@ -700,8 +766,21 @@ const FeePayment = () => {
       setPaymentModalVisible(false);
       setReceiptModal(true);
 
-      // Refresh fee data
-      await fetchFeeData();
+      // Refresh fee data with delay to ensure database consistency
+      console.log('FeePayment - Refreshing fee data after admin payment...');
+      setTimeout(async () => {
+        try {
+          await fetchFeeData();
+          console.log('FeePayment - Fee data refreshed successfully after admin payment');
+        } catch (refreshError) {
+          console.error('FeePayment - Error refreshing fee data after admin payment:', refreshError);
+          Alert.alert(
+            'Refresh Warning', 
+            'Payment was saved but fee data refresh failed. Please manually refresh to see updated status.',
+            [{ text: 'OK', style: 'default' }]
+          );
+        }
+      }, 500);
 
       // Reset form
       setPaymentAmount('');
@@ -709,8 +788,12 @@ const FeePayment = () => {
       setSelectedFeeComponent(null);
 
     } catch (error) {
-      console.error('Error processing payment:', error);
-      Alert.alert('Error', 'Failed to process payment. Please try again.');
+      console.error('FeePayment - Error in handleSubmitPayment:', error);
+      Alert.alert(
+        'Payment Error', 
+        `An unexpected error occurred while processing the payment: ${error.message}\n\nPlease try again.`,
+        [{ text: 'OK', style: 'default' }]
+      );
     } finally {
       setPaymentLoading(false);
     }
@@ -1012,6 +1095,7 @@ const FeePayment = () => {
         .insert([
           {
             student_id: studentId,
+            tenant_id: user?.tenant_id || null,
             academic_year: paymentData.academicYear || '2024-2025',
             fee_component: paymentData.feeComponent,
             amount_paid: Number(paymentData.amount),
@@ -1593,11 +1677,19 @@ const FeePayment = () => {
         // Save payment to database
         if (studentData && studentData.id && studentData.id !== 'sample-student-id') {
           try {
+            console.log('FeePayment - Saving payment to database...', {
+              student_id: studentData.id,
+              tenant_id: user?.tenant_id,
+              fee_component: selectedFee.name,
+              amount_paid: Number(selectedFee.remainingAmount || selectedFee.amount)
+            });
+            
             const { data, error } = await supabase
               .from('student_fees')
               .insert([
                 {
                   student_id: studentData.id,
+                  tenant_id: user?.tenant_id || null,
                   academic_year: selectedFee.academicYear || '2024-2025',
                   fee_component: selectedFee.name,
                   amount_paid: Number(selectedFee.remainingAmount || selectedFee.amount),
@@ -1611,10 +1703,18 @@ const FeePayment = () => {
               
             if (error) {
               console.error('Error saving payment:', error);
+              Alert.alert('Database Error', `Failed to save payment: ${error.message}`);
+              return; // Stop processing if save fails
+            } else {
+              console.log('FeePayment - Payment saved successfully to database:', data);
             }
           } catch (saveError) {
             console.error('Error saving payment to database:', saveError);
+            Alert.alert('Database Error', `Failed to save payment: ${saveError.message}`);
+            return; // Stop processing if save fails
           }
+        } else {
+          console.log('FeePayment - Skipping database save (invalid student data or sample mode)');
         }
         
         // Prepare receipt data
@@ -1638,8 +1738,16 @@ const FeePayment = () => {
         setPaymentMethodModalVisible(false);
         setReceiptModalVisible2(true);
         
-        // Refresh fee data
-        await fetchFeeData();
+        // Refresh fee data with a small delay to ensure database consistency
+        console.log('FeePayment - Refreshing fee data after payment...');
+        setTimeout(async () => {
+          try {
+            await fetchFeeData();
+            console.log('FeePayment - Fee data refreshed successfully after payment');
+          } catch (refreshError) {
+            console.error('Error refreshing fee data after payment:', refreshError);
+          }
+        }, 500);
       } else {
         Alert.alert('Payment Failed', paymentResult.error || 'Payment processing failed');
       }
@@ -2041,47 +2149,54 @@ const FeePayment = () => {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <Header title="Fee Payment" showBack={true} />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2196F3" />
-          <Text style={styles.loadingText}>Loading fee information...</Text>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.container}>
+          <Header title="Fee Payment" showBack={true} />
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#2196F3" />
+            <Text style={styles.loadingText}>Loading fee information...</Text>
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.container}>
-        <Header title="Fee Payment" showBack={true} />
-        <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle" size={48} color="#F44336" />
-          <Text style={styles.errorText}>Failed to load fee information</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => window.location.reload()}>
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.container}>
+          <Header title="Fee Payment" showBack={true} />
+          <View style={styles.errorContainer}>
+            <Ionicons name="alert-circle" size={48} color="#F44336" />
+            <Text style={styles.errorText}>Failed to load fee information</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={() => window.location.reload()}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (!feeStructure) {
     return (
-      <View style={styles.container}>
-        <Header title="Fee Payment" showBack={true} />
-        <View style={styles.emptyContainer}>
-          <Ionicons name="card-outline" size={64} color="#ccc" />
-          <Text style={styles.emptyText}>No fee information available</Text>
-          <Text style={styles.emptySubtext}>Fee structure will be available once configured by the school.</Text>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.container}>
+          <Header title="Fee Payment" showBack={true} />
+          <View style={styles.emptyContainer}>
+            <Ionicons name="card-outline" size={64} color="#ccc" />
+            <Text style={styles.emptyText}>No fee information available</Text>
+            <Text style={styles.emptySubtext}>Fee structure will be available once configured by the school.</Text>
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <Header title="Fee Payment" showBack={true} />
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={styles.container}>
+        <Header title="Fee Payment" showBack={true} />
       
       <View style={styles.content}>
         {/* Tab Navigation */}
@@ -2637,10 +2752,15 @@ const FeePayment = () => {
         </View>
       </Modal>
     </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',

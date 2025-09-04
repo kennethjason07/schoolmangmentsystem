@@ -111,8 +111,17 @@ const MarksEntry = () => {
     }
   }, [exam, examClass]);
 
-  // Handle marks change
+  // Handle marks change with validation
   const handleMarksChange = (studentId, subjectId, value) => {
+    // Get exam max marks for validation
+    const maxMarks = exam?.max_marks || 100;
+    
+    // Allow empty string (user is typing) or valid numbers 0 to exam max_marks (inclusive)
+    if (value !== '' && (isNaN(value) || parseFloat(value) < 0 || parseFloat(value) > maxMarks)) {
+      Alert.alert('Error', `Please enter valid marks (0-${maxMarks})`);
+      return;
+    }
+    
     setMarksForm(prev => ({
       ...prev,
       [studentId]: {
