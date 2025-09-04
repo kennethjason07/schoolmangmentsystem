@@ -15,6 +15,7 @@ export default function App() {
     // Enable universal role_id validation interceptor
     console.log('🚀 [App] Enabling universal role_id interceptor...');
     enableRoleIdInterceptor();
+    
   }, []);
 
   return (

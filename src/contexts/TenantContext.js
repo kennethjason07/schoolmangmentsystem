@@ -100,13 +100,15 @@ export const TenantProvider = ({ children }) => {
       if (session) {
         // Update JWT claims with tenant_id (this would typically be done server-side)
         // For now, we'll use a configuration setting
-        await supabase.rpc('set_config', {
-          setting_name: 'app.current_tenant_id',
-          setting_value: tenantId
-        }).catch(() => {
+        try {
+          await supabase.rpc('set_config', {
+            setting_name: 'app.current_tenant_id',
+            setting_value: tenantId
+          });
+        } catch (rpcError) {
           // If the RPC doesn't exist, that's okay for now
           console.log('set_config RPC not available, using client-side tenant context');
-        });
+        }
       }
     } catch (error) {
       console.error('Error updating Supabase context:', error);

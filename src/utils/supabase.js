@@ -211,14 +211,7 @@ export const getUserTenantId = async () => {
       return null;
     }
 
-    // First check user metadata for tenant_id
-    const metadataTenantId = user.app_metadata?.tenant_id || user.user_metadata?.tenant_id;
-    if (metadataTenantId) {
-      console.log(`Found tenant_id in user metadata: ${metadataTenantId}`);
-      return metadataTenantId;
-    }
-
-    // Try to get user's tenant_id from profile table
+    // PRIORITIZE database tenant_id over metadata to avoid stale metadata issues
     try {
       const { data: userProfile, error: profileError } = await supabase
         .from('users')
@@ -227,7 +220,7 @@ export const getUserTenantId = async () => {
         .maybeSingle();
 
       if (!profileError && userProfile && userProfile.tenant_id) {
-        console.log(`Found tenant_id in user profile: ${userProfile.tenant_id}`);
+        console.log(`Found tenant_id in user profile (prioritized): ${userProfile.tenant_id}`);
         return userProfile.tenant_id;
       }
 
@@ -238,6 +231,13 @@ export const getUserTenantId = async () => {
       }
     } catch (profileError) {
       console.warn('Could not access user profile table:', profileError);
+    }
+
+    // Fallback to user metadata only if database lookup fails
+    const metadataTenantId = user.app_metadata?.tenant_id || user.user_metadata?.tenant_id;
+    if (metadataTenantId) {
+      console.log(`Found tenant_id in user metadata (fallback): ${metadataTenantId}`);
+      return metadataTenantId;
     }
 
     // Use default tenant_id as fallback

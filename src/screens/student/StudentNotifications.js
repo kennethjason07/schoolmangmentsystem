@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Activity
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
-import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { supabase, TABLES, dbHelpers, getUserTenantId } from '../../utils/supabase';
 import Header from '../../components/Header';
 
 const FILTERS = [
@@ -23,6 +23,38 @@ const StudentNotifications = () => {
   const [error, setError] = useState(null);
   const navigation = useNavigation();
 
+  // Utility function to format date from yyyy-mm-dd to dd-mm-yyyy
+  const formatDateToDDMMYYYY = (dateString) => {
+    if (!dateString) return '';
+    
+    try {
+      let date;
+      if (dateString.includes('T')) {
+        // Handle full datetime string
+        date = new Date(dateString);
+      } else if (dateString.includes('-') && dateString.split('-').length === 3) {
+        // Handle date-only string
+        const [year, month, day] = dateString.split('-');
+        date = new Date(year, month - 1, day);
+      } else {
+        date = new Date(dateString);
+      }
+      
+      if (isNaN(date.getTime())) {
+        return dateString; // Return original if parsing fails
+      }
+      
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      
+      return `${day}-${month}-${year}`;
+    } catch (error) {
+      console.warn('Error formatting date:', dateString, error);
+      return dateString;
+    }
+  };
+
   // Fetch notifications from Supabase with read status
   const fetchNotifications = async () => {
     try {
@@ -33,36 +65,75 @@ const StudentNotifications = () => {
       console.log('User ID:', user.id);
       console.log('Linked Student ID:', user.linked_student_id);
 
-      // Fetch all notifications from admins (role_id = 1) - all notification types
-      // Filter out leave notifications manually below
-      const { data: notificationsData, error: notifError } = await supabase
-        .from('notifications')
+      // Get student details to filter notifications properly
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        console.error('Cannot fetch notifications: tenant_id is null');
+        throw new Error('Tenant ID not available');
+      }
+      
+      const { data: studentData, error: studentError } = await supabase
+        .from(TABLES.STUDENTS)
+        .select('id, class_id, classes(id, class_name, section)')
+        .eq('id', user.linked_student_id)
+        .eq('tenant_id', tenantId)
+        .single();
+        
+      if (studentError || !studentData) {
+        console.error('Error fetching student data:', studentError);
+        throw new Error('Student profile not found');
+      }
+      
+      console.log('Student details for notification filtering:', {
+        studentId: studentData.id,
+        classId: studentData.class_id,
+        className: studentData.classes?.class_name,
+        section: studentData.classes?.section
+      });
+      
+      // Fetch notifications that are specifically for this student
+      // This includes notifications that have recipients records for this user
+      const { data: recipientRecords, error: recipientError } = await supabase
+        .from('notification_recipients')
         .select(`
+          notification_id,
+          is_read,
           id,
-          message,
-          type,
-          created_at,
-          sent_by,
-          delivery_status,
-          delivery_mode,
-          users!sent_by(
+          notifications(
             id,
-            role_id,
-            full_name
+            message,
+            type,
+            created_at,
+            sent_by,
+            delivery_status,
+            delivery_mode,
+            users!sent_by(
+              id,
+              role_id,
+              full_name
+            )
           )
         `)
-        .in('type', ['General', 'Urgent', 'Fee Reminder', 'Event', 'Homework', 'Attendance', 'Absentee', 'Exam', 'GRADE_ENTERED', 'HOMEWORK_UPLOADED'])
-        .eq('users.role_id', 1)
-        .order('created_at', { ascending: false })
+        .eq('recipient_id', user.id)
+        .eq('recipient_type', 'Student')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false, foreignTable: 'notifications' })
         .limit(50);
+      
+      if (recipientError) {
+        console.error('❌ [STUDENT NOTIFICATIONS] Error fetching recipient records:', recipientError);
+        throw recipientError;
+      }
+      
+      // Extract notification data from recipient records
+      const notificationsData = recipientRecords?.map(record => ({
+        ...record.notifications,
+        recipientId: record.id,
+        is_read_from_recipient: record.is_read
+      })).filter(n => n && n.id) || [];
       
 
       console.log(`✅ [STUDENT NOTIFICATIONS] Found ${notificationsData?.length || 0} notifications for student ${user.id}`);
-
-      if (notifError) {
-        console.error('❌ [STUDENT NOTIFICATIONS] Error fetching notifications:', notifError);
-        throw notifError;
-      }
 
       if (!notificationsData || notificationsData.length === 0) {
         console.log('No notifications found for this student, showing empty list');
@@ -123,12 +194,20 @@ const StudentNotifications = () => {
         if (missingRecords.length > 0) {
           console.log(`📝 Creating recipient records for ${missingRecords.length} notifications`);
           
+          // Get tenant_id for the record
+          const tenantId = await getUserTenantId();
+          if (!tenantId) {
+            console.error('Cannot create recipient records: tenant_id is null');
+            return;
+          }
+          
           const newRecords = missingRecords.map(notification => ({
             notification_id: notification.id,
             recipient_id: user.id,
             recipient_type: 'Student',
             is_read: false,
-            delivery_status: 'Sent' // Mark as sent since we're showing it to the student
+            delivery_status: 'Sent', // Mark as sent since we're showing it to the student
+            tenant_id: tenantId
           }));
           
           const { data: insertedRecords, error: insertError } = await supabase
@@ -155,9 +234,11 @@ const StudentNotifications = () => {
         sender_name: n.users?.full_name
       })));
 
-      // Filter out leave notifications (which might be marked as General but contain leave-related content)
+      // Filter notifications based on student's class and other criteria
       const filteredNotifications = notificationsData.filter(notification => {
         const message = notification.message.toLowerCase();
+        
+        // 1. Filter out leave notifications (which might be marked as General but contain leave-related content)
         const isLeaveNotification = message.includes('leave') || 
                                    message.includes('absent') || 
                                    message.includes('vacation') || 
@@ -168,22 +249,113 @@ const StudentNotifications = () => {
           console.log(`🚫 Filtering out leave notification: ${notification.message.substring(0, 50)}...`);
           return false;
         }
+        
+        // 2. Filter out class-specific notifications that don't match this student's class
+        // Check if the message contains specific class references that don't match the student's class
+        const studentClass = studentData.classes?.class_name || '';
+        const studentSection = studentData.classes?.section || '';
+        const studentFullClass = `${studentClass}${studentSection}`; // e.g., "3A"
+        
+        // Look for class mentions in the message (e.g., "class 10", "10th", "class X")
+        const classPatterns = [
+          /class\s+(\d+|[ivxlc]+)/gi, // "class 10", "class XII", etc.
+          /grade\s+(\d+|[ivxlc]+)/gi, // "grade 10", "grade XII", etc.
+          /(\d+)(st|nd|rd|th)\s*class/gi, // "10th class", "12th class", etc.
+          /for\s+class\s+(\d+|[ivxlc]+)/gi, // "for class 10", etc.
+        ];
+        
+        let containsWrongClass = false;
+        for (const pattern of classPatterns) {
+          const matches = [...message.matchAll(pattern)];
+          for (const match of matches) {
+            const mentionedClass = match[1]?.toLowerCase();
+            if (mentionedClass && mentionedClass !== studentClass.toLowerCase()) {
+              console.log(`🚫 Filtering out class-specific notification: "${notification.message.substring(0, 100)}..." - mentioned class "${mentionedClass}" doesn't match student's class "${studentClass}"`);
+              containsWrongClass = true;
+              break;
+            }
+          }
+          if (containsWrongClass) break;
+        }
+        
+        if (containsWrongClass) {
+          return false;
+        }
+        
         return true;
       });
 
       console.log(`📋 After filtering: ${filteredNotifications.length} out of ${notificationsData.length} notifications`);
 
+      // Remove duplicate notifications based on message content and type
+      const uniqueNotifications = filteredNotifications.reduce((unique, notification) => {
+        const key = `${notification.type}_${notification.message.substring(0, 100)}`;
+        const existing = unique.find(n => `${n.type}_${n.message.substring(0, 100)}` === key);
+        
+        if (!existing) {
+          unique.push(notification);
+        } else {
+          console.log(`🔄 Removing duplicate notification: "${notification.message.substring(0, 50)}..."`);
+        }
+        
+        return unique;
+      }, []);
+      
+      console.log(`📋 After deduplication: ${uniqueNotifications.length} out of ${filteredNotifications.length} notifications`);
+
       // Transform the data to match the expected format
-      const transformedNotifications = filteredNotifications.map(notification => {
+      const transformedNotifications = uniqueNotifications.map(notification => {
         const readRecord = readStatusData.find(r => r.notification_id === notification.id);
+        
+        // Create a more user-friendly title based on notification type
+        const getFriendlyTitle = (type, message) => {
+          switch (type) {
+            case 'GRADE_ENTERED':
+              return 'New Marks Available';
+            case 'HOMEWORK_UPLOADED':
+              return 'New Assignment Posted';
+            case 'Fee Reminder':
+              return 'Fee Payment Reminder';
+            case 'Urgent':
+              return 'Important Notice';
+            case 'Exam':
+              return 'Exam Notification';
+            case 'Attendance':
+              return 'Attendance Update';
+            case 'Event':
+              return 'School Event';
+            case 'General':
+            default:
+              // For general notifications, use the first meaningful part of the message
+              const sentences = message.split('.').filter(s => s.trim().length > 0);
+              const firstSentence = sentences[0]?.trim() || message;
+              return firstSentence.length > 40 ? firstSentence.substring(0, 40) + '...' : firstSentence;
+          }
+        };
+        
+        // Get user-friendly type label
+        const getFriendlyType = (type) => {
+          switch (type) {
+            case 'GRADE_ENTERED': return 'Marks';
+            case 'HOMEWORK_UPLOADED': return 'Assignment';
+            case 'Fee Reminder': return 'Fee';
+            case 'Urgent': return 'Important';
+            case 'Exam': return 'Exam';
+            case 'Attendance': return 'Attendance';
+            case 'Event': return 'Event';
+            case 'General': return 'Notice';
+            default: return type;
+          }
+        };
         
         return {
           id: notification.id,
-          title: notification.message.substring(0, 50) + (notification.message.length > 50 ? '...' : ''),
-          message: notification.message,
+          title: getFriendlyType(notification.type || 'General'), // Show short type as title
+          message: notification.message, // Show full message as description
           type: notification.type || 'General',
+          displayType: getFriendlyType(notification.type || 'General'),
           created_at: notification.created_at,
-          read: readRecord?.is_read || false,
+          read: notification.is_read_from_recipient || readRecord?.is_read || false,
           date: notification.created_at,
           important: notification.type === 'Urgent' || notification.type === 'Exam',
           recipientId: readRecord?.id || null,
@@ -238,7 +410,7 @@ const StudentNotifications = () => {
     (n.message || '').toLowerCase().includes(search.toLowerCase())
   );
 
-  const markAsRead = async (id) => {
+const markAsRead = async (id) => {
     try {
       console.log('=== MARKING NOTIFICATION AS READ ===');
       console.log('Notification ID:', id);
@@ -248,13 +420,16 @@ const StudentNotifications = () => {
       const notification = notifications.find(n => n.id === id);
       console.log('Found notification:', notification);
 
+      let updateSuccess = false;
+
       if (notification?.recipientId) {
         // Update existing recipient record
         console.log('Updating existing recipient record:', notification.recipientId);
         const { error: updateError } = await supabase
           .from('notification_recipients')
           .update({
-            is_read: true
+            is_read: true,
+            read_at: new Date().toISOString() // Add timestamp when read
           })
           .eq('id', notification.recipientId);
 
@@ -262,23 +437,35 @@ const StudentNotifications = () => {
           console.error('Update error:', updateError);
           throw updateError;
         }
+        updateSuccess = true;
       } else {
         // Create new recipient record
         console.log('Creating new recipient record');
+        
+        // Get tenant_id for the record
+        const tenantId = await getUserTenantId();
+        if (!tenantId) {
+          console.error('Cannot create recipient record: tenant_id is null');
+          throw new Error('Tenant ID not available');
+        }
+        
         const { error: insertError } = await supabase
           .from('notification_recipients')
           .insert({
             notification_id: id,
             recipient_id: user.id,
-            recipient_type: 'Student', // Valid values: 'Student', 'Parent' (capitalized)
+            recipient_type: 'Student',
             is_read: true,
-            delivery_status: 'Sent' // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
+            read_at: new Date().toISOString(),
+            delivery_status: 'Sent',
+            tenant_id: tenantId
           });
 
         if (insertError) {
           console.error('Insert error:', insertError);
           throw insertError;
         }
+        updateSuccess = true;
       }
 
       // Update local state
@@ -288,12 +475,42 @@ const StudentNotifications = () => {
 
       console.log('✅ Successfully marked notification as read');
       
-      // Force a slight delay and trigger navigation event to refresh dashboard
-      setTimeout(() => {
-        console.log('Triggering navigation state change...');
-        // This will help ensure the dashboard refreshes when we go back
-        navigation.setParams({ refreshTrigger: Date.now() });
-      }, 100);
+      // Force a refresh of the dashboard's notification count
+      // This explicit broadcast approach ensures the dashboard will update
+      if (updateSuccess) {
+        console.log('📣 Broadcasting notification count update...');
+        
+        // Use a Supabase broadcast channel to trigger updates
+        // This is a more reliable way to ensure all components update
+        try {
+          const channel = supabase.channel('notification-update');
+          channel.subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              channel.send({
+                type: 'broadcast',
+                event: 'notification-read',
+                payload: {
+                  user_id: user.id,
+                  notification_id: id,
+                  timestamp: new Date().toISOString()
+                }
+              });
+            }
+          });
+          
+          // Cleanup after sending
+          setTimeout(() => channel.unsubscribe(), 1000);
+        } catch (broadcastErr) {
+          console.error('Broadcast error:', broadcastErr);
+          // Fall back to navigation param update if broadcast fails
+        }
+        
+        // Also update navigation params as a backup mechanism
+        setTimeout(() => {
+          console.log('Triggering navigation state change...');
+          navigation.setParams({ refreshTrigger: Date.now() });
+        }, 100);
+      }
     } catch (err) {
       console.error('Mark as read error:', err);
       Alert.alert('Error', 'Failed to mark as read.');
@@ -334,25 +551,31 @@ const StudentNotifications = () => {
           {item.important && (
             <Ionicons name="star" size={18} color="#FFD700" style={{ marginLeft: 6 }} />
           )}
-          <Text style={styles.date}>{item.date ? (item.date.split('T')[0] || item.date) : ''}</Text>
+          <Text style={styles.date}>{formatDateToDDMMYYYY(item.date)}</Text>
         </View>
         
-        {/* Type and Delivery Status Badges */}
-        <View style={styles.badgeRow}>
+        {/* Type badge row */}
+        <View style={styles.badgeOnlyRow}>
           <View style={[styles.typeBadge, { backgroundColor: getTypeColor(item.type) }]}>
-            <Text style={styles.badgeText}>{item.type.toUpperCase()}</Text>
+            <Text style={styles.badgeText}>{item.displayType.toUpperCase()}</Text>
           </View>
-          {item.delivery_status && (
-            <View style={[styles.statusBadge, { backgroundColor: getDeliveryStatusColor(item.delivery_status) }]}>
-              <Text style={styles.badgeText}>{item.delivery_status}</Text>
-            </View>
-          )}
-          {item.delivery_mode && item.delivery_mode !== 'InApp' && (
-            <View style={[styles.modeBadge, { backgroundColor: '#9C27B0' }]}>
-              <Text style={styles.badgeText}>{item.delivery_mode}</Text>
-            </View>
-          )}
         </View>
+        
+        {/* Additional badges if needed */}
+        {(item.delivery_status && item.delivery_status !== 'Sent') || (item.delivery_mode && item.delivery_mode !== 'InApp') ? (
+          <View style={styles.additionalBadgeRow}>
+            {item.delivery_status && item.delivery_status !== 'Sent' && (
+              <View style={[styles.statusBadge, { backgroundColor: getDeliveryStatusColor(item.delivery_status) }]}>
+                <Text style={styles.badgeText}>{item.delivery_status}</Text>
+              </View>
+            )}
+            {item.delivery_mode && item.delivery_mode !== 'InApp' && (
+              <View style={[styles.modeBadge, { backgroundColor: '#9C27B0' }]}>
+                <Text style={styles.badgeText}>{item.delivery_mode}</Text>
+              </View>
+            )}
+          </View>
+        ) : null}
         
         <Text style={styles.message}>{item.message}</Text>
         <View style={styles.actionsRow}>
@@ -547,16 +770,24 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontSize: 13,
   },
-  badgeRow: {
+  // New improved badge layout styles
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  additionalBadgeRow: {
     flexDirection: 'row',
     marginBottom: 8,
-    marginTop: 4,
+    marginTop: 2,
   },
+  // Badge styles
   typeBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 15,
+    alignSelf: 'flex-start',
   },
   statusBadge: {
     paddingHorizontal: 8,
@@ -572,8 +803,21 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     color: '#fff',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
+  // Badge row for type badge only
+  badgeOnlyRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+    marginTop: 2,
+  },
+  // Legacy styles for backward compatibility (can be removed later)
+  badgeRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+    marginTop: 4,
   },
 });
 

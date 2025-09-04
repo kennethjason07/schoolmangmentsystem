@@ -2,6 +2,7 @@ import { Alert, Linking, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { getFileIcon } from './chatFileUpload';
+import { windowsImageSaver, showImageSaveOptions } from './windowsImageSaver';
 
 // Optional MediaLibrary import with fallback
 let MediaLibrary = null;
@@ -169,38 +170,18 @@ const downloadFile = async (file) => {
 };
 
 /**
- * Save image to device gallery
+ * Save image to device gallery with Windows compatibility
  */
 const saveImageToGallery = async (file) => {
   try {
-    // Check if MediaLibrary is available
-    if (!MediaLibrary) {
-      Alert.alert('Feature Not Available', 'Gallery saving is not available on this device. You can download the image instead.');
-      downloadFile(file);
-      return;
-    }
+    console.log('💾 Starting Windows-compatible image save:', file.file_name);
     
-    // Request permissions
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission Required', 'Please grant permission to save images to your gallery.');
-      return;
-    }
-    
-    console.log('💾 Saving image to gallery:', file.file_name);
-    
-    // Download to temp location first
-    const tempUri = FileSystem.documentDirectory + 'temp_' + Date.now() + getFileExtension(file.file_name);
-    const downloadResult = await FileSystem.downloadAsync(file.file_url, tempUri);
-    
-    // Save to media library
-    const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
-    
-    console.log('✅ Image saved to gallery');
-    Alert.alert('Success', 'Image saved to gallery!');
-    
-    // Clean up temp file
-    await FileSystem.deleteAsync(downloadResult.uri, { idempotent: true });
+    // Use the new Windows-compatible image saver
+    await showImageSaveOptions({
+      file_url: file.file_url,
+      file_name: file.file_name,
+      file_size: file.file_size
+    });
     
   } catch (error) {
     console.error('Save to gallery error:', error);

@@ -11,6 +11,9 @@ import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useMessageStatus } from '../../utils/useMessageStatus';
 import { formatToLocalTime } from '../../utils/timeUtils';
 import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from '../../utils/chatFileUpload';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
+import * as Sharing from 'expo-sharing';
 import { runCompleteDiagnostics } from '../../utils/storageDiagnostics';
 import { runDirectStorageTest } from '../../utils/directStorageTest';
 import { runNetworkDiagnostics, formatNetworkDiagnosticResults } from '../../utils/networkDiagnostics';
@@ -204,10 +207,18 @@ const StudentChatWithTeacher = () => {
   // Reset teacher selection and messages on screen focus
   useFocusEffect(
     React.useCallback(() => {
-      setSelectedTeacher(null);
-      setMessages([]);
-      fetchData();
-    }, [])
+      console.log('🎯 StudentChatWithTeacher screen focused');
+      // Only reset if we're not already in a chat (preserve chat state when returning from other screens)
+      if (!selectedTeacher) {
+        console.log('📝 No selected teacher, fetching fresh data');
+        setMessages([]);
+        fetchData();
+      } else {
+        console.log('👨‍🏫 Selected teacher exists, preserving chat state:', selectedTeacher.name);
+        // Just refresh unread counts without clearing chat
+        fetchUnreadCounts();
+      }
+    }, [selectedTeacher])
   );
 
   // Fetch teachers assigned to the student
@@ -582,11 +593,21 @@ const StudentChatWithTeacher = () => {
 
   // Fetch chat messages for selected teacher
   const fetchMessages = async (teacher) => {
+    console.log('🎯 fetchMessages called with teacher:', {
+      id: teacher.id,
+      name: teacher.name,
+      userId: teacher.userId,
+      canMessage: teacher.canMessage
+    });
+    
     try {
       // Don't set loading if this is a refresh call (teacher is already selected)
       if (!selectedTeacher) {
+        console.log('📋 Setting loading and selected teacher');
         setLoading(true);
         setSelectedTeacher(teacher);
+      } else {
+        console.log('🔄 Refreshing messages for already selected teacher');
       }
       setError(null);
 
@@ -628,51 +649,89 @@ const StudentChatWithTeacher = () => {
         let msgs = null;
         let msgError = null;
         
-        // Method 1: OR query (preferred)
-        const query1 = await supabase
-          .from(TABLES.MESSAGES)
-          .select('*')
-          .or(`(sender_id.eq.${user.id},receiver_id.eq.${teacherUserId}),(sender_id.eq.${teacherUserId},receiver_id.eq.${user.id})`)
-          .order('sent_at', { ascending: true });
+        // Get tenant_id for RLS compliance
+        const { data: currentUserData } = await supabase
+          .from(TABLES.USERS)
+          .select('tenant_id')
+          .eq('id', user.id)
+          .single();
           
-        if (!query1.error) {
-          msgs = query1.data;
+        const tenantId = currentUserData?.tenant_id;
+        if (!tenantId) {
+          throw new Error('Cannot access messages: tenant context not found');
+        }
+        
+        console.log('🏢 Using tenant_id for message queries:', tenantId);
+        console.log('👤 User ID:', user.id);
+        console.log('👨‍🏫 Teacher User ID:', teacherUserId);
+        
+        // Simplified approach: Let RLS handle tenant isolation, just query by user IDs
+        console.log('📡 Fetching sent and received messages separately...');
+        
+        const [sentMsgs, receivedMsgs] = await Promise.all([
+          supabase
+            .from(TABLES.MESSAGES)
+            .select('*')
+            .eq('sender_id', user.id)
+            .eq('receiver_id', teacherUserId)
+            .order('sent_at', { ascending: true }),
+          supabase
+            .from(TABLES.MESSAGES)
+            .select('*')
+            .eq('sender_id', teacherUserId)
+            .eq('receiver_id', user.id)
+            .order('sent_at', { ascending: true })
+        ]);
+        
+        console.log('📤 Sent messages result:', {
+          count: sentMsgs.data?.length || 0,
+          error: sentMsgs.error,
+          sample: sentMsgs.data?.[0]
+        });
+        
+        console.log('📥 Received messages result:', {
+          count: receivedMsgs.data?.length || 0,
+          error: receivedMsgs.error,
+          sample: receivedMsgs.data?.[0]
+        });
+        
+        if (!sentMsgs.error && !receivedMsgs.error) {
+          msgs = [...(sentMsgs.data || []), ...(receivedMsgs.data || [])]
+            .sort((a, b) => new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at));
+          console.log('✅ Combined messages count:', msgs.length);
         } else {
-          console.log('OR query failed, trying alternative:', query1.error);
+          msgError = sentMsgs.error || receivedMsgs.error;
+          console.error('❌ Query errors:', { sentError: sentMsgs.error, receivedError: receivedMsgs.error });
+        }
+        
+        // If still no messages, try a broader query for debugging
+        if ((!msgs || msgs.length === 0) && !msgError) {
+          console.log('🔍 No messages found, trying broader debug query...');
           
-          // Method 2: Two separate queries and combine
-          const [sentMsgs, receivedMsgs] = await Promise.all([
-            supabase
-              .from(TABLES.MESSAGES)
-              .select('*')
-              .eq('sender_id', user.id)
-              .eq('receiver_id', teacherUserId),
-            supabase
-              .from(TABLES.MESSAGES)
-              .select('*')
-              .eq('sender_id', teacherUserId)
-              .eq('receiver_id', user.id)
-          ]);
-          
-          if (!sentMsgs.error && !receivedMsgs.error) {
-            msgs = [...(sentMsgs.data || []), ...(receivedMsgs.data || [])]
-              .sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
-          } else {
-            msgError = sentMsgs.error || receivedMsgs.error;
-          }
+          const debugQuery = await supabase
+            .from(TABLES.MESSAGES)
+            .select('*')
+            .eq('tenant_id', tenantId)
+            .limit(10);
+            
+          console.log('🔍 Debug: All messages in tenant:', {
+            count: debugQuery.data?.length || 0,
+            error: debugQuery.error,
+            messages: debugQuery.data?.map(m => ({
+              id: m.id,
+              sender_id: m.sender_id,
+              receiver_id: m.receiver_id,
+              message: m.message?.substring(0, 30)
+            }))
+          });
         }
 
-        console.log('📨 Messages query result:', { msgsCount: msgs?.length || 0, msgError });
+        console.log('📨 Final messages result:', { msgsCount: msgs?.length || 0, msgError });
         
-        if (msgs) {
+        if (msgs && msgs.length > 0) {
+          console.log('📋 Message details:');
           msgs.forEach((msg, index) => {
-            console.log(`Message ${index + 1}:`, {
-              id: msg.id,
-              sender_id: msg.sender_id,
-              receiver_id: msg.receiver_id,
-              message: msg.message?.substring(0, 50) + '...',
-              sent_at: msg.sent_at
-            });
+            console.log(`  ${index + 1}. ${msg.sender_id === user.id ? '→' : '←'} ${msg.message?.substring(0, 50)} (${msg.sent_at || msg.created_at})`);
           });
         }
 
@@ -728,41 +787,66 @@ const StudentChatWithTeacher = () => {
     }
   };
 
-  // Real-time subscription for messages using optimistic UI
-  const messageHandler = getGlobalMessageHandler(supabase, TABLES.MESSAGES);
-  
+  // Real-time subscription for messages - simplified and more reliable
   useEffect(() => {
-    if (!selectedTeacher) return;
-    
-    // Get teacher's user ID for proper subscription
-    let teacherUserId = selectedTeacher.userId;
-    if (!teacherUserId) {
-      // If we don't have the teacher user ID, we can't set up subscription
-      console.log('No teacher user ID available for real-time subscription');
+    if (!selectedTeacher || !selectedTeacher.userId) {
+      console.log('❌ No selected teacher or teacher userId for real-time subscription');
       return;
     }
     
-    // Setup real-time subscription with message updates
-    const subscription = messageHandler.startSubscription(
-      user.id,
-      teacherUserId,
-      (message, eventType) => {
-        console.log('📨 Real-time message update:', { message, eventType });
+    const teacherUserId = selectedTeacher.userId;
+    console.log('🚀 Setting up real-time subscription for chat between:', user.id, 'and', teacherUserId);
+    
+    // Create a unique channel name for this chat
+    const sortedIds = [user.id, teacherUserId].sort();
+    const channelName = `messages-${sortedIds[0]}-${sortedIds[1]}`;
+    
+    const subscription = supabase
+      .channel(channelName)
+      .on('postgres_changes', {
+        event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
+        schema: 'public',
+        table: TABLES.MESSAGES
+      }, (payload) => {
+        console.log('📨 Real-time payload received:', payload);
         
-        if (eventType === 'sent' || eventType === 'received' || eventType === 'updated') {
-          // Update messages state
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+        const messageData = newRecord || oldRecord;
+        
+        // Only process messages related to this chat
+        if (!messageData || 
+            (messageData.sender_id !== user.id && messageData.sender_id !== teacherUserId) ||
+            (messageData.receiver_id !== user.id && messageData.receiver_id !== teacherUserId)) {
+          console.log('🔄 Message not for this chat, ignoring');
+          return;
+        }
+        
+        console.log('✅ Processing real-time message:', eventType, messageData.id);
+        
+        if (eventType === 'INSERT') {
+          // New message - add to list
+          const formattedMessage = {
+            ...messageData,
+            message_type: messageData.message_type || 'text'
+          };
+          
           setMessages(prev => {
-            // Remove any existing message with the same ID
-            const filtered = prev.filter(m => m.id !== message.id);
-            // Add the new/updated message and sort by timestamp
-            const updated = [...filtered, message].sort((a, b) => 
+            // Check if message already exists (avoid duplicates)
+            const exists = prev.some(m => m.id === formattedMessage.id);
+            if (exists) {
+              console.log('⚠️ Message already exists, skipping:', formattedMessage.id);
+              return prev;
+            }
+            
+            const updated = [...prev, formattedMessage].sort((a, b) => 
               new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
             );
             return updated;
           });
           
-          // Mark messages as read if they're from the teacher
-          if (message.sender_id === teacherUserId && !message.is_read) {
+          // Mark as read if from teacher
+          if (messageData.sender_id === teacherUserId) {
+            console.log('📖 Marking message as read from teacher');
             markMessagesAsRead(teacherUserId);
             setUnreadCounts(prev => {
               const updated = { ...prev };
@@ -771,27 +855,40 @@ const StudentChatWithTeacher = () => {
             });
           }
           
-          // Auto-scroll to bottom on new messages
+          // Auto-scroll to bottom
           setTimeout(() => {
             try {
-              if (flatListRef.current?.scrollToEnd) {
-                flatListRef.current.scrollToEnd({ animated: true });
-              }
+              flatListRef.current?.scrollToEnd({ animated: true });
             } catch (error) {
-              // Silently handle scroll error
+              console.log('Scroll error:', error);
             }
           }, 100);
-        } else if (eventType === 'deleted') {
-          // Remove deleted message
-          setMessages(prev => prev.filter(m => m.id !== message.id));
+          
+        } else if (eventType === 'UPDATE') {
+          // Message updated - replace existing
+          const formattedMessage = {
+            ...messageData,
+            message_type: messageData.message_type || 'text'
+          };
+          
+          setMessages(prev => prev.map(msg => 
+            msg.id === formattedMessage.id ? formattedMessage : msg
+          ));
+          
+        } else if (eventType === 'DELETE') {
+          // Message deleted - remove from list
+          setMessages(prev => prev.filter(msg => msg.id !== messageData.id));
         }
-      }
-    );
+      })
+      .subscribe((status) => {
+        console.log('📡 Subscription status:', status, 'for channel:', channelName);
+      });
     
     return () => {
-      messageHandler.stopSubscription();
+      console.log('🛑 Cleaning up real-time subscription for:', channelName);
+      subscription.unsubscribe();
     };
-  }, [selectedTeacher, user.id, messageHandler, markMessagesAsRead]);
+  }, [selectedTeacher, user.id, markMessagesAsRead]);
 
   // Send a message with optimistic UI
   const handleSend = async () => {
@@ -821,59 +918,76 @@ const StudentChatWithTeacher = () => {
         throw new Error('Student profile not found');
       }
       
-      // Prepare message data for the handler
+      // Prepare message data for the handler (let trigger handle tenant_id)
       const messageData = {
         sender_id: user.id,
         receiver_id: teacherUserId,
         student_id: student.id,
         message: messageText,
         message_type: 'text'
+        // tenant_id will be automatically set by the trigger
       };
       
-      // Use the message handler for optimistic UI and reliable sending
-      await messageHandler.sendMessageOptimistic(
-        messageData,
-        // Optimistic update callback
-        (optimisticMessage) => {
-          console.log('⚡ Adding optimistic message to UI:', optimisticMessage);
-          setMessages(prev => {
-            const updated = [...prev, optimisticMessage].sort((a, b) => 
-              new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
-            );
-            return updated;
-          });
-          
-          // Auto-scroll to bottom
-          setTimeout(() => {
-            try {
-              if (flatListRef.current?.scrollToEnd) {
-                flatListRef.current.scrollToEnd({ animated: true });
-              }
-            } catch (error) {
-              // Silently handle scroll error
-            }
-          }, 100);
-        },
-        // Confirmed callback
-        (tempId, confirmedMessage) => {
-          console.log('✅ Message confirmed, replacing optimistic:', { tempId, confirmedMessage });
-          setMessages(prev => prev.map(msg => 
-            msg.id === tempId ? confirmedMessage : msg
-          ));
-        },
-        // Error callback
-        (tempId, failedMessage, error) => {
-          console.error('❌ Message failed:', { tempId, error });
-          // Update message to show failed state
-          setMessages(prev => prev.map(msg => 
-            msg.id === tempId ? { ...failedMessage, failed: true } : msg
-          ));
-          
-          // Restore input text for retry
-          setInput(messageText);
-          Alert.alert('Message Failed', `Failed to send message: ${error.message || 'Unknown error'}. The message is marked as failed - you can try sending again.`);
+      // Add optimistic message immediately for better UX
+      const tempId = `temp_${Date.now()}_${Math.random()}`;
+      const optimisticMessage = {
+        ...messageData,
+        id: tempId,
+        sent_at: new Date().toISOString(),
+        message_type: 'text',
+        pending: true // Mark as pending
+      };
+      
+      // Add optimistic message to UI immediately
+      console.log('⚡ Adding optimistic message to UI:', optimisticMessage);
+      setMessages(prev => {
+        const updated = [...prev, optimisticMessage].sort((a, b) => 
+          new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+        );
+        return updated;
+      });
+      
+      // Auto-scroll to bottom
+      setTimeout(() => {
+        try {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        } catch (error) {
+          console.log('Scroll error after optimistic message:', error);
         }
-      );
+      }, 100);
+      
+      // Send to database
+      const { data: insertedMsg, error: sendError } = await supabase
+        .from(TABLES.MESSAGES)
+        .insert(messageData)
+        .select()
+        .single();
+      
+      if (sendError) {
+        console.error('❌ Database insert failed:', sendError);
+        
+        // Mark message as failed
+        setMessages(prev => prev.map(msg => 
+          msg.id === tempId ? { ...msg, failed: true, error: sendError.message, pending: false } : msg
+        ));
+        
+        // Restore input text for retry
+        setInput(messageText);
+        Alert.alert('Message Failed', `Failed to send message: ${sendError.message || 'Unknown error'}. You can try sending again.`);
+        return;
+      }
+      
+      // Replace optimistic message with real one
+      const confirmedMessage = {
+        ...insertedMsg,
+        message_type: insertedMsg.message_type || 'text',
+        pending: false
+      };
+      
+      console.log('✅ Message confirmed, replacing optimistic:', { tempId, confirmedMessage });
+      setMessages(prev => prev.map(msg => 
+        msg.id === tempId ? confirmedMessage : msg
+      ));
       
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -926,6 +1040,174 @@ const StudentChatWithTeacher = () => {
         }
       ]
     );
+  };
+
+  // Handle image download with user choice
+  const handleImageDownload = async (imageUrl, fileName) => {
+    console.log('🖼️ Image download requested:', { imageUrl, fileName });
+    
+    try {
+      // Generate filename if not provided
+      const downloadFileName = fileName || `chat_image_${Date.now()}.jpg`;
+      console.log('📁 Download filename:', downloadFileName);
+      
+      // Check permissions upfront
+      const { status: mediaStatus } = await MediaLibrary.getPermissionsAsync();
+      const needsMediaPermission = mediaStatus !== 'granted';
+      console.log('📱 Media library permission status:', mediaStatus);
+      
+      // Show options to user with proper button order
+      Alert.alert(
+        'Save Image',
+        'Choose where you want to save this image:',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel'
+          },
+          {
+            text: '📁 Save to Files',
+            onPress: async () => {
+              console.log('💾 User chose: Save to Files');
+              try {
+                // Download to temp location first
+                const fileUri = FileSystem.documentDirectory + downloadFileName;
+                console.log('⬇️ Downloading to temp location:', fileUri);
+                
+                const downloadResult = await FileSystem.downloadAsync(imageUrl, fileUri);
+                console.log('📥 Download result:', downloadResult.status);
+                
+                if (downloadResult.status === 200) {
+                  // Use sharing dialog to open file manager/save dialog
+                  const isAvailable = await Sharing.isAvailableAsync();
+                  console.log('🔗 Sharing available:', isAvailable);
+                  
+                  if (isAvailable) {
+                    console.log('📤 Opening file manager/share dialog...');
+                    await Sharing.shareAsync(downloadResult.uri, {
+                      mimeType: 'image/jpeg',
+                      dialogTitle: 'Save image to...'
+                    });
+                    console.log('✅ Share dialog opened successfully');
+                  } else {
+                    Alert.alert('Not Available', 'File sharing is not available on this device');
+                  }
+                } else {
+                  throw new Error(`Download failed with status: ${downloadResult.status}`);
+                }
+              } catch (error) {
+                console.error('❌ File save error:', error);
+                Alert.alert('Save Failed', `Failed to save image to files: ${error.message}`);
+              }
+            }
+          },
+          {
+            text: '📷 Save to Gallery',
+            onPress: async () => {
+              console.log('🖼️ User chose: Save to Gallery');
+              try {
+                // Request media library permissions if needed
+                let permissionStatus = mediaStatus;
+                if (needsMediaPermission) {
+                  console.log('🔐 Requesting media library permission...');
+                  const permissionResult = await MediaLibrary.requestPermissionsAsync();
+                  permissionStatus = permissionResult.status;
+                  console.log('🔐 Permission result:', permissionStatus);
+                }
+                
+                if (permissionStatus !== 'granted') {
+                  console.log('❌ Media library permission denied');
+                  Alert.alert(
+                    'Permission Required', 
+                    'Permission to access your photo gallery is required to save images. Please enable it in your device settings.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Open Settings', onPress: () => {
+                        // Try to open app settings (platform specific)
+                        if (Platform.OS === 'ios') {
+                          Linking.openURL('app-settings:');
+                        } else {
+                          Linking.openSettings();
+                        }
+                      }}
+                    ]
+                  );
+                  return;
+                }
+
+                // Download to cache directory instead (better for MediaLibrary)
+                const fileUri = FileSystem.cacheDirectory + downloadFileName;
+                console.log('⬇️ Downloading to cache location for gallery save:', fileUri);
+                
+                const downloadResult = await FileSystem.downloadAsync(imageUrl, fileUri);
+                console.log('📥 Gallery download result:', downloadResult.status);
+                
+                if (downloadResult.status === 200) {
+                  // Check if file actually exists and is readable
+                  const fileInfo = await FileSystem.getInfoAsync(downloadResult.uri);
+                  console.log('📄 File info after download:', fileInfo);
+                  
+                  if (!fileInfo.exists) {
+                    throw new Error('Downloaded file does not exist');
+                  }
+                  
+                  // Save to media library (gallery)
+                  console.log('💾 Saving to gallery with MediaLibrary...');
+                  
+                  // Try to create asset with explicit album creation
+                  const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
+                  console.log('📸 Gallery asset created:', asset);
+                  
+                  if (asset && asset.id) {
+                    console.log('✅ Asset successfully saved to gallery:', {
+                      id: asset.id,
+                      filename: asset.filename,
+                      uri: asset.uri,
+                      mediaType: asset.mediaType
+                    });
+                    
+                    // Try to get the album info to confirm save location
+                    try {
+                      const albums = await MediaLibrary.getAlbumsAsync({
+                        includeSmartAlbums: true
+                      });
+                      console.log('📷 Available albums:', albums.map(a => a.title));
+                    } catch (albumError) {
+                      console.log('⚠️ Could not fetch albums info:', albumError);
+                    }
+                    
+                    // Clean up temp file after successful save
+                    try {
+                      await FileSystem.deleteAsync(downloadResult.uri, { idempotent: true });
+                      console.log('🧹 Temp file cleaned up successfully');
+                    } catch (cleanupError) {
+                      console.log('⚠️ Temp file cleanup error (non-critical):', cleanupError);
+                    }
+                    
+                    Alert.alert(
+                      'Saved Successfully! 🎉', 
+                      `Image has been saved to your photo gallery!\n\nFilename: ${asset.filename || downloadFileName}\n\nYou can find it in your Photos app.`,
+                      [{ text: 'OK' }]
+                    );
+                  } else {
+                    throw new Error('MediaLibrary.createAssetAsync returned null or invalid asset');
+                  }
+                } else {
+                  throw new Error(`Download failed with HTTP status: ${downloadResult.status}`);
+                }
+              } catch (error) {
+                console.error('❌ Gallery save error:', error);
+                Alert.alert('Save Failed', `Failed to save to gallery: ${error.message}`);
+              }
+            }
+          }
+        ],
+        { cancelable: true }
+      );
+    } catch (error) {
+      console.error('❌ Image download preparation error:', error);
+      Alert.alert('Download Failed', `Failed to prepare download: ${error.message}`);
+    }
   };
 
   // Show attachment menu
@@ -1498,19 +1780,33 @@ const StudentChatWithTeacher = () => {
                   item.sender_id === user.id ? styles.bubbleParent : styles.bubbleTeacher,
                   deletingMessageId === item.id && styles.deletingMessage
                 ]}>
-                  {item.type === 'image' && (
-                    <Image source={{ uri: item.uri }} style={styles.chatImage} />
-                  )}
-                  {item.type === 'file' && (
+                  {item.message_type === 'image' ? (
+                    <TouchableOpacity 
+                      onPress={() => handleImageDownload(item.file_url, item.file_name)}
+                      activeOpacity={0.8}
+                    >
+                      <Image source={{ uri: item.file_url }} style={styles.chatImage} />
+                      <View style={styles.downloadOverlay}>
+                        <Ionicons name="download" size={16} color="#fff" />
+                      </View>
+                    </TouchableOpacity>
+                  ) : item.message_type === 'file' ? (
                     <View style={styles.fileRow}>
                       <Ionicons name="document" size={20} color="#1976d2" style={{ marginRight: 6 }} />
-                      <Text style={styles.fileName}>{item.file_name}</Text>
+                      <Text style={styles.fileName}>{item.file_name || 'Attachment'}</Text>
                     </View>
+                  ) : (
+                    <Text style={styles.messageText}>
+                      {item.message && item.message.trim().length > 0
+                        ? item.message
+                        : item.message_type === 'image'
+                          ? '📷 Photo'
+                          : item.message_type === 'file'
+                            ? '📎 Attachment'
+                            : '[Attachment]'}
+                    </Text>
                   )}
-                  {(!item.type || item.type === 'text') && (
-                    <Text style={styles.messageText}>{item.message || item.text}</Text>
-                  )}
-                  <Text style={styles.messageTime}>{formatToLocalTime(item.sent_at || item.created_at)}</Text>
+                  <Text style={styles.messageTime}>{formatToLocalTime(item.sent_at)}</Text>
                 </View>
               </TouchableOpacity>
             )}
@@ -1551,12 +1847,7 @@ const StudentChatWithTeacher = () => {
               </TouchableOpacity>
             </View>
             
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.attachmentOptions}
-              style={styles.attachmentScrollView}
-            >
+            <View style={styles.attachmentOptions}>
               <TouchableOpacity style={styles.attachmentOption} onPress={handlePhotoUpload}>
                 <View style={[styles.attachmentIcon, { backgroundColor: '#4CAF50' }]}>
                   <Ionicons name="camera" size={24} color="#fff" />
@@ -1570,111 +1861,7 @@ const StudentChatWithTeacher = () => {
                 </View>
                 <Text style={styles.attachmentText}>Document</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runCompleteDiagnostics().then(results => {
-                  console.log('🔍 Storage Diagnostics Results:', results);
-                  const summary = results.summary;
-                  Alert.alert(
-                    'Storage Diagnostics', 
-                    `Overall Health: ${summary.overallHealth ? '✅ Good' : '❌ Issues Found'}\n\n` +
-                    `Critical Issues: ${summary.criticalIssues.length}\n` +
-                    `${summary.criticalIssues.join('\n')}\n\n` +
-                    `Recommendations:\n${summary.recommendations.join('\n')}`,
-                    [{ text: 'OK' }]
-                  );
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#FF9800' }]}>
-                  <Ionicons name="bug" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Diagnose</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runDirectStorageTest().then(results => {
-                  console.log('🔬 Direct Storage Test Results:', results);
-                  const { success, message, details } = results;
-                  Alert.alert(
-                    'Direct Storage Test', 
-                    `Result: ${success ? '✅ Success' : '❌ Failed'}\n\n` +
-                    `Message: ${message}\n\n` +
-                    (details ? `Details:\n${details}` : ''),
-                    [{ text: 'OK' }]
-                  );
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#9C27B0' }]}>
-                  <Ionicons name="flask" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Direct Test</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runNetworkDiagnostics().then(results => {
-                  console.log('🌐 Network Diagnostics Results:', results);
-                  const formattedResults = formatNetworkDiagnosticResults(results);
-                  Alert.alert(
-                    'Network Diagnostics', 
-                    formattedResults,
-                    [{ text: 'OK' }]
-                  );
-                }).catch(error => {
-                  console.error('Network diagnostics error:', error);
-                  Alert.alert('Network Diagnostics', 'Failed to run network diagnostics: ' + error.message);
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#607D8B' }]}>
-                  <Ionicons name="wifi" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Network</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runBucketDiagnostics().then(results => {
-                  console.log('🪣 Bucket Diagnostics Results:', results);
-                  const formattedResults = formatBucketDiagnosticResults(results);
-                  Alert.alert(
-                    'Bucket Diagnostics', 
-                    formattedResults,
-                    [{ text: 'OK' }]
-                  );
-                }).catch(error => {
-                  console.error('Bucket diagnostics error:', error);
-                  Alert.alert('Bucket Diagnostics', 'Failed to run bucket diagnostics: ' + error.message);
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#795548' }]}>
-                  <Ionicons name="server" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Buckets</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runSimpleNetworkTest().then(results => {
-                  console.log('🌐 Simple Network Test Results:', results);
-                  const formattedResults = formatSimpleNetworkResults(results);
-                  Alert.alert(
-                    'Network Test', 
-                    formattedResults,
-                    [{ text: 'OK' }]
-                  );
-                }).catch(error => {
-                  console.error('Simple network test error:', error);
-                  Alert.alert('Network Test', 'Failed to run network test: ' + error.message);
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#4CAF50' }]}>
-                  <Ionicons name="pulse" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Net Test</Text>
-              </TouchableOpacity>
-            </ScrollView>
+            </View>
           </Animatable.View>
         </TouchableOpacity>
       )}
@@ -2091,6 +2278,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     fontWeight: '600',
+  },
+  
+  // Image download overlay
+  downloadOverlay: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 12,
+    padding: 4,
+    minWidth: 24,
+    minHeight: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 
