@@ -4,7 +4,7 @@ import Header from '../../components/Header';
 import { Picker } from '@react-native-picker/picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Print from 'expo-print';
-import { supabase, dbHelpers } from '../../utils/supabase';
+import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 
 const MarksManagement = () => {
@@ -120,6 +120,26 @@ const MarksManagement = () => {
         return;
       }
 
+      // Get current user's tenant_id for RLS policy compliance
+      const { getCurrentUserId } = require('../../utils/supabase');
+      const currentUserId = await getCurrentUserId();
+      
+      if (!currentUserId) {
+        throw new Error('User authentication required');
+      }
+      
+      const { data: currentUser } = await supabase
+        .from(TABLES.USERS)
+        .select('tenant_id')
+        .eq('id', currentUserId)
+        .single();
+      
+      const userTenantId = currentUser?.tenant_id;
+      
+      if (!userTenantId) {
+        throw new Error('User tenant information not found');
+      }
+
       // Delete existing marks for this class/subject/date
       await supabase
         .from('marks')
@@ -135,7 +155,8 @@ const MarksManagement = () => {
         subject_id: selectedSubject,
         exam_date: examDateStr,
         mark: parseInt(mark),
-        exam_type: selectedExamType
+        exam_type: selectedExamType,
+        tenant_id: userTenantId
       }));
 
       await supabase

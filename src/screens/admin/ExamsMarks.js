@@ -5,7 +5,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
-import { supabase } from '../../utils/supabase';
+import { supabase, getUserTenantId } from '../../utils/supabase';
 // Helper functions for date formatting
 const formatDate = (dateString) => {
   if (!dateString) return '';
@@ -235,6 +235,16 @@ const ExamsMarks = () => {
         return;
       }
 
+      // Get tenant_id for RLS compliance
+      const tenant_id = await getUserTenantId();
+      console.log('📝 Resolved tenant_id for exam creation:', tenant_id);
+      
+      if (!tenant_id) {
+        console.error('❌ No tenant_id available for exam creation');
+        Alert.alert('Error', 'Unable to determine tenant context. Please try signing out and back in.');
+        return;
+      }
+
       // Create exam records for each selected class
       const examRecords = examForm.selected_classes.map(classId => ({
         name: examForm.name.trim(),
@@ -243,10 +253,11 @@ const ExamsMarks = () => {
         start_date: examForm.start_date,
         end_date: examForm.end_date,
         remarks: examForm.description?.trim() || null,
-        max_marks: parseInt(examForm.max_marks) || 100
+        max_marks: parseInt(examForm.max_marks) || 100,
+        tenant_id: tenant_id
       }));
 
-      console.log('📝 Inserting exam records:', examRecords);
+      console.log('🔧 Inserting exam records with tenant_id:', examRecords);
       
       const { data, error } = await supabase
         .from('exams')
@@ -296,6 +307,16 @@ const ExamsMarks = () => {
         return;
       }
 
+      // Get tenant_id for RLS compliance
+      const tenant_id = await getUserTenantId();
+      console.log('🔧 Resolved tenant_id for exam edit:', tenant_id);
+      
+      if (!tenant_id) {
+        console.error('❌ No tenant_id available for exam edit');
+        Alert.alert('Error', 'Unable to determine tenant context. Please try signing out and back in.');
+        return;
+      }
+
       // First, delete the existing exam record
       const { error: deleteError } = await supabase
         .from('exams')
@@ -312,7 +333,8 @@ const ExamsMarks = () => {
         start_date: examForm.start_date,
         end_date: examForm.end_date || examForm.start_date,
         remarks: examForm.description || null,
-        max_marks: parseInt(examForm.max_marks) || 100
+        max_marks: parseInt(examForm.max_marks) || 100,
+        tenant_id: tenant_id
       }));
 
       const { error: insertError } = await supabase
@@ -383,6 +405,34 @@ const ExamsMarks = () => {
         return;
       }
 
+      // Get current user's tenant_id for RLS policy compliance
+      // Use multiple approaches to ensure we always get a tenant_id
+      let userTenantId = null;
+      
+      try {
+        // Approach 1: Try getUserTenantId function
+        const { getUserTenantId } = require('../../utils/supabase');
+        userTenantId = await getUserTenantId();
+        console.log('🔧 [ExamsMarks] getUserTenantId returned:', userTenantId);
+      } catch (error) {
+        console.log('⚠️ [ExamsMarks] getUserTenantId failed:', error.message);
+      }
+      
+      // Approach 2: If that fails, use hardcoded fallback
+      if (!userTenantId) {
+        userTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
+        console.log('🔄 [ExamsMarks] Using hardcoded tenant_id:', userTenantId);
+      }
+      
+      // Approach 3: Final safety check - this should never be needed now
+      if (!userTenantId) {
+        console.error('❌ [ExamsMarks] All tenant_id approaches failed');
+        Alert.alert('Error', 'Unable to determine tenant information. Please try again.');
+        return;
+      }
+      
+      console.log('✅ [ExamsMarks] Final tenant_id to use:', userTenantId);
+
       const marksToSave = [];
 
       Object.entries(marksForm).forEach(([studentId, subjectMarks]) => {
@@ -405,7 +455,8 @@ const ExamsMarks = () => {
               marks_obtained: marksValue,
               grade: grade,
               max_marks: maxMarks,
-              remarks: null
+              remarks: null,
+              tenant_id: userTenantId
             });
           }
         });

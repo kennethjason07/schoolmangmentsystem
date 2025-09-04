@@ -217,6 +217,11 @@ export default function StudentAttendanceMarks({ route, navigation }) {
     logoUrl: '',
   });
 
+  // Missing state variables
+  const [monthlyAttendanceStats, setMonthlyAttendanceStats] = useState({});
+  const [attendancePercentageByMonth, setAttendancePercentageByMonth] = useState({});
+  const [classSubjects, setClassSubjects] = useState([]);
+
   // Animation values for enhanced stats cards
   const [statsAnimValue] = useState(new Animated.Value(0));
   const [pulseAnim] = useState(new Animated.Value(1));
@@ -601,13 +606,13 @@ export default function StudentAttendanceMarks({ route, navigation }) {
     }
   };
 
-  // SIMPLE SOLUTION - Handle tab changes
-  useEffect(() => {
-    if (route?.params?.activeTab) {
-      console.log('Setting activeTab to:', route.params.activeTab);
-      setActiveTab(route.params.activeTab);
-    }
-  }, [route?.params?.activeTab]);
+  // SIMPLE SOLUTION - Handle tab changes (removed as not needed in this screen)
+  // useEffect(() => {
+  //   if (route?.params?.activeTab) {
+  //     console.log('Setting activeTab to:', route.params.activeTab);
+  //     setActiveTab(route.params.activeTab);
+  //   }
+  // }, [route?.params?.activeTab]);
 
   // Comprehensive data refresh function
   const refreshData = async (showLoading = false) => {

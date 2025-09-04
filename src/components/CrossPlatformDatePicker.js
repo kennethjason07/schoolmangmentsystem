@@ -38,7 +38,8 @@ const CrossPlatformDatePicker = ({
       } else if (mode === 'time') {
         return d.toLocaleTimeString('en-US', {
           hour: '2-digit',
-          minute: '2-digit'
+          minute: '2-digit',
+          hour12: true
         });
       } else {
         return d.toLocaleString('en-US', {
@@ -196,7 +197,8 @@ export const DatePickerButton = ({
       } else if (mode === 'time') {
         return d.toLocaleTimeString('en-US', {
           hour: '2-digit',
-          minute: '2-digit'
+          minute: '2-digit',
+          hour12: true
         });
       } else {
         return d.toLocaleString('en-US', {

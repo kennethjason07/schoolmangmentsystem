@@ -17,8 +17,10 @@ import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { Picker } from '@react-native-picker/picker';
 import { supabase } from '../../utils/supabase';
+import { useTenant } from '../../contexts/TenantContext';
 
 const ManageClasses = ({ navigation }) => {
+  const { tenantId } = useTenant();
   const [loading, setLoading] = useState(true);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -49,6 +51,7 @@ const ManageClasses = ({ navigation }) => {
       const { data: classData, error: classError } = await supabase
         .from('classes')
         .select('*')
+        .eq('tenant_id', tenantId)
         .order('class_name', { ascending: true });
       
       if (classError) throw classError;
@@ -59,12 +62,14 @@ const ManageClasses = ({ navigation }) => {
           const { count } = await supabase
             .from('students')
             .select('*', { count: 'exact', head: true })
-            .eq('class_id', cls.id);
+            .eq('class_id', cls.id)
+            .eq('tenant_id', tenantId);
           
           const { count: subjectsCount } = await supabase
             .from('subjects')
             .select('*', { count: 'exact', head: true })
-            .eq('class_id', cls.id);
+            .eq('class_id', cls.id)
+            .eq('tenant_id', tenantId);
           
           return {
             ...cls,
@@ -80,6 +85,7 @@ const ManageClasses = ({ navigation }) => {
       const { data: teacherData, error: teacherError } = await supabase
         .from('teachers')
         .select('*')
+        .eq('tenant_id', tenantId)
         .order('name', { ascending: true });
       
       if (teacherError) throw teacherError;
@@ -106,6 +112,7 @@ const ManageClasses = ({ navigation }) => {
           academic_year: newClass.academic_year,
           section: newClass.section,
           class_teacher_id: newClass.class_teacher_id || null,
+          tenant_id: tenantId,
         });
 
       if (error) {
@@ -356,7 +363,8 @@ const ManageClasses = ({ navigation }) => {
             )
           )
         `)
-        .eq('class_id', classItem.id);
+        .eq('class_id', classItem.id)
+        .eq('tenant_id', tenantId);
       
       if (subjectsError) throw subjectsError;
       
@@ -866,17 +874,30 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   modalContent: {
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 20,
-    width: '90%',
-    maxHeight: '80%',
+    width: '95%',
+    maxWidth: 500,
+    maxHeight: '90%',
+    minHeight: 400,
     overflow: 'hidden',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
+      },
+    }),
   },
   modalHeader: {
     flexDirection: 'row',

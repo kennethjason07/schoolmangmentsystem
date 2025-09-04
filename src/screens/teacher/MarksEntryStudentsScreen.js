@@ -205,6 +205,19 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
   // Enhanced save function
   const saveMarks = async (currentMarks = marks, showAlert = true) => {
     try {
+      // Get current user's tenant_id for RLS policy compliance
+      const { data: currentUser } = await supabase
+        .from(TABLES.USERS)
+        .select('tenant_id')
+        .eq('id', user.id)
+        .single();
+      
+      const userTenantId = currentUser?.tenant_id;
+      
+      if (!userTenantId) {
+        throw new Error('User tenant information not found');
+      }
+      
       const marksToSave = [];
       
       Object.entries(currentMarks).forEach(([cellKey, value]) => {
@@ -218,7 +231,8 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
               subject_id: subjectId,
               marks_obtained: markValue,
               max_marks: 100,
-              exam_id: null
+              exam_id: null,
+              tenant_id: userTenantId
             });
           }
         }

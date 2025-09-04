@@ -331,17 +331,16 @@ export async function createBulkMarksNotifications(marksData, exam, adminUserId 
           .eq('notification_id', notification.id)
           .eq('recipient_id', parent.id);
 
-        // Create message record
+        // Create message record using correct schema fields
         const { error: messageError } = await supabase
           .from(TABLES.MESSAGES)
           .insert({
-            sender_id: adminUserId,
-            recipient_id: parent.id,
-            subject: `Marks Update - ${student.name}`,
-            content: messageContent,
-            message_type: 'System',
+            sender_id: adminUserId || null,
+            receiver_id: parent.id,
+            student_id: student.id,
+            message: messageContent,
+            message_type: 'text',
             is_read: false,
-            priority: 'Normal',
             sent_at: new Date().toISOString()
           });
 

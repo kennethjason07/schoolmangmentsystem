@@ -76,7 +76,7 @@ export const useUnreadNotificationCount = (recipientType = 'Student') => {
       // Get tenant_id for proper filtering
       const tenantId = await getUserTenantId();
       if (!tenantId) {
-        console.error('❌ Cannot fetch notification count: tenant_id is null');
+        console.warn('⚠️ No tenant_id available for notification filtering, setting count to 0');
         setUnreadCount(0);
         setLoading(false);
         return;

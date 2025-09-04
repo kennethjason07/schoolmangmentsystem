@@ -64,6 +64,7 @@ const SubjectsTimetable = ({ route }) => {
   const [copiedDayData, setCopiedDayData] = useState(null);
   const [copiedSourceDay, setCopiedSourceDay] = useState('');
   const [screenData, setScreenData] = useState(Dimensions.get('window'));
+  const [subjectModalError, setSubjectModalError] = useState(null);
 
   // Add screen dimension change listener
   useEffect(() => {
@@ -72,6 +73,25 @@ const SubjectsTimetable = ({ route }) => {
     });
 
     return () => subscription?.remove();
+  }, []);
+
+  // Set current day on component mount
+  useEffect(() => {
+    const getCurrentDay = () => {
+      const today = new Date();
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const currentDayName = dayNames[today.getDay()];
+      const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      
+      // If it's Sunday, default to Monday since school timetables don't include Sunday
+      if (currentDayName === 'Sunday') {
+        setSelectedDay('Monday');
+      } else if (days.includes(currentDayName)) {
+        setSelectedDay(currentDayName);
+      }
+    };
+    
+    getCurrentDay();
   }, []);
 
   useEffect(() => {
@@ -197,7 +217,8 @@ const fetchTimetableForClass = async (classId) => {
   // Subject CRUD
   const openAddSubject = () => {
     setEditSubject(null);
-setSubjectForm({ name: '', code: '', teacherId: '', classId: '' });
+    setSubjectForm({ name: '', code: '', teacherId: '', classId: '' });
+    setSubjectModalError(null);
     setModalVisible(true);
   };
   const openEditSubject = (subject) => {
@@ -209,6 +230,7 @@ setSubjectForm({ name: '', code: '', teacherId: '', classId: '' });
       teacherId: teacherId,
       classId: subject.class_id || ''
     });
+    setSubjectModalError(null);
     setModalVisible(true);
   };
 
@@ -226,6 +248,55 @@ setSubjectForm({ name: '', code: '', teacherId: '', classId: '' });
         Alert.alert('Error', 'Please select a class');
         setLoading(false);
         return;
+      }
+
+      // Check for duplicate subject in the same class (only for new subjects)
+      if (!editSubject) {
+        const { data: existingSubjects, error: checkError } = await supabase
+          .from(TABLES.SUBJECTS)
+          .select('id, name')
+          .eq('class_id', subjectForm.classId)
+          .eq('tenant_id', tenantId)
+          .ilike('name', subjectForm.name.trim());
+
+        if (checkError) {
+          console.error('Error checking for duplicate subjects:', checkError);
+          Alert.alert('Error', 'Failed to validate subject. Please try again.');
+          setLoading(false);
+          return;
+        }
+
+        if (existingSubjects && existingSubjects.length > 0) {
+          const selectedClass = classes.find(c => c.id === subjectForm.classId);
+          const className = selectedClass ? `${selectedClass.class_name} ${selectedClass.section}` : 'this class';
+          setSubjectModalError(`The subject "${subjectForm.name}" already exists for ${className}. Please choose a different name or select a different class.`);
+          setLoading(false);
+          return;
+        }
+      } else {
+        // For editing, check if the new name conflicts with other subjects in the same class
+        const { data: existingSubjects, error: checkError } = await supabase
+          .from(TABLES.SUBJECTS)
+          .select('id, name')
+          .eq('class_id', subjectForm.classId)
+          .eq('tenant_id', tenantId)
+          .ilike('name', subjectForm.name.trim())
+          .neq('id', editSubject.id); // Exclude the current subject being edited
+
+        if (checkError) {
+          console.error('Error checking for duplicate subjects:', checkError);
+          Alert.alert('Error', 'Failed to validate subject. Please try again.');
+          setLoading(false);
+          return;
+        }
+
+        if (existingSubjects && existingSubjects.length > 0) {
+          const selectedClass = classes.find(c => c.id === subjectForm.classId);
+          const className = selectedClass ? `${selectedClass.class_name} ${selectedClass.section}` : 'this class';
+          setSubjectModalError(`The subject "${subjectForm.name}" already exists for ${className}. Please choose a different name.`);
+          setLoading(false);
+          return;
+        }
       }
 
       // Get current academic year
@@ -660,6 +731,8 @@ const { data: subjectData, error: subjectError } = await supabase
       { number: 6, startTime: '12:15', endTime: '13:00', duration: 45, name: 'Period 6' },
       { number: 7, startTime: '14:00', endTime: '14:45', duration: 45, name: 'Period 7' },
       { number: 8, startTime: '14:45', endTime: '15:30', duration: 45, name: 'Period 8' },
+      { number: 9, startTime: '15:45', endTime: '16:30', duration: 45, name: 'Period 9' },
+      { number: 10, startTime: '16:30', endTime: '17:15', duration: 45, name: 'Period 10' },
     ];
   };
 
@@ -1196,18 +1269,25 @@ await supabase
                 <TextInput
                   placeholder="Subject Name"
                   value={subjectForm.name}
-                  onChangeText={text => setSubjectForm(f => ({ ...f, name: text }))}
+                  onChangeText={text => {
+                    setSubjectForm(f => ({ ...f, name: text }));
+                    setSubjectModalError(null); // Clear error when user types
+                  }}
                   style={styles.input}
                 />
 
-                <Text style={{ marginTop: 16, marginBottom: 4, fontSize: 14, fontWeight: '600', color: '#333' }}>Select Class:</Text>
-                <View style={styles.pickerWrapper}>
+                <Text style={styles.modalLabel}>Select Class:</Text>
+                <View style={styles.modalPickerWrapper}>
                   <Picker
                     selectedValue={subjectForm.classId}
                     style={styles.modalPicker}
-                    onValueChange={itemValue => setSubjectForm(f => ({ ...f, classId: itemValue }))}
+                    onValueChange={itemValue => {
+                      setSubjectForm(f => ({ ...f, classId: itemValue }));
+                      setSubjectModalError(null); // Clear error when user selects a class
+                    }}
+                    itemStyle={styles.modalPickerItem}
                   >
-                    <Picker.Item label="Select a Class" value="" />
+                    <Picker.Item label="-- Select a Class --" value="" />
                     {classes.map(c => (
                       <Picker.Item 
                         key={c.id} 
@@ -1218,19 +1298,28 @@ await supabase
                   </Picker>
                 </View>
 
-                <Text style={{ marginTop: 16, marginBottom: 4, fontSize: 14, fontWeight: '600', color: '#333' }}>Assign Teacher (Optional):</Text>
-                <View style={styles.pickerWrapper}>
+                <Text style={styles.modalLabel}>Assign Teacher (Optional):</Text>
+                <View style={styles.modalPickerWrapper}>
                   <Picker
                     selectedValue={subjectForm.teacherId}
                     style={styles.modalPicker}
                     onValueChange={itemValue => setSubjectForm(f => ({ ...f, teacherId: itemValue }))}
+                    itemStyle={styles.modalPickerItem}
                   >
-                    <Picker.Item label="Select a Teacher" value="" />
+                    <Picker.Item label="-- Select a Teacher --" value="" />
                     {teachers.map(t => (
                       <Picker.Item key={t.id} label={t.name} value={t.id} />
                     ))}
                   </Picker>
                 </View>
+                
+                {/* Error message display */}
+                {subjectModalError && (
+                  <View style={styles.errorMessageContainer}>
+                    <Text style={styles.errorMessageText}>{subjectModalError}</Text>
+                  </View>
+                )}
+                
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 }}>
                   <Button title="Cancel" onPress={() => setModalVisible(false)} />
                   <Button title="Save" onPress={handleSaveSubject} />
@@ -1451,75 +1540,136 @@ await supabase
                 />
               </>
             )}
-            {Platform.OS === 'web' ? (
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <View style={{ flex: 1 }}>
-                  <CrossPlatformDatePicker
-                    label="Start Time"
-                    value={periodForm.startTime ? (() => {
-                      const [h, m] = periodForm.startTime.split(':').map(Number);
-                      return new Date(1970, 0, 1, h, m);
-                    })() : null}
-                    onChange={(event, selectedDate) => {
-                      if (selectedDate) {
-                        const h = selectedDate.getHours().toString().padStart(2, '0');
-                        const m = selectedDate.getMinutes().toString().padStart(2, '0');
-                        setPeriodForm(f => ({ ...f, startTime: `${h}:${m}` }));
-                      }
-                    }}
-                    mode="time"
-                    placeholder="Select Start Time"
-                    containerStyle={{ marginBottom: 8 }}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <CrossPlatformDatePicker
-                    label="End Time"
-                    value={periodForm.endTime ? (() => {
-                      const [h, m] = periodForm.endTime.split(':').map(Number);
-                      return new Date(1970, 0, 1, h, m);
-                    })() : null}
-                    onChange={(event, selectedDate) => {
-                      if (selectedDate) {
-                        const h = selectedDate.getHours().toString().padStart(2, '0');
-                        const m = selectedDate.getMinutes().toString().padStart(2, '0');
-                        setPeriodForm(f => ({ ...f, endTime: `${h}:${m}` }));
-                      }
-                    }}
-                    mode="time"
-                    placeholder="Select End Time"
-                    containerStyle={{ marginBottom: 8 }}
-                  />
-                </View>
+            {/* SIMPLE TIME PICKER WITH CLEAR AM/PM */}
+            <Text style={{ marginTop: 16, marginBottom: 8, fontSize: 18, fontWeight: 'bold', color: '#2196F3' }}>Start Time</Text>
+            <View style={styles.simpleTimeRow}>
+              <View style={styles.timeInputContainer}>
+                <Text style={styles.timeLabel}>Time:</Text>
+                <Picker
+                  selectedValue={periodForm.startTime || '09:00'}
+                  style={styles.simpleTimePicker}
+                  onValueChange={(time) => {
+                    setPeriodForm(f => ({ ...f, startTime: time }));
+                  }}
+                >
+                  {/* AM Times */}
+                  <Picker.Item label="12:00 AM" value="00:00" />
+                  <Picker.Item label="12:30 AM" value="00:30" />
+                  <Picker.Item label="01:00 AM" value="01:00" />
+                  <Picker.Item label="01:30 AM" value="01:30" />
+                  <Picker.Item label="02:00 AM" value="02:00" />
+                  <Picker.Item label="02:30 AM" value="02:30" />
+                  <Picker.Item label="03:00 AM" value="03:00" />
+                  <Picker.Item label="03:30 AM" value="03:30" />
+                  <Picker.Item label="04:00 AM" value="04:00" />
+                  <Picker.Item label="04:30 AM" value="04:30" />
+                  <Picker.Item label="05:00 AM" value="05:00" />
+                  <Picker.Item label="05:30 AM" value="05:30" />
+                  <Picker.Item label="06:00 AM" value="06:00" />
+                  <Picker.Item label="06:30 AM" value="06:30" />
+                  <Picker.Item label="07:00 AM" value="07:00" />
+                  <Picker.Item label="07:30 AM" value="07:30" />
+                  <Picker.Item label="08:00 AM" value="08:00" />
+                  <Picker.Item label="08:30 AM" value="08:30" />
+                  <Picker.Item label="09:00 AM" value="09:00" />
+                  <Picker.Item label="09:30 AM" value="09:30" />
+                  <Picker.Item label="10:00 AM" value="10:00" />
+                  <Picker.Item label="10:30 AM" value="10:30" />
+                  <Picker.Item label="11:00 AM" value="11:00" />
+                  <Picker.Item label="11:30 AM" value="11:30" />
+                  {/* PM Times */}
+                  <Picker.Item label="12:00 PM" value="12:00" />
+                  <Picker.Item label="12:30 PM" value="12:30" />
+                  <Picker.Item label="01:00 PM" value="13:00" />
+                  <Picker.Item label="01:30 PM" value="13:30" />
+                  <Picker.Item label="02:00 PM" value="14:00" />
+                  <Picker.Item label="02:30 PM" value="14:30" />
+                  <Picker.Item label="03:00 PM" value="15:00" />
+                  <Picker.Item label="03:30 PM" value="15:30" />
+                  <Picker.Item label="04:00 PM" value="16:00" />
+                  <Picker.Item label="04:30 PM" value="16:30" />
+                  <Picker.Item label="05:00 PM" value="17:00" />
+                  <Picker.Item label="05:30 PM" value="17:30" />
+                  <Picker.Item label="06:00 PM" value="18:00" />
+                  <Picker.Item label="06:30 PM" value="18:30" />
+                  <Picker.Item label="07:00 PM" value="19:00" />
+                  <Picker.Item label="07:30 PM" value="19:30" />
+                  <Picker.Item label="08:00 PM" value="20:00" />
+                  <Picker.Item label="08:30 PM" value="20:30" />
+                  <Picker.Item label="09:00 PM" value="21:00" />
+                  <Picker.Item label="09:30 PM" value="21:30" />
+                  <Picker.Item label="10:00 PM" value="22:00" />
+                  <Picker.Item label="10:30 PM" value="22:30" />
+                  <Picker.Item label="11:00 PM" value="23:00" />
+                  <Picker.Item label="11:30 PM" value="23:30" />
+                </Picker>
               </View>
-            ) : (
-              <>
-                <DatePickerButton
-                  label="Start Time"
-                  value={periodForm.startTime ? (() => {
-                    const [h, m] = periodForm.startTime.split(':').map(Number);
-                    return new Date(1970, 0, 1, h, m);
-                  })() : null}
-                  onPress={() => openTimePicker('startTime', periodForm.startTime)}
-                  placeholder="Select Start Time"
-                  mode="time"
-                  style={styles.input}
-                  containerStyle={{ marginBottom: 8 }}
-                />
-                <DatePickerButton
-                  label="End Time"
-                  value={periodForm.endTime ? (() => {
-                    const [h, m] = periodForm.endTime.split(':').map(Number);
-                    return new Date(1970, 0, 1, h, m);
-                  })() : null}
-                  onPress={() => openTimePicker('endTime', periodForm.endTime)}
-                  placeholder="Select End Time"
-                  mode="time"
-                  style={styles.input}
-                  containerStyle={{ marginBottom: 8 }}
-                />
-              </>
-            )}
+            </View>
+            
+            <Text style={{ marginTop: 16, marginBottom: 8, fontSize: 18, fontWeight: 'bold', color: '#2196F3' }}>End Time</Text>
+            <View style={styles.simpleTimeRow}>
+              <View style={styles.timeInputContainer}>
+                <Text style={styles.timeLabel}>Time:</Text>
+                <Picker
+                  selectedValue={periodForm.endTime || '10:00'}
+                  style={styles.simpleTimePicker}
+                  onValueChange={(time) => {
+                    setPeriodForm(f => ({ ...f, endTime: time }));
+                  }}
+                >
+                  {/* AM Times */}
+                  <Picker.Item label="12:00 AM" value="00:00" />
+                  <Picker.Item label="12:30 AM" value="00:30" />
+                  <Picker.Item label="01:00 AM" value="01:00" />
+                  <Picker.Item label="01:30 AM" value="01:30" />
+                  <Picker.Item label="02:00 AM" value="02:00" />
+                  <Picker.Item label="02:30 AM" value="02:30" />
+                  <Picker.Item label="03:00 AM" value="03:00" />
+                  <Picker.Item label="03:30 AM" value="03:30" />
+                  <Picker.Item label="04:00 AM" value="04:00" />
+                  <Picker.Item label="04:30 AM" value="04:30" />
+                  <Picker.Item label="05:00 AM" value="05:00" />
+                  <Picker.Item label="05:30 AM" value="05:30" />
+                  <Picker.Item label="06:00 AM" value="06:00" />
+                  <Picker.Item label="06:30 AM" value="06:30" />
+                  <Picker.Item label="07:00 AM" value="07:00" />
+                  <Picker.Item label="07:30 AM" value="07:30" />
+                  <Picker.Item label="08:00 AM" value="08:00" />
+                  <Picker.Item label="08:30 AM" value="08:30" />
+                  <Picker.Item label="09:00 AM" value="09:00" />
+                  <Picker.Item label="09:30 AM" value="09:30" />
+                  <Picker.Item label="10:00 AM" value="10:00" />
+                  <Picker.Item label="10:30 AM" value="10:30" />
+                  <Picker.Item label="11:00 AM" value="11:00" />
+                  <Picker.Item label="11:30 AM" value="11:30" />
+                  {/* PM Times */}
+                  <Picker.Item label="12:00 PM" value="12:00" />
+                  <Picker.Item label="12:30 PM" value="12:30" />
+                  <Picker.Item label="01:00 PM" value="13:00" />
+                  <Picker.Item label="01:30 PM" value="13:30" />
+                  <Picker.Item label="02:00 PM" value="14:00" />
+                  <Picker.Item label="02:30 PM" value="14:30" />
+                  <Picker.Item label="03:00 PM" value="15:00" />
+                  <Picker.Item label="03:30 PM" value="15:30" />
+                  <Picker.Item label="04:00 PM" value="16:00" />
+                  <Picker.Item label="04:30 PM" value="16:30" />
+                  <Picker.Item label="05:00 PM" value="17:00" />
+                  <Picker.Item label="05:30 PM" value="17:30" />
+                  <Picker.Item label="06:00 PM" value="18:00" />
+                  <Picker.Item label="06:30 PM" value="18:30" />
+                  <Picker.Item label="07:00 PM" value="19:00" />
+                  <Picker.Item label="07:30 PM" value="19:30" />
+                  <Picker.Item label="08:00 PM" value="20:00" />
+                  <Picker.Item label="08:30 PM" value="20:30" />
+                  <Picker.Item label="09:00 PM" value="21:00" />
+                  <Picker.Item label="09:30 PM" value="21:30" />
+                  <Picker.Item label="10:00 PM" value="22:00" />
+                  <Picker.Item label="10:30 PM" value="22:30" />
+                  <Picker.Item label="11:00 PM" value="23:00" />
+                  <Picker.Item label="11:30 PM" value="23:30" />
+                </Picker>
+              </View>
+            </View>
 
             {periodForm.type === 'subject' && (
               <TextInput
@@ -2498,6 +2648,91 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     color: '#495057',
   },
+  errorMessageContainer: {
+    backgroundColor: '#ffebee',
+    borderWidth: 1,
+    borderColor: '#f44336',
+    borderRadius: 6,
+    padding: 12,
+    marginTop: 12,
+  },
+  errorMessageText: {
+    color: '#d32f2f',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  modalLabel: {
+    marginTop: 16,
+    marginBottom: 8,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  modalPickerWrapper: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+    minHeight: 50,
+    justifyContent: 'center',
+  },
+  modalPickerItem: {
+    fontSize: 16,
+    color: '#495057',
+    ...(Platform.OS === 'ios' && {
+      textAlign: 'left',
+    }),
+  },
+  // Time Picker Styles
+  timePickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  timePickerGroup: {
+    flex: 1,
+    marginHorizontal: 4,
+  },
+  timePickerLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#495057',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  timePicker: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+    minHeight: 50,
+    fontSize: 14,
+  },
+  // Simple Time Picker Styles
+  simpleTimeRow: {
+    marginBottom: 16,
+  },
+  timeInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  timeLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#495057',
+    marginRight: 12,
+    minWidth: 50,
+  },
+  simpleTimePicker: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+    minHeight: 50,
+    fontSize: 16,
+  },
 });
 
-export default SubjectsTimetable; 
+export default SubjectsTimetable;
