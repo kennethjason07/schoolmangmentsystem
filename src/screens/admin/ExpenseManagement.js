@@ -22,10 +22,12 @@ import CrossPlatformDatePicker, { DatePickerButton } from '../../components/Cros
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import { supabase, dbHelpers } from '../../utils/supabase';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth } from 'date-fns';
+import { useTenant } from '../../contexts/TenantContext';
 
 const { width } = Dimensions.get('window');
 
 const ExpenseManagement = ({ navigation }) => {
+  const { tenantId, tenantName, currentTenant } = useTenant();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
@@ -129,7 +131,8 @@ const ExpenseManagement = ({ navigation }) => {
       console.log('📥 Fetching monthly expenses...');
       const { data: monthlyExpenses, error: monthlyError } = await dbHelpers.getExpenses({
         startDate: monthStart,
-        endDate: monthEnd
+        endDate: monthEnd,
+        tenantId: tenantId
       });
 
       console.log('📥 Monthly expenses result:', {
@@ -161,7 +164,8 @@ const ExpenseManagement = ({ navigation }) => {
       
       const { data: yearlyExpenses, error: yearlyError } = await dbHelpers.getExpenses({
         startDate: yearStart,
-        endDate: yearEnd
+        endDate: yearEnd,
+        tenantId: tenantId
       });
 
       if (yearlyError) {
@@ -277,7 +281,7 @@ const ExpenseManagement = ({ navigation }) => {
     const loadCategoriesOnMount = async () => {
       if (expenseCategories.length === 0) {
         console.log('🏷️ Loading categories on mount...');
-        const { data: dbCategories, error: categoriesError } = await dbHelpers.getExpenseCategories();
+        const { data: dbCategories, error: categoriesError } = await dbHelpers.getExpenseCategories(tenantId);
         
         if (categoriesError) {
           console.error('❌ Error fetching categories on mount:', categoriesError);
@@ -370,12 +374,12 @@ const ExpenseManagement = ({ navigation }) => {
 
       if (editExpenseIndex !== null) {
         // Update existing expense using helper function
-        const { error } = await dbHelpers.updateExpense(expenses[editExpenseIndex].id, expenseData);
+        const { error } = await dbHelpers.updateExpense(expenses[editExpenseIndex].id, expenseData, tenantId);
 
         if (error) throw error;
       } else {
         // Create new expense using helper function
-        const { error } = await dbHelpers.createExpense(expenseData);
+        const { error } = await dbHelpers.createExpense(expenseData, tenantId);
 
         if (error) throw error;
       }
@@ -400,7 +404,7 @@ const ExpenseManagement = ({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await dbHelpers.deleteExpense(expenseId);
+              const { error } = await dbHelpers.deleteExpense(expenseId, tenantId);
 
               if (error) throw error;
               await loadExpenseData();
@@ -448,7 +452,7 @@ const ExpenseManagement = ({ navigation }) => {
       for (const update of budgetUpdates) {
         const { error } = await dbHelpers.updateExpenseCategory(update.name, {
           monthly_budget: update.monthly_budget
-        });
+        }, tenantId);
         
         if (error) {
           console.error('Error updating budget for', update.name, error);
@@ -490,7 +494,7 @@ const ExpenseManagement = ({ navigation }) => {
           monthly_budget: category.monthly_budget
         };
         
-        const { data, error } = await dbHelpers.createExpenseCategory(basicCategory);
+        const { data, error } = await dbHelpers.createExpenseCategory(basicCategory, tenantId);
         
         if (error) {
           console.error('Error creating default category:', category.name, error);
@@ -566,7 +570,7 @@ const ExpenseManagement = ({ navigation }) => {
       if (editCategoryIndex !== null) {
         // Update existing category
         const categoryToUpdate = expenseCategories[editCategoryIndex];
-        const { error } = await dbHelpers.updateExpenseCategory(categoryToUpdate.name, databaseCategoryData);
+        const { error } = await dbHelpers.updateExpenseCategory(categoryToUpdate.name, databaseCategoryData, tenantId);
         
         if (error) throw error;
         
@@ -581,7 +585,7 @@ const ExpenseManagement = ({ navigation }) => {
         setExpenseCategories(updatedCategories);
       } else {
         // Create new category
-        const { data, error } = await dbHelpers.createExpenseCategory(databaseCategoryData);
+        const { data, error } = await dbHelpers.createExpenseCategory(databaseCategoryData, tenantId);
         
         if (error) throw error;
         
@@ -613,7 +617,7 @@ const ExpenseManagement = ({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await dbHelpers.deleteExpenseCategory(categoryName);
+              const { error } = await dbHelpers.deleteExpenseCategory(categoryName, tenantId);
               
               if (error) throw error;
               

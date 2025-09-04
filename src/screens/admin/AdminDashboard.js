@@ -30,8 +30,58 @@ import { getEventDisplayProps } from '../../utils/eventIcons';
 import { useAuth } from '../../utils/AuthContext';
 import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
 import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCount';
+import { fixUserSetup, checkUserSetup } from '../../utils/fixUserSetup';
 
 const { width } = Dimensions.get('window');
+
+// Date formatting helper functions
+const formatDateToDisplay = (dateString) => {
+  // Convert YYYY-MM-DD to DD-MM-YYYY for display
+  if (!dateString || typeof dateString !== 'string') return '';
+  
+  // Validate YYYY-MM-DD format
+  if (!dateString.match(/^\d{4}-\d{2}-\d{2}$/)) return dateString;
+  
+  const [year, month, day] = dateString.split('-');
+  
+  // Basic validation
+  if (!year || !month || !day || year.length !== 4 || month.length !== 2 || day.length !== 2) {
+    return dateString;
+  }
+  
+  return `${day}-${month}-${year}`;
+};
+
+const formatDateToStorage = (dateString) => {
+  // Convert DD-MM-YYYY to YYYY-MM-DD for storage
+  if (!dateString || typeof dateString !== 'string') return '';
+  
+  // Validate DD-MM-YYYY format
+  if (!dateString.match(/^\d{2}-\d{2}-\d{4}$/)) return dateString;
+  
+  const [day, month, year] = dateString.split('-');
+  
+  // Basic validation
+  if (!year || !month || !day || year.length !== 4 || month.length !== 2 || day.length !== 2) {
+    return dateString;
+  }
+  
+  return `${year}-${month}-${day}`;
+};
+
+const getCurrentDateString = () => {
+  // Return current date in YYYY-MM-DD format
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getCurrentDateDisplayString = () => {
+  // Return current date in DD-MM-YYYY format
+  return formatDateToDisplay(getCurrentDateString());
+};
 
 const AdminDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -42,30 +92,16 @@ const AdminDashboard = ({ navigation }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [schoolDetails, setSchoolDetails] = useState(null);
 
-  // Debug logs for web
-  console.log('🏠 AdminDashboard - Component rendered');
-  console.log('🏠 AdminDashboard - Current user:', user?.email);
-  console.log('🏠 AdminDashboard - Loading state:', loading);
-  console.log('🏠 AdminDashboard - Error state:', error);
-  console.log('🏠 AdminDashboard - Stats length:', stats.length);
-  console.log('🏠 AdminDashboard - Platform:', Platform.OS);
+  // Component rendered
 
   // Load real-time data from Supabase using actual schema
   const loadDashboardData = async () => {
-    console.log('🏠 loadDashboardData - Starting data load');
     try {
       setLoading(true);
       setError(null);
-      console.log('🏠 loadDashboardData - Set loading to true, error to null');
 
       // Load school details
-      console.log('🏫 === SCHOOL DETAILS DEBUGGING ===');
       const { data: schoolData, error: schoolError } = await dbHelpers.getSchoolDetails();
-      console.log('🏫 School data loaded:', schoolData);
-      console.log('🏫 School error:', schoolError);
-      console.log('🏫 Logo URL:', schoolData?.logo_url);
-      console.log('🏫 School name:', schoolData?.name);
-      console.log('🏫 ===================================');
       setSchoolDetails(schoolData);
 
       // Load students count with gender breakdown
@@ -125,17 +161,9 @@ const AdminDashboard = ({ navigation }) => {
       const totalTeachers = teacherCount || 0;
       const totalClasses = classesCount || 0;
 
-      // Calculate attendance percentage (FIXED: with debugging)
+      // Calculate attendance percentage
       const presentToday = studentAttendance?.filter(att => att.status === 'Present').length || 0;
       const attendancePercentage = totalStudents > 0 ? Math.round((presentToday / totalStudents) * 100) : 0;
-
-      console.log('=== ADMIN DASHBOARD ATTENDANCE DEBUG ===');
-      console.log('Today:', new Date().toISOString().split('T')[0]);
-      console.log('Total students in system:', totalStudents);
-      console.log('Students marked present today:', presentToday);
-      console.log('Total attendance records today:', studentAttendance?.length || 0);
-      console.log('Today\'s attendance percentage:', attendancePercentage);
-      console.log('========================================');
 
       // Calculate fee collection for current month
       const monthlyFeeCollection = feeData?.reduce((sum, fee) => sum + (fee.amount_paid || 0), 0) || 0;
@@ -192,7 +220,7 @@ const AdminDashboard = ({ navigation }) => {
             id: event.id,
             type: event.event_type || 'Event',
             title: event.title,
-            date: event.event_date,
+            date: formatDateToDisplay(event.event_date), // Convert YYYY-MM-DD to DD-MM-YYYY for display
             icon: icon,
             color: color
           };
@@ -409,11 +437,16 @@ const AdminDashboard = ({ navigation }) => {
 
   // Date picker state for Events
   const [showEventDatePicker, setShowEventDatePicker] = useState(false);
+  const [showEventTypePicker, setShowEventTypePicker] = useState(false);
 
 
   // Upcoming Events state - Initialize with empty array, load from database
   const [events, setEvents] = useState([]);
   const [isEventModalVisible, setIsEventModalVisible] = useState(false);
+  // Upcoming Events Popup state
+  const [showUpcomingEventsPopup, setShowUpcomingEventsPopup] = useState(false);
+  const [hasShownPopupThisSession, setHasShownPopupThisSession] = useState(false);
+  const [userHasInteracted, setUserHasInteracted] = useState(false);
   const [eventInput, setEventInput] = useState({ 
     type: 'Event', 
     title: '', 
@@ -424,6 +457,14 @@ const AdminDashboard = ({ navigation }) => {
     isSchoolWide: true,
     selectedClasses: []
   });
+  
+  // Debug eventInput changes (simplified)
+  useEffect(() => {
+    if (eventInput.date) {
+      console.log('📅 Event date set to:', eventInput.date);
+    }
+  }, [eventInput.date]);
+  const [savingEvent, setSavingEvent] = useState(false);
   const [editEventIndex, setEditEventIndex] = useState(null);
   const [allClasses, setAllClasses] = useState([]);
   const [loadingClasses, setLoadingClasses] = useState(false);
@@ -450,73 +491,509 @@ const AdminDashboard = ({ navigation }) => {
     }
   };
 
-  const openAddEventModal = () => {
-    setEventInput({ 
-      type: 'Event', 
-      title: '', 
-      description: '',
-      date: '', 
-      icon: 'calendar', 
-      color: '#FF9800',
-      isSchoolWide: true,
-      selectedClasses: [] 
-    });
-    setEditEventIndex(null);
-    loadClasses(); // Load classes when opening modal
-    setIsEventModalVisible(true);
+  // Helper function removed - using global getCurrentDateString instead
+
+  // Function to ensure events table exists with proper schema
+  const checkEventsTable = async () => {
+    try {
+      console.log('🔥 Checking events table existence...');
+      
+      // Just try to select from the table - if it fails, we'll know the table doesn't exist
+      const { data, error } = await supabase
+        .from('events')
+        .select('id')
+        .limit(1);
+      
+      if (error && error.code === '42P01') {
+        console.log('🔥 Events table does not exist. Table should be created via migration or Supabase dashboard.');
+        console.log('🔥 Expected table schema:');
+        console.log('🔥 - id: UUID (primary key)');
+        console.log('🔥 - title: text');
+        console.log('🔥 - description: text');
+        console.log('🔥 - event_date: date');
+        console.log('🔥 - event_type: text');
+        console.log('🔥 - is_school_wide: boolean');
+        console.log('🔥 - status: text');
+        console.log('🔥 - created_at: timestamp');
+        console.log('🔥 - updated_at: timestamp');
+        return false;
+      }
+      
+      if (error) {
+        console.error('🔥 Error checking events table:', error);
+        console.error('🔥 Error details:', { code: error.code, message: error.message, details: error.details });
+        return false;
+      }
+      
+      console.log('🔥 Events table exists and is accessible');
+      return true;
+    } catch (error) {
+      console.error('🔥 Error checking events table:', error);
+      return false;
+    }
+  };
+
+  const openAddEventModal = async () => {
+    console.log('🔧 === OPENING ADD EVENT MODAL ===');
+    console.log('🔧 Current isEventModalVisible state:', isEventModalVisible);
+    console.log('🔧 Current showUpcomingEventsPopup state:', showUpcomingEventsPopup);
+    console.log('🔧 Current eventInput state:', eventInput);
+    
+    // Prevent multiple modal opens and avoid resetting eventInput if modal is already open
+    if (isEventModalVisible) {
+      console.log('🔧 Modal is already open, skipping reset');
+      return;
+    }
+    
+    try {
+      // Close the upcoming events popup if it's open to prevent conflicts
+      if (showUpcomingEventsPopup) {
+        console.log('🔧 Closing upcoming events popup to prevent conflicts');
+        setShowUpcomingEventsPopup(false);
+        // Add a small delay to ensure the popup closes before opening the add modal
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+      
+      // Check if events table exists first with better error handling
+      const tableExists = await checkEventsTable();
+      if (!tableExists) {
+        console.log('🔧 Events table does not exist, showing fallback modal');
+        // Show a simple fallback modal for adding events without database
+        Alert.alert(
+          'Events Feature', 
+          'The events database table is not set up yet. Please contact your system administrator to enable the events feature.',
+          [
+            { text: 'OK' },
+            { 
+              text: 'Continue Anyway', 
+              onPress: () => {
+                // Allow modal to open anyway for testing
+                setEventInput({
+                  type: 'Event', 
+                  title: '', 
+                  description: '',
+                  date: getCurrentDateDisplayString(),
+                  icon: 'calendar', 
+                  color: '#FF9800',
+                  isSchoolWide: true,
+                  selectedClasses: []
+                });
+                setEditEventIndex(null);
+                loadClasses();
+                setIsEventModalVisible(true);
+              }
+            }
+          ]
+        );
+        return;
+      }
+      
+      // Only reset eventInput if this is a fresh modal open (not already open)
+      const newEventInput = { 
+        type: 'Event', 
+        title: '', 
+        description: '',
+        date: getCurrentDateDisplayString(), // Use DD-MM-YYYY format for display
+        icon: 'calendar', 
+        color: '#FF9800',
+        isSchoolWide: true,
+        selectedClasses: [] 
+      };
+      console.log('🔧 Setting new event input:', newEventInput);
+      setEventInput(newEventInput);
+      
+      setEditEventIndex(null);
+      console.log('🔧 Reset edit index to null');
+      
+      console.log('🔧 Loading classes...');
+      loadClasses(); // Load classes when opening modal
+      
+      console.log('🔧 Setting modal visibility to true');
+      setIsEventModalVisible(true);
+      
+      // Verify state was set
+      setTimeout(() => {
+        console.log('🔧 Modal visibility after timeout:', isEventModalVisible);
+      }, 100);
+      
+      console.log('🔧 === ADD EVENT MODAL OPEN COMPLETE ===');
+    } catch (error) {
+      console.error('🔧 Error opening add event modal:', error);
+      Alert.alert('Error', 'Failed to open event creation form. Please try again.');
+    }
   };
 
   const openEditEventModal = (item, idx) => {
-    setEventInput(item);
+    // Convert date from YYYY-MM-DD (storage) to DD-MM-YYYY (display) for editing
+    const editableItem = { ...item };
+    if (editableItem.date && editableItem.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      editableItem.date = formatDateToDisplay(editableItem.date);
+    }
+    
+    setEventInput(editableItem);
     setEditEventIndex(idx);
     setIsEventModalVisible(true);
   };
 
+  const handleFixUserSetup = async () => {
+    try {
+      Alert.alert(
+        'Fix User Setup',
+        'This will resolve any user account issues that may be causing database errors. Continue?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Fix Now',
+            onPress: async () => {
+              console.log('🔧 Starting user setup fix...');
+              const result = await fixUserSetup();
+              
+              if (result.success) {
+                Alert.alert(
+                  'Success',
+                  result.message,
+                  [{ text: 'OK' }]
+                );
+                // Reload dashboard data to reflect changes
+                await loadDashboardData();
+              } else {
+                Alert.alert(
+                  'Fix Failed',
+                  result.message || 'An error occurred while fixing user setup',
+                  [{ text: 'OK' }]
+                );
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error in handleFixUserSetup:', error);
+      Alert.alert('Error', 'Failed to fix user setup');
+    }
+  };
+
   const saveEvent = async () => {
-    if (!eventInput.title || !eventInput.date) {
-      Alert.alert('Error', 'Please fill in all fields.');
+    console.log('🔥 SaveEvent called');
+    console.log('🔥 Event input data:', eventInput);
+    console.log('🔥 Title:', eventInput.title);
+    console.log('🔥 Date:', eventInput.date);
+    console.log('🔥 Type:', eventInput.type);
+    console.log('🔥 Description:', eventInput.description);
+    console.log('🔥 Edit index:', editEventIndex);
+    
+    // Prevent double-clicking
+    if (savingEvent) {
+      console.log('🔥 Already saving event, ignoring request');
+      return;
+    }
+    
+    // Improved validation
+    if (!eventInput.title.trim()) {
+      console.log('🔥 Validation failed - missing title');
+      Alert.alert('Error', 'Please enter an event title.');
+      return;
+    }
+    
+    if (!eventInput.date) {
+      console.log('🔥 Validation failed - missing date');
+      Alert.alert('Error', 'Please select an event date.');
       return;
     }
 
     try {
-      if (editEventIndex !== null) {
-        // Update existing event
-        const { error } = await supabase
-          .from('events')
-          .update({
-            title: eventInput.title,
-            description: eventInput.description,
-            event_date: eventInput.date,
-            event_type: eventInput.type,
-            is_school_wide: true,
-            status: 'Active',
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', events[editEventIndex].id);
-
-        if (error) throw error;
+      setSavingEvent(true);
+      console.log('🔥 Starting save operation...');
+      
+      // Convert date from DD-MM-YYYY display format to YYYY-MM-DD storage format
+      let formattedDate = eventInput.date;
+      
+      // Check if date is in DD-MM-YYYY format (our display format)
+      if (typeof eventInput.date === 'string' && eventInput.date.match(/^\d{2}-\d{2}-\d{4}$/)) {
+        console.log('🔥 Converting DD-MM-YYYY to YYYY-MM-DD format');
+        formattedDate = formatDateToStorage(eventInput.date);
+        console.log('🔥 Converted date from', eventInput.date, 'to', formattedDate);
+      } else if (typeof eventInput.date === 'string' && !eventInput.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        // Try to parse other date formats as fallback
+        const dateObj = new Date(eventInput.date);
+        if (!isNaN(dateObj.getTime())) {
+          // Date is valid, format it
+          const year = dateObj.getFullYear();
+          const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+          const day = String(dateObj.getDate()).padStart(2, '0');
+          formattedDate = `${year}-${month}-${day}`;
+          console.log('🔥 Fallback reformatted date:', formattedDate);
+        }
+      }
+      
+      // Additional validation for date format
+      if (!formattedDate || formattedDate === '') {
+        console.log('🔥 No date provided, using current date');
+        formattedDate = getCurrentDateString(); // This should be YYYY-MM-DD for database storage
+      }
+      
+      console.log('🔥 Final formatted date:', formattedDate);
+      
+      // Check if events table exists before attempting to save
+      let tableExists = false;
+      try {
+        tableExists = await checkEventsTable();
+        console.log('🔥 Table exists check result:', tableExists);
+      } catch (tableCheckError) {
+        console.error('🔥 Error checking table:', tableCheckError);
+        // Continue with save attempt even if table check fails
+        tableExists = true;
+      }
+      
+      if (!tableExists) {
+        console.log('🔥 Events table does not exist, showing warning and saving locally');
+        
+        // Save event locally for now
+        const localEvent = {
+          id: Date.now().toString(),
+          title: eventInput.title.trim(),
+          type: eventInput.type || 'Event',
+          date: formattedDate,
+          description: eventInput.description?.trim() || '',
+          color: eventInput.color || '#FF9800',
+          icon: eventInput.icon || 'calendar'
+        };
+        
+        // Add to local events array
+        setEvents(currentEvents => [...currentEvents, localEvent]);
+        
+        setIsEventModalVisible(false);
+        setShowEventTypePicker(false);
+        Alert.alert(
+          'Event Added Locally', 
+          'The event has been added to your local list. To save permanently, please set up the events database table.\n\nEvent: "' + eventInput.title + '"',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      
+      // Get tenant ID and current user for multi-tenant support
+      let tenantId = null;
+      let currentUser = null;
+      try {
+        const userResponse = await supabase.auth.getUser();
+        currentUser = userResponse;
+        
+        // Try multiple sources for tenant_id
+        tenantId = currentUser?.data?.user?.app_metadata?.tenant_id || 
+                   currentUser?.data?.user?.user_metadata?.tenant_id;
+        
+        // If no tenant_id found, try to get from users table or create default
+        if (!tenantId && currentUser?.data?.user?.id) {
+          console.log('🔥 No tenant_id in metadata, trying users table...');
+          try {
+            const { data: userData } = await supabase
+              .from('users')
+              .select('tenant_id')
+              .eq('id', currentUser.data.user.id)
+              .single();
+            
+            if (userData?.tenant_id) {
+              tenantId = userData.tenant_id;
+              console.log('🔥 Found tenant_id in users table:', tenantId);
+            }
+          } catch (userTableError) {
+            console.log('🔥 Could not get tenant_id from users table:', userTableError.message);
+          }
+        }
+        
+        // Final fallback: create a default tenant_id if still none found
+        if (!tenantId) {
+          tenantId = 'default-tenant'; // Use a default tenant ID
+          console.log('🔥 Using default tenant_id:', tenantId);
+        }
+        
+        console.log('🔥 Final tenant_id:', tenantId);
+        console.log('🔥 Current user ID:', currentUser?.data?.user?.id);
+      } catch (tenantError) {
+        console.error('🔥 Error getting tenant/user info:', tenantError);
+        // Use default tenant as final fallback
+        tenantId = 'default-tenant';
+      }
+      
+      // Basic event data to insert/update
+      const eventData = {
+        title: eventInput.title.trim(),
+        description: eventInput.description?.trim() || '',
+        event_date: formattedDate,
+        event_type: eventInput.type || 'Event',
+        is_school_wide: eventInput.isSchoolWide || true,
+        status: 'Active'
+      };
+      
+      // Always add tenant_id (required by database constraint)
+      eventData.tenant_id = tenantId;
+      
+      // Add created_by if available and valid
+      if (currentUser?.data?.user?.id) {
+        try {
+          // Check if the user exists in the users table before adding created_by
+          const { data: userExists, error: userCheckError } = await supabase
+            .from('users')
+            .select('id')
+            .eq('id', currentUser.data.user.id)
+            .single();
+          
+          if (userExists && !userCheckError) {
+            eventData.created_by = currentUser.data.user.id;
+            console.log('🔥 Added created_by field with valid user ID:', currentUser.data.user.id);
+          } else {
+            console.log('🔥 User ID not found in users table, skipping created_by field');
+            // Don't add created_by if user doesn't exist in users table
+          }
+        } catch (userValidationError) {
+          console.log('🔥 Error validating user for created_by field:', userValidationError.message);
+          // Skip created_by field if there's an error validating the user
+        }
       } else {
-        // Insert new event
-        const { error } = await supabase
+        console.log('🔥 No current user ID available, skipping created_by field');
+      }
+      
+      console.log('🔥 Prepared event data:', eventData);
+      
+      if (editEventIndex !== null && events[editEventIndex]?.id) {
+        console.log('🔥 Updating existing event with ID:', events[editEventIndex].id);
+        // Add updated timestamp for updates
+        const updateData = {
+          ...eventData,
+          updated_at: new Date().toISOString()
+        };
+        
+        const { data, error } = await supabase
           .from('events')
-          .insert({
-            title: eventInput.title,
-            description: eventInput.description,
-            event_date: eventInput.date,
-            event_type: eventInput.type,
-            is_school_wide: true,
-            status: 'Active'
-          });
+          .update(updateData)
+          .eq('id', events[editEventIndex].id)
+          .select();
 
-        if (error) throw error;
+        if (error) {
+          console.log('🔥 Update error:', error);
+          console.log('🔥 Update error details:', { code: error.code, message: error.message, details: error.details });
+          throw new Error(`Failed to update event: ${error.message}`);
+        }
+        console.log('🔥 Event updated successfully:', data);
+      } else {
+        console.log('🔥 Inserting new event');
+        
+        const { data, error } = await supabase
+          .from('events')
+          .insert(eventData)
+          .select();
+
+        if (error) {
+          console.log('🔥 Insert error:', error);
+          console.log('🔥 Insert error details:', { code: error.code, message: error.message, details: error.details });
+          
+          // Provide more specific error messages
+          let errorMessage = 'Failed to create event';
+          if (error.code === '23505') {
+            errorMessage = 'An event with similar details already exists';
+          } else if (error.code === '42703') {
+            errorMessage = 'Database column error - please contact support';
+          } else if (error.code === '42501' || error.message?.includes('row-level security')) {
+            errorMessage = 'Permission denied: You do not have permission to create events. Please contact your administrator to set up proper user roles and database policies.';
+          } else if (error.code === '23502') {
+            errorMessage = 'Missing required field - please check tenant_id setup';
+          } else if (error.code === '23503' || error.message?.includes('foreign key constraint')) {
+            if (error.message?.includes('created_by_fkey')) {
+              errorMessage = 'User account error: Your user account is not properly set up in the system. Please contact your administrator to resolve this issue.';
+            } else {
+              errorMessage = 'Database relationship error - please contact support';
+            }
+          } else if (error.message) {
+            errorMessage = `Error: ${error.message}`;
+          }
+          
+          throw new Error(errorMessage);
+        }
+        console.log('🔥 Event inserted successfully:', data);
       }
 
+      console.log('🔥 Reloading dashboard data...');
+      // Force load data to refresh events list
       await loadDashboardData();
+      console.log('🔥 Dashboard data reloaded');
+      
+      // Close modal and show success message
       setIsEventModalVisible(false);
-      Alert.alert('Success', 'Event saved successfully!');
+      console.log('🔥 Modal closed');
+      
+      // Show success message with event details
+      const eventAction = editEventIndex !== null ? 'updated' : 'created';
+      Alert.alert(
+        'Success', 
+        `Event "${eventInput.title}" has been ${eventAction} successfully!`,
+        [{ text: 'OK' }]
+      );
     } catch (error) {
-      console.error('Error saving event:', error);
-      Alert.alert('Error', 'Failed to save event');
+      console.error('🔥 Error saving event:', error);
+      console.error('🔥 Error type:', typeof error);
+      console.error('🔥 Error constructor:', error.constructor?.name);
+      console.error('🔥 Error message:', error.message);
+      console.error('🔥 Error stack:', error.stack);
+      
+      // Try to get more error details
+      let errorDetails = 'Unknown error';
+      try {
+        errorDetails = JSON.stringify(error, null, 2);
+      } catch (stringifyError) {
+        errorDetails = error.toString();
+      }
+      console.error('🔥 Error details:', errorDetails);
+      
+      // Show user-friendly error message
+      let errorMessage = 'An unexpected error occurred while saving the event';
+      
+      if (error.message) {
+        errorMessage = error.message;
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      }
+      
+      // Add local save option as fallback
+      Alert.alert(
+        'Save Failed', 
+        errorMessage + '\n\nWould you like to save this event locally instead?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Save Locally',
+            onPress: () => {
+              try {
+                const localEvent = {
+                  id: Date.now().toString(),
+                  title: eventInput.title.trim(),
+                  type: eventInput.type || 'Event',
+                  date: eventInput.date || getCurrentDateDisplayString(),
+                  description: eventInput.description?.trim() || '',
+                  color: eventInput.color || '#FF9800',
+                  icon: eventInput.icon || 'calendar'
+                };
+                
+                setEvents(currentEvents => [...currentEvents, localEvent]);
+                setIsEventModalVisible(false);
+                setShowEventTypePicker(false);
+                
+                Alert.alert(
+                  'Event Saved Locally',
+                  'Your event has been saved to the local list.',
+                  [{ text: 'OK' }]
+                );
+              } catch (localSaveError) {
+                console.error('🔥 Error saving locally:', localSaveError);
+                Alert.alert('Error', 'Failed to save event even locally.');
+              }
+            }
+          }
+        ]
+      );
+    } finally {
+      setSavingEvent(false);
+      console.log('🔥 Save event operation completed');
     }
   };
 
@@ -560,6 +1037,31 @@ const AdminDashboard = ({ navigation }) => {
   //   userId: user?.id
   // });
 
+  // Show upcoming events popup after dashboard loads
+  useEffect(() => {
+    const showPopupAfterDelay = () => {
+      // Only show if:
+      // 1. User is logged in
+      // 2. Dashboard has finished loading
+      // 3. Haven't shown popup this session
+      // 4. There are upcoming events to show
+      // 5. Add event modal is not already open
+      // 6. User hasn't interacted with the dashboard yet
+      if (user?.id && !loading && !hasShownPopupThisSession && events.length > 0 && !isEventModalVisible && !userHasInteracted) {
+        // Show upcoming events popup
+        setTimeout(() => {
+          // Double check that add event modal is still not open before showing popup
+          if (!isEventModalVisible) {
+            setShowUpcomingEventsPopup(true);
+            setHasShownPopupThisSession(true);
+          }
+        }, 2000); // 2 second delay after dashboard loads
+      }
+    };
+
+    showPopupAfterDelay();
+  }, [user?.id, loading, events.length, hasShownPopupThisSession, isEventModalVisible]);
+
   // Force refresh notification count when dashboard loads
   useEffect(() => {
     if (user?.id && refreshNotificationCount) {
@@ -584,7 +1086,6 @@ const AdminDashboard = ({ navigation }) => {
   };
 
   if (loading) {
-    console.log('🏠 AdminDashboard - Rendering loading screen');
     return (
       <View style={styles.container}>
         <Header title="Admin Dashboard" />
@@ -597,7 +1098,6 @@ const AdminDashboard = ({ navigation }) => {
   }
 
   if (error) {
-    console.log('🏠 AdminDashboard - Rendering error screen:', error);
     return (
       <View style={styles.container}>
         <Header title="Admin Dashboard" />
@@ -616,10 +1116,6 @@ const AdminDashboard = ({ navigation }) => {
     );
   }
 
-  console.log('🏠 AdminDashboard - Rendering main dashboard');
-  console.log('🏠 AdminDashboard - Stats to render:', stats.length);
-  console.log('🏠 AdminDashboard - School details:', !!schoolDetails);
-  
   return (
     <View style={[styles.container, webContainerStyle]}>
       <Header 
@@ -656,7 +1152,7 @@ const AdminDashboard = ({ navigation }) => {
                 <LogoDisplay 
                   logoUrl={schoolDetails.logo_url} 
                   onImageError={() => {
-                    console.log('🗓️ Logo image failed to load, using placeholder');
+                    // Logo image failed to load, using placeholder
                   }}
                 />
                 <View style={styles.schoolInfo}>
@@ -756,23 +1252,49 @@ const AdminDashboard = ({ navigation }) => {
           </View>
         </View>
 
+
         {/* Upcoming Events, Exams, or Deadlines */}
         <View style={styles.section}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={styles.sectionTitle}>Upcoming Events</Text>
-            <TouchableOpacity style={styles.addButton} onPress={openAddEventModal}>
+            <TouchableOpacity 
+              style={styles.addButton} 
+              onPress={() => {
+                console.log('🔧 Direct Add Event button pressed');
+                console.log('🔧 Current state - isEventModalVisible:', isEventModalVisible);
+                console.log('🔧 Current state - showUpcomingEventsPopup:', showUpcomingEventsPopup);
+                console.log('🔧 Button touch detected, calling openAddEventModal');
+                
+                // Mark user as having interacted to prevent automatic popup
+                setUserHasInteracted(true);
+                
+                // Prevent multiple modal opens
+                if (!isEventModalVisible && !showUpcomingEventsPopup) {
+                  openAddEventModal();
+                } else {
+                  console.log('🔧 Modal already open, ignoring button press');
+                }
+              }}
+              activeOpacity={0.7}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
               <Ionicons name="add" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
           <View style={styles.upcomingList}>
-            {events.slice().sort((a, b) => new Date(a.date) - new Date(b.date)).map((item, idx) => (
+            {events.slice().sort((a, b) => {
+              // Convert DD-MM-YYYY back to YYYY-MM-DD for proper date sorting
+              const dateA = formatDateToStorage(a.date);
+              const dateB = formatDateToStorage(b.date);
+              return new Date(dateA) - new Date(dateB);
+            }).map((item, idx) => (
               <View key={item.id} style={styles.upcomingItem}>
                 <View style={[styles.upcomingIcon, { backgroundColor: item.color }]}> 
                   <Ionicons name={item.icon} size={20} color="#fff" />
                 </View>
                 <View style={styles.upcomingContent}>
                   <Text style={styles.upcomingTitle}>{item.title}</Text>
-                  <Text style={styles.upcomingSubtitle}>{item.type} • {(() => { const [y, m, d] = item.date.split('-'); return `${d}-${m}-${y}`; })()}</Text>
+                  <Text style={styles.upcomingSubtitle}>{item.type} • {item.date}</Text>
                 </View>
                 <TouchableOpacity onPress={() => openEditEventModal(item, events.findIndex(e => e.id === item.id))} style={{ marginRight: 8 }}>
                   <Ionicons name="create-outline" size={20} color="#2196F3" />
@@ -783,245 +1305,8 @@ const AdminDashboard = ({ navigation }) => {
               </View>
             ))}
           </View>
-          {/* Event Modal */}
-          <Modal
-            visible={isEventModalVisible}
-            animationType="slide"
-            transparent
-            onRequestClose={() => setIsEventModalVisible(false)}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContainer}>
-                <ScrollView 
-                  style={[styles.modalScrollView, webScrollViewStyles.modalScrollView]}
-                  contentContainerStyle={[styles.modalScrollContent, webScrollViewStyles.modalScrollViewContent]}
-                  {...getWebScrollProps({ isModal: true })}
-                >
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>{editEventIndex !== null ? 'Edit Event' : 'Add Event'}</Text>
-                <TextInput
-                  placeholder="Event title"
-                  value={eventInput.title}
-                  onChangeText={text => setEventInput({ ...eventInput, title: text })}
-                  style={styles.input}
-                />
-                <TextInput
-                  placeholder="Event description (optional)"
-                  value={eventInput.description}
-                  onChangeText={text => setEventInput({ ...eventInput, description: text })}
-                  style={[styles.input, { minHeight: 60 }]}
-                  multiline
-                  numberOfLines={3}
-                />
-                {/* Date Picker for Events */}
-                {Platform.OS === 'web' ? (
-                  <CrossPlatformDatePicker
-                    label="Event Date"
-                    value={eventInput.date ? new Date(eventInput.date) : null}
-                    onChange={(event, selectedDate) => {
-                      if (selectedDate) {
-                        const dd = String(selectedDate.getDate()).padStart(2, '0');
-                        const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
-                        const yyyy = selectedDate.getFullYear();
-                        setEventInput({ ...eventInput, date: `${yyyy}-${mm}-${dd}` });
-                      }
-                    }}
-                    mode="date"
-                    placeholder="Select Event Date"
-                    containerStyle={{ marginBottom: 12 }}
-                  />
-                ) : (
-                  <DatePickerButton
-                    label="Event Date"
-                    value={eventInput.date ? new Date(eventInput.date) : null}
-                    onPress={() => setShowEventDatePicker(true)}
-                    placeholder="Select Event Date"
-                    mode="date"
-                    style={styles.input}
-                    containerStyle={{ marginBottom: 12 }}
-                  />
-                )}
-                {Platform.OS !== 'web' && showEventDatePicker && (
-                  <CrossPlatformDatePicker
-                    value={eventInput.date ? new Date(eventInput.date) : new Date()}
-                    mode="date"
-                    display="default"
-                    onChange={(event, selectedDate) => {
-                      setShowEventDatePicker(false);
-                      if (selectedDate) {
-                        const dd = String(selectedDate.getDate()).padStart(2, '0');
-                        const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
-                        const yyyy = selectedDate.getFullYear();
-                        setEventInput({ ...eventInput, date: `${yyyy}-${mm}-${dd}` });
-                      }
-                    }}
-                  />
-                )}
-                <TextInput
-                  placeholder="Type (Event/Exam)"
-                  value={eventInput.type}
-                  onChangeText={text => setEventInput({ ...eventInput, type: text })}
-                  style={styles.input}
-                />
-                
-                {/* Class Selection Section */}
-                <View style={{ marginBottom: 16 }}>
-                  <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 8, color: '#333' }}>Who can see this event?</Text>
-                  
-                  {/* School-wide option */}
-                  <TouchableOpacity 
-                    style={[styles.visibilityOption, eventInput.isSchoolWide && styles.visibilityOptionActive]}
-                    onPress={() => {
-                      setEventInput({ 
-                        ...eventInput, 
-                        isSchoolWide: true,
-                        selectedClasses: (allClasses || []).map(c => c.id)
-                      });
-                    }}
-                  >
-                    <View style={styles.radioButton}>
-                      {eventInput.isSchoolWide && <View style={styles.radioButtonInner} />}
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.visibilityOptionTitle, eventInput.isSchoolWide && styles.visibilityOptionTitleActive]}>
-                        Everyone in the school
-                      </Text>
-                      <Text style={styles.visibilityOptionDesc}>
-                        All students, teachers and parents will see this event
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-
-                  {/* Specific classes option */}
-                  <TouchableOpacity 
-                    style={[styles.visibilityOption, !eventInput.isSchoolWide && styles.visibilityOptionActive]}
-                    onPress={() => {
-                      setEventInput({ 
-                        ...eventInput, 
-                        isSchoolWide: false,
-                        selectedClasses: [] 
-                      });
-                    }}
-                  >
-                    <View style={styles.radioButton}>
-                      {!eventInput.isSchoolWide && <View style={styles.radioButtonInner} />}
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.visibilityOptionTitle, !eventInput.isSchoolWide && styles.visibilityOptionTitleActive]}>
-                        Specific classes only
-                      </Text>
-                      <Text style={styles.visibilityOptionDesc}>
-                        Only selected classes will see this event
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-
-                  {!eventInput.isSchoolWide && (
-                    <View style={styles.classSelectionContainer}>
-                      <View style={styles.instructionContainer}>
-                        <Ionicons name="information-circle" size={16} color="#2196F3" />
-                        <Text style={styles.instructionText}>
-                          Tap the classes you want to include in this event
-                        </Text>
-                      </View>
-                      
-                      {loadingClasses ? (
-                        <View style={{ alignItems: 'center', padding: 20 }}>
-                          <ActivityIndicator color="#2196F3" />
-                          <Text style={{ color: '#666', marginTop: 8 }}>Loading classes...</Text>
-                        </View>
-                      ) : (
-                        <View>
-                          {/* Quick select all button */}
-                          <TouchableOpacity
-                            style={[styles.quickSelectButton]}
-                            onPress={() => {
-                              if ((eventInput.selectedClasses || []).length === (allClasses || []).length) {
-                                setEventInput({ ...eventInput, selectedClasses: [] });
-                              } else {
-                                setEventInput({ ...eventInput, selectedClasses: (allClasses || []).map(c => c.id) });
-                              }
-                            }}
-                          >
-                            <Ionicons 
-                              name={(eventInput.selectedClasses || []).length === (allClasses || []).length ? "checkbox" : "square-outline"} 
-                              size={16} 
-                              color="#2196F3" 
-                            />
-                            <Text style={styles.quickSelectText}>
-                              {(eventInput.selectedClasses || []).length === (allClasses || []).length ? 'Unselect All' : 'Select All Classes'}
-                            </Text>
-                          </TouchableOpacity>
-                          
-                          {/* Class selection area */}
-                          <View style={styles.classGridContainer}>
-                            <Text style={styles.selectionCountText}>
-                              {(eventInput.selectedClasses || []).length} of {(allClasses || []).length} classes selected
-                            </Text>
-                            <ScrollView 
-                              style={[styles.classScrollView, webScrollViewStyles.nestedScrollView]} 
-                              contentContainerStyle={[{ paddingBottom: 8 }, webScrollViewStyles.nestedScrollViewContent]}
-                              {...getWebScrollProps({ isNested: true })}
-                            >
-                              {(allClasses || []).map((classItem) => {
-                                const isSelected = (eventInput.selectedClasses || []).includes(classItem.id);
-                                return (
-                                  <TouchableOpacity
-                                    key={classItem.id}
-                                    style={[styles.classChip, isSelected && styles.classChipSelected]}
-                                    onPress={() => {
-                                      if (isSelected) {
-                                        setEventInput({
-                                          ...eventInput,
-                                          selectedClasses: (eventInput.selectedClasses || []).filter(id => id !== classItem.id)
-                                        });
-                                      } else {
-                                        setEventInput({
-                                          ...eventInput,
-                                          selectedClasses: [...(eventInput.selectedClasses || []), classItem.id]
-                                        });
-                                      }
-                                    }}
-                                  >
-                                    <Ionicons 
-                                      name={isSelected ? "checkbox" : "square-outline"} 
-                                      size={16} 
-                                      color={isSelected ? "#2196F3" : "#999"} 
-                                      style={{ marginRight: 8 }}
-                                    />
-                                    <Text style={[styles.classChipText, isSelected && styles.classChipTextSelected]}>
-                                      {classItem.class_name} {classItem.section}
-                                    </Text>
-                                  </TouchableOpacity>
-                                );
-                              })}
-                              {(allClasses || []).length === 0 && (
-                                <View style={styles.noClassesContainer}>
-                                  <Ionicons name="school-outline" size={24} color="#ccc" />
-                                  <Text style={styles.noClassesText}>No classes found</Text>
-                                </View>
-                              )}
-                            </ScrollView>
-                          </View>
-                        </View>
-                      )}
-                    </View>
-                  )}
-                </View>
-
-                  {/* Optionally, icon/color pickers can be added here */}
-                  <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 }}>
-                    <TouchableOpacity onPress={() => setIsEventModalVisible(false)} style={[styles.modalButton, { backgroundColor: '#ccc' }]}> 
-                      <Text style={{ color: '#333', fontWeight: 'bold' }}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={saveEvent} style={[styles.modalButton, { backgroundColor: '#2196F3', marginLeft: 8 }]}> 
-                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>{editEventIndex !== null ? 'Save' : 'Add'}</Text>
-                    </TouchableOpacity>
-                  </View>
-                </ScrollView>
-              </View>
-            </View>
-          </Modal>
         </View>
+
 
         {/* Fee Collection Summary and Outstanding Dues */}
         <View style={styles.section}>
@@ -1059,7 +1344,6 @@ const AdminDashboard = ({ navigation }) => {
           </View>
         </View>
 
-
         {/* Recent Activities - moved to bottom */}
         <View style={[styles.section, styles.recentActivitiesSection]}>
           <Text style={styles.sectionTitle}>Recent Activities</Text>
@@ -1080,8 +1364,464 @@ const AdminDashboard = ({ navigation }) => {
             ))}
           </View>
         </View>
-
       </ScrollView>
+
+      {/* Upcoming Events Popup Modal */}
+      <Modal
+        visible={showUpcomingEventsPopup}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowUpcomingEventsPopup(false)}
+      >
+        <View style={styles.popupModalOverlay}>
+          <View style={styles.popupModalContainer}>
+            {/* Header */}
+            <View style={styles.popupModalHeader}>
+              <View style={styles.popupModalHeaderContent}>
+                <View style={styles.popupModalIconContainer}>
+                  <Ionicons name="calendar" size={28} color="#2196F3" />
+                </View>
+                <View style={styles.popupModalTitleContainer}>
+                  <Text style={styles.popupModalTitle}>Upcoming Events</Text>
+                  <Text style={styles.popupModalSubtitle}>Welcome back! Here's what's coming up</Text>
+                </View>
+              </View>
+              <TouchableOpacity 
+                style={styles.popupModalCloseButton}
+                onPress={() => setShowUpcomingEventsPopup(false)}
+              >
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Events List */}
+            <ScrollView 
+              style={styles.popupModalScrollView}
+              contentContainerStyle={styles.popupModalScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {events.length === 0 ? (
+                <View style={styles.popupModalNoEvents}>
+                  <Ionicons name="calendar-outline" size={48} color="#ccc" />
+                  <Text style={styles.popupModalNoEventsText}>No upcoming events</Text>
+                  <Text style={styles.popupModalNoEventsSubtext}>Your schedule is clear for now</Text>
+                </View>
+              ) : (
+                events.slice(0, 5).sort((a, b) => {
+                  // Convert DD-MM-YYYY back to YYYY-MM-DD for proper date sorting
+                  const dateA = formatDateToStorage(a.date);
+                  const dateB = formatDateToStorage(b.date);
+                  return new Date(dateA) - new Date(dateB);
+                }).map((item, idx) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={styles.popupModalEventItem}
+                    onPress={() => {
+                      const eventDate = new Date(item.date);
+                      const formattedDate = eventDate.toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      });
+                      
+                      Alert.alert(
+                        item.title,
+                        `${item.type}\n\nDate: ${formattedDate}\n\nTap the event on the dashboard below for more options.`,
+                        [{ text: 'OK' }]
+                      );
+                    }}
+                  >
+                    <View style={[styles.popupModalEventIcon, { backgroundColor: item.color }]}>
+                      <Ionicons name={item.icon} size={20} color="#fff" />
+                    </View>
+                    <View style={styles.popupModalEventContent}>
+                      <Text style={styles.popupModalEventTitle}>{item.title}</Text>
+                      <Text style={styles.popupModalEventType}>{item.type}</Text>
+                      <View style={styles.popupModalEventDateContainer}>
+                        <Ionicons name="calendar-outline" size={14} color="#666" />
+                        <Text style={styles.popupModalEventDate}>
+                          {item.date.replace(/-/g, '/')}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.popupModalEventArrow}>
+                      <Ionicons name="chevron-forward" size={16} color="#ccc" />
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )}
+
+              {events.length > 5 && (
+                <TouchableOpacity 
+                  style={styles.popupModalViewAllButton}
+                  onPress={() => {
+                    setShowUpcomingEventsPopup(false);
+                    // Scroll to events section on dashboard
+                  }}
+                >
+                  <Text style={styles.popupModalViewAllText}>
+                    View all {events.length} events on dashboard
+                  </Text>
+                  <Ionicons name="arrow-down" size={16} color="#2196F3" />
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+
+            {/* Footer */}
+            <View style={styles.popupModalFooter}>
+              <TouchableOpacity 
+                style={styles.popupModalFooterButton}
+                onPress={() => {
+                  console.log('🔧 Add Event button in popup footer pressed');
+                  setShowUpcomingEventsPopup(false);
+                  // Add a longer delay to ensure the popup modal fully closes before opening the add event modal
+                  setTimeout(() => {
+                    console.log('🔧 Opening add event modal from popup footer');
+                    openAddEventModal();
+                  }, 500);
+                }}
+              >
+                <Ionicons name="add" size={18} color="#2196F3" />
+                <Text style={styles.popupModalFooterButtonText}>Add Event</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.popupModalFooterButton, styles.popupModalFooterButtonPrimary]}
+                onPress={() => setShowUpcomingEventsPopup(false)}
+              >
+                <Text style={styles.popupModalFooterButtonTextPrimary}>Continue to Dashboard</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+
+
+      {/* Event Modal using React Native Modal to hide tab bar */}
+      <Modal
+        visible={isEventModalVisible}
+        animationType="fade"
+        transparent
+        statusBarTranslucent
+        onRequestClose={() => {
+          setIsEventModalVisible(false);
+          setShowEventTypePicker(false);
+          setShowEventDatePicker(false);
+        }}
+      >
+        <View style={styles.modalOverlayFullscreen}>
+          <View style={styles.simpleModalContainer}>
+            {/* Modal Header */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' }}>
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#e3f2fd', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                <Ionicons name="calendar-outline" size={20} color="#2196F3" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 2 }}>Add New Event</Text>
+                <Text style={{ fontSize: 14, color: '#666' }}>Create a new event for your school</Text>
+              </View>
+              <TouchableOpacity 
+                onPress={() => {
+                  console.log('🔧 Close button pressed');
+                  setIsEventModalVisible(false);
+                  setShowEventTypePicker(false); // Close dropdown when modal closes
+                  setShowEventDatePicker(false); // Close date picker when modal closes
+                }}
+                style={{ padding: 8 }}
+              >
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Form Fields */}
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: '70%' }}>
+              <Text style={{ fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 8 }}>Event Title *</Text>
+              <TextInput
+                placeholder="Enter event title"
+                value={eventInput.title}
+                onChangeText={text => setEventInput({ ...eventInput, title: text })}
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#e0e0e0',
+                  borderRadius: 8,
+                  padding: 12,
+                  marginBottom: 16,
+                  fontSize: 16,
+                  backgroundColor: '#fafafa'
+                }}
+              />
+              
+              <Text style={{ fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 8 }}>Description</Text>
+              <TextInput
+                placeholder="Enter event description (optional)"
+                value={eventInput.description}
+                onChangeText={text => setEventInput({ ...eventInput, description: text })}
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#e0e0e0',
+                  borderRadius: 8,
+                  padding: 12,
+                  marginBottom: 16,
+                  fontSize: 16,
+                  backgroundColor: '#fafafa',
+                  minHeight: 60
+                }}
+                multiline
+                numberOfLines={3}
+              />
+              <Text style={{ fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 8 }}>Event Date *</Text>
+              {Platform.OS === 'web' ? (
+                <CrossPlatformDatePicker
+                  value={(() => {
+                    if (eventInput.date) {
+                      // Convert DD-MM-YYYY to Date object for the picker (fix timezone issues)
+                      if (eventInput.date.match(/^\d{2}-\d{2}-\d{4}$/)) {
+                        const [day, month, year] = eventInput.date.split('-');
+                        // Use Date constructor with explicit time to avoid timezone issues
+                        const dateObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), 12, 0, 0);
+                        return dateObj;
+                      }
+                      return new Date(eventInput.date);
+                    }
+                    return new Date();
+                  })()}
+                  onChange={(event, selectedDate) => {
+                    if (selectedDate) {
+                      // Convert Date object to DD-MM-YYYY format
+                      const day = String(selectedDate.getDate()).padStart(2, '0');
+                      const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                      const year = selectedDate.getFullYear();
+                      const formattedDate = `${day}-${month}-${year}`;
+                      
+                      setEventInput(prevInput => ({ ...prevInput, date: formattedDate }));
+                    }
+                  }}
+                  mode="date"
+                  minimumDate={new Date()} // Prevent selecting past dates
+                  placeholder="Select event date"
+                  style={{
+                    borderWidth: 1,
+                    borderColor: '#e0e0e0',
+                    borderRadius: 8,
+                    marginBottom: 16,
+                    backgroundColor: '#fafafa'
+                  }}
+                />
+              ) : (
+                <TouchableOpacity
+                  onPress={() => setShowEventDatePicker(true)}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: '#e0e0e0',
+                    borderRadius: 8,
+                    marginBottom: 16,
+                    backgroundColor: '#fafafa',
+                    paddingVertical: 12,
+                    paddingHorizontal: 12,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 16,
+                    color: eventInput.date ? '#333' : '#999'
+                  }}>
+                    {eventInput.date || 'Select event date'}
+                  </Text>
+                  <Ionicons name="calendar" size={20} color="#666" />
+                </TouchableOpacity>
+              )}
+              
+              {/* Mobile Date Picker Modal */}
+              {showEventDatePicker && Platform.OS !== 'web' && (
+                <CrossPlatformDatePicker
+                  value={(() => {
+                    if (eventInput.date) {
+                      // Convert DD-MM-YYYY to Date object (fix timezone issues)
+                      if (eventInput.date.match(/^\d{2}-\d{2}-\d{4}$/)) {
+                        const [day, month, year] = eventInput.date.split('-');
+                        // Use Date constructor with explicit time to avoid timezone issues
+                        const dateObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), 12, 0, 0);
+                        return dateObj;
+                      }
+                      return new Date(eventInput.date);
+                    }
+                    return new Date();
+                  })()}
+                  onChange={(event, selectedDate) => {
+                    setShowEventDatePicker(false);
+                    
+                    if (selectedDate && event.type === 'set') {
+                      // Convert Date object to DD-MM-YYYY format
+                      const day = String(selectedDate.getDate()).padStart(2, '0');
+                      const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                      const year = selectedDate.getFullYear();
+                      const formattedDate = `${day}-${month}-${year}`;
+                      
+                      setEventInput(prevInput => ({ ...prevInput, date: formattedDate }));
+                    }
+                  }}
+                  mode="date"
+                  minimumDate={new Date()} // Prevent selecting past dates
+                  display="default"
+                />
+              )}
+              
+              <Text style={{ fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 8 }}>Event Type</Text>
+              <View style={{
+                borderWidth: 1,
+                borderColor: '#e0e0e0',
+                borderRadius: 8,
+                marginBottom: 16,
+                backgroundColor: '#fafafa'
+              }}>
+                <TouchableOpacity
+                  onPress={() => setShowEventTypePicker(!showEventTypePicker)}
+                  style={{
+                    padding: 12,
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 16,
+                    color: eventInput.type ? '#333' : '#999'
+                  }}>
+                    {eventInput.type || 'Select event type'}
+                  </Text>
+                  <Ionicons 
+                    name={showEventTypePicker ? "chevron-up" : "chevron-down"} 
+                    size={20} 
+                    color="#666" 
+                  />
+                </TouchableOpacity>
+                
+                {showEventTypePicker && (
+                  <View style={{
+                    borderTopWidth: 1,
+                    borderTopColor: '#e0e0e0',
+                    backgroundColor: 'white',
+                    maxHeight: 200
+                  }}>
+                    <ScrollView>
+                      {[
+                        { value: 'Event', icon: 'calendar', color: '#FF9800' },
+                        { value: 'Exam', icon: 'document-text', color: '#F44336' },
+                        { value: 'Meeting', icon: 'people', color: '#9C27B0' },
+                        { value: 'Sports', icon: 'trophy', color: '#4CAF50' },
+                        { value: 'Cultural', icon: 'musical-notes', color: '#2196F3' },
+                        { value: 'Academic', icon: 'school', color: '#FF5722' },
+                        { value: 'Holiday', icon: 'sunny', color: '#FFC107' },
+                        { value: 'Workshop', icon: 'construct', color: '#607D8B' },
+                        { value: 'Field Trip', icon: 'bus', color: '#795548' },
+                        { value: 'Parent Meeting', icon: 'people-circle', color: '#E91E63' }
+                      ].map((option) => (
+                        <TouchableOpacity
+                          key={option.value}
+                          onPress={() => {
+                            setEventInput({ ...eventInput, type: option.value, color: option.color, icon: option.icon });
+                            setShowEventTypePicker(false);
+                          }}
+                          style={{
+                            padding: 12,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            backgroundColor: eventInput.type === option.value ? '#e3f2fd' : 'transparent'
+                          }}
+                        >
+                          <View style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 16,
+                            backgroundColor: option.color,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            marginRight: 12
+                          }}>
+                            <Ionicons name={option.icon} size={16} color="white" />
+                          </View>
+                          <Text style={{
+                            fontSize: 16,
+                            color: eventInput.type === option.value ? '#2196F3' : '#333',
+                            fontWeight: eventInput.type === option.value ? 'bold' : 'normal'
+                          }}>
+                            {option.value}
+                          </Text>
+                          {eventInput.type === option.value && (
+                            <Ionicons name="checkmark" size={20} color="#2196F3" style={{ marginLeft: 'auto' }} />
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
+            </ScrollView>
+
+            {/* Footer Buttons */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 20, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
+              <TouchableOpacity 
+                onPress={() => {
+                  console.log('🔧 Cancel button pressed');
+                  setIsEventModalVisible(false);
+                  setShowEventTypePicker(false); // Close dropdown when modal closes
+                  setShowEventDatePicker(false); // Close date picker when modal closes
+                }}
+                style={{
+                  backgroundColor: '#f5f5f5',
+                  paddingVertical: 12,
+                  paddingHorizontal: 24,
+                  borderRadius: 8,
+                  marginRight: 12,
+                  flex: 1,
+                  borderWidth: 1,
+                  borderColor: '#ddd'
+                }}
+              > 
+                <Text style={{ textAlign: 'center', color: '#666', fontWeight: '600', fontSize: 16 }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={() => {
+                  console.log('🔧 Save button pressed');
+                  if (eventInput.title.trim()) {
+                    saveEvent();
+                  } else {
+                    Alert.alert('Error', 'Please enter an event title');
+                  }
+                }}
+                style={{
+                  backgroundColor: savingEvent ? '#ccc' : '#2196F3',
+                  paddingVertical: 12,
+                  paddingHorizontal: 24,
+                  borderRadius: 8,
+                  flex: 1,
+                  shadowColor: '#2196F3',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 8,
+                  elevation: 4
+                }}
+                disabled={savingEvent}
+              > 
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                  {savingEvent ? (
+                    <ActivityIndicator size={18} color="#fff" style={{ marginRight: 6 }} />
+                  ) : (
+                    <Ionicons name="checkmark" size={18} color="#fff" style={{ marginRight: 6 }} />
+                  )}
+                  <Text style={{ textAlign: 'center', color: '#fff', fontWeight: '600', fontSize: 16 }}>
+                    {savingEvent ? 'Saving...' : 'Save Event'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -1625,28 +2365,69 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   addButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#2196F3',
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 10,
+    shadowColor: '#2196F3',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+    // Ensure button is visible and clickable
+    zIndex: 1,
+    position: 'relative',
   },
   modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+    zIndex: 999999,
+    elevation: 999,
+  },
+  modalContainer: {
+    width: '90%',
+    maxWidth: 480,
+    maxHeight: '85%',
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    elevation: 1000,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    alignSelf: 'center',
+    zIndex: 1000000,
+    position: 'relative',
+  },
+  modalOverlayFixed: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.8)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
-  modalContainer: {
-    width: '90%',
+  modalContainerFixed: {
+    width: '95%',
     maxWidth: 500,
-    maxHeight: '85%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    elevation: 5,
+    maxHeight: '90%',
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -1654,28 +2435,169 @@ const styles = StyleSheet.create({
     },
     shadowOpacity: 0.3,
     shadowRadius: 20,
+    elevation: 25,
+  },
+  simpleModalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    zIndex: 9999999,
+    elevation: 9999,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    // Ensure it covers everything including tab bar
+    ...Platform.select({
+      ios: {
+        paddingBottom: 0, // iOS handles safe areas differently
+      },
+      android: {
+        paddingBottom: 0,
+      },
+      web: {
+        position: 'fixed', // Use fixed positioning on web
+        zIndex: 999999,
+      },
+    }),
+  },
+  simpleModalContainer: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 20,
+    width: '90%',
+    maxWidth: 450,
+    maxHeight: '85%',
+    elevation: 10000,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 15,
+    zIndex: 10000000,
+    position: 'relative',
   },
   modalScrollView: {
     maxHeight: '100%',
   },
   modalScrollContent: {
-    padding: 20,
-    paddingBottom: 30,
+    padding: 24,
+    paddingBottom: 32,
     minHeight: 200,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  modalHeaderIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#e3f2fd',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  modalHeaderText: {
+    flex: 1,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
   },
   input: {
     borderWidth: 1,
     borderColor: '#e0e0e0',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 12,
-    fontSize: 15,
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 16,
+    fontSize: 16,
     backgroundColor: '#fafafa',
+    color: '#333',
+  },
+  inputFocused: {
+    borderColor: '#2196F3',
+    backgroundColor: '#fff',
+    shadowColor: '#2196F3',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  inputDescription: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 8,
+    lineHeight: 18,
   },
   modalButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+    marginHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    minHeight: 48,
+  },
+  modalButtonSecondary: {
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  modalButtonPrimary: {
+    backgroundColor: '#2196F3',
+    shadowColor: '#2196F3',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  modalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  modalButtonTextPrimary: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 24,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
   },
   toggleButton: {
     backgroundColor: '#f0f0f0',
@@ -1856,6 +2778,202 @@ const styles = StyleSheet.create({
   },
   recentActivitiesSection: {
     paddingBottom: 20,
+  },
+  modalOverlayFullscreen: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  // Upcoming Events Popup Modal Styles
+  popupModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  popupModalContainer: {
+    width: '95%',
+    maxWidth: 420,
+    maxHeight: '80%',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.4,
+    shadowRadius: 25,
+    elevation: 15,
+    overflow: 'hidden',
+  },
+  popupModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#f8f9fa',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  popupModalHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  popupModalIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#e3f2fd',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  popupModalTitleContainer: {
+    flex: 1,
+  },
+  popupModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 2,
+  },
+  popupModalSubtitle: {
+    fontSize: 13,
+    color: '#666',
+  },
+  popupModalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f0f0f0',
+  },
+  popupModalScrollView: {
+    maxHeight: 360,
+    paddingHorizontal: 20,
+  },
+  popupModalScrollContent: {
+    paddingVertical: 16,
+  },
+  popupModalNoEvents: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  popupModalNoEventsText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  popupModalNoEventsSubtext: {
+    fontSize: 14,
+    color: '#999',
+  },
+  popupModalEventItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  popupModalEventIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  popupModalEventContent: {
+    flex: 1,
+  },
+  popupModalEventTitle: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 2,
+  },
+  popupModalEventType: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  popupModalEventDateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  popupModalEventDate: {
+    fontSize: 13,
+    color: '#666',
+    marginLeft: 4,
+  },
+  popupModalEventArrow: {
+    marginLeft: 8,
+  },
+  popupModalViewAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginTop: 8,
+    backgroundColor: '#e3f2fd',
+    borderRadius: 8,
+  },
+  popupModalViewAllText: {
+    fontSize: 14,
+    color: '#2196F3',
+    fontWeight: '600',
+    marginRight: 6,
+  },
+  popupModalFooter: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#f8f9fa',
+    borderTopWidth: 1,
+    borderTopColor: '#e9ecef',
+  },
+  popupModalFooterButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginHorizontal: 4,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#2196F3',
+  },
+  popupModalFooterButtonPrimary: {
+    backgroundColor: '#2196F3',
+    borderColor: '#2196F3',
+  },
+  popupModalFooterButtonText: {
+    fontSize: 14,
+    color: '#2196F3',
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  popupModalFooterButtonTextPrimary: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '600',
   },
 
 });

@@ -40,9 +40,11 @@ const ViewReportCard = () => {
   const [selectedReportCard, setSelectedReportCard] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showExamSelectionModal, setShowExamSelectionModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewContent, setPreviewContent] = useState('');
   const [previewType, setPreviewType] = useState('');
+  const [selectedExamForExport, setSelectedExamForExport] = useState(null);
   const [exams, setExams] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [marks, setMarks] = useState([]);
@@ -555,14 +557,14 @@ const ViewReportCard = () => {
             </div>
             <div class="info-row">
               <span><strong>Exam:</strong> <strong>${reportCard.examName}</strong></span>
-              <span><strong>Generated On:</strong> <strong>${new Date().toLocaleDateString('en-US', { 
+              <span><strong>Generated On:</strong> <strong>${new Date().toLocaleDateString('en-GB', { 
                 year: 'numeric', 
                 month: 'long', 
                 day: 'numeric' 
               })}</strong></span>
             </div>
             <div class="info-row">
-              <span><strong>DOB:</strong> <strong>${new Date(reportCard.dob).toLocaleDateString('en-US', { 
+              <span><strong>DOB:</strong> <strong>${new Date(reportCard.dob).toLocaleDateString('en-GB', { 
                 year: 'numeric', 
                 month: 'long', 
                 day: 'numeric' 
@@ -649,8 +651,8 @@ const ViewReportCard = () => {
         <View style={styles.examHeader}>
           <Text style={styles.examName}>{reportCard.exam?.name}</Text>
           <Text style={styles.examDate}>
-            {new Date(reportCard.exam?.start_date).toLocaleDateString()} - {' '}
-            {new Date(reportCard.exam?.end_date).toLocaleDateString()}
+            {new Date(reportCard.exam?.start_date).toLocaleDateString('en-GB')} - {' '}
+            {new Date(reportCard.exam?.end_date).toLocaleDateString('en-GB')}
           </Text>
         </View>
 
@@ -694,7 +696,7 @@ const ViewReportCard = () => {
           </View>
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>Percentage</Text>
-            <Text style={[styles.summaryValue, { color: getGradeColor(reportCard.percentage) }]}>
+            <Text style={[styles.summaryValue, { color: getGradeColor(parseFloat(reportCard.percentage)) }]}>
               {reportCard.percentage}%
             </Text>
           </View>
@@ -965,7 +967,7 @@ const ViewReportCard = () => {
     return `
       <div class="report-section">
         <h3 class="exam-title">${reportCard.exam?.name}</h3>
-        <p><strong>Date:</strong> ${new Date(reportCard.exam?.start_date).toLocaleDateString()} - ${new Date(reportCard.exam?.end_date).toLocaleDateString()}</p>
+        <p><strong>Date:</strong> ${new Date(reportCard.exam?.start_date).toLocaleDateString('en-GB')} - ${new Date(reportCard.exam?.end_date).toLocaleDateString('en-GB')}</p>
         <table>
           <thead>
             <tr>
@@ -1003,9 +1005,225 @@ const ViewReportCard = () => {
     setShowPreviewModal(true);
   };
 
+  const handleSingleExamPreview = (examId) => {
+    const reportCard = reportCards[examId];
+    if (!reportCard) return;
+    
+    const htmlContent = generateSingleExamReportPDF(reportCard);
+    setPreviewContent(htmlContent);
+    setPreviewType('single');
+    setShowPreviewModal(true);
+  };
+
+  const generateSingleExamReportPDF = (reportCard) => {
+    const getGradeColor = (grade) => {
+      switch (grade) {
+        case 'A+': return '#4CAF50';
+        case 'A': return '#4CAF50';
+        case 'A-': return '#8BC34A';
+        case 'B+': return '#2196F3';
+        case 'B': return '#2196F3';
+        case 'B-': return '#03A9F4';
+        case 'C+': return '#FF9800';
+        case 'C': return '#FF9800';
+        case 'C-': return '#FF5722';
+        default: return '#F44336';
+      }
+    };
+
+    const subjectsHTML = reportCard.subjects?.map(subject => `
+      <tr>
+        <td class="subject-cell">${subject.subject?.name}</td>
+        <td style="text-align: center;">${subject.marks_obtained}</td>
+        <td style="text-align: center;">${subject.max_marks}</td>
+        <td style="text-align: center; color: ${getGradeColor(subject.grade)}; font-weight: bold;">${subject.grade}</td>
+      </tr>
+    `).join('') || '';
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Report Card - ${reportCard.exam?.name}</title>
+          <style>
+            body { 
+              font-family: Arial, sans-serif; 
+              margin: 20px; 
+              line-height: 1.4;
+            }
+            .header { 
+              text-align: center; 
+              margin-bottom: 20px; 
+              border-bottom: 2px solid #2196F3;
+              padding-bottom: 20px;
+            }
+            .school-name { 
+              font-size: 24px; 
+              font-weight: bold; 
+              color: #2196F3; 
+              margin-bottom: 10px;
+            }
+            .student-info { 
+              background: #f8f9fa; 
+              padding: 15px; 
+              border-radius: 8px; 
+              margin-bottom: 20px;
+            }
+            .exam-info {
+              background: #e3f2fd;
+              padding: 15px;
+              border-radius: 8px;
+              margin-bottom: 20px;
+            }
+            table { 
+              width: 100%; 
+              border-collapse: collapse; 
+              margin: 15px 0; 
+            }
+            th, td { 
+              border: 1px solid #ddd; 
+              padding: 10px; 
+              text-align: center; 
+            }
+            th { 
+              background: #1976d2; 
+              color: white; 
+              font-weight: bold;
+            }
+            .subject-cell {
+              text-align: left;
+              padding-left: 15px;
+            }
+            .summary {
+              background: #f8f9fa;
+              padding: 15px;
+              border-radius: 8px;
+              margin-top: 20px;
+              text-align: center;
+            }
+            .total-row {
+              background: #f8f9fa;
+              font-weight: bold;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="school-name">${schoolDetails?.name || 'ABC School'}</div>
+            <h1>Report Card</h1>
+          </div>
+          
+          <div class="student-info">
+            <p><strong>Student:</strong> ${student?.name}</p>
+            <p><strong>Class:</strong> ${student?.classes?.class_name} ${student?.classes?.section}</p>
+            <p><strong>Admission No:</strong> ${student?.admission_no}</p>
+          </div>
+          
+          <div class="exam-info">
+            <p><strong>Exam:</strong> ${reportCard.exam?.name}</p>
+            <p><strong>Date:</strong> ${new Date(reportCard.exam?.start_date).toLocaleDateString('en-GB')} - ${new Date(reportCard.exam?.end_date).toLocaleDateString('en-GB')}</p>
+          </div>
+          
+          <h3>Subject-wise Marks</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Subject</th>
+                <th>Marks Obtained</th>
+                <th>Max Marks</th>
+                <th>Grade</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${subjectsHTML}
+              <tr class="total-row">
+                <td class="subject-cell"><strong>Total</strong></td>
+                <td><strong>${reportCard.totalMarks}</strong></td>
+                <td><strong>${reportCard.totalMaxMarks}</strong></td>
+                <td><strong>${reportCard.percentage}%</strong></td>
+              </tr>
+            </tbody>
+          </table>
+          
+          <div class="summary">
+            <h3>Performance Summary</h3>
+            <p><strong>Total Marks:</strong> ${reportCard.totalMarks}/${reportCard.totalMaxMarks}</p>
+            <p><strong>Percentage:</strong> ${reportCard.percentage}%</p>
+            <p><strong>Generated on:</strong> ${new Date().toLocaleDateString('en-GB')}</p>
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
   const handleConfirmExport = async () => {
     setShowPreviewModal(false);
-    await handleExportAllPDF();
+    
+    if (previewType === 'single' && selectedExamForExport) {
+      await handleExportSingleExamPDF();
+    } else {
+      await handleExportAllPDF();
+    }
+  };
+
+  const handleExportSingleExamPDF = async () => {
+    if (!selectedExamForExport) return;
+    
+    try {
+      const reportCard = reportCards[selectedExamForExport];
+      const htmlContent = generateSingleExamReportPDF(reportCard);
+      
+      const { uri } = await Print.printToFileAsync({
+        html: htmlContent,
+        base64: false
+      });
+
+      const fileName = `ReportCard_${student?.name?.replace(/\s+/g, '_')}_${reportCard.exam?.name?.replace(/\s+/g, '_')}.pdf`;
+
+      if (Platform.OS === 'android') {
+        try {
+          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+          if (!permissions.granted) {
+            Alert.alert('Permission Required', 'Please grant storage permission to save the PDF file.');
+            return;
+          }
+
+          const destUri = await FileSystem.StorageAccessFramework.createFileAsync(
+            permissions.directoryUri,
+            fileName,
+            'application/pdf'
+          );
+
+          const fileData = await FileSystem.readAsStringAsync(uri, { 
+            encoding: FileSystem.EncodingType.Base64 
+          });
+          await FileSystem.writeAsStringAsync(destUri, fileData, { 
+            encoding: FileSystem.EncodingType.Base64 
+          });
+
+          Alert.alert(
+            'PDF Saved Successfully',
+            `Report card has been saved.\n\nFile: ${fileName}`,
+            [
+              { 
+                text: 'Share', 
+                onPress: () => sharePDF(uri, fileName) 
+              },
+              { text: 'OK', style: 'default' }
+            ]
+          );
+        } catch (error) {
+          console.error('Android save error:', error);
+          await sharePDF(uri, fileName);
+        }
+      } else {
+        await sharePDF(uri, fileName);
+      }
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      Alert.alert('Error', 'Failed to generate PDF. Please try again.');
+    }
   };
 
   if (loading) {
@@ -1077,14 +1295,62 @@ const ViewReportCard = () => {
       {/* Export Button - Only show when there are report cards */}
       {reportCardKeys.length > 0 && (
         <View style={styles.exportSection}>
-          <TouchableOpacity style={styles.exportButton} onPress={handlePreviewAllPDF}>
+          <TouchableOpacity style={styles.exportButton} onPress={() => setShowExamSelectionModal(true)}>
             <Ionicons name="download" size={20} color="#fff" />
             <Text style={styles.exportButtonText}>Export Report Card</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* Export Modal - Removed, direct preview */}
+      {/* Exam Selection Modal */}
+      {showExamSelectionModal && (
+        <Modal
+          visible={showExamSelectionModal}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setShowExamSelectionModal(false)}
+        >
+          <View style={styles.exportModalOverlay}>
+            <View style={styles.exportModalContainer}>
+              <Text style={styles.exportModalTitle}>Select Exam to Export</Text>
+              
+              <ScrollView style={{ maxHeight: 400 }}>
+                {reportCardKeys.map((examId) => {
+                  const reportCard = reportCards[examId];
+                  return (
+                    <TouchableOpacity
+                      key={examId}
+                      style={styles.examSelectionOption}
+                      onPress={() => {
+                        setSelectedExamForExport(examId);
+                        setShowExamSelectionModal(false);
+                        handleSingleExamPreview(examId);
+                      }}
+                    >
+                      <View style={styles.examOptionContent}>
+                        <Text style={styles.examOptionTitle}>{reportCard.exam?.name}</Text>
+                        <Text style={styles.examOptionDate}>
+                          {new Date(reportCard.exam?.start_date).toLocaleDateString('en-GB')} - {' '}
+                          {new Date(reportCard.exam?.end_date).toLocaleDateString('en-GB')}
+                        </Text>
+                        <Text style={styles.examOptionPercentage}>Result: {reportCard.percentage}%</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={20} color="#666" />
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+              
+              <TouchableOpacity
+                style={styles.exportCancel}
+                onPress={() => setShowExamSelectionModal(false)}
+              >
+                <Text style={styles.exportCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
 
       {/* Preview Modal */}
       {showPreviewModal && (
@@ -1143,42 +1409,104 @@ const ViewReportCard = () => {
                       </View>
                     )}
                     
-                    {/* All Report Cards Preview */}
-                    {Object.keys(reportCards).map(examId => {
-                      const reportCard = reportCards[examId];
-                      return (
-                        <View key={examId} style={styles.reportPreview}>
-                          <Text style={styles.examTitle}>{reportCard.exam?.name}</Text>
-                          <Text style={styles.examDate}>
-                            {new Date(reportCard.exam?.start_date).toLocaleDateString()} - {new Date(reportCard.exam?.end_date).toLocaleDateString()}
-                          </Text>
-                          
-                          <View style={styles.marksTable}>
-                            <View style={styles.tableHeader}>
-                              <Text style={styles.tableHeaderText}>Subject</Text>
-                              <Text style={styles.tableHeaderText}>Marks</Text>
-                              <Text style={styles.tableHeaderText}>Max</Text>
-                              <Text style={styles.tableHeaderText}>Grade</Text>
-                            </View>
-                            
-                            {reportCard.subjects?.map((subject, index) => (
-                              <View key={index} style={styles.tableRow}>
-                                <Text style={styles.subjectCellText}>{subject.subject?.name}</Text>
-                                <Text style={styles.tableCellText}>{subject.marks_obtained}</Text>
-                                <Text style={styles.tableCellText}>{subject.max_marks}</Text>
-                                <Text style={styles.tableCellText}>{subject.grade}</Text>
-                              </View>
-                            ))}
-                            
-                            <View style={styles.totalRow}>
-                              <Text style={styles.totalText}>
-                                Total: {reportCard.totalMarks}/{reportCard.totalMaxMarks} ({reportCard.percentage}%)
+                    {/* Conditional Preview Content */}
+                    {previewType === 'single' && selectedExamForExport ? (
+                      // Single Exam Preview
+                      (() => {
+                        const reportCard = reportCards[selectedExamForExport];
+                        return (
+                          <View style={styles.reportPreview}>
+                            <View style={styles.examInfo}>
+                              <Text style={styles.examTitle}>{reportCard.exam?.name}</Text>
+                              <Text style={styles.examDate}>
+                                {new Date(reportCard.exam?.start_date).toLocaleDateString('en-GB')} - {new Date(reportCard.exam?.end_date).toLocaleDateString('en-GB')}
                               </Text>
                             </View>
+                            
+                            <Text style={styles.sectionTitle}>Subject-wise Marks</Text>
+                            <View style={styles.marksTable}>
+                              <View style={styles.tableHeader}>
+                                <Text style={styles.tableHeaderText}>Subject</Text>
+                                <Text style={styles.tableHeaderText}>Marks</Text>
+                                <Text style={styles.tableHeaderText}>Max</Text>
+                                <Text style={styles.tableHeaderText}>Grade</Text>
+                              </View>
+                              
+                              {reportCard.subjects?.map((subject, index) => (
+                                <View key={index} style={styles.tableRow}>
+                                  <Text style={styles.subjectCellText}>{subject.subject?.name}</Text>
+                                  <Text style={styles.tableCellText}>{subject.marks_obtained}</Text>
+                                  <Text style={styles.tableCellText}>{subject.max_marks}</Text>
+                                  <Text style={styles.tableCellText}>{subject.grade}</Text>
+                                </View>
+                              ))}
+                              
+                              <View style={styles.totalRow}>
+                                <Text style={styles.totalText}>
+                                  Total: {reportCard.totalMarks}/{reportCard.totalMaxMarks} ({reportCard.percentage}%)
+                                </Text>
+                              </View>
+                            </View>
+                            
+                            <View style={styles.summaryPreview}>
+                              <Text style={styles.sectionTitle}>Performance Summary</Text>
+                              <View style={styles.summaryRow}>
+                                <Text style={styles.summaryItemText}>
+                                  <Text style={styles.boldText}>Total Marks:</Text> {reportCard.totalMarks}/{reportCard.totalMaxMarks}
+                                </Text>
+                              </View>
+                              <View style={styles.summaryRow}>
+                                <Text style={styles.summaryItemText}>
+                                  <Text style={styles.boldText}>Percentage:</Text> {reportCard.percentage}%
+                                </Text>
+                              </View>
+                              <View style={styles.summaryRow}>
+                                <Text style={styles.summaryItemText}>
+                                  <Text style={styles.boldText}>Generated on:</Text> {new Date().toLocaleDateString('en-GB')}
+                                </Text>
+                              </View>
+                            </View>
                           </View>
-                        </View>
-                      );
-                    })}
+                        );
+                      })()
+                    ) : (
+                      // All Report Cards Preview
+                      Object.keys(reportCards).map(examId => {
+                        const reportCard = reportCards[examId];
+                        return (
+                          <View key={examId} style={styles.reportPreview}>
+                            <Text style={styles.examTitle}>{reportCard.exam?.name}</Text>
+                            <Text style={styles.examDate}>
+                              {new Date(reportCard.exam?.start_date).toLocaleDateString('en-GB')} - {new Date(reportCard.exam?.end_date).toLocaleDateString('en-GB')}
+                            </Text>
+                            
+                            <View style={styles.marksTable}>
+                              <View style={styles.tableHeader}>
+                                <Text style={styles.tableHeaderText}>Subject</Text>
+                                <Text style={styles.tableHeaderText}>Marks</Text>
+                                <Text style={styles.tableHeaderText}>Max</Text>
+                                <Text style={styles.tableHeaderText}>Grade</Text>
+                              </View>
+                              
+                              {reportCard.subjects?.map((subject, index) => (
+                                <View key={index} style={styles.tableRow}>
+                                  <Text style={styles.subjectCellText}>{subject.subject?.name}</Text>
+                                  <Text style={styles.tableCellText}>{subject.marks_obtained}</Text>
+                                  <Text style={styles.tableCellText}>{subject.max_marks}</Text>
+                                  <Text style={styles.tableCellText}>{subject.grade}</Text>
+                                </View>
+                              ))}
+                              
+                              <View style={styles.totalRow}>
+                                <Text style={styles.totalText}>
+                                  Total: {reportCard.totalMarks}/{reportCard.totalMaxMarks} ({reportCard.percentage}%)
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+                        );
+                      })
+                    )}
                   </View>
                 </View>
               </View>
@@ -1782,6 +2110,58 @@ const styles = StyleSheet.create({
   subjectGradeFixed: {
     width: width * 0.2,
     minWidth: 60,
+  },
+  // Exam Selection Modal Styles
+  examSelectionOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    backgroundColor: '#f8f9fa',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  examOptionContent: {
+    flex: 1,
+  },
+  examOptionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  examOptionDate: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 2,
+  },
+  examOptionPercentage: {
+    fontSize: 14,
+    color: '#1976d2',
+    fontWeight: '600',
+  },
+  // Single Exam Preview Styles
+  examInfo: {
+    backgroundColor: '#e3f2fd',
+    padding: 15,
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  summaryPreview: {
+    backgroundColor: '#f8f9fa',
+    padding: 15,
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  summaryRow: {
+    marginBottom: 8,
+  },
+  summaryItemText: {
+    fontSize: 14,
+    color: '#333',
   },
 });
 

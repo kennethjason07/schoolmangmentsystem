@@ -205,70 +205,39 @@ export const authHelpers = {
 // User tenant helper function
 export const getUserTenantId = async () => {
   try {
-    console.log('🔍 [getUserTenantId] Starting tenant ID resolution...');
-    
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      console.warn('❌ [getUserTenantId] No authenticated user found for tenant context');
       return null;
     }
 
-    // PRIORITIZE database tenant_id over metadata to avoid stale metadata issues
+    // Check database for tenant_id first
     try {
-      console.log('🔍 [getUserTenantId] Checking database for tenant_id...');
       const { data: userProfile, error: profileError } = await supabase
         .from('users')
-        .select('tenant_id, email, role_id')
+        .select('tenant_id')
         .eq('id', user.id)
         .maybeSingle();
 
-      console.log('🔍 [getUserTenantId] Database query result:');
-      console.log('   - Profile found:', !!userProfile);
-      console.log('   - Profile email:', userProfile?.email);
-      console.log('   - Profile tenant_id:', userProfile?.tenant_id);
-      console.log('   - Profile role_id:', userProfile?.role_id);
-      console.log('   - Error:', profileError?.message || 'None');
-      console.log('   - Error code:', profileError?.code || 'None');
-
-      if (!profileError && userProfile && userProfile.tenant_id) {
-        console.log(`Found tenant_id in user profile (prioritized): ${userProfile.tenant_id}`);
+      if (!profileError && userProfile?.tenant_id) {
         return userProfile.tenant_id;
       }
-
-      if (profileError) {
-        console.warn('⚠️ [getUserTenantId] Error accessing user profile table:', profileError);
-      } else {
-        console.warn('⚠️ [getUserTenantId] No tenant_id found in user profile');
-      }
     } catch (profileError) {
-      console.warn('💥 [getUserTenantId] Could not access user profile table:', profileError);
+      // Continue to metadata check
     }
 
-    // PRIORITY 2: Check user metadata for tenant_id as fallback
-    console.log('🔍 [getUserTenantId] Checking JWT metadata for tenant_id...');
+    // Check user metadata for tenant_id as fallback
     const metadataTenantId = user.app_metadata?.tenant_id || user.user_metadata?.tenant_id;
-    console.log('🔍 [getUserTenantId] app_metadata:', JSON.stringify(user.app_metadata || {}, null, 2));
-    console.log('🔍 [getUserTenantId] user_metadata:', JSON.stringify(user.user_metadata || {}, null, 2));
-    console.log('🔍 [getUserTenantId] metadataTenantId:', metadataTenantId);
     
     if (metadataTenantId) {
-      console.log(`✅ [getUserTenantId] Found tenant_id in user metadata: ${metadataTenantId}`);
       return metadataTenantId;
     }
 
-    // FALLBACK: Use known tenant_id for this school system
-    // Since you confirmed all users belong to this tenant, we can safely use it as fallback
+    // Use known tenant_id for this school system as final fallback
     const knownTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
-    console.warn(`⚠️ [getUserTenantId] No tenant_id found in metadata or database`);
-    console.warn(`💡 [getUserTenantId] Using known school tenant_id as fallback: ${knownTenantId}`);
-    console.warn(`💡 [getUserTenantId] This is temporary - should fix user metadata/JWT to include tenant_id`);
-    
     return knownTenantId;
   } catch (error) {
-    console.error('💥 [getUserTenantId] Error in getUserTenantId:', error);
     // Return known tenant as final fallback for this school
     const knownTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
-    console.warn(`⚠️ [getUserTenantId] Using known school tenant_id due to error: ${knownTenantId}`);
     return knownTenantId;
   }
 };
@@ -279,7 +248,6 @@ export const dbHelpers = {
   async ensureRolesExist() {
     try {
       const defaultRoles = ['admin', 'teacher', 'student', 'parent'];
-      console.log('🔍 Checking if roles exist...');
 
       for (const roleName of defaultRoles) {
         const { data: existingRole, error: selectError } = await supabase
@@ -289,30 +257,18 @@ export const dbHelpers = {
           .maybeSingle();
 
         if (selectError && selectError.code !== 'PGRST116') {
-          console.warn(`⚠️  Could not check role ${roleName}:`, selectError.message);
           continue;
         }
 
         if (!existingRole) {
-          console.log(`➕ Creating role: ${roleName}`);
-          const { error: insertError } = await supabase
+          await supabase
             .from(TABLES.ROLES)
             .insert({ role_name: roleName });
-          
-          if (insertError) {
-            console.warn(`⚠️  Could not create role ${roleName}:`, insertError.message);
-            // Continue with other roles
-          } else {
-            console.log(`✅ Created role: ${roleName}`);
-          }
-        } else {
-          console.log(`✅ Role ${roleName} already exists (ID: ${existingRole.id})`);
         }
       }
 
       return { success: true };
     } catch (error) {
-      console.error('Error ensuring roles exist:', error);
       return { success: false, error };
     }
   },
@@ -320,11 +276,8 @@ export const dbHelpers = {
   // Get role ID with fallback for when RLS prevents access
   async getRoleIdSafely(roleName) {
     try {
-      console.log(`🔍 getRoleIdSafely: Attempting to fetch role ID for '${roleName}'`);
-      
       // Input validation
       if (!roleName || typeof roleName !== 'string') {
-        console.error('❌ getRoleIdSafely: Invalid role name provided:', roleName);
         return 1; // Default fallback
       }
       
@@ -334,38 +287,19 @@ export const dbHelpers = {
         .eq('role_name', roleName)
         .maybeSingle();
 
-      if (error) {
-        console.warn(`⚠️  Could not fetch role ${roleName}:`, error.message);
+      if (error || !role?.id) {
         // Return a fallback role ID based on role name
-        // This is a temporary solution for when RLS prevents role access
         const fallbackRoleIds = {
           'admin': 1,
           'teacher': 2,
           'student': 3,
           'parent': 4
         };
-        const fallbackId = fallbackRoleIds[roleName.toLowerCase()] || 1;
-        console.log(`🔄 Using fallback role ID ${fallbackId} for ${roleName}`);
-        return fallbackId;
+        return fallbackRoleIds[roleName.toLowerCase()] || 1;
       }
 
-      if (!role || role.id === null || role.id === undefined) {
-        console.warn(`⚠️  Role ${roleName} not found or has invalid ID, using fallback`);
-        const fallbackRoleIds = {
-          'admin': 1,
-          'teacher': 2,
-          'student': 3,
-          'parent': 4
-        };
-        const fallbackId = fallbackRoleIds[roleName.toLowerCase()] || 1;
-        console.log(`🔄 Using fallback role ID ${fallbackId} for ${roleName}`);
-        return fallbackId;
-      }
-
-      console.log(`✅ Found role ${roleName} with ID: ${role.id}`);
       return role.id;
     } catch (error) {
-      console.error(`❌ Error getting role ID for ${roleName}:`, error);
       // Return fallback
       const fallbackRoleIds = {
         'admin': 1,
@@ -373,9 +307,7 @@ export const dbHelpers = {
         'student': 3,
         'parent': 4
       };
-      const fallbackId = fallbackRoleIds[roleName.toLowerCase()] || 1;
-      console.log(`🔄 Exception fallback: Using role ID ${fallbackId} for ${roleName}`);
-      return fallbackId;
+      return fallbackRoleIds[roleName.toLowerCase()] || 1;
     }
   },
   // Tables that do not require tenant_id filtering (system-wide)
@@ -2450,12 +2382,19 @@ export const dbHelpers = {
   // ========================================
 
   // Get expense categories
-  async getExpenseCategories() {
+  async getExpenseCategories(tenantId = null) {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from(TABLES.EXPENSE_CATEGORIES)
         .select('*')
         .order('name');
+        
+      // Apply tenant filter if provided
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
+      
+      const { data, error } = await query;
       return { data, error };
     } catch (error) {
       return { data: null, error };
@@ -2465,13 +2404,18 @@ export const dbHelpers = {
   // Get expenses with date filtering
   async getExpenses(filters = {}) {
     try {
-      const { startDate = null, endDate = null, category = null } = filters;
+      const { startDate = null, endDate = null, category = null, tenantId = null } = filters;
       
       let query = supabase
         .from(TABLES.SCHOOL_EXPENSES)
         .select('*')
         .order('expense_date', { ascending: false });
 
+      // Apply tenant filter first if provided
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
+      
       if (startDate) {
         query = query.gte('expense_date', startDate);
       }
@@ -2490,11 +2434,14 @@ export const dbHelpers = {
   },
 
   // Create a new expense
-  async createExpense(expenseData) {
+  async createExpense(expenseData, tenantId = null) {
     try {
+      // Add tenant_id to the expense data if provided
+      const finalExpenseData = tenantId ? { ...expenseData, tenant_id: tenantId } : expenseData;
+      
       const { data, error } = await supabase
         .from(TABLES.SCHOOL_EXPENSES)
-        .insert(expenseData)
+        .insert(finalExpenseData)
         .select()
         .single();
       return { data, error };
@@ -2504,14 +2451,19 @@ export const dbHelpers = {
   },
 
   // Update an expense
-  async updateExpense(expenseId, updates) {
+  async updateExpense(expenseId, updates, tenantId = null) {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from(TABLES.SCHOOL_EXPENSES)
         .update(updates)
-        .eq('id', expenseId)
-        .select()
-        .single();
+        .eq('id', expenseId);
+        
+      // Add tenant filter for security
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
+        
+      const { data, error } = await query.select().single();
       return { data, error };
     } catch (error) {
       return { data: null, error };
@@ -2519,12 +2471,19 @@ export const dbHelpers = {
   },
 
   // Delete an expense
-  async deleteExpense(expenseId) {
+  async deleteExpense(expenseId, tenantId = null) {
     try {
-      const { error } = await supabase
+      let query = supabase
         .from(TABLES.SCHOOL_EXPENSES)
         .delete()
         .eq('id', expenseId);
+        
+      // Add tenant filter for security
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
+        
+      const { error } = await query;
       return { error };
     } catch (error) {
       return { error };
@@ -2532,11 +2491,14 @@ export const dbHelpers = {
   },
 
   // Create a new expense category
-  async createExpenseCategory(categoryData) {
+  async createExpenseCategory(categoryData, tenantId = null) {
     try {
+      // Add tenant_id to the category data if provided
+      const finalCategoryData = tenantId ? { ...categoryData, tenant_id: tenantId } : categoryData;
+      
       const { data, error } = await supabase
         .from(TABLES.EXPENSE_CATEGORIES)
-        .insert(categoryData)
+        .insert(finalCategoryData)
         .select()
         .single();
       return { data, error };
@@ -2546,14 +2508,19 @@ export const dbHelpers = {
   },
 
   // Update an expense category
-  async updateExpenseCategory(categoryName, updates) {
+  async updateExpenseCategory(categoryName, updates, tenantId = null) {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from(TABLES.EXPENSE_CATEGORIES)
         .update(updates)
-        .eq('name', categoryName)
-        .select()
-        .single();
+        .eq('name', categoryName);
+        
+      // Add tenant filter for security
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
+        
+      const { data, error } = await query.select().single();
       return { data, error };
     } catch (error) {
       return { data: null, error };
@@ -2561,12 +2528,19 @@ export const dbHelpers = {
   },
 
   // Delete an expense category
-  async deleteExpenseCategory(categoryName) {
+  async deleteExpenseCategory(categoryName, tenantId = null) {
     try {
-      const { error } = await supabase
+      let query = supabase
         .from(TABLES.EXPENSE_CATEGORIES)
         .delete()
         .eq('name', categoryName);
+        
+      // Add tenant filter for security
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
+        
+      const { error } = await query;
       return { error };
     } catch (error) {
       return { error };

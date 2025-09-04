@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, authHelpers, dbHelpers } from './supabase';
 import supabaseService from '../services/SupabaseServiceFixed';
+import { AuthFix } from './authFix';
 
 const AuthContext = createContext({});
 
@@ -43,23 +44,44 @@ export const AuthProvider = ({ children }) => {
   }
 
   useEffect(() => {
-    // Initialize auth state
+    // Initialize auth state with refresh token error handling
     const initializeAuth = async () => {
       try {
-        // Get current session
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        console.log('🔄 Initializing authentication...');
         
-        if (sessionError) {
-          console.error('Error getting session:', sessionError);
-          setLoading(false);
-          return;
-        }
-
-        if (session?.user) {
-          await handleAuthChange(session.user);
+        // First, validate and fix any session issues using AuthFix
+        const sessionResult = await AuthFix.validateAndFixSession();
+        
+        if (sessionResult.valid && sessionResult.session) {
+          // Session is valid, proceed with normal auth handling
+          console.log('✅ Valid session found, proceeding with auth');
+          await handleAuthChange(sessionResult.session.user);
+        } else if (sessionResult.needsReauth) {
+          // Session is invalid or corrupted, clear everything
+          console.log('⚠️ Session invalid or missing, clearing auth state');
+          setUser(null);
+          setUserType(null);
+        } else if (sessionResult.error) {
+          console.error('❌ Session validation error:', sessionResult.error);
+          // Check if it's a refresh token error
+          if (sessionResult.error.message?.includes('Invalid Refresh Token') || 
+              sessionResult.error.message?.includes('Refresh Token Not Found')) {
+            console.log('🔧 Detected refresh token error, clearing auth data');
+            await AuthFix.forceSignOut();
+            setUser(null);
+            setUserType(null);
+          }
         }
       } catch (error) {
-        console.error('Error initializing auth:', error);
+        console.error('❌ Error initializing auth:', error);
+        
+        // If it's any auth-related error, clear everything to be safe
+        if (error.message?.includes('refresh') || error.message?.includes('token') || error.message?.includes('Auth')) {
+          console.log('🧹 Auth error detected, clearing auth data');
+          await AuthFix.forceSignOut();
+          setUser(null);
+          setUserType(null);
+        }
       } finally {
         setLoading(false);
       }
@@ -319,6 +341,10 @@ export const AuthProvider = ({ children }) => {
       setLoading(true);
       isSigningInRef.current = true; // Prevent auth listener from interfering
       
+      // Clear any existing invalid auth data before attempting sign in
+      console.log('🧹 Clearing any invalid auth data before sign in...');
+      await AuthFix.forceSignOut();
+      
       // Resolve tenant if subdomain provided
       let targetTenantId = null;
       if (tenantSubdomain) {
@@ -336,19 +362,17 @@ export const AuthProvider = ({ children }) => {
         targetTenantId = tenant.id;
       }
       
-      // Sign in with Supabase Auth
-      const { data: { session, user }, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
+      // Use AuthFix for safer sign in
+      console.log('🔐 Using AuthFix for safe sign in...');
+      const signInResult = await AuthFix.signInSafely(email, password);
       
-      if (authError) {
-        return { data: null, error: authError };
+      if (!signInResult.success) {
+        console.error('❌ AuthFix sign in failed:', signInResult.error);
+        return { data: null, error: signInResult.error };
       }
-
-      if (!user) {
-        return { data: null, error: { message: 'Authentication failed' } };
-      }
+      
+      const { user, session } = signInResult;
+      console.log('✅ AuthFix sign in successful for:', user.email);
 
       // Get user profile (without roles join to avoid foreign key issues)
       console.log('🔍 Querying user profile for email:', email);

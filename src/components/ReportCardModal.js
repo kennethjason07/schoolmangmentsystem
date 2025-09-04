@@ -178,6 +178,22 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
     return 'F';
   };
 
+  const getGradeColor = (grade) => {
+    if (typeof grade === 'number') {
+      if (grade >= 90) return '#4CAF50';
+      if (grade >= 75) return '#FF9800';
+      if (grade >= 60) return '#FFC107';
+      return '#F44336';
+    }
+    
+    switch (grade) {
+      case 'A+': case 'A': return '#4CAF50';
+      case 'B+': case 'B': return '#FF9800';
+      case 'C+': case 'C': return '#FFC107';
+      default: return '#F44336';
+    }
+  };
+
   const calculateTotals = () => {
     const totalMarksObtained = marks.reduce((sum, mark) => sum + (mark.marks_obtained || 0), 0);
     // Use exam's max_marks for each subject instead of marks table max_marks
@@ -200,7 +216,7 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
 
   const generateReportCardHTML = () => {
     const totals = calculateTotals();
-    const currentDate = new Date().toLocaleDateString();
+    const currentDate = new Date().toLocaleDateString('en-GB');
 
     return `
       <!DOCTYPE html>
@@ -360,7 +376,7 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
             </div>
             <div class="info-row">
               <span class="label">DOB:</span>
-              <span class="value">${new Date(student.dob).toLocaleDateString()}</span>
+              <span class="value">${new Date(student.dob).toLocaleDateString('en-GB')}</span>
             </div>
           </div>
           <div class="info-section">
@@ -403,8 +419,8 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
                   <td>${subject.name}</td>
                   <td>${marksObtained}</td>
                   <td>${maxMarks}</td>
-                  <td>${percentage}%</td>
-                  <td>${grade}</td>
+                  <td style="color: ${getGradeColor(percentage)}">${percentage}%</td>
+                  <td style="color: ${getGradeColor(grade)}">${grade}</td>
                   <td>${mark?.remarks || '-'}</td>
                 </tr>
               `;
@@ -413,8 +429,8 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
               <td><strong>TOTAL</strong></td>
               <td><strong>${totals.totalMarksObtained}</strong></td>
               <td><strong>${totals.totalMaxMarks}</strong></td>
-              <td><strong>${totals.percentage}%</strong></td>
-              <td><strong>${totals.grade}</strong></td>
+              <td><strong style="color: ${getGradeColor(totals.percentage)}">${totals.percentage}%</strong></td>
+              <td><strong style="color: ${getGradeColor(totals.grade)}">${totals.grade}</strong></td>
               <td>-</td>
             </tr>
           </tbody>
@@ -448,7 +464,7 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
           </div>
           <div class="info-row">
             <span class="label">Overall Percentage:</span>
-            <span class="grade-display">${totals.percentage}%</span>
+            <span class="grade-display" style="color: ${getGradeColor(totals.percentage)}">${totals.percentage}%</span>
           </div>
           <div class="info-row">
             <span class="label">Rank:</span>
@@ -599,13 +615,13 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Date of Birth:</Text>
                   <Text style={styles.infoValue}>
-                    {new Date(student.dob).toLocaleDateString()}
+                    {new Date(student.dob).toLocaleDateString('en-GB')}
                   </Text>
                 </View>
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Generated On:</Text>
                   <Text style={styles.infoValue}>
-                    {new Date().toLocaleDateString()}
+                    {new Date().toLocaleDateString('en-GB')}
                   </Text>
                 </View>
               </View>
@@ -641,8 +657,8 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
                         <Text style={[styles.tableCell, isTablet ? { flex: 2 } : styles.tableCellFixed]}>{subject.name}</Text>
                         <Text style={[styles.tableCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{marksObtained}</Text>
                         <Text style={[styles.tableCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{maxMarks}</Text>
-                        <Text style={[styles.tableCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{percentage}%</Text>
-                        <Text style={[styles.tableCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{grade}</Text>
+                        <Text style={[styles.tableCell, { color: getGradeColor(percentage) }, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{percentage}%</Text>
+                        <Text style={[styles.tableCell, { color: getGradeColor(grade) }, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{grade}</Text>
                       </View>
                     );
                   })}
@@ -652,8 +668,8 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
                       <Text style={[styles.tableCell, styles.totalCell, isTablet ? { flex: 2 } : styles.tableCellFixed]}>TOTAL</Text>
                       <Text style={[styles.tableCell, styles.totalCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{totals.totalMarksObtained}</Text>
                       <Text style={[styles.tableCell, styles.totalCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{totals.totalMaxMarks}</Text>
-                      <Text style={[styles.tableCell, styles.totalCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{totals.percentage}%</Text>
-                      <Text style={[styles.tableCell, styles.totalCell, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{totals.grade}</Text>
+                      <Text style={[styles.tableCell, styles.totalCell, { color: getGradeColor(totals.percentage) }, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{totals.percentage}%</Text>
+                      <Text style={[styles.tableCell, styles.totalCell, { color: getGradeColor(totals.grade) }, isTablet ? { flex: 1 } : styles.tableCellFixed]}>{totals.grade}</Text>
                     </View>
                   )}
                 </View>
@@ -698,7 +714,7 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
                   </View>
                   <View style={styles.summaryCard}>
                     <Text style={styles.summaryLabel}>Overall Percentage</Text>
-                    <Text style={[styles.summaryValue, styles.percentageText]}>{totals.percentage}%</Text>
+                    <Text style={[styles.summaryValue, { color: getGradeColor(totals.percentage) }]}>{totals.percentage}%</Text>
                   </View>
                 </View>
               </View>

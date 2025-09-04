@@ -25,53 +25,8 @@ export const useUnreadNotificationCount = (recipientType = 'Student') => {
         return;
       }
 
-      // Log for debugging when needed
-      if (recipientType === 'Admin' || recipientType === 'Student') {
-        console.log(`🔔 ${recipientType} notification count fetch for:`, user.email || user.id);
-      }
-      
-      // Debug: Check what's in the table for this user
-      const { data: debugData, error: debugError } = await supabase
-        .from('notification_recipients')
-        .select('id, recipient_id, recipient_type, is_read, notification_id, created_at')
-        .eq('recipient_id', user.id);
-      
-      // Show debug for Admin and Student users
-      if (recipientType === 'Admin' || recipientType === 'Student') {
-        console.log(`🔍 ${recipientType} Debug - All notifications for this user ID:`, debugData || 'none');
-        
-        if (debugData) {
-          const targetNotifications = debugData.filter(d => d.recipient_type === recipientType);
-          const unreadTargetNotifications = targetNotifications.filter(d => !d.is_read);
-          console.log(`📊 Total ${recipientType} notifications:`, targetNotifications.length);
-          console.log(`📊 Unread ${recipientType} notifications:`, unreadTargetNotifications.length);
-          console.log(`📊 ${recipientType} notification details:`, targetNotifications.slice(0, 5));
-          
-          // Check for notifications with wrong recipient_type
-          const wrongTypeNotifications = debugData.filter(d => d.recipient_type !== recipientType);
-          if (wrongTypeNotifications.length > 0) {
-            console.log(`⚠️ WARNING: ${recipientType} user has notifications with wrong type:`, wrongTypeNotifications.slice(0, 3));
-          }
-        }
-      }
-      
-      // Enhanced debugging for Admin case
-      if (recipientType === 'Admin') {
-        console.log('🔥 ADMIN DEBUG - Enhanced logging:');
-        if (debugData) {
-          const adminNotifications = debugData.filter(d => d.recipient_type === 'Admin');
-          const unreadAdminNotifications = adminNotifications.filter(d => !d.is_read);
-          console.log('🔥 Total Admin notifications:', adminNotifications.length);
-          console.log('🔥 Unread Admin notifications:', unreadAdminNotifications.length);
-          console.log('🔥 Admin notification details:', adminNotifications);
-          
-          // Check if there are notifications with wrong recipient_type
-          const nonAdminNotifications = debugData.filter(d => d.recipient_type !== 'Admin');
-          if (nonAdminNotifications.length > 0) {
-            console.log('⚠️ WARNING: Admin user has non-Admin notifications:', nonAdminNotifications);
-          }
-        }
-      }
+      // Simplified logging
+      // console.log(`🔔 ${recipientType} notification count fetch for:`, user.email || user.id);
 
       // Get tenant_id for proper filtering
       const tenantId = await getUserTenantId();
@@ -109,7 +64,6 @@ export const useUnreadNotificationCount = (recipientType = 'Student') => {
       }
 
       if (!notificationData || notificationData.length === 0) {
-        console.log(`📊 No unread ${recipientType} notifications found`);
         setUnreadCount(0);
         return;
       }
@@ -148,9 +102,6 @@ export const useUnreadNotificationCount = (recipientType = 'Student') => {
                                    message.includes('time off');
         
         if (isLeaveNotification) {
-          if (recipientType === 'Student') {
-            console.log(`🚫 Filtering out leave notification from count: ${notification.message.substring(0, 50)}...`);
-          }
           return false;
         }
         
@@ -171,7 +122,6 @@ export const useUnreadNotificationCount = (recipientType = 'Student') => {
             for (const match of matches) {
               const mentionedClass = match[1]?.toLowerCase();
               if (mentionedClass && mentionedClass !== studentClass.toLowerCase()) {
-                console.log(`🚫 Filtering out class-specific notification from count: mentioned class "${mentionedClass}" doesn't match student's class "${studentClass}"`);
                 return false;
               }
             }
@@ -183,19 +133,7 @@ export const useUnreadNotificationCount = (recipientType = 'Student') => {
 
       const notificationCount = filteredNotifications.length;
       
-      // Log results for debugging
-      if (recipientType === 'Admin' || recipientType === 'Student') {
-        console.log(`📊 ${recipientType} Raw unread notifications:`, notificationData.length);
-        console.log(`📊 ${recipientType} After filtering:`, notificationCount);
-        console.log(`📊 ${recipientType} Filtered out:`, notificationData.length - notificationCount);
-      }
-      
       setUnreadCount(notificationCount);
-      
-      // Final log for debugging
-      if (recipientType === 'Admin' || recipientType === 'Student') {
-        console.log(`✅ ${recipientType} final unread count set to:`, notificationCount);
-      }
     } catch (err) {
       console.error('❌ useUnreadNotificationCount error:', err);
       setError(err.message);
