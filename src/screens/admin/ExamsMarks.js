@@ -995,17 +995,17 @@ const ExamsMarks = () => {
     <View style={styles.container}>
       <Header title="Exams & Marks" showBack={true} onBack={() => navigation.goBack()} />
 
-
-
-      <FlatList
-        data={exams}
-        keyExtractor={(item) => item.id.toString()}
-        renderItem={renderExamItem}
-        contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
+      <View style={styles.scrollWrapper}>
+        <FlatList
+          data={exams}
+          keyExtractor={(item) => item.id.toString()}
+          renderItem={renderExamItem}
+          contentContainerStyle={[styles.listContainer, styles.scrollContent]}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="document-text" size={64} color="#ccc" />
@@ -1020,7 +1020,8 @@ const ExamsMarks = () => {
             </TouchableOpacity>
           </View>
         }
-      />
+        />
+      </View>
 
       {/* Add Exam Floating Button */}
       <TouchableOpacity
@@ -1898,6 +1899,26 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  // Enhanced scroll wrapper styles for web compatibility
+  scrollWrapper: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        height: 'calc(100vh - 160px)',
+        maxHeight: 'calc(100vh - 160px)',
+        minHeight: 400,
+        overflow: 'hidden',
+      },
+    }),
+  },
+  scrollContent: {
+    flexGrow: 1,
+    ...Platform.select({
+      web: {
+        paddingBottom: 40,
+      },
+    }),
   },
   loadingContainer: {
     flex: 1,

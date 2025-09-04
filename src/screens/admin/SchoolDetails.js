@@ -12,6 +12,7 @@ import {
   Platform,
   ActionSheetIOS,
   ScrollView,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -444,13 +445,17 @@ const SchoolDetails = ({ navigation }) => {
     <View style={styles.container}>
       <Header title="School Details" showBack={true} onBack={() => navigation.goBack()} />
       
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={Platform.OS === 'web'}
-        keyboardShouldPersistTaps="handled"
-        bounces={Platform.OS !== 'web'}
-      >
+      <View style={styles.scrollWrapper}>
+        <ScrollView
+          style={styles.scrollContainer}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          keyboardShouldPersistTaps="handled"
+          bounces={Platform.OS !== 'web'}
+          refreshControl={
+            <RefreshControl refreshing={false} onRefresh={() => {}} />
+          }
+        >
         <View style={styles.content}>
           {/* Logo Section */}
           <View style={styles.logoSection}>
@@ -709,7 +714,8 @@ const SchoolDetails = ({ navigation }) => {
             )}
           </TouchableOpacity>
         </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
     </View>
   );
 };
@@ -718,9 +724,25 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-    ...(Platform.OS === 'web' && {
-      height: '100vh', // Full viewport height on web
-      overflow: 'hidden', // Prevent body scrolling
+  },
+  // Enhanced scroll wrapper styles for web compatibility
+  scrollWrapper: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        height: 'calc(100vh - 160px)',
+        maxHeight: 'calc(100vh - 160px)',
+        minHeight: 400,
+        overflow: 'hidden',
+      },
+    }),
+  },
+  scrollContainer: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        overflowY: 'auto'
+      }
     })
   },
   loadingContainer: {
