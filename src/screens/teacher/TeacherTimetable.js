@@ -172,7 +172,9 @@ const TeacherTimetable = ({ navigation }) => {
 
   const getDayNameFromDate = (date) => {
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    return dayNames[date.getDay()];
+    const dayName = dayNames[date.getDay()];
+    // If it's Sunday, default to Monday since school timetables don't include Sunday
+    return dayName === 'Sunday' ? 'Monday' : dayName;
   };
 
   const formatTime = (timeString) => {

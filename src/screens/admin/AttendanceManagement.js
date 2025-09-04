@@ -198,6 +198,7 @@ const AttendanceManagement = () => {
   // Load existing attendance from database
   const loadExistingAttendance = async (classId, date) => {
     try {
+      // With new RLS policies, tenant filtering is automatic
       const { data: existingAttendance, error } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
         .select('student_id, status')
@@ -211,6 +212,7 @@ const AttendanceManagement = () => {
         attendanceMap[record.student_id] = record.status;
       });
 
+      console.log('Loaded attendance for', date, ':', Object.keys(attendanceMap).length, 'records');
       return attendanceMap;
     } catch (error) {
       console.error('Error loading existing attendance:', error);
@@ -294,7 +296,7 @@ const AttendanceManagement = () => {
   const handleMarkAttendance = async () => {
     try {
       if (loading) {
-        console.log('⚠️ [ADMIN ATTENDANCE] Already submitting, ignoring duplicate request');
+        console.log('Already submitting, ignoring duplicate request');
         return; // Prevent double submission
       }
       
@@ -327,47 +329,120 @@ const AttendanceManagement = () => {
         attendanceMarks: attendanceMark
       });
 
+      // Get current user_id for marked_by field
+      const { getCurrentUserId } = require('../../utils/supabase');
+      const currentUserId = await getCurrentUserId();
+      
+      // Check if the current user exists in the users table
+      let validatedUserId = null;
+      if (currentUserId) {
+        try {
+          const { data: userExists, error: userCheckError } = await supabase
+            .from(TABLES.USERS)
+            .select('id')
+            .eq('id', currentUserId)
+            .single();
+          
+          if (!userCheckError && userExists) {
+            validatedUserId = currentUserId;
+            console.log('User exists in users table, using for marked_by');
+          } else {
+            console.warn('User not found in users table, marked_by will be null');
+            console.warn('   - Auth user ID:', currentUserId);
+            console.warn('   - Error:', userCheckError?.message || 'User not found');
+          }
+        } catch (error) {
+          console.warn('Error checking user existence:', error.message);
+        }
+      } else {
+        console.warn('No current user ID found, marked_by will be null');
+      }
+
       // Delete existing attendance records for this class/date
-      await supabase
+      console.log('Deleting existing records for class:', selectedClass, 'date:', attendanceDate);
+      const { error: deleteError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
         .delete()
         .eq('class_id', selectedClass)
         .eq('date', attendanceDate);
 
-      // Insert new attendance records
-      const records = Object.entries(attendanceMark).map(([studentId, status]) => ({
-        class_id: selectedClass,
-        student_id: studentId,
-        date: attendanceDate,
-        status: status,
-        marked_by: null // You can add current user ID here if needed
-      }));
+      if (deleteError) {
+        console.error('Delete error:', deleteError);
+        throw new Error(`Failed to delete existing records: ${deleteError.message}`);
+      }
+      console.log('Successfully deleted existing records');
 
-      await supabase
+      // Insert new attendance records for ONLY explicitly marked students
+      const records = [];
+      
+      // Get current user's tenant_id for RLS policy compliance
+      const { data: currentUser } = await supabase
+        .from(TABLES.USERS)
+        .select('tenant_id')
+        .eq('id', validatedUserId)
+        .single();
+      
+      const userTenantId = currentUser?.tenant_id;
+      
+      // Only create records for students that have been explicitly marked
+      Object.keys(attendanceMark).forEach(studentId => {
+        const status = attendanceMark[studentId];
+        if (status && (status === 'Present' || status === 'Absent')) {
+          records.push({
+            class_id: selectedClass,
+            student_id: studentId,
+            date: attendanceDate,
+            status: status,
+            tenant_id: userTenantId,
+            marked_by: validatedUserId
+          });
+        }
+      });
+
+      console.log('Creating records for explicitly marked students only:');
+      console.log('   - Total students in class:', studentsForClass.length);
+      console.log('   - Students with explicit marks:', Object.keys(attendanceMark).length);
+      console.log('   - Records to insert:', records.length);
+      console.log('   - Sample record structure:', records[0] || 'No records to insert');
+      
+      // Validation: Ensure we have at least one record to insert
+      if (records.length === 0) {
+        Alert.alert('No Attendance Marked', 'Please mark at least one student as Present or Absent before submitting.');
+        setLoading(false);
+        return;
+      }
+
+      const { data: insertData, error: insertError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
         .insert(records);
 
+      if (insertError) {
+        console.error('Insert error:', insertError);
+        throw new Error(`Failed to insert attendance records: ${insertError.message}`);
+      }
+      console.log('Successfully inserted records:', insertData);
+
       // Send absence notifications to parents using new system
-      console.log('📧 [ADMIN ATTENDANCE] Checking for absent students to notify parents...');
+      console.log('Checking for absent students to notify parents...');
 
       const absentRecords = records.filter(record => record.status === 'Absent');
-      console.log(`📧 [ADMIN ATTENDANCE] Found ${absentRecords.length} absent students`);
+      console.log(`Found ${absentRecords.length} absent students`);
 
       let notificationResults = { success: false, totalRecipients: 0, results: [] };
 
       if (absentRecords.length > 0) {
-        console.log('📧 [ADMIN ATTENDANCE] Sending absence notifications using new system...');
+        console.log('Sending absence notifications using new system...');
 
         try {
           // Use the new bulk notification system
           notificationResults = await createBulkAttendanceNotifications(
             absentRecords,
-            null // Admin user ID - you can pass actual admin user ID here
+            validatedUserId
           );
 
-          console.log(`📊 [ADMIN ATTENDANCE] Bulk notification results:`, notificationResults);
+          console.log(`Bulk notification results:`, notificationResults);
         } catch (notificationError) {
-          console.error('❌ [ADMIN ATTENDANCE] Error sending bulk notifications:', notificationError);
+          console.error('Error sending bulk notifications:', notificationError);
           notificationResults = {
             success: false,
             totalRecipients: 0,
@@ -383,8 +458,6 @@ const AttendanceManagement = () => {
         [key]: { ...attendanceMark },
       });
 
-      // Direct editing enabled - no edit mode needed
-
       // Show simple success message
       Alert.alert('Success', 'Attendance saved successfully!');
       
@@ -392,7 +465,7 @@ const AttendanceManagement = () => {
       if (absentRecords.length > 0) {
         const successCount = notificationResults?.results ? notificationResults.results.filter(r => r.success).length : 0;
         const failureCount = notificationResults?.results ? notificationResults.results.filter(r => !r.success).length : 0;
-        console.log(`📊 [ADMIN ATTENDANCE] Notification summary: ${successCount} successful, ${failureCount} failed`);
+        console.log(`Notification summary: ${successCount} successful, ${failureCount} failed`);
       }
     } catch (error) {
       console.error('Error saving attendance:', error);
@@ -406,7 +479,7 @@ const AttendanceManagement = () => {
   const handleTeacherMarkAttendance = async () => {
     try {
       if (loading) {
-        console.log('⚠️ [ADMIN TEACHER ATTENDANCE] Already submitting, ignoring duplicate request');
+        console.log('Already submitting, ignoring duplicate request');
         return; // Prevent double submission
       }
       
@@ -421,23 +494,96 @@ const AttendanceManagement = () => {
 
       const attendanceDate = teacherDate.toISOString().split('T')[0];
 
+      // Get current user_id for marked_by field
+      const { getCurrentUserId } = require('../../utils/supabase');
+      const currentUserId = await getCurrentUserId();
+      
+      // Check if the current user exists in the users table
+      let validatedUserId = null;
+      if (currentUserId) {
+        try {
+          const { data: userExists, error: userCheckError } = await supabase
+            .from(TABLES.USERS)
+            .select('id')
+            .eq('id', currentUserId)
+            .single();
+          
+          if (!userCheckError && userExists) {
+            validatedUserId = currentUserId;
+            console.log('User exists in users table, using for marked_by');
+          } else {
+            console.warn('User not found in users table, marked_by will be null');
+            console.warn('   - Auth user ID:', currentUserId);
+            console.warn('   - Error:', userCheckError?.message || 'User not found');
+          }
+        } catch (error) {
+          console.warn('Error checking user existence:', error.message);
+        }
+      } else {
+        console.warn('No current user ID found, marked_by will be null');
+      }
+
       // Delete existing teacher attendance records for this date
-      await supabase
+      console.log('Deleting existing teacher records for date:', attendanceDate);
+      const { error: deleteError } = await supabase
         .from(TABLES.TEACHER_ATTENDANCE)
         .delete()
         .eq('date', attendanceDate);
 
-      // Insert new teacher attendance records
-      const records = Object.entries(teacherAttendanceMark).map(([teacherId, status]) => ({
-        teacher_id: teacherId,
-        date: attendanceDate,
-        status: status,
-        marked_by: null // You can add current user ID here if needed
-      }));
+      if (deleteError) {
+        console.error('Delete error:', deleteError);
+        throw new Error(`Failed to delete existing teacher records: ${deleteError.message}`);
+      }
+      console.log('Successfully deleted existing teacher records');
 
-      await supabase
+      // Insert new teacher attendance records for ONLY explicitly marked teachers
+      const records = [];
+      
+      // Get current user's tenant_id for RLS policy compliance
+      const { data: currentUser } = await supabase
+        .from(TABLES.USERS)
+        .select('tenant_id')
+        .eq('id', validatedUserId)
+        .single();
+      
+      const userTenantId = currentUser?.tenant_id;
+      
+      // Only create records for teachers that have been explicitly marked
+      Object.keys(teacherAttendanceMark).forEach(teacherId => {
+        const status = teacherAttendanceMark[teacherId];
+        if (status && (status === 'Present' || status === 'Absent')) {
+          records.push({
+            teacher_id: teacherId,
+            date: attendanceDate,
+            status: status,
+            tenant_id: userTenantId,
+            marked_by: validatedUserId
+          });
+        }
+      });
+
+      console.log('Creating teacher records for explicitly marked teachers only:');
+      console.log('   - Total teachers:', teachers.length);
+      console.log('   - Teachers with explicit marks:', Object.keys(teacherAttendanceMark).length);
+      console.log('   - Records to insert:', records.length);
+      console.log('   - Sample record structure:', records[0] || 'No records to insert');
+      
+      // Validation: Ensure we have at least one record to insert
+      if (records.length === 0) {
+        Alert.alert('No Attendance Marked', 'Please mark at least one teacher as Present or Absent before submitting.');
+        setLoading(false);
+        return;
+      }
+
+      const { data: insertData, error: insertError } = await supabase
         .from(TABLES.TEACHER_ATTENDANCE)
         .insert(records);
+
+      if (insertError) {
+        console.error('Teacher insert error:', insertError);
+        throw new Error(`Failed to insert teacher attendance records: ${insertError.message}`);
+      }
+      console.log('Successfully inserted teacher records:', insertData);
 
       // Update local state
       const key = attendanceDate;
@@ -445,8 +591,6 @@ const AttendanceManagement = () => {
         ...teacherAttendanceRecords,
         [key]: { ...teacherAttendanceMark },
       });
-
-      // Direct editing enabled - no edit mode needed
 
       // Show simple success message
       Alert.alert('Success', 'Teacher attendance saved successfully!');

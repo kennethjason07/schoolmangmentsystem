@@ -205,29 +205,19 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
   // Enhanced save function
   const saveMarks = async (currentMarks = marks, showAlert = true) => {
     try {
-      // According to schema.txt, users table has tenant_id NOT NULL (line 540)
-      // Get tenant_id directly from users table using authenticated user's ID
-      const { data: userData, error: userError } = await supabase
+      // Get current user's tenant_id for RLS policy compliance
+      const { data: currentUser } = await supabase
         .from(TABLES.USERS)
         .select('tenant_id')
         .eq('id', user.id)
         .single();
       
-      if (userError) {
-        console.error('Error fetching user tenant_id:', userError);
-        Alert.alert('Error', `Failed to get user information: ${userError.message}`);
-        return;
+      const userTenantId = currentUser?.tenant_id;
+      
+      if (!userTenantId) {
+        throw new Error('User tenant information not found');
       }
       
-      if (!userData || !userData.tenant_id) {
-        console.error('No tenant_id found for user:', user.id);
-        Alert.alert('Error', 'No tenant information found for this user. Please contact support.');
-        return;
-      }
-      
-      const tenant_id = userData.tenant_id;
-      console.log('Retrieved tenant_id from users table:', tenant_id);
-
       const marksToSave = [];
       
       Object.entries(currentMarks).forEach(([cellKey, value]) => {
@@ -242,7 +232,7 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
               marks_obtained: markValue,
               max_marks: 100,
               exam_id: null,
-              tenant_id: tenant_id // Add tenant_id from resolved source
+              tenant_id: userTenantId
             });
           }
         }

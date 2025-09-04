@@ -92,19 +92,31 @@ export const AuthProvider = ({ children }) => {
 
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      async (event, sessionData) => {
         console.log('🔊 Auth state change event:', event, 'isSigningIn:', isSigningInRef.current);
         
-        // Don't handle SIGNED_IN if we're in the middle of a manual sign-in process
-        if (event === 'SIGNED_IN' && session?.user && !isSigningInRef.current) {
-          console.log('🔊 Handling auth state change for SIGNED_IN');
-          await handleAuthChange(session.user);
-        } else if (event === 'SIGNED_IN' && isSigningInRef.current) {
-          console.log('⏭️ Skipping auth state handler - manual sign-in in progress');
-        } else if (event === 'SIGNED_OUT') {
-          console.log('🔊 Handling auth state change for SIGNED_OUT');
+        try {
+          // Safely access session data
+          const currentSession = sessionData || null;
+          
+          // Don't handle SIGNED_IN if we're in the middle of a manual sign-in process
+          if (event === 'SIGNED_IN' && currentSession?.user && !isSigningInRef.current) {
+            console.log('🔊 Handling auth state change for SIGNED_IN');
+            await handleAuthChange(currentSession.user);
+          } else if (event === 'SIGNED_IN' && isSigningInRef.current) {
+            console.log('⏭️ Skipping auth state handler - manual sign-in in progress');
+          } else if (event === 'SIGNED_OUT') {
+            console.log('🔊 Handling auth state change for SIGNED_OUT');
+            setUser(null);
+            setUserType(null);
+            isSigningInRef.current = false;
+          }
+        } catch (error) {
+          console.error('Error updating Supabase context:', error);
+          // If there's an error, reset the auth state to prevent app crashes
           setUser(null);
           setUserType(null);
+          setLoading(false);
           isSigningInRef.current = false;
         }
       }

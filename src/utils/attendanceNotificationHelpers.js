@@ -142,9 +142,10 @@ export const getAttendanceNotificationContext = async (studentId, attendanceDate
  * @param {string} params.studentId - The student ID who was absent
  * @param {string} params.attendanceDate - The date of absence
  * @param {string} params.markedBy - The teacher/user ID who marked the attendance
+ * @param {string} params.tenantId - The tenant ID for the notification
  * @returns {Object} Result object with success status and details
  */
-export const createAttendanceNotification = async ({ studentId, attendanceDate, markedBy }) => {
+export const createAttendanceNotification = async ({ studentId, attendanceDate, markedBy, tenantId }) => {
   try {
     console.log('🚀 Creating attendance notification for student:', studentId, 'on:', attendanceDate);
     
@@ -201,7 +202,7 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
         delivery_status: 'Sent',
         sent_by: markedBy,
         sent_at: new Date().toISOString(),
-        tenant_id: teacherUser.tenant_id // Add tenant_id from teacher user
+        tenant_id: tenantId // Include tenant_id to satisfy NOT NULL constraint
       }])
       .select()
       .single();
@@ -236,7 +237,7 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
       delivery_status: 'Sent',
       is_read: false,
       sent_at: new Date().toISOString(),
-      tenant_id: teacherUser.tenant_id // Add tenant_id from teacher user
+      tenant_id: tenantId // Include tenant_id for notification recipients
     }));
     
     console.log(`📝 [NOTIFICATION] Creating ${recipientRecords.length} recipient records`);
@@ -283,11 +284,33 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
  * Create attendance notifications for multiple absent students
  * @param {Array} absentStudents - Array of absent student records
  * @param {string} markedBy - The teacher/user ID who marked the attendance
+ * @param {string} tenantId - The tenant ID for the notifications
  * @returns {Object} Result object with success status and summary
  */
-export const createBulkAttendanceNotifications = async (absentStudents, markedBy) => {
+export const createBulkAttendanceNotifications = async (absentStudents, markedBy, tenantId = null) => {
   try {
     console.log(`🚀 Creating bulk attendance notifications for ${absentStudents.length} absent students`);
+    
+    // Get tenant_id if not provided
+    if (!tenantId) {
+      // Try to get tenant_id from the first student's record or current user
+      try {
+        const { data: userData, error: userError } = await supabase
+          .from(TABLES.USERS)
+          .select('tenant_id')
+          .eq('id', markedBy)
+          .single();
+        
+        if (!userError && userData?.tenant_id) {
+          tenantId = userData.tenant_id;
+          console.log(`📋 Using tenant_id from user: ${tenantId}`);
+        } else {
+          console.warn('⚠️ Could not get tenant_id from user, notifications may fail');
+        }
+      } catch (error) {
+        console.warn('⚠️ Error getting tenant_id:', error.message);
+      }
+    }
     
     const results = await Promise.all(
       absentStudents.map(async (student) => {
@@ -295,7 +318,8 @@ export const createBulkAttendanceNotifications = async (absentStudents, markedBy
           const result = await createAttendanceNotification({
             studentId: student.student_id,
             attendanceDate: student.date,
-            markedBy: markedBy
+            markedBy: markedBy,
+            tenantId: tenantId
           });
           
           return {

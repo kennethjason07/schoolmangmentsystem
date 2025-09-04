@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import Header from '../../components/Header';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import DropDownPicker from 'react-native-dropdown-picker';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
+import { useTenant } from '../../contexts/TenantContext';
 
 const { width } = Dimensions.get('window');
 
@@ -36,7 +37,9 @@ const statuses = [
 
 const AssignTaskToTeacher = ({ navigation, route }) => {
   const { teacher } = route.params || {};
+  const { tenantId, currentTenant } = useTenant();
   const [loading, setLoading] = useState(true);
+  
   const [tasks, setTasks] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
@@ -163,9 +166,27 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
       return;
     }
 
+    // Validate tenant context
+    const finalTenantId = tenantId || currentTenant?.id;
+    if (!finalTenantId) {
+      Alert.alert('Error', 'No tenant context available. Please try logging in again.');
+      return;
+    }
+
     try {
       if (editTask) {
         // Update existing task
+        console.log('🔍 ADMIN: Updating task with ID:', editTask.id);
+        console.log('🔍 ADMIN: Update data:', {
+          title: form.title,
+          description: form.description,
+          due_date: form.dueDate,
+          priority: form.priority,
+          status: form.status,
+          assigned_teacher_ids: [form.teacher_ids],
+          tenant_id: finalTenantId
+        });
+        
         const { error: updateError } = await supabase
           .from(TABLES.TASKS)
           .update({
@@ -174,21 +195,27 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
             due_date: form.dueDate,
             priority: form.priority,
             status: form.status,
-            assigned_teacher_ids: [form.teacher_ids]
+            assigned_teacher_ids: [form.teacher_ids],
+            tenant_id: finalTenantId  // Ensure tenant_id is included in update
           })
           .eq('id', editTask.id);
 
-        if (updateError) throw updateError;
+        if (updateError) {
+          console.error('🔍 ADMIN: Update error:', updateError);
+          throw updateError;
+        }
       } else {
         // Create new task
         console.log('🔍 ADMIN: Creating task with teacher ID:', form.teacher_ids);
+        console.log('🔍 ADMIN: Final tenant ID:', finalTenantId);
         console.log('🔍 ADMIN: Task data:', {
           title: form.title,
           description: form.description,
           due_date: form.dueDate,
           priority: form.priority,
           status: form.status,
-          assigned_teacher_ids: [form.teacher_ids]
+          assigned_teacher_ids: [form.teacher_ids],
+          tenant_id: finalTenantId
         });
         
         const { data: insertResult, error: insertError } = await supabase
@@ -199,14 +226,18 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
             due_date: form.dueDate,
             priority: form.priority,
             status: form.status,
-            assigned_teacher_ids: [form.teacher_ids]
+            assigned_teacher_ids: [form.teacher_ids],
+            tenant_id: finalTenantId
           })
           .select();
           
         console.log('🔍 ADMIN: Insert result:', insertResult);
         console.log('🔍 ADMIN: Insert error:', insertError);
 
-        if (insertError) throw insertError;
+        if (insertError) {
+          console.error('🔍 ADMIN: Insert error details:', insertError);
+          throw insertError;
+        }
       }
 
       // Refresh data
@@ -270,6 +301,7 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
       setForm(f => ({ ...f, dueDate: date.toISOString().split('T')[0] }));
     }
   };
+
 
   if (loading) {
     return (
@@ -402,7 +434,7 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
         data={filteredTasks}
         keyExtractor={item => item.id}
         style={styles.flatList}
-        renderItem={({ item }) => {
+            renderItem={({ item }) => {
           const priorityInfo = getPriorityInfo(item.priority);
           const statusInfo = getStatusInfo(item.status);
           const teacherIds = item.assigned_teacher_ids || [];
@@ -906,7 +938,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
   },
-  // Task List
   flatList: {
     flex: 1,
     ...(Platform.OS === 'web' && {

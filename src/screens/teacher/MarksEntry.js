@@ -421,6 +421,19 @@ export default function MarksEntry({ navigation }) {
     try {
       setSaving(true);
 
+      // Get current user's tenant_id for RLS policy compliance
+      const { data: currentUser } = await supabase
+        .from(TABLES.USERS)
+        .select('tenant_id')
+        .eq('id', user.id)
+        .single();
+      
+      const userTenantId = currentUser?.tenant_id;
+      
+      if (!userTenantId) {
+        throw new Error('User tenant information not found');
+      }
+
       // Prepare marks data with grade calculation
       const marksData = studentsWithMarks.map(student => {
         const marksObtained = parseInt(marks[student.id]);
@@ -434,7 +447,8 @@ export default function MarksEntry({ navigation }) {
           marks_obtained: marksObtained,
           max_marks: maxMarks, // Store exam's max_marks
           grade: grade,
-          remarks: selectedExamData.name
+          remarks: selectedExamData.name,
+          tenant_id: userTenantId
         };
       });
 

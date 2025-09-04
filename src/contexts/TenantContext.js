@@ -111,8 +111,10 @@ export const TenantProvider = ({ children }) => {
           // If the RPC doesn't exist, that's okay for now
           console.log('set_config RPC not available, using client-side tenant context');
         }
+      } else if (sessionError) {
+        console.log('Session error when setting tenant context:', sessionError.message);
       } else {
-        console.log('No active session found, skipping tenant context update');
+        console.log('No active session found when setting tenant context');
       }
     } catch (error) {
       console.error('Error updating Supabase context:', error);
