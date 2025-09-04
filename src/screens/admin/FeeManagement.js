@@ -26,9 +26,11 @@ import { formatCurrency } from '../../utils/helpers';
 import { isValidDate, isReasonableDate, formatDateForDB, cleanDateForForm } from '../../utils/dateValidation';
 import * as Animatable from 'react-native-animatable';
 import { Picker } from '@react-native-picker/picker';
+import { useTenant } from '../../contexts/TenantContext';
 
 const FeeManagement = () => {
   const navigation = useNavigation();
+  const { tenantId, tenantName, currentTenant } = useTenant();
   const [tab, setTab] = useState('structure');
   const [classes, setClasses] = useState([]);
   const [feeStructures, setFeeStructures] = useState([]);
@@ -104,48 +106,64 @@ const FeeManagement = () => {
   // Helper function to calculate total fees for a student
       // Calculate fee statistics
       const calculateFeeStats = async () => {
+        if (!tenantId) {
+          console.log('calculateFeeStats: No tenant ID available');
+          return;
+        }
+
         try {
+          console.log('🔍 FeeManagement: Calculating fee stats for tenant:', tenantId);
+          
           const { data: feeStructures, error: feeError } = await supabase
             .from(TABLES.FEE_STRUCTURE)
-            .select('amount');
+            .select('amount')
+            .eq('tenant_id', tenantId);
 
           if (feeError) throw feeError;
 
           const { data: studentFees, error: paymentError } = await supabase
             .from(TABLES.STUDENT_FEES)
-            .select('amount_paid, student_id');
+            .select('amount_paid, student_id')
+            .eq('tenant_id', tenantId);
 
           if (paymentError) throw paymentError;
 
           const { data: allStudents, error: studentsError } = await supabase
             .from(TABLES.STUDENTS)
-            .select('id');
+            .select('id')
+            .eq('tenant_id', tenantId);
 
           if (studentsError) throw studentsError;
 
           // Calculate totals
-          const totalDue = feeStructures.reduce((sum, fee) => sum + Number(fee.amount), 0);
-          const totalPaid = studentFees.reduce((sum, payment) => sum + Number(payment.amount_paid || 0), 0);
+          const totalDue = (feeStructures || []).reduce((sum, fee) => sum + Number(fee.amount), 0);
+          const totalPaid = (studentFees || []).reduce((sum, payment) => sum + Number(payment.amount_paid || 0), 0);
           
           // Calculate pending students - students who have no payments at all
-          const studentsWithPayments = new Set(studentFees.map(fee => fee.student_id));
+          const studentsWithPayments = new Set((studentFees || []).map(fee => fee.student_id));
           const pendingStudents = (allStudents?.length || 0) - studentsWithPayments.size;
 
-          console.log('Fee Stats - Total Paid Amount:', totalPaid);
+          console.log('FeeManagement - Fee Stats (Tenant:', tenantId, ')- Total Paid Amount:', totalPaid);
           setFeeStats({ totalDue, totalPaid, pendingStudents });
     } catch (error) {
-      console.error('Error calculating fee statistics:', error);
+      console.error('FeeManagement - Error calculating fee statistics:', error);
       setFeeStats({ totalDue: 0, totalPaid: 0, pendingStudents: 0 });
     }
   };
 
   // Helper function to get pending fees for a student
   const getPendingFees = async (studentId, classId) => {
+    if (!tenantId) {
+      console.log('getPendingFees: No tenant ID available');
+      return [];
+    }
+
     try {
       const { data: fees, error } = await supabase
         .from(TABLES.STUDENT_FEES)
         .select('*')
-        .eq('student_id', studentId);
+        .eq('student_id', studentId)
+        .eq('tenant_id', tenantId);
 
       if (error) throw error;
       
@@ -153,7 +171,8 @@ const FeeManagement = () => {
       const { data: feeStructure, error: feeError } = await supabase
         .from(TABLES.FEE_STRUCTURE)
         .select('*')
-        .eq('class_id', classId);
+        .eq('class_id', classId)
+        .eq('tenant_id', tenantId);
       
       if (feeError) throw feeError;
       
@@ -174,23 +193,29 @@ const FeeManagement = () => {
 
   // Calculate class-wise payment statistics - OPTIMIZED VERSION
   const calculateClassPaymentStats = async () => {
+    if (!tenantId) {
+      console.log('calculateClassPaymentStats: No tenant ID available');
+      return;
+    }
+
     const startTime = performance.now(); // 📊 Performance monitoring
     
     try {
-      console.log('🚀 Calculating class payment stats with optimized queries...');
+      console.log('🚀 Calculating class payment stats with optimized queries for tenant:', tenantId);
       
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
       console.log('📅 Academic year being used:', academicYear);
 
-      // Get all classes in a single query
+      // Get all classes in a single query with tenant filtering
       const { data: classesWithStats, error } = await supabase
         .from(TABLES.CLASSES)
         .select(`
           id,
           class_name,
           section
-        `);
+        `)
+        .eq('tenant_id', tenantId);
 
       if (error) throw error;
       console.log('📊 Classes found:', classesWithStats?.length || 0);
@@ -204,22 +229,24 @@ const FeeManagement = () => {
 
       const classIds = classesWithStats.map(c => c.id);
 
-      // Get all fee structures for all classes in a single query (removed academic year filter)
+      // Get all fee structures for all classes in a single query with tenant filtering
       const { data: allFeeStructures } = await supabase
         .from(TABLES.FEE_STRUCTURE)
         .select('*')
-        .in('class_id', classIds);
+        .in('class_id', classIds)
+        .eq('tenant_id', tenantId);
 
       console.log('💰 Fee structures found:', allFeeStructures?.length || 0);
       if (allFeeStructures && allFeeStructures.length > 0) {
         console.log('💰 Sample fee structure:', allFeeStructures[0]);
       }
 
-      // Get all students for all classes in a single query
+      // Get all students for all classes in a single query with tenant filtering
       const { data: allStudents } = await supabase
         .from(TABLES.STUDENTS)
         .select('id, name, class_id')
-        .in('class_id', classIds);
+        .in('class_id', classIds)
+        .eq('tenant_id', tenantId);
 
       console.log('👥 Students found:', allStudents?.length || 0);
 
@@ -227,7 +254,7 @@ const FeeManagement = () => {
       const studentIds = allStudents?.map(s => s.id) || [];
       console.log('🎯 Student IDs from classes query:', studentIds.length > 0 ? studentIds.slice(0, 5) : 'No students found');
       
-      // Get all concessions for all students in a single query
+      // Get all concessions for all students in a single query with tenant filtering
       let allConcessions = [];
       if (studentIds.length > 0) {
         const { data: concessions, error: concessionsError } = await supabase
@@ -235,7 +262,8 @@ const FeeManagement = () => {
           .select('student_id, discount_value, fee_component')
           .in('student_id', studentIds)
           .eq('academic_year', academicYear)
-          .eq('is_active', true);
+          .eq('is_active', true)
+          .eq('tenant_id', tenantId);
         
         if (!concessionsError && concessions) {
           allConcessions = concessions;
@@ -246,11 +274,12 @@ const FeeManagement = () => {
       // Debug the table reference issue
       console.log('🔍 Table reference being used:', TABLES.STUDENT_FEES);
       
-      // First, let's check what student IDs actually exist in the payments table
+      // First, let's check what student IDs actually exist in the payments table with tenant filtering
       // Fix: Remove fee_id as it doesn't exist in the schema
       const { data: allPaymentsCheck, error: checkError } = await supabase
         .from(TABLES.STUDENT_FEES)
         .select('student_id, amount_paid')
+        .eq('tenant_id', tenantId)
         .limit(5);
       
       if (checkError) {
@@ -259,28 +288,30 @@ const FeeManagement = () => {
       
       console.log('🎯 Sample payment student IDs from database:', allPaymentsCheck?.map(p => p.student_id) || 'No payments in DB');
       
-      // Also try getting ALL payments without filtering to see if there's a mismatch
+      // Also try getting ALL payments for tenant without filtering to see if there's a mismatch
       const { data: allPaymentsUnfiltered, error: unfilteredError } = await supabase
         .from(TABLES.STUDENT_FEES)
-        .select('student_id, amount_paid');
+        .select('student_id, amount_paid')
+        .eq('tenant_id', tenantId);
         
       if (unfilteredError) {
         console.error('🚨 Error getting unfiltered payments:', unfilteredError);
       }
         
-      console.log('🎯 Total payments in database (unfiltered):', allPaymentsUnfiltered?.length || 0);
+      console.log('🎯 Total payments in database (for tenant):', allPaymentsUnfiltered?.length || 0);
       if (allPaymentsUnfiltered && allPaymentsUnfiltered.length > 0) {
         console.log('🎯 Sample unfiltered payment:', allPaymentsUnfiltered[0]);
         const totalFromUnfiltered = allPaymentsUnfiltered.reduce((sum, p) => sum + (parseFloat(p.amount_paid || 0)), 0);
         console.log('🎯 Total amount from unfiltered payments:', totalFromUnfiltered);
       }
       
-      // Get all payments for all students in a single query (removed academic year filter)
+      // Get all payments for all students in a single query with tenant filtering
       // Fix: Remove fee_id as it doesn't exist in the schema
       const { data: allPayments, error: paymentsError } = studentIds.length > 0 ? await supabase
         .from(TABLES.STUDENT_FEES)
         .select('student_id, amount_paid')
-        .in('student_id', studentIds) : { data: [], error: null };
+        .in('student_id', studentIds)
+        .eq('tenant_id', tenantId) : { data: [], error: null };
         
       if (paymentsError) {
         console.error('🚨 Error getting filtered payments:', paymentsError);
@@ -481,10 +512,16 @@ const FeeManagement = () => {
     }
   };
 
-  // Load all data from Supabase on component mount
+  // Add tenant validation effect
   useEffect(() => {
+    if (!tenantId) {
+      console.log('FeeManagement: No tenantId available, waiting for tenant context...');
+      return;
+    }
+    
+    console.log('FeeManagement: TenantId available:', tenantId, 'Loading data...');
     loadAllData();
-  }, []);
+  }, [tenantId]);
 
   // Add focus effect to refresh data when screen comes into focus
   // Only refresh once per focus event to prevent continuous refreshing
@@ -507,15 +544,22 @@ const FeeManagement = () => {
   // The useFocusEffect and pull-to-refresh should be sufficient for real-time updates
 
   const loadAllData = async () => {
+    if (!tenantId) {
+      console.log('FeeManagement: No tenant ID available for loadAllData');
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     const startTime = performance.now(); // 📊 Performance monitoring
     
     try {
-      console.log('🚀 Loading fee management data with optimized queries...');
+      console.log('🚀 FeeManagement: Loading fee management data with tenant filtering for:', tenantId);
       
       setLoading(true);
       setRefreshing(true);
 
-      // Load all data in parallel for better performance
+      // Load all data in parallel for better performance with tenant filtering
       const [
         { data: classesData, error: classesError },
         { data: feeStructuresData, error: feeStructuresError },
@@ -523,20 +567,20 @@ const FeeManagement = () => {
         { data: paymentsData, error: paymentsError },
         { data: allFeeStructures, error: allFeeError }
       ] = await Promise.all([
-        supabase.from(TABLES.CLASSES).select('*'),
+        supabase.from(TABLES.CLASSES).select('*').eq('tenant_id', tenantId),
         supabase.from(TABLES.FEE_STRUCTURE).select(`
           *,
           classes:${TABLES.CLASSES}(id, class_name)
-        `),
+        `).eq('tenant_id', tenantId),
         supabase.from(TABLES.STUDENTS).select(`
           *,
           classes:${TABLES.CLASSES}(class_name)
-        `),
+        `).eq('tenant_id', tenantId),
         supabase.from(TABLES.STUDENT_FEES).select(`
           *,
           students(name)
-        `),
-        supabase.from(TABLES.FEE_STRUCTURE).select('*')
+        `).eq('tenant_id', tenantId),
+        supabase.from(TABLES.FEE_STRUCTURE).select('*').eq('tenant_id', tenantId)
       ]);
 
       // Check for errors
@@ -657,7 +701,8 @@ const FeeManagement = () => {
             type: operation === 'edit' ? feeData.type : newFeeStructure.type,
             amount: operation === 'edit' ? feeData.amount : newFeeStructure.amount,
             due_date: formattedDueDate,
-            description: operation === 'edit' ? feeData.description : newFeeStructure.description
+            description: operation === 'edit' ? feeData.description : newFeeStructure.description,
+            tenant_id: tenantId
           }
         ])
         .select();
@@ -709,7 +754,8 @@ const FeeManagement = () => {
           amount: fee.amount,
           due_date: fee.dueDate ? new Date(fee.dueDate).toISOString().split('T')[0] : null
         })
-        .eq('id', feeId);
+        .eq('id', feeId)
+        .eq('tenant_id', tenantId);
 
       if (error) throw error;
 
@@ -748,6 +794,7 @@ const FeeManagement = () => {
         .select('*')
         .eq('student_id', studentId)
         .eq('fee_id', feeId)
+        .eq('tenant_id', tenantId)
         .single();
         
       if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is the error code for no rows returned
@@ -759,6 +806,7 @@ const FeeManagement = () => {
         .from(TABLES.FEE_STRUCTURE)
         .select('amount')
         .eq('id', feeId)
+        .eq('tenant_id', tenantId)
         .single();
         
       if (feeStructureError) throw feeStructureError;
@@ -784,7 +832,8 @@ const FeeManagement = () => {
             payment_date: paymentDate.toISOString(),
             status: newStatus
           })
-          .eq('id', existingFee.id);
+          .eq('id', existingFee.id)
+          .eq('tenant_id', tenantId);
           
         if (updateError) throw updateError;
       } else {
@@ -797,7 +846,8 @@ const FeeManagement = () => {
               fee_id: feeId,
               amount_paid: amountPaid,
               payment_date: paymentDate.toISOString(),
-              status: status
+              status: status,
+              tenant_id: tenantId
             }
           ]);
 
@@ -909,6 +959,7 @@ const FeeManagement = () => {
         .from(TABLES.FEE_STRUCTURE)
         .select('fee_component, academic_year')
         .eq('id', feeId)
+        .eq('tenant_id', tenantId)
         .single();
       
       if (feeError) throw feeError;
@@ -918,7 +969,8 @@ const FeeManagement = () => {
         .from(TABLES.STUDENT_FEES)
         .select('id')
         .eq('fee_component', feeStructure?.fee_component || 'Unknown')
-        .eq('academic_year', feeStructure?.academic_year || '2024-25');
+        .eq('academic_year', feeStructure?.academic_year || '2024-25')
+        .eq('tenant_id', tenantId);
       
       if (checkError) throw checkError;
       
@@ -934,7 +986,8 @@ const FeeManagement = () => {
       const { error } = await supabase
         .from(TABLES.FEE_STRUCTURE)
         .delete()
-        .eq('id', feeId);
+        .eq('id', feeId)
+        .eq('tenant_id', tenantId);
 
       if (error) throw error;
 
@@ -965,7 +1018,8 @@ const FeeManagement = () => {
         .from(TABLES.STUDENT_FEES)
         .select('id')
         .eq('fee_component', fee.fee_component || fee.type || 'Unknown')
-        .eq('academic_year', fee.academic_year || '2024-25');
+        .eq('academic_year', fee.academic_year || '2024-25')
+        .eq('tenant_id', tenantId);
       
       if (checkError) throw checkError;
       
@@ -981,7 +1035,8 @@ const FeeManagement = () => {
       const { error } = await supabase
         .from(TABLES.FEE_STRUCTURE)
         .delete()
-        .eq('id', fee.id);
+        .eq('id', fee.id)
+        .eq('tenant_id', tenantId);
 
       if (error) throw error;
 
@@ -1040,7 +1095,8 @@ const FeeManagement = () => {
         fee_component: newFeeStructure.type.trim(),
         amount: parseFloat(newFeeStructure.amount),
         academic_year: newFeeStructure.academicYear.trim(),
-        due_date: format(new Date(newFeeStructure.dueDate), 'yyyy-MM-dd')
+        due_date: format(new Date(newFeeStructure.dueDate), 'yyyy-MM-dd'),
+        tenant_id: tenantId
       }));
 
       const { error } = await supabase

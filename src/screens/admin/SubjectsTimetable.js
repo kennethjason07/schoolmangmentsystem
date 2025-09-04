@@ -6,7 +6,7 @@ import CrossPlatformDatePicker, { DatePickerButton } from '../../components/Cros
 import { format } from 'date-fns';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-
+import { useTenant } from '../../contexts/TenantContext';
 
 
 // Helper to calculate duration in minutes
@@ -40,6 +40,7 @@ function formatTime(t) {
 
 const SubjectsTimetable = ({ route }) => {
   const { classId } = route?.params || {};
+  const { tenantId } = useTenant();
   const [tab, setTab] = useState(classId ? 'timetable' : 'subjects');
   const [subjects, setSubjects] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -78,7 +79,7 @@ const SubjectsTimetable = ({ route }) => {
       setLoading(true);
       setError(null);
       try {
-        // Fetch classes
+// Fetch classes
         const { data: classData, error: classError } = await dbHelpers.getClasses();
         if (classError) throw classError;
         setClasses(classData || []);
@@ -91,7 +92,7 @@ const SubjectsTimetable = ({ route }) => {
         if (teacherError) throw teacherError;
         setTeachers(teacherData || []);
 
-        // Fetch all subjects with teacher and class information through junction table
+// Fetch all subjects with teacher and class information through junction table
         const { data: subjectData, error: subjectError } = await supabase
           .from(TABLES.SUBJECTS)
           .select(`
@@ -105,6 +106,7 @@ const SubjectsTimetable = ({ route }) => {
               section
             )
           `)
+          .eq('tenant_id', tenantId)
           .order('name');
         if (subjectError) throw subjectError;
         setSubjects(subjectData || []);
@@ -126,7 +128,8 @@ const SubjectsTimetable = ({ route }) => {
     fetchData();
   }, []);
 
-  const fetchTimetableForClass = async (classId) => {
+const fetchTimetableForClass = async (classId) => {
+    console.log('Timetable fetch - using tenantId:', tenantId);
     try {
       const { data: timetableData, error: timetableError } = await dbHelpers.getTimetableByClass(classId);
       if (timetableError) throw timetableError;
@@ -194,7 +197,7 @@ const SubjectsTimetable = ({ route }) => {
   // Subject CRUD
   const openAddSubject = () => {
     setEditSubject(null);
-    setSubjectForm({ name: '', code: '', teacherId: '', classId: '' });
+setSubjectForm({ name: '', code: '', teacherId: '', classId: '' });
     setModalVisible(true);
   };
   const openEditSubject = (subject) => {
@@ -229,11 +232,12 @@ const SubjectsTimetable = ({ route }) => {
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
 
-      const subjectData = {
+const subjectData = {
         name: subjectForm.name,
         class_id: subjectForm.classId,
         academic_year: academicYear,
-        is_optional: false // Default to false, can be made configurable later
+        is_optional: false, // Default to false, can be made configurable later
+        tenant_id: tenantId,
       };
 
       if (editSubject) {
@@ -249,17 +253,19 @@ const SubjectsTimetable = ({ route }) => {
         // Handle teacher assignment through junction table
         if (subjectForm.teacherId) {
           // First, remove existing teacher assignments for this subject
-          await supabase
+await supabase
             .from(TABLES.TEACHER_SUBJECTS)
             .delete()
-            .eq('subject_id', editSubject.id);
+            .eq('subject_id', editSubject.id)
+            .eq('tenant_id', tenantId);
 
           // Then add the new teacher assignment
-          await supabase
+await supabase
             .from(TABLES.TEACHER_SUBJECTS)
             .insert([{
               teacher_id: subjectForm.teacherId,
-              subject_id: editSubject.id
+              subject_id: editSubject.id,
+              tenant_id: tenantId,
             }]);
         }
 
@@ -276,11 +282,12 @@ const SubjectsTimetable = ({ route }) => {
 
         // Handle teacher assignment through junction table
         if (subjectForm.teacherId && data[0]) {
-          await supabase
+await supabase
             .from(TABLES.TEACHER_SUBJECTS)
             .insert([{
               teacher_id: subjectForm.teacherId,
-              subject_id: data[0].id
+              subject_id: data[0].id,
+              tenant_id: tenantId,
             }]);
         }
 
@@ -300,7 +307,7 @@ const SubjectsTimetable = ({ route }) => {
 
   const refreshSubjects = async () => {
     try {
-      const { data: subjectData, error: subjectError } = await supabase
+const { data: subjectData, error: subjectError } = await supabase
         .from(TABLES.SUBJECTS)
         .select(`
           *,
@@ -313,6 +320,7 @@ const SubjectsTimetable = ({ route }) => {
             section
           )
         `)
+        .eq('tenant_id', tenantId)
         .order('name');
       if (subjectError) throw subjectError;
       setSubjects(subjectData || []);
@@ -593,35 +601,18 @@ const SubjectsTimetable = ({ route }) => {
     return days[date.getDay() === 0 ? 6 : date.getDay() - 1]; // 0=Sunday, 1=Monday...
   }
 
-  // Fetch period settings from database
+// Fetch period settings from database
   const fetchPeriodSettings = async () => {
     try {
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
-      
-      // Get current user's tenant_id from auth context
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) {
-        console.warn('No authenticated user found for period settings fetch');
+
+      if (!tenantId) {
+        console.warn('Could not determine tenantId from context for period settings; using defaults');
         setPeriodSettings(getDefaultPeriods());
         return;
       }
-      
-      // Get user's tenant_id from their profile
-      const { data: userProfile, error: profileError } = await supabase
-        .from('users')
-        .select('tenant_id')
-        .eq('id', user.id)
-        .single();
-      
-      if (profileError || !userProfile) {
-        console.warn('Could not determine user tenant for period settings');
-        setPeriodSettings(getDefaultPeriods());
-        return;
-      }
-      
-      const tenantId = userProfile.tenant_id;
-      
+
       const { data: periodData, error: periodError } = await supabase
         .from('period_settings')
         .select('*')
@@ -698,10 +689,11 @@ const SubjectsTimetable = ({ route }) => {
     try {
       // Get teacher for the selected subject
       let teacherId = null;
-      const { data: teacherSubject, error: teacherError } = await supabase
+const { data: teacherSubject, error: teacherError } = await supabase
         .from('teacher_subjects')
         .select('teacher_id')
         .eq('subject_id', subjectId)
+        .eq('tenant_id', tenantId)
         .single();
 
       if (!teacherError && teacherSubject) {
@@ -722,7 +714,7 @@ const SubjectsTimetable = ({ route }) => {
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
 
-      const timetableData = {
+const timetableData = {
         class_id: selectedClass,
         subject_id: subjectId,
         teacher_id: teacherId,
@@ -730,7 +722,8 @@ const SubjectsTimetable = ({ route }) => {
         period_number: slot.number,
         start_time: slot.startTime,
         end_time: slot.endTime,
-        academic_year: academicYear
+        academic_year: academicYear,
+        tenant_id: tenantId,
       };
 
       // Check if period already exists for this slot (by start time)
@@ -739,12 +732,13 @@ const SubjectsTimetable = ({ route }) => {
       );
 
       // Also check if there's already a period for this exact slot (class, day, period_number)
-      const { data: existingPeriodBySlot, error: checkError } = await supabase
+const { data: existingPeriodBySlot, error: checkError } = await supabase
         .from(TABLES.TIMETABLE)
         .select('id')
         .eq('class_id', selectedClass)
         .eq('day_of_week', day)
         .eq('period_number', slot.number)
+        .eq('tenant_id', tenantId)
         .maybeSingle();
 
       if (checkError && checkError.code !== 'PGRST116') {
@@ -764,7 +758,7 @@ const SubjectsTimetable = ({ route }) => {
         if (error) throw error;
       } else {
         // Create new period - use upsert to handle conflicts
-        const { data, error } = await supabase
+const { data, error } = await supabase
           .from(TABLES.TIMETABLE)
           .upsert([timetableData], {
             onConflict: 'class_id,day_of_week,period_number'
@@ -918,10 +912,11 @@ const SubjectsTimetable = ({ route }) => {
               for (const copiedPeriod of copiedDayData) {
                 // Get teacher for the subject
                 let teacherId = null;
-                const { data: teacherSubject, error: teacherError } = await supabase
+const { data: teacherSubject, error: teacherError } = await supabase
                   .from('teacher_subjects')
                   .select('teacher_id')
                   .eq('subject_id', copiedPeriod.subjectId)
+                  .eq('tenant_id', tenantId)
                   .single();
 
                 if (!teacherError && teacherSubject) {
@@ -931,7 +926,7 @@ const SubjectsTimetable = ({ route }) => {
                 // Generate period number based on start time
                 const periodNumber = Math.floor((parseInt(copiedPeriod.startTime.split(':')[0]) - 8) * 2) + 1;
 
-                const timetableData = {
+const timetableData = {
                   class_id: selectedClass,
                   subject_id: copiedPeriod.subjectId,
                   teacher_id: teacherId,
@@ -939,10 +934,11 @@ const SubjectsTimetable = ({ route }) => {
                   period_number: periodNumber,
                   start_time: copiedPeriod.startTime,
                   end_time: copiedPeriod.endTime,
-                  academic_year: academicYear
+                  academic_year: academicYear,
+                  tenant_id: tenantId,
                 };
 
-                await supabase
+await supabase
                   .from(TABLES.TIMETABLE)
                   .insert([timetableData]);
               }
@@ -1015,27 +1011,12 @@ const SubjectsTimetable = ({ route }) => {
     setPeriodSettings(updated);
   };
 
-  // Save period settings to database
+// Save period settings to database
   const savePeriodSettingsToDatabase = async (periods, academicYear) => {
     try {
-      // Get current user's tenant_id from auth context
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) {
-        throw new Error('No authenticated user found');
+      if (!tenantId) {
+        throw new Error('No tenantId available from context');
       }
-      
-      // Get user's tenant_id from their profile
-      const { data: userProfile, error: profileError } = await supabase
-        .from('users')
-        .select('tenant_id')
-        .eq('id', user.id)
-        .single();
-      
-      if (profileError || !userProfile) {
-        throw new Error('Could not determine user tenant');
-      }
-      
-      const tenantId = userProfile.tenant_id;
       
       // First, delete existing periods for this academic year and tenant
       await supabase

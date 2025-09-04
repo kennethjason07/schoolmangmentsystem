@@ -19,9 +19,11 @@ import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { ActivityIndicator as PaperActivityIndicator } from 'react-native-paper';
+import { useTenant } from '../../contexts/TenantContext';
 
 // Will be fetched from Supabase
 const ManageTeachers = ({ navigation, route }) => {
+  const { tenantId, currentTenant } = useTenant();
   const [subjects, setSubjects] = useState([]);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -36,9 +38,11 @@ const ManageTeachers = ({ navigation, route }) => {
   const [saving, setSaving] = useState(false);
   const [sections, setSections] = useState([]);
   
-  // Load data on component mount
+  // Load data on component mount and when tenant changes
   useEffect(() => {
-    loadData();
+    if (tenantId) {
+      loadData();
+    }
     
     // Check if we need to open edit modal from navigation
     if (route.params?.openEditModal && route.params?.editTeacher) {
@@ -46,7 +50,7 @@ const ManageTeachers = ({ navigation, route }) => {
         openEditModal(route.params.editTeacher);
       }, 500);
     }
-  }, [route.params]);
+  }, [route.params, tenantId]);
 
   useEffect(() => {
     // When selected classes change, filter out subjects that are no longer valid
@@ -75,9 +79,17 @@ const ManageTeachers = ({ navigation, route }) => {
     setError(null);
     
     try {
-      console.log('🚀 Loading teachers with optimized query...');
+      // Check if we have a valid tenant
+      if (!tenantId) {
+        console.warn('No tenant ID available, waiting for tenant context...');
+        setError('No school/tenant selected. Please contact your administrator.');
+        setLoading(false);
+        return;
+      }
+
+      console.log('🚀 Loading teachers with optimized query for tenant:', tenantId);
       
-      // Use a single JOIN query to get all teacher data with related information
+      // Use a single JOIN query to get all teacher data with related information (filtered by tenant)
       const { data: teachersData, error: teachersError } = await supabase
         .from(TABLES.TEACHERS)
         .select(`
@@ -90,6 +102,7 @@ const ManageTeachers = ({ navigation, route }) => {
             profile_url
           )
         `)
+        .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false });
       
       if (teachersError) {
@@ -97,14 +110,20 @@ const ManageTeachers = ({ navigation, route }) => {
         throw new Error('Failed to load teachers');
       }
       
-      // Load classes
-      const { data: classesData, error: classesError } = await dbHelpers.getClasses();
+      // Load classes (filtered by tenant)
+      const { data: classesData, error: classesError } = await supabase
+        .from(TABLES.CLASSES)
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('class_name');
       if (classesError) throw new Error('Failed to load classes');
       
-      // Load subjects
+      // Load subjects (filtered by tenant)
       const { data: subjectsData, error: subjectsError } = await supabase
         .from(TABLES.SUBJECTS)
-        .select('*');
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('name');
       if (subjectsError) throw new Error('Failed to load subjects');
       
       if (!teachersData || teachersData.length === 0) {
@@ -114,27 +133,36 @@ const ManageTeachers = ({ navigation, route }) => {
         return;
       }
       
-      // Get all teacher subject assignments in a single query
+      // Get all teacher subject assignments in a single query (filtered by tenant)
       const teacherIds = teachersData.map(t => t.id);
-      const { data: allTeacherSubjects } = await supabase
-        .from(TABLES.TEACHER_SUBJECTS)
-        .select(`
-          teacher_id,
-          subject_id,
-          subjects(
-            id,
-            name,
-            class_id
-          )
-        `)
-        .in('teacher_id', teacherIds);
+      let allTeacherSubjects = [];
+      let classTeacherAssignments = [];
       
-      // Also get direct class teacher assignments from classes table
-      const { data: classTeacherAssignments } = await supabase
-        .from('classes')
-        .select('id, class_teacher_id')
-        .in('class_teacher_id', teacherIds)
-        .not('class_teacher_id', 'is', null);
+      if (teacherIds.length > 0) {
+        const { data: teacherSubjectsData } = await supabase
+          .from(TABLES.TEACHER_SUBJECTS)
+          .select(`
+            teacher_id,
+            subject_id,
+            subjects(
+              id,
+              name,
+              class_id
+            )
+          `)
+          .eq('tenant_id', tenantId)
+          .in('teacher_id', teacherIds);
+        allTeacherSubjects = teacherSubjectsData || [];
+        
+        // Also get direct class teacher assignments from classes table (filtered by tenant)
+        const { data: classTeacherData } = await supabase
+          .from('classes')
+          .select('id, class_teacher_id')
+          .eq('tenant_id', tenantId)
+          .in('class_teacher_id', teacherIds)
+          .not('class_teacher_id', 'is', null);
+        classTeacherAssignments = classTeacherData || [];
+      }
       
       // Create teacher subjects lookup map for O(1) access
       const teacherSubjectsLookup = {};
@@ -188,7 +216,7 @@ const ManageTeachers = ({ navigation, route }) => {
       setSubjects(uniqueSubjects);
       
       // Debug logging
-      console.log('📊 Data loaded:', {
+      console.log('📊 Data loaded for tenant', tenantId, ':', {
         teachers: processedTeachers?.length || 0,
         classes: classesData?.length || 0,
         subjects: uniqueSubjects?.length || 0
@@ -255,10 +283,11 @@ const ManageTeachers = ({ navigation, route }) => {
     }
     
     try {
-      // Load sections for all selected classes from the classes table
+      // Load sections for all selected classes from the classes table (filtered by tenant)
       const { data, error } = await supabase
         .from(TABLES.CLASSES)
         .select('section')
+        .eq('tenant_id', tenantId)
         .in('id', classIds)
         .not('section', 'is', null);
       
@@ -401,7 +430,7 @@ const ManageTeachers = ({ navigation, route }) => {
     
     try {
       if (modalMode === 'add') {
-        // Create new teacher in Supabase
+        // Create new teacher in Supabase (with tenant_id)
         const teacherData = {
           name: form.name.trim(),
           phone: form.phone.trim(),
@@ -410,6 +439,7 @@ const ManageTeachers = ({ navigation, route }) => {
           qualification: form.qualification,
           salary_amount: parseFloat(form.salary) || 0,
           salary_type: 'monthly', // Default value
+          tenant_id: tenantId, // Add tenant_id
         };
         
         const { data: newTeacher, error } = await supabase
@@ -493,10 +523,11 @@ const ManageTeachers = ({ navigation, route }) => {
         console.log('Deleted existing subject assignments');
       }
 
-      // Create new assignments for selected subjects
+      // Create new assignments for selected subjects (with tenant_id)
       const assignments = form.subjects.map(subjectId => ({
         teacher_id: teacherId,
         subject_id: subjectId,
+        tenant_id: tenantId, // Add tenant_id
       }));
 
       console.log('New subject assignments to insert:', assignments);

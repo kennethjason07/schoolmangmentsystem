@@ -25,6 +25,7 @@ import ModernFilters from '../../components/ui/ModernFilters';
 import Colors from '../../constants/Colors';
 import { useAuth } from '../../utils/AuthContext';
 import { createLeaveStatusNotificationForTeacher } from '../../services/notificationService';
+import LogViewer from '../../components/debug/LogViewer';
 
 const { width } = Dimensions.get('window');
 
@@ -82,7 +83,32 @@ const LeaveManagement = ({ navigation }) => {
 
   useEffect(() => {
     loadData();
+    // Automatic debug info logging
+    logDebugInfo();
   }, []);
+  
+  const logDebugInfo = async () => {
+    try {
+      console.log('🧪 [ADMIN_LEAVE] === AUTOMATIC DEBUG INFO ===');
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      const tenantId = await getUserTenantId();
+      const { data: countData, error: countError } = await supabase
+        .from('leave_applications')
+        .select('count', { count: 'exact', head: true });
+      
+      console.log('🧪 [ADMIN_LEAVE] Debug Summary:');
+      console.log('   - Session exists:', !!session?.session);
+      console.log('   - Session user:', session?.session?.user?.email || 'None');
+      console.log('   - Session error:', sessionError?.message || 'None');
+      console.log('   - Tenant ID:', tenantId || 'NONE');
+      console.log('   - Total leave_applications count:', countData || 'ERROR');
+      console.log('   - Count query error:', countError?.message || 'None');
+      console.log('   - Count error code:', countError?.code || 'None');
+      console.log('🧪 [ADMIN_LEAVE] === END DEBUG INFO ===');
+    } catch (error) {
+      console.error('🧪 [ADMIN_LEAVE] Debug info error:', error.message);
+    }
+  };
 
   useEffect(() => {
     applyFilters();
@@ -102,13 +128,33 @@ const LeaveManagement = ({ navigation }) => {
 
   const loadLeaveApplications = async () => {
     try {
+      console.log('📄 [ADMIN_LEAVE] Starting to load leave applications from database...');
+      console.log('📄 [ADMIN_LEAVE] Current user:', user?.email || 'Not logged in');
+      console.log('📄 [ADMIN_LEAVE] User type:', userType || 'Unknown');
+      
+      // Check current session first
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      console.log('📄 [ADMIN_LEAVE] Session check:');
+      console.log('   - Session exists:', !!session);
+      console.log('   - Session user:', session?.user?.email || 'None');
+      console.log('   - Session error:', sessionError?.message || 'None');
+      
+      if (!session) {
+        console.log('❌ [ADMIN_LEAVE] No active session found');
+        Alert.alert('Authentication Error', 'Please log in to view leave applications.');
+        return;
+      }
+      
       // Get current user's tenant_id using utility function
       const tenantId = await getUserTenantId();
+      console.log('🏢 [ADMIN_LEAVE] Current tenant ID:', tenantId);
       if (!tenantId) {
-        console.error('No tenant_id found for user');
+        console.error('❌ [ADMIN_LEAVE] No tenant_id found for user');
+        Alert.alert('Error', 'Tenant information not found. Please contact support.');
         return;
       }
 
+      console.log('📄 [ADMIN_LEAVE] Querying leave_applications table...');
       const { data, error } = await supabase
         .from('leave_applications')
         .select(`
@@ -121,10 +167,54 @@ const LeaveManagement = ({ navigation }) => {
         .eq('tenant_id', tenantId)
         .order('applied_date', { ascending: false });
 
-      if (error) throw error;
+      console.log('📊 [ADMIN_LEAVE] Leave applications query result:');
+      console.log('   - Applications found:', data?.length || 0);
+      console.log('   - Error:', error?.message || 'None');
+      console.log('   - Error code:', error?.code || 'None');
+      console.log('   - Error hint:', error?.hint || 'None');
+      console.log('   - Error details:', error?.details || 'None');
+      
+      if (data && data.length > 0) {
+        console.log('📄 [ADMIN_LEAVE] Sample application structure:', data[0]);
+        console.log('📄 [ADMIN_LEAVE] Raw data preview:', JSON.stringify(data.slice(0, 2), null, 2));
+      }
+      
+      if (error) {
+        console.error('❌ [ADMIN_LEAVE] Error loading leave applications:', error);
+        
+        // Check if it's an RLS error
+        if (error.code === '42501') {
+          console.log('🔒 [ADMIN_LEAVE] RLS blocking leave applications access');
+          Alert.alert(
+            'Database Access Issue',
+            'Unable to load leave applications due to database permissions. Please run the leave RLS fix script or contact support.',
+            [
+              { text: 'OK' },
+              { text: 'Retry', onPress: loadLeaveApplications }
+            ]
+          );
+          return;
+        }
+        
+        Alert.alert(
+          'Loading Error',
+          'Failed to load leave applications. Please check your internet connection and try again.'
+        );
+        throw error;
+      }
+      
+      console.log('✅ [ADMIN_LEAVE] Successfully loaded', data?.length || 0, 'leave applications');
       setLeaveApplications(data || []);
     } catch (error) {
-      console.error('Error loading leave applications:', error);
+      console.error('💥 [ADMIN_LEAVE] Error loading leave applications:', error);
+      console.error('💥 [ADMIN_LEAVE] Error stack:', error.stack);
+      console.error('💥 [ADMIN_LEAVE] Error details:', {
+        message: error.message,
+        code: error.code,
+        hint: error.hint,
+        details: error.details,
+        name: error.name
+      });
     }
   };
 
@@ -589,7 +679,17 @@ const LeaveManagement = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <Header title="Leave Management" navigation={navigation} showBack={true} />
+      {/* Custom Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Leave Management (Admin)</Text>
+        <View style={styles.headerRight}>
+          <Text style={styles.countBadge}>{filteredApplications.length}</Text>
+        </View>
+      </View>
+      
       
       {/* Modern Filters */}
       <ModernFilters
@@ -1209,6 +1309,7 @@ const LeaveManagement = ({ navigation }) => {
           </View>
         </View>
       </Modal>
+      
     </View>
   );
 };
@@ -1695,6 +1796,59 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     fontStyle: 'italic',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  debugButton: {
+    padding: 4,
+  },
+  countBadge: {
+    backgroundColor: '#2196F3',
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    minWidth: 24,
+    textAlign: 'center',
+  },
+  debugStatus: {
+    backgroundColor: '#FF9800',
+    padding: 8,
+    margin: 4,
+    borderRadius: 4,
+  },
+  debugText: {
+    fontSize: 12,
+    color: '#FFFFFF',
+    fontWeight: '500',
   },
 });
 

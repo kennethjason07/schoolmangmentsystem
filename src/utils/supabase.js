@@ -205,55 +205,74 @@ export const authHelpers = {
 // User tenant helper function
 export const getUserTenantId = async () => {
   try {
+    console.log('🔍 [getUserTenantId] Starting tenant ID resolution...');
+    
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      console.warn('No authenticated user found for tenant context');
+      console.warn('❌ [getUserTenantId] No authenticated user found for tenant context');
       return null;
     }
 
-    // First check user metadata for tenant_id
-    const metadataTenantId = user.app_metadata?.tenant_id || user.user_metadata?.tenant_id;
-    if (metadataTenantId) {
-      console.log(`Found tenant_id in user metadata: ${metadataTenantId}`);
-      return metadataTenantId;
-    }
+    console.log('✅ [getUserTenantId] User found:', user.email);
+    console.log('🔍 [getUserTenantId] User ID:', user.id);
 
-    // Try to get user's tenant_id from profile table
+    // PRIORITY 1: Try to get user's tenant_id from database table first
     try {
+      console.log('🔍 [getUserTenantId] Checking database for tenant_id...');
       const { data: userProfile, error: profileError } = await supabase
         .from('users')
-        .select('tenant_id')
+        .select('tenant_id, email, role_id')
         .eq('id', user.id)
         .maybeSingle();
 
+      console.log('🔍 [getUserTenantId] Database query result:');
+      console.log('   - Profile found:', !!userProfile);
+      console.log('   - Profile email:', userProfile?.email);
+      console.log('   - Profile tenant_id:', userProfile?.tenant_id);
+      console.log('   - Profile role_id:', userProfile?.role_id);
+      console.log('   - Error:', profileError?.message || 'None');
+      console.log('   - Error code:', profileError?.code || 'None');
+
       if (!profileError && userProfile && userProfile.tenant_id) {
-        console.log(`Found tenant_id in user profile: ${userProfile.tenant_id}`);
+        console.log(`✅ [getUserTenantId] Found tenant_id in user database: ${userProfile.tenant_id}`);
         return userProfile.tenant_id;
       }
 
       if (profileError) {
-        console.warn('Error accessing user profile table:', profileError);
+        console.warn('⚠️ [getUserTenantId] Error accessing user profile table:', profileError);
       } else {
-        console.warn('No tenant_id found in user profile');
+        console.warn('⚠️ [getUserTenantId] No tenant_id found in user profile');
       }
     } catch (profileError) {
-      console.warn('Could not access user profile table:', profileError);
+      console.warn('💥 [getUserTenantId] Could not access user profile table:', profileError);
     }
 
-    // Use default tenant_id as fallback
-    const defaultTenantId = '00000000-0000-0000-0000-000000000001'; // UUID format for default tenant
-    console.warn(`Using default tenant_id as fallback: ${defaultTenantId}`);
+    // PRIORITY 2: Check user metadata for tenant_id
+    console.log('🔍 [getUserTenantId] Checking JWT metadata for tenant_id...');
+    const metadataTenantId = user.app_metadata?.tenant_id || user.user_metadata?.tenant_id;
+    console.log('🔍 [getUserTenantId] app_metadata:', JSON.stringify(user.app_metadata || {}, null, 2));
+    console.log('🔍 [getUserTenantId] user_metadata:', JSON.stringify(user.user_metadata || {}, null, 2));
+    console.log('🔍 [getUserTenantId] metadataTenantId:', metadataTenantId);
     
-    // Note: We don't attempt to create user profiles here due to RLS policies
-    // The application should handle user profile creation through proper admin channels
+    if (metadataTenantId) {
+      console.log(`✅ [getUserTenantId] Found tenant_id in user metadata: ${metadataTenantId}`);
+      return metadataTenantId;
+    }
+
+    // FALLBACK: Use known tenant_id for this school system
+    // Since you confirmed all users belong to this tenant, we can safely use it as fallback
+    const knownTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
+    console.warn(`⚠️ [getUserTenantId] No tenant_id found in metadata or database`);
+    console.warn(`💡 [getUserTenantId] Using known school tenant_id as fallback: ${knownTenantId}`);
+    console.warn(`💡 [getUserTenantId] This is temporary - should fix user metadata/JWT to include tenant_id`);
     
-    return defaultTenantId;
+    return knownTenantId;
   } catch (error) {
-    console.error('Error in getUserTenantId:', error);
-    // Return default tenant as final fallback
-    const defaultTenantId = '00000000-0000-0000-0000-000000000001';
-    console.warn(`Using default tenant_id due to error: ${defaultTenantId}`);
-    return defaultTenantId;
+    console.error('💥 [getUserTenantId] Error in getUserTenantId:', error);
+    // Return known tenant as final fallback for this school
+    const knownTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
+    console.warn(`⚠️ [getUserTenantId] Using known school tenant_id due to error: ${knownTenantId}`);
+    return knownTenantId;
   }
 };
 

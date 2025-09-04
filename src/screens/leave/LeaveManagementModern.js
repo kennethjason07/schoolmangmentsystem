@@ -12,7 +12,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../../utils/supabase';
+import { useAuth } from '../../utils/AuthContext';
 
 // NEW: Modern Filter System
 import ModernFilters from '../../components/ui/ModernFilters';
@@ -22,14 +23,20 @@ import { colors } from '../../../assets/colors';
 import AdminAddButton from '../../components/ui/AdminAddButton';
 import AddLeaveApplication from './AddLeaveApplication';
 
+// Debug imports
+import LogViewer from '../../components/debug/LogViewer';
+
 const { width } = Dimensions.get('window');
 
 const LeaveManagementModern = ({ navigation, route }) => {
+  console.log('🎬 [LEAVE_MGMT] Component render started');
+  
   // Existing state
   const [leaveApplications, setLeaveApplications] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
+  const [debugLogVisible, setDebugLogVisible] = useState(false);
 
   // NEW: Modern Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -148,22 +155,27 @@ const LeaveManagementModern = ({ navigation, route }) => {
 
   // NEW: Modern Filter Handlers
   const handleFiltersChange = (type, filters) => {
+    console.log('🔍 [LEAVE_MGMT] Filter change:', { type, filters });
     switch (type) {
       case 'quick':
+        console.log('🔍 [LEAVE_MGMT] Applying quick filters:', filters);
         setActiveQuickFilters(filters);
         applyQuickFilters(filters);
         break;
       case 'advanced':
+        console.log('🔍 [LEAVE_MGMT] Applying advanced filters:', filters);
         setAdvancedFilters(filters);
         applyAdvancedFilters(filters);
         break;
       case 'clear':
+        console.log('🔍 [LEAVE_MGMT] Clearing all filters');
         clearAllFilters();
         break;
     }
   };
 
   const handleSearch = (searchText) => {
+    console.log('🔍 [LEAVE_MGMT] Search query changed:', searchText);
     setSearchQuery(searchText);
     applyFilters(activeQuickFilters, advancedFilters, searchText);
   };
@@ -189,41 +201,67 @@ const LeaveManagementModern = ({ navigation, route }) => {
 
   // NEW: Comprehensive Filter Logic
   const applyFilters = (quickFilters = [], advFilters = {}, search = '') => {
+    console.log('🔍 [LEAVE_MGMT] Applying filters:', {
+      quickFilters,
+      advFilters,
+      search,
+      totalApplications: leaveApplications.length
+    });
+    
     let filtered = [...leaveApplications];
+    console.log('🔍 [LEAVE_MGMT] Starting with applications:', filtered.length);
 
     // Apply search filter
     if (search.trim()) {
       const searchLower = search.toLowerCase().trim();
+      console.log('🔍 [LEAVE_MGMT] Applying search filter:', searchLower);
+      
+      const beforeSearchCount = filtered.length;
       filtered = filtered.filter(app => 
         app.employeeName?.toLowerCase().includes(searchLower) ||
         app.leaveType?.toLowerCase().includes(searchLower) ||
         app.reason?.toLowerCase().includes(searchLower) ||
         app.status?.toLowerCase().includes(searchLower)
       );
+      
+      console.log('🔍 [LEAVE_MGMT] After search filter:', filtered.length, '(filtered out:', (beforeSearchCount - filtered.length), ')');
     }
 
     // Apply quick filters
     if (quickFilters.length > 0) {
+      console.log('🔍 [LEAVE_MGMT] Applying quick filters:', quickFilters);
+      const beforeQuickCount = filtered.length;
+      
       filtered = filtered.filter(app => {
         return quickFilters.some(filterKey => {
           switch (filterKey) {
             case 'pending':
-              return app.status === 'Pending';
+              const isPending = app.status === 'Pending';
+              console.log(`🔍 [LEAVE_MGMT] Quick filter 'pending' for ${app.employeeName}: ${isPending} (status: ${app.status})`);
+              return isPending;
             case 'approved':
-              return app.status === 'Approved';
+              const isApproved = app.status === 'Approved';
+              console.log(`🔍 [LEAVE_MGMT] Quick filter 'approved' for ${app.employeeName}: ${isApproved} (status: ${app.status})`);
+              return isApproved;
             case 'rejected':
-              return app.status === 'Rejected';
+              const isRejected = app.status === 'Rejected';
+              console.log(`🔍 [LEAVE_MGMT] Quick filter 'rejected' for ${app.employeeName}: ${isRejected} (status: ${app.status})`);
+              return isRejected;
             case 'thisWeek':
               const now = new Date();
               const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
               const endOfWeek = new Date(now.setDate(now.getDate() - now.getDay() + 6));
               const startDate = new Date(app.startDate);
-              return startDate >= startOfWeek && startDate <= endOfWeek;
+              const isThisWeek = startDate >= startOfWeek && startDate <= endOfWeek;
+              console.log(`🔍 [LEAVE_MGMT] Quick filter 'thisWeek' for ${app.employeeName}: ${isThisWeek} (start: ${app.startDate})`);
+              return isThisWeek;
             default:
               return true;
           }
         });
       });
+      
+      console.log('🔍 [LEAVE_MGMT] After quick filters:', filtered.length, '(filtered out:', (beforeQuickCount - filtered.length), ')');
     }
 
     // Apply advanced filters
@@ -257,38 +295,164 @@ const LeaveManagementModern = ({ navigation, route }) => {
       });
     }
 
+    console.log('🏁 [LEAVE_MGMT] Final filtered applications count:', filtered.length);
+    console.log('🏁 [LEAVE_MGMT] Final filtered applications:', filtered.map(app => ({
+      id: app.id,
+      employeeName: app.employeeName,
+      status: app.status,
+      leaveType: app.leaveType,
+      startDate: app.startDate
+    })));
+    
     setFilteredApplications(filtered);
   };
 
   // Update filtered applications when leave applications change
   useEffect(() => {
+    console.log('🔄 [LEAVE_MGMT] Leave applications changed, reapplying filters...');
+    console.log('🔄 [LEAVE_MGMT] Current applications count:', leaveApplications.length);
     applyFilters(activeQuickFilters, advancedFilters, searchQuery);
   }, [leaveApplications]);
 
-  // Existing functions (loadLeaveApplications, etc.)
+  // Get auth context for user info
+  const { user } = useAuth();
+
+  // Load leave applications from Supabase database
   const loadLeaveApplications = async () => {
     try {
       setIsLoading(true);
-      const storedApplications = await AsyncStorage.getItem('leaveApplications');
-      if (storedApplications) {
-        const applications = JSON.parse(storedApplications);
-        setLeaveApplications(applications);
-        setFilteredApplications(applications); // Initial load
+      console.log('📄 [LEAVE_MGMT] Starting to load leave applications from database...');
+      console.log('📄 [LEAVE_MGMT] Current user:', user?.email || 'Not logged in');
+      
+      // Check current session first
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      console.log('📄 [LEAVE_MGMT] Session check:');
+      console.log('   - Session exists:', !!session);
+      console.log('   - Session user:', session?.user?.email || 'None');
+      console.log('   - Session error:', sessionError?.message || 'None');
+      
+      if (!session) {
+        console.log('❌ [LEAVE_MGMT] No active session found');
+        Alert.alert('Authentication Error', 'Please log in to view leave applications.');
+        return;
       }
+      
+      console.log('📄 [LEAVE_MGMT] Querying leave_applications table...');
+      
+      // Query leave applications from Supabase with joins to get employee names
+      const { data: applications, error } = await supabase
+        .from('leave_applications')
+        .select(`
+          *,
+          teacher:teachers!leave_applications_teacher_id_fkey(name),
+          applied_by_user:users!leave_applications_applied_by_fkey(full_name)
+        `)
+        .order('created_at', { ascending: false });
+      
+      console.log('📊 [LEAVE_MGMT] Leave applications query result:');
+      console.log('   - Applications found:', applications?.length || 0);
+      console.log('   - Error:', error?.message || 'None');
+      console.log('   - Error code:', error?.code || 'None');
+      console.log('   - Error hint:', error?.hint || 'None');
+      console.log('   - Error details:', error?.details || 'None');
+      
+      if (applications && applications.length > 0) {
+        console.log('📄 [LEAVE_MGMT] Sample application structure:', applications[0]);
+      }
+      console.log('📄 [LEAVE_MGMT] Raw data preview:', JSON.stringify(applications?.slice(0, 2), null, 2));
+      
+      if (error) {
+        console.error('❌ Error loading leave applications:', error);
+        
+        // Check if it's an RLS error
+        if (error.code === '42501') {
+          console.log('🔒 RLS blocking leave applications access');
+          Alert.alert(
+            'Database Access Issue',
+            'Unable to load leave applications due to database permissions. Please run the leave RLS fix script or contact support.',
+            [
+              { text: 'OK' },
+              { text: 'Retry', onPress: loadLeaveApplications }
+            ]
+          );
+          return;
+        }
+        
+        Alert.alert(
+          'Loading Error',
+          'Failed to load leave applications. Please check your internet connection and try again.'
+        );
+        return;
+      }
+      
+      // Transform database data to match expected format
+      console.log('🔄 [LEAVE_MGMT] Transforming database data...');
+      const transformedApplications = (applications || []).map((app, index) => {
+        console.log(`📝 [LEAVE_MGMT] Processing application ${index + 1}:`, {
+          id: app.id,
+          teacher: app.teacher,
+          applied_by_user: app.applied_by_user,
+          start_date: app.start_date,
+          end_date: app.end_date,
+          leave_type: app.leave_type,
+          status: app.status
+        });
+        
+        // Calculate number of days
+        const startDate = new Date(app.start_date);
+        const endDate = new Date(app.end_date);
+        const numberOfDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+        
+        const transformed = {
+          id: app.id,
+          employeeName: app.teacher?.name || app.applied_by_user?.full_name || 'Unknown Employee',
+          employeeEmail: app.applied_by_user?.email || 'unknown@email.com',
+          leaveType: app.leave_type,
+          startDate: app.start_date,
+          endDate: app.end_date,
+          numberOfDays: numberOfDays,
+          reason: app.reason,
+          status: app.status || 'Pending',
+          appliedDate: app.applied_date || app.created_at
+        };
+        
+        console.log(`✅ [LEAVE_MGMT] Transformed application ${index + 1}:`, transformed);
+        return transformed;
+      });
+      
+      console.log('✅ [LEAVE_MGMT] Successfully loaded and transformed', transformedApplications.length, 'leave applications');
+      console.log('📊 [LEAVE_MGMT] Final transformed data:', JSON.stringify(transformedApplications, null, 2));
+      
+      setLeaveApplications(transformedApplications);
+      setFilteredApplications(transformedApplications);
+      
     } catch (error) {
-      console.error('Error loading applications:', error);
+      console.error('💥 [LEAVE_MGMT] Error loading leave applications:', error);
+      console.error('💥 [LEAVE_MGMT] Error stack:', error.stack);
+      console.error('💥 [LEAVE_MGMT] Error details:', {
+        message: error.message,
+        code: error.code,
+        hint: error.hint,
+        details: error.details,
+        name: error.name
+      });
+      Alert.alert('Error', 'An unexpected error occurred while loading leave applications.');
     } finally {
+      console.log('🏁 [LEAVE_MGMT] Finished loading leave applications, setting loading to false');
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
+    console.log('🚀 [LEAVE_MGMT] Component mounted, loading leave applications...');
     loadLeaveApplications();
   }, []);
 
   const onRefresh = async () => {
+    console.log('🔄 [LEAVE_MGMT] Refresh triggered by user pull-to-refresh');
     setRefreshing(true);
     await loadLeaveApplications();
+    console.log('✅ [LEAVE_MGMT] Refresh completed');
     setRefreshing(false);
   };
 
@@ -320,24 +484,59 @@ const LeaveManagementModern = ({ navigation, route }) => {
 
   const handleStatusUpdate = async (applicationId, newStatus) => {
     try {
+      console.log('🔄 [LEAVE_MGMT] Updating leave application status:', { applicationId, newStatus });
+      console.log('🔄 [LEAVE_MGMT] Current user:', user?.email || 'Not logged in');
+      
+      // Find the application being updated
+      const targetApp = leaveApplications.find(app => app.id === applicationId);
+      console.log('🔄 [LEAVE_MGMT] Target application:', targetApp);
+      
+      // Update in Supabase database
+      console.log('🔄 [LEAVE_MGMT] Sending update to Supabase...');
+      const { data: updatedData, error } = await supabase
+        .from('leave_applications')
+        .update({ status: newStatus })
+        .eq('id', applicationId)
+        .select();
+      
+      console.log('📊 [LEAVE_MGMT] Update result:');
+      console.log('   - Updated data:', updatedData);
+      console.log('   - Error:', error?.message || 'None');
+      console.log('   - Error code:', error?.code || 'None');
+      
+      if (error) {
+        console.error('❌ [LEAVE_MGMT] Error updating leave status in database:', error);
+        Alert.alert('Update Failed', `Failed to update leave application status: ${error.message}`);
+        return;
+      }
+      
+      // Update local state
+      console.log('🔄 [LEAVE_MGMT] Updating local state...');
       const updatedApplications = leaveApplications.map(app =>
         app.id === applicationId ? { ...app, status: newStatus } : app
       );
       
+      console.log('📊 [LEAVE_MGMT] Updated applications count:', updatedApplications.length);
       setLeaveApplications(updatedApplications);
-      await AsyncStorage.setItem('leaveApplications', JSON.stringify(updatedApplications));
       
+      console.log('✅ [LEAVE_MGMT] Leave application status updated successfully');
       Alert.alert('Success', `Leave application ${newStatus.toLowerCase()} successfully`);
+      
     } catch (error) {
-      console.error('Error updating status:', error);
-      Alert.alert('Error', 'Failed to update leave application status');
+      console.error('💥 [LEAVE_MGMT] Error updating leave status:', error);
+      console.error('💥 [LEAVE_MGMT] Error stack:', error.stack);
+      Alert.alert('Error', `Failed to update leave application status: ${error.message}`);
     }
   };
 
-  const handleApplicationAdded = (newApplication) => {
-    const updatedApplications = [...leaveApplications, newApplication];
-    setLeaveApplications(updatedApplications);
+  const handleApplicationAdded = async (newApplication) => {
+    console.log('➕ [LEAVE_MGMT] New leave application added, refreshing list...');
+    console.log('➕ [LEAVE_MGMT] New application data:', newApplication);
     setModalVisible(false);
+    // Reload from database to get the latest data
+    console.log('🔄 [LEAVE_MGMT] Reloading all applications after new addition...');
+    await loadLeaveApplications();
+    console.log('✅ [LEAVE_MGMT] Application list refreshed after addition');
   };
 
   const renderLeaveApplicationItem = ({ item }) => (
@@ -413,6 +612,16 @@ const LeaveManagementModern = ({ navigation, route }) => {
     </View>
   );
 
+  console.log('🎨 [LEAVE_MGMT] Rendering component with state:', {
+    leaveApplicationsCount: leaveApplications.length,
+    filteredApplicationsCount: filteredApplications.length,
+    isLoading,
+    refreshing,
+    modalVisible,
+    activeQuickFilters,
+    searchQuery
+  });
+  
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -421,9 +630,45 @@ const LeaveManagementModern = ({ navigation, route }) => {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Leave Management</Text>
         <View style={styles.headerRight}>
+          <TouchableOpacity 
+            onPress={async () => {
+              console.log('🧪 [LEAVE_MGMT] Quick DB test button pressed');
+              try {
+                const { data, error } = await supabase.from('leave_applications').select('count', { count: 'exact', head: true });
+                const { data: session } = await supabase.auth.getSession();
+                Alert.alert('DB Test', `Session: ${session.session ? 'YES' : 'NO'}\nCount: ${data || 'ERROR'}\nError: ${error?.message || 'None'}\nCode: ${error?.code || 'None'}`);
+              } catch (e) {
+                Alert.alert('DB Test Error', e.message);
+              }
+            }}
+            style={styles.debugButton}
+          >
+            <Ionicons name="flask" size={20} color={colors.error} />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            onPress={() => {
+              console.log('🐛 [LEAVE_MGMT] Debug button pressed');
+              setDebugLogVisible(true);
+            }}
+            style={styles.debugButton}
+          >
+            <Ionicons name="bug" size={20} color={colors.primary} />
+          </TouchableOpacity>
           <Text style={styles.countBadge}>{filteredApplications.length}</Text>
         </View>
       </View>
+
+      {/* Debug Status Display - Remove this after debugging */}
+      {__DEV__ && (
+        <View style={styles.debugStatus}>
+          <Text style={styles.debugText}>
+            🔍 Debug Status: Loading: {isLoading ? 'YES' : 'NO'} | 
+            User: {user?.email?.slice(0, 15) || 'None'} | 
+            Apps: {leaveApplications.length} | 
+            Filtered: {filteredApplications.length}
+          </Text>
+        </View>
+      )}
 
       {/* NEW: Modern Filter System - Replaces old filter tabs */}
       <ModernFilters
@@ -458,14 +703,27 @@ const LeaveManagementModern = ({ navigation, route }) => {
       />
 
       <AdminAddButton
-        onPress={() => setModalVisible(true)}
+        onPress={() => {
+          console.log('➕ [LEAVE_MGMT] Add button pressed, opening modal');
+          setModalVisible(true);
+        }}
         label="Add Leave Application"
       />
 
+      {/* AddLeaveApplication component */}
       <AddLeaveApplication
         visible={modalVisible}
-        onClose={() => setModalVisible(false)}
+        onClose={() => {
+          console.log('❌ [LEAVE_MGMT] Modal closed');
+          setModalVisible(false);
+        }}
         onApplicationAdded={handleApplicationAdded}
+      />
+      
+      {/* Debug Log Viewer */}
+      <LogViewer
+        visible={debugLogVisible}
+        onClose={() => setDebugLogVisible(false)}
       />
     </SafeAreaView>
   );
@@ -500,7 +758,12 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   headerRight: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
+  },
+  debugButton: {
+    padding: 4,
   },
   countBadge: {
     backgroundColor: colors.primary,
@@ -637,6 +900,47 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     lineHeight: 24,
+  },
+  debugStatus: {
+    backgroundColor: colors.warning,
+    padding: 8,
+    margin: 4,
+    borderRadius: 4,
+  },
+  debugText: {
+    fontSize: 12,
+    color: colors.white,
+    fontWeight: '500',
+  },
+  debugModal: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -100 }, { translateY: -50 }],
+    width: 200,
+    height: 100,
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 5,
+  },
+  debugModalText: {
+    color: colors.white,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  debugModalClose: {
+    backgroundColor: colors.white,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 4,
+  },
+  debugModalCloseText: {
+    color: colors.primary,
+    fontWeight: '600',
   },
 });
 

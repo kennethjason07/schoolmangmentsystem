@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, authHelpers, dbHelpers } from './supabase';
+import supabaseService from '../services/SupabaseServiceFixed';
 
 const AuthContext = createContext({});
 
@@ -94,17 +95,20 @@ export const AuthProvider = ({ children }) => {
   // The auth state is now managed through the auth state change listener and initial session check
 
   const handleAuthChange = async (authUser) => {
-    console.log('🔄 handleAuthChange called with user:', authUser?.email);
+    console.log('🔄 [AUTH] handleAuthChange called with user:', authUser?.email);
+    console.log('🔄 [AUTH] Full auth user object:', authUser);
     try {
       if (!authUser) {
-        console.log('❌ No auth user provided, clearing state');
+        console.log('❌ [AUTH] No auth user provided, clearing state');
         setUser(null);
         setUserType(null);
         setLoading(false); // Ensure loading is false when no user
         return;
       }
 
-      console.log('👤 Fetching user profile for:', authUser.email);
+      console.log('👤 [AUTH] Fetching user profile for:', authUser.email);
+      console.log('👤 [AUTH] Auth user ID:', authUser.id);
+      console.log('👤 [AUTH] Auth user metadata:', authUser.user_metadata);
       // First get user profile without roles join to avoid foreign key issues during signup
       // Use case-insensitive search for email with timeout
       let userProfile = null;
@@ -112,7 +116,11 @@ export const AuthProvider = ({ children }) => {
       let tenantId = null;
       
       try {
-        console.log('🔍 Starting user profile query...');
+        console.log('🔍 [AUTH] Starting user profile query...');
+        console.log('🔍 [AUTH] Supabase client status:', {
+          url: supabase.supabaseUrl,
+          key: supabase.supabaseKey ? 'Set' : 'Missing'
+        });
         
         // First try with exact email match
         let profileQuery = supabase
@@ -121,8 +129,16 @@ export const AuthProvider = ({ children }) => {
           .eq('email', authUser.email)
           .maybeSingle();
         
-        console.log('📧 Querying with exact email:', authUser.email);
+        console.log('📧 [AUTH] Querying with exact email:', authUser.email);
+        console.log('📧 [AUTH] Query object:', profileQuery);
         let result = await profileQuery;
+        
+        console.log('📊 [AUTH] Exact email query result:', {
+          data: result.data,
+          error: result.error,
+          status: result.status,
+          statusText: result.statusText
+        });
         
         // If exact match fails, try case-insensitive
         if (!result.data && !result.error) {
@@ -281,6 +297,12 @@ export const AuthProvider = ({ children }) => {
 
       console.log('👤 Final user data:', userData);
       console.log('🎭 Final role name:', roleName);
+
+      // Set tenant context in SupabaseService if user has tenant_id
+      if (userData.tenant_id) {
+        console.log('🏢 Setting tenant context:', userData.tenant_id);
+        supabaseService.setTenantContext(userData.tenant_id);
+      }
 
       setUser(userData);
       setUserType(roleName);
@@ -460,6 +482,12 @@ export const AuthProvider = ({ children }) => {
       console.log('🌐 Platform:', Platform.OS);
       console.log('👤 About to set user:', userData);
       console.log('🎭 About to set userType:', actualRoleName ? actualRoleName.toLowerCase() : 'user');
+      
+      // Set tenant context in SupabaseService
+      if (userData.tenant_id) {
+        console.log('🏢 Setting tenant context during signIn:', userData.tenant_id);
+        supabaseService.setTenantContext(userData.tenant_id);
+      }
       
       setUser(userData);
       setUserType(actualRoleName ? actualRoleName.toLowerCase() : 'user');

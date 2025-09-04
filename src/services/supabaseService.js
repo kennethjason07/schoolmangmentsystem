@@ -1,16 +1,16 @@
 import { supabase } from '../utils/supabase';
 
-// School-aware Supabase service
+// Tenant-aware Supabase service
 class SupabaseService {
   constructor() {
-    this.selectedSchoolId = null;
+    this.selectedTenantId = null;
   }
 
-  // Set the current school context
-  setSchoolContext(schoolId) {
-    console.log('🏫 SupabaseService - setSchoolContext called with:', schoolId);
-    this.selectedSchoolId = schoolId;
-    console.log('🏫 SupabaseService - selectedSchoolId now set to:', this.selectedSchoolId);
+  // Set the current tenant context
+  setTenantContext(tenantId) {
+    console.log('🏫 SupabaseService - setTenantContext called with:', tenantId);
+    this.selectedTenantId = tenantId;
+    console.log('🏫 SupabaseService - selectedTenantId now set to:', this.selectedTenantId);
   }
 
   // Test method to debug Supabase client
@@ -42,9 +42,9 @@ class SupabaseService {
     }
   }
   
-  // Get school-filtered query
-  getSchoolQuery(tableName) {
-    console.log('🔎 SupabaseService - getSchoolQuery called for table:', tableName, 'with selectedSchoolId:', this.selectedSchoolId);
+  // Get tenant-filtered query
+  getTenantQuery(tableName) {
+    console.log('🔎 SupabaseService - getTenantQuery called for table:', tableName, 'with selectedTenantId:', this.selectedTenantId);
     
     // Run test first time only
     if (!this._testRun) {
@@ -56,14 +56,14 @@ class SupabaseService {
       const query = supabase.from(tableName);
       console.log('🔎 SupabaseService - base query after supabase.from():', query);
       
-      if (this.selectedSchoolId) {
-        // Return the base query, filtered by school_id, without .select()
+      if (this.selectedTenantId) {
+        // Return the base query, filtered by tenant_id, without .select()
         // The service methods will call .select() themselves
-        console.log('🔎 SupabaseService - adding school filter to base query');
+        console.log('🔎 SupabaseService - adding tenant filter to base query');
         
         // Since query.from() returns a raw query builder, we need to use it properly
         // Let's try to add the filter in a different way
-        const filteredQuery = query.select('*').eq('school_id', this.selectedSchoolId);
+        const filteredQuery = query.select('*').eq('tenant_id', this.selectedTenantId);
         console.log('🔎 SupabaseService - filtered query created:', filteredQuery);
         console.log('🔎 SupabaseService - filtered query type:', typeof filteredQuery);
         console.log('🔎 SupabaseService - filtered query methods:', {
@@ -76,7 +76,7 @@ class SupabaseService {
         return {
           select: (columns) => {
             console.log('🔎 Custom select called with:', columns);
-            const newQuery = query.select(columns).eq('school_id', this.selectedSchoolId);
+            const newQuery = query.select(columns).eq('tenant_id', this.selectedTenantId);
             console.log('🔎 Custom select newQuery methods:', {
               eq: typeof newQuery.eq,
               order: typeof newQuery.order,
@@ -93,7 +93,7 @@ class SupabaseService {
       return query; // Return the base query without select
       
     } catch (error) {
-      console.error('😱 SupabaseService - Error in getSchoolQuery:', error);
+      console.error('😱 SupabaseService - Error in getTenantQuery:', error);
       throw error;
     }
   }

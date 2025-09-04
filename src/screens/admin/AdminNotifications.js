@@ -14,7 +14,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { useAuth } from '../../utils/AuthContext';
-import { supabase } from '../../utils/supabase';
+import { supabase, getUserTenantId } from '../../utils/supabase';
 
 const AdminNotifications = ({ navigation }) => {
   const [notifications, setNotifications] = useState([]);
@@ -86,7 +86,33 @@ const AdminNotifications = ({ navigation }) => {
 
   const fetchNotifications = async () => {
     try {
-      if (!user?.id) return;
+      console.log('🔔 [ADMIN_NOTIF] Starting to fetch admin notifications...');
+      console.log('🔔 [ADMIN_NOTIF] Current user:', user?.email || 'Not logged in');
+      
+      if (!user?.id) {
+        console.log('❌ [ADMIN_NOTIF] No user ID available');
+        return;
+      }
+
+      // Check current session first
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      console.log('🔔 [ADMIN_NOTIF] Session check:');
+      console.log('   - Session exists:', !!session);
+      console.log('   - Session user:', session?.user?.email || 'None');
+      console.log('   - Session error:', sessionError?.message || 'None');
+      
+      if (!session) {
+        console.log('❌ [ADMIN_NOTIF] No active session found');
+        return;
+      }
+
+      // Get current user's tenant_id
+      const tenantId = await getUserTenantId();
+      console.log('🏢 [ADMIN_NOTIF] Current tenant ID:', tenantId);
+      if (!tenantId) {
+        console.error('❌ [ADMIN_NOTIF] No tenant_id found for user');
+        return;
+      }
 
       // Load read notifications from storage
       const readIds = await loadReadNotifications();
@@ -97,6 +123,7 @@ const AdminNotifications = ({ navigation }) => {
       let recipientNotifications = null;
       let recipientError = null;
       
+      console.log('🔔 [ADMIN_NOTIF] Querying notification_recipients with Admin type...');
       // Try with Admin recipient type first
       const { data: adminNotifications, error: adminError } = await supabase
         .from('notification_recipients')
@@ -106,13 +133,19 @@ const AdminNotifications = ({ navigation }) => {
         `)
         .eq('recipient_id', user.id)
         .eq('recipient_type', 'Admin')
+        .eq('tenant_id', tenantId)
         .order('sent_at', { ascending: false });
+        
+      console.log('🔔 [ADMIN_NOTIF] Admin notifications query result:');
+      console.log('   - Found:', adminNotifications?.length || 0);
+      console.log('   - Error:', adminError?.message || 'None');
+      console.log('   - Error code:', adminError?.code || 'None');
         
       if (!adminError) {
         recipientNotifications = adminNotifications;
-        console.log('✅ Using Admin recipient type for admin notifications');
+        console.log('✅ [ADMIN_NOTIF] Using Admin recipient type for admin notifications');
       } else {
-        console.log('🔄 Admin recipient type failed, trying Parent fallback...');
+        console.log('🔄 [ADMIN_NOTIF] Admin recipient type failed, trying Parent fallback...');
         // Fallback to Parent type if Admin constraint not updated yet
         const { data: fallbackNotifications, error: fallbackError } = await supabase
           .from('notification_recipients')
@@ -122,13 +155,19 @@ const AdminNotifications = ({ navigation }) => {
           `)
           .eq('recipient_id', user.id)
           .eq('recipient_type', 'Parent')
+          .eq('tenant_id', tenantId)
           .order('sent_at', { ascending: false });
+          
+        console.log('🔔 [ADMIN_NOTIF] Parent fallback query result:');
+        console.log('   - Found:', fallbackNotifications?.length || 0);
+        console.log('   - Error:', fallbackError?.message || 'None');
+        console.log('   - Error code:', fallbackError?.code || 'None');
           
         recipientNotifications = fallbackNotifications;
         recipientError = fallbackError;
         
         if (!fallbackError) {
-          console.log('✅ Using Parent fallback for admin notifications');
+          console.log('✅ [ADMIN_NOTIF] Using Parent fallback for admin notifications');
         }
       }
 
@@ -136,6 +175,7 @@ const AdminNotifications = ({ navigation }) => {
 
       // Process recipient notifications (these are targeted to this specific admin)
       if (!recipientError && recipientNotifications) {
+        console.log('🔔 [ADMIN_NOTIF] Processing', recipientNotifications.length, 'recipient notifications');
         const recipientNotifs = recipientNotifications.map(item => ({
           id: item.notification.id,
           title: getNotificationTitle(item.notification.type, item.notification.message),
@@ -153,12 +193,19 @@ const AdminNotifications = ({ navigation }) => {
 
       // Also get general notifications not specifically targeted (fallback method)
       // BUT exclude notifications sent by this admin to avoid seeing their own approval notifications
+      console.log('🔔 [ADMIN_NOTIF] Querying general notifications...');
       const { data: generalNotifications, error: generalError } = await supabase
         .from('notifications')
         .select('*')
+        .eq('tenant_id', tenantId)
         .or(`sent_by.is.null,type.eq.General`)
         .neq('sent_by', user.id) // Exclude notifications sent by this admin
         .order('created_at', { ascending: false });
+
+      console.log('🔔 [ADMIN_NOTIF] General notifications query result:');
+      console.log('   - Found:', generalNotifications?.length || 0);
+      console.log('   - Error:', generalError?.message || 'None');
+      console.log('   - Error code:', generalError?.code || 'None');
 
       if (!generalError && generalNotifications) {
         const generalNotifs = generalNotifications
@@ -182,10 +229,30 @@ const AdminNotifications = ({ navigation }) => {
       // Sort all notifications by created date (most recent first)
       allNotifications.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
+      console.log('✅ [ADMIN_NOTIF] Total notifications loaded:', allNotifications.length);
       setNotifications(allNotifications);
 
     } catch (error) {
-      console.error('Error fetching admin notifications:', error);
+      console.error('💥 [ADMIN_NOTIF] Error fetching admin notifications:', error);
+      console.error('💥 [ADMIN_NOTIF] Error details:', {
+        message: error.message,
+        code: error.code,
+        hint: error.hint,
+        details: error.details
+      });
+      
+      // Check for RLS errors
+      if (error.code === '42501') {
+        console.log('🔒 [ADMIN_NOTIF] RLS blocking notifications access');
+        Alert.alert(
+          'Database Access Issue',
+          'Unable to load notifications due to database permissions. Please contact support.',
+          [
+            { text: 'OK' },
+            { text: 'Retry', onPress: fetchNotifications }
+          ]
+        );
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -203,7 +270,15 @@ const AdminNotifications = ({ navigation }) => {
 
   const markAsRead = async (notificationId) => {
     try {
-      console.log('🔔 Admin: Marking notification as read:', notificationId);
+      console.log('🔔 [ADMIN_NOTIF] Marking notification as read:', notificationId);
+      
+      // Get tenant_id for RLS compliance
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        console.error('❌ [ADMIN_NOTIF] No tenant_id found for marking notification as read');
+        Alert.alert('Error', 'Tenant information not found');
+        return;
+      }
       
       // Update the notification_recipients table in the database
       const { error: dbError } = await supabase
@@ -214,15 +289,34 @@ const AdminNotifications = ({ navigation }) => {
         })
         .eq('notification_id', notificationId)
         .eq('recipient_id', user.id)
+        .eq('tenant_id', tenantId)
         .eq('recipient_type', 'Admin');
         
       if (dbError) {
-        console.error('❌ Error updating notification in database:', dbError);
-        Alert.alert('Error', 'Failed to mark notification as read');
-        return;
+        console.error('❌ [ADMIN_NOTIF] Error updating notification in database:', dbError);
+        
+        // Try with Parent fallback if Admin type fails
+        const { error: fallbackError } = await supabase
+          .from('notification_recipients')
+          .update({ 
+            is_read: true,
+            read_at: new Date().toISOString()
+          })
+          .eq('notification_id', notificationId)
+          .eq('recipient_id', user.id)
+          .eq('tenant_id', tenantId)
+          .eq('recipient_type', 'Parent');
+          
+        if (fallbackError) {
+          console.error('❌ [ADMIN_NOTIF] Fallback update also failed:', fallbackError);
+          Alert.alert('Error', 'Failed to mark notification as read');
+          return;
+        }
+        
+        console.log('✅ [ADMIN_NOTIF] Notification marked as read using Parent fallback');
+      } else {
+        console.log('✅ [ADMIN_NOTIF] Notification marked as read in database');
       }
-      
-      console.log('✅ Admin: Notification marked as read in database');
       
       // Update the readNotifications set for local state
       const newReadNotifications = new Set([...readNotifications, notificationId.toString()]);
@@ -240,7 +334,7 @@ const AdminNotifications = ({ navigation }) => {
         )
       );
     } catch (error) {
-      console.error('Error marking notification as read:', error);
+      console.error('💥 [ADMIN_NOTIF] Error marking notification as read:', error);
       Alert.alert('Error', 'Failed to mark notification as read');
     }
   };
@@ -254,7 +348,15 @@ const AdminNotifications = ({ navigation }) => {
         return;
       }
 
-      console.log('🔔 Admin: Marking all notifications as read, count:', unreadNotifications.length);
+      console.log('🔔 [ADMIN_NOTIF] Marking all notifications as read, count:', unreadNotifications.length);
+      
+      // Get tenant_id for RLS compliance
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        console.error('❌ [ADMIN_NOTIF] No tenant_id found for marking all notifications as read');
+        Alert.alert('Error', 'Tenant information not found');
+        return;
+      }
       
       // Update all unread notifications in the database
       const { error: dbError } = await supabase
@@ -264,16 +366,35 @@ const AdminNotifications = ({ navigation }) => {
           read_at: new Date().toISOString()
         })
         .eq('recipient_id', user.id)
+        .eq('tenant_id', tenantId)
         .eq('recipient_type', 'Admin')
         .eq('is_read', false);
         
       if (dbError) {
-        console.error('❌ Error marking all notifications as read in database:', dbError);
-        Alert.alert('Error', 'Failed to mark all notifications as read');
-        return;
+        console.error('❌ [ADMIN_NOTIF] Error marking all notifications as read in database:', dbError);
+        
+        // Try with Parent fallback if Admin type fails
+        const { error: fallbackError } = await supabase
+          .from('notification_recipients')
+          .update({ 
+            is_read: true,
+            read_at: new Date().toISOString()
+          })
+          .eq('recipient_id', user.id)
+          .eq('tenant_id', tenantId)
+          .eq('recipient_type', 'Parent')
+          .eq('is_read', false);
+          
+        if (fallbackError) {
+          console.error('❌ [ADMIN_NOTIF] Fallback mark all also failed:', fallbackError);
+          Alert.alert('Error', 'Failed to mark all notifications as read');
+          return;
+        }
+        
+        console.log('✅ [ADMIN_NOTIF] All notifications marked as read using Parent fallback');
+      } else {
+        console.log('✅ [ADMIN_NOTIF] All notifications marked as read in database');
       }
-      
-      console.log('✅ Admin: All notifications marked as read in database');
 
       // Get all notification IDs
       const allNotificationIds = notifications.map(notif => notif.id.toString());
@@ -290,7 +411,7 @@ const AdminNotifications = ({ navigation }) => {
       
       Alert.alert('Success', 'All notifications marked as read.');
     } catch (error) {
-      console.error('Error marking all notifications as read:', error);
+      console.error('💥 [ADMIN_NOTIF] Error marking all notifications as read:', error);
       Alert.alert('Error', 'Failed to mark notifications as read.');
     }
   };

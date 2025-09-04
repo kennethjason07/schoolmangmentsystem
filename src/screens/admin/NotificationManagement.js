@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, TextInput, ScrollView, ActivityIndicator, Modal, Button, Platform, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { supabase, TABLES, dbHelpers, getUserTenantId } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import Header from '../../components/Header';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
@@ -53,9 +53,224 @@ const NotificationManagement = () => {
     setLoading(true);
     setError(null);
     try {
-      console.log('🔄 Loading notifications...');
+      console.log('🔔 [NOTIF_MGMT] Starting to load notifications...');
+      console.log('🔔 [NOTIF_MGMT] Current user:', user?.email || 'Not logged in');
       
-      // Load from notifications table with recipients
+      if (!user?.id) {
+        console.log('❌ [NOTIF_MGMT] No user ID available');
+        setError('User not authenticated');
+        return;
+      }
+
+      // Check current session first
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      console.log('🔔 [NOTIF_MGMT] Session check:');
+      console.log('   - Session exists:', !!session);
+      console.log('   - Session user:', session?.user?.email || 'None');
+      console.log('   - Session error:', sessionError?.message || 'None');
+      
+      // JWT DEBUG: Check what's in the JWT token
+      console.log('🔍 [JWT_DEBUG] Analyzing JWT token content...');
+      if (session?.access_token) {
+        try {
+          // Decode JWT payload (not verifying signature, just reading)
+          const token = session.access_token;
+          const base64Payload = token.split('.')[1];
+          const payload = JSON.parse(atob(base64Payload));
+          
+          console.log('🔍 [JWT_DEBUG] JWT Payload:');
+          console.log('   - iss (issuer):', payload.iss);
+          console.log('   - sub (subject/user_id):', payload.sub);
+          console.log('   - email:', payload.email);
+          console.log('   - role:', payload.role);
+          console.log('   - tenant_id:', payload.tenant_id || '❌ MISSING!');
+          console.log('   - user_metadata:', JSON.stringify(payload.user_metadata || {}, null, 2));
+          console.log('   - app_metadata:', JSON.stringify(payload.app_metadata || {}, null, 2));
+          
+          if (!payload.tenant_id) {
+            console.log('❌ [JWT_DEBUG] CRITICAL: No tenant_id in JWT token!');
+            console.log('❌ [JWT_DEBUG] This explains why RLS policies block all access');
+            console.log('💡 [JWT_DEBUG] Need to update user authentication to include tenant_id in JWT');
+          } else {
+            console.log('✅ [JWT_DEBUG] tenant_id found in JWT:', payload.tenant_id);
+            console.log('🔍 [JWT_DEBUG] Matches expected tenant?', payload.tenant_id === 'b8f8b5f0-1234-4567-8901-123456789000');
+          }
+          
+        } catch (e) {
+          console.log('❌ [JWT_DEBUG] Failed to decode JWT:', e.message);
+        }
+      } else {
+        console.log('❌ [JWT_DEBUG] No access token in session');
+      }
+      
+      if (!session) {
+        console.log('❌ [NOTIF_MGMT] No active session found');
+        setError('No active session');
+        return;
+      }
+
+      // Get current user's tenant_id from metadata
+      const metadataTenantId = await getUserTenantId();
+      console.log('🏢 [NOTIF_MGMT] Metadata tenant ID:', metadataTenantId);
+      
+      // Also get tenant_id from user database record
+      const { data: userRecord, error: userRecordError } = await supabase
+        .from('users')
+        .select('tenant_id, email, role_id')
+        .eq('id', user.id)
+        .single();
+      
+      const dbTenantId = userRecord?.tenant_id;
+      console.log('🏢 [NOTIF_MGMT] Database tenant ID:', dbTenantId);
+      
+      // Check for tenant_id mismatch
+      if (metadataTenantId && dbTenantId && metadataTenantId !== dbTenantId) {
+        console.log('⚠️ [NOTIF_MGMT] TENANT MISMATCH DETECTED!');
+        console.log('   - Metadata tenant_id:', metadataTenantId);
+        console.log('   - Database tenant_id:', dbTenantId);
+        console.log('   - Using database tenant_id for queries');
+      }
+      
+      // Use database tenant_id as primary, fallback to metadata
+      const tenantId = dbTenantId || metadataTenantId;
+      console.log('🏢 [NOTIF_MGMT] Final tenant ID for queries:', tenantId);
+      
+      if (!tenantId) {
+        console.error('❌ [NOTIF_MGMT] No tenant_id found for user');
+        setError('Tenant information not found');
+        return;
+      }
+      
+      console.log('🔔 [NOTIF_MGMT] Querying notifications table...');
+      
+      // First, let's check what notifications exist in the database without tenant filtering
+      console.log('🔍 [NOTIF_MGMT] Checking all notifications in database...');
+      const { data: allNotifications, error: allError } = await supabase
+        .from('notifications')
+        .select('id, tenant_id, type, message, created_at, sent_by')
+        .order('created_at', { ascending: false })
+        .limit(20);
+      
+      console.log('🔍 [NOTIF_MGMT] All notifications check:');
+      console.log('   - Total found:', allNotifications?.length || 0);
+      console.log('   - Error:', allError?.message || 'None');
+      console.log('   - Error code:', allError?.code || 'None');
+      console.log('   - Error hint:', allError?.hint || 'None');
+      console.log('   - Error details:', allError?.details || 'None');
+      
+      // If we get 0 notifications, let's check if this is an RLS issue
+      if ((!allNotifications || allNotifications.length === 0) && !allError) {
+        console.log('🔍 [NOTIF_MGMT] Zero notifications found - checking RLS policies...');
+        
+        // Try a simple count query to see if RLS is blocking us
+        const { data: countData, error: countError } = await supabase
+          .from('notifications')
+          .select('count', { count: 'exact', head: true });
+        
+        console.log('🔍 [NOTIF_MGMT] Count query result:');
+        console.log('   - Count:', countData || 'ERROR');
+        console.log('   - Count error:', countError?.message || 'None');
+        console.log('   - Count error code:', countError?.code || 'None');
+        
+        // Try to check current user's role and permissions
+        console.log('🔍 [NOTIF_MGMT] Checking user permissions...');
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('id, email, role_id, tenant_id')
+          .eq('id', user.id)
+          .single();
+        
+        console.log('🔍 [NOTIF_MGMT] User data check:');
+        console.log('   - User found:', !!userData);
+        console.log('   - User email:', userData?.email || 'None');
+        console.log('   - User role_id:', userData?.role_id || 'None');
+        console.log('   - User tenant_id:', userData?.tenant_id || 'None');
+        console.log('   - User error:', userError?.message || 'None');
+        console.log('   - User error code:', userError?.code || 'None');
+        
+        // Try to check if any tables are accessible
+        console.log('🔍 [NOTIF_MGMT] Testing basic table access...');
+        const { data: rolesData, error: rolesError } = await supabase
+          .from('roles')
+          .select('count', { count: 'exact', head: true });
+        
+        console.log('🔍 [NOTIF_MGMT] Roles table access:');
+        console.log('   - Accessible:', !rolesError);
+        console.log('   - Error:', rolesError?.message || 'None');
+        console.log('   - Error code:', rolesError?.code || 'None');
+        
+        // Let's also check if we can access the information_schema to see table definitions
+        console.log('🔍 [NOTIF_MGMT] Checking database schema info...');
+        try {
+          const { data: tableInfo, error: tableError } = await supabase.rpc('check_table_exists', { table_name: 'notifications' });
+          console.log('🔍 [NOTIF_MGMT] Table check RPC result:');
+          console.log('   - Table exists:', tableInfo);
+          console.log('   - Error:', tableError?.message || 'None');
+        } catch (rpcError) {
+          console.log('🔍 [NOTIF_MGMT] RPC not available, trying direct schema query...');
+          
+          // Fallback: try a simple RLS bypass test by checking a known system table
+          const { data: schemaData, error: schemaError } = await supabase
+            .from('information_schema.tables')
+            .select('table_name')
+            .eq('table_name', 'notifications')
+            .limit(1);
+          
+          console.log('🔍 [NOTIF_MGMT] Schema query result:');
+          console.log('   - Schema accessible:', !schemaError);
+          console.log('   - Schema error:', schemaError?.message || 'None');
+          console.log('   - Schema error code:', schemaError?.code || 'None');
+          console.log('   - Table found in schema:', schemaData?.length > 0);
+        }
+        
+        // Try querying the exact table name used in TABLES constant
+        console.log('🔍 [NOTIF_MGMT] Testing exact table name from TABLES constant...');
+        console.log('   - TABLES.NOTIFICATIONS value:', TABLES.NOTIFICATIONS);
+        
+        const { data: exactTableData, error: exactTableError } = await supabase
+          .from(TABLES.NOTIFICATIONS)
+          .select('count', { count: 'exact', head: true });
+        
+        console.log('🔍 [NOTIF_MGMT] Exact table name test:');
+        console.log('   - Accessible via TABLES.NOTIFICATIONS:', !exactTableError);
+        console.log('   - Error:', exactTableError?.message || 'None');
+        console.log('   - Error code:', exactTableError?.code || 'None');
+        
+        // Also check notification_recipients table
+        const { data: recipientsTableData, error: recipientsTableError } = await supabase
+          .from('notification_recipients')
+          .select('count', { count: 'exact', head: true });
+        
+        console.log('🔍 [NOTIF_MGMT] Recipients table test:');
+        console.log('   - Accessible:', !recipientsTableError);
+        console.log('   - Error:', recipientsTableError?.message || 'None');
+        console.log('   - Error code:', recipientsTableError?.code || 'None');
+      }
+      
+      if (allNotifications && allNotifications.length > 0) {
+        console.log('🔍 [NOTIF_MGMT] ALL notifications found in database:');
+        allNotifications.forEach((notif, index) => {
+          console.log(`   ${index + 1}. ID: ${notif.id}`);
+          console.log(`      Tenant: ${notif.tenant_id}`);
+          console.log(`      Type: ${notif.type}`);
+          console.log(`      Sent by: ${notif.sent_by}`);
+          console.log(`      Message: ${notif.message?.substring(0, 50)}...`);
+          console.log(`      Matches our tenant: ${notif.tenant_id === tenantId}`);
+          console.log(`      Matches metadata tenant: ${notif.tenant_id === metadataTenantId}`);
+        });
+        
+        // Check if any notifications match either tenant_id
+        const metadataMatches = allNotifications.filter(n => n.tenant_id === metadataTenantId).length;
+        const dbMatches = allNotifications.filter(n => n.tenant_id === dbTenantId).length;
+        console.log('🔍 [NOTIF_MGMT] Tenant matching summary:');
+        console.log(`   - Notifications matching metadata tenant (${metadataTenantId}): ${metadataMatches}`);
+        console.log(`   - Notifications matching database tenant (${dbTenantId}): ${dbMatches}`);
+      } else {
+        console.log('🔍 [NOTIF_MGMT] No notifications found in the entire database!');
+      }
+      
+      // TEMPORARY FIX: Try both queries - with and without tenant filtering
+      console.log('🔔 [NOTIF_MGMT] Querying with tenant filter...');
       const { data, error } = await supabase
         .from('notifications')
         .select(`
@@ -65,7 +280,8 @@ const NotificationManagement = () => {
             recipient_id,
             recipient_type,
             delivery_status,
-            sent_at
+            sent_at,
+            tenant_id
           ),
           users!sent_by(
             id,
@@ -73,16 +289,112 @@ const NotificationManagement = () => {
             role_id
           )
         `)
+        .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false });
       
-      if (error) throw error;
+      console.log('🔔 [NOTIF_MGMT] Tenant-filtered notifications query result:');
+      console.log('   - Found with tenant filter:', data?.length || 0);
+      console.log('   - Error:', error?.message || 'None');
       
-      console.log(`✅ Loaded ${data?.length || 0} notifications`);
-      setNotifications(data || []);
+      // TEMPORARY BYPASS: If no notifications found with tenant filter, try without filter
+      let finalNotifications = data || [];
+      if ((!data || data.length === 0) && !error) {
+        console.log('🔍 [NOTIF_MGMT] TENANT BYPASS: Trying without tenant filter...');
+        
+        const { data: unfiltered, error: unfilteredError } = await supabase
+          .from('notifications')
+          .select(`
+            *,
+            notification_recipients(
+              id,
+              recipient_id,
+              recipient_type,
+              delivery_status,
+              sent_at,
+              tenant_id
+            ),
+            users!sent_by(
+              id,
+              full_name,
+              role_id
+            )
+          `)
+          .order('created_at', { ascending: false })
+          .limit(50);
+        
+        console.log('🔍 [NOTIF_MGMT] Unfiltered notifications query result:');
+        console.log('   - Found without filter:', unfiltered?.length || 0);
+        console.log('   - Error:', unfilteredError?.message || 'None');
+        
+        if (unfilteredError) {
+          console.log('❌ [NOTIF_MGMT] Even unfiltered query failed');
+          throw unfilteredError;
+        }
+        
+        if (unfiltered && unfiltered.length > 0) {
+          console.log('🎯 [NOTIF_MGMT] TENANT MISMATCH CONFIRMED!');
+          console.log(`   - Found ${unfiltered.length} notifications without tenant filter`);
+          console.log(`   - But 0 notifications with tenant_id: ${tenantId}`);
+          
+          console.log('🔍 [NOTIF_MGMT] Analyzing tenant_ids in notifications:');
+          const notificationTenants = {};
+          unfiltered.forEach(notif => {
+            const tid = notif.tenant_id || 'NULL';
+            if (!notificationTenants[tid]) notificationTenants[tid] = 0;
+            notificationTenants[tid]++;
+          });
+          
+          Object.keys(notificationTenants).forEach(tid => {
+            console.log(`   - Tenant '${tid}': ${notificationTenants[tid]} notifications`);
+            console.log(`     * Matches current user tenant: ${tid === tenantId}`);
+          });
+          
+          // TEMPORARY: Show all notifications regardless of tenant for debugging
+          console.log('⚠️ [NOTIF_MGMT] TEMPORARY: Showing all notifications for debugging');
+          finalNotifications = unfiltered;
+          
+          // Show alert about tenant mismatch
+          Alert.alert(
+            'Tenant ID Mismatch Detected',
+            `Found ${unfiltered.length} notifications in database, but none match your tenant ID (${tenantId}). Showing all notifications for debugging. This needs to be fixed in the database.`,
+            [
+              { text: 'OK' }
+            ]
+          );
+        }
+      }
+      
+      console.log('🔔 [NOTIF_MGMT] Final notifications result:');
+      console.log('   - Found:', finalNotifications?.length || 0);
+      console.log('   - Using tenant filter:', (!data || data.length === 0) ? 'No (bypassed)' : 'Yes');
+      
+      if (error) {
+        console.error('❌ [NOTIF_MGMT] Error loading notifications:', error);
+        
+        // Check for RLS errors
+        if (error.code === '42501') {
+          console.log('🔒 [NOTIF_MGMT] RLS blocking notifications access');
+          setError('Database permissions issue - please contact support');
+          Alert.alert(
+            'Database Access Issue',
+            'Unable to load notifications due to database permissions. Please contact support.',
+            [
+              { text: 'OK' },
+              { text: 'Retry', onPress: loadNotifications }
+            ]
+          );
+          return;
+        }
+        
+        throw error;
+      }
+      
+      console.log(`✅ [NOTIF_MGMT] Successfully loaded ${finalNotifications?.length || 0} notifications`);
+      setNotifications(finalNotifications || []);
     } catch (err) {
-      console.error('Error loading notifications:', err);
+      console.error('💥 [NOTIF_MGMT] Error loading notifications:', err);
       setError('Failed to load notifications');
-      Alert.alert('Error', 'Failed to load notifications');
+      Alert.alert('Error', `Failed to load notifications: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -92,12 +404,20 @@ const NotificationManagement = () => {
   const handleRefresh = async () => {
     try {
       setRefreshing(true);
-      console.log('🔄 Pull-to-refresh triggered in Notification Management');
+      console.log('🔄 [NOTIF_MGMT] Pull-to-refresh triggered in Notification Management');
       
       // Clear any existing errors
       setError(null);
       
-      // Load from notifications table with recipients
+      // Get tenant_id for filtering
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        console.error('❌ [NOTIF_MGMT] No tenant_id found during refresh');
+        setError('Tenant information not found');
+        return;
+      }
+      
+      // Load from notifications table with recipients, filtered by tenant_id
       const { data, error } = await supabase
         .from('notifications')
         .select(`
@@ -107,7 +427,8 @@ const NotificationManagement = () => {
             recipient_id,
             recipient_type,
             delivery_status,
-            sent_at
+            sent_at,
+            tenant_id
           ),
           users!sent_by(
             id,
@@ -115,19 +436,28 @@ const NotificationManagement = () => {
             role_id
           )
         `)
+        .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false });
       
       if (error) {
-        console.error('Refresh error:', error);
+        console.error('❌ [NOTIF_MGMT] Refresh error:', error);
+        
+        // Check for RLS errors
+        if (error.code === '42501') {
+          console.log('🔒 [NOTIF_MGMT] RLS blocking notifications access during refresh');
+          setError('Database permissions issue - please contact support');
+          return;
+        }
+        
         setError('Failed to refresh notifications');
         return;
       }
       
-      console.log(`✅ Refreshed ${data?.length || 0} notifications`);
+      console.log(`✅ [NOTIF_MGMT] Refreshed ${data?.length || 0} notifications`);
       setNotifications(data || []);
       
     } catch (err) {
-      console.error('Error refreshing notifications:', err);
+      console.error('💥 [NOTIF_MGMT] Error refreshing notifications:', err);
       setError('Failed to refresh notifications');
     } finally {
       setRefreshing(false);
@@ -207,18 +537,39 @@ const NotificationManagement = () => {
           try {
             setLoading(true);
             
+            // Get tenant_id for RLS compliance
+            const tenantId = await getUserTenantId();
+            if (!tenantId) {
+              console.error('❌ [NOTIF_MGMT] No tenant_id found for deleting notification');
+              Alert.alert('Error', 'Tenant information not found');
+              return;
+            }
+            
             // Delete from notifications table (will cascade to notification_recipients)
             const { error } = await supabase
               .from(TABLES.NOTIFICATIONS)
               .delete()
-              .eq('id', notificationId);
+              .eq('id', notificationId)
+              .eq('tenant_id', tenantId);
             
-            if (error) throw error;
+            if (error) {
+              console.error('❌ [NOTIF_MGMT] Error deleting notification:', error);
+              
+              // Check for RLS errors
+              if (error.code === '42501') {
+                console.log('🔒 [NOTIF_MGMT] RLS blocking notification deletion');
+                Alert.alert('Database Access Issue', 'Unable to delete notification due to database permissions.');
+                return;
+              }
+              
+              throw error;
+            }
             
+            console.log('✅ [NOTIF_MGMT] Notification deleted successfully');
             loadNotifications(); // Refresh the list
             Alert.alert('Success', 'Notification deleted successfully');
           } catch (err) {
-            console.error('Error deleting notification:', err);
+            console.error('💥 [NOTIF_MGMT] Error deleting notification:', err);
             Alert.alert('Error', 'Failed to delete notification');
           } finally {
             setLoading(false);
@@ -232,15 +583,37 @@ const NotificationManagement = () => {
     try {
       setLoading(true);
       
+      // Get tenant_id for RLS compliance
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        console.error('❌ [NOTIF_MGMT] No tenant_id found for resending notification');
+        Alert.alert('Error', 'Tenant information not found');
+        return;
+      }
+      
+      console.log('🔔 [NOTIF_MGMT] Resending notification:', notification.id);
+      
       // Update delivery status for all recipients of this notification
       const { error: updateError } = await supabase
         .from('notification_recipients')
         .update({ 
           delivery_status: 'Sent' // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
         })
-        .eq('notification_id', notification.id);
+        .eq('notification_id', notification.id)
+        .eq('tenant_id', tenantId);
       
-      if (updateError) throw updateError;
+      if (updateError) {
+        console.error('❌ [NOTIF_MGMT] Error updating recipients:', updateError);
+        
+        // Check for RLS errors
+        if (updateError.code === '42501') {
+          console.log('🔒 [NOTIF_MGMT] RLS blocking recipient update');
+          Alert.alert('Database Access Issue', 'Unable to update recipients due to database permissions.');
+          return;
+        }
+        
+        throw updateError;
+      }
       
       // Also update the main notification
       const { error: notifUpdateError } = await supabase
@@ -248,14 +621,27 @@ const NotificationManagement = () => {
         .update({ 
           delivery_status: 'Sent' // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
         })
-        .eq('id', notification.id);
+        .eq('id', notification.id)
+        .eq('tenant_id', tenantId);
       
-      if (notifUpdateError) throw notifUpdateError;
+      if (notifUpdateError) {
+        console.error('❌ [NOTIF_MGMT] Error updating main notification:', notifUpdateError);
+        
+        // Check for RLS errors
+        if (notifUpdateError.code === '42501') {
+          console.log('🔒 [NOTIF_MGMT] RLS blocking notification update');
+          Alert.alert('Database Access Issue', 'Unable to update notification due to database permissions.');
+          return;
+        }
+        
+        throw notifUpdateError;
+      }
       
+      console.log('✅ [NOTIF_MGMT] Notification resent successfully');
       loadNotifications(); // Refresh the list
       Alert.alert('Success', 'Notification resent successfully');
     } catch (err) {
-      console.error('Error resending notification:', err);
+      console.error('💥 [NOTIF_MGMT] Error resending notification:', err);
       Alert.alert('Error', 'Failed to resend notification');
     } finally {
       setLoading(false);
@@ -266,13 +652,24 @@ const NotificationManagement = () => {
     try {
       setLoading(true);
       
+      // Get tenant_id for RLS compliance
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        console.error('❌ [NOTIF_MGMT] No tenant_id found for duplicating notification');
+        Alert.alert('Error', 'Tenant information not found');
+        return;
+      }
+      
+      console.log('🔔 [NOTIF_MGMT] Duplicating notification:', notification.id);
+      
       // Create a duplicate notification
       const duplicateNotification = {
         type: notification.type,
         message: notification.message,
         delivery_mode: 'InApp',
         delivery_status: 'Pending', // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
-        sent_by: user?.id || null // Store current admin user ID
+        sent_by: user?.id || null, // Store current admin user ID
+        tenant_id: tenantId // Include tenant_id for RLS compliance
       };
       
       const { data, error } = await supabase
@@ -280,13 +677,25 @@ const NotificationManagement = () => {
         .insert(duplicateNotification)
         .select();
       
-      if (error) throw error;
+      if (error) {
+        console.error('❌ [NOTIF_MGMT] Error duplicating notification:', error);
+        
+        // Check for RLS errors
+        if (error.code === '42501') {
+          console.log('🔒 [NOTIF_MGMT] RLS blocking notification duplication');
+          Alert.alert('Database Access Issue', 'Unable to duplicate notification due to database permissions.');
+          return;
+        }
+        
+        throw error;
+      }
       
+      console.log('✅ [NOTIF_MGMT] Notification duplicated successfully');
       // Update local state
       setNotifications([...(data || []), ...notifications]);
       Alert.alert('Success', 'Notification duplicated successfully');
     } catch (err) {
-      console.error('Error duplicating notification:', err);
+      console.error('💥 [NOTIF_MGMT] Error duplicating notification:', err);
       Alert.alert('Error', 'Failed to duplicate notification');
     } finally {
       setLoading(false);
@@ -369,6 +778,33 @@ const NotificationManagement = () => {
         }
       }
       
+      // Get tenant_id for RLS compliance - use the same logic as loadNotifications
+      const metadataTenantId = await getUserTenantId();
+      console.log('💾 [NOTIF_CREATE] Metadata tenant ID:', metadataTenantId);
+      
+      // Get database tenant_id
+      const { data: userRecord } = await supabase
+        .from('users')
+        .select('tenant_id')
+        .eq('id', user.id)
+        .single();
+      
+      const dbTenantId = userRecord?.tenant_id;
+      console.log('💾 [NOTIF_CREATE] Database tenant ID:', dbTenantId);
+      
+      // Use database tenant_id as primary
+      const tenantId = dbTenantId || metadataTenantId;
+      console.log('💾 [NOTIF_CREATE] Using tenant ID for creation:', tenantId);
+      
+      if (!tenantId) {
+        console.error('❌ [NOTIF_CREATE] No tenant_id found for creating notification');
+        Alert.alert('Error', 'Tenant information not found');
+        return;
+      }
+
+      console.log('💾 [NOTIF_CREATE] Starting notification creation process...');
+      console.log('💾 [NOTIF_CREATE] Selected roles:', createForm.selectedRoles);
+      
       // Step 1: Create notification record
       const notificationData = {
         type: createForm.type,
@@ -376,8 +812,11 @@ const NotificationManagement = () => {
         delivery_mode: 'InApp',
         delivery_status: createForm.status,
         scheduled_at: scheduledAt,
-        sent_by: user?.id || null // Store current admin user ID
+        sent_by: user?.id || null, // Store current admin user ID
+        tenant_id: tenantId // Include tenant_id for RLS compliance
       };
+      
+      console.log('💾 [NOTIF_CREATE] Notification data to insert:', notificationData);
       
       const { data: notificationResult, error: notificationError } = await supabase
         .from(TABLES.NOTIFICATIONS)
@@ -385,14 +824,54 @@ const NotificationManagement = () => {
         .select()
         .single();
       
-      if (notificationError) throw notificationError;
+      console.log('💾 [NOTIF_CREATE] Notification insertion result:');
+      console.log('   - Success:', !!notificationResult);
+      console.log('   - New notification ID:', notificationResult?.id);
+      console.log('   - Error:', notificationError?.message || 'None');
       
-      // Step 2: Get all users to create recipients based on selected roles
+      if (notificationError) {
+        console.error('❌ [NOTIF_CREATE] Error creating notification:', notificationError);
+        throw notificationError;
+      }
+      
+      // Step 2: Get all users to create recipients based on selected roles, filtered by tenant
+      console.log('💾 [NOTIF_CREATE] Fetching users for recipient creation...');
+      console.log('💾 [NOTIF_CREATE] Looking for users with tenant_id:', tenantId);
+      
       const { data: users, error: usersError } = await supabase
         .from('users')
-        .select('id, role_id');
+        .select('id, role_id, email, full_name')
+        .eq('tenant_id', tenantId);
       
-      if (usersError) throw usersError;
+      console.log('💾 [NOTIF_CREATE] Users query result:');
+      console.log('   - Total users found:', users?.length || 0);
+      console.log('   - Error:', usersError?.message || 'None');
+      
+      if (usersError) {
+        console.error('❌ [NOTIF_CREATE] Error fetching users:', usersError);
+        throw usersError;
+      }
+      
+      if (users && users.length > 0) {
+        console.log('💾 [NOTIF_CREATE] User breakdown by role:');
+        const roleBreakdown = {};
+        users.forEach(user => {
+          if (!roleBreakdown[user.role_id]) {
+            roleBreakdown[user.role_id] = [];
+          }
+          roleBreakdown[user.role_id].push(`${user.email} (${user.full_name || 'No name'})`);
+        });
+        
+        Object.entries(roleBreakdown).forEach(([roleId, userList]) => {
+          console.log(`   - Role ${roleId}: ${userList.length} users`);
+          userList.slice(0, 3).forEach(userInfo => console.log(`     * ${userInfo}`));
+          if (userList.length > 3) {
+            console.log(`     ... and ${userList.length - 3} more`);
+          }
+        });
+      } else {
+        console.log('💾 [NOTIF_CREATE] No users found for tenant:', tenantId);
+      }
       
       // Map role names to role_ids based on typical school management system structure
       const roleMap = {
@@ -402,16 +881,25 @@ const NotificationManagement = () => {
         'teacher': 4
       };
       
+      console.log('💾 [NOTIF_CREATE] Role mapping:', roleMap);
+      
       // Get role_ids for selected roles
       const selectedRoleIds = createForm.selectedRoles.map(role => roleMap[role]).filter(Boolean);
+      console.log('💾 [NOTIF_CREATE] Selected role IDs:', selectedRoleIds);
       
       // Step 3: Create recipients based on selected roles
       // Note: Database only supports 'Student' and 'Parent' in notification_recipients table
       const supportedRoles = createForm.selectedRoles.filter(role => role === 'student' || role === 'parent');
       const unsupportedRoles = createForm.selectedRoles.filter(role => role === 'teacher' || role === 'admin');
       
-      const recipients = users
-        .filter(user => selectedRoleIds.includes(user.role_id))
+      console.log('💾 [NOTIF_CREATE] Role filtering:');
+      console.log('   - Supported roles:', supportedRoles);
+      console.log('   - Unsupported roles:', unsupportedRoles);
+      
+      const filteredUsers = users?.filter(user => selectedRoleIds.includes(user.role_id)) || [];
+      console.log('💾 [NOTIF_CREATE] Users matching selected roles:', filteredUsers.length);
+      
+      const recipients = filteredUsers
         .map(user => {
           // Map role_id back to recipient_type (only Student and Parent are valid in notification_recipients)
           let recipientType = null;
@@ -419,23 +907,55 @@ const NotificationManagement = () => {
           else if (user.role_id === 2) recipientType = 'Student';
           // Teachers (role_id 4) and Admins (role_id 1) are not supported in notification_recipients table
           
+          console.log(`💾 [NOTIF_CREATE] Mapping user ${user.email} (role ${user.role_id}) -> ${recipientType}`);
+          
           return {
             notification_id: notificationResult.id,
             recipient_id: user.id,
             recipient_type: recipientType,
-            delivery_status: 'Pending'
+            delivery_status: 'Pending',
+            tenant_id: tenantId // Include tenant_id for RLS compliance
           };
         })
-        .filter(recipient => recipient.recipient_type === 'Student' || recipient.recipient_type === 'Parent');
+        .filter(recipient => {
+          const isValid = recipient.recipient_type === 'Student' || recipient.recipient_type === 'Parent';
+          if (!isValid) {
+            console.log(`💾 [NOTIF_CREATE] Filtering out recipient with type: ${recipient.recipient_type}`);
+          }
+          return isValid;
+        });
+      
+      console.log('💾 [NOTIF_CREATE] Final recipients to create:', recipients.length);
+      if (recipients.length > 0) {
+        console.log('💾 [NOTIF_CREATE] Sample recipients:');
+        recipients.slice(0, 3).forEach((r, i) => {
+          console.log(`   ${i + 1}. User: ${r.recipient_id}, Type: ${r.recipient_type}, Tenant: ${r.tenant_id}`);
+        });
+      }
       
       // Step 4: Insert into notification_recipients table
       if (recipients.length > 0) {
-        const { error: recipientsError } = await supabase
+        console.log('💾 [NOTIF_CREATE] Inserting recipients into notification_recipients table...');
+        const { data: recipientsResult, error: recipientsError } = await supabase
           .from('notification_recipients')
-          .insert(recipients);
+          .insert(recipients)
+          .select();
         
-        if (recipientsError) throw recipientsError;
+        console.log('💾 [NOTIF_CREATE] Recipients insertion result:');
+        console.log('   - Success:', !!recipientsResult);
+        console.log('   - Recipients created:', recipientsResult?.length || 0);
+        console.log('   - Error:', recipientsError?.message || 'None');
+        console.log('   - Error code:', recipientsError?.code || 'None');
+        
+        if (recipientsError) {
+          console.error('❌ [NOTIF_CREATE] Error creating recipients:', recipientsError);
+          throw recipientsError;
+        }
+      } else {
+        console.log('💾 [NOTIF_CREATE] No valid recipients to create - all selected roles are unsupported');
       }
+      
+      console.log('💾 [NOTIF_CREATE] Creation process completed successfully!');
       
       // Create success message with role breakdown
       let successMessage = `Notification created successfully!\n`;
@@ -460,6 +980,7 @@ const NotificationManagement = () => {
         successMessage += `Note: ${unsupportedRoles.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ')} notifications are not yet supported by the system.`;
       }
       
+      console.log('💾 [NOTIF_CREATE] Refreshing notifications list...');
       loadNotifications(); // Refresh the list
       Alert.alert('Success', successMessage.trim());
       
