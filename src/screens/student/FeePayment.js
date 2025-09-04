@@ -23,6 +23,7 @@ import * as Print from 'expo-print';
 import { supabase, TABLES, dbHelpers, isValidUUID } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import { getSchoolLogoBase64, getLogoHTML, getReceiptHeaderCSS } from '../../utils/logoUtils';
+import { calculateStudentFees } from '../../utils/feeCalculation';
 
 const { width } = Dimensions.get('window');
 
@@ -70,148 +71,34 @@ const FeePayment = () => {
         }
 
         setStudentData(studentDetails);
-
-        // Debug student details first
         console.log('Student FeePayment - Student details:', studentDetails);
 
-        let classFees = null;
-        let feesError = null;
+        // Use the centralized fee calculation utility
+        console.log('Student FeePayment - Calculating fees using utility...');
+        const feeSummary = await calculateStudentFees(user.linked_student_id, studentDetails.class_id);
+        console.log('Student FeePayment - Fee summary calculated:', feeSummary);
 
-        // Only fetch data if we have valid student details
-        if (studentDetails && isValidUUID(studentDetails.id) && isValidUUID(studentDetails.class_id)) {
-          console.log('Student FeePayment - Fetching fee structure for student:', studentDetails.id, 'class:', studentDetails.class_id);
-
-          // Get fee structure for a class using easy.txt recommendation
-          const feeResult = await supabase
-            .from('fee_structure')
-            .select(`
-              *,
-              classes(id, class_name, section, academic_year)
-            `)
-            .or(`class_id.eq.${studentDetails.class_id},student_id.eq.${studentDetails.id}`)
-            .order('due_date', { ascending: true });
-
-          classFees = feeResult.data;
-          feesError = feeResult.error;
-
-          if (feesError) {
-            console.log('Student FeePayment - Database error fetching fee structure:', feesError);
-          } else {
-            console.log('Student FeePayment - Loaded', classFees?.length || 0, 'fee structure records from database');
-          }
-        } else {
-          console.log('Student FeePayment - Invalid student details, will use sample data');
-          console.log('Student FeePayment - Student ID valid:', isValidUUID(studentDetails?.id));
-          console.log('Student FeePayment - Class ID valid:', isValidUUID(studentDetails?.class_id));
-        }
-
-        if (feesError && feesError.code !== '42P01') {
-          console.log('Fee structure error:', feesError);
-        }
-
-        // Debug fee structure data
-        console.log('Student FeePayment - Raw fee structure data:');
-        console.log('- Student ID:', studentDetails?.id);
-        console.log('- Class ID:', studentDetails?.class_id);
-        console.log('- Fee structures found:', classFees?.length || 0);
-        console.log('- Fee structure details:', classFees);
-
-        // Get payment history using proper schema: student_fees table
-        let studentPayments = null;
-        let paymentsError = null;
-
-        if (studentDetails && isValidUUID(studentDetails.id)) {
-          console.log('Student FeePayment - Fetching payment history for student:', studentDetails.id);
-
-          // Get student fees without problematic join - we'll get fee structure separately
-          const paymentResult = await supabase
-            .from('student_fees')
-            .select(`
-              *,
-              students(name, admission_no)
-            `)
-            .eq('student_id', studentDetails.id)
-            .order('payment_date', { ascending: false });
-
-          studentPayments = paymentResult.data;
-          paymentsError = paymentResult.error;
-
-          if (paymentsError) {
-            console.log('Student FeePayment - Database error fetching payments:', paymentsError);
-          } else {
-            console.log('Student FeePayment - Loaded', studentPayments?.length || 0, 'payment records from database');
-          }
-        } else {
-          console.log('Student FeePayment - Invalid student ID for payment history:', studentDetails?.id);
-        }
-
-        if (paymentsError && paymentsError.code !== '42P01') {
-          console.log('Student payments error:', paymentsError);
-        }
-
-        // Debug payment data
-        console.log('Student FeePayment - Raw payment data:');
-        console.log('- Payments found:', studentPayments?.length || 0);
-        console.log('- Payment details:', studentPayments);
-        
-        // If no fee structure found, show empty state instead of sample data
-        let feesToProcess = classFees || [];
-        if (!feesToProcess || feesToProcess.length === 0) {
-          console.log('Student FeePayment - No fee structure found, showing empty state');
-          feesToProcess = [];
-        }
-
-        // Transform payment history based on schema FIRST
-        let transformedPayments = [];
-
-        if (studentPayments && studentPayments.length > 0) {
-          transformedPayments = studentPayments.map(payment => {
-            return {
-              id: payment.id,
-              feeName: payment.fee_component || 'Fee Payment',
-              amount: Number(payment.amount_paid) || 0,
-              paymentDate: payment.payment_date || new Date().toISOString().split('T')[0],
-              paymentMethod: payment.payment_mode || 'Online',
-              transactionId: payment.id ? `TXN${payment.id.slice(-8).toUpperCase()}` : `TXN${Date.now()}`,
-              status: 'completed',
-              receiptUrl: null,
-              remarks: payment.remarks || '',
-              academicYear: payment.academic_year || '2024-2025',
-              createdAt: payment.created_at || new Date().toISOString()
-            };
+        if (!feeSummary || !feeSummary.details || feeSummary.details.length === 0) {
+          console.log('Student FeePayment - No fee data from utility, showing empty state');
+          setFeeStructure({
+            studentName: studentDetails.name,
+            class: studentDetails.classes?.class_name || 'N/A',
+            academicYear: '2024-2025',
+            totalDue: 0,
+            totalPaid: 0,
+            outstanding: 0,
+            fees: []
           });
-        } else {
-          // No payment history found - leave empty array
-          console.log('Student FeePayment - No payment history found in database');
-          transformedPayments = [];
+          setPaymentHistory([]);
+          return;
         }
 
-        // Transform fee structure data based on schema
-        const transformedFees = feesToProcess.map(fee => {
-          // Safely get fee component name
-          const feeComponent = fee.fee_component || fee.name || 'General Fee';
-          
-          // Find payments for this fee component using the transformed payments
-          const payments = transformedPayments?.filter(p =>
-            p.feeName === feeComponent &&
-            p.academicYear === (fee.academic_year || '2024-2025')
-          ) || [];
-
-          const totalPaidAmount = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-          const feeAmount = Number(fee.amount || 0);
-          const remainingAmount = feeAmount - totalPaidAmount;
-
-          let status = 'unpaid';
-          if (totalPaidAmount >= feeAmount) {
-            status = 'paid';
-          } else if (totalPaidAmount > 0) {
-            status = 'partial';
-          }
-
+        // Transform fee details from utility to match component expectations
+        const transformedFees = feeSummary.details.map(fee => {
           // Determine category based on fee component
           let category = 'general';
-          if (feeComponent) {
-            const component = feeComponent.toLowerCase();
+          if (fee.feeComponent) {
+            const component = fee.feeComponent.toLowerCase();
             if (component.includes('tuition') || component.includes('academic')) {
               category = 'tuition';
             } else if (component.includes('book') || component.includes('library')) {
@@ -227,48 +114,76 @@ const FeePayment = () => {
             }
           }
 
+          let status = 'unpaid';
+          if (fee.paidAmount >= fee.finalAmount) {
+            status = 'paid';
+          } else if (fee.paidAmount > 0) {
+            status = 'partial';
+          }
+
           return {
             id: fee.id || `fee-${Date.now()}-${Math.random()}`,
-            name: feeComponent,
-            amount: feeAmount,
-            dueDate: fee.due_date || new Date().toISOString().split('T')[0],
+            name: fee.feeComponent,
+            totalAmount: fee.finalAmount, // Full fee amount after discount
+            amount: fee.outstandingAmount, // Amount still pending (this is what should be displayed)
+            dueDate: fee.dueDate,
             status: status,
-            paidAmount: totalPaidAmount,
-            remainingAmount: remainingAmount,
-            description: `${feeComponent} for ${fee.academic_year || '2024-25'}`,
+            paidAmount: fee.paidAmount,
+            remainingAmount: fee.outstandingAmount,
+            description: `${fee.feeComponent} for ${fee.academicYear || '2024-25'}`,
             category: category,
-            academicYear: fee.academic_year || '2024-25',
-            isClassFee: fee.class_id ? true : false,
-            isIndividualFee: fee.student_id ? true : false,
-            payments: payments
+            academicYear: fee.academicYear,
+            isClassFee: fee.isClassFee,
+            isIndividualFee: fee.isIndividualFee,
+            payments: fee.payments || []
           };
         });
-        
-        // Calculate totals with debugging
-        const totalDue = transformedFees.reduce((sum, fee) => sum + fee.amount, 0);
-        const totalPaid = transformedFees.reduce((sum, fee) => sum + fee.paidAmount, 0);
-        const outstanding = totalDue - totalPaid;
 
-        // Debug logging
-        console.log('Student FeePayment - Fee calculation debug:');
-        console.log('- Transformed fees count:', transformedFees.length);
-        console.log('- Total due:', totalDue);
-        console.log('- Total paid:', totalPaid);
-        console.log('- Outstanding:', outstanding);
-        console.log('- Fee details:', transformedFees.map(f => ({ name: f.name, amount: f.amount, paid: f.paidAmount, status: f.status })));
+        // Create clean payment history (only unique, valid payments that were actually matched)
+        const allPayments = [];
+        const seenPaymentIds = new Set();
+        
+        feeSummary.details.forEach(fee => {
+          if (fee.payments && fee.payments.length > 0) {
+            fee.payments.forEach(payment => {
+              // Only add if we haven't seen this payment ID before
+              if (!seenPaymentIds.has(payment.id)) {
+                seenPaymentIds.add(payment.id);
+                allPayments.push({
+                  id: payment.id,
+                  feeName: fee.feeComponent,
+                  amount: payment.amount,
+                  paymentDate: payment.paymentDate,
+                  paymentMethod: payment.paymentMode || 'Online',
+                  transactionId: payment.receiptNumber ? `RCP${payment.receiptNumber}` : `TXN${payment.id.slice(-8).toUpperCase()}`,
+                  status: 'completed',
+                  receiptUrl: null,
+                  remarks: payment.remarks || '',
+                  academicYear: fee.academicYear,
+                  createdAt: payment.createdAt
+                });
+              }
+            });
+          }
+        });
+
+        // Sort payment history by date (most recent first)
+        allPayments.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
+        
+        console.log('Filtered payment history:', allPayments.length, 'unique payments');
 
         setFeeStructure({
           studentName: studentDetails.name,
           class: studentDetails.classes?.class_name || 'N/A',
-          academicYear: '2024-2025', // This could be fetched from settings
-          totalDue: totalDue,
-          totalPaid: totalPaid,
-          outstanding: outstanding,
+          academicYear: feeSummary.academicYear || '2024-2025',
+          totalDue: feeSummary.totalAmount,
+          totalPaid: feeSummary.totalPaid,
+          outstanding: feeSummary.totalOutstanding,
           fees: transformedFees
         });
         
-        console.log('Student FeePayment - Payment history loaded:', transformedPayments.length, 'payments');
-        setPaymentHistory(transformedPayments);
+        console.log('Student FeePayment - Payment history loaded:', allPayments.length, 'payments');
+        setPaymentHistory(allPayments);
       } catch (err) {
         console.error('Error fetching fee data:', err);
         setError(err.message);

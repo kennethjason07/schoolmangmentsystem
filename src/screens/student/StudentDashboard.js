@@ -2,13 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated, RefreshControl, Image, FlatList, Modal, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
-import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { supabase, TABLES, dbHelpers, getUserTenantId } from '../../utils/supabase';
 import { useFocusEffect } from '@react-navigation/native';
 import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
 import LogoDisplay from '../../components/LogoDisplay';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
+import { calculateStudentFees, getFeeStatusText, getFeeStatusColor } from '../../utils/feeCalculation';
+import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCount';
 
 const StudentDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -23,10 +25,14 @@ const StudentDashboard = ({ navigation }) => {
   const [attendance, setAttendance] = useState([]);
   const [marks, setMarks] = useState([]);
   const [fees, setFees] = useState([]);
+  const [feeSummary, setFeeSummary] = useState(null);
   const [todayClasses, setTodayClasses] = useState([]);
   const [recentActivities, setRecentActivities] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [showStudentDetailsModal, setShowStudentDetailsModal] = useState(false);
+
+  // Hook for notification count with auto-refresh
+  const { unreadCount: hookUnreadCount, refresh: refreshNotificationCount } = useUnreadNotificationCount('Student');
 
   // Utility function to format date from yyyy-mm-dd to dd-mm-yyyy
   const formatDateToDDMMYYYY = (dateString) => {
@@ -100,11 +106,19 @@ const StudentDashboard = ({ navigation }) => {
         return;
       }
 
+      // Get tenant_id for filtering
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        console.log('Student Dashboard - No tenant ID available');
+        return;
+      }
+
       // Get student data
       const { data: studentData, error: studentError } = await supabase
         .from(TABLES.STUDENTS)
         .select('id, class_id')
         .eq('id', user.linked_student_id)
+        .eq('tenant_id', tenantId)
         .single();
 
       if (studentError) {
@@ -119,6 +133,7 @@ const StudentDashboard = ({ navigation }) => {
         .from(TABLES.ASSIGNMENTS)
         .select('*')
         .eq('class_id', studentData.class_id)
+        .eq('tenant_id', tenantId)
         .order('due_date', { ascending: true });
 
       if (assignmentsError && assignmentsError.code !== '42P01') {
@@ -132,6 +147,7 @@ const StudentDashboard = ({ navigation }) => {
         .from(TABLES.HOMEWORKS)
         .select('*')
         .or(`class_id.eq.${studentData.class_id},assigned_students.cs.{${studentData.id}}`)
+        .eq('tenant_id', tenantId)
         .order('due_date', { ascending: true });
 
       if (homeworksError && homeworksError.code !== '42P01') {
@@ -144,7 +160,8 @@ const StudentDashboard = ({ navigation }) => {
       const { data: submissionsData, error: submissionsError } = await supabase
         .from('assignment_submissions')
         .select('*')
-        .eq('student_id', studentData.id);
+        .eq('student_id', studentData.id)
+        .eq('tenant_id', tenantId);
 
       if (submissionsError && submissionsError.code !== '42P01') {
         console.log('Dashboard - Submissions refresh error:', submissionsError);
@@ -180,31 +197,38 @@ const StudentDashboard = ({ navigation }) => {
         return;
       }
       
+      // Get tenant_id for filtering
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        console.log('Student Dashboard - No tenant ID available');
+        return;
+      }
+      
       console.log('Dashboard: Refreshing notifications for user:', user.id);
       
-      // Fetch all notifications from admins (all notification types)
-      // Fetch all notifications regardless of delivery_status
+      // Fetch notifications with recipient info using the working query pattern from StudentNotifications
       const { data: notificationsData, error: notifError } = await supabase
-        .from('notifications')
+        .from('notification_recipients')
         .select(`
           id,
-          message,
-          type,
-          created_at,
-          sent_by,
-          delivery_status,
-          delivery_mode,
-          users!sent_by(
+          is_read,
+          read_at,
+          notifications!inner (
             id,
-            role_id,
-            full_name
+            message,
+            type,
+            created_at,
+            sent_by,
+            delivery_status,
+            delivery_mode
           )
         `)
+        .eq('recipient_id', user.id)
         .eq('recipient_type', 'Student')
-        .eq('recipient_id', studentId)
-        .order('sent_at', { ascending: false })
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false, foreignTable: 'notifications' })
         .limit(10);
-
+      
       if (notifError && notifError.code !== '42P01') {
         console.log('Dashboard - Notifications fetch error:', notifError);
         setNotifications([]);
@@ -219,7 +243,7 @@ const StudentDashboard = ({ navigation }) => {
 
       // Update delivery status to 'Sent' for any InApp notifications that are still 'Pending'
       const pendingNotifications = notificationsData.filter(n => 
-        n.delivery_status === 'Pending' && n.delivery_mode === 'InApp'
+        n.notifications.delivery_status === 'Pending' && n.notifications.delivery_mode === 'InApp'
       );
       
       if (pendingNotifications.length > 0) {
@@ -231,7 +255,7 @@ const StudentDashboard = ({ navigation }) => {
             delivery_status: 'Sent',
             sent_at: new Date().toISOString()
           })
-          .in('id', pendingNotifications.map(n => n.id))
+          .in('id', pendingNotifications.map(n => n.notifications.id))
           .eq('delivery_mode', 'InApp');
         
         if (updateError) {
@@ -240,9 +264,9 @@ const StudentDashboard = ({ navigation }) => {
           console.log('Dashboard - Successfully updated notification delivery status');
           // Update the local data to reflect the change
           notificationsData.forEach(n => {
-            if (pendingNotifications.some(p => p.id === n.id)) {
-              n.delivery_status = 'Sent';
-              n.sent_at = new Date().toISOString();
+            if (pendingNotifications.some(p => p.notifications.id === n.notifications.id)) {
+              n.notifications.delivery_status = 'Sent';
+              n.notifications.sent_at = new Date().toISOString();
             }
           });
         }
@@ -250,7 +274,7 @@ const StudentDashboard = ({ navigation }) => {
 
       // Filter out leave notifications (same logic as StudentNotifications screen)
       const filteredNotifications = notificationsData.filter(notification => {
-        const message = notification.message.toLowerCase();
+        const message = notification.notifications.message.toLowerCase();
         const isLeaveNotification = message.includes('leave') || 
                                    message.includes('absent') || 
                                    message.includes('vacation') || 
@@ -259,64 +283,18 @@ const StudentDashboard = ({ navigation }) => {
         return !isLeaveNotification;
       });
 
-      // Get read status for these notifications from notification_recipients table
-      const notificationIds = filteredNotifications.map(n => n.id);
-      let readStatusData = [];
-      
-      if (notificationIds.length > 0) {
-        const { data: readData } = await supabase
-          .from('notification_recipients')
-          .select('notification_id, is_read, id')
-          .eq('recipient_id', user.id)
-          .eq('recipient_type', 'Student')
-          .in('notification_id', notificationIds);
-        
-        readStatusData = readData || [];
-        
-        // Create recipient records for notifications that don't have them yet
-        const missingRecords = filteredNotifications.filter(notification => 
-          !readStatusData.some(record => record.notification_id === notification.id)
-        );
-        
-        if (missingRecords.length > 0) {
-          console.log(`Dashboard - Creating recipient records for ${missingRecords.length} notifications`);
-          
-          const newRecords = missingRecords.map(notification => ({
-            notification_id: notification.id,
-            recipient_id: user.id,
-            recipient_type: 'Student',
-            is_read: false,
-            delivery_status: 'Sent' // Mark as sent since we're showing it to the student
-          }));
-          
-          const { data: insertedRecords, error: insertError } = await supabase
-            .from('notification_recipients')
-            .insert(newRecords)
-            .select('notification_id, is_read, id');
-          
-          if (insertError) {
-            console.error('Dashboard - Error creating recipient records:', insertError);
-          } else {
-            console.log(`Dashboard - Created ${insertedRecords?.length || 0} new recipient records`);
-            // Add the new records to our read status data
-            readStatusData = [...readStatusData, ...(insertedRecords || [])];
-          }
-        }
-      }
-
       // Transform notifications for dashboard display
       const transformedNotifications = filteredNotifications.map(notification => {
-        const readRecord = readStatusData.find(r => r.notification_id === notification.id);
-        
+        const notif = notification.notifications;
         return {
-          id: notification.id,
-          title: notification.message.substring(0, 50) + (notification.message.length > 50 ? '...' : ''),
-          message: notification.message,
-          type: notification.type || 'General',
-          created_at: notification.created_at,
-          is_read: readRecord?.is_read || false,
-          read_at: readRecord?.read_at,
-          sender: notification.users
+          id: notif.id,
+          title: notif.message.substring(0, 50) + (notif.message.length > 50 ? '...' : ''),
+          message: notif.message,
+          type: notif.type || 'General',
+          created_at: notif.created_at,
+          is_read: notification.is_read || false,
+          read_at: notification.read_at,
+          sender: null // No sender info in this simplified approach
         };
       });
 
@@ -340,6 +318,30 @@ const StudentDashboard = ({ navigation }) => {
     }, [user])
   );
 
+  // Add broadcast listener for notification updates
+  useEffect(() => {
+    if (!user?.id) return;
+    
+    // Listen for notification update broadcasts
+    const notificationUpdateChannel = supabase
+      .channel('notification-update')
+      .on('broadcast', { event: 'notification-read' }, (payload) => {
+        console.log('📣 StudentDashboard received notification update broadcast:', payload);
+        if (payload.payload.user_id === user.id) {
+          console.log('📣 Notification update is for current user, refreshing dashboard notifications');
+          // Refresh notifications when a notification is marked as read
+          setTimeout(() => {
+            refreshNotifications();
+          }, 300); // Small delay to ensure database is updated
+        }
+      })
+      .subscribe();
+    
+    return () => {
+      notificationUpdateChannel.unsubscribe();
+    };
+  }, [user?.id, refreshNotifications]);
+
   // Pull-to-refresh functionality
   const { refreshing, onRefresh } = usePullToRefresh(async () => {
     await fetchDashboardData();
@@ -350,6 +352,12 @@ const StudentDashboard = ({ navigation }) => {
     try {
       setLoading(true);
       setError(null);
+
+      // Get tenant_id for filtering
+      const tenantId = await getUserTenantId();
+      if (!tenantId) {
+        throw new Error('Tenant context required but not found');
+      }
 
       // Get school details
       const { data: schoolData } = await dbHelpers.getSchoolDetails();
@@ -364,6 +372,7 @@ const StudentDashboard = ({ navigation }) => {
           parents:parent_id(name, phone, email)
         `)
         .eq('id', user.linked_student_id)
+        .eq('tenant_id', tenantId)
         .single();
 
       // Also get the student's own user account for profile picture
@@ -371,6 +380,7 @@ const StudentDashboard = ({ navigation }) => {
         .from(TABLES.USERS)
         .select('id, email, phone, profile_url, full_name')
         .eq('linked_student_id', user.linked_student_id)
+        .eq('tenant_id', tenantId)
         .maybeSingle();
 
       if (studentError) {
@@ -399,6 +409,7 @@ const StudentDashboard = ({ navigation }) => {
           .from('events')
           .select('*')
           .eq('status', 'Active')
+          .eq('tenant_id', tenantId)
           .gte('event_date', today)
           .order('event_date', { ascending: true });
 
@@ -430,29 +441,38 @@ const StudentDashboard = ({ navigation }) => {
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
 
+        console.log(`Dashboard - Fetching attendance for ${year}-${month.toString().padStart(2, '0')}`);
+
         const { data: allAttendanceData, error: attendanceError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
         .select('*')
           .eq('student_id', studentData.id)
+          .eq('tenant_id', tenantId)
           .order('date', { ascending: false });
 
-      if (attendanceError) throw attendanceError;
+      if (attendanceError) {
+          console.log('Attendance fetch error:', attendanceError);
+          setAttendance([]);
+        } else {
+          // Filter for current month records
+          const currentMonthRecords = (allAttendanceData || []).filter(record => {
+            if (!record.date || typeof record.date !== 'string') return false;
+            
+            const dateParts = record.date.split('-');
+            if (dateParts.length < 3) return false;
+            
+            const recordYear = parseInt(dateParts[0], 10);
+            const recordMonth = parseInt(dateParts[1], 10);
+            
+            if (isNaN(recordYear) || isNaN(recordMonth)) return false;
+            
+            return recordYear === year && recordMonth === month;
+          });
 
-        const currentMonthRecords = (allAttendanceData || []).filter(record => {
-          if (!record.date || typeof record.date !== 'string') return false;
-          
-          const dateParts = record.date.split('-');
-          if (dateParts.length < 2) return false;
-          
-          const recordYear = parseInt(dateParts[0], 10);
-          const recordMonth = parseInt(dateParts[1], 10);
-          
-          if (isNaN(recordYear) || isNaN(recordMonth)) return false;
-          
-          return recordYear === year && recordMonth === month;
-        });
-
-        setAttendance(currentMonthRecords);
+          console.log(`Dashboard - Found ${currentMonthRecords.length} attendance records for current month`);
+          console.log('Sample attendance records:', currentMonthRecords.slice(0, 3));
+          setAttendance(currentMonthRecords);
+        }
       } catch (err) {
         console.log('Attendance fetch error:', err);
         setAttendance([]);
@@ -468,149 +488,61 @@ const StudentDashboard = ({ navigation }) => {
             exams(name, start_date)
           `)
           .eq('student_id', studentData.id)
+          .eq('tenant_id', tenantId)
           .order('created_at', { ascending: false })
           .limit(10);
 
         if (marksError && marksError.code !== '42P01') {
           console.log('Marks error:', marksError);
+          setMarks([]);
+        } else {
+          console.log(`Dashboard - Found ${marksData?.length || 0} marks records`);
+          console.log('Sample marks data:', marksData?.slice(0, 3));
+          
+          // Validate marks data
+          const validMarks = (marksData || []).filter(mark => {
+            const marksObtained = Number(mark.marks_obtained);
+            const maxMarks = Number(mark.max_marks);
+            const isValid = !isNaN(marksObtained) && !isNaN(maxMarks) && maxMarks > 0 && marksObtained >= 0;
+            
+            if (!isValid) {
+              console.log('Invalid mark record:', {
+                id: mark.id,
+                marks_obtained: mark.marks_obtained,
+                max_marks: mark.max_marks,
+                subject: mark.subjects?.name
+              });
+            }
+            
+            return isValid;
+          });
+          
+          console.log(`Dashboard - Valid marks: ${validMarks.length}/${marksData?.length || 0}`);
+          setMarks(validMarks);
         }
-        setMarks(marksData || []);
       } catch (err) {
         console.log('Marks fetch error:', err);
         setMarks([]);
       }
 
-      // Get fee information using the same logic as FeePayment screen
+      // Get fee information using corrected calculation utility
       try {
-        let feesSummary = {
-          totalDue: 0,
-          totalPaid: 0,
-          outstanding: 0,
-          pendingFees: []
-        };
-
-        // Get fee structure for this student's class
-        const { data: classFees, error: feesError } = await supabase
-          .from('fee_structure')
-          .select(`
-            *,
-            classes(id, class_name, section, academic_year)
-          `)
-          .or(`class_id.eq.${studentData.class_id},student_id.eq.${studentData.id}`)
-          .order('due_date', { ascending: true });
-
-        if (feesError && feesError.code !== '42P01') {
-          console.log('Dashboard - Fee structure error:', feesError);
-        }
-
-        // Get payment history for this student
-        const { data: studentPayments, error: paymentsError } = await supabase
-          .from('student_fees')
-          .select(`
-            *,
-            students(name, admission_no),
-            fee_structure(*)
-          `)
-          .eq('student_id', studentData.id)
-          .order('payment_date', { ascending: false });
-
-        if (paymentsError && paymentsError.code !== '42P01') {
-          console.log('Dashboard - Student payments error:', paymentsError);
-        }
-
-        // Transform payment data first
-        let transformedPayments = [];
-        if (studentPayments && studentPayments.length > 0) {
-          transformedPayments = studentPayments.map(payment => ({
-            id: payment.id,
-            feeName: payment.fee_component || 'Fee Payment',
-            amount: Number(payment.amount_paid) || 0,
-            paymentDate: payment.payment_date || new Date().toISOString().split('T')[0],
-            paymentMethod: payment.payment_mode || 'Online',
-            academicYear: payment.academic_year || '2024-2025'
-          }));
+        console.log('Dashboard - Using corrected fee calculation for student:', studentData.id, 'class:', studentData.class_id);
+        
+        const feeSummary = await calculateStudentFees(studentData.id, studentData.class_id);
+        
+        if (feeSummary) {
+          console.log('Dashboard - Fee calculation successful:', feeSummary);
+          setFeeSummary(feeSummary);
+          setFees(feeSummary.allFees || []);
         } else {
-          // Use sample data if no real payments found
-          transformedPayments = [
-            { feeName: 'Tuition Fee', amount: 25000, academicYear: '2024-2025' },
-            { feeName: 'Development Fee', amount: 5000, academicYear: '2024-2025' },
-            { feeName: 'Transport Fee', amount: 3000, academicYear: '2024-2025' }
-          ];
+          console.log('Dashboard - Fee calculation failed or returned null');
+          setFeeSummary(null);
+          setFees([]);
         }
-
-        // Process fee structure or use sample data
-        let feesToProcess = classFees || [];
-        if (!feesToProcess || feesToProcess.length === 0) {
-          feesToProcess = [
-            {
-              id: 'sample-1',
-              academic_year: '2024-2025',
-              class_id: studentData.class_id,
-              fee_component: 'Tuition Fee',
-              amount: 25000,
-              due_date: '2024-04-30'
-            },
-            {
-              id: 'sample-2',
-              academic_year: '2024-2025',
-              class_id: studentData.class_id,
-              fee_component: 'Development Fee',
-              amount: 5000,
-              due_date: '2024-04-30'
-            },
-            {
-              id: 'sample-3',
-              academic_year: '2024-2025',
-              class_id: studentData.class_id,
-              fee_component: 'Transport Fee',
-              amount: 8000,
-              due_date: '2024-05-31'
-            }
-          ];
-        }
-
-        // Calculate fee summary using the same logic as FeePayment
-        const processedFees = feesToProcess.map(fee => {
-          const feeComponent = fee.fee_component || fee.name || 'General Fee';
-          
-          // Find payments for this fee component
-          const payments = transformedPayments?.filter(p =>
-            p.feeName === feeComponent &&
-            p.academicYear === (fee.academic_year || '2024-2025')
-          ) || [];
-
-          const totalPaidAmount = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-          const feeAmount = Number(fee.amount || 0);
-          const remainingAmount = feeAmount - totalPaidAmount;
-
-          let status = 'pending';
-          if (totalPaidAmount >= feeAmount) {
-            status = 'paid';
-          } else if (totalPaidAmount > 0) {
-            status = 'partial';
-          }
-
-          return {
-            id: fee.id || `fee-${Date.now()}-${Math.random()}`,
-            name: feeComponent,
-            amount: feeAmount,
-            paidAmount: totalPaidAmount,
-            remainingAmount: remainingAmount,
-            status: status,
-            due_date: fee.due_date
-          };
-        });
-
-        // Calculate totals
-        feesSummary.totalDue = processedFees.reduce((sum, fee) => sum + fee.amount, 0);
-        feesSummary.totalPaid = processedFees.reduce((sum, fee) => sum + fee.paidAmount, 0);
-        feesSummary.outstanding = feesSummary.totalDue - feesSummary.totalPaid;
-        feesSummary.pendingFees = processedFees.filter(fee => fee.status === 'pending' || fee.status === 'partial');
-
-        console.log('Dashboard - Fee summary:', feesSummary);
-        setFees(processedFees);
       } catch (err) {
-        console.log('Dashboard - Fees fetch error:', err);
+        console.log('Dashboard - Fee calculation error:', err);
+        setFeeSummary(null);
         setFees([]);
       }
 
@@ -626,6 +558,7 @@ const StudentDashboard = ({ navigation }) => {
           `)
           .eq('class_id', studentData.class_id)
           .eq('day', today)
+          .eq('tenant_id', tenantId)
           .order('start_time', { ascending: true });
 
         if (timetableError && timetableError.code !== '42P01') {
@@ -664,6 +597,7 @@ const StudentDashboard = ({ navigation }) => {
           .from(TABLES.ASSIGNMENTS)
           .select('*')
           .eq('class_id', studentData.class_id)
+          .eq('tenant_id', tenantId)
           .order('due_date', { ascending: true });
 
         if (assignmentsError && assignmentsError.code !== '42P01') {
@@ -677,6 +611,7 @@ const StudentDashboard = ({ navigation }) => {
           .from(TABLES.HOMEWORKS)
           .select('*')
           .or(`class_id.eq.${studentData.class_id},assigned_students.cs.{${studentData.id}}`)
+          .eq('tenant_id', tenantId)
           .order('due_date', { ascending: true });
 
         if (homeworksError && homeworksError.code !== '42P01') {
@@ -689,7 +624,8 @@ const StudentDashboard = ({ navigation }) => {
         const { data: submissionsData, error: submissionsError } = await supabase
           .from('assignment_submissions')
           .select('*')
-          .eq('student_id', studentData.id);
+          .eq('student_id', studentData.id)
+          .eq('tenant_id', tenantId);
 
         if (submissionsError && submissionsError.code !== '42P01') {
           console.log('Dashboard - Submissions error:', submissionsError);
@@ -731,8 +667,15 @@ const StudentDashboard = ({ navigation }) => {
     }
   }, [user]);
 
-  // Calculate unread notifications count
-  const unreadCount = notifications.filter(notification => !notification.is_read).length;
+  // Use the hook's unread count instead of calculating from local state
+  const unreadCount = hookUnreadCount;
+  
+  // Debug unread count from hook
+  console.log('Dashboard - Using hook unread count:', {
+    hookUnreadCount: hookUnreadCount,
+    localNotificationsCount: notifications.length,
+    localUnreadCount: notifications.filter(notification => !notification.is_read).length
+  });
   
   // Calculate attendance percentage
   const totalRecords = attendance.length;
@@ -757,23 +700,48 @@ const StudentDashboard = ({ navigation }) => {
     },
   ];
 
-  // Get fee status using the corrected logic
+  // Get fee status using the corrected logic from feeSummary
   const getFeeStatus = () => {
-    if (fees.length === 0) return 'No fees';
-    const pendingFees = fees.filter(fee => fee.status === 'pending' || fee.status === 'partial');
-    if (pendingFees.length === 0) return 'All paid';
-    const totalOutstanding = pendingFees.reduce((sum, fee) => sum + (fee.remainingAmount || 0), 0);
-    return `₹${totalOutstanding.toLocaleString()}`;
+    if (!feeSummary || feeSummary.totalDue === 0) {
+      return 'No fees';
+    }
+    
+    return getFeeStatusText(feeSummary);
+  };
+
+  // Get fee status color for UI
+  const getFeeStatusColorForUI = () => {
+    return getFeeStatusColor(feeSummary);
   };
 
   // Get average marks
   const getAverageMarks = () => {
     if (marks.length === 0) return 'No marks';
-    const totalMarks = marks.reduce((sum, mark) => sum + (mark.marks_obtained || 0), 0);
-    const totalMaxMarks = marks.reduce((sum, mark) => sum + (mark.max_marks || 0), 0);
-    if (totalMaxMarks === 0) return 'No marks';
-    const percentage = Math.round((totalMarks / totalMaxMarks) * 100);
-    return `${percentage}%`;
+    
+    // Calculate average of individual percentages rather than total marks
+    const validMarks = marks.filter(mark => {
+      const marksObtained = Number(mark.marks_obtained);
+      const maxMarks = Number(mark.max_marks);
+      return !isNaN(marksObtained) && !isNaN(maxMarks) && maxMarks > 0 && marksObtained >= 0;
+    });
+    
+    if (validMarks.length === 0) return 'No valid marks';
+    
+    const percentages = validMarks.map(mark => {
+      const marksObtained = Number(mark.marks_obtained);
+      const maxMarks = Number(mark.max_marks);
+      return (marksObtained / maxMarks) * 100;
+    });
+    
+    const averagePercentage = percentages.reduce((sum, perc) => sum + perc, 0) / percentages.length;
+    
+    console.log('Dashboard - Average marks calculation:', {
+      totalMarks: validMarks.length,
+      percentages: percentages.slice(0, 3),
+      average: averagePercentage
+    });
+    
+    return `${Math.round(averagePercentage)}%`;
   };
 
   // Student stats for the dashboard
@@ -790,8 +758,8 @@ const StudentDashboard = ({ navigation }) => {
       title: 'Fee Status',
       value: getFeeStatus(),
       icon: 'card',
-      color: fees.filter(f => f.status === 'pending').length > 0 ? '#FF9800' : '#4CAF50',
-      subtitle: fees.filter(f => f.status === 'pending').length > 0 ? 'Pending fees' : 'All paid',
+      color: getFeeStatusColorForUI(),
+      subtitle: feeSummary && feeSummary.totalOutstanding > 0 ? 'Pending fees' : 'All paid',
       onPress: () => handleCardNavigation('fees')
     },
     {
@@ -821,6 +789,7 @@ const StudentDashboard = ({ navigation }) => {
           title="Student Dashboard"
           showBack={false}
           showNotifications={true}
+          unreadCount={unreadCount}
           onNotificationsPress={handleNotificationsPress}
         />
         <View style={styles.loadingContainer}>
@@ -834,7 +803,7 @@ const StudentDashboard = ({ navigation }) => {
   if (error) {
     return (
       <View style={styles.container}>
-        <Header title="Student Dashboard" showBack={false} showNotifications={true} />
+        <Header title="Student Dashboard" showBack={false} showNotifications={true} unreadCount={unreadCount} />
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle" size={48} color="#F44336" />
           <Text style={styles.errorText}>Failed to load dashboard</Text>
@@ -1095,30 +1064,37 @@ const StudentDashboard = ({ navigation }) => {
               </TouchableOpacity>
             </View>
             <View style={styles.marksContainer}>
-              {marks.slice(0, 3).map((mark, index) => (
-                <View key={index} style={styles.markCard}>
-                  <View style={styles.markHeader}>
-                    <Text style={styles.markSubject}>
-                      {mark.subjects?.name || 'Subject'}
-                    </Text>
-                    <View style={[
-                      styles.markGrade,
-                      { backgroundColor: (mark.marks_obtained / mark.max_marks) >= 0.9 ? '#4CAF50' :
-                                        (mark.marks_obtained / mark.max_marks) >= 0.75 ? '#FF9800' : '#F44336' }
-                    ]}>
-                      <Text style={styles.markGradeText}>
-                        {Math.round((mark.marks_obtained / mark.max_marks) * 100)}%
+              {marks.slice(0, 3).map((mark, index) => {
+                const marksObtained = Number(mark.marks_obtained) || 0;
+                const maxMarks = Number(mark.max_marks) || 1;
+                const percentage = maxMarks > 0 ? Math.round((marksObtained / maxMarks) * 100) : 0;
+                const ratio = maxMarks > 0 ? (marksObtained / maxMarks) : 0;
+                
+                return (
+                  <View key={index} style={styles.markCard}>
+                    <View style={styles.markHeader}>
+                      <Text style={styles.markSubject}>
+                        {mark.subjects?.name || 'Subject'}
                       </Text>
+                      <View style={[
+                        styles.markGrade,
+                        { backgroundColor: ratio >= 0.9 ? '#4CAF50' :
+                                          ratio >= 0.75 ? '#FF9800' : '#F44336' }
+                      ]}>
+                        <Text style={styles.markGradeText}>
+                          {percentage}%
+                        </Text>
+                      </View>
                     </View>
+                    <Text style={styles.markDetails}>
+                      {marksObtained}/{maxMarks} marks
+                    </Text>
+                    <Text style={styles.markExam}>
+                      {mark.exams?.name || 'Exam'} • {formatDateToDDMMYYYY(mark.exams?.start_date || mark.created_at)}
+                    </Text>
                   </View>
-                  <Text style={styles.markDetails}>
-                    {mark.marks_obtained}/{mark.max_marks} marks
-                  </Text>
-                  <Text style={styles.markExam}>
-                    {mark.exams?.name || 'Exam'} • {formatDateToDDMMYYYY(mark.exams?.start_date || mark.created_at)}
-                  </Text>
-                </View>
-              ))}
+                );
+              })}
             </View>
           </View>
         )}
@@ -1287,6 +1263,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    ...Platform.select({
+      ios: {
+        paddingTop: 0,
+      },
+      android: {
+        paddingTop: 0,
+      },
+    }),
   },
   scrollView: {
     flex: 1,
@@ -1299,6 +1283,11 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
+    paddingBottom: Platform.select({
+      ios: 34, // Extra padding for iOS home indicator
+      android: 20,
+      default: 20,
+    }),
   },
   loadingContainer: {
     flex: 1,
@@ -1329,6 +1318,17 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 25,
     borderRadius: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
   },
   retryButtonText: {
     color: '#fff',
@@ -1460,13 +1460,25 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 18,
     marginBottom: 8,
-    elevation: 3,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 3,
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+      },
+    }),
   },
   studentCardRow: {
     flexDirection: 'row',
@@ -1521,11 +1533,23 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     padding: 20,
     borderRadius: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+      },
+    }),
   },
   sectionTitleContainer: {
     flexDirection: 'row',
@@ -1704,11 +1728,17 @@ const styles = StyleSheet.create({
     width: '48%',
     backgroundColor: '#f8f9fa',
     borderRadius: 12,
-    padding: 12,
+    padding: 16, // Increased for better touch target
     marginBottom: 12,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#e9ecef',
+    minHeight: Platform.select({
+      ios: 100, // Minimum touch target for iOS
+      android: 90,
+      default: 90,
+    }),
+    justifyContent: 'center',
   },
   actionIcon: {
     width: 48,
@@ -1716,17 +1746,25 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 8, // Increased spacing
   },
   actionTitle: {
-    fontSize: 14,
+    fontSize: Platform.select({
+      ios: 15, // Slightly larger for iOS
+      android: 14,
+      default: 14,
+    }),
     fontWeight: '600',
     color: '#333',
     textAlign: 'center',
-    marginBottom: 2,
+    marginBottom: 3,
   },
   actionSubtitle: {
-    fontSize: 12,
+    fontSize: Platform.select({
+      ios: 13, // Slightly larger for iOS
+      android: 12,
+      default: 12,
+    }),
     color: '#666',
     textAlign: 'center',
   },

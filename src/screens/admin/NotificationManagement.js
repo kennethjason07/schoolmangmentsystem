@@ -7,13 +7,12 @@ import Header from '../../components/Header';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import { formatToLocalTime } from '../../utils/timeUtils';
 const roles = ['teacher', 'parent', 'student', 'admin'];
-const notificationTypes = ['General', 'Urgent', 'Fee Reminder', 'Event', 'Homework', 'Attendance', 'Absentee', 'Exam'];
+const notificationTypes = ['General', 'Urgent', 'Event', 'Homework', 'Attendance', 'Absentee', 'Exam'];
 
 // Color mapping for notification types
 const getNotificationTypeColor = (type) => {
   switch (type?.toLowerCase()) {
     case 'urgent': return '#F44336'; // Red
-    case 'fee reminder': return '#FF9800'; // Orange
     case 'event': return '#9C27B0'; // Purple
     case 'homework': return '#2196F3'; // Blue
     case 'attendance': return '#4CAF50'; // Green

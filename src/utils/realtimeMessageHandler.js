@@ -1,6 +1,7 @@
 /**
  * Enhanced real-time message handler for instant messaging
  * Provides optimistic UI updates combined with real-time synchronization
+ * Features robust polling fallback for instant WhatsApp-like messaging
  */
 
 export class RealtimeMessageHandler {
@@ -12,10 +13,27 @@ export class RealtimeMessageHandler {
     this.syncRetries = new Map(); // Track retry attempts
     this.maxRetries = 3;
     this.retryDelay = 1000; // 1 second
+    
+    // Enhanced connection monitoring and polling
+    this.isRealtimeConnected = false;
+    this.pollingInterval = null;
+    this.connectionCheckInterval = null;
+    this.lastMessageTimestamp = null;
+    this.currentUserId = null;
+    this.currentContactId = null;
+    this.messageUpdateCallback = null;
+    this.pollingFrequency = 2000; // Poll every 2 seconds when real-time fails
+    this.connectionCheckFrequency = 10000; // Check connection every 10 seconds
+    this.lastSeenMessageIds = new Set(); // Track seen messages to avoid duplicates
+    this.isPollingActive = false;
+    
+    // Bind methods to preserve context
+    this.pollForMessages = this.pollForMessages.bind(this);
+    this.checkRealtimeConnection = this.checkRealtimeConnection.bind(this);
   }
 
   /**
-   * Start real-time subscription for a specific chat
+   * Start real-time subscription for a specific chat with enhanced reliability
    * @param {string} userId - Current user ID
    * @param {string} contactUserId - Contact's user ID
    * @param {function} onMessageUpdate - Callback for message updates
@@ -24,9 +42,21 @@ export class RealtimeMessageHandler {
   startSubscription(userId, contactUserId, onMessageUpdate, onTypingUpdate = null) {
     this.stopSubscription(); // Clean up existing subscription
     
-    const channelName = `chat-${Math.min(userId, contactUserId)}-${Math.max(userId, contactUserId)}`;
+    // Store current chat context
+    this.currentUserId = userId;
+    this.currentContactId = contactUserId;
+    this.messageUpdateCallback = onMessageUpdate;
     
-    console.log('🚀 Starting real-time subscription for channel:', channelName);
+    // Ensure both IDs are valid strings before creating channel name
+    const safeUserId = String(userId || 'unknown');
+    const safeContactId = String(contactUserId || 'unknown');
+    
+    // Create a consistent channel name by sorting the IDs alphabetically
+    const sortedIds = [safeUserId, safeContactId].sort();
+    const channelName = `chat-${sortedIds[0]}-${sortedIds[1]}`;
+    
+    console.log('🚀 Starting enhanced real-time subscription for channel:', channelName);
+    console.log('🔗 User IDs:', { userId: safeUserId, contactUserId: safeContactId });
     
     this.subscription = this.supabase
       .channel(channelName)
@@ -37,6 +67,7 @@ export class RealtimeMessageHandler {
         filter: `sender_id=eq.${userId},receiver_id=eq.${contactUserId}`
       }, (payload) => {
         console.log('📨 Real-time INSERT (sent):', payload);
+        this.isRealtimeConnected = true; // Mark real-time as working
         this.handleRealtimeMessage(payload, onMessageUpdate, 'sent');
       })
       .on('postgres_changes', { 
@@ -46,6 +77,7 @@ export class RealtimeMessageHandler {
         filter: `sender_id=eq.${contactUserId},receiver_id=eq.${userId}`
       }, (payload) => {
         console.log('📨 Real-time INSERT (received):', payload);
+        this.isRealtimeConnected = true; // Mark real-time as working
         this.handleRealtimeMessage(payload, onMessageUpdate, 'received');
       })
       .on('postgres_changes', { 
@@ -55,6 +87,7 @@ export class RealtimeMessageHandler {
         filter: `sender_id=eq.${userId},receiver_id=eq.${contactUserId}`
       }, (payload) => {
         console.log('📝 Real-time UPDATE (sent):', payload);
+        this.isRealtimeConnected = true; // Mark real-time as working
         this.handleRealtimeMessage(payload, onMessageUpdate, 'updated');
       })
       .on('postgres_changes', { 
@@ -64,6 +97,7 @@ export class RealtimeMessageHandler {
         filter: `sender_id=eq.${contactUserId},receiver_id=eq.${userId}`
       }, (payload) => {
         console.log('📝 Real-time UPDATE (received):', payload);
+        this.isRealtimeConnected = true; // Mark real-time as working
         this.handleRealtimeMessage(payload, onMessageUpdate, 'updated');
       })
       .on('postgres_changes', { 
@@ -72,11 +106,28 @@ export class RealtimeMessageHandler {
         table: this.messagesTable
       }, (payload) => {
         console.log('🗑️ Real-time DELETE:', payload);
+        this.isRealtimeConnected = true; // Mark real-time as working
         this.handleRealtimeMessage(payload, onMessageUpdate, 'deleted');
       })
-      .subscribe((status) => {
+      .subscribe((status, err) => {
         console.log('📡 Subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Real-time subscription established!');
+          this.isRealtimeConnected = true;
+          // Stop aggressive polling when real-time is working
+          this.stopPolling();
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          console.log('❌ Real-time connection failed, starting polling fallback');
+          this.isRealtimeConnected = false;
+          this.startPolling();
+        }
       });
+    
+    // Start connection monitoring
+    this.startConnectionMonitoring();
+    
+    // Start polling as immediate fallback until real-time is confirmed
+    this.startPolling();
     
     return this.subscription;
   }
@@ -239,14 +290,175 @@ export class RealtimeMessageHandler {
   }
 
   /**
-   * Stop the current subscription
+   * Start intelligent polling as fallback for real-time
+   */
+  startPolling() {
+    if (this.isPollingActive || !this.currentUserId || !this.currentContactId) {
+      return;
+    }
+    
+    console.log('🔄 Starting intelligent message polling');
+    this.isPollingActive = true;
+    
+    this.pollingInterval = setInterval(this.pollForMessages, this.pollingFrequency);
+  }
+  
+  /**
+   * Stop polling
+   */
+  stopPolling() {
+    if (this.pollingInterval) {
+      console.log('⏹️ Stopping message polling');
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
+      this.isPollingActive = false;
+    }
+  }
+  
+  /**
+   * Poll for new messages
+   */
+  async pollForMessages() {
+    if (!this.messageUpdateCallback || !this.currentUserId || !this.currentContactId) {
+      return;
+    }
+    
+    try {
+      // Get the most recent timestamp we've seen
+      const sinceTimestamp = this.lastMessageTimestamp || new Date(Date.now() - 60000).toISOString();
+      
+      // Query for new messages since last check
+      const { data: newMessages, error } = await this.supabase
+        .from(this.messagesTable)
+        .select('*')
+        .or(`(sender_id.eq.${this.currentUserId},receiver_id.eq.${this.currentContactId}),(sender_id.eq.${this.currentContactId},receiver_id.eq.${this.currentUserId})`)
+        .gt('sent_at', sinceTimestamp)
+        .order('sent_at', { ascending: true });
+      
+      if (error) {
+        console.error('❌ Polling error:', error);
+        return;
+      }
+      
+      if (newMessages && newMessages.length > 0) {
+        console.log(`📥 Found ${newMessages.length} new messages via polling`);
+        
+        for (const message of newMessages) {
+          // Avoid duplicates using message ID tracking
+          if (this.lastSeenMessageIds.has(message.id)) {
+            continue;
+          }
+          
+          this.lastSeenMessageIds.add(message.id);
+          
+          // Determine event type
+          const eventType = message.sender_id === this.currentUserId ? 'sent' : 'received';
+          
+          // Format and send to callback
+          const formattedMessage = {
+            ...message,
+            message_type: message.message_type || 'text',
+            timestamp: new Date(message.sent_at || message.created_at).toISOString()
+          };
+          
+          console.log('📨 Polling found message:', { id: message.id, eventType });
+          this.messageUpdateCallback(formattedMessage, eventType);
+          
+          // Update last timestamp
+          if (!this.lastMessageTimestamp || message.sent_at > this.lastMessageTimestamp) {
+            this.lastMessageTimestamp = message.sent_at;
+          }
+        }
+        
+        // If we found messages via polling and real-time was supposed to be working,
+        // it might be having issues - keep polling active
+        if (this.isRealtimeConnected && newMessages.length > 0) {
+          console.log('⚠️ Real-time might be lagging, continuing polling as backup');
+        }
+      }
+      
+    } catch (error) {
+      console.error('❌ Error during message polling:', error);
+    }
+  }
+  
+  /**
+   * Start connection monitoring
+   */
+  startConnectionMonitoring() {
+    if (this.connectionCheckInterval) {
+      clearInterval(this.connectionCheckInterval);
+    }
+    
+    console.log('👀 Starting connection monitoring');
+    this.connectionCheckInterval = setInterval(this.checkRealtimeConnection, this.connectionCheckFrequency);
+  }
+  
+  /**
+   * Check if real-time connection is still working
+   */
+  async checkRealtimeConnection() {
+    try {
+      // Check if we have a subscription and it's supposed to be connected
+      if (!this.subscription) {
+        this.isRealtimeConnected = false;
+        return;
+      }
+      
+      // Simple ping test - try to query the database
+      const { data, error } = await this.supabase
+        .from(this.messagesTable)
+        .select('id')
+        .limit(1);
+      
+      if (error) {
+        console.warn('⚠️ Connection check failed:', error);
+        this.isRealtimeConnected = false;
+        this.startPolling(); // Fallback to polling
+        return;
+      }
+      
+      // If real-time hasn't received any events in a while, consider it stale
+      const timeSinceLastRealtime = Date.now() - (this.lastRealtimeActivity || Date.now() - this.connectionCheckFrequency);
+      
+      if (timeSinceLastRealtime > this.connectionCheckFrequency * 2) {
+        console.log('⚠️ Real-time connection seems stale, keeping polling active');
+        this.startPolling();
+      }
+      
+    } catch (error) {
+      console.error('❌ Connection check error:', error);
+      this.isRealtimeConnected = false;
+      this.startPolling();
+    }
+  }
+
+  /**
+   * Stop the current subscription and all monitoring
    */
   stopSubscription() {
+    console.log('🛑 Stopping subscription and all monitoring');
+    
     if (this.subscription) {
-      console.log('🛑 Stopping real-time subscription');
       this.subscription.unsubscribe();
       this.subscription = null;
     }
+    
+    // Stop polling and monitoring
+    this.stopPolling();
+    
+    if (this.connectionCheckInterval) {
+      clearInterval(this.connectionCheckInterval);
+      this.connectionCheckInterval = null;
+    }
+    
+    // Reset state
+    this.isRealtimeConnected = false;
+    this.currentUserId = null;
+    this.currentContactId = null;
+    this.messageUpdateCallback = null;
+    this.lastMessageTimestamp = null;
+    this.lastSeenMessageIds.clear();
     
     // Clear pending queues
     this.messageQueue.clear();
@@ -283,7 +495,8 @@ export class RealtimeMessageHandler {
           receiver_id: message.receiver_id,
           student_id: message.student_id,
           message: message.message,
-          message_type: message.message_type || 'text'
+          message_type: message.message_type || 'text',
+          tenant_id: message.tenant_id // Include tenant_id for RLS compliance
         };
 
         const { data: insertedMsg, error: sendError } = await this.supabase

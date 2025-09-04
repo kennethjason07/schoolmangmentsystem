@@ -16,6 +16,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import { windowsImageSaver, showImageSaveOptions } from '../utils/windowsImageSaver';
 
 // Optional MediaLibrary import with fallback
 let MediaLibrary = null;
@@ -163,41 +164,18 @@ const ImageViewer = ({ visible, imageData, onClose }) => {
     }
   };
 
-  // Handle save to gallery
+  // Handle save to gallery with Windows compatibility
   const handleSaveToGallery = async () => {
     try {
-      if (!MediaLibrary) {
-        Alert.alert(
-          'Feature Not Available',
-          'Gallery saving is not available. You can download the image instead.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Download', onPress: handleDownload }
-          ]
-        );
-        return;
-      }
-
       setLoading(true);
       
-      // Request permissions
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Please grant permission to save images to your gallery.');
-        return;
-      }
+      // Use the new Windows-compatible image saver
+      await showImageSaveOptions({
+        file_url: imageUrl,
+        file_name: imageName,
+        file_size: fileSize
+      });
       
-      // Download to temp location first
-      const tempUri = FileSystem.documentDirectory + 'temp_' + Date.now() + '.jpg';
-      const downloadResult = await FileSystem.downloadAsync(imageUrl, tempUri);
-      
-      // Save to media library
-      await MediaLibrary.createAssetAsync(downloadResult.uri);
-      
-      Alert.alert('Success', 'Image saved to gallery!');
-      
-      // Clean up temp file
-      await FileSystem.deleteAsync(downloadResult.uri, { idempotent: true });
     } catch (error) {
       console.error('Save to gallery error:', error);
       Alert.alert('Save Failed', 'Failed to save image: ' + error.message);

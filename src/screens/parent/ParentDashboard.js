@@ -21,7 +21,7 @@ import { useAuth } from '../../utils/AuthContext';
 import { useSelectedStudent } from '../../contexts/SelectedStudentContext';
 import { useFocusEffect } from '@react-navigation/native';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
-import { useUnreadMessageCount } from '../../hooks/useUnreadMessageCount';
+import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCount';
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -1669,14 +1669,18 @@ const ParentDashboard = ({ navigation }) => {
     }
   }, [user]);
 
-  // Use custom hook for unread message count instead of notifications
-  const { unreadCount: unreadMessageCount = 0 } = useUnreadMessageCount() || {};
+  // Hook for notification count with auto-refresh
+  const { unreadCount: hookUnreadCount, refresh: refreshNotificationCount } = useUnreadNotificationCount('Parent');
+  
+  // Calculate unread notifications count from local state
+  const unreadCount = notifications.filter(notification => !notification.is_read).length;
   
   // Debug logging for unread count
   console.log('=== PARENT DASHBOARD UNREAD COUNT DEBUG ===');
   console.log('Total notifications:', notifications.length);
-  console.log('Notifications array:', notifications);
-  console.log('Unread message count from hook:', unreadMessageCount);
+  console.log('Notifications array:', notifications.slice(0, 3).map(n => ({ id: n.id, is_read: n.is_read, title: n.title })));
+  console.log('Hook unread count:', hookUnreadCount);
+  console.log('Local unread count:', unreadCount);
   console.log('============================================');
 
   // Calculate attendance percentage - handle Sunday exclusion and case sensitivity
@@ -1997,7 +2001,7 @@ const ParentDashboard = ({ navigation }) => {
         title="Parent Dashboard" 
         showBack={false} 
         showNotifications={true}
-        unreadCount={unreadMessageCount}
+        unreadCount={unreadCount}
       />
       
       {/* Student Switch Banner - Show when parent has multiple children */}

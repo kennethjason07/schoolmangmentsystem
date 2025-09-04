@@ -40,6 +40,26 @@ const generateMonths = () => {
 
 const MONTHS = generateMonths();
 
+// Get current month value for default selection
+const getCurrentMonthValue = () => {
+  const currentDate = new Date();
+  const currentYear = currentDate.getFullYear();
+  const currentMonth = currentDate.getMonth() + 1; // Convert to 1-indexed
+  return `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+};
+
+// Helper function to format month-year for display
+const formatMonthYearForDisplay = (monthValue) => {
+  if (!monthValue) return 'N/A';
+  const [year, month] = monthValue.split('-');
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  const monthIndex = parseInt(month) - 1;
+  return `${monthNames[monthIndex]} ${year}`;
+};
+
 const getAttendanceColor = (status) => {
   switch (status) {
     case 'present': return '#4CAF50';
@@ -178,7 +198,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
   const { user } = useAuth();
   // Default to attendance tab, but can be overridden by route params
 
-  const [selectedMonth, setSelectedMonth] = useState(MONTHS[0].value);
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthValue());
   const [fadeAnim] = useState(new Animated.Value(1));
   const [selectedStat, setSelectedStat] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
@@ -632,27 +652,6 @@ export default function StudentAttendanceMarks({ route, navigation }) {
       useNativeDriver: true,
     }).start();
 
-    // Start pulse animation for attendance percentage
-    const startPulseAnimation = () => {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.05,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-    };
-
-    // Start pulse animation after a delay
-    setTimeout(startPulseAnimation, 1000);
-
     // Enhanced real-time subscriptions with better error handling
     const subscriptions = [];
 
@@ -741,6 +740,10 @@ export default function StudentAttendanceMarks({ route, navigation }) {
   // Use monthly percentage for display (current behavior)
   const percentage = monthlyPercentage;
 
+  // Progress bar should show a minimum visible width when percentage > 0
+  const barPercent = showOverallAttendance ? overallPercentage : percentage;
+  const displayedBarPercent = barPercent > 0 ? Math.max(barPercent, 20) : 0;
+
   // Debug logging
   console.log('=== ATTENDANCE CALCULATION COMPARISON ===');
   console.log('Selected month:', selectedMonth);
@@ -828,7 +831,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                 <View style={styles.headerTextContainer}>
                   <Text style={styles.sectionHeaderTitle}>Attendance Overview</Text>
                   <Text style={styles.sectionHeaderSubtitle}>
-                    {showOverallAttendance ? 'Overall attendance across all months' : `Monthly attendance for ${selectedMonth.split('-')[1]}/${selectedMonth.split('-')[0]}`}
+                    {showOverallAttendance ? 'Overall attendance across all months' : `Monthly attendance for ${formatMonthYearForDisplay(selectedMonth)}`}
                   </Text>
                 </View>
                 <TouchableOpacity
@@ -843,8 +846,8 @@ export default function StudentAttendanceMarks({ route, navigation }) {
 
               {/* Enhanced Stats Cards */}
               <View style={styles.statsContainer}>
-                {/* Animated Main Attendance Card - Featured */}
-                <Animated.View style={[styles.mainAttendanceCard, {
+                {/* Clean Unified Attendance Card */}
+                <Animated.View style={[styles.unifiedAttendanceCard, {
                   opacity: statsAnimValue,
                   transform: [{
                     translateY: statsAnimValue.interpolate({
@@ -853,64 +856,97 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                     }),
                   }],
                 }]}>
-                  <View style={styles.attendanceCardHeader}>
-                    <View style={[styles.attendanceIconWrapper, { backgroundColor: percentage >= 75 ? '#E8F5E8' : percentage >= 60 ? '#FFF3E0' : '#FFEBEE' }]}>
-                      <Ionicons
-                        name="trending-up"
-                        size={32}
-                        color={percentage >= 75 ? '#4CAF50' : percentage >= 60 ? '#FF9800' : '#F44336'}
-                      />
-                    </View>
-                    <View style={styles.attendanceTextWrapper}>
-                      <Animated.Text style={[styles.attendancePercentage, {
-                        transform: [{ scale: pulseAnim }]
-                      }]}>{showOverallAttendance ? overallPercentage : percentage}%</Animated.Text>
-                      <Text style={styles.attendanceLabel}>
-                        {showOverallAttendance ? 'Overall Attendance' : 'Monthly Attendance'}
-                      </Text>
-                      <Text style={styles.attendanceSubLabel}>
-                        {showOverallAttendance
-                          ? `All time • ${allPresentCount}/${allRecords.length} days`
-                          : `${selectedMonth.split('-')[1]}/${selectedMonth.split('-')[0]} • Overall: ${overallPercentage}%`
-                        }
-                      </Text>
-                      <View style={styles.attendanceProgressBar}>
-                        <View
-                          style={[
-                            styles.attendanceProgress,
-                            {
-                              width: `${showOverallAttendance ? overallPercentage : percentage}%`,
-                              backgroundColor: (showOverallAttendance ? overallPercentage : percentage) >= 75 ? '#4CAF50' : (showOverallAttendance ? overallPercentage : percentage) >= 60 ? '#FF9800' : '#F44336'
-                            }
-                          ]}
-                        />
+                  <View style={styles.unifiedCardHeader}>
+                    <View style={styles.unifiedTitleSection}>
+                      <View style={styles.unifiedIconContainer}>
+                        <Ionicons name="analytics" size={20} color="#2196F3" />
+                      </View>
+                      <View>
+                        <Text style={styles.unifiedCardTitle}>
+                          {showOverallAttendance ? 'Overall Attendance' : 'Monthly Attendance'}
+                        </Text>
+                        <Text style={styles.unifiedCardSubtitle}>
+                          {showOverallAttendance
+                            ? `All time • ${allPresentCount} of ${allRecords.length} days`
+                            : `${formatMonthYearForDisplay(selectedMonth)} • ${stats.present} of ${total} days`
+                          }
+                        </Text>
                       </View>
                     </View>
+                    <View style={styles.unifiedPercentageBadge}>
+                      <Text style={styles.unifiedPercentageText}>
+                        {barPercent}%
+                      </Text>
+                    </View>
                   </View>
-                  <Text style={styles.attendanceSubtext}>
-                    {(showOverallAttendance ? overallPercentage : percentage) >= 75
-                      ? `Excellent ${showOverallAttendance ? 'overall' : 'monthly'} attendance! Keep it up!`
-                      : (showOverallAttendance ? overallPercentage : percentage) >= 60
-                      ? `Good ${showOverallAttendance ? 'overall' : 'monthly'} attendance, aim for 75%+`
-                      : `${showOverallAttendance ? 'Overall' : 'Monthly'} attendance needs improvement`}
-                  </Text>
-                </Animated.View>
 
-                {/* Clean Calendar Stats like Parent */}
-                <View style={styles.calendarStats}>
-                  <View style={styles.calendarStatItem}>
-                    <Text style={styles.calendarStatNumber}>{total}</Text>
-                    <Text style={styles.calendarStatLabel}>Total Days</Text>
+                  <View style={styles.unifiedProgressSection}>
+                    <View style={styles.unifiedProgressBarContainer}>
+                      <View
+                        style={[
+                          styles.unifiedProgressBar,
+                          {
+                            width: `${displayedBarPercent}%`,
+                            backgroundColor: (barPercent) >= 75 ? '#4CAF50' : (barPercent) >= 60 ? '#FF9800' : '#F44336'
+                          }
+                        ]}
+                      />
+                    </View>
+                    <View style={styles.unifiedProgressLabels}>
+                      <Text style={styles.unifiedProgressStartLabel}>0%</Text>
+                      <Text style={styles.unifiedProgressEndLabel}>100%</Text>
+                    </View>
                   </View>
-                  <View style={styles.calendarStatItem}>
-                    <Text style={styles.calendarStatNumber}>{showOverallAttendance ? overallPercentage : percentage}%</Text>
-                    <Text style={styles.calendarStatLabel}>Attendance</Text>
+
+                  <View style={styles.unifiedBottomSection}>
+                    <View style={styles.unifiedStatsRow}>
+                      <View style={styles.unifiedStatItem}>
+                        <Text style={styles.unifiedStatNumber}>{total}</Text>
+                        <Text style={styles.unifiedStatLabel}>Total Days</Text>
+                      </View>
+                      <View style={styles.unifiedStatItem}>
+                        <Text style={styles.unifiedStatNumber}>{showOverallAttendance ? allPresentCount : stats.present}</Text>
+                        <Text style={styles.unifiedStatLabel}>Present</Text>
+                      </View>
+                      <View style={styles.unifiedStatItem}>
+                        <Text style={styles.unifiedStatNumber}>{showOverallAttendance ? (allRecords.length - allPresentCount) : (total - stats.present)}</Text>
+                        <Text style={styles.unifiedStatLabel}>Absent</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={[
+                      styles.unifiedStatusIndicator,
+                      {
+                        backgroundColor: (showOverallAttendance ? overallPercentage : percentage) >= 75 ? '#E8F5E8' : (showOverallAttendance ? overallPercentage : percentage) >= 60 ? '#FFF3E0' : '#FFEBEE'
+                      }
+                    ]}>
+                      <Ionicons
+                        name={
+                          (showOverallAttendance ? overallPercentage : percentage) >= 75 ? 'checkmark-circle' :
+                          (showOverallAttendance ? overallPercentage : percentage) >= 60 ? 'warning' : 'alert-circle'
+                        }
+                        size={16}
+                        color={
+                          (showOverallAttendance ? overallPercentage : percentage) >= 75 ? '#4CAF50' :
+                          (showOverallAttendance ? overallPercentage : percentage) >= 60 ? '#FF9800' : '#F44336'
+                        }
+                      />
+                      <Text style={[
+                        styles.unifiedStatusText,
+                        {
+                          color: (showOverallAttendance ? overallPercentage : percentage) >= 75 ? '#4CAF50' :
+                                 (showOverallAttendance ? overallPercentage : percentage) >= 60 ? '#FF9800' : '#F44336'
+                        }
+                      ]}>
+                        {(showOverallAttendance ? overallPercentage : percentage) >= 75
+                          ? 'Excellent Performance'
+                          : (showOverallAttendance ? overallPercentage : percentage) >= 60
+                          ? 'Good Performance'
+                          : 'Needs Improvement'}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={styles.calendarStatItem}>
-                    <Text style={styles.calendarStatNumber}>{showOverallAttendance ? allPresentCount : stats.present}</Text>
-                    <Text style={styles.calendarStatLabel}>Present</Text>
-                  </View>
-                </View>
+                </Animated.View>
               </View>
               {/* Enhanced Stat Details Modal */}
               <Modal visible={!!selectedStat} transparent animationType="slide" onRequestClose={() => setSelectedStat(null)}>
@@ -981,6 +1017,75 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                   </View>
                 </View>
               </Modal>
+              
+              {/* Month/Year Picker Modal */}
+              <Modal visible={showMonthPicker} transparent animationType="slide" onRequestClose={() => setShowMonthPicker(false)}>
+                <View style={styles.monthPickerModalOverlay}>
+                  <View style={styles.monthPickerModalContent}>
+                    <View style={styles.monthPickerHeader}>
+                      <Text style={styles.monthPickerTitle}>Select Month & Year</Text>
+                      <TouchableOpacity onPress={() => setShowMonthPicker(false)} style={styles.monthPickerCloseButton}>
+                        <Ionicons name="close" size={24} color="#666" />
+                      </TouchableOpacity>
+                    </View>
+                    
+                    <ScrollView 
+                      style={styles.monthPickerList} 
+                      contentContainerStyle={styles.monthPickerScrollContent}
+                      showsVerticalScrollIndicator={true}
+                      bounces={true}
+                    >
+                      {MONTHS.map((month, index) => {
+                        const isSelected = selectedMonth === month.value;
+                        const isCurrent = month.value === getCurrentMonthValue();
+                        const isLast = index === MONTHS.length - 1;
+                        
+                        return (
+                          <TouchableOpacity
+                            key={month.value}
+                            style={[
+                              styles.monthPickerItem,
+                              isSelected && styles.monthPickerItemSelected,
+                              isCurrent && styles.monthPickerItemCurrent,
+                              isLast && styles.monthPickerItemLast
+                            ]}
+                            onPress={() => {
+                              setSelectedMonth(month.value);
+                              setShowMonthPicker(false);
+                            }}
+                          >
+                            <View style={styles.monthPickerItemContent}>
+                              <Text style={[
+                                styles.monthPickerItemText,
+                                isSelected && styles.monthPickerItemTextSelected,
+                                isCurrent && styles.monthPickerItemTextCurrent
+                              ]}>
+                                {month.label}
+                              </Text>
+                              {isCurrent && (
+                                <View style={styles.currentMonthBadge}>
+                                  <Text style={styles.currentMonthBadgeText}>Current</Text>
+                                </View>
+                              )}
+                            </View>
+                            {isSelected && (
+                              <Ionicons name="checkmark-circle" size={20} color="#4285F4" />
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                    
+                    <TouchableOpacity 
+                      style={styles.monthPickerDoneButton}
+                      onPress={() => setShowMonthPicker(false)}
+                    >
+                      <Text style={styles.monthPickerDoneButtonText}>Done</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </Modal>
+              
               {/* Modern Google Calendar-style Navigation Header */}
               <View style={styles.modernCalendarNavHeader}>
                 <TouchableOpacity
@@ -1471,78 +1576,132 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
   },
-  mainAttendanceCard: {
+  // Unified Clean Attendance Card Styles
+  unifiedAttendanceCard: {
     backgroundColor: '#fff',
-    borderRadius: 20,
+    borderRadius: 16,
     padding: 20,
     marginTop: 8,
     marginBottom: 20,
-    elevation: 8,
-    shadowColor: '#2196F3',
-    shadowOpacity: 0.2,
-    shadowRadius: 15,
-    shadowOffset: { width: 0, height: 8 },
-    borderLeftWidth: 6,
-    borderLeftColor: '#2196F3',
-    borderTopWidth: 2,
-    borderTopColor: '#E3F2FD',
-    borderRightWidth: 1,
-    borderRightColor: '#E3F2FD',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E3F2FD',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    borderWidth: 1,
+    borderColor: '#E3F2FD',
   },
-  attendanceCardHeader: {
+  unifiedCardHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 20,
   },
-  attendanceIconWrapper: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  attendanceTextWrapper: {
+  unifiedTitleSection: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     flex: 1,
   },
-  attendancePercentage: {
-    fontSize: 36,
+  unifiedIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#E3F2FD',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  unifiedCardTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1565C0',
+    marginBottom: 4,
+    lineHeight: 22,
+  },
+  unifiedCardSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 18,
+  },
+  unifiedPercentageBadge: {
+    backgroundColor: '#2196F3',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 70,
+  },
+  unifiedPercentageText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    lineHeight: 24,
+  },
+  unifiedProgressSection: {
+    marginBottom: 20,
+  },
+  unifiedProgressBarContainer: {
+    height: 8,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  unifiedProgressBar: {
+    height: '100%',
+    borderRadius: 4,
+    transition: 'width 0.3s ease',
+  },
+  unifiedProgressLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  unifiedProgressStartLabel: {
+    fontSize: 12,
+    color: '#999',
+    fontWeight: '500',
+  },
+  unifiedProgressEndLabel: {
+    fontSize: 12,
+    color: '#999',
+    fontWeight: '500',
+  },
+  unifiedBottomSection: {
+    gap: 16,
+  },
+  unifiedStatsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 10,
+  },
+  unifiedStatItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  unifiedStatNumber: {
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#2196F3',
     marginBottom: 4,
-    textShadowColor: 'rgba(33, 150, 243, 0.3)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
   },
-  attendanceLabel: {
-    fontSize: 16,
+  unifiedStatLabel: {
+    fontSize: 12,
     color: '#666',
-    marginBottom: 4,
     fontWeight: '500',
   },
-  attendanceSubLabel: {
-    fontSize: 12,
-    color: '#888',
-    marginBottom: 8,
-    fontStyle: 'italic',
+  unifiedStatusIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
   },
-  attendanceProgressBar: {
-    height: 6,
-    backgroundColor: '#E3F2FD',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  attendanceProgress: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  attendanceSubtext: {
+  unifiedStatusText: {
     fontSize: 14,
-    color: '#888',
-    fontStyle: 'italic',
-    textAlign: 'center',
+    fontWeight: '600',
   },
   statsGrid: {
     flexDirection: 'row',
@@ -2082,5 +2241,124 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     marginTop: 4,
+  },
+  
+  // Month Picker Modal Styles
+  monthPickerModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  monthPickerModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    width: '100%',
+    maxWidth: 320,
+    maxHeight: '70%',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  monthPickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  monthPickerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#202124',
+  },
+  monthPickerCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F5F5F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  monthPickerList: {
+    maxHeight: 320,
+    paddingHorizontal: 20,
+  },
+  monthPickerScrollContent: {
+    paddingVertical: 10,
+    paddingBottom: 20,
+  },
+  monthPickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginVertical: 2,
+    backgroundColor: '#fff',
+  },
+  monthPickerItemSelected: {
+    backgroundColor: '#e8f0fe',
+    borderWidth: 1,
+    borderColor: '#4285F4',
+  },
+  monthPickerItemCurrent: {
+    borderWidth: 1,
+    borderColor: '#34A853',
+    backgroundColor: '#e6f4ea',
+  },
+  monthPickerItemContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  monthPickerItemText: {
+    fontSize: 16,
+    color: '#202124',
+    fontWeight: '500',
+  },
+  monthPickerItemTextSelected: {
+    color: '#4285F4',
+    fontWeight: '600',
+  },
+  monthPickerItemTextCurrent: {
+    color: '#34A853',
+    fontWeight: '600',
+  },
+  currentMonthBadge: {
+    backgroundColor: '#34A853',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginLeft: 8,
+  },
+  currentMonthBadgeText: {
+    fontSize: 10,
+    color: '#fff',
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+  },
+  monthPickerDoneButton: {
+    backgroundColor: '#4285F4',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    margin: 20,
+    marginTop: 10,
+  },
+  monthPickerDoneButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  monthPickerItemLast: {
+    marginBottom: 10,
   },
 });

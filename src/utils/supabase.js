@@ -213,10 +213,7 @@ export const getUserTenantId = async () => {
       return null;
     }
 
-    console.log('✅ [getUserTenantId] User found:', user.email);
-    console.log('🔍 [getUserTenantId] User ID:', user.id);
-
-    // PRIORITY 1: Try to get user's tenant_id from database table first
+    // PRIORITIZE database tenant_id over metadata to avoid stale metadata issues
     try {
       console.log('🔍 [getUserTenantId] Checking database for tenant_id...');
       const { data: userProfile, error: profileError } = await supabase
@@ -234,7 +231,7 @@ export const getUserTenantId = async () => {
       console.log('   - Error code:', profileError?.code || 'None');
 
       if (!profileError && userProfile && userProfile.tenant_id) {
-        console.log(`✅ [getUserTenantId] Found tenant_id in user database: ${userProfile.tenant_id}`);
+        console.log(`Found tenant_id in user profile (prioritized): ${userProfile.tenant_id}`);
         return userProfile.tenant_id;
       }
 
@@ -247,7 +244,7 @@ export const getUserTenantId = async () => {
       console.warn('💥 [getUserTenantId] Could not access user profile table:', profileError);
     }
 
-    // PRIORITY 2: Check user metadata for tenant_id
+    // PRIORITY 2: Check user metadata for tenant_id as fallback
     console.log('🔍 [getUserTenantId] Checking JWT metadata for tenant_id...');
     const metadataTenantId = user.app_metadata?.tenant_id || user.user_metadata?.tenant_id;
     console.log('🔍 [getUserTenantId] app_metadata:', JSON.stringify(user.app_metadata || {}, null, 2));
