@@ -10,6 +10,7 @@ import {
   TextInput,
   ActivityIndicator,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTenant } from '../../contexts/TenantContext';
@@ -268,12 +269,17 @@ const TenantManagement = ({ navigation }) => {
         </TouchableOpacity>
       </View>
 
-      <ScrollView 
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
+      <View style={styles.scrollWrapper}>
+        <ScrollView 
+          style={styles.scrollContainer}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          keyboardShouldPersistTaps="handled"
+          bounces={Platform.OS !== 'web'}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
         {tenants.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="business-outline" size={64} color="#ccc" />
@@ -348,7 +354,8 @@ const TenantManagement = ({ navigation }) => {
             </View>
           ))
         )}
-      </ScrollView>
+        </ScrollView>
+      </View>
 
       {/* Create/Edit Modal */}
       <Modal visible={modalVisible} animationType="slide" transparent>
@@ -501,9 +508,34 @@ const styles = StyleSheet.create({
   addButton: {
     padding: 5,
   },
-  content: {
+  // Enhanced scroll wrapper styles for web compatibility
+  scrollWrapper: {
     flex: 1,
+    ...Platform.select({
+      web: {
+        height: 'calc(100vh - 160px)',
+        maxHeight: 'calc(100vh - 160px)',
+        minHeight: 400,
+        overflow: 'hidden',
+      },
+    }),
+  },
+  scrollContainer: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        overflowY: 'auto'
+      }
+    })
+  },
+  scrollContent: {
+    flexGrow: 1,
     padding: 20,
+    ...Platform.select({
+      web: {
+        paddingBottom: 40,
+      },
+    }),
   },
   emptyState: {
     flex: 1,

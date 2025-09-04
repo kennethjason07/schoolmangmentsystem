@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Dimensions,
+  Platform,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
@@ -16,6 +18,7 @@ const { width } = Dimensions.get('window');
 
 const AutoGrading = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     // Simulate initial loading
@@ -25,6 +28,14 @@ const AutoGrading = ({ navigation }) => {
 
     return () => clearTimeout(timer);
   }, []);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    // Simulate AI model refresh
+    setTimeout(() => {
+      setRefreshing(false);
+    }, 2000);
+  };
 
   // AI-powered features that would be available
   const upcomingFeatures = [
@@ -110,7 +121,17 @@ const AutoGrading = ({ navigation }) => {
     <View style={styles.container}>
       <Header title="Auto Grading System" showBack={true} />
       
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <View style={styles.scrollWrapper}>
+        <ScrollView
+          style={styles.scrollContainer}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          keyboardShouldPersistTaps="handled"
+          bounces={Platform.OS !== 'web'}
+        >
         {/* Upcoming Feature Banner */}
         <UpcomingFeatureBanner
           title="AI Auto Grading"
@@ -209,7 +230,11 @@ const AutoGrading = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         </View>
-      </ScrollView>
+        
+        {/* Add bottom padding to ensure last content is fully visible */}
+        <View style={styles.bottomSpacer} />
+        </ScrollView>
+      </View>
     </View>
   );
 };
@@ -219,8 +244,33 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
-  content: {
+  // Enhanced scroll wrapper styles for web compatibility
+  scrollWrapper: {
     flex: 1,
+    ...Platform.select({
+      web: {
+        height: 'calc(100vh - 160px)',
+        maxHeight: 'calc(100vh - 160px)',
+        minHeight: 400,
+        overflow: 'hidden',
+      },
+    }),
+  },
+  scrollContainer: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        overflowY: 'auto',
+      },
+    }),
+  },
+  scrollContent: {
+    flexGrow: 1,
+    ...Platform.select({
+      web: {
+        paddingBottom: 40,
+      },
+    }),
   },
   loadingContainer: {
     flex: 1,
@@ -404,6 +454,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     marginLeft: 6,
+  },
+  bottomSpacer: {
+    height: 20,
   },
 });
 

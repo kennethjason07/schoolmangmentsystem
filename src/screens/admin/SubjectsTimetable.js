@@ -1157,21 +1157,22 @@ await supabase
         </TouchableOpacity>
       </View>
       {tab === 'subjects' ? (
-        <ScrollView 
-          style={styles.content}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={Platform.OS === 'web'}
-          keyboardShouldPersistTaps="handled"
-          bounces={Platform.OS !== 'web'}
-          refreshControl={
-            <RefreshControl 
-              refreshing={refreshing} 
-              onRefresh={onRefresh} 
-              colors={['#4CAF50']}
-              tintColor="#4CAF50"
-            />
-          }
-        >
+        <View style={styles.scrollWrapper}>
+          <ScrollView 
+            style={styles.scrollContainer}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={Platform.OS === 'web'}
+            keyboardShouldPersistTaps="handled"
+            bounces={Platform.OS !== 'web'}
+            refreshControl={
+              <RefreshControl 
+                refreshing={refreshing} 
+                onRefresh={onRefresh} 
+                colors={['#4CAF50']}
+                tintColor="#4CAF50"
+              />
+            }
+          >
           <View style={styles.subjectsSection}>
             {subjects.map((item) => (
               <View key={item.id} style={styles.subjectRow}>
@@ -1242,21 +1243,25 @@ await supabase
           <TouchableOpacity style={styles.fab} onPress={openAddSubject}>
             <Text style={styles.fabIcon}>+</Text>
           </TouchableOpacity>
-        </ScrollView>
+          </ScrollView>
+        </View>
       ) : (
-        <ScrollView 
-          style={styles.timetableContainer} 
-          contentContainerStyle={styles.timetableScrollContent}
-          showsVerticalScrollIndicator={Platform.OS === 'web'}
-          refreshControl={
-            <RefreshControl 
-              refreshing={refreshing} 
-              onRefresh={onRefresh} 
-              colors={['#4CAF50']}
-              tintColor="#4CAF50"
-            />
-          }
-        >
+        <View style={styles.scrollWrapper}>
+          <ScrollView 
+            style={styles.scrollContainer} 
+            contentContainerStyle={styles.timetableScrollContent}
+            showsVerticalScrollIndicator={Platform.OS === 'web'}
+            keyboardShouldPersistTaps="handled"
+            bounces={Platform.OS !== 'web'}
+            refreshControl={
+              <RefreshControl 
+                refreshing={refreshing} 
+                onRefresh={onRefresh} 
+                colors={['#4CAF50']}
+                tintColor="#4CAF50"
+              />
+            }
+          >
           {/* Class Selector */}
           <View style={styles.classSelector}>
             <View style={styles.selectorHeader}>
@@ -1406,7 +1411,8 @@ await supabase
               )}
             </TouchableOpacity>
           </View>
-        </ScrollView>
+          </ScrollView>
+        </View>
       )}
 
       {/* Period Modal */}
@@ -1791,6 +1797,26 @@ const styles = StyleSheet.create({
   tabText: {
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  // Enhanced scroll wrapper styles for web compatibility
+  scrollWrapper: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        height: 'calc(100vh - 160px)',
+        maxHeight: 'calc(100vh - 160px)',
+        minHeight: 400,
+        overflow: 'hidden',
+      },
+    }),
+  },
+  scrollContainer: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        overflowY: 'auto'
+      }
+    })
   },
   content: {
     flex: 1,
