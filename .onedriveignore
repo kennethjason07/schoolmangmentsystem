@@ -1,0 +1,11 @@
+# OneDrive ignore file to speed up development
+# Exclude Metro cache and development files from syncing
+
+.expo/
+.metro-cache/
+node_modules/.cache/
+dist/
+build/
+*.log
+.DS_Store
+Thumbs.db

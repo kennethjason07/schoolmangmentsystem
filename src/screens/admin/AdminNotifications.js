@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, getUserTenantId } from '../../utils/supabase';
+import universalNotificationService from '../../services/UniversalNotificationService';
 
 const AdminNotifications = ({ navigation }) => {
   const [notifications, setNotifications] = useState([]);
@@ -333,6 +334,17 @@ const AdminNotifications = ({ navigation }) => {
             : notif
         )
       );
+      
+      // Broadcast the notification read event for immediate badge updates
+      try {
+        console.log('📣 [ADMIN_NOTIF] Broadcasting notification read event...');
+        await universalNotificationService.broadcastNotificationRead(user.id, notificationId);
+        console.log('✅ [ADMIN_NOTIF] Broadcast successful');
+      } catch (broadcastError) {
+        console.warn('⚠️ [ADMIN_NOTIF] Broadcast failed (not critical):', broadcastError);
+        // Broadcasting is not critical, continue even if it fails
+      }
+      
     } catch (error) {
       console.error('💥 [ADMIN_NOTIF] Error marking notification as read:', error);
       Alert.alert('Error', 'Failed to mark notification as read');
@@ -410,6 +422,20 @@ const AdminNotifications = ({ navigation }) => {
       );
       
       Alert.alert('Success', 'All notifications marked as read.');
+      
+      // Broadcast notification read events for immediate badge updates
+      try {
+        console.log('📣 [ADMIN_NOTIF] Broadcasting bulk notification read events...');
+        // Broadcast for each unread notification
+        const broadcastPromises = unreadNotifications.map(notif => 
+          universalNotificationService.broadcastNotificationRead(user.id, notif.id)
+        );
+        await Promise.all(broadcastPromises);
+        console.log('✅ [ADMIN_NOTIF] Bulk broadcast successful');
+      } catch (broadcastError) {
+        console.warn('⚠️ [ADMIN_NOTIF] Bulk broadcast failed (not critical):', broadcastError);
+        // Broadcasting is not critical, continue even if it fails
+      }
     } catch (error) {
       console.error('💥 [ADMIN_NOTIF] Error marking all notifications as read:', error);
       Alert.alert('Error', 'Failed to mark notifications as read.');

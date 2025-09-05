@@ -94,14 +94,27 @@ export const useUnreadNotificationCount = (recipientType = 'Student') => {
         
         const message = notification.message.toLowerCase();
         
-        // 1. Filter out leave notifications (same logic as StudentNotifications)
-        const isLeaveNotification = message.includes('leave') || 
-                                   message.includes('absent') || 
-                                   message.includes('vacation') || 
-                                   message.includes('sick') ||
-                                   message.includes('time off');
+        // 1. Only filter out automatic/system leave notifications, but keep leave status updates
+        // Keep: "Leave request approved", "Leave request denied", "Leave application processed"
+        // Filter: "Employee is absent", "Student on leave today", etc.
+        const isSystemLeaveNotification = (
+          (message.includes('absent') && !message.includes('request')) ||
+          (message.includes('on leave') && !message.includes('request')) ||
+          (message.includes('vacation') && !message.includes('request')) ||
+          (message.includes('time off') && !message.includes('request'))
+        );
         
-        if (isLeaveNotification) {
+        // Keep important leave-related notifications (approvals, denials, etc.)
+        const isImportantLeaveNotification = (
+          message.includes('approved') ||
+          message.includes('denied') ||
+          message.includes('rejected') ||
+          message.includes('processed') ||
+          message.includes('pending') ||
+          message.includes('submitted')
+        );
+        
+        if (isSystemLeaveNotification && !isImportantLeaveNotification) {
           return false;
         }
         

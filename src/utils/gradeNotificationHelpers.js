@@ -1,4 +1,5 @@
 import { supabase, TABLES } from './supabase';
+import universalNotificationService from '../services/UniversalNotificationService';
 
 /**
  * Helper functions for grade notifications using the existing notification system
@@ -239,6 +240,20 @@ export async function createGradeNotification({ classId, subjectId, examId, teac
       .eq('id', notification.id);
     
     console.log('✅ Notification delivered successfully with proper timestamps');
+    
+    // Broadcast real-time notification updates to all parent users for instant badge refresh
+    try {
+      console.log(`📡 [GRADE NOTIFICATION] Broadcasting real-time updates to ${parentUsers.length} parents...`);
+      const parentUserIds = parentUsers.map(p => p.id);
+      await universalNotificationService.broadcastNewNotificationToUsers(
+        parentUserIds,
+        notification.id,
+        'GRADE_ENTERED'
+      );
+      console.log(`✅ [GRADE NOTIFICATION] Real-time broadcasts sent successfully`);
+    } catch (broadcastError) {
+      console.warn(`⚠️ [GRADE NOTIFICATION] Broadcasting failed (not critical):`, broadcastError);
+    }
 
     return {
       success: true,

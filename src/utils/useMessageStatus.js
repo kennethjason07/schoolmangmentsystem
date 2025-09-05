@@ -1,5 +1,6 @@
 import { supabase, TABLES } from './supabase';
 import { useAuth } from './AuthContext';
+import universalNotificationService from '../services/UniversalNotificationService';
 
 export const useMessageStatus = () => {
   const { user } = useAuth();
@@ -19,6 +20,10 @@ export const useMessageStatus = () => {
       if (error) {
         return { success: false, error };
       }
+
+      // Broadcast the message read event to update badges in real-time
+      await universalNotificationService.broadcastMessageRead(user.id, senderId);
+      console.log('✅ Broadcast message read event for sender:', senderId);
 
       return { success: true };
     } catch (error) {
@@ -40,6 +45,11 @@ export const useMessageStatus = () => {
       if (error) {
         return { success: false, error };
       }
+
+      // Broadcast the message read event to update badges in real-time
+      // For mark all as read, we broadcast with a null sender to indicate all messages
+      await universalNotificationService.broadcastMessageRead(user.id, 'ALL');
+      console.log('✅ Broadcast mark all messages read event');
 
       return { success: true };
     } catch (error) {

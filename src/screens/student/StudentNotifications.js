@@ -5,6 +5,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers, getUserTenantId } from '../../utils/supabase';
 import Header from '../../components/Header';
+import universalNotificationService from '../../services/UniversalNotificationService';
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -475,41 +476,15 @@ const markAsRead = async (id) => {
 
       console.log('✅ Successfully marked notification as read');
       
-      // Force a refresh of the dashboard's notification count
-      // This explicit broadcast approach ensures the dashboard will update
+      // Broadcast the notification-read event to update badge counts immediately
       if (updateSuccess) {
-        console.log('📣 Broadcasting notification count update...');
-        
-        // Use a Supabase broadcast channel to trigger updates
-        // This is a more reliable way to ensure all components update
         try {
-          const channel = supabase.channel('notification-update');
-          channel.subscribe((status) => {
-            if (status === 'SUBSCRIBED') {
-              channel.send({
-                type: 'broadcast',
-                event: 'notification-read',
-                payload: {
-                  user_id: user.id,
-                  notification_id: id,
-                  timestamp: new Date().toISOString()
-                }
-              });
-            }
-          });
-          
-          // Cleanup after sending
-          setTimeout(() => channel.unsubscribe(), 1000);
-        } catch (broadcastErr) {
-          console.error('Broadcast error:', broadcastErr);
-          // Fall back to navigation param update if broadcast fails
+          await universalNotificationService.broadcastNotificationRead(user.id, id);
+          console.log('📣 Successfully broadcasted notification-read event');
+        } catch (broadcastError) {
+          console.error('Error broadcasting notification-read event:', broadcastError);
+          // Continue execution even if broadcast fails
         }
-        
-        // Also update navigation params as a backup mechanism
-        setTimeout(() => {
-          console.log('Triggering navigation state change...');
-          navigation.setParams({ refreshTrigger: Date.now() });
-        }, 100);
       }
     } catch (err) {
       console.error('Mark as read error:', err);

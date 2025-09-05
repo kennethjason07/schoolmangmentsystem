@@ -1094,6 +1094,8 @@ const FeeManagement = () => {
         class_id: classId,
         fee_component: newFeeStructure.type.trim(),
         amount: parseFloat(newFeeStructure.amount),
+        base_amount: parseFloat(newFeeStructure.amount), // Set base_amount to the same as amount initially
+        discount_applied: 0, // Default discount
         academic_year: newFeeStructure.academicYear.trim(),
         due_date: format(new Date(newFeeStructure.dueDate), 'yyyy-MM-dd'),
         tenant_id: tenantId

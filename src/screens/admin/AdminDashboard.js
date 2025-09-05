@@ -29,8 +29,10 @@ import { format, addMonths } from 'date-fns';
 import { getEventDisplayProps } from '../../utils/eventIcons';
 import { useAuth } from '../../utils/AuthContext';
 import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
-import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCount';
+import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificationCount';
 import { fixUserSetup, checkUserSetup } from '../../utils/fixUserSetup';
+import { createTestAdminNotification, checkAdminNotificationCounts } from '../../utils/adminNotificationTest';
+import RealtimeDebugPanel from '../../components/RealtimeDebugPanel';
 
 const { width } = Dimensions.get('window');
 
@@ -348,10 +350,7 @@ const AdminDashboard = ({ navigation }) => {
         loadDashboardData(),
         loadChartData()
       ]);
-      // Also refresh notification count
-      if (refreshNotificationCount) {
-        refreshNotificationCount();
-      }
+      // Universal notification system automatically handles refresh
     } catch (error) {
       console.error('Error refreshing dashboard:', error);
     } finally {
@@ -373,6 +372,7 @@ const AdminDashboard = ({ navigation }) => {
     { title: 'Exams & Marks', icon: 'document-text', color: '#795548', screen: 'ExamsMarks' }, // Stack screen
     { title: 'Report Cards', icon: 'document-text', color: '#E91E63', screen: 'ReportCardGeneration' }, // Stack screen
     { title: 'Notifications', icon: 'notifications', color: '#FF5722', screen: 'NotificationManagement' }, // Stack screen
+    { title: 'Test Notifications', icon: 'flask', color: '#9C27B0', action: testAdminNotifications, banner: 'TEST' }, // Test function
     { title: 'Hall Tickets', icon: 'card-outline', color: '#00BCD4', screen: 'HallTicketGeneration', banner: 'UPCOMING' }, // Stack screen
     { title: 'Auto Grading', icon: 'checkmark-done', color: '#4CAF50', screen: 'AutoGrading', banner: 'UPCOMING' }, // Stack screen
   ];
@@ -1026,14 +1026,23 @@ const AdminDashboard = ({ navigation }) => {
     { text: 'Exam scheduled: Mathematics for Class 4A', time: '1 day ago', icon: 'calendar' },
   ]);
 
-  // Use custom hook for unread notification count from notification_recipients table
-  const { unreadCount = 0, loading: notificationLoading, error: notificationError, refresh: refreshNotificationCount } = useUnreadNotificationCount('Admin') || {};
+  // Use universal notification system for consistent, real-time badge updates
+  const { totalCount, notificationCount, messageCount } = useUniversalNotificationCount({
+    autoRefresh: true,
+    realTime: true,
+    onCountChange: (counts) => {
+      console.log('🔔 [AdminDashboard] Notification counts updated:', counts);
+    }
+  });
+  
+  // Use the total count for admin badge (includes messages + notifications)
+  const unreadCount = totalCount;
   
   // Debug the notification count only when needed
-  // console.log('📱 AdminDashboard - Notification count debug:', {
-  //   unreadCount,
-  //   notificationLoading,
-  //   notificationError,
+  // console.log('📱 AdminDashboard - Universal notification count debug:', {
+  //   totalCount,
+  //   notificationCount,
+  //   messageCount,
   //   userId: user?.id
   // });
 
@@ -1062,13 +1071,47 @@ const AdminDashboard = ({ navigation }) => {
     showPopupAfterDelay();
   }, [user?.id, loading, events.length, hasShownPopupThisSession, isEventModalVisible]);
 
-  // Force refresh notification count when dashboard loads
-  useEffect(() => {
-    if (user?.id && refreshNotificationCount) {
-      // console.log('🔄 Force refreshing notification count on admin dashboard load');
-      refreshNotificationCount();
+  // Universal notification system automatically handles real-time updates
+  // No manual refresh needed
+
+  // Test function for admin notifications
+  const testAdminNotifications = async () => {
+    try {
+      Alert.alert(
+        'Test Admin Notifications',
+        'This will create a test notification for all admin users. You should see the notification badge update instantly.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Create Test',
+            onPress: async () => {
+              console.log('🧪 Starting admin notification test...');
+              const result = await createTestAdminNotification();
+              
+              if (result.success) {
+                Alert.alert(
+                  'Test Notification Created!',
+                  `Successfully sent test notification to ${result.recipientCount} admin users. Check if the notification badge updated instantly!`,
+                  [{ text: 'OK' }]
+                );
+                
+                // Also check counts for current admin
+                if (user?.id) {
+                  const counts = await checkAdminNotificationCounts(user.id);
+                  console.log('📊 Current admin notification counts:', counts);
+                }
+              } else {
+                Alert.alert('Test Failed', result.error || 'Failed to create test notification');
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error in test function:', error);
+      Alert.alert('Error', 'Failed to run notification test');
     }
-  }, [user?.id, refreshNotificationCount]);
+  };
 
   const openAddActivityModal = () => {
     // This function is not fully implemented in the original file,
@@ -1139,6 +1182,9 @@ const AdminDashboard = ({ navigation }) => {
           />
         }
       >
+        {/* Debug Panel for Real-time Testing */}
+        <RealtimeDebugPanel />
+        
         {/* Welcome Section - Modern gradient design */}
         <View style={styles.welcomeSection}>
           {/* Decorative background elements */}
@@ -1234,7 +1280,13 @@ const AdminDashboard = ({ navigation }) => {
               <TouchableOpacity
                 key={index}
                 style={styles.quickActionCard}
-                onPress={() => navigation.navigate(action.screen)}
+                onPress={() => {
+                  if (action.action) {
+                    action.action(); // Call custom action function
+                  } else {
+                    navigation.navigate(action.screen); // Navigate to screen
+                  }
+                }}
               >
                 <View style={styles.actionIconContainer}>
                   <View style={[styles.actionIcon, { backgroundColor: action.color }]}>

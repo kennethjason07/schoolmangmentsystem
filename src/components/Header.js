@@ -4,11 +4,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../utils/AuthContext';
 import { supabase } from '../utils/supabase';
+import UniversalNotificationBadge from './UniversalNotificationBadge';
+import DebugBadge from './DebugBadge';
+import universalNotificationService from '../services/UniversalNotificationService';
 
 const Header = ({ title, showBack = false, showProfile = true, showNotifications = false, onProfilePress, onNotificationsPress, unreadCount = 0 }) => {
   const navigation = useNavigation();
   const { user: authUser, userType } = useAuth();
   const [userProfileUrl, setUserProfileUrl] = useState(null);
+
+  // Get the appropriate notification screen based on user type
+  const getNotificationScreen = () => {
+    if (userType) {
+      return universalNotificationService.getNotificationScreen(userType);
+    }
+    return 'ParentNotifications'; // fallback
+  };
 
   // Function to load user profile image
   const loadUserProfile = async () => {
@@ -76,21 +87,15 @@ const Header = ({ title, showBack = false, showProfile = true, showNotifications
       <View style={styles.rightSection}>
         {showNotifications && (
           <TouchableOpacity 
-            onPress={onNotificationsPress || (() => navigation.navigate('ParentNotifications'))}
+            onPress={onNotificationsPress || (() => navigation.navigate(getNotificationScreen()))}
             style={styles.notificationButton}
           >
             <Ionicons 
               name="notifications" 
               size={24} 
-              color={unreadCount > 0 ? "#2196F3" : "#333"} 
+              color="#333"
             />
-            {unreadCount > 0 && (
-              <View style={styles.notificationBadge}>
-                <Text style={styles.notificationBadgeText}>
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </Text>
-              </View>
-            )}
+            <UniversalNotificationBadge />
           </TouchableOpacity>
         )}
         {showProfile && authUser && userType && (
@@ -180,23 +185,6 @@ const styles = StyleSheet.create({
     position: 'relative',
     marginRight: 12,
     padding: 4,
-  },
-  notificationBadge: {
-    position: 'absolute',
-    top: -5,
-    right: -5,
-    backgroundColor: 'red',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1,
-  },
-  notificationBadgeText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
   },
 });
 

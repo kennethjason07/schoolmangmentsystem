@@ -1,4 +1,5 @@
 import { supabase, TABLES, getUserTenantId } from '../utils/supabase';
+import universalNotificationService from './UniversalNotificationService';
 
 /**
  * Automated Notification Service
@@ -429,6 +430,19 @@ const createNotificationForSpecificUser = async (studentData, date, markedBy, us
     } else {
       console.warn(`⚠️ [TARGETED NOTIFICATION] Notification created but delivery failed for ${parentName} (${userId}):`, deliveryResult.error);
     }
+    
+    // Broadcast real-time notification update for instant badge refresh
+    try {
+      console.log(`📡 [ABSENCE NOTIFICATION] Broadcasting real-time update to ${parentName} (${userId})`);
+      await universalNotificationService.handleNewNotificationRecipient(
+        userId,
+        notificationResult.id,
+        'parent'
+      );
+      console.log(`✅ [ABSENCE NOTIFICATION] Real-time broadcast sent successfully`);
+    } catch (broadcastError) {
+      console.warn(`⚠️ [ABSENCE NOTIFICATION] Broadcasting failed (not critical):`, broadcastError);
+    }
 
     return { 
       success: true, 
@@ -600,7 +614,21 @@ export const createLeaveRequestNotificationForAdmins = async (leaveData, teacher
         throw recipientsError;
       }
 
-      console.log(`✅ [LEAVE REQUEST] Created notification recipients for ${adminUsers.length} admin users`);
+    console.log(`✅ [LEAVE REQUEST] Created notification recipients for ${adminUsers.length} admin users`);
+    
+    // Broadcast real-time notification updates to all admin users
+    try {
+      console.log(`📡 [LEAVE REQUEST] Broadcasting real-time updates to ${adminUsers.length} admin users...`);
+      const adminUserIds = adminUsers.map(admin => admin.id);
+      await universalNotificationService.broadcastNewNotificationToUsers(
+        adminUserIds,
+        notification.id,
+        'General'
+      );
+      console.log(`✅ [LEAVE REQUEST] Real-time broadcasts sent successfully`);
+    } catch (broadcastError) {
+      console.warn(`⚠️ [LEAVE REQUEST] Broadcasting failed (not critical):`, broadcastError);
+    }
     }
 
     return {
@@ -681,6 +709,20 @@ export const createTestNotification = async (parentUserId, message = 'Test notif
     }
 
     console.log(`🧪 [TEST] Test notification created successfully`);
+    
+    // Broadcast real-time notification update for test notification
+    try {
+      console.log(`📡 [TEST] Broadcasting real-time update to parent ${parentUserId}...`);
+      await universalNotificationService.handleNewNotificationRecipient(
+        parentUserId,
+        notificationResult.id,
+        'parent'
+      );
+      console.log(`✅ [TEST] Real-time broadcast sent successfully`);
+    } catch (broadcastError) {
+      console.warn(`⚠️ [TEST] Broadcasting failed (not critical):`, broadcastError);
+    }
+    
     return {
       success: true,
       message: 'Test notification created',
@@ -953,6 +995,19 @@ export const createLeaveStatusNotificationForTeacher = async (leaveData, status,
     }
 
     console.log(`✅ [LEAVE STATUS] Created notification recipient for teacher user ${teacherUser.id}`);
+    
+    // Broadcast real-time notification update to the teacher
+    try {
+      console.log(`📡 [LEAVE STATUS] Broadcasting real-time update to teacher ${teacherUser.id}...`);
+      await universalNotificationService.handleNewNotificationRecipient(
+        teacherUser.id,
+        notification.id,
+        'teacher'
+      );
+      console.log(`✅ [LEAVE STATUS] Real-time broadcast sent successfully`);
+    } catch (broadcastError) {
+      console.warn(`⚠️ [LEAVE STATUS] Broadcasting failed (not critical):`, broadcastError);
+    }
 
     return {
       success: true,

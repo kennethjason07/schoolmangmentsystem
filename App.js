@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { runNetworkDiagnostics } from './src/utils/networkDiagnostics';
 import { enableRoleIdInterceptor } from './src/utils/roleIdInterceptor';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { TenantProvider } from './src/contexts/TenantContext';
 import { AuthProvider } from './src/utils/AuthContext';
 import { SelectedStudentProvider } from './src/contexts/SelectedStudentContext';
@@ -17,13 +18,15 @@ export default function App() {
   }, []);
 
   return (
-    <TenantProvider>
-      <AuthProvider>
-        <SelectedStudentProvider>
-          <AppNavigator />
-          <StatusBar style="auto" />
-        </SelectedStudentProvider>
-      </AuthProvider>
-    </TenantProvider>
+    <SafeAreaProvider>
+      <TenantProvider>
+        <AuthProvider>
+          <SelectedStudentProvider>
+            <AppNavigator />
+            <StatusBar style="auto" />
+          </SelectedStudentProvider>
+        </AuthProvider>
+      </TenantProvider>
+    </SafeAreaProvider>
   );
 }

@@ -1,0 +1,195 @@
+{
+  "expo": {
+    "name": "VidyaSetu - School Management",
+    "slug": "vidyasetu-school-management",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.vidyasetu.schoolmanagement",
+      "buildNumber": "1.0.0",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app uses the camera to take photos for profile pictures and document uploads.",
+        "NSMicrophoneUsageDescription": "This app uses the microphone to record audio messages in chat.",
+        "NSPhotoLibraryUsageDescription": "This app accesses the photo library to select images for profiles and attachments."
+      },
+      "config": {
+        "googleMobileAdsAppId": "ca-app-pub-xxxxxxxxxxxxxxxx~xxxxxxxxxx"
+      }
+    },
+    "android": {
+      "package": "com.vidyasetu.schoolmanagement",
+      "versionCode": 1,
+      "compileSdkVersion": 34,
+      "targetSdkVersion": 34,
+      "buildToolsVersion": "34.0.0",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_WIFI_STATE",
+        "android.permission.WAKE_LOCK",
+        "android.permission.VIBRATE",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.USE_BIOMETRIC",
+        "com.android.vending.BILLING"
+      ],
+      "config": {
+        "googleMobileAdsAppId": "ca-app-pub-xxxxxxxxxxxxxxxx~xxxxxxxxxx"
+      },
+      "googleServicesFile": "./google-services.json"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "static",
+      "config": {
+        "firebase": {
+          "apiKey": "your-web-api-key",
+          "authDomain": "your-project.firebaseapp.com",
+          "projectId": "your-project-id",
+          "storageBucket": "your-project-id.appspot.com",
+          "messagingSenderId": "123456789",
+          "appId": "1:123456789:web:abcdefghijklmnop"
+        }
+      }
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#2196F3",
+          "defaultChannel": "default",
+          "sounds": [
+            "./assets/sounds/message_tone.wav",
+            "./assets/sounds/notification_tone.wav",
+            "./assets/sounds/urgent_tone.wav"
+          ],
+          "modes": ["production", "development"]
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34,
+            "buildToolsVersion": "34.0.0",
+            "proguardMinifyEnabled": true,
+            "enableProguardInReleaseBuilds": true
+          },
+          "ios": {
+            "deploymentTarget": "11.0"
+          }
+        }
+      ],
+      [
+        "@react-native-async-storage/async-storage",
+        {
+          "useFramework": "static"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow VidyaSetu to access your camera to take photos for profiles and documents."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow VidyaSetu to access your photos to upload profile pictures and attachments.",
+          "savePhotosPermission": "Allow VidyaSetu to save photos to your gallery.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      [
+        "expo-document-picker",
+        {
+          "iCloudContainerEnvironment": "Production"
+        }
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/Roboto-Regular.ttf",
+            "./assets/fonts/Roboto-Bold.ttf"
+          ]
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "eas": {
+        "projectId": "your-eas-project-id"
+      },
+      "supabaseUrl": "https://your-project.supabase.co",
+      "supabaseAnonKey": "your-supabase-anon-key",
+      "googleWebClientId": "your-google-web-client-id",
+      "googleAndroidClientId": "your-google-android-client-id",
+      "googleIosClientId": "your-google-ios-client-id"
+    },
+    "owner": "your-expo-username",
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/your-eas-project-id"
+    },
+    "notification": {
+      "icon": "./assets/notification-icon.png",
+      "color": "#2196F3",
+      "iosDisplayInForeground": true,
+      "androidMode": "default",
+      "androidCollapsedTitle": "New school update"
+    }
+  }
+}
+
+// Additional configuration notes:
+// 
+// 1. Replace "your-expo-project-id" with your actual Expo project ID
+// 2. Replace "your-eas-project-id" with your actual EAS project ID  
+// 3. Replace Supabase URLs and keys with your actual values
+// 4. Replace Google client IDs with your actual OAuth client IDs
+// 5. Add your actual Google Services file (google-services.json) for Android
+// 6. Create notification sound files in assets/sounds/ directory
+// 7. Create notification icons in appropriate sizes:
+//    - notification-icon.png (96x96px for Android)
+//    - icon.png (1024x1024px)
+//    - adaptive-icon.png (1024x1024px for Android)
+//    - favicon.png (48x48px for web)
+//    - splash.png (1284x2778px for iOS, 1080x1920px for Android)
+
+// Sound file specifications:
+// - message_tone.wav: Light, pleasant sound for chat messages (1-2 seconds)
+// - notification_tone.wav: Professional sound for school notifications (2-3 seconds)  
+// - urgent_tone.wav: Attention-grabbing sound for urgent alerts (3-4 seconds)
+
+// Icon specifications:
+// - notification-icon.png: Simple, monochrome icon that looks good at small sizes
+// - Should be white/transparent with alpha channel
+// - Avoid fine details that won't be visible at 24dp size
+// - Test on both light and dark backgrounds

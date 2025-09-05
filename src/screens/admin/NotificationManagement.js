@@ -3,6 +3,7 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, TextInput, S
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, TABLES, dbHelpers, getUserTenantId } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
+import universalNotificationService from '../../services/UniversalNotificationService';
 import Header from '../../components/Header';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import { formatToLocalTime } from '../../utils/timeUtils';
@@ -955,6 +956,26 @@ const NotificationManagement = () => {
       }
       
       console.log('💾 [NOTIF_CREATE] Creation process completed successfully!');
+      
+      // Step 5: Broadcast real-time notification updates to trigger badge refreshes
+      if (recipients.length > 0) {
+        try {
+          console.log('📡 [NOTIF_CREATE] Broadcasting new notification to users...');
+          const recipientUserIds = recipients.map(r => r.recipient_id);
+          
+          // Broadcast to each user individually for instant badge updates
+          await universalNotificationService.broadcastNewNotificationToUsers(
+            recipientUserIds,
+            notificationResult.id,
+            createForm.type || 'General'
+          );
+          
+          console.log('✅ [NOTIF_CREATE] Real-time broadcasts sent successfully');
+        } catch (broadcastError) {
+          console.warn('⚠️ [NOTIF_CREATE] Broadcasting failed (not critical):', broadcastError);
+          // Continue even if broadcasting fails - the notifications were created successfully
+        }
+      }
       
       // Create success message with role breakdown
       let successMessage = `Notification created successfully!\n`;

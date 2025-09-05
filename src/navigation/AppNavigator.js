@@ -12,6 +12,9 @@ import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 import LoadingScreen from '../screens/LoadingScreen';
 import { useAuth } from '../utils/AuthContext';
 import MessageBadge from '../components/MessageBadge';
+import UniversalNotificationBadge from '../components/UniversalNotificationBadge';
+import InAppNotificationBanner from '../components/InAppNotificationBanner';
+import { navigationRef } from '../services/NavigationService';
 // Admin Screens
 import AdminDashboard from '../screens/admin/AdminDashboard';
 import ManageClasses from '../screens/admin/ManageClasses';
@@ -91,6 +94,7 @@ import StudentFeePayment from '../screens/student/FeePayment';
 // Universal Screens
 import ProfileScreen from '../screens/universal/ProfileScreen';
 import SettingsScreen from '../screens/universal/SettingsScreen';
+import NotificationSettings from '../screens/universal/NotificationSettings';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -175,12 +179,12 @@ function TeacherTabNavigator() {
           
           const icon = <Ionicons name={iconName} size={size} color={color} />;
           
-          // Add badge for Chat tab
+          // Add badge for Chat tab  
           if (route.name === 'Chat') {
             return (
               <View style={{ position: 'relative' }}>
                 {icon}
-                <MessageBadge userType="teacher" />
+                <UniversalNotificationBadge />
               </View>
             );
           }
@@ -249,7 +253,7 @@ function ParentTabNavigator() {
             return (
               <View style={{ position: 'relative' }}>
                 {icon}
-                <MessageBadge userType="parent" />
+                <UniversalNotificationBadge />
               </View>
             );
           }
@@ -318,7 +322,7 @@ function StudentTabNavigator() {
             return (
               <View style={{ position: 'relative' }}>
                 {icon}
-                <MessageBadge userType="student" />
+                <UniversalNotificationBadge />
               </View>
             );
           }
@@ -375,7 +379,8 @@ export default function AppNavigator() {
   });
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
+      <InAppNotificationBanner />
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!user ? (
           // Auth Stack - when user is not authenticated
@@ -423,6 +428,7 @@ export default function AppNavigator() {
                   initialParams={{ fromAdmin: true }}
                 />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
+                <Stack.Screen name="NotificationSettings" component={NotificationSettings} />
                 <Stack.Screen name="StudentDetails" component={StudentDetails} />
                 <Stack.Screen name="StudentList" component={StudentList} />
               </>
@@ -443,6 +449,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="TeacherNotifications" component={TeacherNotifications} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
+                <Stack.Screen name="NotificationSettings" component={NotificationSettings} />
               </>
             )}
             {userType === 'parent' && (
@@ -453,6 +460,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="ParentViewHomework" component={ParentViewHomework} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
+                <Stack.Screen name="NotificationSettings" component={NotificationSettings} />
               </>
             )}
             {userType === 'student' && (
@@ -462,6 +470,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="StudentFeePayment" component={StudentFeePayment} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
+                <Stack.Screen name="NotificationSettings" component={NotificationSettings} />
                 <Stack.Screen name="StudentDetails" component={StudentDetails} />
               </>
             )}

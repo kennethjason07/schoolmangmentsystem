@@ -22,6 +22,7 @@ import { useAuth } from '../../utils/AuthContext';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { formatToLocalTime } from '../../utils/timeUtils';
 import { getParentNotifications, markNotificationAsRead } from '../../utils/gradeNotificationHelpers';
+import universalNotificationService from '../../services/UniversalNotificationService';
 
 const { width } = Dimensions.get('window');
 
@@ -322,6 +323,11 @@ const Notifications = ({ navigation }) => {
         );
         
         console.log('✅ Updated local state');
+        
+        // Broadcast the notification read event to update badges
+        await universalNotificationService.broadcastNotificationRead(user.id, id);
+        console.log('✅ Broadcast notification read event');
+        
         return;
       } else {
         console.log('=== CREATING NEW RECIPIENT RECORD ===');
@@ -517,6 +523,10 @@ const Notifications = ({ navigation }) => {
       setNotifications(notifications =>
         notifications.map(n => n.id === id ? { ...n, isRead: false } : n)
       );
+      
+      // Broadcast the notification read event to update badges  
+      await universalNotificationService.broadcastNotificationRead(user.id, id);
+      console.log('✅ Broadcast notification unread event');
       
       console.log('Successfully marked notification as unread');
     } catch (error) {

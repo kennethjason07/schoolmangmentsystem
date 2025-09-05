@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase } from '../../utils/supabase';
+import universalNotificationService from '../../services/UniversalNotificationService';
 
 const TeacherNotifications = ({ navigation }) => {
   const [notifications, setNotifications] = useState([]);
@@ -177,6 +178,12 @@ const TeacherNotifications = ({ navigation }) => {
 
   const markAsRead = async (notificationId) => {
     try {
+      console.log('🔔 [TEACHER_NOTIF] Marking notification as read:', notificationId);
+      
+      // Find the notification to get its actual notification_id for broadcasting
+      const notification = notifications.find(n => n.id === notificationId);
+      const actualNotificationId = notification?.notificationId || notificationId;
+      
       // Update the notification_recipients table
       const { error: updateError } = await supabase
         .from('notification_recipients')
@@ -202,8 +209,19 @@ const TeacherNotifications = ({ navigation }) => {
       );
       
       console.log('📖 Marked notification as read in database:', notificationId);
+      
+      // Broadcast the notification read event for immediate badge updates
+      try {
+        console.log('📣 [TEACHER_NOTIF] Broadcasting notification read event...');
+        await universalNotificationService.broadcastNotificationRead(user.id, actualNotificationId);
+        console.log('✅ [TEACHER_NOTIF] Broadcast successful');
+      } catch (broadcastError) {
+        console.warn('⚠️ [TEACHER_NOTIF] Broadcast failed (not critical):', broadcastError);
+        // Broadcasting is not critical, continue even if it fails
+      }
+      
     } catch (error) {
-      console.error('Error marking notification as read:', error);
+      console.error('❌ Error marking notification as read:', error);
     }
   };
 
@@ -215,6 +233,8 @@ const TeacherNotifications = ({ navigation }) => {
         Alert.alert('Info', 'All notifications are already read.');
         return;
       }
+
+      console.log('🔔 [TEACHER_NOTIF] Marking all notifications as read:', unreadNotifications.length);
 
       // Update all unread notifications in notification_recipients table
       const { error: updateError } = await supabase
@@ -240,8 +260,23 @@ const TeacherNotifications = ({ navigation }) => {
       
       Alert.alert('Success', 'All notifications marked as read.');
       console.log('📖 Marked all notifications as read in database');
+      
+      // Broadcast notification read events for immediate badge updates
+      try {
+        console.log('📣 [TEACHER_NOTIF] Broadcasting bulk notification read events...');
+        // Broadcast for each unread notification
+        const broadcastPromises = unreadNotifications.map(notif => 
+          universalNotificationService.broadcastNotificationRead(user.id, notif.notificationId || notif.id)
+        );
+        await Promise.all(broadcastPromises);
+        console.log('✅ [TEACHER_NOTIF] Bulk broadcast successful');
+      } catch (broadcastError) {
+        console.warn('⚠️ [TEACHER_NOTIF] Bulk broadcast failed (not critical):', broadcastError);
+        // Broadcasting is not critical, continue even if it fails
+      }
+      
     } catch (error) {
-      console.error('Error marking all notifications as read:', error);
+      console.error('❌ Error marking all notifications as read:', error);
       Alert.alert('Error', 'Failed to mark notifications as read.');
     }
   };

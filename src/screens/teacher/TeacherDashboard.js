@@ -10,7 +10,9 @@ import { Platform } from 'react-native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import MessageBadge from '../../components/MessageBadge';
-import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCount';
+import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificationCount';
+import DebugBadge from '../../components/DebugBadge';
+import NotificationTester from '../../components/NotificationTester';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -946,23 +948,23 @@ function groupAndSortSchedule(schedule) {
     });
   };
 
-  // Use custom hook for unread notification count from notification_recipients table
-  const { unreadCount = 0, loading: notificationLoading, error: notificationError, refresh: refreshNotificationCount } = useUnreadNotificationCount('Teacher') || {};
+  // Use universal notification count hook for real-time badge updates
+  const { totalCount: unreadCount = 0, loading: notificationLoading, refresh: refreshNotificationCount } = useUniversalNotificationCount({
+    autoRefresh: true,
+    realTime: true,
+    onCountChange: (counts) => {
+      console.log('🔔 [TeacherDashboard] Notification counts updated:', counts);
+    }
+  }) || {};
   
   // Debug the notification count only when needed
-  // console.log('📱 TeacherDashboard - Notification count debug:', {
-  //   unreadCount,
-  //   notificationLoading,
-  //   notificationError,
-  //   userId: user?.id
-  // });
+  console.log('📱 TeacherDashboard - Universal notification count:', {
+    unreadCount,
+    notificationLoading,
+    userId: user?.id
+  });
 
-  // Force refresh notification count when dashboard loads
-  useEffect(() => {
-    if (user?.id && refreshNotificationCount) {
-      refreshNotificationCount();
-    }
-  }, [user?.id, refreshNotificationCount]);
+  // No need for manual refresh - universal hook handles everything automatically
   
   // Function to fetch attendance analytics separately after dashboard loads
   const fetchAttendanceAnalytics = async (classMap) => {
@@ -1933,6 +1935,28 @@ function groupAndSortSchedule(schedule) {
                 <Text style={{ color: '#388e3c', fontWeight: 'bold' }}>{ann.message}</Text>
               </View>
             ))}
+          </View>
+        </View>
+
+        {/* Debug Section - Notification Testing */}
+        <View style={styles.section}>
+          <View style={styles.sectionTitleContainer}>
+            <View style={styles.sectionIcon}>
+              <Ionicons name="bug" size={20} color="#856404" />
+            </View>
+            <Text style={[styles.sectionTitle, { color: '#856404' }]}>🔧 Debug Tools (Teacher)</Text>
+          </View>
+          
+          {/* Debug Badge */}
+          <View style={styles.debugContainer}>
+            <Text style={styles.debugLabel}>Message Count Debug:</Text>
+            <DebugBadge />
+          </View>
+          
+          {/* Notification Tester */}
+          <View style={styles.debugContainer}>
+            <Text style={styles.debugLabel}>Notification Test Tools:</Text>
+            <NotificationTester />
           </View>
         </View>
       </ScrollView>
@@ -3111,6 +3135,22 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     width: 60,
     height: 60,
+  },
+
+  // Debug Section Styles
+  debugContainer: {
+    backgroundColor: '#fff3cd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#ffeaa7',
+  },
+  debugLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#856404',
+    marginBottom: 8,
   },
 });
 

@@ -1,4 +1,5 @@
 import { supabase, TABLES } from './supabase';
+import universalNotificationService from '../services/UniversalNotificationService';
 
 /**
  * Helper functions for bulk marks notifications
@@ -330,6 +331,19 @@ export async function createBulkMarksNotifications(marksData, exam, adminUserId 
           })
           .eq('notification_id', notification.id)
           .eq('recipient_id', parent.id);
+        
+        // Broadcast real-time notification update for instant badge refresh
+        try {
+          console.log(`📡 [MARKS] Broadcasting real-time update to ${parent.full_name} (${parent.id})`);
+          await universalNotificationService.handleNewNotificationRecipient(
+            parent.id,
+            notification.id,
+            'parent'
+          );
+          console.log(`✅ [MARKS] Real-time broadcast sent successfully`);
+        } catch (broadcastError) {
+          console.warn(`⚠️ [MARKS] Broadcasting failed (not critical):`, broadcastError);
+        }
 
         // Create message record using correct schema fields
         const { error: messageError } = await supabase

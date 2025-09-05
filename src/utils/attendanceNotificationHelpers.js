@@ -1,4 +1,5 @@
 import { supabase, TABLES } from './supabase';
+import universalNotificationService from '../services/UniversalNotificationService';
 
 /**
  * Find parent user accounts linked to a student
@@ -258,6 +259,20 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
     }
     
     console.log(`✅ Created ${recipientData.length} notification recipients`);
+    
+    // Broadcast real-time notification updates to all parent users for instant badge refresh
+    try {
+      console.log(`📡 [ATTENDANCE NOTIFICATION] Broadcasting real-time updates to ${uniqueParentUsers.length} parents...`);
+      const parentUserIds = uniqueParentUsers.map(pu => pu.userId);
+      await universalNotificationService.broadcastNewNotificationToUsers(
+        parentUserIds,
+        notificationData.id,
+        'Absentee'
+      );
+      console.log(`✅ [ATTENDANCE NOTIFICATION] Real-time broadcasts sent successfully`);
+    } catch (broadcastError) {
+      console.warn(`⚠️ [ATTENDANCE NOTIFICATION] Broadcasting failed (not critical):`, broadcastError);
+    }
     
     return {
       success: true,

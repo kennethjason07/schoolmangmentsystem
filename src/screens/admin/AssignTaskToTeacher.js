@@ -17,7 +17,7 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import DropDownPicker from 'react-native-dropdown-picker';
-import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
+import { supabase, dbHelpers, TABLES, getUserTenantId } from '../../utils/supabase';
 import { useTenant } from '../../contexts/TenantContext';
 
 const { width } = Dimensions.get('window');

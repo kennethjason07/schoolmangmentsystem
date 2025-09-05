@@ -23,6 +23,8 @@ import { useSelectedStudent } from '../../contexts/SelectedStudentContext';
 import { useFocusEffect } from '@react-navigation/native';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCount';
+import DebugBadge from '../../components/DebugBadge';
+import NotificationTester from '../../components/NotificationTester';
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -3420,6 +3422,26 @@ const ParentDashboard = ({ navigation }) => {
           />
         </View>
 
+        {/* Debug Section - Notification Testing */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>🔧 Debug Tools</Text>
+            <Text style={styles.viewAllText}>Testing Only</Text>
+          </View>
+          
+          {/* Debug Badge */}
+          <View style={styles.debugContainer}>
+            <Text style={styles.debugLabel}>Message Count Debug:</Text>
+            <DebugBadge />
+          </View>
+          
+          {/* Notification Tester */}
+          <View style={styles.debugContainer}>
+            <Text style={styles.debugLabel}>Notification Test Tools:</Text>
+            <NotificationTester />
+          </View>
+        </View>
+
       </ScrollView>
 
       {/* Attendance Details Modal */}
@@ -4484,6 +4506,22 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     marginLeft: 8,
     fontWeight: '500',
+  },
+
+  // Debug Section Styles
+  debugContainer: {
+    backgroundColor: '#fff3cd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#ffeaa7',
+  },
+  debugLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#856404',
+    marginBottom: 8,
   },
 });
 
