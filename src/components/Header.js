@@ -8,7 +8,7 @@ import UniversalNotificationBadge from './UniversalNotificationBadge';
 import DebugBadge from './DebugBadge';
 import universalNotificationService from '../services/UniversalNotificationService';
 
-const Header = ({ title, showBack = false, showProfile = true, showNotifications = false, onProfilePress, onNotificationsPress, unreadCount = 0 }) => {
+const Header = ({ title, showBack = false, showProfile = true, showNotifications = false, onProfilePress, onNotificationsPress, unreadCount = 0, rightComponent }) => {
   const navigation = useNavigation();
   const { user: authUser, userType } = useAuth();
   const [userProfileUrl, setUserProfileUrl] = useState(null);
@@ -85,46 +85,53 @@ const Header = ({ title, showBack = false, showProfile = true, showNotifications
         <Text style={styles.title}>{title}</Text>
       </View>
       <View style={styles.rightSection}>
-        {showNotifications && (
-          <TouchableOpacity 
-            onPress={onNotificationsPress || (() => navigation.navigate(getNotificationScreen()))}
-            style={styles.notificationButton}
-          >
-            <Ionicons 
-              name="notifications" 
-              size={24} 
-              color="#333"
-            />
-            <UniversalNotificationBadge />
-          </TouchableOpacity>
-        )}
-        {showProfile && authUser && userType && (
-          <TouchableOpacity 
-            onPress={onProfilePress || (() => {
-              try {
-                navigation.navigate('Profile');
-              } catch (error) {
-                console.warn('Profile navigation failed:', error);
-                // Fallback to settings if Profile isn't available
-                try {
-                  navigation.navigate('Settings');
-                } catch (settingsError) {
-                  console.warn('Settings navigation also failed:', settingsError);
-                }
-              }
-            })} 
-            style={styles.profileButton}
-          >
-            {userProfileUrl ? (
-              <Image 
-                source={{ uri: userProfileUrl }} 
-                style={styles.profileImage}
-                onError={() => setUserProfileUrl(null)}
-              />
-            ) : (
-              <Ionicons name="person-circle" size={32} color="#2196F3" />
+        {/* Custom right component takes priority */}
+        {rightComponent ? (
+          rightComponent()
+        ) : (
+          <>
+            {showNotifications && (
+              <TouchableOpacity 
+                onPress={onNotificationsPress || (() => navigation.navigate(getNotificationScreen()))}
+                style={styles.notificationButton}
+              >
+                <Ionicons 
+                  name="notifications" 
+                  size={24} 
+                  color="#333"
+                />
+                <UniversalNotificationBadge />
+              </TouchableOpacity>
             )}
-          </TouchableOpacity>
+            {showProfile && authUser && userType && (
+              <TouchableOpacity 
+                onPress={onProfilePress || (() => {
+                  try {
+                    navigation.navigate('Profile');
+                  } catch (error) {
+                    console.warn('Profile navigation failed:', error);
+                    // Fallback to settings if Profile isn't available
+                    try {
+                      navigation.navigate('Settings');
+                    } catch (settingsError) {
+                      console.warn('Settings navigation also failed:', settingsError);
+                    }
+                  }
+                })} 
+                style={styles.profileButton}
+              >
+                {userProfileUrl ? (
+                  <Image 
+                    source={{ uri: userProfileUrl }} 
+                    style={styles.profileImage}
+                    onError={() => setUserProfileUrl(null)}
+                  />
+                ) : (
+                  <Ionicons name="person-circle" size={32} color="#2196F3" />
+                )}
+              </TouchableOpacity>
+            )}
+          </>
         )}
       </View>
     </View>

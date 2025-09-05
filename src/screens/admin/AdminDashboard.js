@@ -32,7 +32,6 @@ import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../..
 import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificationCount';
 import { fixUserSetup, checkUserSetup } from '../../utils/fixUserSetup';
 import { createTestAdminNotification, checkAdminNotificationCounts } from '../../utils/adminNotificationTest';
-import RealtimeDebugPanel from '../../components/RealtimeDebugPanel';
 
 const { width } = Dimensions.get('window');
 
@@ -1182,8 +1181,6 @@ const AdminDashboard = ({ navigation }) => {
           />
         }
       >
-        {/* Debug Panel for Real-time Testing */}
-        <RealtimeDebugPanel />
         
         {/* Welcome Section - Modern gradient design */}
         <View style={styles.welcomeSection}>
