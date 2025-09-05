@@ -1,5 +1,5 @@
 {
-  "name": "vidyasethu",
+  "name": "vidyasetu",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -68,12 +68,43 @@
     "react-native-url-polyfill": "^2.0.0",
     "react-native-vector-icons": "^10.2.0",
     "react-native-web": "^0.20.0",
-    "react-native-webview": "^13.13.5",
+    "react-native-webview": "13.13.5",
     "readable-stream": "^4.7.0",
-    "victory-native": "^41.17.4"
+    "victory-native": "^41.4.0"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
+  },
+  "overrides": {
+    "victory-native": {
+      "@shopify/react-native-skia": "v2.0.0-next.4"
+    }
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "@faker-js/faker",
+          "@supabase/functions-js",
+          "@supabase/realtime-js",
+          "@supabase/storage-js",
+          "base-64",
+          "chart.js",
+          "datetimepicker",
+          "install",
+          "jspdf",
+          "jspdf-autotable",
+          "pdfmake",
+          "process",
+          "react-chartjs-2",
+          "react-datepicker",
+          "react-native-vector-icons",
+          "readable-stream",
+          "react-native-chart-kit",
+          "react-native-crypto"
+        ]
+      }
+    }
   },
   "private": true
 }
