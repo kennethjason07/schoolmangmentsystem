@@ -13,6 +13,8 @@ import {
   FlatList,
   Dimensions,
   Platform,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -678,17 +680,23 @@ const LeaveManagement = ({ navigation }) => {
   }
 
   return (
-    <View style={styles.container}>
-      {/* Custom Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#333" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Leave Management (Admin)</Text>
-        <View style={styles.headerRight}>
-          <Text style={styles.countBadge}>{filteredApplications.length}</Text>
+    <SafeAreaView style={styles.safeContainer}>
+      <StatusBar 
+        barStyle="dark-content" 
+        backgroundColor="#FFFFFF" 
+        translucent={false}
+      />
+      <View style={styles.container}>
+        {/* Custom Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Leave Management (Admin)</Text>
+          <View style={styles.headerRight}>
+            <Text style={styles.countBadge}>{filteredApplications.length}</Text>
+          </View>
         </View>
-      </View>
       
       
       {/* Modern Filters */}
@@ -1311,10 +1319,15 @@ const LeaveManagement = ({ navigation }) => {
       </Modal>
       
     </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
   container: {
     flex: 1,
     backgroundColor: '#F8FAFC',
@@ -1802,7 +1815,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingTop: Platform.OS === 'ios' ? 50 : 20,
+    paddingBottom: 16,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',

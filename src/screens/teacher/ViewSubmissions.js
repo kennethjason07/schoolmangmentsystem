@@ -121,12 +121,14 @@ const ViewSubmissions = () => {
             )
           `)
           .eq('assignment_type', 'assignment')
+          .eq('tenant_id', teacher.tenant_id)
           .in('assignment_id', 
             // Subquery to get assignment IDs created by this teacher
             await supabase
               .from(TABLES.ASSIGNMENTS)
               .select('id')
               .eq('assigned_by', teacher.id)
+              .eq('tenant_id', teacher.tenant_id)
               .then(({ data }) => data?.map(a => a.id) || [])
           )
           .order('submitted_at', { ascending: false });
@@ -140,6 +142,7 @@ const ViewSubmissions = () => {
               .from(TABLES.ASSIGNMENTS)
               .select('title, description, due_date, subjects(name)')
               .eq('id', submission.assignment_id)
+              .eq('tenant_id', teacher.tenant_id)
               .single();
 
             if (!aError && assignmentData) {
@@ -179,12 +182,14 @@ const ViewSubmissions = () => {
             )
           `)
           .eq('assignment_type', 'homework')
+          .eq('tenant_id', teacher.tenant_id)
           .in('assignment_id', 
             // Subquery to get homework IDs created by this teacher
             await supabase
               .from(TABLES.HOMEWORKS)
               .select('id')
               .eq('teacher_id', teacher.id)
+              .eq('tenant_id', teacher.tenant_id)
               .then(({ data }) => data?.map(h => h.id) || [])
           )
           .order('submitted_at', { ascending: false });
@@ -198,6 +203,7 @@ const ViewSubmissions = () => {
               .from(TABLES.HOMEWORKS)
               .select('title, description, due_date, subjects(name)')
               .eq('id', submission.assignment_id)
+              .eq('tenant_id', teacher.tenant_id)
               .single();
 
             if (!hError && homeworkData) {

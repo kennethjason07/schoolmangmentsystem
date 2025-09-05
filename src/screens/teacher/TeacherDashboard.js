@@ -588,7 +588,7 @@ function groupAndSortSchedule(schedule) {
             Alert.alert(
               'Upcoming Events',
               (currentEventsForStats?.length || 0) > 0 ?
-                currentEventsForStats.map(e => `• ${e.title} (${new Date(e.event_date).toLocaleDateString()})`).join('\n') :
+                currentEventsForStats.map(e => `• ${e.title} (${new Date(e.event_date).toLocaleDateString('en-GB')})`).join('\n') :
                 'No upcoming events scheduled.',
               [{ text: 'OK' }]
             );
@@ -1840,7 +1840,7 @@ function groupAndSortSchedule(schedule) {
                   onPress={() => {
                     Alert.alert(
                       event.title,
-                      `${event.description}\n\nDate: ${new Date(event.date).toLocaleDateString('en-US', {
+                      `${event.description}\n\nDate: ${new Date(event.date).toLocaleDateString('en-GB', {
                         weekday: 'long',
                         year: 'numeric',
                         month: 'long',
@@ -1876,9 +1876,9 @@ function groupAndSortSchedule(schedule) {
                     <View style={styles.eventDateTime}>
                       <Ionicons name="calendar" size={14} color="#666" />
                       <Text style={styles.eventDate}>
-                        {new Date(event.date).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric'
+                        {new Date(event.date).toLocaleDateString('en-GB', {
+                          day: 'numeric',
+                          month: 'short'
                         })}
                       </Text>
                       <Ionicons name="time" size={14} color="#666" style={{ marginLeft: 12 }} />
