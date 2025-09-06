@@ -398,6 +398,7 @@ const ViewAssignments = () => {
         assignment_id: selectedAssignment.id,
         assignment_type: selectedAssignment.type, // 'assignment' or 'homework'
         student_id: student.id,
+        tenant_id: student.tenant_id, // Add tenant_id for multi-tenant data isolation
         submitted_files: uploadedFiles.map(file => ({
           name: file.name,
           size: file.size,

@@ -75,11 +75,15 @@ const TakeAttendance = () => {
 
       assignedSubjects.forEach(subject => {
         if (subject.subjects?.classes) {
-          classMap.set(subject.subjects.classes.id, {
-            id: subject.subjects.classes.id,
-            class_name: subject.subjects.classes.class_name,
-            section: subject.subjects.classes.section
-          });
+          // Create a unique key combining class_name and section to avoid duplicates
+          const uniqueKey = `${subject.subjects.classes.class_name}-${subject.subjects.classes.section}`;
+          if (!classMap.has(uniqueKey)) {
+            classMap.set(uniqueKey, {
+              id: subject.subjects.classes.id,
+              class_name: subject.subjects.classes.class_name,
+              section: subject.subjects.classes.section
+            });
+          }
         }
       });
 
@@ -87,7 +91,8 @@ const TakeAttendance = () => {
       
       setClasses(classList);
       
-      if (classList.length > 0) {
+      // Only set default selection if no class is currently selected
+      if (classList.length > 0 && !selectedClass) {
         setSelectedClass(classList[0].id);
         setViewClass(classList[0].id);
         setSelectedSection(classList[0].section);
@@ -484,12 +489,22 @@ const TakeAttendance = () => {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
+      // Store current selection before refreshing
+      const currentSelectedClass = selectedClass;
+      const currentSelectedSection = selectedSection;
+      
       // Refresh all data
       await Promise.all([
         fetchClassesAndStudents(),
         selectedClass ? fetchStudents() : Promise.resolve(),
         (selectedClass && selectedDate && students.length > 0) ? fetchExistingAttendance() : Promise.resolve()
       ]);
+      
+      // Restore selection if it was lost during refresh
+      if (currentSelectedClass && !selectedClass) {
+        setSelectedClass(currentSelectedClass);
+        setSelectedSection(currentSelectedSection);
+      }
     } catch (error) {
       console.error('Error during refresh:', error);
       Alert.alert('Error', 'Failed to refresh data. Please try again.');

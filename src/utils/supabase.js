@@ -1619,6 +1619,7 @@ export const dbHelpers = {
             gender,
             address,
             class_id,
+            tenant_id,
             classes(id, class_name, section)
           )
         `)
