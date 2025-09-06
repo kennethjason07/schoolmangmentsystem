@@ -6,7 +6,9 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "web-optimized": "node start-web-optimized.js",
+    "web-fast": "expo start --web --clear"
   },
   "dependencies": {
     "@craftzdog/react-native-buffer": "^6.1.0",

@@ -694,7 +694,7 @@ const LeaveManagement = ({ navigation }) => {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Leave Management (Admin)</Text>
           <View style={styles.headerRight}>
-            <Text style={styles.countBadge}>{filteredApplications.length}</Text>
+            {/* Count badge removed */}
           </View>
         </View>
       
@@ -1815,7 +1815,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 50 : 20,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
     paddingBottom: 16,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,

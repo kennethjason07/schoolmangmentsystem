@@ -23,6 +23,11 @@ import * as Animatable from 'react-native-animatable';
 // Import VidyaSethu logo with fallback
 const VidyaSethuLogo = require('../../../assets/logo-white.png');
 
+// Import role-specific logos
+const TeacherLogo = require('../../../logo-teacher.jpg');
+const ParentLogo = require('../../../parents-logo.jpg');
+const StudentLogo = require('../../../student-logo-vector.jpg');
+
 const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -35,10 +40,10 @@ const LoginScreen = ({ navigation }) => {
   const { signIn } = useAuth();
 
   const roles = [
-    { key: 'admin', label: 'Admin', icon: 'school', color: '#1976d2' },
-    { key: 'teacher', label: 'Teacher', icon: 'person', color: '#4CAF50' },
-    { key: 'parent', label: 'Parent', icon: 'people', color: '#FF9800' },
-    { key: 'student', label: 'Student', icon: 'person-circle', color: '#9C27B0' },
+    { key: 'admin', label: 'Admin', description: 'School Management', icon: 'school', color: '#1976d2' },
+    { key: 'teacher', label: 'Teacher', description: 'Faculty Member', icon: 'person', color: '#4CAF50' },
+    { key: 'parent', label: 'Parent', description: 'Guardian', icon: 'people', color: '#FF9800' },
+    { key: 'student', label: 'Student', description: 'Learner', icon: 'person-circle', color: '#9C27B0' },
   ];
 
   // Validate email
@@ -240,71 +245,108 @@ const LoginScreen = ({ navigation }) => {
                     ]}
                     onPress={() => setSelectedRole(role.key)}
                   >
-                    <Ionicons 
-                      name={role.icon} 
-                      size={24} 
-                      color={selectedRole === role.key ? '#fff' : '#666'} 
-                    />
-                    <Text style={[
-                      styles.roleButtonText,
-                      selectedRole === role.key && { color: '#fff' }
-                    ]}>
-                      {role.label}
-                    </Text>
+                    <View style={styles.roleButtonContent}>
+                      {/* Show logo for teacher, parent, student; icon for admin */}
+                      {role.key === 'teacher' ? (
+                        <Image 
+                          source={TeacherLogo} 
+                          style={styles.roleLogo} 
+                          resizeMode="contain"
+                        />
+                      ) : role.key === 'parent' ? (
+                        <Image 
+                          source={ParentLogo} 
+                          style={styles.roleLogo} 
+                          resizeMode="contain"
+                        />
+                      ) : role.key === 'student' ? (
+                        <Image 
+                          source={StudentLogo} 
+                          style={styles.roleLogo} 
+                          resizeMode="contain"
+                        />
+                      ) : (
+                        <Ionicons 
+                          name={role.icon} 
+                          size={28} 
+                          color={selectedRole === role.key ? '#fff' : role.color} 
+                        />
+                      )}
+                      <View style={styles.roleButtonTextContainer}>
+                        <Text style={[
+                          styles.roleButtonTitle,
+                          selectedRole === role.key && { color: '#fff' }
+                        ]}>
+                          {role.label}
+                        </Text>
+                        <Text style={[
+                          styles.roleButtonDescription,
+                          selectedRole === role.key && { color: 'rgba(255,255,255,0.9)' }
+                        ]}>
+                          {role.description}
+                        </Text>
+                      </View>
+                    </View>
                   </TouchableOpacity>
                 ))}
               </View>
             </View>
 
             {/* Email Input */}
-            <View style={styles.inputContainer}>
-              <Ionicons name="mail" size={24} color="#666" />
-              <TextInput
-                style={styles.input}
-                placeholder="Email"
-                placeholderTextColor="#666"
-                value={email}
-                onChangeText={(text) => {
-                  setEmail(text);
-                  validateEmail(text);
-                }}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
+            <View style={styles.inputSection}>
+              <Text style={styles.inputLabel}>Email Address</Text>
+              <View style={styles.inputContainer}>
+                <Ionicons name="mail" size={24} color="#1976d2" />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your email address"
+                  placeholderTextColor="#999"
+                  value={email}
+                  onChangeText={(text) => {
+                    setEmail(text);
+                    validateEmail(text);
+                  }}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+              {emailError && (
+                <Text style={styles.errorText}>{emailError}</Text>
+              )}
             </View>
-            {emailError && (
-              <Text style={styles.errorText}>{emailError}</Text>
-            )}
 
             {/* Password Input */}
-            <View style={styles.inputContainer}>
-              <Ionicons name="lock-closed" size={24} color="#666" />
-              <TextInput
-                style={styles.input}
-                placeholder="Password"
-                placeholderTextColor="#666"
-                value={password}
-                onChangeText={(text) => {
-                  setPassword(text);
-                  validatePassword(text);
-                }}
-                secureTextEntry={!showPassword}
-              />
-              <TouchableOpacity
-                style={styles.showPasswordButton}
-                onPress={() => setShowPassword(!showPassword)}
-              >
-                <Ionicons
-                  name={showPassword ? "eye-off" : "eye"}
-                  size={24}
-                  color="#666"
+            <View style={styles.inputSection}>
+              <Text style={styles.inputLabel}>Password</Text>
+              <View style={styles.inputContainer}>
+                <Ionicons name="lock-closed" size={24} color="#1976d2" />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your password"
+                  placeholderTextColor="#999"
+                  value={password}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    validatePassword(text);
+                  }}
+                  secureTextEntry={!showPassword}
                 />
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.showPasswordButton}
+                  onPress={() => setShowPassword(!showPassword)}
+                >
+                  <Ionicons
+                    name={showPassword ? "eye-off" : "eye"}
+                    size={24}
+                    color="#1976d2"
+                  />
+                </TouchableOpacity>
+              </View>
+              {passwordError && (
+                <Text style={styles.errorText}>{passwordError}</Text>
+              )}
             </View>
-            {passwordError && (
-              <Text style={styles.errorText}>{passwordError}</Text>
-            )}
 
             {/* Login Button */}
             <TouchableOpacity
@@ -325,20 +367,21 @@ const LoginScreen = ({ navigation }) => {
               )}
             </TouchableOpacity>
 
-            {/* Forgot Password */}
-            <TouchableOpacity
-              style={styles.forgotPasswordButton}
-              onPress={() => navigation.navigate('ForgotPassword')}
-            >
-              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-            </TouchableOpacity>
-
-            {/* Sign Up */}
-            <View style={styles.signupContainer}>
-              <Text style={styles.signupText}>Don't have an account? </Text>
-              <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
-                <Text style={styles.signupLink}>Sign Up</Text>
+            {/* Footer Section */}
+            <View style={styles.footerContainer}>
+              <TouchableOpacity 
+                style={styles.forgotPasswordButton}
+                onPress={() => navigation.navigate('ForgotPassword')}
+              >
+                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
               </TouchableOpacity>
+              
+              <View style={styles.signupContainer}>
+                <Text style={styles.signupText}>Don't have an account? </Text>
+                <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
+                  <Text style={styles.signupLink}>Sign Up</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </Animatable.View>
         </ScrollView>
@@ -451,7 +494,7 @@ const styles = StyleSheet.create({
     }),
   },
   roleContainer: {
-    marginBottom: 20,
+    marginBottom: 12,
   },
   roleLabel: {
     fontSize: 16,
@@ -484,10 +527,45 @@ const styles = StyleSheet.create({
       boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
     }),
   },
+  roleButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  roleButtonTextContainer: {
+    marginLeft: 10,
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  roleButtonTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+  },
+  roleButtonDescription: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  roleLogo: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
   roleButtonText: {
     fontSize: 14,
     marginLeft: 8,
     color: '#666',
+  },
+  inputSection: {
+    marginBottom: 8,
+  },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
   },
   inputContainer: {
     flexDirection: 'row',
@@ -496,7 +574,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 15,
     paddingVertical: 12,
-    marginBottom: 15,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: '#ddd',
   },
@@ -520,7 +598,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1976d2',
     borderRadius: 10,
     padding: 15,
-    marginTop: 20,
+    marginTop: 12,
     // Web-specific enhancements
     ...(Platform.OS === 'web' && {
       cursor: 'pointer',
@@ -540,6 +618,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
     marginLeft: 10,
+  },
+  footerContainer: {
+    marginTop: 10,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0, 0, 0, 0.1)',
   },
   forgotPasswordButton: {
     alignItems: 'flex-end',

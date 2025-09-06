@@ -40,8 +40,56 @@ if (process.env.EXPO_PLATFORM === 'web') {
 }
 
 // Enable persistent caching for faster subsequent builds
-config.cacheVersion = '1.0';
-config.cacheRoot = require('path').join(__dirname, '.metro-cache');
+config.cacheStores = [
+  {
+    store: require('metro-cache/src/stores/FileStore'),
+    options: {
+      cacheDirectory: require('path').join(__dirname, '.metro-cache'),
+      maxSize: 500 * 1024 * 1024, // 500 MB cache
+    },
+  },
+];
+
+// Improve bundle splitting
+config.serializer = {
+  ...config.serializer,
+  customSerializer: undefined, // Let metro handle serialization
+  
+  // Web-specific bundle splitting
+  ...(process.env.EXPO_PLATFORM === 'web' && {
+    // Create separate chunks for different parts of the app
+    createModuleIdFactory: () => {
+      const moduleIds = new Map();
+      let nextId = 0;
+      
+      return (path) => {
+        if (!moduleIds.has(path)) {
+          moduleIds.set(path, nextId++);
+        }
+        return moduleIds.get(path);
+      };
+    },
+    
+    // Process modules for better optimization
+    processModuleFilter: (modules) => {
+      // Filter out unnecessary modules for initial load
+      return modules.filter((module) => {
+        const path = module.path;
+        
+        // Skip heavy dependencies on initial load
+        if (path.includes('chart.js') || 
+            path.includes('victory-native') ||
+            path.includes('jspdf') ||
+            path.includes('pdfmake')) {
+          return false;
+        }
+        
+        // Keep core dependencies
+        return true;
+      });
+    },
+  }),
+};
 
 // Asset optimization for web
 if (process.env.EXPO_PLATFORM === 'web') {
