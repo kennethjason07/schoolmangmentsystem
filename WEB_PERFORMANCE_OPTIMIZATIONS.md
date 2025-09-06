@@ -25,11 +25,25 @@
 - **New**: Different app initialization for web vs mobile
 - **Files**: `App.optimized.js`
 
+### 6. **Ultra-Fast Mode (NEW)**
+- **Minimal polyfills**: Only essential polyfills loaded initially
+- **Async component loading**: All components loaded asynchronously after initial render
+- **Deferred diagnostics**: Heavy operations postponed until after UI is interactive
+- **Service Worker**: Caches static assets for faster subsequent loads
+- **Files**: `App.minimal.js`, `polyfills.minimal.js`, `index.minimal.js`, `public/sw.js`
+
 ## 🚀 How to Use
 
-### Quick Start (Recommended)
+### Ultra-Fast Mode (NEW - Recommended)
 ```bash
-npm run start-web-optimized
+npm run web-ultra-fast
+# or
+node start-web-ultra-fast.js
+```
+
+### Optimized Mode
+```bash
+npm run web-optimized
 # or
 node start-web-optimized.js
 ```

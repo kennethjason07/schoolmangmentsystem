@@ -41,7 +41,6 @@ if (process.env.EXPO_PLATFORM === 'web') {
 
 // Enable persistent caching for faster subsequent builds
 config.cacheVersion = '1.0';
-config.cacheRoot = require('path').join(__dirname, '.metro-cache');
 
 // Asset optimization for web
 if (process.env.EXPO_PLATFORM === 'web') {

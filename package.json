@@ -8,7 +8,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "web-optimized": "node start-web-optimized.js",
-    "web-fast": "expo start --web --clear"
+    "web-fast": "expo start --web --clear",
+    "web-ultra-fast": "node start-web-ultra-fast.js"
   },
   "dependencies": {
     "@craftzdog/react-native-buffer": "^6.1.0",

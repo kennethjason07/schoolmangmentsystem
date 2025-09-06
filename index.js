@@ -11,8 +11,8 @@ if (Platform.OS === 'web') {
 }
 
 import { registerRootComponent } from 'expo';
-// Use optimized App for better performance
-import App from './App.optimized';
+// Use standard App to avoid 404 issues
+import App from './App';
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
 // It also ensures that whether you load the app in Expo Go or in a native build,

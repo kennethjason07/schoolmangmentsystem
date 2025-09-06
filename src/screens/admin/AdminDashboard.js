@@ -342,6 +342,45 @@ const AdminDashboard = ({ navigation }) => {
     };
   }, []);
 
+  // Test function for admin notifications - Define before usage
+  const testAdminNotifications = async () => {
+    try {
+      Alert.alert(
+        'Test Admin Notifications',
+        'This will create a test notification for all admin users. You should see the notification badge update instantly.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Create Test',
+            onPress: async () => {
+              console.log('🧪 Starting admin notification test...');
+              const result = await createTestAdminNotification();
+              
+              if (result.success) {
+                Alert.alert(
+                  'Test Notification Created!',
+                  `Successfully sent test notification to ${result.recipientCount} admin users. Check if the notification badge updated instantly!`,
+                  [{ text: 'OK' }]
+                );
+                
+                // Also check counts for current admin
+                if (user?.id) {
+                  const counts = await checkAdminNotificationCounts(user.id);
+                  console.log('📊 Current admin notification counts:', counts);
+                }
+              } else {
+                Alert.alert('Test Failed', result.error || 'Failed to create test notification');
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error in test function:', error);
+      Alert.alert('Error', 'Failed to run notification test');
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     try {
@@ -1073,45 +1112,6 @@ const AdminDashboard = ({ navigation }) => {
 
   // Universal notification system automatically handles real-time updates
   // No manual refresh needed
-
-  // Test function for admin notifications
-  const testAdminNotifications = async () => {
-    try {
-      Alert.alert(
-        'Test Admin Notifications',
-        'This will create a test notification for all admin users. You should see the notification badge update instantly.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Create Test',
-            onPress: async () => {
-              console.log('🧪 Starting admin notification test...');
-              const result = await createTestAdminNotification();
-              
-              if (result.success) {
-                Alert.alert(
-                  'Test Notification Created!',
-                  `Successfully sent test notification to ${result.recipientCount} admin users. Check if the notification badge updated instantly!`,
-                  [{ text: 'OK' }]
-                );
-                
-                // Also check counts for current admin
-                if (user?.id) {
-                  const counts = await checkAdminNotificationCounts(user.id);
-                  console.log('📊 Current admin notification counts:', counts);
-                }
-              } else {
-                Alert.alert('Test Failed', result.error || 'Failed to create test notification');
-              }
-            }
-          }
-        ]
-      );
-    } catch (error) {
-      console.error('Error in test function:', error);
-      Alert.alert('Error', 'Failed to run notification test');
-    }
-  };
 
   const openAddActivityModal = () => {
     // This function is not fully implemented in the original file,

@@ -3,11 +3,24 @@
  * Handles platform-specific image saving and file management
  */
 import { Alert, Platform, Linking } from 'react-native';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
 
-// Optional MediaLibrary import with proper fallback
+// Optional imports with proper fallbacks for web compatibility
+let FileSystem = null;
+let Sharing = null;
 let MediaLibrary = null;
+
+try {
+  FileSystem = require('expo-file-system');
+} catch (e) {
+  console.log('📱 expo-file-system not available on this platform (likely web)');
+}
+
+try {
+  Sharing = require('expo-sharing');
+} catch (e) {
+  console.log('📱 expo-sharing not available on this platform');
+}
+
 try {
   MediaLibrary = require('expo-media-library');
 } catch (e) {
@@ -29,6 +42,12 @@ export class WindowsImageSaver {
    */
   async initializeDirectory() {
     try {
+      // Check if FileSystem is available (not available on web)
+      if (!FileSystem) {
+        console.log('🌐 FileSystem not available on web platform, skipping directory initialization');
+        return;
+      }
+
       // Use different paths based on platform
       if (this.isWindows) {
         // Windows-specific directory structure
@@ -45,8 +64,10 @@ export class WindowsImageSaver {
       }
     } catch (error) {
       console.error('Failed to initialize directory:', error);
-      // Fallback to document directory
-      this.downloadDirectory = FileSystem.documentDirectory;
+      // Fallback to document directory if available
+      if (FileSystem) {
+        this.downloadDirectory = FileSystem.documentDirectory;
+      }
     }
   }
 
@@ -272,6 +293,26 @@ export class WindowsImageSaver {
    */
   async showSaveOptions(imageData) {
     return new Promise((resolve) => {
+      // Check if we're on web where file system operations aren't available
+      if (!FileSystem) {
+        // On web, just provide a link to download the image
+        Alert.alert(
+          'Download Image',
+          'On web, you can right-click the image and select "Save image as..." or click the link below to download.',
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
+            {
+              text: 'Open Image',
+              onPress: () => {
+                Linking.openURL(imageData.file_url);
+                resolve({ success: true, method: 'web_download' });
+              }
+            }
+          ]
+        );
+        return;
+      }
+
       const options = [
         { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) }
       ];
