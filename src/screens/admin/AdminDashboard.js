@@ -367,6 +367,7 @@ const AdminDashboard = ({ navigation }) => {
     { title: 'Subjects Timetable', icon: 'calendar', color: '#607D8B', screen: 'SubjectsTimetable' }, // Stack screen
     { title: 'Attendance', icon: 'checkmark-circle', color: '#009688', screen: 'AttendanceManagement' }, // Stack screen
     { title: 'Fee Management', icon: 'card', color: '#9C27B0', screen: 'FeeManagement' }, // Stack screen
+    { title: 'Stationary Management', icon: 'cube-outline', color: '#FF5722', screen: 'StationaryManagement' }, // Stack screen
     { title: 'Expense Management', icon: 'wallet', color: '#F44336', screen: 'ExpenseManagement' }, // Stack screen
     { title: 'Exams & Marks', icon: 'document-text', color: '#795548', screen: 'ExamsMarks' }, // Stack screen
     { title: 'Report Cards', icon: 'document-text', color: '#E91E63', screen: 'ReportCardGeneration' }, // Stack screen
