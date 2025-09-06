@@ -7,6 +7,7 @@ import { format, parseISO } from 'date-fns';
 import { formatCurrency } from '../../utils/helpers';
 import { Ionicons } from '@expo/vector-icons';
 import * as Animatable from 'react-native-animatable';
+import FeeService from '../../services/FeeService';
 
 export default function FeeClassDetails() {
   const route = useRoute();
@@ -136,52 +137,118 @@ export default function FeeClassDetails() {
                   <Text style={styles.emptyText}>No students found in this class</Text>
                 </View>
               }
-              renderItem={({ item }) => (
-                <View style={styles.studentRowMulti}>
-                  <Text style={styles.studentNameMulti}>{item.full_name}</Text>
-                  <View style={{ flex: 1 }}>
-                    {allFees.length > 0 ? allFees.map(feeType => {
-                      // Find payments for this student and fee type
-                      const studentPayments = payments.filter(p => 
-                        p.student_id === item.id && p.fee_id === feeType.id
-                      );
-                      
-                      // Calculate total paid amount for this fee
-                      const paidAmount = studentPayments.reduce((sum, payment) => 
-                        sum + (payment.amount_paid || 0), 0
-                      );
-                      
-                      // Determine payment status
-                      let status = 'Unpaid';
-                      if (paidAmount >= feeType.amount) {
-                        status = 'Paid';
-                      } else if (paidAmount > 0) {
-                        status = 'Partial';
+              renderItem={({ item }) => {
+                // Use FeeService for consistent calculation across admin views
+                const [studentFeeData, setStudentFeeData] = React.useState(null);
+                const [loadingFeeData, setLoadingFeeData] = React.useState(true);
+                
+                React.useEffect(() => {
+                  const fetchStudentFeeData = async () => {
+                    try {
+                      console.log('🎯 FeeClassDetails - Using FeeService for student:', item.id);
+                      const feeServiceResult = await FeeService.getStudentFeeDetails(item.id);
+                      if (feeServiceResult.success && feeServiceResult.data) {
+                        setStudentFeeData(feeServiceResult.data);
+                        console.log('✅ FeeClassDetails - FeeService data:', {
+                          totalDue: feeServiceResult.data.fees.totalDue,
+                          totalPaid: feeServiceResult.data.fees.totalPaid,
+                          components: feeServiceResult.data.fees.components?.length
+                        });
+                      } else {
+                        console.log('⚠️ FeeClassDetails - FeeService failed, using fallback');
+                        setStudentFeeData(null);
                       }
-                      
-                      return (
-                        <View key={feeType.id} style={styles.feeTypeDueRow}>
-                          <Text style={styles.feeTypeDueTitle}>{feeType.type}:</Text>
-                          <Text style={styles.feeTypeDueAmount}>
-                            {formatCurrency(paidAmount)} / {formatCurrency(feeType.amount)}
-                          </Text>
-                          <Text 
-                            style={[styles.feeTypeDueStatus, 
-                              status === 'Paid' ? {color: '#4CAF50'} : 
-                              status === 'Partial' ? {color: '#FF9800'} : 
-                              {color: '#F44336'}
-                            ]}
-                          >
-                            {status}
-                          </Text>
-                        </View>
-                      );
-                    }) : (
-                      <Text style={styles.noFeesText}>No fee structures defined for this class</Text>
-                    )}
+                    } catch (error) {
+                      console.error('❌ FeeClassDetails - Error fetching fee data:', error);
+                      setStudentFeeData(null);
+                    } finally {
+                      setLoadingFeeData(false);
+                    }
+                  };
+                  
+                  fetchStudentFeeData();
+                }, [item.id]);
+                
+                return (
+                  <View style={styles.studentRowMulti}>
+                    <Text style={styles.studentNameMulti}>{item.full_name}</Text>
+                    <View style={{ flex: 1 }}>
+                      {loadingFeeData ? (
+                        <Text style={styles.loadingText}>Loading fee data...</Text>
+                      ) : studentFeeData?.fees?.components ? (
+                        studentFeeData.fees.components.map((component, index) => {
+                          // Determine payment status using centralized data
+                          let status = 'Unpaid';
+                          if (component.paidAmount >= component.finalAmount) {
+                            status = 'Paid';
+                          } else if (component.paidAmount > 0) {
+                            status = 'Partial';
+                          }
+                          
+                          return (
+                            <View key={index} style={styles.feeTypeDueRow}>
+                              <Text style={styles.feeTypeDueTitle}>{component.name}:</Text>
+                              <Text style={styles.feeTypeDueAmount}>
+                                {formatCurrency(component.paidAmount)} / {formatCurrency(component.finalAmount)}
+                                {component.discountAmount > 0 && (
+                                  <Text style={styles.discountText}> (₹{component.discountAmount} off)</Text>
+                                )}
+                              </Text>
+                              <Text 
+                                style={[styles.feeTypeDueStatus, 
+                                  status === 'Paid' ? {color: '#4CAF50'} : 
+                                  status === 'Partial' ? {color: '#FF9800'} : 
+                                  {color: '#F44336'}
+                                ]}
+                              >
+                                {status}
+                              </Text>
+                            </View>
+                          );
+                        })
+                      ) : allFees.length > 0 ? (
+                        // Fallback to old calculation if FeeService fails
+                        allFees.map(feeType => {
+                          const studentPayments = payments.filter(p => 
+                            p.student_id === item.id && p.fee_id === feeType.id
+                          );
+                          
+                          const paidAmount = studentPayments.reduce((sum, payment) => 
+                            sum + (payment.amount_paid || 0), 0
+                          );
+                          
+                          let status = 'Unpaid';
+                          if (paidAmount >= feeType.amount) {
+                            status = 'Paid';
+                          } else if (paidAmount > 0) {
+                            status = 'Partial';
+                          }
+                          
+                          return (
+                            <View key={feeType.id} style={styles.feeTypeDueRow}>
+                              <Text style={styles.feeTypeDueTitle}>{feeType.type}:</Text>
+                              <Text style={styles.feeTypeDueAmount}>
+                                {formatCurrency(paidAmount)} / {formatCurrency(feeType.amount)}
+                              </Text>
+                              <Text 
+                                style={[styles.feeTypeDueStatus, 
+                                  status === 'Paid' ? {color: '#4CAF50'} : 
+                                  status === 'Partial' ? {color: '#FF9800'} : 
+                                  {color: '#F44336'}
+                                ]}
+                              >
+                                {status}
+                              </Text>
+                            </View>
+                          );
+                        })
+                      ) : (
+                        <Text style={styles.noFeesText}>No fee structures defined for this class</Text>
+                      )}
+                    </View>
                   </View>
-                </View>
-              )}
+                );
+              }}
             />
           )}
           
@@ -456,5 +523,17 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     textAlign: 'center',
     marginTop: 10,
+  },
+  discountText: {
+    fontSize: 11,
+    color: '#FF9800',
+    fontStyle: 'italic',
+  },
+  loadingText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    fontStyle: 'italic',
+    marginVertical: 8,
   },
 });

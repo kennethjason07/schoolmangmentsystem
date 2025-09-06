@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
+import StudentFeeCard from '../../components/StudentFeeCard';
 import { Picker } from '@react-native-picker/picker';
 import { useNavigation } from '@react-navigation/native';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
@@ -1179,11 +1180,10 @@ const ManageStudents = () => {
               <Text style={styles.contactText}>
                 Contact: {item.parentPhone || 'Not Available'}
               </Text>
-              <Text style={styles.feesText}>
-                Fees: <Text style={item.feesStatus === 'Paid' ? styles.paidText : styles.unpaidText}>
-                  {item.feesStatus || 'Unpaid'}
-                </Text>
-              </Text>
+              <StudentFeeCard 
+                studentId={item.id}
+                compact={true}
+              />
             </View>
           </View>
 

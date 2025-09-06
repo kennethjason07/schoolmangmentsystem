@@ -6,6 +6,7 @@ import { supabase, TABLES, dbHelpers, getUserTenantId } from '../../utils/supaba
 import { useFocusEffect } from '@react-navigation/native';
 import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
+import StudentFeeCard from '../../components/StudentFeeCard';
 import LogoDisplay from '../../components/LogoDisplay';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
@@ -930,6 +931,26 @@ const StudentDashboard = ({ navigation }) => {
             ))}
           </View>
         </View>
+
+        {/* Fee Information */}
+        {studentProfile && (
+          <View style={styles.section}>
+            <View style={styles.sectionTitleContainer}>
+              <View style={styles.sectionIcon}>
+                <Ionicons name="card" size={20} color="#4CAF50" />
+              </View>
+              <Text style={styles.sectionTitle}>Fee Information</Text>
+              <TouchableOpacity onPress={() => handleCardNavigation('fees')}>
+                <Text style={styles.viewAllText}>View Details</Text>
+              </TouchableOpacity>
+            </View>
+            <StudentFeeCard 
+              studentId={studentProfile.id}
+              compact={false}
+              style={{ marginBottom: 0 }}
+            />
+          </View>
+        )}
 
         {/* Quick Actions */}
         <View style={styles.section}>

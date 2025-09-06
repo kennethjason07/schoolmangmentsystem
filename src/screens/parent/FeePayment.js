@@ -26,6 +26,7 @@ import { supabase, TABLES, dbHelpers, isValidUUID } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import { format } from 'date-fns';
 import { getSchoolLogoBase64, getLogoHTML, getReceiptHeaderCSS } from '../../utils/logoUtils';
+import FeeService from '../../services/FeeService';
 
 const { width } = Dimensions.get('window');
 
@@ -102,94 +103,117 @@ const FeePayment = () => {
         let studentPayments = null;
         let paymentsError = null;
 
-        // Only fetch data if we have valid student details
+        // Only fetch data if we have valid student details - use centralized FeeService
         if (studentDetails && isValidUUID(studentDetails.id)) {
-          console.log('FeePayment - Fetching fee structure and payments for student:', studentDetails.id, 'class:', studentDetails.class_id);
+          console.log('🎯 FeePayment - Using NEW class-based FeeService for student:', studentDetails.id);
           
-          // Fetch both fee structure and payments in parallel for better performance
-          const [feeResult, paymentResult] = await Promise.all([
-            // Get fee structure for class and individual student fees
-            supabase
-              .from('fee_structure')
-              .select(`
-                id,
-                academic_year,
-                class_id,
-                student_id,
-                fee_component,
-                amount,
-                base_amount,
-                discount_applied,
-                due_date,
-                created_at,
-                classes(id, class_name, section, academic_year)
-              `)
-              .or(`class_id.eq.${studentDetails.class_id},student_id.eq.${studentDetails.id}`)
-              .eq('academic_year', '2024-2025')
-              .order('due_date', { ascending: true }),
+          // Use the NEW class-based FeeService for proper fee structure
+          const feeServiceResult = await FeeService.getStudentFeesWithClassBase(studentDetails.id);
+          
+          if (feeServiceResult.success && feeServiceResult.data) {
+            const feeData = feeServiceResult.data;
+            console.log('Parent FeePayment - FeeService successful:', {
+              totalDue: feeData.fees.totalDue,
+              totalPaid: feeData.fees.totalPaid,
+              totalOutstanding: feeData.fees.totalOutstanding,
+              individualDiscounts: feeData.fees.individualDiscounts,
+              classBaseFee: feeData.fees.classBaseFee,
+              feesCount: feeData.fees.components?.length || 0
+            });
             
-            // Get all payments for this student
-            supabase
-              .from('student_fees')
-              .select(`
-                id,
-                student_id,
-                academic_year,
-                fee_component,
-                amount_paid,
-                payment_date,
-                payment_mode,
-                receipt_number,
-                remarks,
-                created_at
-              `)
-              .eq('student_id', studentDetails.id)
-              .eq('academic_year', '2024-2025')
-              .order('payment_date', { ascending: false })
-          ]);
-
-          classFees = feeResult.data;
-          feesError = feeResult.error;
-          studentPayments = paymentResult.data;
-          paymentsError = paymentResult.error;
-
-          if (feesError) {
-            console.log('FeePayment - Database error fetching fee structure:', feesError);
+            // Transform the centralized FeeService results to the component's expected format
+            const transformedFees = feeData.fees.components.map(component => {
+              // Determine category based on fee component
+              let category = 'general';
+              if (component.component) {
+                const componentName = component.component.toLowerCase();
+                if (componentName.includes('tuition') || componentName.includes('academic')) {
+                  category = 'tuition';
+                } else if (componentName.includes('book') || componentName.includes('library')) {
+                  category = 'books';
+                } else if (componentName.includes('transport') || componentName.includes('bus')) {
+                  category = 'transport';
+                } else if (componentName.includes('exam') || componentName.includes('test')) {
+                  category = 'examination';
+                } else if (componentName.includes('activity') || componentName.includes('sport')) {
+                  category = 'activities';
+                } else if (componentName.includes('facility') || componentName.includes('lab')) {
+                  category = 'facilities';
+                }
+              }
+              
+              return {
+                id: component.id,
+                name: component.name,
+                amount: component.finalAmount, // Use final amount after discounts
+                baseFeeAmount: component.baseFeeAmount, // Store original amount
+                discountAmount: component.discountAmount, // Store discount
+                dueDate: component.dueDate || new Date().toISOString().split('T')[0],
+                status: component.status,
+                paidAmount: component.paidAmount,
+                remainingAmount: component.remainingAmount,
+                description: `${component.name} for ${component.academicYear || '2024-25'}${component.discountAmount > 0 ? ` (₹${component.discountAmount} discount applied)` : ''}`,
+                category: category,
+                academicYear: component.academicYear || '2024-25',
+                isClassFee: component.isClassFee || false,
+                hasIndividualDiscount: component.hasIndividualDiscount || false,
+                payments: component.payments || []
+              };
+            });
+            
+            // Set fee structure with proper totals from the new service
+            setFeeStructure({
+              studentName: studentDetails.name,
+              class: studentDetails.classes?.class_name || feeData.student.class?.name || 'N/A',
+              academicYear: feeData.fees.academicYear || '2024-2025',
+              totalDue: feeData.fees.totalDue, // Total after discounts
+              totalBaseFee: feeData.fees.classBaseFee, // Class base fee before discounts
+              totalDiscounts: feeData.fees.individualDiscounts, // Individual discounts applied
+              totalPaid: feeData.fees.totalPaid,
+              outstanding: feeData.fees.totalOutstanding,
+              fees: transformedFees
+            });
+            
+            // Transform payment history from the fee components
+            const allPayments = feeData.fees.components
+              .flatMap(component => component.payments || [])
+              .sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
+            
+            const transformedPayments = allPayments.map(payment => ({
+              id: payment.id,
+              feeName: payment.remarks?.split(' for ')[0] || 'Fee Payment',
+              amount: Number(payment.amount) || 0,
+              paymentDate: payment.paymentDate || new Date().toISOString().split('T')[0],
+              paymentMethod: payment.paymentMode || 'Online',
+              transactionId: payment.id ? `TXN${payment.id.toString().slice(-8).toUpperCase()}` : `TXN${Date.now()}`,
+              receiptNumber: payment.receiptNumber || null,
+              status: 'completed',
+              receiptUrl: null,
+              remarks: payment.remarks || '',
+              academicYear: feeData.fees.academicYear || '2024-2025',
+              createdAt: new Date().toISOString()
+            }));
+            
+            setPaymentHistory(transformedPayments);
+            
+            console.log('✅ FeePayment - Successfully loaded fees with dynamic discount calculation:');
+            console.log('- Total fees:', transformedFees.length);
+            console.log('- Class base total: ₹' + feeData.fees.classBaseFee);
+            console.log('- Individual discounts: ₹' + feeData.fees.individualDiscounts);
+            console.log('- Final amount due: ₹' + feeData.fees.totalDue);
+            console.log('- Total paid: ₹' + feeData.fees.totalPaid);
+            console.log('- Outstanding: ₹' + feeData.fees.totalOutstanding);
+            console.log('- Has individual discounts:', feeData.individualInfo.hasIndividualDiscounts);
+            
           } else {
-            console.log('FeePayment - Loaded', classFees?.length || 0, 'fee structure records from database');
-          }
-          
-          if (paymentsError) {
-            console.log('FeePayment - Database error fetching payments:', paymentsError);
-          } else {
-            console.log('FeePayment - Loaded', studentPayments?.length || 0, 'payment records from database');
+            console.log('FeePayment - Fee service failed:', feeServiceResult?.error);
+            throw new Error(feeServiceResult?.error || 'Fee service failed');
           }
         } else {
           console.log('FeePayment - Invalid student details, will use sample data');
           console.log('FeePayment - Student ID valid:', isValidUUID(studentDetails?.id));
           console.log('FeePayment - Class ID valid:', isValidUUID(studentDetails?.class_id));
         }
-
-        if (feesError && feesError.code !== '42P01') {
-          console.log('Fee structure error:', feesError);
-        }
-        
-        if (paymentsError && paymentsError.code !== '42P01') {
-          console.log('Student payments error:', paymentsError);
-        }
-
-        // Debug payment data
-        console.log('FeePayment - Raw payment data:');
-        console.log('- Payments found:', studentPayments?.length || 0);
-        console.log('- Payment details:', studentPayments);
-        // Debug receipt numbers specifically
-        studentPayments?.forEach((payment, index) => {
-          console.log(`Payment ${index + 1}:`);
-          console.log('  - ID:', payment.id);
-          console.log('  - Receipt Number:', payment.receipt_number);
-          console.log('  - Fee Component:', payment.fee_component);
-          console.log('  - Amount:', payment.amount_paid);
-        });
         
         // If no fee structure found, use sample data for development
         let feesToProcess = classFees || [];
@@ -231,32 +255,50 @@ const FeePayment = () => {
           // Safely get fee component name
           const feeComponent = fee.fee_component || fee.name || 'General Fee';
           
-          // Find payments for this fee component - check both real and sample payments
+          // Find payments for this fee component - improved matching logic
           let payments = [];
           if (studentPayments?.length > 0) {
-            // Use real payments from database - improved matching logic
+            // Use real payments from database with flexible matching
             payments = studentPayments.filter(p => {
               // More flexible matching - case insensitive and trimmed
               const paymentComponent = (p.fee_component || '').trim().toLowerCase();
               const feeComponentLower = feeComponent.trim().toLowerCase();
-              const yearMatch = p.academic_year === fee.academic_year;
-              const componentMatch = paymentComponent === feeComponentLower;
               
-              // Debug payment matching
-              console.log(`FeePayment - Matching payment:`);
-              console.log(`  - Payment component: "${paymentComponent}"`);
-              console.log(`  - Fee component: "${feeComponentLower}"`);
-              console.log(`  - Component match: ${componentMatch}`);
-              console.log(`  - Year match: ${yearMatch}`);
+              // Also try exact match without case sensitivity for academic year
+              const paymentYear = (p.academic_year || '').trim();
+              const feeYear = (fee.academic_year || '2024-2025').trim();
+              
+              // Multiple matching strategies
+              const exactComponentMatch = paymentComponent === feeComponentLower;
+              const partialComponentMatch = paymentComponent.includes(feeComponentLower) || feeComponentLower.includes(paymentComponent);
+              const yearMatch = paymentYear === feeYear || !paymentYear || !feeYear; // Be more lenient with year matching
+              
+              // Use exact match first, then partial if exact fails
+              const componentMatch = exactComponentMatch || partialComponentMatch;
+              
+              // Debug payment matching with more info
+              if (componentMatch || exactComponentMatch) {
+                console.log(`🔍 FeePayment - Payment matching for "${feeComponent}":`);
+                console.log(`  - Payment component: "${paymentComponent}"`);
+                console.log(`  - Fee component: "${feeComponentLower}"`);
+                console.log(`  - Exact match: ${exactComponentMatch}`);
+                console.log(`  - Partial match: ${partialComponentMatch}`);
+                console.log(`  - Component match result: ${componentMatch}`);
+                console.log(`  - Payment year: "${paymentYear}"`);
+                console.log(`  - Fee year: "${feeYear}"`);
+                console.log(`  - Year match: ${yearMatch}`);
+                console.log(`  - Final match: ${componentMatch && yearMatch}`);
+              }
               
               return componentMatch && yearMatch;
             }) || [];
             
-            console.log(`FeePayment - Found ${payments.length} payments for ${feeComponent}:`);
-            payments.forEach(p => {
-              console.log(`  - Payment ID: ${p.id}, Amount: ${p.amount_paid}`);
+            console.log(`✅ FeePayment - Found ${payments.length} payments for "${feeComponent}":`);
+            payments.forEach((p, idx) => {
+              console.log(`  Payment ${idx + 1}: ID=${p.id}, Amount=₹${p.amount_paid}, Date=${p.payment_date}, Receipt=${p.receipt_number}`);
             });
           } else {
+            console.log(`⚠️ FeePayment - No payment data found, using sample payments for "${feeComponent}"`);
             // Use sample payments if no real payments exist
             const samplePaymentAmount = feeComponent === 'Tuition Fee' ? 5000 : 
                                        feeComponent === 'Library Fee' ? 2000 : 0;
@@ -265,7 +307,10 @@ const FeePayment = () => {
                 id: `sample-payment-${feeComponent}`,
                 fee_component: feeComponent,
                 amount_paid: samplePaymentAmount,
-                academic_year: fee.academic_year
+                academic_year: fee.academic_year,
+                payment_date: '2024-08-15',
+                receipt_number: `SAMPLE-${Date.now()}`,
+                payment_mode: 'Sample'
               }];
             }
           }
@@ -766,21 +811,71 @@ const FeePayment = () => {
       setPaymentModalVisible(false);
       setReceiptModal(true);
 
-      // Refresh fee data with delay to ensure database consistency
+      // Enhanced refresh mechanism with better verification
       console.log('FeePayment - Refreshing fee data after admin payment...');
-      setTimeout(async () => {
+      
+      const performVerifiedRefresh = async (attempts = 0) => {
         try {
-          await fetchFeeData();
-          console.log('FeePayment - Fee data refreshed successfully after admin payment');
+          const maxAttempts = 3;
+          const baseDelay = 1000;
+          
+          if (attempts >= maxAttempts) {
+            console.log('FeePayment - Max refresh attempts reached, forcing final refresh');
+            await fetchFeeData();
+            return;
+          }
+          
+          // Check if payment exists in database with retry logic
+          const { data: recentPayment, error: paymentCheckError } = await supabase
+            .from('student_fees')
+            .select('id, amount_paid, fee_component, payment_date, receipt_number')
+            .eq('receipt_number', receiptNumber)
+            .single();
+            
+          if (recentPayment && !paymentCheckError) {
+            console.log('✅ FeePayment - Payment verified in database:', {
+              id: recentPayment.id,
+              amount: recentPayment.amount_paid,
+              component: recentPayment.fee_component,
+              receipt: recentPayment.receipt_number
+            });
+            
+            // Payment confirmed, refresh fee data
+            await fetchFeeData();
+            console.log('✅ FeePayment - Fee data refreshed successfully after verified payment');
+            
+          } else {
+            console.log(`⏳ FeePayment - Payment not yet found (attempt ${attempts + 1}/${maxAttempts}), retrying...`);
+            
+            // Exponential backoff for retries
+            const delay = baseDelay * Math.pow(1.5, attempts);
+            setTimeout(() => {
+              performVerifiedRefresh(attempts + 1);
+            }, delay);
+          }
         } catch (refreshError) {
-          console.error('FeePayment - Error refreshing fee data after admin payment:', refreshError);
-          Alert.alert(
-            'Refresh Warning', 
-            'Payment was saved but fee data refresh failed. Please manually refresh to see updated status.',
-            [{ text: 'OK', style: 'default' }]
-          );
+          console.error('❌ FeePayment - Error in verified refresh:', refreshError);
+          
+          // Fallback: try basic refresh without verification
+          try {
+            console.log('🔄 FeePayment - Attempting fallback refresh...');
+            await fetchFeeData();
+            console.log('✅ FeePayment - Fallback refresh completed');
+          } catch (finalError) {
+            console.error('❌ FeePayment - Fallback refresh also failed:', finalError);
+            Alert.alert(
+              'Refresh Warning', 
+              'Payment was saved successfully, but the display may not update immediately. Please pull down to refresh manually.',
+              [{ text: 'OK', style: 'default' }]
+            );
+          }
         }
-      }, 500);
+      };
+      
+      // Start the verified refresh process
+      setTimeout(() => {
+        performVerifiedRefresh();
+      }, 500); // Initial delay to allow database write to complete
 
       // Reset form
       setPaymentAmount('');
@@ -1040,6 +1135,7 @@ const FeePayment = () => {
         .from('student_fees')
         .select('receipt_number')
         .not('receipt_number', 'is', null)
+        .eq('tenant_id', user?.tenant_id || null)
         .order('receipt_number', { ascending: false })
         .limit(1)
         .single();
@@ -1252,31 +1348,6 @@ const FeePayment = () => {
     ];
   };
 
-  // Check for existing student fee record using easy.txt recommendation
-  const checkExistingStudentFee = async (studentId, feeId) => {
-    try {
-      if (!isValidUUID(studentId) || !isValidUUID(feeId)) {
-        return null;
-      }
-
-      const { data: existingFee, error } = await supabase
-        .from('student_fees')
-        .select('*')
-        .eq('student_id', studentId)
-        .eq('fee_id', feeId)
-        .single();
-
-      if (error && error.code !== 'PGRST116') {
-        console.error('Error checking existing fee:', error);
-        return null;
-      }
-
-      return existingFee;
-    } catch (error) {
-      console.error('Error in checkExistingStudentFee:', error);
-      return null;
-    }
-  };
 
   // Get fee structure amount by ID using easy.txt recommendation
   const getFeeStructureAmount = async (feeId) => {
@@ -1738,16 +1809,39 @@ const FeePayment = () => {
         setPaymentMethodModalVisible(false);
         setReceiptModalVisible2(true);
         
-        // Refresh fee data with a small delay to ensure database consistency
+        // Refresh fee data with better verification and delay
         console.log('FeePayment - Refreshing fee data after payment...');
         setTimeout(async () => {
           try {
-            await fetchFeeData();
-            console.log('FeePayment - Fee data refreshed successfully after payment');
+            // Verify the payment was saved by checking the database
+            const { data: recentPayment, error: paymentCheckError } = await supabase
+              .from('student_fees')
+              .select('id, amount_paid, fee_component')
+              .eq('receipt_number', receiptNumber)
+              .single();
+              
+            if (recentPayment) {
+              console.log('FeePayment - Verified payment in database:', recentPayment);
+              // Payment confirmed, now refresh fee data
+              await fetchFeeData();
+              console.log('FeePayment - Fee data refreshed successfully after payment');
+            } else {
+              console.log('FeePayment - Payment not found in database, trying longer delay');
+              // Try one more time with longer delay
+              setTimeout(async () => {
+                await fetchFeeData();
+              }, 1000);
+            }
           } catch (refreshError) {
             console.error('Error refreshing fee data after payment:', refreshError);
+            // Still try to refresh even if verification fails
+            try {
+              await fetchFeeData();
+            } catch (finalError) {
+              console.error('Final refresh attempt failed:', finalError);
+            }
           }
-        }, 500);
+        }, 1000);
       } else {
         Alert.alert('Payment Failed', paymentResult.error || 'Payment processing failed');
       }
@@ -2220,8 +2314,18 @@ const FeePayment = () => {
           <Text style={styles.feeDistributionTitle}>Fee Distribution Summary</Text>
           <View style={styles.summaryCards}>
             <View style={styles.summaryCard}>
-              <Text style={styles.summaryLabel}>Total Academic Fee</Text>
-              <Text style={[styles.summaryAmount, { color: '#2196F3' }]}>₹{feeStructure.totalDue}</Text>
+              <Text style={styles.summaryLabel}>Base Fee Amount</Text>
+              <Text style={[styles.summaryAmount, { color: '#2196F3' }]}>₹{feeStructure.totalBaseFee || feeStructure.totalDue}</Text>
+            </View>
+            {feeStructure.totalDiscounts > 0 && (
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryLabel}>Discounts Applied</Text>
+                <Text style={[styles.summaryAmount, { color: '#FF9800' }]}>₹{feeStructure.totalDiscounts}</Text>
+              </View>
+            )}
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryLabel}>Amount Due</Text>
+              <Text style={[styles.summaryAmount, { color: '#9C27B0' }]}>₹{feeStructure.totalDue}</Text>
             </View>
             <View style={styles.summaryCard}>
               <Text style={styles.summaryLabel}>Paid</Text>
@@ -2771,15 +2875,16 @@ const styles = StyleSheet.create({
   },
   summaryCards: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     marginBottom: 20,
   },
   summaryCard: {
-    flex: 1,
     backgroundColor: '#fff',
     padding: 8,
     borderRadius: 8,
-    marginHorizontal: 4,
+    marginBottom: 8,
+    minWidth: '48%',
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },

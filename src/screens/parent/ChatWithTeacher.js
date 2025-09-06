@@ -630,7 +630,16 @@ const ChatWithTeacher = () => {
           
           // Mark messages as read if they're from the teacher
           if (message.sender_id === selectedTeacher.userId && !message.is_read) {
-            markMessagesAsRead(selectedTeacher.userId);
+            console.log('📖 Parent Chat: Marking message as read in real-time handler');
+            markMessagesAsRead(selectedTeacher.userId).then((result) => {
+              if (result?.success) {
+                console.log('✅ Parent Chat: Messages marked as read successfully, notifying badge system');
+                badgeNotifier.notifyMessagesRead(user.id, selectedTeacher.userId);
+              } else {
+                console.log('❌ Parent Chat: Failed to mark messages as read:', result?.error);
+              }
+            });
+            
             setUnreadCounts(prev => {
               const updated = { ...prev };
               delete updated[selectedTeacher.userId];
@@ -695,21 +704,28 @@ const ChatWithTeacher = () => {
     
     // Only handle read status if teacher has a user account
     if (teacher.userId && teacher.userId !== user.id && teacher.hasUserAccount !== false) {
-      await markMessagesAsRead(teacher.userId);
+      console.log('📖 Parent Chat: Selecting teacher, marking messages as read');
+      const result = await markMessagesAsRead(teacher.userId);
       
-      // Notify badge system that messages were read
-      badgeNotifier.notifyMessagesRead(user.id, teacher.userId);
-      
-      // Clear unread count for this teacher immediately
-      setUnreadCounts(prev => ({
-        ...prev,
-        [teacher.userId]: 0
-      }));
-      
-      // Refresh unread counts after a short delay to ensure database is updated
-      setTimeout(() => {
-        fetchUnreadCounts([teacher]);
-      }, 1000);
+      if (result?.success) {
+        console.log('✅ Parent Chat: Messages marked as read on teacher select, notifying badge system');
+        // Notify badge system that messages were read
+        badgeNotifier.notifyMessagesRead(user.id, teacher.userId);
+        
+        // Clear unread count for this teacher immediately
+        setUnreadCounts(prev => ({
+          ...prev,
+          [teacher.userId]: 0
+        }));
+        
+        // Refresh unread counts after a short delay to ensure database is updated
+        setTimeout(() => {
+          console.log('🔄 Parent Chat: Refreshing unread counts after marking as read');
+          fetchUnreadCounts([teacher]);
+        }, 1000);
+      } else {
+        console.log('❌ Parent Chat: Failed to mark messages as read on teacher select:', result?.error);
+      }
     }
     
     // Show warning if teacher doesn't have user account

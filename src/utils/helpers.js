@@ -8,9 +8,18 @@
  * @param {string} currency - The currency symbol (default: '$')
  * @returns {string} - Formatted currency string
  */
-export const formatCurrency = (amount, currency = '$') => {
+export const formatCurrency = (amount, currency = '₹') => {
   if (amount === null || amount === undefined || isNaN(amount)) {
-    return `${currency}0.00`;
+    return `${currency}0`;
+  }
+  
+  const num = parseFloat(amount);
+  if (currency === '₹') {
+    // Indian currency formatting - return just the number for ₹ prefix in components
+    return num.toLocaleString('en-IN', { 
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2 
+    });
   }
   
   return `${currency}${Number(amount).toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,')}`;

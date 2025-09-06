@@ -372,18 +372,51 @@ const ExpenseManagement = ({ navigation }) => {
         expense_date: expenseInput.date
       };
 
+      let expenseId = null;
+      
       if (editExpenseIndex !== null) {
         // Update existing expense using helper function
-        const { error } = await dbHelpers.updateExpense(expenses[editExpenseIndex].id, expenseData, tenantId);
+        expenseId = expenses[editExpenseIndex].id;
+        const { error } = await dbHelpers.updateExpense(expenseId, expenseData, tenantId);
 
         if (error) throw error;
       } else {
         // Create new expense using helper function
-        const { error } = await dbHelpers.createExpense(expenseData, tenantId);
+        const { data, error } = await dbHelpers.createExpense(expenseData, tenantId);
 
         if (error) throw error;
+        expenseId = data?.id;
       }
 
+      // Verify the operation completed before refreshing
+      if (expenseId) {
+        console.log('🔄 Verifying expense operation completed for ID:', expenseId);
+        
+        // Brief delay to allow database consistency
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        try {
+          // Verify the expense exists in the database
+          const { data: verifyData, error: verifyError } = await supabase
+            .from('school_expenses')
+            .select('id, title, amount')
+            .eq('id', expenseId)
+            .eq('tenant_id', tenantId)
+            .single();
+
+          if (verifyError || !verifyData) {
+            console.warn('⚠️ Expense verification failed, waiting longer...', verifyError);
+            // Wait a bit longer and try refresh anyway
+            await new Promise(resolve => setTimeout(resolve, 500));
+          } else {
+            console.log('✅ Expense operation verified successfully:', verifyData);
+          }
+        } catch (verifyErr) {
+          console.warn('⚠️ Expense verification error, continuing with refresh:', verifyErr);
+        }
+      }
+
+      // Now refresh the data
       await loadExpenseData();
       setIsExpenseModalVisible(false);
       Alert.alert('Success', 'Expense saved successfully!');
@@ -407,6 +440,33 @@ const ExpenseManagement = ({ navigation }) => {
               const { error } = await dbHelpers.deleteExpense(expenseId, tenantId);
 
               if (error) throw error;
+              
+              // Verify the deletion completed before refreshing
+              console.log('🔄 Verifying expense deletion for ID:', expenseId);
+              
+              // Brief delay to allow database consistency
+              await new Promise(resolve => setTimeout(resolve, 300));
+              
+              try {
+                // Verify the expense no longer exists in the database
+                const { data: verifyData, error: verifyError } = await supabase
+                  .from('school_expenses')
+                  .select('id')
+                  .eq('id', expenseId)
+                  .eq('tenant_id', tenantId)
+                  .single();
+
+                if (!verifyError && verifyData) {
+                  console.warn('⚠️ Expense still exists after deletion, waiting longer...');
+                  // Wait a bit longer and try refresh anyway
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                } else {
+                  console.log('✅ Expense deletion verified successfully');
+                }
+              } catch (verifyErr) {
+                console.warn('⚠️ Expense deletion verification error, continuing with refresh:', verifyErr);
+              }
+              
               await loadExpenseData();
               Alert.alert('Success', 'Expense deleted successfully!');
             } catch (error) {
@@ -459,6 +519,34 @@ const ExpenseManagement = ({ navigation }) => {
           Alert.alert('Error', `Failed to update budget for ${update.name}`);
           return;
         }
+      }
+      
+      // Verify budget updates completed before refreshing
+      console.log('🔄 Verifying budget updates completed...');
+      
+      // Brief delay to allow database consistency
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      try {
+        // Verify at least one budget update is reflected in the database
+        if (budgetUpdates.length > 0) {
+          const firstUpdate = budgetUpdates[0];
+          const { data: verifyData, error: verifyError } = await supabase
+            .from('school_expense_categories')
+            .select('name, monthly_budget')
+            .eq('name', firstUpdate.name)
+            .eq('tenant_id', tenantId)
+            .single();
+
+          if (verifyError || !verifyData || verifyData.monthly_budget !== firstUpdate.monthly_budget) {
+            console.warn('⚠️ Budget verification failed, waiting longer...', verifyError);
+            await new Promise(resolve => setTimeout(resolve, 500));
+          } else {
+            console.log('✅ Budget updates verified successfully:', verifyData);
+          }
+        }
+      } catch (verifyErr) {
+        console.warn('⚠️ Budget verification error, continuing with refresh:', verifyErr);
       }
       
       setIsBudgetModalVisible(false);

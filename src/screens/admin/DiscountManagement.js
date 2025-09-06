@@ -17,11 +17,15 @@ import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import { formatCurrency } from '../../utils/helpers';
+import { useTenant } from '../../contexts/TenantContext';
 
 const DiscountManagement = ({ navigation, route }) => {
   // Get navigation parameters
   const params = route.params || {};
   const { classId, className, studentId, studentName } = params;
+  
+  // Get tenant context
+  const { tenantId } = useTenant();
   
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -119,15 +123,42 @@ const DiscountManagement = ({ navigation, route }) => {
     setModalVisible(true);
   };
 
+  // Note: Individual fee structure creation logic has been moved to 
+  // dbHelpers.applyStudentDiscountToFeeStructure() in supabase.js
+  // This provides better logic that only creates entries for discounted components
+
   const handleSaveDiscount = async () => {
+    // Enhanced validation with detailed logging
+    console.log('🔍 DISCOUNT DEBUG - Starting discount creation...');
+    console.log('📋 Form Data:', {
+      classId: formData.classId,
+      studentId: formData.studentId,
+      discountValue: formData.discountValue,
+      feeComponent: formData.feeComponent,
+      description: formData.description,
+      academicYear: formData.academicYear
+    });
+    console.log('📊 Context Data:', { tenantId, editingDiscount: !!editingDiscount });
+    
     // Simple validation for amount only
     if (!formData.discountValue || parseFloat(formData.discountValue) <= 0) {
+      console.error('❌ Validation Error: Invalid discount amount:', formData.discountValue);
       Alert.alert('Validation Error', 'Please enter a valid concession amount');
       return;
     }
 
     if (!formData.classId || !formData.studentId) {
+      console.error('❌ Validation Error: Missing required IDs:', {
+        classId: formData.classId,
+        studentId: formData.studentId
+      });
       Alert.alert('Error', 'Student and class information is required');
+      return;
+    }
+
+    if (!tenantId) {
+      console.error('❌ Validation Error: Missing tenant context');
+      Alert.alert('Error', 'Tenant context is required');
       return;
     }
 
@@ -135,6 +166,7 @@ const DiscountManagement = ({ navigation, route }) => {
       setLoading(true);
 
       if (editingDiscount) {
+        console.log('🔄 Updating existing discount:', editingDiscount.id);
         // Update existing discount
         const { error } = await dbHelpers.updateStudentDiscount(editingDiscount.id, {
           discount_type: 'fixed_amount', // Always fixed amount
@@ -143,11 +175,16 @@ const DiscountManagement = ({ navigation, route }) => {
           description: formData.description
         });
         
-        if (error) throw error;
+        if (error) {
+          console.error('❌ Update Error:', error);
+          throw error;
+        }
+        console.log('✅ Discount updated successfully');
         Alert.alert('Success', 'Fee concession updated successfully');
       } else {
-        // Create new discount - always individual
-        const { error } = await dbHelpers.createStudentDiscount({
+        console.log('➕ Creating new discount...');
+        
+        const discountData = {
           student_id: formData.studentId,
           class_id: formData.classId,
           academic_year: formData.academicYear,
@@ -155,10 +192,37 @@ const DiscountManagement = ({ navigation, route }) => {
           discount_value: parseFloat(formData.discountValue),
           fee_component: formData.feeComponent || null,
           description: formData.description
-        });
+        };
         
-        if (error) throw error;
-        Alert.alert('Success', 'Fee concession created successfully');
+        console.log('💾 Discount data to be saved:', discountData);
+        console.log('🚀 About to call dbHelpers.createStudentDiscount...');
+        
+        // Create a discount record which will be stored in student_discounts table
+        const { error: discountError, data: createdDiscount } = await dbHelpers.createStudentDiscount(discountData);
+        
+        if (discountError) {
+          console.error('❌ Create Error Details:', {
+            message: discountError.message,
+            code: discountError.code,
+            hint: discountError.hint,
+            details: discountError.details
+          });
+          
+          // Provide more specific error messages
+          let errorMessage = discountError.message;
+          if (discountError.message.includes('foreign key')) {
+            errorMessage = 'The selected student or class does not exist. Please refresh and try again.';
+          } else if (discountError.message.includes('permission')) {
+            errorMessage = 'You do not have permission to create discounts. Please contact your administrator.';
+          } else if (discountError.message.includes('duplicate')) {
+            errorMessage = 'A discount already exists for this student. Please edit the existing discount instead.';
+          }
+          
+          throw new Error(errorMessage);
+        }
+        
+        console.log('✅ Discount created successfully:', createdDiscount);
+        Alert.alert('Success', `Fee concession of ₹${parseFloat(formData.discountValue)} applied successfully to student. The discount will be reflected in fee calculations.`);
       }
 
       setModalVisible(false);
@@ -168,8 +232,28 @@ const DiscountManagement = ({ navigation, route }) => {
       loadStudentDiscounts();
       
     } catch (error) {
-      console.error('Error saving discount:', error);
-      Alert.alert('Error', 'Failed to save fee concession: ' + error.message);
+      console.error('❌ Error saving discount:', error);
+      
+      // Enhanced error message for user
+      let userMessage = error.message || 'Failed to save fee concession';
+      if (userMessage.includes('fetch failed')) {
+        userMessage = 'Network error. Please check your connection and try again.';
+      }
+      
+      Alert.alert(
+        'Error', 
+        userMessage,
+        [
+          { text: 'OK' },
+          { 
+            text: 'Copy Error', 
+            onPress: () => {
+              // This would copy error details for debugging
+              console.log('Full error for debugging:', JSON.stringify(error, null, 2));
+            }
+          }
+        ]
+      );
     } finally {
       setLoading(false);
     }

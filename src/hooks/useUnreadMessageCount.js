@@ -1,6 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { AppState } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../utils/AuthContext';
 import { supabase } from '../utils/supabase';
 import { badgeNotifier } from '../utils/badgeNotifier';
@@ -12,8 +10,6 @@ import { badgeNotifier } from '../utils/badgeNotifier';
 export const useUnreadMessageCount = () => {
   const { user } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
-  const subscriptionRef = useRef(null);
-  const pollingRef = useRef(null);
 
   // Fetch unread count from database
   const fetchUnreadCount = useCallback(async () => {
@@ -23,131 +19,69 @@ export const useUnreadMessageCount = () => {
         return;
       }
 
-      console.log(`🔔 useUnreadMessageCount: Fetching unread count for user:`, user.id);
-
-      const { data: unreadMessages, error } = await supabase
+      // Fetch ONLY unread messages from the messages table
+      const { data: unreadMessages, error: messagesError } = await supabase
         .from('messages')
-        .select('id, sender_id')
+        .select('id')
         .eq('receiver_id', user.id)
         .eq('is_read', false);
 
-      if (error) {
-        console.log('❌ useUnreadMessageCount: Error fetching unread messages:', error);
+      if (messagesError) {
+        console.log('Error fetching unread messages:', messagesError);
+        setUnreadCount(0);
         return;
       }
 
-      const count = unreadMessages?.length || 0;
-      console.log(`📊 useUnreadMessageCount: Found ${count} unread messages`);
-      setUnreadCount(count);
+      const messageCount = unreadMessages?.length || 0;
+      setUnreadCount(messageCount);
 
     } catch (error) {
       console.log('💥 useUnreadMessageCount: Error in fetchUnreadCount:', error);
+      setUnreadCount(0);
     }
   }, [user?.id]);
 
-  // Set up polling and real-time updates
+  // Set up real-time subscription
   useEffect(() => {
     if (!user?.id) {
       setUnreadCount(0);
       return;
     }
-
-    console.log(`🔔 useUnreadMessageCount: Setting up for user:`, user.id);
     
     // Initial fetch
     fetchUnreadCount();
 
-    // Set up polling every 10 seconds
-    pollingRef.current = setInterval(() => {
-      console.log(`🔄 useUnreadMessageCount: Polling unread count`);
+    // Subscribe to badge notification events
+    const handleBadgeRefresh = () => {
       fetchUnreadCount();
-    }, 10000);
-
-    // App state change listener - refresh when app becomes active
-    const handleAppStateChange = (nextAppState) => {
-      console.log(`🔔 useUnreadMessageCount: App state changed to:`, nextAppState);
-      if (nextAppState === 'active') {
-        console.log(`🔄 useUnreadMessageCount: App became active, refreshing count`);
-        fetchUnreadCount();
-      }
     };
+    
+    // The subscribe method returns an unsubscribe function
+    const unsubscribeBadgeNotifier = badgeNotifier.subscribe(user.id, handleBadgeRefresh);
 
-    const appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
-
-    // Subscribe to badge notification events for instant updates
-    const unsubscribeBadgeNotifier = badgeNotifier.subscribe(user.id, (reason) => {
-      console.log(`📡 useUnreadMessageCount: Received notification, reason: ${reason}`);
-      fetchUnreadCount();
-    });
-
-    // Try real-time subscription as a bonus
-    let realtimeSubscription = null;
-    try {
-      const channelName = `unread-messages-${user.id}-${Date.now()}`;
-      console.log(`🔔 useUnreadMessageCount: Setting up real-time subscription:`, channelName);
-      
-      realtimeSubscription = supabase
-        .channel(channelName)
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public', 
-            table: 'messages',
-            filter: `receiver_id=eq.${user.id}`
-          },
-          (payload) => {
-            console.log(`⚡ useUnreadMessageCount: Real-time INSERT event:`, payload);
-            setTimeout(() => fetchUnreadCount(), 100);
-          }
-        )
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'messages',
-            filter: `receiver_id=eq.${user.id}`
-          },
-          (payload) => {
-            console.log(`⚡ useUnreadMessageCount: Real-time UPDATE event:`, payload);
-            setTimeout(() => fetchUnreadCount(), 100);
-          }
-        )
-        .subscribe((status) => {
-          console.log(`🔔 useUnreadMessageCount: Real-time status:`, status);
-        });
-    } catch (error) {
-      console.log(`❌ useUnreadMessageCount: Real-time setup failed:`, error);
-    }
+    // Real-time subscription for message changes
+    const messageSubscription = supabase
+      .channel(`message-updates-${user.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'messages',
+        filter: `receiver_id=eq.${user.id}`
+      }, (payload) => {
+        // Refresh count when messages change
+        fetchUnreadCount();
+      })
+      .subscribe();
 
     // Cleanup function
     return () => {
-      console.log(`🗿 useUnreadMessageCount: Cleaning up`);
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-      }
-      appStateSubscription?.remove();
+      // Call the unsubscribe function returned by subscribe
       unsubscribeBadgeNotifier();
-      if (realtimeSubscription) {
-        try {
-          realtimeSubscription.unsubscribe();
-        } catch (error) {
-          console.log('Error unsubscribing from real-time:', error);
-        }
+      if (messageSubscription) {
+        supabase.removeChannel(messageSubscription);
       }
     };
   }, [user?.id, fetchUnreadCount]);
-
-  // Refresh count when screen comes into focus
-  useFocusEffect(
-    useCallback(() => {
-      if (user?.id) {
-        console.log('🔔 useUnreadMessageCount: Screen focused, refreshing count');
-        fetchUnreadCount();
-      }
-    }, [user?.id, fetchUnreadCount])
-  );
 
   // Ensure we always return a valid object with proper fallbacks
   return {
