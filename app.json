@@ -36,7 +36,19 @@
       ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "build": {
+        "babel": {
+          "include": [
+            "@expo/vector-icons"
+          ]
+        }
+      },
+      "performance": {
+        "lazyLoading": true,
+        "bundleSplitting": true
+      }
     },
     "plugins": [
       "expo-font",

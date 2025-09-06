@@ -36,10 +36,10 @@ const SignupScreen = ({ navigation }) => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const roles = [
-    { key: 1, label: 'Admin', icon: 'school', color: '#1976d2' },
-    { key: 2, label: 'Teacher', icon: 'person', color: '#4CAF50' },
-    { key: 3, label: 'Parent', icon: 'people', color: '#FF9800' },
-    { key: 4, label: 'Student', icon: 'person-circle', color: '#9C27B0' },
+    { key: 1, label: 'Admin', description: 'School Management', icon: 'school', color: '#1976d2' },
+    { key: 2, label: 'Teacher', description: 'Faculty Member', icon: 'person', color: '#4CAF50' },
+    { key: 3, label: 'Parent', description: 'Guardian', icon: 'people', color: '#FF9800' },
+    { key: 4, label: 'Student', description: 'Learner', icon: 'person-circle', color: '#9C27B0' },
   ];
 
   // Validate full name
