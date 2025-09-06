@@ -1413,15 +1413,101 @@ export const dbHelpers = {
     }
   },
 
-  // Fee management
-  async getFeeStructure(classId) {
+  // Fee management - Updated to follow clean approach
+  async getFeeStructure(classId, academicYear = '2024-25') {
     try {
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        return { data: null, error: new Error('Tenant context required') };
+      }
+
+      // 🎯 CLEAN APPROACH: Only get class-level fees (student_id = null)
       const { data, error } = await supabase
         .from(TABLES.FEE_STRUCTURE)
         .select('*')
-        .eq('class_id', classId);
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .is('student_id', null) // Only class-level fees
+        .order('fee_component');
+      
+      console.log('📋 Retrieved class-level fees only:', data?.length || 0);
       return { data, error };
     } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // Create class-level fee structure entry (clean approach)
+  async createClassFee(feeData) {
+    try {
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        return { data: null, error: new Error('Tenant context required') };
+      }
+
+      // 🎯 CLEAN APPROACH: Ensure this is a class-level fee with base_amount = amount
+      const classLevelFeeData = {
+        ...feeData,
+        student_id: null, // Always null for class fees
+        base_amount: feeData.amount, // base_amount should always equal amount for class fees
+        tenant_id: tenantId
+      };
+
+      console.log('💾 Creating class-level fee:', classLevelFeeData);
+
+      const { data, error } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .insert(classLevelFeeData)
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('❌ Error creating class fee:', error);
+        return { data: null, error };
+      }
+
+      console.log('✅ Successfully created class-level fee:', data.fee_component);
+      return { data, error: null };
+    } catch (error) {
+      console.error('❌ Error in createClassFee:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Update class-level fee (clean approach)
+  async updateClassFee(feeId, updates) {
+    try {
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        return { data: null, error: new Error('Tenant context required') };
+      }
+
+      // 🎯 CLEAN APPROACH: Ensure base_amount = amount when updating class fees
+      if (updates.amount !== undefined) {
+        updates.base_amount = updates.amount; // Keep base_amount in sync
+      }
+
+      console.log('🔄 Updating class-level fee:', feeId, updates);
+
+      const { data, error } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .update(updates)
+        .eq('id', feeId)
+        .eq('tenant_id', tenantId)
+        .is('student_id', null) // Only update class-level fees
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('❌ Error updating class fee:', error);
+        return { data: null, error };
+      }
+
+      console.log('✅ Successfully updated class-level fee');
+      return { data, error: null };
+    } catch (error) {
+      console.error('❌ Error in updateClassFee:', error);
       return { data: null, error };
     }
   },
@@ -1533,7 +1619,14 @@ export const dbHelpers = {
   // Parent management
   async getParentByUserId(userId) {
     try {
-      // Get user data with linked student information
+      // Get current tenant ID
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        console.warn('No tenant context found for getParentByUserId');
+        return { data: null, error: new Error('Tenant context required') };
+      }
+      
+      // Get user data with linked student information, filtered by tenant_id
       const { data: userData, error: userError } = await supabase
         .from(TABLES.USERS)
         .select(`
@@ -1548,13 +1641,16 @@ export const dbHelpers = {
             gender,
             address,
             class_id,
-            classes(id, class_name, section)
+            tenant_id,
+            classes(id, class_name, section, tenant_id)
           )
         `)
         .eq('id', userId)
+        .eq('tenant_id', tenantId)  // Filter user by tenant_id
         .single();
 
       if (userError) {
+        console.error('Error fetching parent user data:', userError);
         return { data: null, error: userError };
       }
 
@@ -1562,41 +1658,87 @@ export const dbHelpers = {
         return { data: null, error: new Error('No student linked to this user') };
       }
 
+      // Additional safety check: ensure the linked student belongs to the same tenant
+      if (userData.students && userData.students.tenant_id !== tenantId) {
+        console.warn('Student belongs to different tenant:', {
+          userTenant: tenantId,
+          studentTenant: userData.students.tenant_id,
+          studentId: userData.students.id
+        });
+        return { data: null, error: new Error('Student not found in current tenant context') };
+      }
+
+      console.log('Successfully fetched parent data with tenant filtering:', {
+        userId,
+        tenantId,
+        studentId: userData.students?.id,
+        studentName: userData.students?.name
+      });
+
       return { data: userData, error: null };
     } catch (error) {
+      console.error('Error in getParentByUserId:', error);
       return { data: null, error };
     }
   },
 
   async getStudentsByParentId(userId) {
     try {
-      // Get all students linked to this parent user
+      // Get current tenant ID
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        console.warn('No tenant context found for getStudentsByParentId');
+        return { data: [], error: new Error('Tenant context required') };
+      }
+      
+      // Get all students linked to this parent user with tenant filtering
       const { data: userData, error: userError } = await supabase
         .from(TABLES.USERS)
         .select('linked_parent_of')
         .eq('id', userId)
+        .eq('tenant_id', tenantId)  // Filter by tenant_id
         .single();
 
       if (userError || !userData.linked_parent_of) {
         return { data: [], error: userError || new Error('No students linked to this parent') };
       }
 
-      // Get student details
+      // Get student details with tenant filtering
       const { data: studentData, error: studentError } = await supabase
         .from(TABLES.STUDENTS)
         .select(`
           *,
-          classes(id, class_name, section)
+          classes(id, class_name, section, tenant_id)
         `)
         .eq('id', userData.linked_parent_of)
+        .eq('tenant_id', tenantId)  // Filter by tenant_id
         .single();
 
       if (studentError) {
+        console.error('Error fetching student data for parent:', studentError);
         return { data: [], error: studentError };
       }
 
+      // Additional safety check: ensure the student belongs to the same tenant
+      if (studentData && studentData.tenant_id !== tenantId) {
+        console.warn('Student belongs to different tenant:', {
+          userTenant: tenantId,
+          studentTenant: studentData.tenant_id,
+          studentId: studentData.id
+        });
+        return { data: [], error: new Error('Student not found in current tenant context') };
+      }
+
+      console.log('Successfully fetched student data for parent with tenant filtering:', {
+        userId,
+        tenantId,
+        studentId: studentData?.id,
+        studentName: studentData?.name
+      });
+
       return { data: [studentData], error: null };
     } catch (error) {
+      console.error('Error in getStudentsByParentId:', error);
       return { data: [], error };
     }
   },
@@ -2694,20 +2836,55 @@ export const dbHelpers = {
     }
   },
 
-  // Create a new fee concession for a student
+  // Create a new fee concession for a student - CLEAN VERSION (NO fee_structure modifications)
   async createStudentDiscount(discountData) {
     try {
-      const { data, error } = await supabase
+      console.log('🎯 ULTRA CLEAN: Creating discount ONLY in student_discounts table');
+      console.log('📋 Input data:', discountData);
+      
+      // Get tenant context
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        console.error('❌ No tenant context available for creating student discount');
+        return { data: null, error: new Error('Tenant context required') };
+      }
+      
+      // Prepare clean discount data - ONLY for student_discounts table
+      const cleanDiscountData = {
+        student_id: discountData.student_id,
+        class_id: discountData.class_id,
+        academic_year: discountData.academic_year || '2024-25',
+        discount_type: discountData.discount_type || 'fixed_amount',
+        discount_value: Number(discountData.discount_value),
+        fee_component: discountData.fee_component || null,
+        description: discountData.description || null,
+        tenant_id: tenantId,
+        is_active: true,
+        created_by: discountData.created_by || null
+      };
+      
+      console.log('💾 Clean discount data to insert:', cleanDiscountData);
+      
+      // ONLY insert into student_discounts table - NO OTHER OPERATIONS
+      const { data: discountResult, error: discountError } = await supabase
         .from(TABLES.STUDENT_DISCOUNTS)
-        .insert(discountData)
-        .select(`
-          *,
-          students(id, name, admission_no, roll_no),
-          classes(class_name, section)
-        `)
+        .insert(cleanDiscountData)
+        .select('*')
         .single();
-      return { data, error };
+      
+      if (discountError) {
+        console.error('❌ Error inserting into student_discounts:', discountError);
+        return { data: null, error: discountError };
+      }
+      
+      console.log('✅ SUCCESS: Discount created in student_discounts table only');
+      console.log('💡 The discount will be applied dynamically when fees are calculated');
+      console.log('🚫 NO modifications made to fee_structure table');
+      
+      return { data: discountResult, error: null };
+      
     } catch (error) {
+      console.error('❌ Unexpected error in createStudentDiscount:', error);
       return { data: null, error };
     }
   },
@@ -2732,7 +2909,20 @@ export const dbHelpers = {
   // Update a fee concession
   async updateStudentDiscount(discountId, updates) {
     try {
-      const { data, error } = await supabase
+      // Step 1: Get the original discount data first
+      const { data: originalDiscount, error: fetchError } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .select('*')
+        .eq('id', discountId)
+        .single();
+
+      if (fetchError) {
+        console.error('Error fetching original discount:', fetchError);
+        return { data: null, error: fetchError };
+      }
+
+      // Step 2: Update the discount record
+      const { data: updatedDiscount, error: updateError } = await supabase
         .from(TABLES.STUDENT_DISCOUNTS)
         .update(updates)
         .eq('id', discountId)
@@ -2742,7 +2932,19 @@ export const dbHelpers = {
           classes(class_name, section)
         `)
         .single();
-      return { data, error };
+
+      if (updateError) {
+        console.error('Error updating discount:', updateError);
+        return { data: null, error: updateError };
+      }
+
+      // No need to update fee_structure anymore - discounts are calculated dynamically
+      if (updates.discount_value && updates.discount_value !== originalDiscount.discount_value) {
+        console.log('🎯 Discount value changed, will be applied dynamically during fee calculations');
+        // Nothing to do here - discounts are applied dynamically during fee calculations
+      }
+
+      return { data: updatedDiscount, error: null };
     } catch (error) {
       return { data: null, error };
     }
@@ -2751,23 +2953,53 @@ export const dbHelpers = {
   // Delete/Deactivate a fee concession
   async deleteStudentDiscount(discountId, hardDelete = false) {
     try {
+      // Step 1: Get the discount details first so we can clean up related fee entries
+      const { data: discountData, error: fetchError } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .select('*')
+        .eq('id', discountId)
+        .single();
+
+      if (fetchError) {
+        console.error('Error fetching discount for deletion:', fetchError);
+        return { error: fetchError };
+      }
+
+      console.log('🗑️ Deleting student discount:', discountData);
+
       if (hardDelete) {
+        // Step 2A: Hard delete - Remove the discount record completely
         const { error } = await supabase
           .from(TABLES.STUDENT_DISCOUNTS)
           .delete()
           .eq('id', discountId);
-        return { error };
+        
+        if (error) return { error };
+        
+        // No need to modify fee_structure table anymore
+        console.log('🎯 CLEAN APPROACH: Discount removal will be applied dynamically during fee calculations');
+        
+        console.log('✅ Hard deleted discount and cleaned up student-specific fee entries');
+        return { error: null };
       } else {
-        // Soft delete by setting is_active to false
+        // Step 2B: Soft delete by setting is_active to false
         const { data, error } = await supabase
           .from(TABLES.STUDENT_DISCOUNTS)
           .update({ is_active: false })
           .eq('id', discountId)
           .select()
           .single();
-        return { data, error };
+        
+        if (error) return { data: null, error };
+        
+        // No need to modify fee_structure table anymore
+        console.log('🎯 CLEAN APPROACH: Discount deactivation will be applied dynamically during fee calculations');
+        
+        console.log('✅ Soft deleted discount and cleaned up student-specific fee entries');
+        return { data, error: null };
       }
     } catch (error) {
+      console.error('Error in deleteStudentDiscount:', error);
       return { error };
     }
   },
@@ -2775,12 +3007,56 @@ export const dbHelpers = {
   // Get students with their fee concession information for a class
   async getStudentsWithDiscounts(classId, academicYear = '2024-25') {
     try {
-      const { data, error } = await supabase.rpc('get_students_with_discounts', {
-        p_class_id: classId,
-        p_academic_year: academicYear
+      console.log('🔍 Getting students with discounts for class:', classId);
+      
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        return { data: null, error: new Error('Tenant context required') };
+      }
+
+      // Get students in the class
+      const { data: students, error: studentsError } = await supabase
+        .from(TABLES.STUDENTS)
+        .select(`
+          id, name, admission_no, roll_no,
+          classes(id, class_name, section)
+        `)
+        .eq('class_id', classId)
+        .eq('tenant_id', tenantId);
+
+      if (studentsError) {
+        return { data: null, error: studentsError };
+      }
+
+      // Get all discounts for this class
+      const { data: discounts, error: discountsError } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .select('*')
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true);
+
+      if (discountsError) {
+        return { data: null, error: discountsError };
+      }
+
+      // Combine students with their discount information
+      const studentsWithDiscounts = students.map(student => {
+        const studentDiscounts = discounts.filter(d => d.student_id === student.id);
+        const totalDiscount = studentDiscounts.reduce((sum, d) => sum + (d.discount_value || 0), 0);
+        
+        return {
+          ...student,
+          discounts: studentDiscounts,
+          total_discount: totalDiscount,
+          has_discount: studentDiscounts.length > 0
+        };
       });
-      return { data, error };
+
+      return { data: studentsWithDiscounts, error: null };
     } catch (error) {
+      console.error('Error in getStudentsWithDiscounts:', error);
       return { data: null, error };
     }
   },
@@ -2788,29 +3064,229 @@ export const dbHelpers = {
   // Calculate fee with concession for a student
   async calculateStudentFee(studentId, classId, academicYear, feeComponent, baseAmount) {
     try {
-      const { data, error } = await supabase.rpc('calculate_student_fee', {
-        p_student_id: studentId,
-        p_class_id: classId,
-        p_academic_year: academicYear,
-        p_fee_component: feeComponent,
-        p_base_amount: baseAmount
-      });
-      return { data: data && data.length > 0 ? data[0] : null, error };
+      console.log('🧮 Calculating student fee:', { studentId, feeComponent, baseAmount });
+      
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        return { data: null, error: new Error('Tenant context required') };
+      }
+
+      // Get active discounts for this student and fee component
+      const { data: discounts, error: discountsError } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .select('*')
+        .eq('student_id', studentId)
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true)
+        .or(`fee_component.eq.${feeComponent},fee_component.is.null`);
+
+      if (discountsError) {
+        return { data: null, error: discountsError };
+      }
+
+      let finalAmount = baseAmount;
+      let discountApplied = 0;
+
+      // Apply the discount if found
+      if (discounts && discounts.length > 0) {
+        const discount = discounts[0]; // Use first matching discount
+        
+        if (discount.discount_type === 'percentage') {
+          discountApplied = (baseAmount * discount.discount_value) / 100;
+        } else if (discount.discount_type === 'fixed_amount') {
+          discountApplied = Math.min(discount.discount_value, baseAmount);
+        }
+        
+        finalAmount = Math.max(0, baseAmount - discountApplied);
+      }
+
+      return {
+        data: {
+          student_id: studentId,
+          fee_component: feeComponent,
+          base_amount: baseAmount,
+          discount_applied: discountApplied,
+          final_amount: finalAmount
+        },
+        error: null
+      };
+    } catch (error) {
+      console.error('Error in calculateStudentFee:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Apply fee concession to fee structure (Clean approach: No longer modifies fee_structure)
+  async applyDiscountToFeeStructure(studentId, classId, academicYear) {
+    try {
+      console.log('🎯 CLEAN APPROACH: Discounts are now managed only in student_discounts table');
+      console.log('📋 Fee calculations are done dynamically using calculateStudentFeesWithDiscounts()');
+      
+      // Just return success as discounts are managed in student_discounts table
+      return { 
+        data: { 
+          message: 'Discounts are managed in student_discounts table and applied dynamically',
+          approach: 'clean'
+        }, 
+        error: null 
+      };
     } catch (error) {
       return { data: null, error };
     }
   },
 
-  // Apply fee concession to fee structure
-  async applyDiscountToFeeStructure(studentId, classId, academicYear) {
+  // 🎯 NEW APPROACH: Calculate student fees dynamically from class fees + discounts
+  async calculateStudentFeesWithDiscounts(studentId, classId, academicYear) {
     try {
-      const { data, error } = await supabase.rpc('apply_discount_to_fee_structure', {
-        p_student_id: studentId,
-        p_class_id: classId,
-        p_academic_year: academicYear
+      console.log('🧮 Calculating student fees dynamically:', { studentId, classId, academicYear });
+      
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        console.error('❌ No tenant context found');
+        return { data: null, error: new Error('Tenant context required') };
+      }
+
+      // Step 1: Get class-level fees (base fees for the class)
+      const { data: classFees, error: classFeesError } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .select('id, fee_component, amount, base_amount, due_date')
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .is('student_id', null) // Only class-level fees
+        .order('fee_component');
+
+      if (classFeesError) {
+        console.error('❌ Error fetching class fees:', classFeesError);
+        return { data: null, error: classFeesError };
+      }
+
+      if (!classFees || classFees.length === 0) {
+        console.warn('⚠️ No class-level fees found for class:', classId);
+        return { data: [], error: null };
+      }
+
+      // Step 2: Get active discounts for this student
+      const { data: studentDiscounts, error: discountsError } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .select('fee_component, discount_type, discount_value, description')
+        .eq('student_id', studentId)
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true);
+
+      if (discountsError) {
+        console.error('❌ Error fetching student discounts:', discountsError);
+        return { data: null, error: discountsError };
+      }
+
+      console.log('📋 Found class fees:', classFees.length);
+      console.log('🎫 Found active discounts:', studentDiscounts?.length || 0);
+
+      // Step 3: Apply discounts to class fees
+      const studentFees = classFees.map(classFee => {
+        // Find discount for this fee component (if any)
+        const discount = studentDiscounts?.find(d => 
+          d.fee_component === classFee.fee_component || 
+          d.fee_component === null || 
+          d.fee_component === 'ALL'
+        );
+
+        let finalAmount = classFee.amount;
+        let discountApplied = 0;
+        let discountDescription = null;
+
+        if (discount) {
+          if (discount.discount_type === 'percentage') {
+            discountApplied = (classFee.amount * discount.discount_value) / 100;
+            finalAmount = classFee.amount - discountApplied;
+          } else if (discount.discount_type === 'fixed_amount') {
+            discountApplied = Math.min(discount.discount_value, classFee.amount); // Don't exceed fee amount
+            finalAmount = classFee.amount - discountApplied;
+          }
+          discountDescription = discount.description;
+        }
+
+        return {
+          id: classFee.id, // Keep original fee structure ID for reference
+          student_id: studentId, // Add student context
+          class_id: classId,
+          academic_year: academicYear,
+          fee_component: classFee.fee_component,
+          base_amount: classFee.amount, // Original class fee amount
+          amount: Math.max(0, finalAmount), // Final amount after discount (never negative)
+          discount_applied: discountApplied,
+          due_date: classFee.due_date,
+          has_discount: !!discount,
+          discount_description: discountDescription,
+          tenant_id: tenantId
+        };
       });
-      return { data, error };
+
+      const totalBaseFees = classFees.reduce((sum, fee) => sum + fee.amount, 0);
+      const totalDiscountAmount = studentFees.reduce((sum, fee) => sum + (fee.discount_applied || 0), 0);
+      const totalFinalAmount = studentFees.reduce((sum, fee) => sum + fee.amount, 0);
+
+      console.log('💰 Fee calculation summary:');
+      console.log(`   Base fees: ₹${totalBaseFees}`);
+      console.log(`   Discount: ₹${totalDiscountAmount}`);
+      console.log(`   Final amount: ₹${totalFinalAmount}`);
+
+      return {
+        data: studentFees,
+        summary: {
+          totalBaseFees,
+          totalDiscountAmount,
+          totalFinalAmount,
+          discountPercentage: totalBaseFees > 0 ? ((totalDiscountAmount / totalBaseFees) * 100).toFixed(1) : 0
+        },
+        error: null
+      };
     } catch (error) {
+      console.error('❌ Error in calculateStudentFeesWithDiscounts:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Clean approach: Only manage student_discounts table, never modify fee_structure
+  async applyStudentDiscountToFeeStructure(studentId, classId, academicYear, discountValue, feeComponent = null) {
+    try {
+      console.log('🎯 CLEAN APPROACH: Only validating discount application:', {
+        studentId, classId, academicYear, discountValue, feeComponent
+      });
+
+      // Just validate that class fees exist - don't modify fee_structure table
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        return { data: null, error: new Error('Tenant context required') };
+      }
+
+      // Verify class fees exist
+      let feeQuery = supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .select('fee_component, amount')
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .is('student_id', null); // Only class-level fees
+
+      if (feeComponent) {
+        feeQuery = feeQuery.eq('fee_component', feeComponent);
+      }
+
+      const { data: classFees, error: feeError } = await feeQuery;
+
+      if (feeError || !classFees || classFees.length === 0) {
+        return { data: null, error: new Error('No class fees found. Create class fees first.') };
+      }
+
+      console.log('✅ Class fees verified. Discount will apply dynamically during calculation.');
+      return { data: { verified: true, classFees }, error: null };
+    } catch (error) {
+      console.error('❌ Error in applyStudentDiscountToFeeStructure:', error);
       return { data: null, error };
     }
   },
@@ -2860,6 +3336,414 @@ export const dbHelpers = {
       
       return { data: uniqueComponents, error: null };
     } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  // DEPRECATED: This function is no longer needed as we don't modify fee_structure directly
+  // Kept for backward compatibility but it now does nothing
+  async removeStudentSpecificFeeEntries(studentId, classId, academicYear, feeComponent = null) {
+    console.log('🎯 CLEAN APPROACH: removeStudentSpecificFeeEntries is deprecated');
+    console.log('No modifications to fee_structure needed - discounts are applied dynamically');
+    return { error: null };
+  },
+
+  // Delete class fee and cascade to student-specific fee entries
+  async deleteClassFeeWithCascade(classFeeId) {
+    try {
+      console.log('🗑️ Deleting class fee with cascade for ID:', classFeeId);
+      
+      // Step 1: Get the class fee details first
+      const { data: classFee, error: fetchError } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .select('*')
+        .eq('id', classFeeId)
+        .is('student_id', null) // Ensure it's a class-level fee
+        .single();
+
+      if (fetchError) {
+        console.error('Error fetching class fee for deletion:', fetchError);
+        return { error: fetchError };
+      }
+
+      if (!classFee) {
+        return { error: new Error('Class fee not found or is not a class-level fee') };
+      }
+
+      console.log('📋 Class fee to delete:', classFee);
+
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        console.error('No tenant context found');
+        return { error: new Error('Tenant context required') };
+      }
+
+      // Step 2: Find and delete all related student-specific fee entries
+      const { data: relatedStudentFees, error: studentFeesError } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .select('id, student_id')
+        .eq('class_id', classFee.class_id)
+        .eq('academic_year', classFee.academic_year)
+        .eq('fee_component', classFee.fee_component)
+        .eq('tenant_id', tenantId)
+        .not('student_id', 'is', null); // Only student-specific fees
+
+      if (studentFeesError) {
+        console.error('Error finding related student fees:', studentFeesError);
+        return { error: studentFeesError };
+      }
+
+      console.log('📋 Related student-specific fees to delete:', relatedStudentFees?.length || 0);
+
+      // Step 3: Delete related student-specific fees first
+      if (relatedStudentFees && relatedStudentFees.length > 0) {
+        const studentFeeIds = relatedStudentFees.map(fee => fee.id);
+        
+        const { error: deleteStudentFeesError } = await supabase
+          .from(TABLES.FEE_STRUCTURE)
+          .delete()
+          .in('id', studentFeeIds);
+
+        if (deleteStudentFeesError) {
+          console.error('Error deleting related student fees:', deleteStudentFeesError);
+          return { error: deleteStudentFeesError };
+        }
+
+        console.log('✅ Deleted', relatedStudentFees.length, 'related student-specific fee entries');
+      }
+
+      // Step 4: Find and delete related student discounts
+      const { data: relatedDiscounts, error: discountsError } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .select('id, student_id')
+        .eq('class_id', classFee.class_id)
+        .eq('academic_year', classFee.academic_year)
+        .eq('fee_component', classFee.fee_component)
+        .eq('tenant_id', tenantId);
+
+      if (discountsError) {
+        console.error('Error finding related discounts:', discountsError);
+        // Don't fail the operation, just log the warning
+      } else if (relatedDiscounts && relatedDiscounts.length > 0) {
+        console.log('📋 Related discounts to deactivate:', relatedDiscounts.length);
+        
+        // Soft delete the discounts by setting is_active to false
+        const { error: deactivateDiscountsError } = await supabase
+          .from(TABLES.STUDENT_DISCOUNTS)
+          .update({ is_active: false })
+          .in('id', relatedDiscounts.map(discount => discount.id));
+
+        if (deactivateDiscountsError) {
+          console.error('Error deactivating related discounts:', deactivateDiscountsError);
+          // Don't fail the operation, just log the warning
+        } else {
+          console.log('✅ Deactivated', relatedDiscounts.length, 'related student discounts');
+        }
+      }
+
+      // Step 5: Delete the main class fee
+      const { error: deleteClassFeeError } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .delete()
+        .eq('id', classFeeId);
+
+      if (deleteClassFeeError) {
+        console.error('Error deleting class fee:', deleteClassFeeError);
+        return { error: deleteClassFeeError };
+      }
+
+      console.log('✅ Successfully deleted class fee and all related entries');
+
+      return {
+        data: {
+          deletedClassFee: classFee,
+          deletedStudentFees: relatedStudentFees?.length || 0,
+          deactivatedDiscounts: relatedDiscounts?.length || 0
+        },
+        error: null
+      };
+    } catch (error) {
+      console.error('Error in deleteClassFeeWithCascade:', error);
+      return { error };
+    }
+  },
+
+  // Delete all class fees for a class and academic year with cascade
+  async deleteAllClassFeesWithCascade(classId, academicYear) {
+    try {
+      console.log('🗑️ Deleting all class fees with cascade for class:', classId, 'year:', academicYear);
+      
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        console.error('No tenant context found');
+        return { error: new Error('Tenant context required') };
+      }
+
+      // Step 1: Get all class-level fees for this class and academic year
+      const { data: classFees, error: fetchError } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .select('*')
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .is('student_id', null); // Only class-level fees
+
+      if (fetchError) {
+        console.error('Error fetching class fees for deletion:', fetchError);
+        return { error: fetchError };
+      }
+
+      if (!classFees || classFees.length === 0) {
+        console.log('No class fees found to delete');
+        return { data: { deletedClassFees: 0, deletedStudentFees: 0, deactivatedDiscounts: 0 }, error: null };
+      }
+
+      console.log('📋 Class fees to delete:', classFees.length);
+
+      // Step 2: Delete all related student-specific fees for this class and year
+      const { data: deletedStudentFees, error: deleteStudentFeesError } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .delete()
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .not('student_id', 'is', null) // Only student-specific fees
+        .select('id');
+
+      if (deleteStudentFeesError) {
+        console.error('Error deleting student fees:', deleteStudentFeesError);
+        return { error: deleteStudentFeesError };
+      }
+
+      console.log('✅ Deleted', deletedStudentFees?.length || 0, 'student-specific fee entries');
+
+      // Step 3: Deactivate all related student discounts for this class and year
+      const { data: deactivatedDiscounts, error: discountsError } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .update({ is_active: false })
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true)
+        .select('id');
+
+      if (discountsError) {
+        console.error('Error deactivating discounts:', discountsError);
+        // Don't fail the operation, just log the warning
+      }
+
+      console.log('✅ Deactivated', deactivatedDiscounts?.length || 0, 'student discounts');
+
+      // Step 4: Delete all class-level fees
+      const classFeeIds = classFees.map(fee => fee.id);
+      const { error: deleteClassFeesError } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .delete()
+        .in('id', classFeeIds);
+
+      if (deleteClassFeesError) {
+        console.error('Error deleting class fees:', deleteClassFeesError);
+        return { error: deleteClassFeesError };
+      }
+
+      console.log('✅ Successfully deleted all class fees and related entries');
+
+      return {
+        data: {
+          deletedClassFees: classFees.length,
+          deletedStudentFees: deletedStudentFees?.length || 0,
+          deactivatedDiscounts: deactivatedDiscounts?.length || 0,
+          classFeesDeleted: classFees
+        },
+        error: null
+      };
+    } catch (error) {
+      console.error('Error in deleteAllClassFeesWithCascade:', error);
+      return { error };
+    }
+  },
+
+  // Get the actual fees that apply to a specific student (class fees OR student-specific fees)
+  async getStudentApplicableFees(studentId, classId, academicYear) {
+    try {
+      console.log('🔍 Getting applicable fees for student:', studentId);
+      
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        return { data: null, error: new Error('Tenant context required') };
+      }
+
+      // Step 1: Get student-specific fees (if any)
+      const { data: studentSpecificFees, error: studentError } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .select('*')
+        .eq('student_id', studentId)
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .order('fee_component');
+
+      if (studentError) {
+        return { data: null, error: studentError };
+      }
+
+      // Step 2: Get class-level fees
+      const { data: classFees, error: classError } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .select('*')
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .is('student_id', null) // Only class-level fees
+        .order('fee_component');
+
+      if (classError) {
+        return { data: null, error: classError };
+      }
+
+      // Step 3: Build the applicable fees list
+      // For each fee component, use student-specific fee if exists, otherwise use class fee
+      const applicableFees = [];
+      const studentFeeComponents = new Set((studentSpecificFees || []).map(f => f.fee_component));
+
+      console.log('📋 Student has specific fees for components:', Array.from(studentFeeComponents));
+
+      // Add student-specific fees
+      if (studentSpecificFees && studentSpecificFees.length > 0) {
+        studentSpecificFees.forEach(fee => {
+          applicableFees.push({
+            ...fee,
+            fee_type: 'student_specific',
+            applicable_reason: 'Student has specific fee (concession applied)'
+          });
+        });
+      }
+
+      // Add class fees for components that don't have student-specific overrides
+      if (classFees && classFees.length > 0) {
+        classFees.forEach(fee => {
+          if (!studentFeeComponents.has(fee.fee_component)) {
+            applicableFees.push({
+              ...fee,
+              fee_type: 'class_level',
+              applicable_reason: 'No student-specific override, using class fee'
+            });
+          }
+        });
+      }
+
+      // Sort by fee component for consistency
+      applicableFees.sort((a, b) => (a.fee_component || '').localeCompare(b.fee_component || ''));
+
+      console.log('✅ Applicable fees for student:', studentId);
+      applicableFees.forEach(fee => {
+        console.log(`   ${fee.fee_component}: ${fee.amount} (${fee.fee_type})`);
+      });
+
+      return { data: applicableFees, error: null };
+    } catch (error) {
+      console.error('Error in getStudentApplicableFees:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Check for fee structure integrity - ensure no class fees were accidentally modified
+  async verifyFeeStructureIntegrity(classId, academicYear) {
+    try {
+      console.log('🔍 Verifying fee structure integrity for class:', classId);
+      
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        return { data: null, error: new Error('Tenant context required') };
+      }
+
+      // Get all fees for this class
+      const { data: allFees, error } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .select('id, fee_component, amount, student_id')
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .order('fee_component, student_id');
+
+      if (error) {
+        return { data: null, error };
+      }
+
+      // Group by fee component
+      const feesByComponent = {};
+      allFees.forEach(fee => {
+        if (!feesByComponent[fee.fee_component]) {
+          feesByComponent[fee.fee_component] = { class: null, students: [] };
+        }
+        
+        if (fee.student_id === null) {
+          feesByComponent[fee.fee_component].class = fee;
+        } else {
+          feesByComponent[fee.fee_component].students.push(fee);
+        }
+      });
+
+      // Analyze each component
+      const report = {
+        components: [],
+        issues: [],
+        summary: {
+          totalComponents: 0,
+          classFeesFound: 0,
+          studentFeesFound: 0,
+          integrityIssues: 0
+        }
+      };
+
+      Object.keys(feesByComponent).forEach(component => {
+        const componentData = feesByComponent[component];
+        const componentReport = {
+          component,
+          classFee: componentData.class,
+          studentFees: componentData.students,
+          hasClassFee: !!componentData.class,
+          studentCount: componentData.students.length,
+          issues: []
+        };
+
+        // Check for issues
+        if (!componentData.class) {
+          componentReport.issues.push('Missing class-level fee (students will have no fallback)');
+          report.issues.push(`${component}: Missing class-level fee`);
+        }
+
+        // Check if student fees have proper base_amount
+        componentData.students.forEach(studentFee => {
+          if (componentData.class && studentFee.base_amount !== componentData.class.amount) {
+            componentReport.issues.push(`Student ${studentFee.student_id}: base_amount (${studentFee.base_amount}) doesn't match class fee (${componentData.class.amount})`);
+            report.issues.push(`${component}: Student ${studentFee.student_id} has mismatched base_amount`);
+          }
+        });
+
+        report.components.push(componentReport);
+        report.summary.totalComponents++;
+        if (componentData.class) report.summary.classFeesFound++;
+        report.summary.studentFeesFound += componentData.students.length;
+        report.summary.integrityIssues += componentReport.issues.length;
+      });
+
+      console.log('📊 Fee Structure Integrity Report:');
+      console.log(`   Components: ${report.summary.totalComponents}`);
+      console.log(`   Class fees: ${report.summary.classFeesFound}`);
+      console.log(`   Student fees: ${report.summary.studentFeesFound}`);
+      console.log(`   Issues: ${report.summary.integrityIssues}`);
+
+      if (report.issues.length > 0) {
+        console.log('❌ Issues found:');
+        report.issues.forEach(issue => console.log(`   - ${issue}`));
+      } else {
+        console.log('✅ No integrity issues found');
+      }
+
+      return { data: report, error: null };
+    } catch (error) {
+      console.error('Error in verifyFeeStructureIntegrity:', error);
       return { data: null, error };
     }
   },

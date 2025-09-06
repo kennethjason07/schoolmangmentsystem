@@ -16,15 +16,15 @@ import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
 import StudentSwitchBanner from '../../components/StudentSwitchBanner';
+import StudentFeeCard from '../../components/StudentFeeCard';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import { useSelectedStudent } from '../../contexts/SelectedStudentContext';
 import { useFocusEffect } from '@react-navigation/native';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
-import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCount';
-import DebugBadge from '../../components/DebugBadge';
-import NotificationTester from '../../components/NotificationTester';
+import { useUnreadMessageCount } from '../../hooks/useUnreadMessageCount';
+import { badgeNotifier } from '../../utils/badgeNotifier';
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -450,7 +450,6 @@ const ParentDashboard = ({ navigation }) => {
             fee_component,
             amount,
             base_amount,
-            discount_applied,
             due_date,
             created_at,
             classes(id, class_name, section, academic_year)
@@ -1146,7 +1145,6 @@ const ParentDashboard = ({ navigation }) => {
                 fee_component,
                 amount,
                 base_amount,
-                discount_applied,
                 due_date,
                 created_at,
                 classes(id, class_name, section, academic_year)
@@ -1378,7 +1376,6 @@ const ParentDashboard = ({ navigation }) => {
             payments: payments,
             // Additional fields for better fee tracking
             baseAmount: fee.base_amount || feeAmount,
-            discountApplied: fee.discount_applied || 0,
             createdAt: fee.created_at
           };
         });
@@ -2482,14 +2479,78 @@ const ParentDashboard = ({ navigation }) => {
     }
   }, [user]);
 
-  // Use the proper notification count hook - this handles deduplication and filtering correctly
-  const { unreadCount, refresh: refreshNotificationCount } = useUnreadNotificationCount('Parent');
+  // Use the unread message count hook to show message count on bell icon
+  const { unreadCount, refreshCount: refreshMessageCount } = useUnreadMessageCount();
   
-  // Debug logging for unread count - simplified to avoid confusion
-  console.log('=== PARENT DASHBOARD NOTIFICATION COUNT ===');
-  console.log('Final unread count from hook:', unreadCount);
+  // Manual test function to verify badge notifications and debug messages
+  const testBadgeNotification = async () => {
+    console.log('🧪 MANUAL TEST: Testing badge notification system');
+    console.log('🧪 Current unread count:', unreadCount);
+    console.log('🧪 Current user ID:', user?.id);
+    
+    // Debug: Check messages table directly
+    if (user?.id) {
+      try {
+        console.log('🧪 MANUAL TEST: Fetching messages directly from database...');
+        
+        // Get ALL messages for this user
+        const { data: allMessages, error: allError } = await supabase
+          .from('messages')
+          .select('id, sender_id, receiver_id, is_read, message, sent_at')
+          .eq('receiver_id', user.id)
+          .order('sent_at', { ascending: false });
+          
+        // Get ONLY unread messages for this user
+        const { data: unreadMessages, error: unreadError } = await supabase
+          .from('messages')
+          .select('id, sender_id, receiver_id, is_read, message, sent_at')
+          .eq('receiver_id', user.id)
+          .eq('is_read', false)
+          .order('sent_at', { ascending: false });
+        
+        console.log('🧪 MANUAL TEST: Database query results:');
+        console.log('  Total messages for user:', allMessages?.length || 0);
+        console.log('  Unread messages for user:', unreadMessages?.length || 0);
+        
+        if (allMessages && allMessages.length > 0) {
+          console.log('🧪 MANUAL TEST: All messages breakdown:');
+          allMessages.forEach((msg, idx) => {
+            console.log(`    ${idx + 1}. ID: ${msg.id}, Read: ${msg.is_read}, Sender: ${msg.sender_id}, Message: ${msg.message?.substring(0, 50)}...`);
+          });
+        }
+        
+        if (unreadMessages && unreadMessages.length > 0) {
+          console.log('🧪 MANUAL TEST: Unread messages details:');
+          unreadMessages.forEach((msg, idx) => {
+            console.log(`    ${idx + 1}. ID: ${msg.id}, Sender: ${msg.sender_id}, Message: ${msg.message?.substring(0, 50)}...`);
+          });
+        }
+        
+        if (allError) console.log('🧪 MANUAL TEST: Error fetching all messages:', allError);
+        if (unreadError) console.log('🧪 MANUAL TEST: Error fetching unread messages:', unreadError);
+        
+      } catch (error) {
+        console.log('🧪 MANUAL TEST: Error in direct database query:', error);
+      }
+    }
+    
+    // Force refresh the message count
+    refreshMessageCount().then(() => {
+      console.log('🧪 MANUAL TEST: Refresh completed, new count should be visible');
+    });
+    
+    // Trigger badge notifier manually
+    if (user?.id) {
+      console.log('🧪 MANUAL TEST: Triggering badge notifier for user:', user.id);
+      badgeNotifier.notifyBadgeRefresh(user.id, 'manual-test');
+    }
+  };
+  
+  // Debug logging for unread message count - simplified to avoid confusion
+  console.log('=== PARENT DASHBOARD MESSAGE COUNT ===');
+  console.log('Final unread message count from hook:', unreadCount);
   console.log('Local notifications array length:', notifications.length);
-  console.log('==========================================');
+  console.log('=====================================');
 
   // Calculate attendance percentage with useMemo for better performance and updates
   const attendanceStats = React.useMemo(() => {
@@ -2851,7 +2912,12 @@ const ParentDashboard = ({ navigation }) => {
   if (loading) {
     return (
       <View style={styles.container}>
-        <Header title="Parent Dashboard" showBack={false} showNotifications={true} />
+        <Header 
+          title="Parent Dashboard" 
+          showBack={false} 
+          showNotifications={true}
+          unreadCount={unreadCount}
+        />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#FF9800" />
           <Text style={styles.loadingText}>Loading dashboard...</Text>
@@ -2863,7 +2929,12 @@ const ParentDashboard = ({ navigation }) => {
   if (error) {
     return (
       <View style={styles.container}>
-        <Header title="Parent Dashboard" showBack={false} showNotifications={true} />
+        <Header 
+          title="Parent Dashboard" 
+          showBack={false} 
+          showNotifications={true}
+          unreadCount={unreadCount}
+        />
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle" size={48} color="#F44336" />
           <Text style={styles.errorText}>Failed to load dashboard</Text>
@@ -3099,6 +3170,22 @@ const ParentDashboard = ({ navigation }) => {
           </View>
         </View>
 
+        {/* Fee Information - Comprehensive discount-aware display */}
+        {studentData?.id && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Fee Information</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Fees')}>
+                <Text style={styles.viewAllText}>View Details</Text>
+              </TouchableOpacity>
+            </View>
+            <StudentFeeCard 
+              studentId={studentData.id} 
+              compact={false}
+            />
+          </View>
+        )}
+        
         {/* Fee Distribution Summary Cards */}
         {fees.length > 0 && (() => {
           console.log('=== FEE OVERVIEW DEBUG ===');

@@ -70,53 +70,63 @@ const normalizeAcademicYear = (year) => {
  * Calculate complete fee information for a student
  * @param {string} studentId - The student's ID
  * @param {string} classId - Optional student's class ID (will be fetched if not provided)
+ * @param {string} tenantId - Optional tenant ID (will be fetched if not provided)
  * @returns {Object} Complete fee calculation data
  */
-export const calculateStudentFees = async (studentId, classId = null) => {
+export const calculateStudentFees = async (studentId, classId = null, tenantId = null) => {
   try {
     console.log('=== FEE CALCULATION START ===');
     console.log('Student ID:', studentId);
     console.log('Class ID:', classId);
+    console.log('Tenant ID (provided):', tenantId);
 
-    const tenantId = await getUserTenantId();
-    if (!tenantId) {
-      throw new Error('Tenant context required but not found');
+    // Use provided tenantId or fetch from context
+    let actualTenantId = tenantId;
+    if (!actualTenantId) {
+      actualTenantId = await getUserTenantId();
+      if (!actualTenantId) {
+        throw new Error('Tenant context required but not found');
+      }
     }
+    console.log('Using tenant ID:', actualTenantId);
 
     // Step 1: Get student info and class ID if needed
     let actualClassId = classId;
     if (!actualClassId) {
       const { data: studentRecord, error: studentError } = await supabase
         .from(TABLES.STUDENTS)
-        .select('class_id, academic_year')
+        .select('class_id, academic_year, name')
         .eq('id', studentId)
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', actualTenantId)
         .single();
       
       if (studentError || !studentRecord?.class_id) {
-        throw new Error('Could not determine student class ID');
+        console.error('Student lookup error:', studentError);
+        throw new Error(`Could not determine student class ID: ${studentError?.message || 'Student not found'}`);
       }
       
       actualClassId = studentRecord.class_id;
-      console.log('Fetched class ID from student record:', actualClassId);
+      console.log('Fetched class ID from student record:', actualClassId, 'for student:', studentRecord.name);
     }
 
-    // Step 2: Get fee structure for student's class
-    console.log('Step 2: Fetching fee structure...');
-    const { data: feeStructureData, error: feeStructureError } = await supabase
-      .from(TABLES.FEE_STRUCTURE)
-      .select(`
-        id,
-        fee_component,
-        amount,
-        due_date,
-        academic_year,
-        class_id,
-        student_id
-      `)
-      .or(`class_id.eq.${actualClassId},student_id.eq.${studentId}`)
-      .eq('tenant_id', tenantId)
-      .order('due_date', { ascending: true });
+  // Step 2: Get ONLY class-level fee structure (simplified approach)
+  console.log('Step 2: Fetching CLASS-LEVEL fee structure...');
+  const { data: feeStructureData, error: feeStructureError } = await supabase
+    .from(TABLES.FEE_STRUCTURE)
+    .select(`
+      id,
+      fee_component,
+      amount,
+      due_date,
+      academic_year,
+      class_id,
+      student_id,
+      tenant_id
+    `)
+    .eq('class_id', actualClassId)
+    .is('student_id', null) // 🎯 SIMPLIFIED: Only get class-level fees
+    .eq('tenant_id', actualTenantId)
+    .order('due_date', { ascending: true });
 
     if (feeStructureError) {
       throw new Error(`Failed to fetch fee structure: ${feeStructureError.message}`);
@@ -147,7 +157,7 @@ export const calculateStudentFees = async (studentId, classId = null) => {
       .from(TABLES.STUDENT_DISCOUNTS)
       .select('*')
       .eq('student_id', studentId)
-      .eq('tenant_id', tenantId)
+      .eq('tenant_id', actualTenantId)
       .eq('is_active', true);
 
     if (discountError && discountError.code !== '42P01') {
@@ -172,7 +182,7 @@ export const calculateStudentFees = async (studentId, classId = null) => {
         receipt_number
       `)
       .eq('student_id', studentId)
-      .eq('tenant_id', tenantId)
+      .eq('tenant_id', actualTenantId)
       .order('payment_date', { ascending: false });
 
     if (paymentError) {
@@ -181,56 +191,75 @@ export const calculateStudentFees = async (studentId, classId = null) => {
 
     console.log(`Found ${allPaymentData?.length || 0} total payment records`);
 
-    // Step 5: Process each fee component
-    const processedFees = [];
-    const usedPaymentIds = new Set();
-    let totalCalculatedPaid = 0;
-    let totalCalculatedOutstanding = 0;
+  // Step 5: Process each fee component (simplified approach)
+  const processedFees = [];
+  const usedPaymentIds = new Set();
+  let totalCalculatedPaid = 0;
+  let totalCalculatedOutstanding = 0;
 
-    // Group fee structure by component + academic year
-    const feeMap = new Map();
-    (feeStructureData || []).forEach(fee => {
-      const key = `${fee.fee_component}_${normalizeAcademicYear(fee.academic_year)}`;
-      if (!feeMap.has(key)) {
-        feeMap.set(key, {
-          component: fee.fee_component,
-          academicYear: normalizeAcademicYear(fee.academic_year),
-          fees: []
-        });
-      }
-      feeMap.get(key).fees.push(fee);
+  // 🎯 SIMPLIFIED: Group ONLY class-level fees by component + academic year
+  const feeMap = new Map();
+  (feeStructureData || []).forEach(fee => {
+    const key = `${fee.fee_component}_${normalizeAcademicYear(fee.academic_year)}`;
+    if (!feeMap.has(key)) {
+      feeMap.set(key, {
+        component: fee.fee_component,
+        academicYear: normalizeAcademicYear(fee.academic_year),
+        fees: []
+      });
+    }
+    
+    const feeGroup = feeMap.get(key);
+    feeGroup.fees.push(fee);
+  });
+
+  console.log('Step 5: Processing grouped class fees...');
+  console.log('Fee groups:', Array.from(feeMap.keys()));
+  
+  // Debug: Show class-level fees (all fees should be class-level with student_id = null)
+  for (const [key, feeGroup] of feeMap) {
+    console.log(`Fee group ${key}: feeCount=${feeGroup.fees.length}`);
+    feeGroup.fees.forEach((fee, idx) => {
+      console.log(`  🎯 Class Fee ${idx + 1}: ID=${fee.id}, student_id=${fee.student_id || 'null'}, class_id=${fee.class_id}, amount=${fee.amount}`);
+    });
+  }
+
+  for (const [key, feeGroup] of feeMap) {
+    const { component, academicYear, fees } = feeGroup;
+    console.log(`\n--- 🎯 Processing CLASS FEE: ${component} (${academicYear}) ---`);
+    
+    // Calculate total base amount for this component (from class fees only)
+    const baseAmount = fees.reduce((sum, fee) => sum + (Number(fee.amount) || 0), 0);
+    console.log(`📊 Base class fee amount: ₹${baseAmount}`);
+
+    // 🎯 SIMPLIFIED: Find applicable discounts from student_discounts table
+    const applicableDiscounts = (discountData || []).filter(discount => {
+      const discountYear = normalizeAcademicYear(discount.academic_year);
+      const isComponentMatch = discount.fee_component === component || discount.fee_component === 'ALL';
+      const isYearMatch = discountYear === academicYear || !discount.academic_year;
+      
+      console.log(`🔍 Checking discount: ${discount.fee_component} (${discount.discount_type}: ${discount.discount_value}) - ComponentMatch: ${isComponentMatch}, YearMatch: ${isYearMatch}`);
+      
+      return isComponentMatch && isYearMatch;
     });
 
-    console.log('Step 5: Processing grouped fees...');
-    console.log('Fee groups:', Array.from(feeMap.keys()));
+    console.log(`🎁 Found ${applicableDiscounts.length} applicable discounts`);
 
-    for (const [key, feeGroup] of feeMap) {
-      const { component, academicYear, fees } = feeGroup;
-      console.log(`\n--- Processing: ${component} (${academicYear}) ---`);
-      
-      // Calculate total base amount for this component
-      const baseAmount = fees.reduce((sum, fee) => sum + (Number(fee.amount) || 0), 0);
-      console.log(`Base amount: ₹${baseAmount}`);
+    // Calculate total discount from student_discounts table
+    let totalDiscount = 0;
+    applicableDiscounts.forEach(discount => {
+      let discountAmount = 0;
+      if (discount.discount_type === 'percentage') {
+        discountAmount = (baseAmount * Number(discount.discount_value)) / 100;
+      } else if (discount.discount_type === 'fixed' || discount.discount_type === 'fixed_amount') {
+        discountAmount = Number(discount.discount_value) || 0;
+      }
+      totalDiscount += discountAmount;
+      console.log(`  💰 Applied ${discount.discount_type} discount: ₹${discountAmount} (reason: ${discount.reason || 'No reason'})`);
+    });
 
-      // Find applicable discounts
-      const applicableDiscounts = (discountData || []).filter(discount => {
-        const discountYear = normalizeAcademicYear(discount.academic_year);
-        return (discount.fee_component === component || discount.fee_component === 'ALL') &&
-               (discountYear === academicYear || !discount.academic_year);
-      });
-
-      // Calculate discount
-      let totalDiscount = 0;
-      applicableDiscounts.forEach(discount => {
-        if (discount.discount_type === 'percentage') {
-          totalDiscount += (baseAmount * Number(discount.discount_value)) / 100;
-        } else if (discount.discount_type === 'fixed' || discount.discount_type === 'fixed_amount') {
-          totalDiscount += Number(discount.discount_value) || 0;
-        }
-      });
-
-      const finalAmount = Math.max(0, baseAmount - totalDiscount);
-      console.log(`After ₹${totalDiscount} discount: ₹${finalAmount}`);
+    const finalAmount = Math.max(0, baseAmount - totalDiscount);
+    console.log(`💸 Final amount (₹${baseAmount} - ₹${totalDiscount}): ₹${finalAmount}`);
 
       // Find matching payments for this specific component and academic year
       const matchingPayments = (allPaymentData || []).filter(payment => {
@@ -238,17 +267,29 @@ export const calculateStudentFees = async (studentId, classId = null) => {
         if (usedPaymentIds.has(payment.id)) return false;
         
         const paymentYear = normalizeAcademicYear(payment.academic_year);
-        const isYearMatch = paymentYear === academicYear;
+        const isYearMatch = paymentYear === academicYear || !payment.academic_year; // Also match if no year specified
         
         // Try exact match first
         if (payment.fee_component === component && isYearMatch) {
           return true;
         }
         
-        // Try fuzzy match for same academic year
+        // Try fuzzy match for same academic year or no year
         if (isYearMatch) {
           const matchedComponent = findMatchingFeeComponent(payment.fee_component, [component]);
-          return matchedComponent === component;
+          if (matchedComponent === component) {
+            console.log(`  Fuzzy matched payment: ${payment.fee_component} -> ${component}`);
+            return true;
+          }
+        }
+        
+        // If no year-specific match found and payment has no academic year, try fuzzy match
+        if (!payment.academic_year) {
+          const matchedComponent = findMatchingFeeComponent(payment.fee_component, [component]);
+          if (matchedComponent === component) {
+            console.log(`  Year-agnostic fuzzy matched payment: ${payment.fee_component} -> ${component}`);
+            return true;
+          }
         }
         
         return false;
@@ -331,11 +372,23 @@ export const calculateStudentFees = async (studentId, classId = null) => {
       outstandingAmount: fee.remainingAmount,
       dueDate: fee.dueDate,
       academicYear: fee.academicYear,
-      isClassFee: fee.class_id ? true : false,
-      isIndividualFee: fee.student_id ? true : false,
+      isClassFee: true, // 🎯 SIMPLIFIED: All fees are now class-level fees
+      isIndividualFee: false, // 🎯 SIMPLIFIED: No individual fee entries, discounts managed separately
       payments: fee.payments,
       discounts: fee.discounts
     }));
+
+    // Add metadata for debugging and validation
+    const calculationMetadata = {
+      studentId,
+      classId: actualClassId,
+      tenantId: actualTenantId,
+      calculatedAt: new Date().toISOString(),
+      feeStructureCount: feeStructureData?.length || 0,
+      paymentRecordsCount: allPaymentData?.length || 0,
+      processedFeesCount: processedFees.length,
+      orphanedPaymentsCount: orphanedPayments.length
+    };
 
     return {
       totalAmount,
@@ -349,12 +402,44 @@ export const calculateStudentFees = async (studentId, classId = null) => {
       totalDue: totalAmount,
       pendingFees: processedFees.filter(fee => fee.status !== 'paid'),
       paidFees: processedFees.filter(fee => fee.status === 'paid'),
-      allFees: processedFees
+      allFees: processedFees,
+      metadata: calculationMetadata
     };
 
   } catch (error) {
     console.error('Fee calculation error:', error);
-    return null;
+    console.error('Error details:', {
+      studentId,
+      classId,
+      tenantId: actualTenantId,
+      error: error.message,
+      stack: error.stack
+    });
+    
+    // Return empty calculation instead of null to prevent crashes
+    return {
+      totalAmount: 0,
+      totalPaid: 0,
+      totalOutstanding: 0,
+      totalBaseFee: 0,
+      totalDiscounts: 0,
+      academicYear: '2024-25',
+      details: [],
+      orphanedPayments: [],
+      totalDue: 0,
+      pendingFees: [],
+      paidFees: [],
+      allFees: [],
+      error: error.message,
+      metadata: {
+        studentId,
+        classId,
+        tenantId: actualTenantId || 'unknown',
+        calculatedAt: new Date().toISOString(),
+        hasError: true,
+        errorMessage: error.message
+      }
+    };
   }
 };
 

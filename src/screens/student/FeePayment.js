@@ -23,7 +23,8 @@ import * as Print from 'expo-print';
 import { supabase, TABLES, dbHelpers, isValidUUID } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import { getSchoolLogoBase64, getLogoHTML, getReceiptHeaderCSS } from '../../utils/logoUtils';
-import { calculateStudentFees } from '../../utils/feeCalculation';
+import FeeService from '../../services/FeeService';
+import { validateFeeConsistency, syncFeeAfterPayment } from '../../services/feeSync';
 
 const { width } = Dimensions.get('window');
 
@@ -73,13 +74,32 @@ const FeePayment = () => {
         setStudentData(studentDetails);
         console.log('Student FeePayment - Student details:', studentDetails);
 
-        // Use the centralized fee calculation utility
-        console.log('Student FeePayment - Calculating fees using utility...');
-        const feeSummary = await calculateStudentFees(user.linked_student_id, studentDetails.class_id);
-        console.log('Student FeePayment - Fee summary calculated:', feeSummary);
+        // 🎯 Use NEW class-based FeeService for proper fee structure
+        console.log('Student FeePayment - Getting fees using class-based FeeService...');
+        const feeServiceResult = await FeeService.getStudentFeesWithClassBase(user.linked_student_id);
+        console.log('Student FeePayment - FeeService result:', feeServiceResult);
+        
+        // Validate fee consistency to ensure data integrity
+        try {
+          const consistencyCheck = await validateFeeConsistency(user.linked_student_id, user.tenant_id);
+          if (!consistencyCheck.isConsistent) {
+            console.warn('Student FeePayment - Fee consistency issues detected:', consistencyCheck.issues);
+            // Still proceed but log the issues for debugging
+          }
+          if (consistencyCheck.warnings && consistencyCheck.warnings.length > 0) {
+            console.warn('Student FeePayment - Fee warnings:', consistencyCheck.warnings);
+          }
+        } catch (consistencyError) {
+          console.warn('Student FeePayment - Fee consistency check failed (non-critical):', consistencyError);
+        }
 
-        if (!feeSummary || !feeSummary.details || feeSummary.details.length === 0) {
-          console.log('Student FeePayment - No fee data from utility, showing empty state');
+        // Handle FeeService result
+        if (!feeServiceResult.success || !feeServiceResult.data) {
+          if (feeServiceResult.error) {
+            console.error('Student FeePayment - FeeService error:', feeServiceResult.error);
+          } else {
+            console.log('Student FeePayment - No fee data from FeeService, showing empty state');
+          }
           setFeeStructure({
             studentName: studentDetails.name,
             class: studentDetails.classes?.class_name || 'N/A',
@@ -87,103 +107,93 @@ const FeePayment = () => {
             totalDue: 0,
             totalPaid: 0,
             outstanding: 0,
-            fees: []
+            fees: [],
+            metadata: { source: 'empty-state' }
           });
           setPaymentHistory([]);
           return;
         }
 
-        // Transform fee details from utility to match component expectations
-        const transformedFees = feeSummary.details.map(fee => {
+        const feeData = feeServiceResult.data;
+        console.log('Student FeePayment - Using FeeService data:', feeData);
+
+        // Transform fee components from NEW class-based FeeService
+        const transformedFees = feeData.fees.components.map(component => {
           // Determine category based on fee component
           let category = 'general';
-          if (fee.feeComponent) {
-            const component = fee.feeComponent.toLowerCase();
-            if (component.includes('tuition') || component.includes('academic')) {
+          if (component.name) {
+            const componentName = component.name.toLowerCase();
+            if (componentName.includes('tuition') || componentName.includes('academic')) {
               category = 'tuition';
-            } else if (component.includes('book') || component.includes('library')) {
+            } else if (componentName.includes('book') || componentName.includes('library')) {
               category = 'books';
-            } else if (component.includes('transport') || component.includes('bus')) {
+            } else if (componentName.includes('transport') || componentName.includes('bus')) {
               category = 'transport';
-            } else if (component.includes('exam') || component.includes('test')) {
+            } else if (componentName.includes('exam') || componentName.includes('test')) {
               category = 'examination';
-            } else if (component.includes('activity') || component.includes('sport')) {
+            } else if (componentName.includes('activity') || componentName.includes('sport')) {
               category = 'activities';
-            } else if (component.includes('facility') || component.includes('lab')) {
+            } else if (componentName.includes('facility') || componentName.includes('lab')) {
               category = 'facilities';
             }
           }
 
-          let status = 'unpaid';
-          if (fee.paidAmount >= fee.finalAmount) {
-            status = 'paid';
-          } else if (fee.paidAmount > 0) {
-            status = 'partial';
-          }
-
           return {
-            id: fee.id || `fee-${Date.now()}-${Math.random()}`,
-            name: fee.feeComponent,
-            totalAmount: fee.finalAmount, // Full fee amount after discount
-            amount: fee.outstandingAmount, // Amount still pending (this is what should be displayed)
-            dueDate: fee.dueDate,
-            status: status,
-            paidAmount: fee.paidAmount,
-            remainingAmount: fee.outstandingAmount,
-            description: `${fee.feeComponent} for ${fee.academicYear || '2024-25'}`,
+            id: component.id || `fee-${component.name}-${Date.now()}`,
+            name: component.name,
+            // Class fee amounts
+            totalAmount: component.baseFeeAmount, // Base class fee
+            discountAmount: component.discountAmount, // Individual discount
+            amount: component.finalAmount, // Final amount after discount
+            dueDate: component.dueDate || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
+            status: component.status,
+            paidAmount: component.paidAmount,
+            remainingAmount: component.remainingAmount,
+            description: component.hasIndividualDiscount ? 
+              `${component.name} - Class Fee: ₹${component.baseFeeAmount}, Your Discount: ₹${component.discountAmount}` :
+              `${component.name} - Standard Class Fee`,
             category: category,
-            academicYear: fee.academicYear,
-            isClassFee: fee.isClassFee,
-            isIndividualFee: fee.isIndividualFee,
-            payments: fee.payments || []
+            academicYear: feeData.fees.academicYear,
+            isClassFee: component.isClassFee,
+            hasIndividualDiscount: component.hasIndividualDiscount,
+            appliedDiscount: component.appliedDiscount
           };
         });
 
-        // Create clean payment history (only unique, valid payments that were actually matched)
-        const allPayments = [];
-        const seenPaymentIds = new Set();
-        
-        feeSummary.details.forEach(fee => {
-          if (fee.payments && fee.payments.length > 0) {
-            fee.payments.forEach(payment => {
-              // Only add if we haven't seen this payment ID before
-              if (!seenPaymentIds.has(payment.id)) {
-                seenPaymentIds.add(payment.id);
-                allPayments.push({
-                  id: payment.id,
-                  feeName: fee.feeComponent,
-                  amount: payment.amount,
-                  paymentDate: payment.paymentDate,
-                  paymentMethod: payment.paymentMode || 'Online',
-                  transactionId: payment.receiptNumber ? `RCP${payment.receiptNumber}` : `TXN${payment.id.slice(-8).toUpperCase()}`,
-                  status: 'completed',
-                  receiptUrl: null,
-                  remarks: payment.remarks || '',
-                  academicYear: fee.academicYear,
-                  createdAt: payment.createdAt
-                });
-              }
-            });
-          }
-        });
+        // Get payment history from FeeService
+        const paymentHistoryFromService = feeData.fees.payments ? feeData.fees.payments.recentPayments.map(payment => ({
+          id: payment.id,
+          feeName: payment.component || 'Fee Payment',
+          amount: payment.amount,
+          paymentDate: payment.date,
+          paymentMethod: payment.mode || 'Online',
+          transactionId: payment.receipt || `TXN${payment.id.toString().slice(-8).toUpperCase()}`,
+          status: 'completed',
+          receiptUrl: null,
+          remarks: payment.remarks || '',
+          academicYear: feeData.student.class_info.academic_year || '2024-25'
+        })) : [];
 
-        // Sort payment history by date (most recent first)
-        allPayments.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
-        
-        console.log('Filtered payment history:', allPayments.length, 'unique payments');
+        console.log('Student FeePayment - Payment history from FeeService:', paymentHistoryFromService.length, 'payments');
 
         setFeeStructure({
-          studentName: studentDetails.name,
-          class: studentDetails.classes?.class_name || 'N/A',
-          academicYear: feeSummary.academicYear || '2024-2025',
-          totalDue: feeSummary.totalAmount,
-          totalPaid: feeSummary.totalPaid,
-          outstanding: feeSummary.totalOutstanding,
-          fees: transformedFees
+          studentName: feeData.student.name,
+          class: `${feeData.student.class?.name || 'N/A'} ${feeData.student.class?.section || ''}`.trim(),
+          academicYear: feeData.fees.academicYear || '2024-2025',
+          // Class-based fee structure information
+          totalClassFee: feeData.fees.classBaseFee, // What all students in class pay
+          totalDiscounts: feeData.fees.individualDiscounts, // This student's individual discounts
+          totalDue: feeData.fees.totalDue, // Final amount after individual discounts
+          totalPaid: feeData.fees.totalPaid,
+          outstanding: feeData.fees.totalOutstanding,
+          fees: transformedFees,
+          // Additional information
+          classFeeInfo: feeData.classFeeStructure,
+          individualInfo: feeData.individualInfo
         });
         
-        console.log('Student FeePayment - Payment history loaded:', allPayments.length, 'payments');
-        setPaymentHistory(allPayments);
+        console.log('Student FeePayment - Payment history loaded:', paymentHistoryFromService.length, 'payments');
+        setPaymentHistory(paymentHistoryFromService);
       } catch (err) {
         console.error('Error fetching fee data:', err);
         setError(err.message);
@@ -368,11 +378,20 @@ const FeePayment = () => {
     }
   };
 
-  // Refresh fee data
+  // Refresh fee data with sync validation
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      if (user) {
+      if (user && user.linked_student_id) {
+        console.log('Student FeePayment - Manual refresh triggered');
+        
+        // Optionally trigger fee sync to ensure consistency
+        try {
+          await syncFeeAfterPayment(user.linked_student_id, '', 0, user.tenant_id);
+        } catch (syncError) {
+          console.warn('Student FeePayment - Refresh sync failed (non-critical):', syncError);
+        }
+        
         await fetchFeeData();
       }
     } catch (error) {

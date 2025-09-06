@@ -27,6 +27,8 @@ import { isValidDate, isReasonableDate, formatDateForDB, cleanDateForForm } from
 import * as Animatable from 'react-native-animatable';
 import { Picker } from '@react-native-picker/picker';
 import { useTenant } from '../../contexts/TenantContext';
+import { calculateStudentFees } from '../../utils/feeCalculation';
+import FeeService from '../../services/FeeService';
 
 const FeeManagement = () => {
   const navigation = useNavigation();
@@ -254,6 +256,49 @@ const FeeManagement = () => {
       const studentIds = allStudents?.map(s => s.id) || [];
       console.log('🎯 Student IDs from classes query:', studentIds.length > 0 ? studentIds.slice(0, 5) : 'No students found');
       
+      // Use centralized FeeService for complete consistency with parent/student views
+      console.log('🎯 FeeManagement - Using centralized FeeService for admin view consistency');
+      const studentFeeCalculations = new Map();
+      for (const student of (allStudents || [])) {
+        try {
+          const feeServiceResult = await FeeService.getStudentFeeDetails(student.id);
+          if (feeServiceResult.success && feeServiceResult.data) {
+            const feeData = feeServiceResult.data;
+            studentFeeCalculations.set(student.id, {
+              totalAmount: feeData.fees.totalDue,
+              totalPaid: feeData.fees.totalPaid,
+              totalOutstanding: feeData.fees.totalOutstanding,
+              totalDiscounts: feeData.fees.totalDiscounts,
+              allFees: feeData.fees.components || []
+            });
+            console.log(`💰 Admin - Student ${student.name} fee calc (FeeService):`, {
+              totalDue: feeData.fees.totalDue,
+              totalPaid: feeData.fees.totalPaid,
+              outstanding: feeData.fees.totalOutstanding,
+              discounts: feeData.fees.totalDiscounts
+            });
+          } else {
+            console.log(`⚠️ Admin - FeeService failed for student ${student.id}, trying fallback`);
+            // Fallback to old calculation method
+            const feeCalc = await calculateStudentFees(student.id, student.class_id);
+            if (feeCalc) {
+              studentFeeCalculations.set(student.id, feeCalc);
+            }
+          }
+        } catch (calcError) {
+          console.error(`Error calculating fees for student ${student.id}:`, calcError);
+          // Try fallback calculation
+          try {
+            const feeCalc = await calculateStudentFees(student.id, student.class_id);
+            if (feeCalc) {
+              studentFeeCalculations.set(student.id, feeCalc);
+            }
+          } catch (fallbackError) {
+            console.error(`Fallback calculation also failed for student ${student.id}:`, fallbackError);
+          }
+        }
+      }
+      
       // Get all concessions for all students in a single query with tenant filtering
       let allConcessions = [];
       if (studentIds.length > 0) {
@@ -369,56 +414,66 @@ const FeeManagement = () => {
       const totalPaymentsAmount = (allPayments || []).reduce((sum, p) => sum + (parseFloat(p.amount_paid || 0)), 0);
       console.log('Class Payment Stats - Total payments amount:', totalPaymentsAmount);
 
-      // Process all classes synchronously using lookup maps
-      const classStats = classesWithStats.map(classData => {
-        const feeStructures = feeStructureLookup[classData.id] || [];
-        const studentsInClass = studentsLookup[classData.id] || [];
+        // Process all classes synchronously using lookup maps with centralized fee calculation
+        const classStats = classesWithStats.map(classData => {
+          const feeStructures = feeStructureLookup[classData.id] || [];
+          const studentsInClass = studentsLookup[classData.id] || [];
 
-        // Calculate total fee structure for this class
-        const totalFeeStructure = feeStructures.reduce((sum, fee) => sum + (parseFloat(fee.amount) || 0), 0);
-
-        // Calculate total students in class
-        const totalStudents = studentsInClass.length;
-
-        // Calculate total expected fees (fee structure × number of students)
-        const totalExpectedFees = totalFeeStructure * totalStudents;
-
-        // Calculate payments for this class
+          // Use centralized fee calculation for accurate totals
+          let totalExpectedFees = 0;
           let totalPaid = 0;
           const studentsWithPaymentsSet = new Set();
 
           studentsInClass.forEach(student => {
-            const studentPayments = paymentsLookup[student.id] || [];
-            const studentTotalPaid = studentPayments.reduce((sum, payment) => 
-              sum + (parseFloat(payment.amount_paid || 0)), 0);
-            
-            totalPaid += studentTotalPaid;
-            
-            if (studentTotalPaid > 0) {
-              studentsWithPaymentsSet.add(student.id);
+            const studentCalc = studentFeeCalculations.get(student.id);
+            if (studentCalc) {
+              totalExpectedFees += studentCalc.totalAmount;
+              totalPaid += studentCalc.totalPaid;
+              
+              if (studentCalc.totalPaid > 0) {
+                studentsWithPaymentsSet.add(student.id);
+              }
+            } else {
+              // Fallback to old calculation if centralized calc failed
+              const studentPayments = paymentsLookup[student.id] || [];
+              const studentTotalPaid = studentPayments.reduce((sum, payment) => 
+                sum + (parseFloat(payment.amount_paid || 0)), 0);
+              
+              totalPaid += studentTotalPaid;
+              
+              if (studentTotalPaid > 0) {
+                studentsWithPaymentsSet.add(student.id);
+              }
             }
           });
+
+          // Calculate total students in class
+          const totalStudents = studentsInClass.length;
           
-          console.log(`Class ${classData.class_name} - Students: ${studentsInClass.length}, Total Paid: ${totalPaid}`);
-          
-          // Debug each student's payments
+          // If centralized calculation didn't provide expected fees, use fallback
+          if (totalExpectedFees === 0) {
+            const totalFeeStructure = feeStructures.reduce((sum, fee) => sum + (parseFloat(fee.amount) || 0), 0);
+            totalExpectedFees = totalFeeStructure * totalStudents;
+          }
+            
+          console.log(`Class ${classData.class_name} - Students: ${studentsInClass.length}, Expected: ${totalExpectedFees}, Paid: ${totalPaid}`);
+            
+          // Debug each student's calculations
           studentsInClass.forEach(student => {
-            const studentPayments = paymentsLookup[student.id] || [];
-            const studentTotalPaid = studentPayments.reduce((sum, payment) => 
-              sum + (parseFloat(payment.amount_paid || 0)), 0);
-            if (studentTotalPaid > 0) {
-              console.log(`  Student ${student.name} (${student.id}): ${studentTotalPaid} from ${studentPayments.length} payments`);
+            const studentCalc = studentFeeCalculations.get(student.id);
+            if (studentCalc && studentCalc.totalPaid > 0) {
+              console.log(`  Student ${student.name} (${student.id}): Expected ₹${studentCalc.totalAmount}, Paid ₹${studentCalc.totalPaid}`);
             }
           });
 
-        const studentsWithPayments = studentsWithPaymentsSet.size;
-        const studentsWithoutPayments = totalStudents - studentsWithPayments;
+          const studentsWithPayments = studentsWithPaymentsSet.size;
+          const studentsWithoutPayments = totalStudents - studentsWithPayments;
 
-        // Calculate outstanding amount
-        const outstanding = totalExpectedFees - totalPaid;
+          // Calculate outstanding amount
+          const outstanding = Math.max(0, totalExpectedFees - totalPaid);
 
-        // Calculate collection rate
-        const collectionRate = totalExpectedFees > 0 ? (totalPaid / totalExpectedFees) * 100 : 0;
+          // Calculate collection rate
+          const collectionRate = totalExpectedFees > 0 ? (totalPaid / totalExpectedFees) * 100 : 0;
         
         // Calculate concessions for this class
         let totalConcessions = 0;
@@ -441,21 +496,21 @@ const FeeManagement = () => {
           }
         });
 
-        return {
-          classId: classData.id,
-          className: `${classData.class_name}${classData.section ? ` - ${classData.section}` : ''}`,
-          totalStudents,
-          totalExpectedFees,
-          totalPaid,
-          outstanding,
-          collectionRate: Math.round(collectionRate * 100) / 100,
-          studentsWithPayments,
-          studentsWithoutPayments,
-          feeStructureAmount: totalFeeStructure,
-          totalConcessions,
-          studentsWithConcessions,
-          concessionDetails
-        };
+          return {
+            classId: classData.id,
+            className: `${classData.class_name}${classData.section ? ` - ${classData.section}` : ''}`,
+            totalStudents,
+            totalExpectedFees,
+            totalPaid,
+            outstanding,
+            collectionRate: Math.round(collectionRate * 100) / 100,
+            studentsWithPayments,
+            studentsWithoutPayments,
+            feeStructureAmount: totalExpectedFees / Math.max(totalStudents, 1), // Average fee per student
+            totalConcessions,
+            studentsWithConcessions,
+            concessionDetails
+          };
       });
 
       // Sort by outstanding amount (highest first)
@@ -1090,12 +1145,13 @@ const FeeManagement = () => {
       setPaymentLoading(true);
       
       // Create fee structure for each selected class
+      const amountValue = parseFloat(newFeeStructure.amount);
       const feeStructures = selectedClassIds.map(classId => ({
         class_id: classId,
+        student_id: null, // ⚠️ CRITICAL: Explicitly set to null for class-level fees
         fee_component: newFeeStructure.type.trim(),
-        amount: parseFloat(newFeeStructure.amount),
-        base_amount: parseFloat(newFeeStructure.amount), // Set base_amount to the same as amount initially
-        discount_applied: 0, // Default discount
+        amount: amountValue,
+        base_amount: amountValue, // ✅ FIXED: Set base_amount equal to amount for class fees
         academic_year: newFeeStructure.academicYear.trim(),
         due_date: format(new Date(newFeeStructure.dueDate), 'yyyy-MM-dd'),
         tenant_id: tenantId
@@ -1207,8 +1263,12 @@ const FeeManagement = () => {
                         <View style={styles.feeItemContent}>
                           <View style={styles.feeItemLeft}>
                             <Text style={styles.feeItemTitle}>
-                              {fee.type || fee.fee_component || 'Unknown Fee'} {formatSafeCurrency(fee.amount)}
+                              {fee.type || fee.fee_component || 'Unknown Fee'}
                             </Text>
+                            <View style={styles.feeAmountContainer}>
+                              <Text style={styles.feeBaseAmount}>Base: {formatSafeCurrency(fee.amount)}</Text>
+                              {/* TODO: Show discounted amount if different */}
+                            </View>
                             <Text style={styles.feeItemDescription}>
                               {fee.description || fee.fee_component || 'No description'}
                             </Text>
@@ -2302,6 +2362,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     fontStyle: 'italic',
+  },
+  feeAmountContainer: {
+    marginVertical: 4,
+  },
+  feeBaseAmount: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1976d2',
   },
   // Scroll wrapper styles to fix scrolling issues
   scrollWrapper: {

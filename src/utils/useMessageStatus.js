@@ -8,16 +8,39 @@ export const useMessageStatus = () => {
   // Mark messages as read when user opens a chat with a specific sender
   const markMessagesAsRead = async (senderId) => {
     try {
-      if (!user?.id || !senderId) return;
+      if (!user?.id || !senderId) {
+        console.log('❌ markMessagesAsRead: Missing user ID or sender ID', { userId: user?.id, senderId });
+        return { success: false, error: 'Missing user ID or sender ID' };
+      }
 
-      const { error } = await supabase
+      console.log(`📖 markMessagesAsRead: Marking messages as read from sender ${senderId} to user ${user.id}`);
+      
+      // First, get the unread messages to see what we're about to mark
+      const { data: unreadMessages, error: fetchError } = await supabase
+        .from(TABLES.MESSAGES)
+        .select('id, message, sent_at, is_read')
+        .eq('sender_id', senderId)
+        .eq('receiver_id', user.id)
+        .eq('is_read', false);
+        
+      if (fetchError) {
+        console.log('❌ markMessagesAsRead: Error fetching unread messages:', fetchError);
+      } else {
+        console.log(`📖 markMessagesAsRead: Found ${unreadMessages?.length || 0} unread messages to mark as read:`, 
+          unreadMessages?.map(m => ({ id: m.id, message: m.message?.substring(0, 30) + '...' })) || []
+        );
+      }
+
+      const { data: updatedMessages, error } = await supabase
         .from(TABLES.MESSAGES)
         .update({ is_read: true })
         .eq('sender_id', senderId)
         .eq('receiver_id', user.id)
-        .eq('is_read', false);
+        .eq('is_read', false)
+        .select('id, is_read'); // Get the updated records back
 
       if (error) {
+        console.log('❌ markMessagesAsRead: Error updating messages:', error);
         return { success: false, error };
       }
 
@@ -27,6 +50,7 @@ export const useMessageStatus = () => {
 
       return { success: true };
     } catch (error) {
+      console.log('💥 markMessagesAsRead: Unexpected error:', error);
       return { success: false, error };
     }
   };
@@ -90,23 +114,37 @@ export const useMessageStatus = () => {
 // This can be used outside of React components
 export const getUnreadCountFromSender = async (senderId, userId) => {
   try {
-    if (!userId || !senderId) return 0;
-
-    const { data, error } = await supabase
-      .from(TABLES.MESSAGES)
-      .select('id')
-      .eq('sender_id', senderId)
-      .eq('receiver_id', userId)
-      .eq('is_read', false);
-
-    if (error) {
-      console.log('Error fetching unread count:', error);
+    if (!userId || !senderId) {
+      console.log('📊 getUnreadCountFromSender: Missing parameters', { userId, senderId });
       return 0;
     }
 
-    return data ? data.length : 0;
+    console.log(`📊 getUnreadCountFromSender: Getting count for sender ${senderId} to user ${userId}`);
+
+    const { data, error } = await supabase
+      .from(TABLES.MESSAGES)
+      .select('id, message, sent_at, is_read')
+      .eq('sender_id', senderId)
+      .eq('receiver_id', userId)
+      .eq('is_read', false)
+      .order('sent_at', { ascending: false });
+
+    if (error) {
+      console.log('❌ getUnreadCountFromSender: Error fetching unread count:', error);
+      return 0;
+    }
+
+    const count = data ? data.length : 0;
+    console.log(`📊 getUnreadCountFromSender: Found ${count} unread messages from sender ${senderId}`);
+    if (count > 0) {
+      console.log('📊 getUnreadCountFromSender: Sample messages:', 
+        data?.slice(0, 3).map(m => ({ id: m.id, message: m.message?.substring(0, 30) + '...', is_read: m.is_read })) || []
+      );
+    }
+
+    return count;
   } catch (error) {
-    console.log('Error in getUnreadCountFromSender:', error);
+    console.log('💥 getUnreadCountFromSender: Unexpected error:', error);
     return 0;
   }
 };
