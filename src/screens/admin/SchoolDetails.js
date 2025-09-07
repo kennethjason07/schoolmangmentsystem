@@ -13,6 +13,7 @@ import {
   ActionSheetIOS,
   ScrollView,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -20,8 +21,10 @@ import * as FileSystem from 'expo-file-system';
 import { decode as atob } from 'base-64';
 import Header from '../../components/Header';
 import { supabase, dbHelpers } from '../../utils/supabase';
+import { useAuth } from '../../utils/AuthContext';
 
 const SchoolDetails = ({ navigation }) => {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -41,9 +44,22 @@ const SchoolDetails = ({ navigation }) => {
     logo_url: '',
     description: '',
   });
+  
+  // UPI Settings State
+  const [upiSettings, setUpiSettings] = useState([]);
+  const [upiLoading, setUpiLoading] = useState(false);
+  const [showUpiModal, setShowUpiModal] = useState(false);
+  const [editingUpi, setEditingUpi] = useState(null);
+  const [upiFormData, setUpiFormData] = useState({
+    upi_id: '',
+    upi_name: '',
+    description: '',
+    is_primary: false,
+  });
 
   useEffect(() => {
     loadSchoolDetails();
+    loadUpiSettings();
   }, []);
 
   const loadSchoolDetails = async () => {
@@ -367,6 +383,222 @@ const SchoolDetails = ({ navigation }) => {
       );
     } finally {
       setUploading(false);
+    }
+  };
+
+  // UPI Management Functions
+  const loadUpiSettings = async () => {
+    try {
+      setUpiLoading(true);
+      console.log('Loading UPI settings for tenant:', user?.tenant_id);
+      
+      const { data, error } = await supabase
+        .from('school_upi_settings')
+        .select('*')
+        .eq('tenant_id', user?.tenant_id)
+        .eq('is_active', true)
+        .order('is_primary', { ascending: false })
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('Error loading UPI settings:', error);
+        if (error.code !== 'PGRST116') {
+          Alert.alert('Error', 'Failed to load UPI settings: ' + error.message);
+        }
+      } else {
+        console.log('UPI settings loaded:', data);
+        setUpiSettings(data || []);
+      }
+    } catch (error) {
+      console.error('Exception loading UPI settings:', error);
+    } finally {
+      setUpiLoading(false);
+    }
+  };
+  
+  const handleAddUpi = () => {
+    setEditingUpi(null);
+    setUpiFormData({
+      upi_id: '',
+      upi_name: '',
+      description: '',
+      is_primary: upiSettings.length === 0, // First UPI ID should be primary
+    });
+    setShowUpiModal(true);
+  };
+  
+  const handleEditUpi = (upiSetting) => {
+    setEditingUpi(upiSetting);
+    setUpiFormData({
+      upi_id: upiSetting.upi_id,
+      upi_name: upiSetting.upi_name,
+      description: upiSetting.description || '',
+      is_primary: upiSetting.is_primary,
+    });
+    setShowUpiModal(true);
+  };
+  
+  const handleUpiFormChange = (field, value) => {
+    setUpiFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+  
+  const validateUpiId = (upiId) => {
+    const upiRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+$/;
+    return upiRegex.test(upiId);
+  };
+  
+  const handleSaveUpi = async () => {
+    try {
+      // Validation
+      if (!upiFormData.upi_id.trim()) {
+        Alert.alert('Error', 'UPI ID is required');
+        return;
+      }
+      
+      if (!validateUpiId(upiFormData.upi_id)) {
+        Alert.alert('Error', 'Please enter a valid UPI ID (e.g., user@bank)');
+        return;
+      }
+      
+      if (!upiFormData.upi_name.trim()) {
+        Alert.alert('Error', 'UPI name is required');
+        return;
+      }
+      
+      setUpiLoading(true);
+      
+      const upiData = {
+        tenant_id: user?.tenant_id,
+        upi_id: upiFormData.upi_id.trim(),
+        upi_name: upiFormData.upi_name.trim(),
+        description: upiFormData.description.trim() || null,
+        is_primary: upiFormData.is_primary,
+        is_active: true,
+      };
+      
+      let result;
+      
+      if (editingUpi) {
+        // Update existing UPI setting
+        result = await supabase
+          .from('school_upi_settings')
+          .update({
+            ...upiData,
+            updated_by: user?.id,
+          })
+          .eq('id', editingUpi.id)
+          .eq('tenant_id', user?.tenant_id)
+          .select()
+          .single();
+      } else {
+        // Create new UPI setting
+        result = await supabase
+          .from('school_upi_settings')
+          .insert({
+            ...upiData,
+            created_by: user?.id,
+          })
+          .select()
+          .single();
+      }
+      
+      const { data, error } = result;
+      
+      if (error) {
+        console.error('Error saving UPI setting:', error);
+        Alert.alert('Error', 'Failed to save UPI setting: ' + error.message);
+        return;
+      }
+      
+      console.log('UPI setting saved:', data);
+      setShowUpiModal(false);
+      await loadUpiSettings();
+      Alert.alert('Success', editingUpi ? 'UPI setting updated successfully!' : 'UPI setting added successfully!');
+      
+    } catch (error) {
+      console.error('Exception saving UPI setting:', error);
+      Alert.alert('Error', 'Failed to save UPI setting. Please try again.');
+    } finally {
+      setUpiLoading(false);
+    }
+  };
+  
+  const handleDeleteUpi = (upiSetting) => {
+    Alert.alert(
+      'Delete UPI Setting',
+      `Are you sure you want to delete "${upiSetting.upi_name}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setUpiLoading(true);
+              
+              const { error } = await supabase
+                .from('school_upi_settings')
+                .delete()
+                .eq('id', upiSetting.id)
+                .eq('tenant_id', user?.tenant_id);
+              
+              if (error) {
+                console.error('Error deleting UPI setting:', error);
+                Alert.alert('Error', 'Failed to delete UPI setting: ' + error.message);
+                return;
+              }
+              
+              await loadUpiSettings();
+              Alert.alert('Success', 'UPI setting deleted successfully!');
+              
+            } catch (error) {
+              console.error('Exception deleting UPI setting:', error);
+              Alert.alert('Error', 'Failed to delete UPI setting. Please try again.');
+            } finally {
+              setUpiLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+  
+  const handleSetPrimary = async (upiSetting) => {
+    if (upiSetting.is_primary) {
+      Alert.alert('Info', 'This UPI ID is already set as primary.');
+      return;
+    }
+    
+    try {
+      setUpiLoading(true);
+      
+      // Update without updated_by to avoid foreign key constraint issues
+      const { error } = await supabase
+        .from('school_upi_settings')
+        .update({ 
+          is_primary: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', upiSetting.id)
+        .eq('tenant_id', user?.tenant_id);
+      
+      if (error) {
+        console.error('Error setting primary UPI:', error);
+        Alert.alert('Error', 'Failed to set primary UPI: ' + error.message);
+        return;
+      }
+      
+      await loadUpiSettings();
+      Alert.alert('Success', `"${upiSetting.upi_name}" is now set as the primary UPI ID.`);
+      
+    } catch (error) {
+      console.error('Exception setting primary UPI:', error);
+      Alert.alert('Error', 'Failed to set primary UPI. Please try again.');
+    } finally {
+      setUpiLoading(false);
     }
   };
 
@@ -698,6 +930,92 @@ const SchoolDetails = ({ navigation }) => {
             </View>
           </View>
 
+          {/* UPI Payment Settings */}
+          <View style={styles.section}>
+            <View style={styles.upiHeader}>
+              <Text style={styles.sectionTitle}>UPI Payment Settings</Text>
+              <TouchableOpacity
+                style={styles.addUpiButton}
+                onPress={handleAddUpi}
+                disabled={upiLoading}
+              >
+                <Ionicons name="add-circle" size={20} color="#fff" />
+                <Text style={styles.addUpiButtonText}>Add UPI ID</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.upiDescription}>
+              Configure UPI IDs for accepting student fee payments via QR codes.
+            </Text>
+
+            {upiLoading ? (
+              <View style={styles.upiLoadingContainer}>
+                <ActivityIndicator size="large" color="#2196F3" />
+                <Text style={styles.upiLoadingText}>Loading UPI settings...</Text>
+              </View>
+            ) : upiSettings.length === 0 ? (
+              <View style={styles.noUpiContainer}>
+                <Ionicons name="qr-code-outline" size={48} color="#ccc" />
+                <Text style={styles.noUpiTitle}>No UPI IDs Configured</Text>
+                <Text style={styles.noUpiText}>
+                  Add a UPI ID to enable QR code payments for student fees.
+                </Text>
+                <TouchableOpacity
+                  style={styles.firstUpiButton}
+                  onPress={handleAddUpi}
+                >
+                  <Ionicons name="add" size={16} color="#2196F3" />
+                  <Text style={styles.firstUpiButtonText}>Add Your First UPI ID</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.upiListContainer}>
+                {upiSettings.map((upiSetting, index) => (
+                  <View key={upiSetting.id} style={styles.upiCard}>
+                    <View style={styles.upiCardHeader}>
+                      <View style={styles.upiCardLeft}>
+                        <View style={styles.upiNameContainer}>
+                          <Text style={styles.upiName}>{upiSetting.upi_name}</Text>
+                          {upiSetting.is_primary && (
+                            <View style={styles.primaryBadge}>
+                              <Text style={styles.primaryBadgeText}>Primary</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={styles.upiId}>{upiSetting.upi_id}</Text>
+                        {upiSetting.description && (
+                          <Text style={styles.upiDescription2}>{upiSetting.description}</Text>
+                        )}
+                      </View>
+                      <View style={styles.upiCardActions}>
+                        <TouchableOpacity
+                          style={styles.upiActionButton}
+                          onPress={() => handleEditUpi(upiSetting)}
+                        >
+                          <Ionicons name="pencil" size={16} color="#2196F3" />
+                        </TouchableOpacity>
+                        {!upiSetting.is_primary && (
+                          <TouchableOpacity
+                            style={styles.upiActionButton}
+                            onPress={() => handleSetPrimary(upiSetting)}
+                          >
+                            <Ionicons name="star-outline" size={16} color="#FF9800" />
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                          style={styles.upiActionButton}
+                          onPress={() => handleDeleteUpi(upiSetting)}
+                        >
+                          <Ionicons name="trash-outline" size={16} color="#F44336" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+
           {/* Save Button */}
           <TouchableOpacity
             style={[styles.saveButton, saving && styles.saveButtonDisabled]}
@@ -716,6 +1034,95 @@ const SchoolDetails = ({ navigation }) => {
         </View>
         </ScrollView>
       </View>
+      
+      {/* UPI Modal */}
+      <Modal
+        visible={showUpiModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowUpiModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              {editingUpi ? 'Edit UPI Setting' : 'Add UPI Setting'}
+            </Text>
+            <TouchableOpacity
+              onPress={() => setShowUpiModal(false)}
+              style={styles.closeButton}
+            >
+              <Ionicons name="close" size={24} color="#666" />
+            </TouchableOpacity>
+          </View>
+          
+          <ScrollView style={styles.modalContent}>
+            <View style={styles.upiFormCard}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>UPI ID *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={upiFormData.upi_id}
+                  onChangeText={(value) => handleUpiFormChange('upi_id', value)}
+                  placeholder="e.g., yourname@bankname"
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+              </View>
+              
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Display Name *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={upiFormData.upi_name}
+                  onChangeText={(value) => handleUpiFormChange('upi_name', value)}
+                  placeholder="e.g., Primary Account, School Account"
+                />
+              </View>
+              
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Description (Optional)</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={upiFormData.description}
+                  onChangeText={(value) => handleUpiFormChange('description', value)}
+                  placeholder="Additional notes about this UPI account..."
+                  multiline
+                  numberOfLines={3}
+                />
+              </View>
+              
+              <View style={styles.inputGroup}>
+                <TouchableOpacity
+                  style={styles.checkboxContainer}
+                  onPress={() => handleUpiFormChange('is_primary', !upiFormData.is_primary)}
+                >
+                  <View style={[styles.checkbox, upiFormData.is_primary && styles.checkboxChecked]}>
+                    {upiFormData.is_primary && <Ionicons name="checkmark" size={16} color="#fff" />}
+                  </View>
+                  <Text style={styles.checkboxLabel}>Set as Primary UPI ID</Text>
+                </TouchableOpacity>
+                <Text style={styles.checkboxHint}>
+                  Primary UPI ID will be used by default for QR code generation
+                </Text>
+              </View>
+              
+              <TouchableOpacity
+                style={[styles.saveUpiButton, upiLoading && styles.saveUpiButtonDisabled]}
+                onPress={handleSaveUpi}
+                disabled={upiLoading}
+              >
+                {upiLoading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.saveUpiButtonText}>
+                    {editingUpi ? 'Update UPI Setting' : 'Add UPI Setting'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -933,6 +1340,232 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     marginLeft: 8,
+  },
+  // UPI Management Styles
+  upiHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  addUpiButton: {
+    backgroundColor: '#2196F3',
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  addUpiButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  upiDescription: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  upiLoadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  upiLoadingText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#666',
+  },
+  noUpiContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    borderStyle: 'dashed',
+  },
+  noUpiTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  noUpiText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  firstUpiButton: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#2196F3',
+    borderRadius: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  firstUpiButtonText: {
+    color: '#2196F3',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  upiListContainer: {
+    gap: 12,
+  },
+  upiCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  upiCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  upiCardLeft: {
+    flex: 1,
+    marginRight: 12,
+  },
+  upiNameContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  upiName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  primaryBadge: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    marginLeft: 8,
+  },
+  primaryBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  upiId: {
+    fontSize: 14,
+    color: '#2196F3',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    marginBottom: 4,
+  },
+  upiDescription2: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+  },
+  upiCardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  upiActionButton: {
+    padding: 8,
+    borderRadius: 4,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  // Modal Styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  closeButton: {
+    padding: 4,
+  },
+  modalContent: {
+    flex: 1,
+    padding: 20,
+  },
+  upiFormCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  checkboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  checkboxChecked: {
+    backgroundColor: '#2196F3',
+    borderColor: '#2196F3',
+  },
+  checkboxLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  checkboxHint: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 32,
+    lineHeight: 16,
+  },
+  saveUpiButton: {
+    backgroundColor: '#2196F3',
+    borderRadius: 8,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+  },
+  saveUpiButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  saveUpiButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 

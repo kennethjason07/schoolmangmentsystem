@@ -21,6 +21,8 @@ import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { formatCurrency } from '../../utils/helpers';
 import { format } from 'date-fns';
+import UPIQRModal from '../../components/UPIQRModal';
+import { useAuth } from '../../utils/AuthContext';
 
 const ClassStudentDetails = ({ route, navigation }) => {
   const { classData } = route.params;
@@ -50,6 +52,9 @@ const ClassStudentDetails = ({ route, navigation }) => {
   const [selectedPaymentForReceipt, setSelectedPaymentForReceipt] = useState(null);
   const [schoolDetails, setSchoolDetails] = useState(null);
   const [schoolLogo, setSchoolLogo] = useState(null);
+  const [showUPIQRModal, setShowUPIQRModal] = useState(false);
+  const [upiTransactionData, setUpiTransactionData] = useState(null);
+  const { user } = useAuth();
 
   useEffect(() => {
     loadSchoolDetails();
@@ -317,8 +322,10 @@ const ClassStudentDetails = ({ route, navigation }) => {
         return {
           id: student.id,
           name: student.name,
-          admissionNo: student.admission_no,
-          rollNo: student.roll_no,
+          admission_no: student.admission_no,
+          admissionNo: student.admission_no, // Keep both for compatibility
+          roll_no: student.roll_no,
+          rollNo: student.roll_no, // Keep both for compatibility
           totalFeeStructure,
           totalPaid,
           outstanding,
@@ -501,6 +508,135 @@ const ClassStudentDetails = ({ route, navigation }) => {
       openIndividualDiscount: true
     });
   };
+
+  // Handle UPI QR Code payment
+  const handleUPIPayment = (student) => {
+    if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
+      Alert.alert('Validation Error', 'Please enter a valid payment amount first.');
+      return;
+    }
+
+    if (!selectedFeeComponent) {
+      Alert.alert('Validation Error', 'Please select a fee component first.');
+      return;
+    }
+
+    // Use selectedStudent or fallback to passed student parameter
+    const studentData = selectedStudent || student;
+    
+    if (!studentData) {
+      Alert.alert('Error', 'Student data is not available. Please try again.');
+      return;
+    }
+
+    // Set student and UPI transaction data
+    const transactionData = {
+      studentId: studentData.id,
+      studentName: studentData.name,
+      admissionNo: studentData.admissionNo || studentData.admission_no,
+      className: classData.className,
+      amount: parseFloat(paymentAmount),
+      feeComponent: selectedFeeComponent === 'custom' 
+        ? (paymentRemarks || 'General Fee Payment')
+        : selectedFeeComponent || 'General Fee Payment',
+      paymentDate: paymentDate.toISOString().split('T')[0],
+      academicYear: `${new Date().getFullYear()}-${(new Date().getFullYear() + 1).toString().slice(-2)}`,
+      tenantId: user?.tenant_id
+    };
+
+    setUpiTransactionData(transactionData);
+    setShowUPIQRModal(true);
+  };
+
+  // Handle UPI payment success
+  const handleUPIPaymentSuccess = async (paymentData) => {
+    try {
+      setPaymentLoading(true);
+      
+      // 🚨 IMPORTANT: The UPI payment record is already created by UPIDBService.createStudentFeeRecord
+      // We don't need to insert it again here. Just use the existing record.
+      
+      // Check if paymentData contains the fee record (from UPIQRModal)
+      let insertedPayment;
+      
+      if (paymentData.feeRecord && !paymentData.isLocal) {
+        // Use the existing fee record created by UPI flow
+        insertedPayment = paymentData.feeRecord;
+        console.log('✅ Using existing UPI fee record:', insertedPayment.id);
+      } else {
+        // Fallback: Create record manually (only if UPI flow didn't create one)
+        console.log('🔄 Creating manual fee record as fallback...');
+        
+        const receiptNumber = await getNextReceiptNumber();
+        console.log('UPI - Generated receipt number:', receiptNumber);
+
+        const { data: manualPayment, error } = await supabase
+          .from(TABLES.STUDENT_FEES)
+          .insert({
+            student_id: upiTransactionData.studentId,
+            fee_component: upiTransactionData.feeComponent,
+            amount_paid: upiTransactionData.amount,
+            payment_date: upiTransactionData.paymentDate,
+            payment_mode: 'UPI',
+            academic_year: upiTransactionData.academicYear,
+            receipt_number: receiptNumber,
+            tenant_id: user?.tenant_id, // ✅ FIX: Add missing tenant_id
+            // Note: transaction_id removed as it doesn't exist in student_fees table schema
+            // UPI transaction details are stored in the separate upi_transactions table
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        insertedPayment = manualPayment;
+      }
+
+      // Store payment record for receipt
+      const receiptData = {
+        ...insertedPayment,
+        student_name: upiTransactionData.studentName,
+        student_admission_no: upiTransactionData.admissionNo,
+        student_roll_no: selectedStudent?.rollNo,
+        class_name: upiTransactionData.className,
+        receipt_no: insertedPayment.receipt_number || 'N/A', // ✅ FIX: Use receipt_number from the inserted payment
+        payment_date_formatted: formatDateForDisplay(paymentDate),
+        amount_in_words: numberToWords(upiTransactionData.amount)
+      };
+      
+      setLastPaymentRecord(receiptData);
+      
+      // Close modals
+      setShowUPIQRModal(false);
+      setPaymentModal(false);
+      
+      // Show receipt modal
+      setReceiptModal(true);
+      
+      // Refresh the data to show updated payment status
+      await loadClassStudentDetails();
+      
+      Alert.alert('Payment Successful', 'UPI payment has been recorded successfully!');
+      
+    } catch (error) {
+      console.error('Error recording UPI payment:', error);
+      Alert.alert('Error', 'Failed to record UPI payment. Please try again.');
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
+  // Handle UPI payment failure
+  const handleUPIPaymentFailure = (error) => {
+    console.error('UPI payment failed:', error);
+    Alert.alert('Payment Failed', error.message || 'UPI payment failed. Please try again.');
+  };
+
+  // Handle UPI modal close
+  const handleUPIModalClose = () => {
+    setShowUPIQRModal(false);
+    setUpiTransactionData(null);
+  };
+
 
   // Format date for display
   const formatDateForDisplay = (date) => {
@@ -714,7 +850,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
               ${schoolPhone ? `<div class="school-info">Phone: ${schoolPhone}</div>` : ''}
               ${schoolEmail ? `<div class="school-info">Email: ${schoolEmail}</div>` : ''}
               <div class="receipt-title">PAYMENT RECEIPT</div>
-              <div class="receipt-number">Receipt No: ${receiptData.receipt_no}</div>
+              <div class="receipt-number">Receipt No: ${receiptData.receipt_no || receiptData.receipt_number || 'N/A'}</div>
             </div>
 
             <div class="details-section">
@@ -810,7 +946,9 @@ const ClassStudentDetails = ({ route, navigation }) => {
         base64: false
       });
 
-      const fileName = `receipt_${receiptData.receipt_no.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+      // ✅ FIX: Add null check for receiptData.receipt_no before calling replace()
+      const receiptNumber = receiptData.receipt_no || receiptData.receipt_number || 'N_A';
+      const fileName = `receipt_${String(receiptNumber).replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
       const newUri = `${FileSystem.documentDirectory}${fileName}`;
       
       await FileSystem.moveAsync({
@@ -869,6 +1007,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
           payment_mode: paymentMode,
           academic_year: academicYear,
           receipt_number: receiptNumber,
+          tenant_id: user?.tenant_id, // ✅ FIX: Add missing tenant_id for Cash payments
         })
         .select()
         .single();
@@ -1172,30 +1311,32 @@ const ClassStudentDetails = ({ route, navigation }) => {
                 )}
 
 
-                {/* Payment History */}
-                {student.payments.length > 0 && (
-                  <View style={styles.paymentHistory}>
-                    <Text style={styles.paymentHistoryTitle}>
-                      Recent Payments ({student.paymentCount})
-                    </Text>
-                    {student.payments.slice(0, 3).map((payment, payIndex) => (
-                      <View key={payment.id} style={styles.paymentItem}>
-                        <Text style={styles.paymentComponent}>{payment.fee_component}</Text>
-                        <View style={styles.paymentDetails}>
-                          <Text style={styles.paymentAmount}>
-                            {formatSafeCurrency(payment.amount_paid)}
-                          </Text>
-                          <Text style={styles.paymentDate}>
-                            {formatSafeDate(payment.payment_date)}
-                          </Text>
-                        </View>
-                      </View>
-                    ))}
-                    {student.payments.length > 3 && (
-                      <Text style={styles.morePayments}>
-                        +{student.payments.length - 3} more payments
+                {/* Payment Summary - Compact */}
+                {student.paymentCount > 0 && (
+                  <View style={styles.compactPaymentSummary}>
+                    <View style={styles.paymentSummaryRow}>
+                      <Ionicons name="receipt" size={16} color="#4CAF50" style={{ marginRight: 6 }} />
+                      <Text style={styles.paymentSummaryText}>
+                        {student.paymentCount} payment{student.paymentCount > 1 ? 's' : ''} made
                       </Text>
-                    )}
+                      <Text style={styles.paymentSummaryAmount}>
+                        {formatSafeCurrency(student.totalPaid)}
+                      </Text>
+                    </View>
+                    <View style={styles.progressContainer}>
+                      <View style={styles.progressBar}>
+                        <View 
+                          style={[styles.progressFill, { 
+                            width: `${student.paymentPercentage}%`,
+                            backgroundColor: student.paymentStatus === 'Paid' ? '#4CAF50' :
+                              student.paymentStatus === 'Partial' ? '#FF9800' : '#F44336'
+                          }]} 
+                        />
+                      </View>
+                      <Text style={styles.progressText}>
+                        {student.paymentPercentage.toFixed(0)}% completed
+                      </Text>
+                    </View>
                   </View>
                 )}
 
@@ -1224,6 +1365,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
                         Pay
                       </Text>
                     </TouchableOpacity>
+
 
                     {/* Fee Concession Button */}
                     <TouchableOpacity
@@ -1677,28 +1819,40 @@ const ClassStudentDetails = ({ route, navigation }) => {
                     </TouchableOpacity>
                   </View>
 
-                  {/* Payment Mode */}
+                  {/* Payment Mode - Simplified */}
                   <View style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>Payment Mode *</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                      {['Cash', 'Card', 'UPI', 'Bank Transfer', 'Cheque'].map((mode) => (
-                        <TouchableOpacity
-                          key={mode}
-                          style={[
-                            styles.paymentModeChip,
-                            paymentMode === mode && styles.activePaymentModeChip
-                          ]}
-                          onPress={() => setPaymentMode(mode)}
-                        >
-                          <Text style={[
-                            styles.paymentModeChipText,
-                            paymentMode === mode && styles.activePaymentModeChipText
-                          ]}>
-                            {mode}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
+                    <View style={styles.paymentModeContainer}>
+                      <TouchableOpacity
+                        style={[styles.paymentModeChip, styles.activePaymentModeChip]}
+                        disabled
+                      >
+                        <Text style={[styles.paymentModeChipText, styles.activePaymentModeChipText]}>
+                          Cash
+                        </Text>
+                      </TouchableOpacity>
+                      <Text style={styles.paymentModeNote}>
+                        For other payment methods, use "Generate UPI QR Code" below
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* UPI Payment Section */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>UPI Payment</Text>
+                    <TouchableOpacity
+                      style={styles.upiPaymentButton}
+                      onPress={() => handleUPIPayment(selectedStudent)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="qr-code" size={16} color="#fff" style={{ marginRight: 6 }} />
+                      <Text style={styles.upiPaymentButtonText}>
+                        Generate UPI QR Code
+                      </Text>
+                    </TouchableOpacity>
+                    <Text style={styles.upiPaymentNote}>
+                      Generate QR code for UPI payment. Payment will be recorded after verification.
+                    </Text>
                   </View>
 
                   {/* Fee Component Selection */}
@@ -2128,6 +2282,17 @@ const ClassStudentDetails = ({ route, navigation }) => {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* UPI QR Modal */}
+      {showUPIQRModal && upiTransactionData && (
+        <UPIQRModal
+          visible={showUPIQRModal}
+          onClose={handleUPIModalClose}
+          onSuccess={handleUPIPaymentSuccess}
+          onFailure={handleUPIPaymentFailure}
+          transactionData={upiTransactionData}
+        />
+      )}
     </View>
   );
 };
@@ -2911,6 +3076,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  // UPI Payment Button
+  upiPaymentButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FF9800',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flex: 1,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  upiPaymentButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   // Payment Form Styles
   paymentFormCard: {
     backgroundColor: '#fff',
@@ -3450,6 +3636,48 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  // UPI Payment Note Styles
+  upiPaymentNote: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    marginTop: 6,
+    lineHeight: 16,
+    textAlign: 'center',
+  },
+  // Compact Payment Summary Styles
+  compactPaymentSummary: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#4CAF50',
+  },
+  paymentSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  paymentSummaryText: {
+    fontSize: 13,
+    color: '#333',
+    fontWeight: '500',
+    flex: 1,
+  },
+  paymentSummaryAmount: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  progressText: {
+    fontSize: 11,
+    color: '#666',
+    textAlign: 'right',
+    marginTop: 4,
   },
 });
 

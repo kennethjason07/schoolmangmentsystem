@@ -42,6 +42,7 @@ import AdminNotifications from '../screens/admin/AdminNotifications';
 import HallTicketGeneration from '../screens/admin/HallTicketGeneration';
 import AutoGrading from '../screens/admin/AutoGrading';
 
+
 import FeeClassDetails from '../screens/admin/FeeClassDetails';
 import ClassStudentDetails from '../screens/admin/ClassStudentDetails';
 import AssignTaskToTeacher from '../screens/admin/AssignTaskToTeacher';
@@ -417,6 +418,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="AdminNotifications" component={AdminNotifications} />
                 <Stack.Screen name="HallTicketGeneration" component={HallTicketGeneration} />
                 <Stack.Screen name="AutoGrading" component={AutoGrading} />
+
 
                 <Stack.Screen name="AssignTaskToTeacher" component={AssignTaskToTeacher} />
                 <Stack.Screen name="AttendanceReport" component={AttendanceReport} />
