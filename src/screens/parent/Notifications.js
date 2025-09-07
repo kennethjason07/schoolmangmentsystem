@@ -649,7 +649,14 @@ const Notifications = ({ navigation }) => {
           data={filteredNotifications}
           keyExtractor={item => item.uniqueKey}
           renderItem={renderNotification}
-          contentContainerStyle={{ paddingBottom: 24 }}
+          contentContainerStyle={{ 
+            paddingBottom: 24,
+            flexGrow: 1 // Ensures proper scrolling on web
+          }}
+          style={{
+            flex: 1,
+            maxHeight: '100%' // Prevents overflow issues on web
+          }}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="notifications-off" size={64} color="#ccc" />
@@ -662,7 +669,21 @@ const Notifications = ({ navigation }) => {
               </Text>
             </View>
           }
-          showsVerticalScrollIndicator={false}
+          showsVerticalScrollIndicator={true}
+          scrollEnabled={true}
+          nestedScrollEnabled={true}
+          bounces={false} // Better web experience
+          overScrollMode="never" // Android specific but helps with consistency
+          keyboardShouldPersistTaps="handled"
+          removeClippedSubviews={false} // Better for web rendering
+          maxToRenderPerBatch={10} // Optimize rendering performance
+          initialNumToRender={10}
+          windowSize={10}
+          getItemLayout={(data, index) => ({
+            length: 120, // Approximate height of each notification card
+            offset: 120 * index,
+            index,
+          })}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -697,6 +718,7 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: 16,
+    overflow: 'hidden', // Prevents content overflow on web
   },
   filterRow: {
     flexDirection: 'row',

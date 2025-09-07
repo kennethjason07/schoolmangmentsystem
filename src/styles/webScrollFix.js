@@ -15,7 +15,7 @@ export const webScrollViewStyles = {
       WebkitOverflowScrolling: 'touch', // Smooth scrolling on iOS web
       scrollBehavior: 'smooth', // Smooth scrolling behavior
       msOverflowStyle: '-ms-autohiding-scrollbar', // For Edge/IE
-      '::-webkit-scrollbar': { width: '8px' }, // Customize scrollbar for WebKit browsers
+      // Note: Custom scrollbar styling requires CSS injection, not inline styles
     }),
   },
   
@@ -114,4 +114,33 @@ export const webContainerStyle = {
     display: 'flex',
     flexDirection: 'column',
   }),
+};
+
+/**
+ * Optional function to inject custom scrollbar CSS for web
+ * Call this once in your App.js if you need custom scrollbar styling
+ * Note: This is optional and not required for basic functionality
+ */
+export const injectScrollbarStyles = () => {
+  if (Platform.OS === 'web' && typeof document !== 'undefined') {
+    const style = document.createElement('style');
+    style.textContent = `
+      /* Custom scrollbar styles for React Native Web */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #a8a8a8;
+      }
+    `;
+    document.head.appendChild(style);
+  }
 };

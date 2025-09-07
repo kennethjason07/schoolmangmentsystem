@@ -98,32 +98,72 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
     }
   };
 
-  // Fetch existing marks for all subjects
+  // Fetch existing marks for all subjects - Fixed with better error handling
   const fetchExistingMarks = async () => {
     if (students.length === 0 || subjects.length === 0) return;
 
     try {
       console.log('Fetching existing marks for students:', students.length, 'subjects:', subjects.length);
       
-      const { data: existingMarks, error: marksError } = await supabase
-        .from(TABLES.MARKS)
-        .select('student_id, subject_id, marks_obtained, max_marks, grade, created_at')
-        .in('subject_id', subjects.map(s => s.id))
-        .in('student_id', students.map(s => s.id))
-        .order('created_at', { ascending: false }); // Get latest marks first
-
-      if (marksError) {
-        console.error('Error fetching marks:', marksError);
-        throw marksError;
+      // Validate student and subject IDs to prevent 400 errors
+      const validStudentIds = students
+        .filter(s => s && s.id && typeof s.id === 'string' && s.id.length > 0)
+        .map(s => s.id);
+      
+      const validSubjectIds = subjects
+        .filter(s => s && s.id && typeof s.id === 'string' && s.id.length > 0)
+        .map(s => s.id);
+      
+      if (validStudentIds.length === 0 || validSubjectIds.length === 0) {
+        console.log('No valid student or subject IDs found');
+        setMarks({});
+        updateProgress({});
+        return;
       }
-
-      console.log('Found existing marks:', existingMarks?.length || 0);
+      
+      console.log('Valid IDs:', { students: validStudentIds.length, subjects: validSubjectIds.length });
+      
+      // Process in batches to avoid URL length limits and RLS issues
+      const BATCH_SIZE = 50; // Reduce batch size to prevent query length issues
+      const studentBatches = [];
+      
+      for (let i = 0; i < validStudentIds.length; i += BATCH_SIZE) {
+        studentBatches.push(validStudentIds.slice(i, i + BATCH_SIZE));
+      }
+      
+      let allMarks = [];
+      
+      for (const studentBatch of studentBatches) {
+        try {
+          const { data: batchMarks, error: batchError } = await supabase
+            .from(TABLES.MARKS)
+            .select('student_id, subject_id, marks_obtained, max_marks, grade, created_at')
+            .in('subject_id', validSubjectIds)
+            .in('student_id', studentBatch)
+            .order('created_at', { ascending: false });
+          
+          if (batchError) {
+            console.error('Error fetching marks batch:', batchError);
+            // Continue with other batches instead of failing completely
+            continue;
+          }
+          
+          if (batchMarks && batchMarks.length > 0) {
+            allMarks = allMarks.concat(batchMarks);
+          }
+        } catch (batchErr) {
+          console.error('Batch processing error:', batchErr);
+          // Continue with other batches
+        }
+      }
+      
+      console.log('Found existing marks:', allMarks.length);
       
       const marksMap = {};
-      if (existingMarks && existingMarks.length > 0) {
+      if (allMarks.length > 0) {
         // Group by student-subject combination to get the latest entry
         const latestMarks = {};
-        existingMarks.forEach(mark => {
+        allMarks.forEach(mark => {
           const cellKey = `${mark.student_id}-${mark.subject_id}`;
           if (!latestMarks[cellKey] || new Date(mark.created_at) > new Date(latestMarks[cellKey].created_at)) {
             latestMarks[cellKey] = mark;
@@ -143,7 +183,9 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
 
     } catch (err) {
       console.error('Error fetching existing marks:', err);
-      // Don't throw error, just log it so the screen doesn't break
+      // Set empty marks to prevent UI issues
+      setMarks({});
+      updateProgress({});
     }
   };
   

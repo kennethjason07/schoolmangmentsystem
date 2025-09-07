@@ -399,8 +399,25 @@ const StudentAccountManagement = ({ navigation }) => {
 
             <ScrollView 
               style={styles.modalContent}
-              showsVerticalScrollIndicator={false}
+              showsVerticalScrollIndicator={Platform.OS !== 'web'}
               keyboardShouldPersistTaps="handled"
+              bounces={Platform.OS !== 'web'}
+              scrollEventThrottle={16}
+              nestedScrollEnabled={true}
+              contentContainerStyle={{ paddingBottom: 20 }}
+              // Enhanced accessibility
+              accessible={true}
+              accessibilityLabel="Account creation form"
+              accessibilityHint="Scroll to fill out all required fields"
+              // Web-specific optimizations
+              {...(Platform.OS === 'web' && {
+                style: {
+                  ...styles.modalContent,
+                  scrollBehavior: 'smooth',
+                  overflowY: 'auto',
+                  maxHeight: '60vh',
+                }
+              })}
             >
               <Text style={styles.inputLabel}>Full Name *</Text>
               <TextInput
@@ -480,8 +497,8 @@ const StudentAccountManagement = ({ navigation }) => {
                 </TouchableOpacity>
               </View>
               
-              {/* Add some bottom padding to ensure last field is accessible */}
-              <View style={{ height: 20 }} />
+              {/* Enhanced bottom spacing for better scroll experience */}
+              <View style={styles.modalBottomSpacing} />
             </ScrollView>
 
             <View style={styles.modalActions}>
@@ -699,6 +716,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 8,
     flexDirection: 'column',
+    // Enhanced for better scrolling on different platforms
+    ...(Platform.OS === 'web' && {
+      maxHeight: '90vh',
+      minHeight: '400px',
+      overflow: 'hidden',
+    }),
   },
   modalHeader: {
     flexDirection: 'row',
@@ -720,6 +743,19 @@ const styles = StyleSheet.create({
   modalContent: {
     padding: 20,
     flex: 1,
+    // Enhanced scrolling for better UX
+    ...(Platform.OS === 'web' && {
+      maxHeight: '60vh',
+      overflowY: 'auto',
+      scrollbarWidth: 'thin',
+      scrollbarColor: '#ccc transparent',
+    }),
+  },
+  modalBottomSpacing: {
+    height: 40, // Increased spacing for better accessibility
+    ...(Platform.OS === 'web' && {
+      height: 60, // Extra space on web for scroll behavior
+    }),
   },
   inputLabel: {
     fontSize: 16,

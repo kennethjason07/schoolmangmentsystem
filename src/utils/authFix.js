@@ -133,7 +133,7 @@ export class AuthFix {
    * Check if current session is valid and handle invalid refresh tokens (web-safe with timeout)
    */
   static async validateAndFixSession() {
-    const VALIDATION_TIMEOUT = Platform.OS === 'web' ? 8000 : 10000; // Shorter timeout for web
+    const VALIDATION_TIMEOUT = Platform.OS === 'web' ? 4000 : 8000; // Much shorter timeout for web
     
     try {
       console.log('🔍 Validating current session...');

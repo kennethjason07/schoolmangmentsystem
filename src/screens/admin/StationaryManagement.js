@@ -816,7 +816,13 @@ const StationaryManagement = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
         }
         contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        nestedScrollEnabled={true}
+        bounces={false}
+        overScrollMode="never"
+        scrollBehavior="smooth"
+        style={styles.scrollContainer}
+        WebkitOverflowScrolling="touch"
       />
     </View>
   );
@@ -842,14 +848,27 @@ const StationaryManagement = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
         }
         contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        nestedScrollEnabled={true}
+        bounces={false}
+        overScrollMode="never"
+        scrollBehavior="smooth"
+        style={styles.scrollContainer}
+        WebkitOverflowScrolling="touch"
       />
     </View>
   );
 
   const renderReportsTab = () => (
     <ScrollView 
-      style={styles.tabContent}
+      style={[styles.tabContent, styles.scrollContainer]}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={Platform.OS === 'web'}
+      nestedScrollEnabled={true}
+      bounces={false}
+      overScrollMode="never"
+      scrollBehavior="smooth"
+      WebkitOverflowScrolling="touch"
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
       }
@@ -932,10 +951,12 @@ const StationaryManagement = ({ navigation }) => {
         {renderTabButton('reports', 'Reports', 'analytics-outline')}
       </View>
 
-      {/* Tab Content */}
-      {activeTab === 'items' && renderItemsTab()}
-      {activeTab === 'payments' && renderPaymentsTab()}
-      {activeTab === 'reports' && renderReportsTab()}
+      {/* Tab Content with scrollWrapper for web */}
+      <View style={styles.scrollWrapper}>
+        {activeTab === 'items' && renderItemsTab()}
+        {activeTab === 'payments' && renderPaymentsTab()}
+        {activeTab === 'reports' && renderReportsTab()}
+      </View>
 
       {/* Fee Item Modal */}
       <Modal
@@ -1270,6 +1291,25 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  scrollWrapper: {
+    flex: 1,
+    ...(Platform.OS === 'web' ? {
+      height: 'calc(100vh - 120px)',
+      minHeight: 300,
+      maxHeight: '100%',
+      overflow: 'hidden',
+    } : {}),
+  },
+  scrollContainer: {
+    flex: 1,
+    ...(Platform.OS === 'web' ? {
+      overflowY: 'scroll',
+    } : {}),
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 20,
   },
   loadingContainer: {
     flex: 1,

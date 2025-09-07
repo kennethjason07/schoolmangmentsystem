@@ -1159,7 +1159,9 @@ function groupAndSortSchedule(schedule) {
       />
       <ScrollView 
         style={styles.scrollView} 
+        contentContainerStyle={styles.scrollViewContent}
         showsVerticalScrollIndicator={false}
+        nestedScrollEnabled={true}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -2180,6 +2182,14 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  scrollViewContent: {
+    flexGrow: 1,
+    minHeight: '100%',
+    ...(Platform.OS === 'web' && {
+      overflow: 'auto',
+      WebkitOverflowScrolling: 'touch',
+    }),
   },
   welcomeSection: {
     padding: 16,

@@ -40,6 +40,7 @@ const LoadingScreen = () => {
         <Image
           source={VidyaSethuLogo}
           style={styles.logoImage}
+          tintColor="#fff"
           resizeMode="contain"
           onError={() => {
             // Fallback to icon if logo file is not found
@@ -79,7 +80,7 @@ const styles = StyleSheet.create({
   logoImage: {
     width: 100,
     height: 100,
-    tintColor: '#fff', // Makes logo white for dark background
+    // tintColor moved to Image component prop
   },
   appTitle: {
     fontSize: 32,

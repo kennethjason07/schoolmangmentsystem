@@ -290,13 +290,22 @@ export default function MarksEntry({ navigation }) {
       
       console.log('Loading existing marks for class:', classId, 'subject:', subjectId, 'exam:', examId, 'students:', studentIds.length);
       
-      // Get existing marks for this specific exam, subject, and students
+      // Get existing marks for this specific exam, subject, and students - Fixed with validation
+      // Validate student IDs to prevent 400 errors
+      const validStudentIds = studentIds.filter(id => id && typeof id === 'string' && id.length > 0);
+      
+      if (validStudentIds.length === 0) {
+        console.log('No valid student IDs found');
+        setMarks({});
+        return;
+      }
+      
       const { data: existingMarks, error: marksError } = await supabase
         .from(TABLES.MARKS)
         .select('student_id, marks_obtained, grade, created_at')
         .eq('exam_id', examId)
         .eq('subject_id', subjectId)
-        .in('student_id', studentIds)
+        .in('student_id', validStudentIds)
         .order('created_at', { ascending: false });
         
       if (marksError) {
