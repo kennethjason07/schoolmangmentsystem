@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator, Alert, RefreshControl } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator, Alert, RefreshControl, Platform, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers, getUserTenantId } from '../../utils/supabase';
 import Header from '../../components/Header';
 import universalNotificationService from '../../services/UniversalNotificationService';
+import { webScrollViewStyles, getWebScrollProps, webContainerStyle, injectScrollbarStyles } from '../../styles/webScrollFix';
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -14,15 +15,22 @@ const FILTERS = [
   { key: 'important', label: 'Important' },
 ];
 
-const StudentNotifications = () => {
+const StudentNotifications = ({ navigation }) => {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState([]);
+  const flatListRef = useRef(null);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const navigation = useNavigation();
+
+  // Initialize web scroll styles on mount
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      injectScrollbarStyles();
+    }
+  }, []);
 
   // Utility function to format date from yyyy-mm-dd to dd-mm-yyyy
   const formatDateToDDMMYYYY = (dateString) => {
@@ -378,16 +386,33 @@ const StudentNotifications = () => {
   };
 
   useEffect(() => {
-    fetchNotifications();
-    // Real-time subscription
+    if (user?.id) {
+      fetchNotifications();
+    }
+  }, [user?.id]);
+
+  // Add focus effect to refresh data when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (user?.id) {
+        fetchNotifications();
+      }
+    }, [user?.id])
+  );
+
+  // Real-time subscription effect
+  useEffect(() => {
+    if (!user?.id) return;
+    
     const notifSub = supabase
       .channel('student-notifications')
       .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.NOTIFICATIONS }, fetchNotifications)
       .subscribe();
+      
     return () => {
       notifSub.unsubscribe();
     };
-  }, []);
+  }, [user?.id]);
 
   // Handle pull-to-refresh
   const onRefresh = async () => {
@@ -584,47 +609,129 @@ const markAsRead = async (id) => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={Platform.OS === 'web' ? styles.webContainer : styles.container}>
       <Header title="Notifications" showBack={true} showProfile={false} />
-      <View style={styles.contentContainer}>
+      
+      {/* Filter and Search Controls */}
+      <View style={styles.controlsContainer}>
         <View style={styles.filterRow}>
-        {FILTERS.map(f => (
-          <TouchableOpacity
-            key={f.key}
-            style={[styles.filterBtn, filter === f.key && styles.filterBtnActive]}
-            onPress={() => setFilter(f.key)}
-          >
-            <Text style={[styles.filterText, filter === f.key && styles.filterTextActive]}>{f.label}</Text>
-            {f.key === 'important' && (
-              <Ionicons name="star" size={15} color="#FFD700" style={{ marginLeft: 4 }} />
-            )}
-          </TouchableOpacity>
-        ))}
+          {FILTERS.map(f => (
+            <TouchableOpacity
+              key={f.key}
+              style={[styles.filterBtn, filter === f.key && styles.filterBtnActive]}
+              onPress={() => setFilter(f.key)}
+            >
+              <Text style={[styles.filterText, filter === f.key && styles.filterTextActive]}>{f.label}</Text>
+              {f.key === 'important' && (
+                <Ionicons name="star" size={15} color="#FFD700" style={{ marginLeft: 4 }} />
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+        
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search notifications..."
+          value={search}
+          onChangeText={setSearch}
+          placeholderTextColor="#aaa"
+        />
       </View>
-      <TextInput
-        style={styles.searchInput}
-        placeholder="Search notifications..."
-        value={search}
-        onChangeText={setSearch}
-        placeholderTextColor="#aaa"
-      />
-      <FlatList
-        data={filteredNotifications}
-        keyExtractor={item => item.id}
-        renderItem={renderNotification}
-        contentContainerStyle={{ paddingBottom: 24 }}
-        ListEmptyComponent={<Text style={{ color: '#888', textAlign: 'center', marginTop: 40 }}>No notifications found.</Text>}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#1976d2']}
-            tintColor="#1976d2"
-          />
-        }
-      />
-      </View>
+      
+      {/* Platform-Specific Scrolling Implementation */}
+      {Platform.OS === 'web' ? (
+        <div style={{ 
+          flex: 1,
+          height: 'calc(100vh - 200px)', // Proper height constraint
+          overflow: 'auto',
+          overflowX: 'hidden',
+          padding: '16px',
+          backgroundColor: '#f5f7fa',
+          WebkitOverflowScrolling: 'touch'
+        }}>
+          {/* List Header */}
+          {filteredNotifications.length > 0 && (
+            <View style={styles.listHeader}>
+              <Text style={styles.listHeaderText}>
+                {filteredNotifications.length} notification{filteredNotifications.length !== 1 ? 's' : ''}
+                {filter !== 'all' && ` (${filter})`}
+              </Text>
+            </View>
+          )}
+          
+          {/* Notifications Content */}
+          {filteredNotifications.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="notifications-outline" size={64} color="#ccc" />
+              <Text style={styles.emptyText}>No notifications found</Text>
+              <Text style={styles.emptySubtext}>
+                {filter === 'unread' ? 'You have no unread notifications.' :
+                 filter === 'read' ? 'You have no read notifications.' :
+                 filter === 'important' ? 'You have no important notifications.' :
+                 search ? 'No notifications match your search.' : 'You have no notifications yet.'}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.notificationsContent}>
+              {filteredNotifications.map(item => (
+                <View key={item.id} style={styles.notificationWrapper}>
+                  {renderNotification({ item })}
+                </View>
+              ))}
+            </View>
+          )}
+        </div>
+      ) : (
+        <ScrollView
+          ref={flatListRef}
+          style={styles.content}
+          contentContainerStyle={{ paddingBottom: 20 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#1976d2']}
+              tintColor="#1976d2"
+              title="Pull to refresh"
+              titleColor="#666"
+            />
+          }
+          showsVerticalScrollIndicator={true}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* List Header */}
+          {filteredNotifications.length > 0 && (
+            <View style={styles.listHeader}>
+              <Text style={styles.listHeaderText}>
+                {filteredNotifications.length} notification{filteredNotifications.length !== 1 ? 's' : ''}
+                {filter !== 'all' && ` (${filter})`}
+              </Text>
+            </View>
+          )}
+          
+          {/* Notifications Content */}
+          {filteredNotifications.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="notifications-outline" size={64} color="#ccc" />
+              <Text style={styles.emptyText}>No notifications found</Text>
+              <Text style={styles.emptySubtext}>
+                {filter === 'unread' ? 'You have no unread notifications.' :
+                 filter === 'read' ? 'You have no read notifications.' :
+                 filter === 'important' ? 'You have no important notifications.' :
+                 search ? 'No notifications match your search.' : 'You have no notifications yet.'}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.notificationsContent}>
+              {filteredNotifications.map(item => (
+                <View key={item.id} style={styles.notificationWrapper}>
+                  {renderNotification({ item })}
+                </View>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      )}
     </View>
   );
 };
@@ -634,9 +741,62 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f7fa',
   },
-  contentContainer: {
+  webContainer: {
+    flex: 1,
+    height: '100vh',
+    backgroundColor: '#f5f7fa',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  controlsContainer: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  // AttendanceSummary-style scrolling pattern (working approach)
+  content: {
     flex: 1,
     padding: 16,
+  },
+  notificationsContent: {
+    // Remove horizontal padding since content style already has padding
+  },
+  notificationWrapper: {
+    // Individual notification wrapper for better spacing
+  },
+  listHeader: {
+    paddingVertical: 8,
+    paddingTop: 16,
+  },
+  listHeaderText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+    minHeight: 400,
+  },
+  emptyText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#666',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  emptySubtext: {
+    fontSize: 16,
+    color: '#999',
+    marginTop: 8,
+    textAlign: 'center',
+    lineHeight: 22,
   },
   header: {
     fontSize: 24,

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity, Modal, ScrollView, Button, Platform, Animated, Easing, Pressable, ActivityIndicator, Alert, RefreshControl } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Header from '../../components/Header';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -717,10 +718,24 @@ const ViewStudentInfo = () => {
   }
 
   return (
-    <View style={styles.container}>
-      <Header title="View Student Info" showBack={true} />
-      
-      <View style={styles.content}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={styles.container}>
+        <Header title="View Student Info" showBack={true} />
+        
+        <ScrollView 
+          style={styles.scrollView}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#FF9800']}
+              progressBackgroundColor="#fff"
+            />
+          }
+        >
+        {/* Add content wrapper with padding */}
+        <View style={styles.section}>
         {/* Teacher Role Summary */}
         {students.length > 0 && (
           <View style={styles.summarySection}>
@@ -822,23 +837,42 @@ const ViewStudentInfo = () => {
             </Text>
           </View>
         ) : (
-          <FlatList
-            data={filteredStudents}
-            renderItem={renderStudent}
-            keyExtractor={item => item.id}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.listContainer}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={onRefresh}
-                tintColor="#1976d2"
-                {...(Platform.OS === 'android' && { colors: ['#1976d2'] })}
-              />
-            }
-          />
+          <View style={styles.studentListWrapper}>
+            {filteredStudents.map((student, index) => (
+              <TouchableOpacity
+                key={student.id}
+                style={styles.studentCard}
+                onPress={() => openModal(student)}
+              >
+                <View style={styles.studentHeader}>
+                  <View style={styles.studentInfo}>
+                    <View style={styles.studentNameRow}>
+                      <Text style={styles.studentName}>{student.name}</Text>
+                    </View>
+                    <Text style={styles.studentDetails}>
+                      Roll: {student.roll_no} | {student.classSection}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#666" />
+                </View>
+                
+                <View style={styles.studentStats}>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Admission No</Text>
+                    <Text style={styles.statValue}>{student.admission_no || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Parent</Text>
+                    <Text style={styles.statValue}>{student.parents?.name || 'N/A'}</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
         )}
-      </View>
+        </View>
+        {/* End section wrapper */}
+      </ScrollView>
 
       {/* Student Detail Modal */}
       <Modal
@@ -1000,18 +1034,40 @@ const ViewStudentInfo = () => {
           </View>
         </View>
       </Modal>
-    </View>
+      </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#667eea',
+  },
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        overflow: 'hidden',
+      },
+    }),
+  },
+  scrollView: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        overflow: 'auto',
+        height: '100%',
+        WebkitOverflowScrolling: 'touch',
+      }
+    })
   },
   content: {
     flex: 1,
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   summarySection: {
     backgroundColor: '#fff',
@@ -1342,6 +1398,11 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     paddingBottom: 20,
+    flexGrow: 1,
+  },
+  flatListStyle: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   parentSubSection: {
     marginBottom: 16,
@@ -1367,6 +1428,22 @@ const styles = StyleSheet.create({
     color: '#f57c00',
     fontSize: 14,
     fontStyle: 'italic',
+  },
+  scrollContainer: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 20,
+  },
+  studentListWrapper: {
+    paddingBottom: 20,
+  },
+  section: {
+    backgroundColor: '#fff',
+    marginTop: 8,
+    padding: 20,
   },
 });
 

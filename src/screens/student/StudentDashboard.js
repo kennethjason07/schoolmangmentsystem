@@ -9,6 +9,7 @@ import StatCard from '../../components/StatCard';
 import StudentFeeCard from '../../components/StudentFeeCard';
 import LogoDisplay from '../../components/LogoDisplay';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
+import NotificationPopup from '../../components/NotificationPopup';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { calculateStudentFees, getFeeStatusText, getFeeStatusColor } from '../../utils/feeCalculation';
 import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCount';
@@ -44,14 +45,34 @@ const StudentDashboard = ({ navigation }) => {
     // Currently just enables smooth scrolling behavior
   };
   
-  // Quick navigation to specific sections
+  // Quick navigation to specific sections (enhanced for web)
   const scrollToSection = (yOffset) => {
     if (scrollViewRef.current) {
-      scrollViewRef.current.scrollTo({ 
-        y: yOffset, 
-        animated: true,
-        duration: Platform.OS === 'web' ? 300 : undefined
-      });
+      if (Platform.OS === 'web') {
+        // For web, use a more reliable scrolling method
+        try {
+          scrollViewRef.current.scrollTo({ 
+            y: yOffset, 
+            animated: true
+          });
+        } catch (error) {
+          console.warn('Web scroll error:', error);
+          // Fallback for web - use native DOM scrolling
+          const scrollElement = scrollViewRef.current?.getScrollableNode?.();
+          if (scrollElement) {
+            scrollElement.scrollTo({ 
+              top: yOffset, 
+              behavior: 'smooth' 
+            });
+          }
+        }
+      } else {
+        // Mobile scrolling
+        scrollViewRef.current.scrollTo({ 
+          y: yOffset, 
+          animated: true
+        });
+      }
     }
   };
 
@@ -118,6 +139,71 @@ const StudentDashboard = ({ navigation }) => {
   const handleNotificationsPress = () => {
     navigation.navigate('StudentNotifications');
   };
+
+  // Handle individual notification press from popup
+  const handleNotificationPress = (notification) => {
+    console.log('Notification pressed:', notification);
+    // You can add custom navigation or action based on notification type
+    switch (notification.type) {
+      case 'assignment':
+        navigation.navigate('Assignments');
+        break;
+      case 'grade':
+        navigation.navigate('Marks', { activeTab: 'marks' });
+        break;
+      case 'attendance':
+        navigation.navigate('Attendance');
+        break;
+      case 'fee':
+        navigation.navigate('StudentFeePayment');
+        break;
+      case 'announcement':
+        navigation.navigate('StudentNotifications');
+        break;
+      default:
+        navigation.navigate('StudentNotifications');
+    }
+  };
+
+  // Custom right component for header with NotificationPopup and Profile
+  const renderRightComponent = () => (
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      <NotificationPopup
+        userType="Student"
+        onNotificationPress={handleNotificationPress}
+        iconSize={24}
+        iconColor="#333"
+      />
+      {user && (
+        <TouchableOpacity 
+          onPress={() => {
+            try {
+              navigation.navigate('Profile');
+            } catch (error) {
+              console.warn('Profile navigation failed:', error);
+              try {
+                navigation.navigate('Settings');
+              } catch (settingsError) {
+                console.warn('Settings navigation also failed:', settingsError);
+              }
+            }
+          }} 
+          style={styles.profileButtonCustom}
+          activeOpacity={0.7}
+        >
+          {studentProfile?.profile_url ? (
+            <Image 
+              source={{ uri: studentProfile.profile_url }} 
+              style={styles.profileImageCustom}
+              onError={() => setStudentProfile(prev => ({ ...prev, profile_url: null }))}
+            />
+          ) : (
+            <Ionicons name="person-circle" size={32} color="#2196F3" />
+          )}
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 
   // Function to fetch only assignments data (for focus refresh)
   const fetchAssignmentsData = async () => {
@@ -841,9 +927,7 @@ const StudentDashboard = ({ navigation }) => {
       <Header
         title="Student Dashboard"
         showBack={false}
-        showNotifications={true}
-        unreadCount={unreadCount}
-        onNotificationsPress={handleNotificationsPress}
+        rightComponent={renderRightComponent}
       />
 
       <View style={styles.scrollWrapper}>
@@ -1381,6 +1465,14 @@ const styles = StyleSheet.create({
   },
   scrollContainer: {
     flex: 1,
+    ...Platform.select({
+      web: {
+        // Enhanced scrolling for web
+        scrollBehavior: 'smooth',
+        overflowY: 'auto',
+        WebkitOverflowScrolling: 'touch',
+      }
+    }),
   },
   scrollContent: {
     flexGrow: 1,
@@ -2004,6 +2096,20 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#333',
     marginTop: 4,
+  },
+  
+  // Custom Profile Button Styles
+  profileButtonCustom: {
+    padding: 4,
+    marginLeft: 12,
+    flexShrink: 0,
+  },
+  profileImageCustom: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#2196F3',
   },
   
 });
