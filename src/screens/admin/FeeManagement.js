@@ -122,7 +122,7 @@ const FeeManagement = () => {
       // Calculate fee statistics
       const calculateFeeStats = async () => {
         // 🛡️ Validate tenant access first
-        const validation = await validateTenantAccess(tenantId, user?.id, 'FeeManagement - calculateFeeStats');
+        const validation = await validateTenantAccess(user?.id, tenantId, 'FeeManagement - calculateFeeStats');
         if (!validation.isValid) {
           console.error('❌ FeeManagement calculateFeeStats: Tenant validation failed:', validation.error);
           setFeeStats({ totalDue: 0, totalPaid: 0, pendingStudents: 0 });
@@ -180,7 +180,7 @@ const FeeManagement = () => {
   // Helper function to get pending fees for a student
   const getPendingFees = async (studentId, classId) => {
     // 🛡️ Validate tenant access first
-    const validation = await validateTenantAccess(tenantId, user?.id, 'FeeManagement - getPendingFees');
+    const validation = await validateTenantAccess(user?.id, tenantId, 'FeeManagement - getPendingFees');
     if (!validation.isValid) {
       console.error('❌ FeeManagement getPendingFees: Tenant validation failed:', validation.error);
       return [];
@@ -230,7 +230,7 @@ const FeeManagement = () => {
   // Calculate class-wise payment statistics - OPTIMIZED VERSION
   const calculateClassPaymentStats = async () => {
     // 🛡️ Validate tenant access first
-    const validation = await validateTenantAccess(tenantId, user?.id, 'FeeManagement - calculateClassPaymentStats');
+    const validation = await validateTenantAccess(user?.id, tenantId, 'FeeManagement - calculateClassPaymentStats');
     if (!validation.isValid) {
       console.error('❌ FeeManagement calculateClassPaymentStats: Tenant validation failed:', validation.error);
       setClassPaymentStats([]);

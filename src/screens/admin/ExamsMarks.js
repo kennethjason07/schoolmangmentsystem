@@ -112,10 +112,17 @@ const ExamsMarks = () => {
   // Load data using schema.txt structure
   const loadAllData = async () => {
     try {
+      // 🛡️ Ensure tenant context is available before proceeding
+      if (!tenantId) {
+        console.log('⏳ ExamsMarks: Waiting for tenant context to be available...');
+        setLoading(false);
+        return;
+      }
+      
       setLoading(true);
       
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'ExamsMarks - loadAllData');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ExamsMarks - loadAllData');
       if (!validation.isValid) {
         console.error('❌ ExamsMarks loadAllData: Tenant validation failed:', validation.error);
         Alert.alert('Access Denied', validation.error);
@@ -134,6 +141,7 @@ const ExamsMarks = () => {
           end_date, 
           remarks, 
           max_marks,
+          tenant_id,
           created_at,
           classes!inner(
             id,
@@ -147,32 +155,52 @@ const ExamsMarks = () => {
 
       // Load classes using tenant-aware query
       const { data: classesData, error: classesError } = await createTenantQuery(tenantId, 'classes')
-        .select('id, class_name, section, academic_year, class_teacher_id, created_at')
+        .select('id, class_name, section, academic_year, class_teacher_id, tenant_id, created_at')
         .execute();
 
       if (classesError) throw classesError;
 
       // Load subjects using tenant-aware query
       const { data: subjectsData, error: subjectsError } = await createTenantQuery(tenantId, 'subjects')
-        .select('id, name, class_id, academic_year, is_optional, created_at')
+        .select('id, name, class_id, academic_year, is_optional, tenant_id, created_at')
         .execute();
 
       if (subjectsError) throw subjectsError;
 
       // Load students using tenant-aware query
       const { data: studentsData, error: studentsError } = await createTenantQuery(tenantId, 'students')
-        .select('id, admission_no, name, roll_no, class_id, academic_year, created_at')
+        .select('id, admission_no, name, roll_no, class_id, academic_year, tenant_id, created_at')
         .execute();
 
       if (studentsError) throw studentsError;
 
       // Load marks using tenant-aware query
       const { data: marksData, error: marksError } = await createTenantQuery(tenantId, 'marks')
-        .select('id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks, created_at')
+        .select('id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks, tenant_id, created_at')
         .execute();
 
       if (marksError) throw marksError;
 
+      // 🛡️ DEBUG: Log current tenant ID and sample data for debugging
+      console.log('🔍 [DEBUG] Current tenantId:', tenantId);
+      console.log('🔍 [DEBUG] Current tenantId type:', typeof tenantId);
+      
+      if (examsData && examsData.length > 0) {
+        console.log('🔍 [DEBUG] First exam record:', {
+          id: examsData[0].id,
+          name: examsData[0].name,
+          tenant_id: examsData[0].tenant_id,
+          tenant_id_type: typeof examsData[0].tenant_id
+        });
+        console.log('🔍 [DEBUG] All exam tenant_ids:', examsData.map(exam => exam.tenant_id));
+        console.log('🔍 [DEBUG] Tenant ID comparison:', {
+          expected: tenantId,
+          actual: examsData[0].tenant_id,
+          areEqual: examsData[0].tenant_id === tenantId,
+          strictEqual: examsData[0].tenant_id === tenantId
+        });
+      }
+      
       // 🛡️ Validate all data belongs to correct tenant
       const dataValidations = [
         { data: examsData, name: 'ExamsMarks - Exams' },
@@ -220,11 +248,15 @@ const ExamsMarks = () => {
     setRefreshing(false);
   };
 
-  // Load data on component mount
+  // Load data when tenantId is available
   useEffect(() => {
-    console.log('📚 ExamsMarks component mounted');
-    loadAllData();
-  }, []);
+    if (tenantId) {
+      console.log('🔄 ExamsMarks: tenantId available, loading data...');
+      loadAllData();
+    } else {
+      console.log('⏳ ExamsMarks: Waiting for tenantId to become available...');
+    }
+  }, [tenantId]); // Add tenantId as dependency
 
   // Add debugging for button functions
   useEffect(() => {
@@ -254,7 +286,7 @@ const ExamsMarks = () => {
       console.log('📝 handleAddExam called with form:', examForm);
       
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'ExamsMarks - handleAddExam');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ExamsMarks - handleAddExam');
       if (!validation.isValid) {
         Alert.alert('Access Denied', validation.error);
         return;
@@ -348,7 +380,7 @@ const ExamsMarks = () => {
   const handleEditExam = async () => {
     try {
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'ExamsMarks - handleEditExam');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ExamsMarks - handleEditExam');
       if (!validation.isValid) {
         Alert.alert('Access Denied', validation.error);
         return;
@@ -416,41 +448,92 @@ const ExamsMarks = () => {
     console.log('🗑️ handleDeleteExam called with exam:', exam);
     Alert.alert(
       'Delete Exam',
-      `Delete "${exam.name}"?`,
+      `Are you sure you want to delete "${exam.name}"?\n\nThis will also delete all marks associated with this exam.`,
       [
-        { text: 'Cancel' },
+        { 
+          text: 'Cancel',
+          style: 'cancel',
+          onPress: () => console.log('User cancelled exam deletion')
+        },
         {
           text: 'Delete',
+          style: 'destructive',
           onPress: async () => {
+            // Show loading immediately
+            setLoading(true);
+            
             try {
+              console.log('🔄 Starting exam deletion process for:', exam.id);
+              
               // 🛡️ Validate tenant access first
-              const validation = await validateTenantAccess(tenantId, user?.id, 'ExamsMarks - handleDeleteExam');
+              const validation = await validateTenantAccess(user?.id, tenantId, 'ExamsMarks - handleDeleteExam');
               if (!validation.isValid) {
+                console.error('❌ Tenant validation failed:', validation.error);
                 Alert.alert('Access Denied', validation.error);
                 return;
               }
               
-              // Delete marks first with tenant validation
-              await supabase
+              console.log('✅ Tenant validation passed, proceeding with deletion');
+
+              // Step 1: Delete associated marks first
+              console.log('🔄 Deleting marks for exam ID:', exam.id);
+              const { error: marksError } = await supabase
                 .from('marks')
                 .delete()
                 .eq('exam_id', exam.id)
                 .eq('tenant_id', tenantId);
 
-              // Delete exam with tenant validation
-              const { error } = await supabase
+              if (marksError) {
+                console.error('❌ Error deleting marks:', marksError);
+                throw new Error(`Failed to delete marks: ${marksError.message}`);
+              }
+              console.log('✅ Marks deleted successfully');
+
+              // Step 2: Delete the exam
+              console.log('🔄 Deleting exam with ID:', exam.id);
+              const { error: examError } = await supabase
                 .from('exams')
                 .delete()
                 .eq('id', exam.id)
                 .eq('tenant_id', tenantId);
 
-              if (error) throw error;
+              if (examError) {
+                console.error('❌ Error deleting exam:', examError);
+                throw new Error(`Failed to delete exam: ${examError.message}`);
+              }
+              console.log('✅ Exam deleted successfully');
 
-              Alert.alert('Success', 'Exam deleted');
-              loadAllData();
+              // Step 3: Update local state immediately for instant UI feedback
+              console.log('🔄 Updating local state...');
+              setExams(prevExams => {
+                const updatedExams = prevExams.filter(e => e.id !== exam.id);
+                console.log('✅ Local state updated. Remaining exams:', updatedExams.length);
+                return updatedExams;
+              });
+
+              // Also update marks state to remove deleted marks
+              setMarks(prevMarks => {
+                const updatedMarks = prevMarks.filter(m => m.exam_id !== exam.id);
+                console.log('✅ Marks state updated. Remaining marks:', updatedMarks.length);
+                return updatedMarks;
+              });
+
+              // Step 4: Show success message
+              Alert.alert('Success', `Exam "${exam.name}" has been deleted successfully.`);
+
+              // Step 5: Refresh data from server to ensure consistency
+              console.log('🔄 Refreshing data from server...');
+              await loadAllData();
+              console.log('✅ Data refresh completed');
 
             } catch (error) {
-              Alert.alert('Error', error.message);
+              console.error('❌ Error in deletion process:', error);
+              Alert.alert(
+                'Deletion Failed', 
+                `Could not delete the exam: ${error.message}\n\nPlease try again or contact support if the problem persists.`
+              );
+            } finally {
+              setLoading(false);
             }
           }
         }
@@ -462,7 +545,7 @@ const ExamsMarks = () => {
   const handleBulkSaveMarks = async () => {
     try {
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'ExamsMarks - handleBulkSaveMarks');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ExamsMarks - handleBulkSaveMarks');
       if (!validation.isValid) {
         Alert.alert('Access Denied', validation.error);
         return;

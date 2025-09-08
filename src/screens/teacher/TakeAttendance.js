@@ -8,13 +8,8 @@ import * as Print from 'expo-print';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import { createBulkAttendanceNotifications } from '../../utils/attendanceNotificationHelpers';
-import { 
-  validateTenantAccess, 
-  createTenantQuery, 
-  validateDataTenancy,
-  TENANT_ERROR_MESSAGES 
-} from '../../utils/tenantValidation';
 import { useTenantContext } from '../../contexts/TenantContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 function formatDateDMY(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') return '';
@@ -56,23 +51,95 @@ const TakeAttendance = () => {
       setLoading(true);
       setError(null);
       
-      // Validate tenant access before proceeding
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
-        return;
+      console.log('🚀 TakeAttendance.fetchClassesAndStudents: Starting for user:', user?.email);
+      
+      // Get the current tenant using the email-based lookup method
+      let currentTenantId = tenantId;
+      
+      if (!currentTenantId) {
+        console.log('⚠️ No tenant from context, trying email lookup...');
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          currentTenantId = emailTenant?.id;
+          console.log('📧 Email-based tenant ID:', currentTenantId);
+        } catch (emailError) {
+          console.error('❌ Email tenant lookup failed:', emailError);
+        }
+        
+        if (!currentTenantId) {
+          throw new Error('Unable to determine tenant context. Please contact support.');
+        }
       }
       
-      // Get teacher info using the helper function
+      console.log('✅ Using tenant_id:', currentTenantId);
+      
+      // Use the robust teacher lookup from dbHelpers
+      console.log('🔍 Getting teacher info using dbHelpers...');
       const { data: teacherData, error: teacherError } = await dbHelpers.getTeacherByUserId(user.id);
-
-      if (teacherError || !teacherData) throw new Error('Teacher not found');
-      setTeacherInfo(teacherData);
-
-      // Get assigned classes and subjects with tenant isolation
-      const tenantQuery = createTenantQuery(supabase.from(TABLES.TEACHER_SUBJECTS), tenantId);
-      const { data: assignedSubjects, error: subjectsError } = await tenantQuery
+      
+      if (teacherError || !teacherData) {
+        console.error('❌ Teacher lookup failed:', teacherError);
+        
+        // Try fallback lookups like in TeacherSubjects
+        console.log('🔄 Trying fallback: user lookup by email within tenant...');
+        const { data: userRecord, error: userLookupError } = await supabase
+          .from(TABLES.USERS)
+          .select('id, email, linked_teacher_id, tenant_id')
+          .eq('email', user.email)
+          .eq('tenant_id', currentTenantId)
+          .single();
+        
+        if (userLookupError || !userRecord?.linked_teacher_id) {
+          console.error('❌ Fallback user lookup failed:', userLookupError);
+          
+          // Fallback 2: Cross-tenant user lookup for better error messaging
+          const { data: crossTenantUser, error: crossTenantError } = await supabase
+            .from(TABLES.USERS)
+            .select('id, email, tenant_id, linked_teacher_id')
+            .eq('email', user.email)
+            .single();
+            
+          if (!crossTenantError && crossTenantUser) {
+            if (crossTenantUser.tenant_id !== currentTenantId) {
+              throw new Error(`User account exists in tenant "${crossTenantUser.tenant_id}" but current tenant is "${currentTenantId}". Please contact admin to fix tenant assignment.`);
+            } else if (!crossTenantUser.linked_teacher_id) {
+              throw new Error(`User account found but not linked to a teacher profile. Please contact admin to complete account setup.`);
+            }
+          }
+          
+          throw new Error(`User record not found for email: ${user.email} in tenant: ${currentTenantId}. Please contact admin.`);
+        }
+        
+        // Get teacher info using the linked teacher ID
+        const { data: fallbackTeacher, error: fallbackTeacherError } = await supabase
+          .from(TABLES.TEACHERS)
+          .select('*')
+          .eq('id', userRecord.linked_teacher_id)
+          .eq('tenant_id', currentTenantId)
+          .single();
+          
+        if (fallbackTeacherError || !fallbackTeacher) {
+          throw new Error('Teacher profile not found or does not belong to current tenant.');
+        }
+        
+        // Use fallback teacher data
+        setTeacherInfo(fallbackTeacher);
+        console.log('✅ Fallback teacher lookup successful:', fallbackTeacher.name);
+        teacherData = fallbackTeacher; // Use fallback data for the rest of the function
+      } else {
+        // Validate teacher belongs to current tenant
+        if (teacherData.tenant_id !== currentTenantId) {
+          throw new Error(`Teacher belongs to tenant "${teacherData.tenant_id}" but current tenant is "${currentTenantId}".`);
+        }
+        
+        setTeacherInfo(teacherData);
+        console.log('✅ Teacher lookup successful:', teacherData.name);
+      }
+      
+      // Get assigned subjects and classes with proper tenant filtering
+      console.log('📚 Loading teacher subjects and classes...');
+      const { data: assignedSubjects, error: subjectsError } = await supabase
+        .from(TABLES.TEACHER_SUBJECTS)
         .select(`
           *,
           subjects(
@@ -82,23 +149,12 @@ const TakeAttendance = () => {
             classes(class_name, id, section)
           )
         `)
-        .eq('teacher_id', teacherData.id);
+        .eq('teacher_id', teacherData.id)
+        .eq('tenant_id', currentTenantId);
 
-      if (subjectsError) throw subjectsError;
-
-      // Validate fetched data belongs to correct tenant
-      const validationResult = await validateDataTenancy(
-        assignedSubjects?.map(s => ({ 
-          id: s.id, 
-          tenant_id: s.tenant_id 
-        })) || [],
-        tenantId
-      );
-      
-      if (!validationResult.isValid) {
-        console.error('❌ Tenant data validation failed:', validationResult.error);
-        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
-        return;
+      if (subjectsError) {
+        console.error('❌ Error fetching assigned subjects:', subjectsError);
+        throw subjectsError;
       }
 
       // Extract unique classes
@@ -122,6 +178,9 @@ const TakeAttendance = () => {
       
       setClasses(classList);
       
+      console.log('📊 Found', assignedSubjects.length, 'subject assignments and', classList.length, 'unique classes');
+      console.log('🔍 Classes:', classList.map(c => `${c.class_name} ${c.section}`));
+      
       // Only set default selection if no class is currently selected
       if (classList.length > 0 && !selectedClass) {
         setSelectedClass(classList[0].id);
@@ -131,7 +190,8 @@ const TakeAttendance = () => {
       }
 
     } catch (err) {
-      setError(err.message);
+      console.error('❌ Error in fetchClassesAndStudents:', err);
+      setError(err.message || 'Failed to load teacher classes and students');
     } finally {
       setLoading(false);
     }
@@ -144,49 +204,51 @@ const TakeAttendance = () => {
     try {
       setLoading(true);
       
-      // Validate tenant access before fetching students
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed for students:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
-        return;
+      console.log('🏫 TakeAttendance.fetchStudents: Starting for class:', selectedClass);
+      
+      // Get current tenant ID using the same method as fetchClassesAndStudents
+      let currentTenantId = tenantId;
+      
+      if (!currentTenantId) {
+        console.log('⚠️ No tenant from context in fetchStudents, trying email lookup...');
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          currentTenantId = emailTenant?.id;
+          console.log('📧 Email-based tenant ID for students:', currentTenantId);
+        } catch (emailError) {
+          console.error('❌ Email tenant lookup failed in fetchStudents:', emailError);
+        }
+        
+        if (!currentTenantId) {
+          throw new Error('Unable to determine tenant context for students. Please contact support.');
+        }
       }
       
-      // Get students for the selected class with tenant isolation
-      const tenantQuery = createTenantQuery(supabase.from(TABLES.STUDENTS), tenantId);
-      const { data: studentsData, error: studentsError } = await tenantQuery
+      // Get students for the selected class with proper tenant filtering
+      console.log('🎫 Loading students for class:', selectedClass, 'tenant:', currentTenantId);
+      const { data: studentsData, error: studentsError } = await supabase
+        .from(TABLES.STUDENTS)
         .select(`
           id,
           name,
           admission_no,
-          classes(class_name, section),
-          tenant_id
+          classes(class_name, section)
         `)
         .eq('class_id', selectedClass)
+        .eq('tenant_id', currentTenantId)
         .order('admission_no');
 
-      if (studentsError) throw studentsError;
-      
-      // Validate fetched students belong to correct tenant
-      const validationResult = await validateDataTenancy(
-        studentsData?.map(s => ({ 
-          id: s.id, 
-          tenant_id: s.tenant_id 
-        })) || [],
-        tenantId
-      );
-      
-      if (!validationResult.isValid) {
-        console.error('❌ Student data validation failed:', validationResult.error);
-        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
-        return;
+      if (studentsError) {
+        console.error('❌ Error fetching students:', studentsError);
+        throw studentsError;
       }
       
+      console.log('📊 Found', studentsData?.length || 0, 'students in class', selectedClass);
       setStudents(studentsData || []);
 
     } catch (err) {
-      setError(err.message);
-      console.error('Error fetching students:', err);
+      console.error('❌ Error in fetchStudents:', err);
+      setError(err.message || 'Failed to load students');
     } finally {
       setLoading(false);
     }
@@ -203,38 +265,40 @@ const TakeAttendance = () => {
     }
     
     try {
-      // Validate tenant access before fetching attendance
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed for attendance:', tenantValidation.error);
-        return; // Silent return for better UX on attendance fetch
-      }
-      
       console.log('🔍 [DEBUG] Fetching existing attendance...');
       console.log('🔍 [DEBUG] Class ID:', selectedClass);
       console.log('🔍 [DEBUG] Date:', selectedDate);
       console.log('🔍 [DEBUG] Student IDs:', students.map(s => s.id));
       
-      // Get existing attendance records with tenant isolation
-      const tenantQuery = createTenantQuery(supabase.from(TABLES.STUDENT_ATTENDANCE), tenantId);
-      const { data: attendanceData, error: attendanceError } = await tenantQuery
-        .select('student_id, status, tenant_id')  // Include tenant_id for validation
-        .eq('date', selectedDate)
-        .eq('class_id', selectedClass);
-
-      if (attendanceError) throw attendanceError;
-
-      // Validate fetched attendance data belongs to correct tenant
-      const validationResult = await validateDataTenancy(
-        attendanceData?.map(a => ({ 
-          id: a.student_id, 
-          tenant_id: a.tenant_id 
-        })) || [],
-        tenantId
-      );
+      // Get current tenant ID using the same method as other functions
+      let currentTenantId = tenantId;
       
-      if (!validationResult.isValid) {
-        console.error('❌ Attendance data validation failed:', validationResult.error);
+      if (!currentTenantId) {
+        console.log('⚠️ No tenant from context in fetchExistingAttendance, trying email lookup...');
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          currentTenantId = emailTenant?.id;
+          console.log('📧 Email-based tenant ID for attendance:', currentTenantId);
+        } catch (emailError) {
+          console.error('❌ Email tenant lookup failed in fetchExistingAttendance:', emailError);
+        }
+        
+        if (!currentTenantId) {
+          console.warn('❌ No tenant context available for attendance fetch, skipping silently');
+          return; // Silent return for better UX
+        }
+      }
+      
+      // Get existing attendance records with proper tenant filtering
+      const { data: attendanceData, error: attendanceError } = await supabase
+        .from(TABLES.STUDENT_ATTENDANCE)
+        .select('student_id, status')
+        .eq('date', selectedDate)
+        .eq('class_id', selectedClass)
+        .eq('tenant_id', currentTenantId);
+
+      if (attendanceError) {
+        console.error('❌ Error fetching attendance:', attendanceError);
         return; // Silent return for better UX
       }
 
@@ -342,14 +406,6 @@ const TakeAttendance = () => {
       
       setLoading(true);
       
-      // Validate tenant access before saving attendance
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed for saving attendance:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
-        return;
-      }
-      
       if (students.length === 0) {
         Alert.alert('No Students', 'No students found for the selected class and section.');
         return;
@@ -366,9 +422,28 @@ const TakeAttendance = () => {
         return;
       }
 
+      // Get current tenant ID using the same method as other functions
+      let currentTenantId = tenantId;
+      
+      if (!currentTenantId) {
+        console.log('⚠️ No tenant from context in handleMarkAttendance, trying email lookup...');
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          currentTenantId = emailTenant?.id;
+          console.log('📧 Email-based tenant ID for attendance marking:', currentTenantId);
+        } catch (emailError) {
+          console.error('❌ Email tenant lookup failed in handleMarkAttendance:', emailError);
+        }
+        
+        if (!currentTenantId) {
+          Alert.alert('Error', 'Unable to determine tenant context for saving attendance. Please contact support.');
+          return;
+        }
+      }
+
       // Ensure we have teacher info with tenant_id
-      if (!teacherInfo?.tenant_id) {
-        Alert.alert('Error', 'Teacher information not loaded properly. Please try again.');
+      if (!teacherInfo?.tenant_id || teacherInfo.tenant_id !== currentTenantId) {
+        Alert.alert('Error', 'Teacher information not loaded properly or tenant mismatch. Please try again.');
         return;
       }
 
@@ -379,14 +454,14 @@ const TakeAttendance = () => {
         date: selectedDate,
         status: attendanceMark[student.id], // No fallback - we know it's defined
         marked_by: user.id,
-        tenant_id: teacherInfo.tenant_id // Include tenant_id for multi-tenant support
+        tenant_id: currentTenantId // Use consistent tenant_id
       }));
 
       // 🔍 DEBUG: Log what we're about to submit
       console.log('🔍 [DEBUG] About to submit attendance records:');
       console.log('🔍 [DEBUG] Selected Class:', selectedClass);
       console.log('🔍 [DEBUG] Selected Date:', selectedDate);
-      console.log('🔍 [DEBUG] Tenant ID:', teacherInfo.tenant_id);
+      console.log('🔍 [DEBUG] Tenant ID:', currentTenantId);
       console.log('🔍 [DEBUG] Records to submit:', JSON.stringify(attendanceRecords, null, 2));
       console.log('🔍 [DEBUG] Current attendanceMark state:', JSON.stringify(attendanceMark, null, 2));
 
@@ -394,16 +469,16 @@ const TakeAttendance = () => {
       // we'll delete existing records for these students on this date, then insert new ones
       console.log('🔄 [WORKAROUND] Delete existing records then insert new ones (no unique constraint available)');
       
-      // Step 1: Delete existing attendance records for these students on this date with tenant isolation
-      // Use tenant-aware query to ensure only records from the current tenant are affected
+      // Step 1: Delete existing attendance records for these students on this date with proper tenant filtering
       const studentIds = attendanceRecords.map(record => record.student_id);
-      console.log('🗑️ [DELETE] Removing existing records for students with tenant isolation:', studentIds);
+      console.log('🗑️ [DELETE] Removing existing records for students with tenant filtering:', studentIds);
       
-      const tenantDeleteQuery = createTenantQuery(supabase.from(TABLES.STUDENT_ATTENDANCE), tenantId);
-      const { error: deleteError } = await tenantDeleteQuery
+      const { error: deleteError } = await supabase
+        .from(TABLES.STUDENT_ATTENDANCE)
         .delete()
         .eq('date', selectedDate)
         .eq('class_id', selectedClass)
+        .eq('tenant_id', currentTenantId)
         .in('student_id', studentIds);
         
       if (deleteError) {
@@ -413,11 +488,11 @@ const TakeAttendance = () => {
       
       console.log('✅ [DELETE] Successfully deleted existing records');
       
-      // Step 2: Insert the new attendance records with tenant isolation
+      // Step 2: Insert the new attendance records with proper tenant isolation
       console.log('➕ [INSERT] Inserting new attendance records with tenant isolation');
       
-      const tenantInsertQuery = createTenantQuery(supabase.from(TABLES.STUDENT_ATTENDANCE), tenantId);
-      const { error: insertError } = await tenantInsertQuery
+      const { error: insertError } = await supabase
+        .from(TABLES.STUDENT_ATTENDANCE)
         .insert(attendanceRecords);
         
       if (insertError) {
@@ -459,67 +534,50 @@ const TakeAttendance = () => {
     if (!viewClass || !viewDate) return;
     
     try {
-      // Validate tenant access before fetching view attendance
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed for view attendance:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
-        return;
+      // Get current tenant ID using the same method as other functions
+      let currentTenantId = tenantId;
+      
+      if (!currentTenantId) {
+        console.log('⚠️ No tenant from context in fetchViewAttendance, trying email lookup...');
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          currentTenantId = emailTenant?.id;
+          console.log('📧 Email-based tenant ID for view attendance:', currentTenantId);
+        } catch (emailError) {
+          console.error('❌ Email tenant lookup failed in fetchViewAttendance:', emailError);
+        }
+        
+        if (!currentTenantId) {
+          console.warn('❌ No tenant context available for view attendance, skipping silently');
+          setViewAttendance([]);
+          return; // Silent return for better UX
+        }
       }
       
-      // Get students for the view class with tenant isolation
-      const tenantStudentQuery = createTenantQuery(supabase.from(TABLES.STUDENTS), tenantId);
-      const { data: viewStudents } = await tenantStudentQuery
-        .select('id, name, admission_no, tenant_id')
-        .eq('class_id', viewClass);
+      // Get students for the view class with proper tenant filtering
+      const { data: viewStudents } = await supabase
+        .from(TABLES.STUDENTS)
+        .select('id, name, admission_no')
+        .eq('class_id', viewClass)
+        .eq('tenant_id', currentTenantId);
 
       if (!viewStudents || viewStudents.length === 0) {
         setViewAttendance([]);
         return;
       }
-      
-      // Validate students belong to correct tenant
-      const studentValidation = await validateDataTenancy(
-        viewStudents?.map(s => ({ 
-          id: s.id, 
-          tenant_id: s.tenant_id 
-        })) || [],
-        tenantId
-      );
-      
-      if (!studentValidation.isValid) {
-        console.error('❌ Student validation failed for view:', studentValidation.error);
-        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
-        return;
-      }
 
-      // Get attendance records with tenant isolation
-      const tenantAttendanceQuery = createTenantQuery(supabase.from(TABLES.STUDENT_ATTENDANCE), tenantId);
-      const { data: attendanceData, error: attendanceError } = await tenantAttendanceQuery
+      // Get attendance records with proper tenant filtering
+      const { data: attendanceData, error: attendanceError } = await supabase
+        .from(TABLES.STUDENT_ATTENDANCE)
         .select(`
           *,
-          students(name, admission_no),
-          tenant_id
+          students(name, admission_no)
         `)
         .eq('date', viewDate)
+        .eq('tenant_id', currentTenantId)
         .in('student_id', viewStudents.map(s => s.id));
 
       if (attendanceError) throw attendanceError;
-      
-      // Validate attendance data belongs to correct tenant
-      const attendanceValidation = await validateDataTenancy(
-        attendanceData?.map(a => ({ 
-          id: a.id, 
-          tenant_id: a.tenant_id 
-        })) || [],
-        tenantId
-      );
-      
-      if (!attendanceValidation.isValid) {
-        console.error('❌ Attendance validation failed for view:', attendanceValidation.error);
-        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
-        return;
-      }
 
       // Combine student info with attendance
       const combinedAttendance = viewStudents.map(student => {

@@ -166,7 +166,7 @@ const LeaveManagement = ({ navigation }) => {
       }
       
       // 🛡️ Validate tenant access first using centralized utility
-      const validation = await validateTenantAccess(tenantId, user?.id, 'LeaveManagement - loadLeaveApplications');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'LeaveManagement - loadLeaveApplications');
       if (!validation.isValid) {
         console.error('❌ LeaveManagement loadLeaveApplications: Tenant validation failed:', validation.error);
         Alert.alert('Access Denied', validation.error);
@@ -296,7 +296,7 @@ const LeaveManagement = ({ navigation }) => {
       }
       
       // 🛡️ Validate tenant access
-      const validation = await validateTenantAccess(tenantId, user?.id, 'LeaveManagement - loadTeachers');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'LeaveManagement - loadTeachers');
       if (!validation.isValid) {
         console.error('❌ LeaveManagement loadTeachers: Tenant validation failed:', validation.error);
         setTeachers([]);
@@ -485,7 +485,7 @@ const LeaveManagement = ({ navigation }) => {
       }
       
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'LeaveManagement - handleAddLeave');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'LeaveManagement - handleAddLeave');
       if (!validation.isValid) {
         Alert.alert('Access Denied', validation.error);
         return;
@@ -635,7 +635,7 @@ const LeaveManagement = ({ navigation }) => {
       }
       
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'LeaveManagement - handleReviewLeave');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'LeaveManagement - handleReviewLeave');
       if (!validation.isValid) {
         Alert.alert('Access Denied', validation.error);
         return;

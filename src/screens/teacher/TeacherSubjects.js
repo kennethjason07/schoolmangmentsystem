@@ -70,31 +70,23 @@ const TeacherSubjects = ({ navigation }) => {
       
       console.log('🚀 TeacherSubjects.loadTeacherSubjects: Starting with tenant_id:', tenantId, 'user:', user.id);
 
-      // Get teacher info with tenant-aware query
-      console.log('🔍 Loading teacher info for user:', user.id, 'tenant:', tenantId);
-      const tenantTeacherQuery = createTenantQuery(supabase.from(TABLES.TEACHERS), tenantId);
-      const { data: teacherData, error: teacherError } = await tenantTeacherQuery
-        .select(`
-          *,
-          users!users_linked_teacher_id_fkey(id, email, full_name, phone),
-          tenant_id
-        `)
-        .eq('users.id', user.id)
-        .single();
-        
+      // Use the existing working dbHelpers method like student dashboard
+      console.log('🔍 Loading teacher info using dbHelpers.getTeacherByUserId...');
+      const { data: teacherData, error: teacherError } = await dbHelpers.getTeacherByUserId(user.id);
+      
       if (teacherError || !teacherData) {
-        console.error('❌ Teacher not found for user:', user.id, 'in tenant:', tenantId);
-        throw new Error('Teacher information not found for this tenant.');
+        console.error('❌ Teacher not found for user:', user.id, 'Error:', teacherError);
+        throw new Error('Teacher information not found for this tenant. Please contact your administrator to link your account to a teacher profile.');
       }
       
       // Validate teacher data belongs to correct tenant
-      const teacherValidation = await validateDataTenancy([{ 
+      const teacherValidation = validateDataTenancy([{ 
         id: teacherData.id, 
         tenant_id: teacherData.tenant_id 
-      }], tenantId);
+      }], tenantId, 'TeacherSubjects-TeacherData');
       
-      if (!teacherValidation.isValid) {
-        console.error('❌ Teacher data validation failed:', teacherValidation.error);
+      if (!teacherValidation) {
+        console.error('❌ Teacher data validation failed: Teacher data does not belong to tenant', tenantId);
         Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
         return;
       }
@@ -102,9 +94,10 @@ const TeacherSubjects = ({ navigation }) => {
       console.log('👨‍🏫 Found teacher:', teacherData.name, 'for tenant:', tenantId);
       setTeacherInfo(teacherData);
 
-      // Get subjects assigned to teacher with tenant-aware query
-      const tenantSubjectQuery = createTenantQuery(supabase.from(TABLES.TEACHER_SUBJECTS), tenantId);
-      const { data: subjectAssignments, error: subjectError } = await tenantSubjectQuery
+      // Get subjects assigned to teacher using direct supabase query with tenant filtering
+      console.log('🔍 Loading subject assignments for teacher:', teacherData.id, 'tenant:', tenantId);
+      const { data: subjectAssignments, error: subjectError } = await supabase
+        .from(TABLES.TEACHER_SUBJECTS)
         .select(`
           id,
           teacher_id,
@@ -127,31 +120,35 @@ const TeacherSubjects = ({ navigation }) => {
           )
         `)
         .eq('teacher_id', teacherData.id)
+        .eq('tenant_id', tenantId)
         .order('assigned_on', { ascending: false });
 
       if (subjectError) {
-        throw subjectError;
+        console.log('Subject assignments error:', subjectError);
+        // Don't throw error for missing assignments, just set empty array
+        // throw subjectError;
       }
       
       // Validate subject assignments belong to correct tenant
-      const subjectValidation = await validateDataTenancy(
+      const subjectValidation = validateDataTenancy(
         subjectAssignments?.map(sa => ({ 
           id: sa.id, 
           tenant_id: sa.tenant_id 
         })) || [],
-        tenantId
+        tenantId,
+        'TeacherSubjects-SubjectAssignments'
       );
       
-      if (!subjectValidation.isValid) {
-        console.error('❌ Subject assignment data validation failed:', subjectValidation.error);
+      if (!subjectValidation) {
+        console.error('❌ Subject assignment data validation failed: Subject assignments do not belong to tenant', tenantId);
         Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
         return;
       }
 
-      // Get classes where teacher is class teacher with tenant-aware query
+      // Get classes where teacher is class teacher using direct supabase query with tenant filtering
       console.log('🔍 Loading class teacher assignments for teacher:', teacherData.id, 'tenant:', tenantId);
-      const tenantClassQuery = createTenantQuery(supabase.from(TABLES.CLASSES), tenantId);
-      const { data: classTeacherData, error: classTeacherError } = await tenantClassQuery
+      const { data: classTeacherData, error: classTeacherError } = await supabase
+        .from(TABLES.CLASSES)
         .select(`
           id,
           class_name,
@@ -159,7 +156,8 @@ const TeacherSubjects = ({ navigation }) => {
           academic_year,
           tenant_id
         `)
-        .eq('class_teacher_id', teacherData.id);
+        .eq('class_teacher_id', teacherData.id)
+        .eq('tenant_id', tenantId);
 
       if (classTeacherError) {
         console.log('Error fetching class teacher data:', classTeacherError);
@@ -167,16 +165,17 @@ const TeacherSubjects = ({ navigation }) => {
       
       // Validate class teacher data belongs to correct tenant (if exists)
       if (classTeacherData && classTeacherData.length > 0) {
-        const classValidation = await validateDataTenancy(
+        const classValidation = validateDataTenancy(
           classTeacherData?.map(ct => ({ 
             id: ct.id, 
             tenant_id: ct.tenant_id 
           })) || [],
-          tenantId
+          tenantId,
+          'TeacherSubjects-ClassTeacherData'
         );
         
-        if (!classValidation.isValid) {
-          console.error('❌ Class teacher data validation failed:', classValidation.error);
+        if (!classValidation) {
+          console.error('❌ Class teacher data validation failed: Class teacher data does not belong to tenant', tenantId);
           Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
           return;
         }

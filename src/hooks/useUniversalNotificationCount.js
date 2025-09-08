@@ -11,17 +11,23 @@ import universalNotificationService from '../services/UniversalNotificationServi
  * - Real-time updates via Supabase subscriptions
  * - Automatic refresh on app focus and screen changes
  * - Intelligent caching for performance
- * - Combines messages and notifications into unified counts
+ * - SEPARATES messages and notifications for different contexts
+ * 
+ * IMPORTANT: Count Usage Guidelines:
+ * - Use `notificationCount` for bell icons (system notifications only)
+ * - Use `messageCount` for chat/message screens (personal messages only)
+ * - Use `totalCount` only when you need both combined
  * 
  * @param {Object} options - Configuration options
  * @param {boolean} options.autoRefresh - Whether to auto-refresh on focus (default: true)
  * @param {boolean} options.realTime - Whether to enable real-time subscriptions (default: true)
  * @param {Function} options.onCountChange - Callback when counts change
+ * @param {string} options.context - Context for debugging ('bell', 'chat', 'dashboard', etc.)
  * 
  * @returns {Object} Hook result
  * @returns {number} result.totalCount - Total unread count (messages + notifications)
- * @returns {number} result.messageCount - Unread message count
- * @returns {number} result.notificationCount - Unread notification count  
+ * @returns {number} result.messageCount - Unread message count (for chat screens)
+ * @returns {number} result.notificationCount - Unread notification count (for bell icons)
  * @returns {boolean} result.loading - Whether currently loading
  * @returns {Function} result.refresh - Manual refresh function
  * @returns {string} result.notificationScreen - Appropriate screen name for navigation

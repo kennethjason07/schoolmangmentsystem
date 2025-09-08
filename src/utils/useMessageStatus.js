@@ -44,11 +44,17 @@ export const useMessageStatus = () => {
         return { success: false, error };
       }
 
+      console.log(`✅ markMessagesAsRead: Successfully marked ${updatedMessages?.length || 0} messages as read`);
+      
       // Broadcast the message read event to update badges in real-time
+      console.log('📡 Broadcasting message read event for instant badge updates...');
       await universalNotificationService.broadcastMessageRead(user.id, senderId);
-      console.log('✅ Broadcast message read event for sender:', senderId);
+      console.log('✅ Broadcast message read event sent successfully for sender:', senderId);
+      
+      // Small delay to ensure broadcast is processed
+      await new Promise(resolve => setTimeout(resolve, 50));
 
-      return { success: true };
+      return { success: true, updatedCount: updatedMessages?.length || 0 };
     } catch (error) {
       console.log('💥 markMessagesAsRead: Unexpected error:', error);
       return { success: false, error };

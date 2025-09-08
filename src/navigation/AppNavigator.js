@@ -13,6 +13,7 @@ import LoadingScreen from '../screens/LoadingScreen';
 import { useAuth } from '../utils/AuthContext';
 import MessageBadge from '../components/MessageBadge';
 import UniversalNotificationBadge from '../components/UniversalNotificationBadge';
+import ChatBadge from '../components/ChatBadge';
 import InAppNotificationBanner from '../components/InAppNotificationBanner';
 import { navigationRef } from '../services/NavigationService';
 // Admin Screens
@@ -186,7 +187,7 @@ function TeacherTabNavigator() {
             return (
               <View style={{ position: 'relative' }}>
                 {icon}
-                <UniversalNotificationBadge />
+                <ChatBadge />
               </View>
             );
           }
@@ -255,7 +256,7 @@ function ParentTabNavigator() {
             return (
               <View style={{ position: 'relative' }}>
                 {icon}
-                <UniversalNotificationBadge />
+                <ChatBadge />
               </View>
             );
           }
@@ -324,7 +325,7 @@ function StudentTabNavigator() {
             return (
               <View style={{ position: 'relative' }}>
                 {icon}
-                <UniversalNotificationBadge />
+                <ChatBadge />
               </View>
             );
           }

@@ -19,6 +19,7 @@ import { runSimpleNetworkTest, formatSimpleNetworkResults } from '../../utils/si
 import { handleFileView, formatFileSize as formatFileSizeDisplay, getFileTypeColor } from '../../utils/fileViewer';
 import ImageViewer from '../../components/ImageViewer';
 import { getGlobalMessageHandler } from '../../utils/realtimeMessageHandler';
+import universalNotificationService from '../../services/UniversalNotificationService';
 
 const TeacherChat = () => {
   const { user } = useAuth();
@@ -635,7 +636,12 @@ const TeacherChat = () => {
         
         // Mark messages from this contact as read
         if (contactUserId !== user.id) {
-          markMessagesAsRead(contactUserId);
+          const markResult = await markMessagesAsRead(contactUserId);
+          if (markResult?.success) {
+            console.log('✅ TeacherChat: Messages marked as read, broadcasting to universal service');
+            // Broadcast to universal notification service for immediate badge update
+            universalNotificationService.broadcastMessageRead(user.id, contactUserId);
+          }
           // Update unread counts to remove this contact
           setUnreadCounts(prev => {
             const updated = { ...prev };

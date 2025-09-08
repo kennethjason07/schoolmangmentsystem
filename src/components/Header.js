@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../utils/AuthContext';
 import { supabase } from '../utils/supabase';
-import UniversalNotificationBadge from './UniversalNotificationBadge';
+import NotificationBellBadge from './NotificationBellBadge';
 import DebugBadge from './DebugBadge';
 import universalNotificationService from '../services/UniversalNotificationService';
 
@@ -100,7 +100,7 @@ const Header = ({ title, showBack = false, showProfile = true, showNotifications
                   size={24} 
                   color="#333"
                 />
-                <UniversalNotificationBadge />
+                <NotificationBellBadge />
               </TouchableOpacity>
             )}
             {showProfile && authUser && userType && (
