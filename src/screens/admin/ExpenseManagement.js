@@ -23,11 +23,14 @@ import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import { supabase, dbHelpers } from '../../utils/supabase';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 import { useTenant } from '../../contexts/TenantContext';
+import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
+import { useAuth } from '../../utils/AuthContext';
 
 const { width } = Dimensions.get('window');
 
 const ExpenseManagement = ({ navigation }) => {
   const { tenantId, tenantName, currentTenant } = useTenant();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
@@ -89,6 +92,15 @@ const ExpenseManagement = ({ navigation }) => {
 
   const loadExpenseData = async () => {
     try {
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'ExpenseManagement - loadExpenseData');
+      if (!validation.isValid) {
+        console.error('❌ ExpenseManagement loadExpenseData: Tenant validation failed:', validation.error);
+        Alert.alert('Access Denied', validation.error);
+        setLoading(false);
+        return;
+      }
+      
       console.log('🔍 ExpenseManagement: Starting data load...');
       setLoading(true);
       
@@ -97,34 +109,24 @@ const ExpenseManagement = ({ navigation }) => {
       const monthEnd = format(endOfMonth(selectedMonth), 'yyyy-MM-dd');
       console.log('📅 Date range:', { monthStart, monthEnd, selectedMonth });
       
-      // Test database connection first
-      console.log('🔗 Testing database connection...');
+      // Test database connection with tenant-aware query
+      console.log('🔗 Testing database connection with tenant validation...');
       try {
-        const { data: testData, error: testError } = await supabase
-          .from('school_expenses')
+        const { data: testData, error: testError } = await createTenantQuery(tenantId, 'school_expenses')
           .select('count')
-          .limit(1);
+          .limit(1)
+          .execute();
         console.log('🔗 Database connection test:', { testData, testError });
-      } catch (testErr) {
-        console.error('❌ Database connection failed:', testErr);
-      }
-      
-      // Check if tables exist
-      console.log('📊 Checking if tables exist...');
-      try {
-        const { data: tableCheck, error: tableError } = await supabase
-          .from('school_expenses')
-          .select('id')
-          .limit(1);
-        console.log('📊 Table check result:', { tableCheck, tableError });
         
-        if (tableError) {
-          console.error('❌ Table does not exist or access denied:', tableError);
-          Alert.alert('Database Error', 'The expense tables may not exist. Please run the SQL script in Supabase first.');
+        if (testError) {
+          console.error('❌ Table does not exist or access denied:', testError);
+          Alert.alert('Database Error', 'The expense tables may not exist or you do not have access. Please contact administrator.');
           return;
         }
-      } catch (err) {
-        console.error('❌ Error checking tables:', err);
+      } catch (testErr) {
+        console.error('❌ Database connection failed:', testErr);
+        Alert.alert('Database Error', 'Failed to connect to expense database. Please contact administrator.');
+        return;
       }
       
       // Fetch monthly expenses from database
@@ -147,6 +149,17 @@ const ExpenseManagement = ({ navigation }) => {
         return;
       }
 
+      // 🛡️ Validate expense data belongs to correct tenant
+      if (monthlyExpenses && monthlyExpenses.length > 0) {
+        const expensesValid = validateDataTenancy(monthlyExpenses, tenantId, 'ExpenseManagement - Monthly Expenses');
+        if (!expensesValid) {
+          Alert.alert('Data Security Alert', 'Expense data validation failed. Please contact administrator.');
+          setExpenses([]);
+          setMonthlyTotal(0);
+          return;
+        }
+      }
+      
       // Set expenses from database (empty array if no data)
       setExpenses(monthlyExpenses || []);
       console.log('✅ Set expenses state:', monthlyExpenses?.length || 0, 'items');
@@ -173,6 +186,17 @@ const ExpenseManagement = ({ navigation }) => {
         setYearlyExpenses([]);
         setYearlyTotal(0);
       } else {
+        // 🛡️ Validate yearly expense data belongs to correct tenant
+        if (yearlyExpenses && yearlyExpenses.length > 0) {
+          const yearlyExpensesValid = validateDataTenancy(yearlyExpenses, tenantId, 'ExpenseManagement - Yearly Expenses');
+          if (!yearlyExpensesValid) {
+            Alert.alert('Data Security Alert', 'Yearly expense data validation failed. Please contact administrator.');
+            setYearlyExpenses([]);
+            setYearlyTotal(0);
+            return;
+          }
+        }
+        
         const yearlySum = (yearlyExpenses || []).reduce((sum, expense) => sum + (expense.amount || 0), 0);
         setYearlyTotal(yearlySum);
         setYearlyExpenses(yearlyExpenses || []);
@@ -357,6 +381,13 @@ const ExpenseManagement = ({ navigation }) => {
   };
 
   const saveExpense = async () => {
+    // 🛡️ Validate tenant access first
+    const validation = await validateTenantAccess(tenantId, user?.id, 'ExpenseManagement - saveExpense');
+    if (!validation.isValid) {
+      Alert.alert('Access Denied', validation.error);
+      return;
+    }
+
     if (!expenseInput.title || !expenseInput.amount || !expenseInput.category) {
       Alert.alert('Error', 'Please fill in all required fields.');
       return;
@@ -396,13 +427,12 @@ const ExpenseManagement = ({ navigation }) => {
         await new Promise(resolve => setTimeout(resolve, 300));
         
         try {
-          // Verify the expense exists in the database
-          const { data: verifyData, error: verifyError } = await supabase
-            .from('school_expenses')
+          // Verify the expense exists in the database using tenant-aware query
+          const { data: verifyData, error: verifyError } = await createTenantQuery(tenantId, 'school_expenses')
             .select('id, title, amount')
             .eq('id', expenseId)
-            .eq('tenant_id', tenantId)
-            .single();
+            .single()
+            .execute();
 
           if (verifyError || !verifyData) {
             console.warn('⚠️ Expense verification failed, waiting longer...', verifyError);
@@ -437,6 +467,13 @@ const ExpenseManagement = ({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
+              // 🛡️ Validate tenant access first
+              const validation = await validateTenantAccess(tenantId, user?.id, 'ExpenseManagement - deleteExpense');
+              if (!validation.isValid) {
+                Alert.alert('Access Denied', validation.error);
+                return;
+              }
+
               const { error } = await dbHelpers.deleteExpense(expenseId, tenantId);
 
               if (error) throw error;
@@ -448,13 +485,12 @@ const ExpenseManagement = ({ navigation }) => {
               await new Promise(resolve => setTimeout(resolve, 300));
               
               try {
-                // Verify the expense no longer exists in the database
-                const { data: verifyData, error: verifyError } = await supabase
-                  .from('school_expenses')
+                // Verify the expense no longer exists in the database using tenant-aware query
+                const { data: verifyData, error: verifyError } = await createTenantQuery(tenantId, 'school_expenses')
                   .select('id')
                   .eq('id', expenseId)
-                  .eq('tenant_id', tenantId)
-                  .single();
+                  .single()
+                  .execute();
 
                 if (!verifyError && verifyData) {
                   console.warn('⚠️ Expense still exists after deletion, waiting longer...');
@@ -493,6 +529,13 @@ const ExpenseManagement = ({ navigation }) => {
 
   const saveBudgets = async () => {
     try {
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'ExpenseManagement - saveBudgets');
+      if (!validation.isValid) {
+        Alert.alert('Access Denied', validation.error);
+        return;
+      }
+
       const budgetUpdates = [];
       
       for (const [categoryName, budgetValue] of Object.entries(budgetInputs)) {

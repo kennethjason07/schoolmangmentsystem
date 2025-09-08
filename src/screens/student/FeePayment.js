@@ -20,7 +20,14 @@ import Header from '../../components/Header';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
-import { supabase, TABLES, dbHelpers, isValidUUID } from '../../utils/supabase';
+import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { 
+  validateTenantAccess, 
+  createTenantQuery, 
+  validateDataTenancy,
+  TENANT_ERROR_MESSAGES 
+} from '../../utils/tenantValidation';
+import { useTenantContext } from '../../contexts/TenantContext';
 import { useAuth } from '../../utils/AuthContext';
 import { getSchoolLogoBase64, getLogoHTML, getReceiptHeaderCSS } from '../../utils/logoUtils';
 import FeeService from '../../services/FeeService';
@@ -29,8 +36,9 @@ import { validateFeeConsistency, syncFeeAfterPayment } from '../../services/feeS
 const { width } = Dimensions.get('window');
 
 const FeePayment = () => {
-  const { user } = useAuth();
   const navigation = useNavigation();
+  const { user } = useAuth();
+  const { tenantId } = useTenantContext();
   const [feeStructure, setFeeStructure] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [studentData, setStudentData] = useState(null);

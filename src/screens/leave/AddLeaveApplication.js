@@ -11,11 +11,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { supabase } from '../../utils/supabase';
+import { supabase, getUserTenantId } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
+import { useTenantContext } from '../../contexts/TenantContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 import { colors } from '../../../assets/colors';
 
 const AddLeaveApplication = ({ visible, onClose, onApplicationAdded }) => {
+  const { currentTenant } = useTenantContext();
   const [leaveType, setLeaveType] = useState('Sick');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -34,8 +37,10 @@ const AddLeaveApplication = ({ visible, onClose, onApplicationAdded }) => {
   };
 
   const handleSubmit = async () => {
-    console.log('➕ [ADD_LEAVE] Starting leave application submission...');
-    console.log('➕ [ADD_LEAVE] Form data:', {
+    const startTime = performance.now();
+    
+    console.log('🚀 AddLeaveApplication: Starting leave application submission...');
+    console.log('📊 AddLeaveApplication: Form data:', {
       leaveType,
       startDate,
       endDate,
@@ -61,7 +66,27 @@ const AddLeaveApplication = ({ visible, onClose, onApplicationAdded }) => {
 
     try {
       setIsSubmitting(true);
-      console.log('➕ [ADD_LEAVE] Preparing to insert into database...');
+      console.log('📊 AddLeaveApplication: Preparing to insert into database...');
+      
+      // Get tenant ID with email fallback
+      let tenantId = currentTenant?.id || await getUserTenantId();
+      
+      if (!tenantId) {
+        console.log('⚠️ AddLeaveApplication: No tenant from context/getUserTenantId, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          tenantId = emailTenant?.id;
+          console.log('📧 AddLeaveApplication: Email-based tenant ID:', tenantId);
+        } catch (emailError) {
+          console.error('❌ AddLeaveApplication: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!tenantId) {
+          Alert.alert('Error', 'Unable to determine tenant context. Please contact support.');
+          return;
+        }
+      }
 
       // Get current user session
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -86,7 +111,7 @@ const AddLeaveApplication = ({ visible, onClose, onApplicationAdded }) => {
         applied_date: new Date().toISOString().split('T')[0],
         applied_by: user.id,
         teacher_id: user.linked_teacher_id || null,
-        tenant_id: user.tenant_id || null
+        tenant_id: tenantId // Use dynamically obtained tenant ID
       };
 
       console.log('➕ [ADD_LEAVE] Data to insert:', leaveData);
@@ -125,7 +150,12 @@ const AddLeaveApplication = ({ visible, onClose, onApplicationAdded }) => {
         return;
       }
 
-      console.log('✅ [ADD_LEAVE] Leave application submitted successfully:', insertedData);
+      console.log('✅ AddLeaveApplication: Leave application submitted successfully:', insertedData);
+      
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const submitTime = Math.round(endTime - startTime);
+      console.log(`✅ AddLeaveApplication: Leave submitted in ${submitTime}ms`);
       
       Alert.alert(
         'Success!', 
@@ -138,7 +168,7 @@ const AddLeaveApplication = ({ visible, onClose, onApplicationAdded }) => {
       );
 
     } catch (error) {
-      console.error('💥 [ADD_LEAVE] Submission error:', error);
+      console.error('❌ AddLeaveApplication: Submission error:', error.message);
       Alert.alert('Error', 'An unexpected error occurred while submitting the application.');
     } finally {
       setIsSubmitting(false);

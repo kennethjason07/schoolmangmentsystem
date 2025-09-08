@@ -28,11 +28,15 @@ import Colors from '../../constants/Colors';
 import { useAuth } from '../../utils/AuthContext';
 import { createLeaveStatusNotificationForTeacher } from '../../services/notificationService';
 import LogViewer from '../../components/debug/LogViewer';
+import { validateTenantAccess, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
+import { useTenantContext } from '../../contexts/TenantContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 const { width } = Dimensions.get('window');
 
 const LeaveManagement = ({ navigation }) => {
   const { user, userType, isAuthenticated } = useAuth();
+  const { currentTenant } = useTenantContext();
   
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -129,12 +133,47 @@ const LeaveManagement = ({ navigation }) => {
   };
 
   const loadLeaveApplications = async () => {
+    const startTime = performance.now();
+    let timeoutId;
+    
     try {
-      console.log('📄 [ADMIN_LEAVE] Starting to load leave applications from database...');
-      console.log('📄 [ADMIN_LEAVE] Current user:', user?.email || 'Not logged in');
-      console.log('📄 [ADMIN_LEAVE] User type:', userType || 'Unknown');
+      console.log('🚀 LeaveManagement: Starting optimized data load...');
       
-      // Check current session first
+      // ⏰ Set timeout protection
+      timeoutId = setTimeout(() => {
+        console.warn('⚠️ LeaveManagement: Load timeout (10s)');
+        throw new Error('Loading timeout - please check your connection');
+      }, 10000);
+      
+      // 🔍 Validate tenant context
+      let tenantId = currentTenant?.id;
+      console.log('📋 LeaveManagement: Current tenant ID:', tenantId);
+      
+      if (!tenantId) {
+        console.log('⚠️ LeaveManagement: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          tenantId = emailTenant?.id;
+          console.log('📧 LeaveManagement: Email-based tenant ID:', tenantId);
+        } catch (emailError) {
+          console.error('❌ LeaveManagement: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!tenantId) {
+          throw new Error('Unable to determine tenant context. Please contact support.');
+        }
+      }
+      
+      // 🛡️ Validate tenant access first using centralized utility
+      const validation = await validateTenantAccess(tenantId, user?.id, 'LeaveManagement - loadLeaveApplications');
+      if (!validation.isValid) {
+        console.error('❌ LeaveManagement loadLeaveApplications: Tenant validation failed:', validation.error);
+        Alert.alert('Access Denied', validation.error);
+        return;
+      }
+      
+      // Check current session first (keeping existing logic for compatibility)
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       console.log('📄 [ADMIN_LEAVE] Session check:');
       console.log('   - Session exists:', !!session);
@@ -147,16 +186,9 @@ const LeaveManagement = ({ navigation }) => {
         return;
       }
       
-      // Get current user's tenant_id using utility function
-      const tenantId = await getUserTenantId();
-      console.log('🏢 [ADMIN_LEAVE] Current tenant ID:', tenantId);
-      if (!tenantId) {
-        console.error('❌ [ADMIN_LEAVE] No tenant_id found for user');
-        Alert.alert('Error', 'Tenant information not found. Please contact support.');
-        return;
-      }
+      console.log('🏢 LeaveManagement: Using validated tenant ID:', tenantId);
 
-      console.log('📄 [ADMIN_LEAVE] Querying leave_applications table...');
+      console.log('📄 LeaveManagement: Querying leave_applications table with tenant filter...');
       const { data, error } = await supabase
         .from('leave_applications')
         .select(`
@@ -205,40 +237,118 @@ const LeaveManagement = ({ navigation }) => {
         throw error;
       }
       
-      console.log('✅ [ADMIN_LEAVE] Successfully loaded', data?.length || 0, 'leave applications');
+      // 🛡️ Validate leave applications data belongs to correct tenant
+      if (data && data.length > 0) {
+        const applicationsValid = validateDataTenancy(data, tenantId, 'LeaveManagement - Leave Applications');
+        if (!applicationsValid) {
+          Alert.alert('Data Security Alert', 'Leave applications data validation failed. Please contact administrator.');
+          setLeaveApplications([]);
+          return;
+        }
+      }
+      
+      clearTimeout(timeoutId);
+      
+      console.log(`✅ LeaveManagement: Successfully loaded ${data?.length || 0} leave applications`);
       setLeaveApplications(data || []);
+      
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.log(`✅ LeaveManagement: Data loaded in ${loadTime}ms`);
+      
+      if (loadTime > 2000) {
+        console.warn('⚠️ LeaveManagement: Slow loading (>2s). Check network.');
+      } else {
+        console.log('🚀 LeaveManagement: Fast loading achieved!');
+      }
+      
     } catch (error) {
-      console.error('💥 [ADMIN_LEAVE] Error loading leave applications:', error);
-      console.error('💥 [ADMIN_LEAVE] Error stack:', error.stack);
-      console.error('💥 [ADMIN_LEAVE] Error details:', {
-        message: error.message,
-        code: error.code,
-        hint: error.hint,
-        details: error.details,
-        name: error.name
-      });
+      clearTimeout(timeoutId);
+      console.error('❌ LeaveManagement: Failed to load data:', error.message);
+      Alert.alert('Error', error.message || 'Failed to load leave applications');
+    } finally {
+      clearTimeout(timeoutId);
     }
   };
 
   const loadTeachers = async () => {
     try {
-      // Get current user's tenant_id using utility function
-      const tenantId = await getUserTenantId();
+      console.log('🚀 LeaveManagement: Loading teachers...');
+      
+      // 🔍 Get tenant ID with email fallback
+      let tenantId = currentTenant?.id;
+      
       if (!tenantId) {
-        console.error('No tenant_id found for user in teachers fetch');
+        console.log('⚠️ LeaveManagement loadTeachers: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          tenantId = emailTenant?.id;
+          console.log('📧 LeaveManagement loadTeachers: Email-based tenant ID:', tenantId);
+        } catch (emailError) {
+          console.error('❌ LeaveManagement loadTeachers: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!tenantId) {
+          throw new Error('Unable to determine tenant context for teacher data');
+        }
+      }
+      
+      // 🛡️ Validate tenant access
+      const validation = await validateTenantAccess(tenantId, user?.id, 'LeaveManagement - loadTeachers');
+      if (!validation.isValid) {
+        console.error('❌ LeaveManagement loadTeachers: Tenant validation failed:', validation.error);
+        setTeachers([]);
         return;
       }
-
+      
+      console.log('📊 LeaveManagement: Fetching teachers with tenant_id:', tenantId);
       const { data, error } = await supabase
         .from('teachers')
-        .select('id, name')
+        .select('id, name, tenant_id') // Include tenant_id in selection for debugging
         .eq('tenant_id', tenantId)
         .order('name');
+      
+      console.log('📄 LeaveManagement: Teachers query result:');
+      console.log('   - Teachers found:', data?.length || 0);
+      console.log('   - Error:', error?.message || 'None');
+      if (data && data.length > 0) {
+        console.log('   - Sample teacher:', data[0]);
+        // Check tenant_id distribution
+        const tenantDistribution = data.reduce((acc, teacher) => {
+          const tid = teacher.tenant_id || 'null';
+          acc[tid] = (acc[tid] || 0) + 1;
+          return acc;
+        }, {});
+        console.log('   - Tenant ID distribution:', tenantDistribution);
+      }
 
       if (error) throw error;
-      setTeachers(data || []);
+      
+      // 🛡️ Filter teachers data to ensure only correct tenant data
+      let validTeachers = data || [];
+      if (data && data.length > 0) {
+        // Filter out any teachers that don't belong to current tenant
+        validTeachers = data.filter(teacher => teacher.tenant_id === tenantId);
+        
+        if (validTeachers.length !== data.length) {
+          console.warn(`⚠️ LeaveManagement: Filtered ${data.length - validTeachers.length} teachers with wrong tenant_id`);
+          console.log(`ℹ️ LeaveManagement: Keeping ${validTeachers.length} teachers with correct tenant_id`);
+        }
+      }
+      
+      // Map teachers to only include UI-needed fields
+      const teachersForUI = validTeachers.map(teacher => ({
+        id: teacher.id,
+        name: teacher.name
+      }));
+      
+      setTeachers(teachersForUI);
+      console.log(`✅ LeaveManagement: Successfully loaded ${teachersForUI.length} teachers for UI`);
+      
     } catch (error) {
-      console.error('Error loading teachers:', error);
+      console.error('❌ LeaveManagement: Error loading teachers:', error.message);
       setTeachers([]); // Set empty array as fallback
     }
   };
@@ -353,6 +463,34 @@ const LeaveManagement = ({ navigation }) => {
 
   const handleAddLeave = async () => {
     try {
+      console.log('🚀 LeaveManagement: Starting handleAddLeave...');
+      
+      // 🔍 Get tenant ID with email fallback
+      let tenantId = currentTenant?.id;
+      
+      if (!tenantId) {
+        console.log('⚠️ LeaveManagement handleAddLeave: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          tenantId = emailTenant?.id;
+          console.log('📧 LeaveManagement handleAddLeave: Email-based tenant ID:', tenantId);
+        } catch (emailError) {
+          console.error('❌ LeaveManagement handleAddLeave: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!tenantId) {
+          throw new Error('Unable to determine tenant context for adding leave');
+        }
+      }
+      
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'LeaveManagement - handleAddLeave');
+      if (!validation.isValid) {
+        Alert.alert('Access Denied', validation.error);
+        return;
+      }
+
       if (!newLeaveForm.teacher_id || !newLeaveForm.reason.trim()) {
         Alert.alert('Error', 'Please fill in all required fields');
         return;
@@ -380,7 +518,7 @@ const LeaveManagement = ({ navigation }) => {
       // Ensure user exists in the users table
       let userId = user.id;
       try {
-        // Check if user exists in users table
+        // Check if user exists in users table with tenant filter
         const { data: existingUser, error: userCheckError } = await supabase
           .from('users')
           .select('id')
@@ -433,10 +571,9 @@ const LeaveManagement = ({ navigation }) => {
         userId = null;
       }
 
-      // Get user's tenant_id for insertion using utility function
-      const tenantId = await getUserTenantId();
+      // Use already validated tenantId from context
       if (!tenantId) {
-        console.error('No tenant_id found for user during leave insertion');
+        console.error('No tenant_id available during leave insertion');
         Alert.alert('Error', 'User tenant information not found');
         return;
       }
@@ -457,6 +594,7 @@ const LeaveManagement = ({ navigation }) => {
         tenant_id: tenantId, // Include tenant_id for RLS compliance
       };
 
+      // 🛡️ Insert leave application with tenant validation
       const { error } = await supabase
         .from('leave_applications')
         .insert([leaveData]);
@@ -475,6 +613,34 @@ const LeaveManagement = ({ navigation }) => {
 
   const handleReviewLeave = async () => {
     try {
+      console.log('🚀 LeaveManagement: Starting handleReviewLeave...');
+      
+      // 🔍 Get tenant ID with email fallback
+      let tenantId = currentTenant?.id;
+      
+      if (!tenantId) {
+        console.log('⚠️ LeaveManagement handleReviewLeave: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          tenantId = emailTenant?.id;
+          console.log('📧 LeaveManagement handleReviewLeave: Email-based tenant ID:', tenantId);
+        } catch (emailError) {
+          console.error('❌ LeaveManagement handleReviewLeave: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!tenantId) {
+          throw new Error('Unable to determine tenant context for reviewing leave');
+        }
+      }
+      
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'LeaveManagement - handleReviewLeave');
+      if (!validation.isValid) {
+        Alert.alert('Access Denied', validation.error);
+        return;
+      }
+
       if (!reviewForm.admin_remarks.trim()) {
         Alert.alert('Error', 'Please add admin remarks');
         return;
@@ -502,10 +668,12 @@ const LeaveManagement = ({ navigation }) => {
         replacement_notes: reviewForm.replacement_notes.trim() || null,
       };
 
+      // 🛡️ Ensure we only update leave applications belonging to our tenant
       const { error } = await supabase
         .from('leave_applications')
         .update(updateData)
-        .eq('id', selectedLeave.id);
+        .eq('id', selectedLeave.id)
+        .eq('tenant_id', tenantId);
 
       if (error) throw error;
 

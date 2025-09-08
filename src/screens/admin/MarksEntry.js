@@ -5,11 +5,16 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import Header from '../../components/Header';
 import { supabase, TABLES } from '../../utils/supabase';
 import { createBulkMarksNotifications } from '../../utils/marksNotificationHelpers';
+import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
+import { useTenant } from '../../contexts/TenantContext';
+import { useAuth } from '../../utils/AuthContext';
 
 const MarksEntry = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const inputRefs = useRef({});
+  const { tenantId } = useTenant();
+  const { user } = useAuth();
   
   // Get exam and class data from route params
   const { exam, examClass } = route.params || {};
@@ -43,32 +48,61 @@ const MarksEntry = () => {
   const loadData = async () => {
     try {
       setLoading(true);
+      
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'MarksEntry - loadData');
+      if (!validation.isValid) {
+        console.error('❌ MarksEntry loadData: Tenant validation failed:', validation.error);
+        Alert.alert('Access Denied', validation.error);
+        setLoading(false);
+        return;
+      }
 
-      // Load subjects for the class
-      const { data: subjectsData, error: subjectsError } = await supabase
-        .from('subjects')
+      // Load subjects for the class using tenant-aware query
+      const { data: subjectsData, error: subjectsError } = await createTenantQuery(tenantId, 'subjects')
         .select('id, name, class_id, academic_year, is_optional, created_at')
-        .eq('class_id', examClass.id);
+        .eq('class_id', examClass.id)
+        .execute();
 
       if (subjectsError) throw subjectsError;
 
-      // Load students for the class
-      const { data: studentsData, error: studentsError } = await supabase
-        .from('students')
+      // Load students for the class using tenant-aware query
+      const { data: studentsData, error: studentsError } = await createTenantQuery(tenantId, 'students')
         .select('id, admission_no, name, roll_no, class_id, academic_year, created_at')
-        .eq('class_id', examClass.id);
+        .eq('class_id', examClass.id)
+        .execute();
 
       if (studentsError) throw studentsError;
 
-      // Load existing marks for this exam
-      const { data: marksData, error: marksError } = await supabase
-        .from('marks')
+      // Load existing marks for this exam using tenant-aware query
+      const { data: marksData, error: marksError } = await createTenantQuery(tenantId, 'marks')
         .select('id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks, created_at')
-        .eq('exam_id', exam.id);
+        .eq('exam_id', exam.id)
+        .execute();
 
       if (marksError) throw marksError;
 
-      // Set data
+      // 🛡️ Validate all data belongs to correct tenant
+      const dataValidations = [
+        { data: subjectsData, name: 'MarksEntry - Subjects' },
+        { data: studentsData, name: 'MarksEntry - Students' },
+        { data: marksData, name: 'MarksEntry - Marks' }
+      ];
+      
+      for (const { data, name } of dataValidations) {
+        if (data && data.length > 0) {
+          const isValid = validateDataTenancy(data, tenantId, name);
+          if (!isValid) {
+            Alert.alert('Data Security Alert', `${name.split(' - ')[1]} data validation failed. Please contact administrator.`);
+            setSubjects([]);
+            setStudents([]);
+            setMarks([]);
+            return;
+          }
+        }
+      }
+      
+      // Set validated data
       let processedSubjects = subjectsData || [];
       
       // If no subjects exist, create default ones
@@ -134,58 +168,26 @@ const MarksEntry = () => {
   // Save all marks
   const handleBulkSaveMarks = async () => {
     try {
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'MarksEntry - handleBulkSaveMarks');
+      if (!validation.isValid) {
+        Alert.alert('Access Denied', validation.error);
+        return;
+      }
+      
       if (!exam) {
         Alert.alert('Error', 'Exam information is missing');
         return;
       }
 
-      // Get current user's tenant_id for RLS policy compliance
-      // Use multiple approaches to ensure we always get a tenant_id
-      let userTenantId = null;
-      
-      try {
-        // Approach 1: Try getUserTenantId function
-        const { getUserTenantId } = require('../../utils/supabase');
-        userTenantId = await getUserTenantId();
-        console.log('🔧 [Admin MarksEntry] getUserTenantId returned:', userTenantId);
-      } catch (error) {
-        console.log('⚠️ [Admin MarksEntry] getUserTenantId failed:', error.message);
-      }
-      
-      // Approach 2: If that fails, try database lookup
-      if (!userTenantId) {
-        try {
-          const { getCurrentUserId } = require('../../utils/supabase');
-          const currentUserId = await getCurrentUserId();
-          
-          if (currentUserId) {
-            const { data: currentUser } = await supabase
-              .from(TABLES.USERS)
-              .select('tenant_id')
-              .eq('id', currentUserId)
-              .single();
-            userTenantId = currentUser?.tenant_id;
-            console.log('🔧 [Admin MarksEntry] Database tenant_id:', userTenantId);
-          }
-        } catch (dbError) {
-          console.log('⚠️ [Admin MarksEntry] Database lookup failed:', dbError.message);
-        }
-      }
-      
-      // Approach 3: If that fails, use hardcoded fallback
-      if (!userTenantId) {
-        userTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
-        console.log('🔄 [Admin MarksEntry] Using hardcoded tenant_id:', userTenantId);
-      }
-      
-      // Approach 4: Final safety check - this should never be needed now
-      if (!userTenantId) {
-        console.error('❌ [Admin MarksEntry] All tenant_id approaches failed');
+      // Use already validated tenantId from context
+      if (!tenantId) {
+        console.error('❌ [Admin MarksEntry] No tenant_id available for marks saving');
         Alert.alert('Error', 'Unable to determine tenant information. Please try again.');
         return;
       }
       
-      console.log('✅ [Admin MarksEntry] Final tenant_id to use:', userTenantId);
+      console.log('✅ [Admin MarksEntry] Using validated tenant_id for marks:', tenantId);
 
       const marksToSave = [];
 
@@ -210,18 +212,19 @@ const MarksEntry = () => {
               grade: grade,
               max_marks: maxMarks, // Store exam's max_marks
               remarks: null,
-              tenant_id: userTenantId
+              tenant_id: tenantId
             });
           }
         });
       });
 
       if (marksToSave.length > 0) {
-        // Delete existing marks for this exam first
+        // Delete existing marks for this exam first with tenant validation
         await supabase
           .from('marks')
           .delete()
-          .eq('exam_id', exam.id);
+          .eq('exam_id', exam.id)
+          .eq('tenant_id', tenantId);
 
         // Insert new marks
         const { error } = await supabase

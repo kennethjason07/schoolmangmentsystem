@@ -19,10 +19,13 @@ import Header from '../../components/Header';
 import { supabase, getUserTenantId } from '../../utils/supabase';
 import { format, parseISO, isAfter, differenceInDays } from 'date-fns';
 import { createLeaveRequestNotificationForAdmins } from '../../services/notificationService';
+import { useTenantContext } from '../../contexts/TenantContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 const { width } = Dimensions.get('window');
 
 const LeaveApplication = ({ navigation }) => {
+  const { currentTenant } = useTenantContext();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [myLeaves, setMyLeaves] = useState([]);
@@ -101,14 +104,31 @@ const LeaveApplication = ({ navigation }) => {
   };
 
   const loadMyLeaves = async () => {
+    const startTime = performance.now();
+    
     try {
       if (!teacherProfile?.linked_teacher_id) return;
-
-      // Get current user's tenant_id using utility function
-      const tenantId = await getUserTenantId();
+      
+      console.log('🚀 TeacherLeaveApplication: Starting loadMyLeaves...');
+      
+      // Get tenant ID with email fallback
+      let tenantId = currentTenant?.id || await getUserTenantId();
+      
       if (!tenantId) {
-        console.error('No tenant_id found for user in teacher leaves fetch');
-        return;
+        console.log('⚠️ TeacherLeaveApplication: No tenant from context/getUserTenantId, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          tenantId = emailTenant?.id;
+          console.log('📧 TeacherLeaveApplication: Email-based tenant ID:', tenantId);
+        } catch (emailError) {
+          console.error('❌ TeacherLeaveApplication: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!tenantId) {
+          console.error('No tenant_id found for user in teacher leaves fetch');
+          return;
+        }
       }
 
       const { data, error } = await supabase
@@ -124,9 +144,16 @@ const LeaveApplication = ({ navigation }) => {
         .order('applied_date', { ascending: false });
 
       if (error) throw error;
+      
       setMyLeaves(data || []);
+      
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.log(`✅ TeacherLeaveApplication: My leaves loaded in ${loadTime}ms`);
+      
     } catch (error) {
-      console.error('Error loading my leaves:', error);
+      console.error('❌ TeacherLeaveApplication: Error loading my leaves:', error.message);
     }
   };
 
@@ -160,17 +187,33 @@ const LeaveApplication = ({ navigation }) => {
   };
 
   const submitApplication = async (totalDays) => {
+    const startTime = performance.now();
+    
     try {
       setSubmitting(true);
+      console.log('🚀 TeacherLeaveApplication: Starting submitApplication...');
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('User not authenticated');
 
-      // Get user's tenant_id for insertion using utility function
-      const tenantId = await getUserTenantId();
+      // Get tenant ID with email fallback
+      let tenantId = currentTenant?.id || await getUserTenantId();
+      
       if (!tenantId) {
-        console.error('No tenant_id found for user during teacher leave insertion');
-        throw new Error('User tenant information not found');
+        console.log('⚠️ TeacherLeaveApplication: No tenant for submit, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          tenantId = emailTenant?.id;
+          console.log('📧 TeacherLeaveApplication: Email-based tenant ID for submit:', tenantId);
+        } catch (emailError) {
+          console.error('❌ TeacherLeaveApplication: Email tenant lookup failed for submit:', emailError);
+        }
+        
+        if (!tenantId) {
+          console.error('No tenant_id found for user during teacher leave insertion');
+          throw new Error('User tenant information not found. Please contact support.');
+        }
       }
 
       const leaveData = {

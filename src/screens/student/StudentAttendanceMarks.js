@@ -7,6 +7,13 @@ import * as Sharing from 'expo-sharing';
 import { LineChart } from 'react-native-chart-kit';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { 
+  validateTenantAccess, 
+  createTenantQuery, 
+  validateDataTenancy,
+  TENANT_ERROR_MESSAGES 
+} from '../../utils/tenantValidation';
+import { useTenantContext } from '../../contexts/TenantContext';
 import Header from '../../components/Header';
 
 // Generate months dynamically up to current month only (same as parent)
@@ -196,6 +203,7 @@ const validateAndSanitizeData = (data, type) => {
 
 export default function StudentAttendanceMarks({ route, navigation }) {
   const { user } = useAuth();
+  const { tenantId } = useTenantContext();
   // Default to attendance tab, but can be overridden by route params
 
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthValue());

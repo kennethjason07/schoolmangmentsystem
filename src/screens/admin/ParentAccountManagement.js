@@ -18,8 +18,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { useTenantContext } from '../../contexts/TenantContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 const ParentAccountManagement = ({ navigation }) => {
+  const { currentTenant } = useTenantContext();
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState('all');
@@ -55,54 +58,90 @@ const ParentAccountManagement = ({ navigation }) => {
   }, [navigation]);
 
   const loadStudents = async () => {
+    const startTime = performance.now();
+    let timeoutId;
+    
     try {
+      console.log('🚀 ParentAccountManagement: Starting data load...');
       setLoading(true);
+      
+      // ⏰ Set timeout protection
+      timeoutId = setTimeout(() => {
+        console.warn('⚠️ ParentAccountManagement: Load timeout (10s)');
+        throw new Error('Loading timeout - please check your connection');
+      }, 10000);
+      
+      // 🔍 Validate tenant context
+      let tenantId = currentTenant?.id;
+      console.log('📋 ParentAccountManagement: Current tenant ID:', tenantId);
+      
+      if (!tenantId) {
+        console.log('⚠️ ParentAccountManagement: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          tenantId = emailTenant?.id;
+          console.log('📧 ParentAccountManagement: Email-based tenant ID:', tenantId);
+        } catch (emailError) {
+          console.error('❌ ParentAccountManagement: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!tenantId) {
+          throw new Error('Unable to determine tenant context. Please contact support.');
+        }
+      }
       
       // Test auth connection
       await dbHelpers.testAuthConnection();
       
-      // Load classes first
-      const { data: classesData, error: classesError } = await supabase
-        .from(TABLES.CLASSES)
-        .select('id, class_name, section')
-        .order('class_name');
-
-      if (classesError) throw classesError;
-      setClasses(classesData || []);
+      // 🏃‍♂️ Fast parallel data fetching
+      console.log('📊 ParentAccountManagement: Fetching data in parallel...');
       
-      // Load students with their class information
-      const { data: studentsData, error: studentsError } = await supabase
-        .from(TABLES.STUDENTS)
-        .select(`
-          *,
-          classes(id, class_name, section)
-        `)
-        .order('name');
-
-      if (studentsError) throw studentsError;
-
-      // Check which students already have parent login accounts
-      const { data: existingAccounts, error: accountsError } = await supabase
-        .from(TABLES.USERS)
-        .select('id, email, linked_parent_of, role_id, full_name')
-        .not('linked_parent_of', 'is', null);
-
-      if (accountsError) throw accountsError;
-
-      // Check which students have parent records in the parents table
-      const { data: parentRecords, error: parentRecordsError } = await supabase
-        .from(TABLES.PARENTS)
-        .select('id, name, relation, phone, email, student_id');
-
-      if (parentRecordsError) throw parentRecordsError;
-
+      const [classesResult, studentsResult, accountsResult, parentRecordsResult] = await Promise.all([
+        supabase
+          .from(TABLES.CLASSES)
+          .select('id, class_name, section')
+          .eq('tenant_id', tenantId)
+          .order('class_name'),
+        supabase
+          .from(TABLES.STUDENTS)
+          .select(`
+            *,
+            classes(id, class_name, section)
+          `)
+          .eq('tenant_id', tenantId)
+          .order('name'),
+        supabase
+          .from(TABLES.USERS)
+          .select('id, email, linked_parent_of, role_id, full_name')
+          .not('linked_parent_of', 'is', null),
+        supabase
+          .from(TABLES.PARENTS)
+          .select('id, name, relation, phone, email, student_id')
+      ]);
+      
+      if (classesResult.error) throw classesResult.error;
+      if (studentsResult.error) throw studentsResult.error;
+      if (accountsResult.error) throw accountsResult.error;
+      if (parentRecordsResult.error) throw parentRecordsResult.error;
+      
+      clearTimeout(timeoutId);
+      
+      // ✅ Set data immediately
+      const classesData = classesResult.data || [];
+      const studentsData = studentsResult.data || [];
+      const existingAccounts = accountsResult.data || [];
+      const parentRecords = parentRecordsResult.data || [];
+      
+      setClasses(classesData);
+      
       // Map students with their comprehensive parent status
-      const studentsWithParentAccountStatus = (studentsData || []).map(student => {
-        const hasParentAccount = existingAccounts?.some(account => account.linked_parent_of === student.id);
-        const parentAccountInfo = existingAccounts?.find(account => account.linked_parent_of === student.id);
+      const studentsWithParentAccountStatus = studentsData.map(student => {
+        const hasParentAccount = existingAccounts.some(account => account.linked_parent_of === student.id);
+        const parentAccountInfo = existingAccounts.find(account => account.linked_parent_of === student.id);
         
         // Get all parent records for this student and filter out placeholder names
-        const allParentRecords = parentRecords?.filter(parent => 
+        const allParentRecords = parentRecords.filter(parent => 
           parent.student_id === student.id && 
           parent.name &&
           parent.name.trim() !== '' &&
@@ -144,12 +183,28 @@ const ParentAccountManagement = ({ navigation }) => {
           parentStatus
         };
       });
-
+      
       setStudents(studentsWithParentAccountStatus);
+      
+      console.log(`✅ ParentAccountManagement: Loaded ${classesData.length} classes, ${studentsWithParentAccountStatus.length} students`);
+      
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.log(`✅ ParentAccountManagement: Data loaded in ${loadTime}ms`);
+      
+      if (loadTime > 2000) {
+        console.warn('⚠️ ParentAccountManagement: Slow loading (>2s). Check network.');
+      } else {
+        console.log('🚀 ParentAccountManagement: Fast loading achieved!');
+      }
+      
     } catch (error) {
-      console.error('Error loading students:', error);
-      Alert.alert('Error', 'Failed to load students');
+      clearTimeout(timeoutId);
+      console.error('❌ ParentAccountManagement: Failed to load data:', error.message);
+      Alert.alert('Error', error.message || 'Failed to load students');
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
       setRefreshing(false);
     }

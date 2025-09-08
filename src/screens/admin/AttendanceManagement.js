@@ -634,6 +634,68 @@ const AttendanceManagement = () => {
     }));
   };
 
+  // Mark all students as present
+  const markAllStudentsAsPresent = () => {
+    if (studentsForClass.length === 0) {
+      Alert.alert('No Students', 'No students found to mark as present.');
+      return;
+    }
+
+    Alert.alert(
+      'Mark All Students as Present',
+      `Are you sure you want to mark all ${studentsForClass.length} students as Present for ${formatSafeDate(selectedDate, 'dd MMM yyyy')}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Mark All Present',
+          style: 'default',
+          onPress: () => {
+            const newAttendanceMark = {};
+            studentsForClass.forEach(student => {
+              newAttendanceMark[student.id] = 'Present';
+            });
+            setAttendanceMark(newAttendanceMark);
+            
+            // Show success message
+            Alert.alert('Success', `All ${studentsForClass.length} students have been marked as Present.`);
+            console.log(`✅ Marked all ${studentsForClass.length} students as Present`);
+          }
+        }
+      ]
+    );
+  };
+
+  // Mark all teachers as present
+  const markAllTeachersAsPresent = () => {
+    if (teachers.length === 0) {
+      Alert.alert('No Teachers', 'No teachers found to mark as present.');
+      return;
+    }
+
+    Alert.alert(
+      'Mark All Teachers as Present',
+      `Are you sure you want to mark all ${teachers.length} teachers as Present for ${formatSafeDate(teacherDate, 'dd MMM yyyy')}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Mark All Present',
+          style: 'default',
+          onPress: () => {
+            const newTeacherAttendanceMark = {};
+            teachers.forEach(teacher => {
+              newTeacherAttendanceMark[teacher.id] = 'Present';
+            });
+            setTeacherAttendanceMark(newTeacherAttendanceMark);
+            
+            // Show success message
+            Alert.alert('Success', `All ${teachers.length} teachers have been marked as Present.`);
+            console.log(`✅ Marked all ${teachers.length} teachers as Present`);
+          }
+        }
+      ]
+    );
+  };
+
   // Export to PDF function
   const exportToPDF = async () => {
     try {
@@ -991,6 +1053,20 @@ const AttendanceManagement = () => {
               </TouchableOpacity>
             </Animatable.View>
             
+            <Animatable.View animation="fadeInUp" delay={400}>
+              <TouchableOpacity
+                style={[
+                  styles.submitButtonCard,
+                  styles.markAllPresentButtonCard
+                ]}
+                onPress={markAllStudentsAsPresent}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="checkmark-done-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.submitButtonText}>Mark All Students Present</Text>
+              </TouchableOpacity>
+            </Animatable.View>
+
             <Animatable.View animation="fadeInUp" delay={500}>
               <TouchableOpacity
                 style={[
@@ -1037,6 +1113,20 @@ const AttendanceManagement = () => {
               </TouchableOpacity>
             </Animatable.View>
             
+            <Animatable.View animation="fadeInUp" delay={400}>
+              <TouchableOpacity
+                style={[
+                  styles.submitButtonCard,
+                  styles.markAllPresentButtonCard
+                ]}
+                onPress={markAllTeachersAsPresent}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="checkmark-done-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.submitButtonText}>Mark All Teachers Present</Text>
+              </TouchableOpacity>
+            </Animatable.View>
+
             <Animatable.View animation="fadeInUp" delay={500}>
               <TouchableOpacity
                 style={[
@@ -1251,22 +1341,38 @@ const AttendanceManagement = () => {
         {/* View Attendance Button */}
         {tab === 'student' && selectedClass && studentsForClass.length > 0 && (
           <View style={styles.viewButtonContainer}>
-            <TouchableOpacity
-              style={styles.viewButton}
-              onPress={() => {
-                setViewClass(selectedClass);
-                setViewDate(selectedDate);
-                setViewModalVisible(true);
-              }}
-            >
-              <Text style={styles.viewButtonText}>View Attendance</Text>
-            </TouchableOpacity>
+            <View style={styles.teacherButtonsRow}>
+              <TouchableOpacity
+                style={styles.markAllPresentTeacherButton}
+                onPress={markAllStudentsAsPresent}
+              >
+                <Ionicons name="checkmark-done-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.viewButtonText}>Mark All Present</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.viewButton}
+                onPress={() => {
+                  setViewClass(selectedClass);
+                  setViewDate(selectedDate);
+                  setViewModalVisible(true);
+                }}
+              >
+                <Text style={styles.viewButtonText}>View Attendance</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
         {tab === 'teacher' && teachers.length > 0 && (
           <View style={styles.viewButtonContainer}>
             <View style={styles.teacherButtonsRow}>
+              <TouchableOpacity
+                style={styles.markAllPresentTeacherButton}
+                onPress={markAllTeachersAsPresent}
+              >
+                <Ionicons name="checkmark-done-outline" size={20} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.viewButtonText}>Mark All Present</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.submitTeacherButton}
                 onPress={() => {
@@ -2071,7 +2177,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
-    gap: 12,
+    gap: 8,
   },
   submitTeacherButton: {
     backgroundColor: '#FF9800',
@@ -2628,5 +2734,22 @@ const styles = StyleSheet.create({
   submitStudentButtonCard: {
     backgroundColor: '#4CAF50',
     marginTop: 8,
+  },
+  // Mark All Present button card style
+  markAllPresentButtonCard: {
+    backgroundColor: '#2196F3',
+    marginTop: 8,
+  },
+  // Teacher Mark All Present button style
+  markAllPresentTeacherButton: {
+    backgroundColor: '#2196F3',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    flex: 1,
+    marginRight: 6,
   },
 });

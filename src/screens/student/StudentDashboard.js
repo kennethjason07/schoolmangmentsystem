@@ -2,7 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated, RefreshControl, Image, FlatList, Modal, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
-import { supabase, TABLES, dbHelpers, getUserTenantId } from '../../utils/supabase';
+import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { 
+  validateTenantAccess, 
+  createTenantQuery, 
+  validateDataTenancy,
+  TENANT_ERROR_MESSAGES 
+} from '../../utils/tenantValidation';
+import { useTenantContext } from '../../contexts/TenantContext';
 import { useFocusEffect } from '@react-navigation/native';
 import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
@@ -15,6 +22,7 @@ import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCou
 
 const StudentDashboard = ({ navigation }) => {
   const { user } = useAuth();
+  const { tenantId } = useTenantContext();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [studentProfile, setStudentProfile] = useState(null);
@@ -107,34 +115,43 @@ const StudentDashboard = ({ navigation }) => {
         return;
       }
 
-      // Get tenant_id for filtering
-      const tenantId = await getUserTenantId();
-      if (!tenantId) {
-        console.log('Student Dashboard - No tenant ID available');
-        return;
+      // Validate tenant access before proceeding
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Student dashboard tenant validation failed:', tenantValidation.error);
+        return; // Silent return for better UX
       }
 
-      // Get student data
-      const { data: studentData, error: studentError } = await supabase
-        .from(TABLES.STUDENTS)
-        .select('id, class_id')
+      // Get student data with tenant-aware query
+      const tenantStudentQuery = createTenantQuery(supabase.from(TABLES.STUDENTS), tenantId);
+      const { data: studentData, error: studentError } = await tenantStudentQuery
+        .select('id, class_id, tenant_id')
         .eq('id', user.linked_student_id)
-        .eq('tenant_id', tenantId)
         .single();
 
       if (studentError) {
         console.log('Dashboard - Student fetch error for assignments:', studentError);
         return;
       }
+      
+      // Validate student data belongs to correct tenant
+      const studentValidation = await validateDataTenancy([{ 
+        id: studentData.id, 
+        tenant_id: studentData.tenant_id 
+      }], tenantId);
+      
+      if (!studentValidation.isValid) {
+        console.error('❌ Student data validation failed:', studentValidation.error);
+        return;
+      }
 
       let allAssignments = [];
 
-      // Get assignments from assignments table
-      const { data: assignmentsData, error: assignmentsError } = await supabase
-        .from(TABLES.ASSIGNMENTS)
-        .select('*')
+      // Get assignments from assignments table with tenant isolation
+      const tenantAssignmentQuery = createTenantQuery(supabase.from(TABLES.ASSIGNMENTS), tenantId);
+      const { data: assignmentsData, error: assignmentsError } = await tenantAssignmentQuery
+        .select('*, tenant_id')
         .eq('class_id', studentData.class_id)
-        .eq('tenant_id', tenantId)
         .order('due_date', { ascending: true });
 
       if (assignmentsError && assignmentsError.code !== '42P01') {
@@ -143,12 +160,11 @@ const StudentDashboard = ({ navigation }) => {
         allAssignments = [...allAssignments, ...assignmentsData];
       }
 
-      // Get homeworks from homeworks table
-      const { data: homeworksData, error: homeworksError } = await supabase
-        .from(TABLES.HOMEWORKS)
-        .select('*')
+      // Get homeworks from homeworks table with tenant isolation
+      const tenantHomeworkQuery = createTenantQuery(supabase.from(TABLES.HOMEWORKS), tenantId);
+      const { data: homeworksData, error: homeworksError } = await tenantHomeworkQuery
+        .select('*, tenant_id')
         .or(`class_id.eq.${studentData.class_id},assigned_students.cs.{${studentData.id}}`)
-        .eq('tenant_id', tenantId)
         .order('due_date', { ascending: true });
 
       if (homeworksError && homeworksError.code !== '42P01') {
@@ -157,12 +173,11 @@ const StudentDashboard = ({ navigation }) => {
         allAssignments = [...allAssignments, ...homeworksData];
       }
 
-      // Get existing submissions for this student
-      const { data: submissionsData, error: submissionsError } = await supabase
-        .from('assignment_submissions')
-        .select('*')
-        .eq('student_id', studentData.id)
-        .eq('tenant_id', tenantId);
+      // Get existing submissions for this student with tenant isolation
+      const tenantSubmissionQuery = createTenantQuery(supabase.from('assignment_submissions'), tenantId);
+      const { data: submissionsData, error: submissionsError } = await tenantSubmissionQuery
+        .select('*, tenant_id')
+        .eq('student_id', studentData.id);
 
       if (submissionsError && submissionsError.code !== '42P01') {
         console.log('Dashboard - Submissions refresh error:', submissionsError);
@@ -198,22 +213,23 @@ const StudentDashboard = ({ navigation }) => {
         return;
       }
       
-      // Get tenant_id for filtering
-      const tenantId = await getUserTenantId();
-      if (!tenantId) {
-        console.log('Student Dashboard - No tenant ID available');
-        return;
+      // Validate tenant access before refreshing notifications
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Student dashboard notification validation failed:', tenantValidation.error);
+        return; // Silent return for better UX
       }
       
       console.log('Dashboard: Refreshing notifications for user:', user.id);
       
-      // Fetch notifications with recipient info using the working query pattern from StudentNotifications
-      const { data: notificationsData, error: notifError } = await supabase
-        .from('notification_recipients')
+      // Fetch notifications with recipient info using tenant-aware query
+      const tenantNotificationQuery = createTenantQuery(supabase.from('notification_recipients'), tenantId);
+      const { data: notificationsData, error: notifError } = await tenantNotificationQuery
         .select(`
           id,
           is_read,
           read_at,
+          tenant_id,
           notifications!inner (
             id,
             message,
@@ -221,12 +237,12 @@ const StudentDashboard = ({ navigation }) => {
             created_at,
             sent_by,
             delivery_status,
-            delivery_mode
+            delivery_mode,
+            tenant_id
           )
         `)
         .eq('recipient_id', user.id)
         .eq('recipient_type', 'Student')
-        .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false, foreignTable: 'notifications' })
         .limit(10);
       
@@ -354,38 +370,52 @@ const StudentDashboard = ({ navigation }) => {
       setLoading(true);
       setError(null);
 
-      // Get tenant_id for filtering
-      const tenantId = await getUserTenantId();
-      if (!tenantId) {
-        throw new Error('Tenant context required but not found');
+      // Validate tenant access before proceeding
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Student dashboard tenant validation failed:', tenantValidation.error);
+        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+        setError(tenantValidation.error);
+        return;
       }
 
       // Get school details
       const { data: schoolData } = await dbHelpers.getSchoolDetails();
       setSchoolDetails(schoolData);
 
-      // Get student profile with user data for profile picture and email
-      const { data: studentData, error: studentError } = await supabase
-        .from(TABLES.STUDENTS)
+      // Get student profile with user data for profile picture and email using tenant-aware query
+      const tenantStudentQuery = createTenantQuery(supabase.from(TABLES.STUDENTS), tenantId);
+      const { data: studentData, error: studentError } = await tenantStudentQuery
         .select(`
           *,
           classes(id, class_name, section),
-          parents:parent_id(name, phone, email)
+          parents:parent_id(name, phone, email),
+          tenant_id
         `)
         .eq('id', user.linked_student_id)
-        .eq('tenant_id', tenantId)
         .single();
 
-      // Also get the student's own user account for profile picture
-      const { data: studentUserData, error: studentUserError } = await supabase
-        .from(TABLES.USERS)
-        .select('id, email, phone, profile_url, full_name')
+      // Also get the student's own user account for profile picture using tenant-aware query
+      const tenantUserQuery = createTenantQuery(supabase.from(TABLES.USERS), tenantId);
+      const { data: studentUserData, error: studentUserError } = await tenantUserQuery
+        .select('id, email, phone, profile_url, full_name, tenant_id')
         .eq('linked_student_id', user.linked_student_id)
-        .eq('tenant_id', tenantId)
         .maybeSingle();
 
       if (studentError) {
         throw new Error('Student profile not found. Please contact administrator.');
+      }
+      
+      // Validate student data belongs to correct tenant
+      const studentValidation = await validateDataTenancy([{ 
+        id: studentData.id, 
+        tenant_id: studentData.tenant_id 
+      }], tenantId);
+      
+      if (!studentValidation.isValid) {
+        console.error('❌ Student profile data validation failed:', studentValidation.error);
+        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
+        return;
       }
 
       // Merge student data with user data for complete profile
@@ -403,14 +433,13 @@ const StudentDashboard = ({ navigation }) => {
       // Get notifications
       await refreshNotifications();
 
-      // Get upcoming events
+      // Get upcoming events using tenant-aware query
       try {
         const today = new Date().toISOString().split('T')[0];
-        const { data: upcomingEventsData, error: eventsError } = await supabase
-          .from('events')
-          .select('*')
+        const tenantEventQuery = createTenantQuery(supabase.from('events'), tenantId);
+        const { data: upcomingEventsData, error: eventsError } = await tenantEventQuery
+          .select('*, tenant_id')
           .eq('status', 'Active')
-          .eq('tenant_id', tenantId)
           .gte('event_date', today)
           .order('event_date', { ascending: true });
 
@@ -444,11 +473,10 @@ const StudentDashboard = ({ navigation }) => {
 
         console.log(`Dashboard - Fetching attendance for ${year}-${month.toString().padStart(2, '0')}`);
 
-        const { data: allAttendanceData, error: attendanceError } = await supabase
-        .from(TABLES.STUDENT_ATTENDANCE)
-        .select('*')
+        const tenantAttendanceQuery = createTenantQuery(supabase.from(TABLES.STUDENT_ATTENDANCE), tenantId);
+        const { data: allAttendanceData, error: attendanceError } = await tenantAttendanceQuery
+        .select('*, tenant_id')
           .eq('student_id', studentData.id)
-          .eq('tenant_id', tenantId)
           .order('date', { ascending: false });
 
       if (attendanceError) {
@@ -481,15 +509,15 @@ const StudentDashboard = ({ navigation }) => {
 
       // Get marks data
       try {
-        const { data: marksData, error: marksError } = await supabase
-          .from(TABLES.MARKS)
+        const tenantMarksQuery = createTenantQuery(supabase.from(TABLES.MARKS), tenantId);
+        const { data: marksData, error: marksError } = await tenantMarksQuery
           .select(`
             *,
             subjects(name),
-            exams(name, start_date)
+            exams(name, start_date),
+            tenant_id
           `)
           .eq('student_id', studentData.id)
-          .eq('tenant_id', tenantId)
           .order('created_at', { ascending: false })
           .limit(10);
 
@@ -550,16 +578,16 @@ const StudentDashboard = ({ navigation }) => {
       // Get today's classes
       try {
         const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-        const { data: timetableData, error: timetableError } = await supabase
-          .from(TABLES.TIMETABLE)
+        const tenantTimetableQuery = createTenantQuery(supabase.from(TABLES.TIMETABLE), tenantId);
+        const { data: timetableData, error: timetableError } = await tenantTimetableQuery
           .select(`
             *,
             subjects(name),
-            classes(class_name, section)
+            classes(class_name, section),
+            tenant_id
           `)
           .eq('class_id', studentData.class_id)
           .eq('day', today)
-          .eq('tenant_id', tenantId)
           .order('start_time', { ascending: true });
 
         if (timetableError && timetableError.code !== '42P01') {

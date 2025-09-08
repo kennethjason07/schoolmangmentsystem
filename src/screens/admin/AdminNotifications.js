@@ -16,6 +16,8 @@ import Header from '../../components/Header';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, getUserTenantId } from '../../utils/supabase';
 import universalNotificationService from '../../services/UniversalNotificationService';
+import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
+import { useTenant } from '../../contexts/TenantContext';
 
 const AdminNotifications = ({ navigation }) => {
   const [notifications, setNotifications] = useState([]);
@@ -23,6 +25,7 @@ const AdminNotifications = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [readNotifications, setReadNotifications] = useState(new Set());
   const { user } = useAuth();
+  const { tenantId } = useTenant();
 
   const getNotificationTitle = (type, message) => {
     // Extract title from message or use type-based defaults
@@ -90,12 +93,20 @@ const AdminNotifications = ({ navigation }) => {
       console.log('🔔 [ADMIN_NOTIF] Starting to fetch admin notifications...');
       console.log('🔔 [ADMIN_NOTIF] Current user:', user?.email || 'Not logged in');
       
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'AdminNotifications - fetchNotifications');
+      if (!validation.isValid) {
+        console.error('❌ AdminNotifications fetchNotifications: Tenant validation failed:', validation.error);
+        Alert.alert('Access Denied', validation.error);
+        return;
+      }
+      
       if (!user?.id) {
         console.log('❌ [ADMIN_NOTIF] No user ID available');
         return;
       }
 
-      // Check current session first
+      // Check current session first (keeping for compatibility)
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       console.log('🔔 [ADMIN_NOTIF] Session check:');
       console.log('   - Session exists:', !!session);
@@ -107,13 +118,7 @@ const AdminNotifications = ({ navigation }) => {
         return;
       }
 
-      // Get current user's tenant_id
-      const tenantId = await getUserTenantId();
-      console.log('🏢 [ADMIN_NOTIF] Current tenant ID:', tenantId);
-      if (!tenantId) {
-        console.error('❌ [ADMIN_NOTIF] No tenant_id found for user');
-        return;
-      }
+      console.log('🏢 [ADMIN_NOTIF] Using validated tenant ID:', tenantId);
 
       // Load read notifications from storage
       const readIds = await loadReadNotifications();
@@ -125,17 +130,16 @@ const AdminNotifications = ({ navigation }) => {
       let recipientError = null;
       
       console.log('🔔 [ADMIN_NOTIF] Querying notification_recipients with Admin type...');
-      // Try with Admin recipient type first
-      const { data: adminNotifications, error: adminError } = await supabase
-        .from('notification_recipients')
+      // Try with Admin recipient type first using tenant-aware query
+      const { data: adminNotifications, error: adminError } = await createTenantQuery(tenantId, 'notification_recipients')
         .select(`
           *,
           notification:notifications(*)
         `)
         .eq('recipient_id', user.id)
         .eq('recipient_type', 'Admin')
-        .eq('tenant_id', tenantId)
-        .order('sent_at', { ascending: false });
+        .order('sent_at', { ascending: false })
+        .execute();
         
       console.log('🔔 [ADMIN_NOTIF] Admin notifications query result:');
       console.log('   - Found:', adminNotifications?.length || 0);
@@ -147,17 +151,16 @@ const AdminNotifications = ({ navigation }) => {
         console.log('✅ [ADMIN_NOTIF] Using Admin recipient type for admin notifications');
       } else {
         console.log('🔄 [ADMIN_NOTIF] Admin recipient type failed, trying Parent fallback...');
-        // Fallback to Parent type if Admin constraint not updated yet
-        const { data: fallbackNotifications, error: fallbackError } = await supabase
-          .from('notification_recipients')
+        // Fallback to Parent type if Admin constraint not updated yet using tenant-aware query
+        const { data: fallbackNotifications, error: fallbackError } = await createTenantQuery(tenantId, 'notification_recipients')
           .select(`
             *,
             notification:notifications(*)
           `)
           .eq('recipient_id', user.id)
           .eq('recipient_type', 'Parent')
-          .eq('tenant_id', tenantId)
-          .order('sent_at', { ascending: false });
+          .order('sent_at', { ascending: false })
+          .execute();
           
         console.log('🔔 [ADMIN_NOTIF] Parent fallback query result:');
         console.log('   - Found:', fallbackNotifications?.length || 0);
@@ -177,6 +180,18 @@ const AdminNotifications = ({ navigation }) => {
       // Process recipient notifications (these are targeted to this specific admin)
       if (!recipientError && recipientNotifications) {
         console.log('🔔 [ADMIN_NOTIF] Processing', recipientNotifications.length, 'recipient notifications');
+        
+        // 🛡️ Validate recipient notifications belong to correct tenant
+        if (recipientNotifications.length > 0) {
+          const notificationsValid = validateDataTenancy(recipientNotifications, tenantId, 'AdminNotifications - Recipient Notifications');
+          if (!notificationsValid) {
+            console.error('Recipient notifications data validation failed');
+            Alert.alert('Data Security Alert', 'Notifications data validation failed. Please contact administrator.');
+            setNotifications([]);
+            return;
+          }
+        }
+        
         const recipientNotifs = recipientNotifications.map(item => ({
           id: item.notification.id,
           title: getNotificationTitle(item.notification.type, item.notification.message),
@@ -192,16 +207,15 @@ const AdminNotifications = ({ navigation }) => {
         allNotifications = [...recipientNotifs];
       }
 
-      // Also get general notifications not specifically targeted (fallback method)
+      // Also get general notifications not specifically targeted using tenant-aware query
       // BUT exclude notifications sent by this admin to avoid seeing their own approval notifications
       console.log('🔔 [ADMIN_NOTIF] Querying general notifications...');
-      const { data: generalNotifications, error: generalError } = await supabase
-        .from('notifications')
+      const { data: generalNotifications, error: generalError } = await createTenantQuery(tenantId, 'notifications')
         .select('*')
-        .eq('tenant_id', tenantId)
         .or(`sent_by.is.null,type.eq.General`)
         .neq('sent_by', user.id) // Exclude notifications sent by this admin
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .execute();
 
       console.log('🔔 [ADMIN_NOTIF] General notifications query result:');
       console.log('   - Found:', generalNotifications?.length || 0);
@@ -209,22 +223,32 @@ const AdminNotifications = ({ navigation }) => {
       console.log('   - Error code:', generalError?.code || 'None');
 
       if (!generalError && generalNotifications) {
-        const generalNotifs = generalNotifications
-          .filter(item => !allNotifications.some(existing => existing.id === item.id)) // Avoid duplicates
-          .filter(item => item.sent_by !== user.id) // Additional safety check to exclude admin's own notifications
-          .map(item => ({
-            id: item.id,
-            title: getNotificationTitle(item.type, item.message),
-            message: item.message || '',
-            type: item.message && item.message.includes('[LEAVE_REQUEST]') 
-              ? 'leave_request' 
-              : (item.type || 'general'),
-            isRead: readIds.has(item.id.toString()),
-            createdAt: item.created_at,
-            sentAt: item.sent_at,
-            deliveryStatus: item.delivery_status
-          }));
-        allNotifications = [...allNotifications, ...generalNotifs];
+        // 🛡️ Validate general notifications belong to correct tenant
+        if (generalNotifications.length > 0) {
+          const generalNotificationsValid = validateDataTenancy(generalNotifications, tenantId, 'AdminNotifications - General Notifications');
+          if (!generalNotificationsValid) {
+            console.error('General notifications data validation failed');
+            // Don't show alert for general notifications as they're supplementary
+            // Just skip them and continue with recipient notifications
+          } else {
+            const generalNotifs = generalNotifications
+              .filter(item => !allNotifications.some(existing => existing.id === item.id)) // Avoid duplicates
+              .filter(item => item.sent_by !== user.id) // Additional safety check to exclude admin's own notifications
+              .map(item => ({
+                id: item.id,
+                title: getNotificationTitle(item.type, item.message),
+                message: item.message || '',
+                type: item.message && item.message.includes('[LEAVE_REQUEST]') 
+                  ? 'leave_request' 
+                  : (item.type || 'general'),
+                isRead: readIds.has(item.id.toString()),
+                createdAt: item.created_at,
+                sentAt: item.sent_at,
+                deliveryStatus: item.delivery_status
+              }));
+            allNotifications = [...allNotifications, ...generalNotifs];
+          }
+        }
       }
 
       // Sort all notifications by created date (most recent first)
@@ -273,11 +297,10 @@ const AdminNotifications = ({ navigation }) => {
     try {
       console.log('🔔 [ADMIN_NOTIF] Marking notification as read:', notificationId);
       
-      // Get tenant_id for RLS compliance
-      const tenantId = await getUserTenantId();
-      if (!tenantId) {
-        console.error('❌ [ADMIN_NOTIF] No tenant_id found for marking notification as read');
-        Alert.alert('Error', 'Tenant information not found');
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'AdminNotifications - markAsRead');
+      if (!validation.isValid) {
+        Alert.alert('Access Denied', validation.error);
         return;
       }
       

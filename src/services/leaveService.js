@@ -1,4 +1,5 @@
 import { supabase, dbHelpers, getUserTenantId, TABLES, tenantHelpers } from '../utils/supabase';
+import { getCurrentUserTenantByEmail } from '../utils/getTenantByEmail';
 import { format } from 'date-fns';
 
 /**
@@ -14,11 +15,28 @@ class LeaveService {
    * @returns {Object} Response with success status and data
    */
   async submitLeaveApplication(leaveData) {
+    const startTime = performance.now();
+    
     try {
-      // Get tenant ID for the current user
-      const tenantId = await getUserTenantId();
+      console.log('🚀 LeaveService: Starting submitLeaveApplication...');
+      
+      // Get tenant ID with email fallback
+      let tenantId = await getUserTenantId();
+      
       if (!tenantId) {
-        throw new Error('Tenant context required for leave application');
+        console.log('⚠️ LeaveService: No tenant from getUserTenantId, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          tenantId = emailTenant?.id;
+          console.log('📧 LeaveService: Email-based tenant ID:', tenantId);
+        } catch (emailError) {
+          console.error('❌ LeaveService: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!tenantId) {
+          throw new Error('Tenant context required for leave application. Please contact support.');
+        }
       }
 
       // Add tenant_id to the leave data
@@ -38,6 +56,11 @@ class LeaveService {
         .single();
 
       if (error) throw error;
+      
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const submitTime = Math.round(endTime - startTime);
+      console.log(`✅ LeaveService: Leave submitted in ${submitTime}ms`);
 
       return {
         success: true,
@@ -45,7 +68,7 @@ class LeaveService {
         message: 'Leave application submitted successfully'
       };
     } catch (error) {
-      console.error('Error submitting leave application:', error);
+      console.error('❌ LeaveService: Error submitting leave application:', error.message);
       return {
         success: false,
         error: error.message,
@@ -60,11 +83,28 @@ class LeaveService {
    * @returns {Object} Response with leave applications
    */
   async getLeaveApplications(filters = {}) {
+    const startTime = performance.now();
+    
     try {
-      // Get tenant ID for the current user
-      const tenantId = await getUserTenantId();
+      console.log('🚀 LeaveService: Starting getLeaveApplications...');
+      
+      // Get tenant ID with email fallback
+      let tenantId = await getUserTenantId();
+      
       if (!tenantId) {
-        throw new Error('Tenant context required to fetch leave applications');
+        console.log('⚠️ LeaveService: No tenant from getUserTenantId, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          tenantId = emailTenant?.id;
+          console.log('📧 LeaveService: Email-based tenant ID:', tenantId);
+        } catch (emailError) {
+          console.error('❌ LeaveService: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!tenantId) {
+          throw new Error('Tenant context required to fetch leave applications. Please contact support.');
+        }
       }
 
       let query = supabase
@@ -106,6 +146,11 @@ class LeaveService {
       const { data, error } = await query;
 
       if (error) throw error;
+      
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const fetchTime = Math.round(endTime - startTime);
+      console.log(`✅ LeaveService: Leave applications fetched in ${fetchTime}ms`);
 
       return {
         success: true,
@@ -113,7 +158,7 @@ class LeaveService {
         message: 'Leave applications retrieved successfully'
       };
     } catch (error) {
-      console.error('Error fetching leave applications:', error);
+      console.error('❌ LeaveService: Error fetching leave applications:', error.message);
       return {
         success: false,
         error: error.message,

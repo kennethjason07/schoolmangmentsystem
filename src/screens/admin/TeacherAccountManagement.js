@@ -17,8 +17,11 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { useTenantContext } from '../../contexts/TenantContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 const TeacherAccountManagement = ({ navigation }) => {
+  const { currentTenant } = useTenantContext();
   const [teachers, setTeachers] = useState([]);
   const [filteredTeachers, setFilteredTeachers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -64,16 +67,71 @@ const TeacherAccountManagement = ({ navigation }) => {
   };
 
   const loadTeachers = async () => {
+    const startTime = performance.now();
+    let timeoutId;
+    
     try {
+      console.log('🚀 TeacherAccountManagement: Starting data load...');
       setLoading(true);
+      
+      // ⏰ Set timeout protection
+      timeoutId = setTimeout(() => {
+        console.warn('⚠️ TeacherAccountManagement: Load timeout (10s)');
+        throw new Error('Loading timeout - please check your connection');
+      }, 10000);
+      
+      // 🔍 Validate tenant context
+      let tenantId = currentTenant?.id;
+      console.log('📋 TeacherAccountManagement: Current tenant ID:', tenantId);
+      
+      if (!tenantId) {
+        console.log('⚠️ TeacherAccountManagement: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          tenantId = emailTenant?.id;
+          console.log('📧 TeacherAccountManagement: Email-based tenant ID:', tenantId);
+        } catch (emailError) {
+          console.error('❌ TeacherAccountManagement: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!tenantId) {
+          throw new Error('Unable to determine tenant context. Please contact support.');
+        }
+      }
+      
+      // 🏃‍♂️ Fast parallel data fetching
+      console.log('📊 TeacherAccountManagement: Fetching teachers data...');
       const { data, error } = await dbHelpers.getTeachers();
+      
       if (error) throw error;
-      setTeachers(data || []);
-      setFilteredTeachers(data || []);
+      
+      clearTimeout(timeoutId);
+      
+      // ✅ Set data immediately
+      const teachersData = data || [];
+      setTeachers(teachersData);
+      setFilteredTeachers(teachersData);
+      
+      console.log(`✅ TeacherAccountManagement: Loaded ${teachersData.length} teachers`);
+      
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.log(`✅ TeacherAccountManagement: Data loaded in ${loadTime}ms`);
+      
+      if (loadTime > 2000) {
+        console.warn('⚠️ TeacherAccountManagement: Slow loading (>2s). Check network.');
+      } else {
+        console.log('🚀 TeacherAccountManagement: Fast loading achieved!');
+      }
+      
     } catch (error) {
-      console.error('Error loading teachers:', error);
-      Alert.alert('Error', 'Failed to load teachers');
+      clearTimeout(timeoutId);
+      console.error('❌ TeacherAccountManagement: Failed to load data:', error.message);
+      Alert.alert('Error', error.message || 'Failed to load teachers');
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };

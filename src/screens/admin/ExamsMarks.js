@@ -6,6 +6,9 @@ import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import { supabase, getUserTenantId } from '../../utils/supabase';
+import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
+import { useTenant } from '../../contexts/TenantContext';
+import { useAuth } from '../../utils/AuthContext';
 // Helper functions for date formatting
 const formatDate = (dateString) => {
   if (!dateString) return '';
@@ -64,6 +67,8 @@ const getGradeColor = (grade) => {
 
 const ExamsMarks = () => {
   const navigation = useNavigation();
+  const { tenantId } = useTenant();
+  const { user } = useAuth();
 
   // Core data states
   const [exams, setExams] = useState([]);
@@ -108,10 +113,18 @@ const ExamsMarks = () => {
   const loadAllData = async () => {
     try {
       setLoading(true);
+      
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'ExamsMarks - loadAllData');
+      if (!validation.isValid) {
+        console.error('❌ ExamsMarks loadAllData: Tenant validation failed:', validation.error);
+        Alert.alert('Access Denied', validation.error);
+        setLoading(false);
+        return;
+      }
 
-      // Load exams with class information (schema.txt: exams table with classes join)
-      const { data: examsData, error: examsError } = await supabase
-        .from('exams')
+      // Load exams with class information using tenant-aware query
+      const { data: examsData, error: examsError } = await createTenantQuery(tenantId, 'exams')
         .select(`
           id, 
           name, 
@@ -127,39 +140,65 @@ const ExamsMarks = () => {
             class_name,
             section
           )
-        `);
+        `)
+        .execute();
 
       if (examsError) throw examsError;
 
-      // Load classes (schema.txt: classes table)
-      const { data: classesData, error: classesError } = await supabase
-        .from('classes')
-        .select('id, class_name, section, academic_year, class_teacher_id, created_at');
+      // Load classes using tenant-aware query
+      const { data: classesData, error: classesError } = await createTenantQuery(tenantId, 'classes')
+        .select('id, class_name, section, academic_year, class_teacher_id, created_at')
+        .execute();
 
       if (classesError) throw classesError;
 
-      // Load subjects (schema.txt: subjects table)
-      const { data: subjectsData, error: subjectsError } = await supabase
-        .from('subjects')
-        .select('id, name, class_id, academic_year, is_optional, created_at');
+      // Load subjects using tenant-aware query
+      const { data: subjectsData, error: subjectsError } = await createTenantQuery(tenantId, 'subjects')
+        .select('id, name, class_id, academic_year, is_optional, created_at')
+        .execute();
 
       if (subjectsError) throw subjectsError;
 
-      // Load students (schema.txt: students table)
-      const { data: studentsData, error: studentsError } = await supabase
-        .from('students')
-        .select('id, admission_no, name, roll_no, class_id, academic_year, created_at');
+      // Load students using tenant-aware query
+      const { data: studentsData, error: studentsError } = await createTenantQuery(tenantId, 'students')
+        .select('id, admission_no, name, roll_no, class_id, academic_year, created_at')
+        .execute();
 
       if (studentsError) throw studentsError;
 
-      // Load marks (schema.txt: marks table)
-      const { data: marksData, error: marksError } = await supabase
-        .from('marks')
-        .select('id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks, created_at');
+      // Load marks using tenant-aware query
+      const { data: marksData, error: marksError } = await createTenantQuery(tenantId, 'marks')
+        .select('id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks, created_at')
+        .execute();
 
       if (marksError) throw marksError;
 
-      // Set data
+      // 🛡️ Validate all data belongs to correct tenant
+      const dataValidations = [
+        { data: examsData, name: 'ExamsMarks - Exams' },
+        { data: classesData, name: 'ExamsMarks - Classes' },
+        { data: subjectsData, name: 'ExamsMarks - Subjects' },
+        { data: studentsData, name: 'ExamsMarks - Students' },
+        { data: marksData, name: 'ExamsMarks - Marks' }
+      ];
+      
+      for (const { data, name } of dataValidations) {
+        if (data && data.length > 0) {
+          const isValid = validateDataTenancy(data, tenantId, name);
+          if (!isValid) {
+            Alert.alert('Data Security Alert', `${name.split(' - ')[1]} data validation failed. Please contact administrator.`);
+            // Reset all data on validation failure
+            setExams([]);
+            setClasses([]);
+            setSubjects([]);
+            setStudents([]);
+            setMarks([]);
+            return;
+          }
+        }
+      }
+
+      // Set validated data
       setExams(examsData || []);
       setClasses(classesData || []);
       setSubjects(subjectsData || []);
@@ -214,6 +253,13 @@ const ExamsMarks = () => {
     try {
       console.log('📝 handleAddExam called with form:', examForm);
       
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'ExamsMarks - handleAddExam');
+      if (!validation.isValid) {
+        Alert.alert('Access Denied', validation.error);
+        return;
+      }
+      
       // Validate required fields
       if (!examForm.name || !examForm.name.trim()) {
         Alert.alert('Validation Error', 'Please enter an exam name');
@@ -235,15 +281,14 @@ const ExamsMarks = () => {
         return;
       }
 
-      // Get tenant_id for RLS compliance
-      const tenant_id = await getUserTenantId();
-      console.log('📝 Resolved tenant_id for exam creation:', tenant_id);
-      
-      if (!tenant_id) {
+      // Use already validated tenantId from context
+      if (!tenantId) {
         console.error('❌ No tenant_id available for exam creation');
         Alert.alert('Error', 'Unable to determine tenant context. Please try signing out and back in.');
         return;
       }
+      
+      console.log('📝 Using validated tenant_id for exam creation:', tenantId);
 
       // Create exam records for each selected class
       const examRecords = examForm.selected_classes.map(classId => ({
@@ -254,7 +299,7 @@ const ExamsMarks = () => {
         end_date: examForm.end_date,
         remarks: examForm.description?.trim() || null,
         max_marks: parseInt(examForm.max_marks) || 100,
-        tenant_id: tenant_id
+        tenant_id: tenantId
       }));
 
       console.log('🔧 Inserting exam records with tenant_id:', examRecords);
@@ -302,26 +347,33 @@ const ExamsMarks = () => {
   // Edit exam (using schema: exams table)
   const handleEditExam = async () => {
     try {
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'ExamsMarks - handleEditExam');
+      if (!validation.isValid) {
+        Alert.alert('Access Denied', validation.error);
+        return;
+      }
+      
       if (!selectedExam || !examForm.name || !examForm.start_date || examForm.selected_classes.length === 0) {
         Alert.alert('Error', 'Please fill in all required fields and select at least one class');
         return;
       }
 
-      // Get tenant_id for RLS compliance
-      const tenant_id = await getUserTenantId();
-      console.log('🔧 Resolved tenant_id for exam edit:', tenant_id);
-      
-      if (!tenant_id) {
+      // Use already validated tenantId from context
+      if (!tenantId) {
         console.error('❌ No tenant_id available for exam edit');
         Alert.alert('Error', 'Unable to determine tenant context. Please try signing out and back in.');
         return;
       }
+      
+      console.log('🔧 Using validated tenant_id for exam edit:', tenantId);
 
-      // First, delete the existing exam record
+      // First, delete the existing exam record with tenant validation
       const { error: deleteError } = await supabase
         .from('exams')
         .delete()
-        .eq('id', selectedExam.id);
+        .eq('id', selectedExam.id)
+        .eq('tenant_id', tenantId);
 
       if (deleteError) throw deleteError;
 
@@ -334,7 +386,7 @@ const ExamsMarks = () => {
         end_date: examForm.end_date || examForm.start_date,
         remarks: examForm.description || null,
         max_marks: parseInt(examForm.max_marks) || 100,
-        tenant_id: tenant_id
+        tenant_id: tenantId
       }));
 
       const { error: insertError } = await supabase
@@ -371,17 +423,26 @@ const ExamsMarks = () => {
           text: 'Delete',
           onPress: async () => {
             try {
-              // Delete marks first (schema.txt: marks table)
+              // 🛡️ Validate tenant access first
+              const validation = await validateTenantAccess(tenantId, user?.id, 'ExamsMarks - handleDeleteExam');
+              if (!validation.isValid) {
+                Alert.alert('Access Denied', validation.error);
+                return;
+              }
+              
+              // Delete marks first with tenant validation
               await supabase
                 .from('marks')
                 .delete()
-                .eq('exam_id', exam.id);
+                .eq('exam_id', exam.id)
+                .eq('tenant_id', tenantId);
 
-              // Delete exam (schema.txt: exams table)
+              // Delete exam with tenant validation
               const { error } = await supabase
                 .from('exams')
                 .delete()
-                .eq('id', exam.id);
+                .eq('id', exam.id)
+                .eq('tenant_id', tenantId);
 
               if (error) throw error;
 
@@ -400,38 +461,26 @@ const ExamsMarks = () => {
   // Save marks (schema.txt: marks table)
   const handleBulkSaveMarks = async () => {
     try {
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'ExamsMarks - handleBulkSaveMarks');
+      if (!validation.isValid) {
+        Alert.alert('Access Denied', validation.error);
+        return;
+      }
+      
       if (!selectedExam) {
         Alert.alert('Error', 'Please select an exam');
         return;
       }
 
-      // Get current user's tenant_id for RLS policy compliance
-      // Use multiple approaches to ensure we always get a tenant_id
-      let userTenantId = null;
-      
-      try {
-        // Approach 1: Try getUserTenantId function
-        const { getUserTenantId } = require('../../utils/supabase');
-        userTenantId = await getUserTenantId();
-        console.log('🔧 [ExamsMarks] getUserTenantId returned:', userTenantId);
-      } catch (error) {
-        console.log('⚠️ [ExamsMarks] getUserTenantId failed:', error.message);
-      }
-      
-      // Approach 2: If that fails, use hardcoded fallback
-      if (!userTenantId) {
-        userTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
-        console.log('🔄 [ExamsMarks] Using hardcoded tenant_id:', userTenantId);
-      }
-      
-      // Approach 3: Final safety check - this should never be needed now
-      if (!userTenantId) {
-        console.error('❌ [ExamsMarks] All tenant_id approaches failed');
+      // Use already validated tenantId from context
+      if (!tenantId) {
+        console.error('❌ [ExamsMarks] No tenant_id available for marks saving');
         Alert.alert('Error', 'Unable to determine tenant information. Please try again.');
         return;
       }
       
-      console.log('✅ [ExamsMarks] Final tenant_id to use:', userTenantId);
+      console.log('✅ [ExamsMarks] Using validated tenant_id for marks:', tenantId);
 
       const marksToSave = [];
       const examMaxMarks = selectedExam?.max_marks || 100;
@@ -469,7 +518,7 @@ const ExamsMarks = () => {
               grade: grade,
               max_marks: maxMarks,
               remarks: null,
-              tenant_id: userTenantId
+              tenant_id: tenantId
             });
           }
         });

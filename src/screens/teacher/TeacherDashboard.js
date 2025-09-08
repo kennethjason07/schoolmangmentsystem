@@ -13,6 +13,13 @@ import MessageBadge from '../../components/MessageBadge';
 import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificationCount';
 import DebugBadge from '../../components/DebugBadge';
 import NotificationTester from '../../components/NotificationTester';
+import { 
+  validateTenantAccess, 
+  createTenantQuery, 
+  validateDataTenancy,
+  TENANT_ERROR_MESSAGES 
+} from '../../utils/tenantValidation';
+import { useTenantContext } from '../../contexts/TenantContext';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -43,6 +50,7 @@ const [teacherProfile, setTeacherProfile] = useState(null);
   const [schoolDetails, setSchoolDetails] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date()); // Add current time state
   const { user } = useAuth();
+  const { tenantId } = useTenantContext();
 
 // Helper to extract class order key
 function getClassOrderKey(className) {
@@ -171,6 +179,16 @@ function groupAndSortSchedule(schedule) {
       setLoading(true);
       setError(null);
       
+      // Validate tenant access before proceeding
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Tenant validation failed:', tenantValidation.error);
+        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+        setError(tenantValidation.error);
+        setLoading(false);
+        return;
+      }
+      
       // Initialize empty stats with loading state instead of null
       setTeacherStats([
         { title: 'My Students', value: '0', icon: 'people', color: '#2196F3', subtitle: 'Loading...', isLoading: true },
@@ -198,22 +216,43 @@ function groupAndSortSchedule(schedule) {
       if (teacherError || !teacherData) {
         throw new Error('Teacher profile not found. Please contact administrator.');
       }
+      
+      // Validate teacher data belongs to correct tenant
+      if (teacherData && teacherData.tenant_id) {
+        const teacherValidation = await validateDataTenancy([{ 
+          id: teacherData.id, 
+          tenant_id: teacherData.tenant_id 
+        }], tenantId);
+        
+        if (!teacherValidation.isValid) {
+          console.error('❌ Teacher data validation failed:', teacherValidation.error);
+          Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
+          setError('Data validation failed');
+          setLoading(false);
+          return;
+        }
+      }
 
       const teacher = teacherData;
       setTeacherProfile(teacher);
 
-      // Start fetching multiple data sources in parallel for better performance
+      // Start fetching multiple data sources in parallel for better performance with tenant isolation
+      const tenantSubjectQuery = createTenantQuery(supabase.from(TABLES.TEACHER_SUBJECTS), tenantId);
+      const tenantClassQuery = createTenantQuery(supabase.from(TABLES.CLASSES), tenantId);
+      const tenantNotificationQuery = createTenantQuery(supabase.from(TABLES.NOTIFICATIONS), tenantId);
+      const tenantTaskQuery = createTenantQuery(supabase.from(TABLES.PERSONAL_TASKS), tenantId);
+      
       const [
         subjectsResponse,
         classTeacherResponse,
         notificationsResponse,
         personalTasksResponse
       ] = await Promise.all([
-        // Get assigned subjects
-        supabase
-          .from(TABLES.TEACHER_SUBJECTS)
+        // Get assigned subjects with tenant isolation
+        tenantSubjectQuery
           .select(`
             *,
+            tenant_id,
             subjects(
               name,
               class_id,
@@ -222,28 +261,26 @@ function groupAndSortSchedule(schedule) {
           `)
           .eq('teacher_id', teacher.id),
         
-        // Get class teacher assignments
-        supabase
-          .from(TABLES.CLASSES)
+        // Get class teacher assignments with tenant isolation
+        tenantClassQuery
           .select(`
             id,
             class_name,
             section,
-            academic_year
+            academic_year,
+            tenant_id
           `)
           .eq('class_teacher_id', teacher.id),
           
-        // Get notifications
-        supabase
-          .from(TABLES.NOTIFICATIONS)
-          .select('*')
+        // Get notifications with tenant isolation
+        tenantNotificationQuery
+          .select('*, tenant_id')
           .order('created_at', { ascending: false })
           .limit(5),
           
-        // Get personal tasks
-        supabase
-          .from(TABLES.PERSONAL_TASKS)
-          .select('*')
+        // Get personal tasks with tenant isolation
+        tenantTaskQuery
+          .select('*, tenant_id')
           .eq('user_id', user.id)
           .eq('status', 'pending')
           .order('priority', { ascending: false })
@@ -255,10 +292,42 @@ function groupAndSortSchedule(schedule) {
       const subjectsError = subjectsResponse.error;
       if (subjectsError) throw subjectsError;
       
+      // Validate subject assignments belong to correct tenant
+      const subjectValidation = await validateDataTenancy(
+        assignedSubjects?.map(s => ({ 
+          id: s.id, 
+          tenant_id: s.tenant_id 
+        })) || [],
+        tenantId
+      );
+      
+      if (!subjectValidation.isValid) {
+        console.error('❌ Subject data validation failed:', subjectValidation.error);
+        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
+        return;
+      }
+      
       // Process class teacher assignments
       const classTeacherClasses = classTeacherResponse.data || [];
       const classTeacherError = classTeacherResponse.error;
       if (classTeacherError) throw classTeacherError;
+      
+      // Validate class teacher assignments belong to correct tenant
+      if (classTeacherClasses && classTeacherClasses.length > 0) {
+        const classValidation = await validateDataTenancy(
+          classTeacherClasses?.map(c => ({ 
+            id: c.id, 
+            tenant_id: c.tenant_id 
+          })) || [],
+          tenantId
+        );
+        
+        if (!classValidation.isValid) {
+          console.error('❌ Class teacher data validation failed:', classValidation.error);
+          Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
+          return;
+        }
+      }
 
       console.log('🏫 Class teacher assignments found:', classTeacherClasses?.length || 0);
       if (classTeacherClasses && classTeacherClasses.length > 0) {
@@ -296,11 +365,11 @@ function groupAndSortSchedule(schedule) {
       const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       const todayName = dayNames[today];
 
-      // Start another parallel fetch for the timetable
-      const timetableResponse = await supabase
-        .from(TABLES.TIMETABLE)
+      // Start another parallel fetch for the timetable with tenant isolation
+      const tenantTimetableQuery = createTenantQuery(supabase.from(TABLES.TIMETABLE), tenantId);
+      const timetableResponse = await tenantTimetableQuery
         .select(`
-          id, start_time, end_time, period_number, day_of_week, academic_year,
+          id, start_time, end_time, period_number, day_of_week, academic_year, tenant_id,
           subjects(id, name),
           classes(id, class_name, section)
         `)
@@ -335,8 +404,23 @@ function groupAndSortSchedule(schedule) {
           }
         }
         
-        // Process and set the final schedule
+        // Validate timetable data belongs to correct tenant
         if (timetableData && timetableData.length > 0) {
+          const timetableValidation = await validateDataTenancy(
+            timetableData?.map(t => ({ 
+              id: t.id, 
+              tenant_id: t.tenant_id 
+            })) || [],
+            tenantId
+          );
+          
+          if (!timetableValidation.isValid) {
+            console.error('❌ Timetable data validation failed:', timetableValidation.error);
+            // Don't throw error, just set empty schedule for better UX
+            setSchedule([]);
+            return;
+          }
+          
           const processedSchedule = timetableData.map(entry => {
             return {
               id: entry.id,
@@ -370,21 +454,22 @@ function groupAndSortSchedule(schedule) {
       // This eliminates redundant queries to the same table
       setAnnouncements(notificationsData?.slice(0, 3) || []);
       
-      // Start fetching admin tasks and events in parallel
+      // Start fetching admin tasks and events in parallel with tenant isolation
+      const tenantAdminTaskQuery = createTenantQuery(supabase.from(TABLES.TASKS), tenantId);
+      const tenantEventQuery = createTenantQuery(supabase.from('events'), tenantId);
+      
       const [adminTasksResponse, eventsResponse] = await Promise.all([
-        // Get admin tasks
-        supabase
-          .from(TABLES.TASKS)
-          .select('*')
+        // Get admin tasks with tenant isolation
+        tenantAdminTaskQuery
+          .select('*, tenant_id')
           .overlaps('assigned_teacher_ids', [teacher.id])
           .eq('status', 'Pending')
           .order('priority', { ascending: false })
           .order('due_date', { ascending: true }),
           
-        // Get events
-        supabase
-          .from('events')
-          .select('*')
+        // Get events with tenant isolation
+        tenantEventQuery
+          .select('*, tenant_id')
           .eq('status', 'Active')
           .gte('event_date', new Date().toISOString().split('T')[0])
           .order('event_date', { ascending: true })
@@ -494,19 +579,32 @@ function groupAndSortSchedule(schedule) {
         console.log('📋 Combined unique class IDs:', uniqueClassIds);
         
         if (uniqueClassIds.length > 0) {
-          // Get all students from these classes in one query
-          const { data: allStudentsData, error: studentsError } = await supabase
-            .from(TABLES.STUDENTS)
-            .select('id, class_id, name')
+          // Get all students from these classes with tenant isolation
+          const tenantStudentQuery = createTenantQuery(supabase.from(TABLES.STUDENTS), tenantId);
+          const { data: allStudentsData, error: studentsError } = await tenantStudentQuery
+            .select('id, class_id, name, tenant_id')
             .in('class_id', uniqueClassIds);
 
           if (!studentsError && allStudentsData) {
-            console.log('👥 Total students found across all classes:', allStudentsData.length);
-            allStudentsData.forEach(student => {
-              uniqueStudentIds.add(student.id);
-              console.log(`📚 Student: ${student.name} (ID: ${student.id}, Class: ${student.class_id})`);
-            });
-            totalStudents = allStudentsData.length;
+            // Validate student data belongs to correct tenant
+            const studentValidation = await validateDataTenancy(
+              allStudentsData?.map(s => ({ 
+                id: s.id, 
+                tenant_id: s.tenant_id 
+              })) || [],
+              tenantId
+            );
+            
+            if (studentValidation.isValid) {
+              console.log('👥 Total students found across all classes:', allStudentsData.length);
+              allStudentsData.forEach(student => {
+                uniqueStudentIds.add(student.id);
+                console.log(`📚 Student: ${student.name} (ID: ${student.id}, Class: ${student.class_id})`);
+              });
+              totalStudents = allStudentsData.length;
+            } else {
+              console.error('❌ Student data validation failed:', studentValidation.error);
+            }
           } else {
             console.log('❌ Error fetching students:', studentsError);
           }
@@ -520,13 +618,13 @@ function groupAndSortSchedule(schedule) {
       const uniqueStudentCount = uniqueStudentIds.size;
       console.log('📊 Final student count - Total:', totalStudents, 'Unique:', uniqueStudentCount);
       
-      // Get current events data from above instead of relying on state
+      // Get current events data with tenant isolation
       let currentEventsForStats = [];
       try {
         const today = new Date().toISOString().split('T')[0];
-        const { data: statsEventsData } = await supabase
-          .from('events')
-          .select('*')
+        const tenantStatsEventQuery = createTenantQuery(supabase.from('events'), tenantId);
+        const { data: statsEventsData } = await tenantStatsEventQuery
+          .select('*, tenant_id')
           .eq('status', 'Active')
           .gte('event_date', today)
           .order('event_date', { ascending: true })
@@ -759,8 +857,16 @@ function groupAndSortSchedule(schedule) {
 
   async function handleCompletePersonalTask(id) {
     try {
-      const { error } = await supabase
-        .from(TABLES.PERSONAL_TASKS)
+      // Validate tenant access before completing task
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Tenant validation failed for complete task:', tenantValidation.error);
+        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+        return;
+      }
+      
+      const tenantTaskQuery = createTenantQuery(supabase.from(TABLES.PERSONAL_TASKS), tenantId);
+      const { error } = await tenantTaskQuery
         .update({
           status: 'completed',
           completed_at: new Date().toISOString()
@@ -789,21 +895,16 @@ function groupAndSortSchedule(schedule) {
     }
 
     try {
-      // Get user's tenant_id 
-      const { data: userData, error: userError } = await supabase
-        .from(TABLES.USERS)
-        .select('tenant_id')
-        .eq('id', user.id)
-        .single();
-      
-      if (userError || !userData) {
-        console.error('Error fetching user tenant_id:', userError);
-        Alert.alert('Error', 'Could not get user information. Please try again.');
+      // Validate tenant access before adding task
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Tenant validation failed for add task:', tenantValidation.error);
+        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
         return;
       }
 
-      const { data, error } = await supabase
-        .from(TABLES.PERSONAL_TASKS)
+      const tenantTaskQuery = createTenantQuery(supabase.from(TABLES.PERSONAL_TASKS), tenantId);
+      const { data, error } = await tenantTaskQuery
         .insert([
           {
             user_id: user.id,
@@ -813,7 +914,7 @@ function groupAndSortSchedule(schedule) {
             priority: newTask.priority,
             due_date: newTask.due,
             status: 'pending',
-            tenant_id: userData.tenant_id // Add tenant_id from user data
+            tenant_id: tenantId // Use tenantId from context
           }
         ])
         .select();
@@ -839,8 +940,16 @@ function groupAndSortSchedule(schedule) {
   }
   async function handleCompleteAdminTask(id) {
     try {
-      const { error } = await supabase
-        .from(TABLES.TASKS)
+      // Validate tenant access before completing admin task
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Tenant validation failed for complete admin task:', tenantValidation.error);
+        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+        return;
+      }
+      
+      const tenantAdminTaskQuery = createTenantQuery(supabase.from(TABLES.TASKS), tenantId);
+      const { error } = await tenantAdminTaskQuery
         .update({
           status: 'Completed',
           completed_at: new Date().toISOString()
@@ -971,22 +1080,44 @@ function groupAndSortSchedule(schedule) {
     if (!classMap) return;
     
     try {
+      // Validate tenant access before fetching analytics
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Tenant validation failed for attendance analytics:', tenantValidation.error);
+        return; // Silent return for better UX
+      }
+      
       let totalAttendance = 0, totalDays = 0;
       let attendanceDataFetched = false;
       
-      // Get attendance data for a sample of students for quicker loading
+      // Get attendance data for a sample of students for quicker loading with tenant isolation
+      const tenantStudentQuery = createTenantQuery(supabase.from(TABLES.STUDENTS), tenantId);
+      const tenantAttendanceQuery = createTenantQuery(supabase.from(TABLES.STUDENT_ATTENDANCE), tenantId);
+      
       for (const className of Object.keys(classMap).slice(0, 2)) { // Only check first 2 classes
-        const { data: studentsData } = await supabase
-          .from(TABLES.STUDENTS)
-          .select('id')
+        const { data: studentsData } = await tenantStudentQuery
+          .select('id, tenant_id')
           .eq('class_name', className)
           .limit(5); // Only check 5 students per class
 
         if (studentsData && studentsData.length > 0) {
+          // Validate student data belongs to correct tenant
+          const studentValidation = await validateDataTenancy(
+            studentsData?.map(s => ({ 
+              id: s.id, 
+              tenant_id: s.tenant_id 
+            })) || [],
+            tenantId
+          );
+          
+          if (!studentValidation.isValid) {
+            console.error('❌ Student data validation failed in analytics:', studentValidation.error);
+            continue; // Skip this class and continue with next
+          }
+          
           for (const student of studentsData) {
-            const { data: attendanceData } = await supabase
-              .from(TABLES.STUDENT_ATTENDANCE)
-              .select('status')
+            const { data: attendanceData } = await tenantAttendanceQuery
+              .select('status, tenant_id')
               .eq('student_id', student.id)
               .limit(10); // Only check 10 most recent attendance records
 

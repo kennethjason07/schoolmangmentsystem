@@ -50,7 +50,9 @@ const SchoolDetails = ({ navigation }) => {
     try {
       setLoading(true);
       console.log('=== Loading school details ===');
+      console.log('🏢 SchoolDetails: About to call dbHelpers.getSchoolDetails()');
       const { data, error } = await dbHelpers.getSchoolDetails();
+      console.log('🏢 SchoolDetails: getSchoolDetails result:', { data: data ? 'EXISTS' : 'NULL', error: error?.message });
 
       console.log('School details query result:', { data, error });
       if (data) {
@@ -380,8 +382,10 @@ const SchoolDetails = ({ navigation }) => {
         return;
       }
 
-      console.log('Saving school data:', schoolData);
+      console.log('🏢 SchoolDetails: Saving school data:', schoolData);
+      console.log('🏢 SchoolDetails: About to call dbHelpers.updateSchoolDetails()');
       const { data, error } = await dbHelpers.updateSchoolDetails(schoolData);
+      console.log('🏢 SchoolDetails: updateSchoolDetails result:', { data: data ? 'SUCCESS' : 'NULL', error: error?.message });
 
       console.log('Save result:', { data, error });
 

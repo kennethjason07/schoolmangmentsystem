@@ -20,6 +20,13 @@ import StudentFeeCard from '../../components/StudentFeeCard';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
+import { 
+  validateTenantAccess, 
+  createTenantQuery, 
+  validateDataTenancy,
+  TENANT_ERROR_MESSAGES 
+} from '../../utils/tenantValidation';
+import { useTenantContext } from '../../contexts/TenantContext';
 import { useSelectedStudent } from '../../contexts/SelectedStudentContext';
 import { useFocusEffect } from '@react-navigation/native';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
@@ -28,6 +35,7 @@ import { badgeNotifier } from '../../utils/badgeNotifier';
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
+  const { tenantId } = useTenantContext();
   const { selectedStudent, hasMultipleStudents, availableStudents, loading: studentLoading } = useSelectedStudent();
   const [studentData, setStudentData] = useState(null);
   
@@ -109,21 +117,30 @@ const ParentDashboard = ({ navigation }) => {
   // Function to refresh notifications
   const refreshNotifications = async () => {
     try {
+      // Validate tenant access before refreshing notifications
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Parent dashboard notification validation failed:', tenantValidation.error);
+        return; // Silent return for better UX
+      }
+      
       console.log('Refreshing notifications for parent:', user.id);
       
-      // Get notifications with recipients for this parent
-      const { data: notificationsData, error: notificationsError } = await supabase
-        .from(TABLES.NOTIFICATION_RECIPIENTS)
+      // Get notifications with recipients for this parent using tenant-aware query
+      const tenantNotificationQuery = createTenantQuery(supabase.from(TABLES.NOTIFICATION_RECIPIENTS), tenantId);
+      const { data: notificationsData, error: notificationsError } = await tenantNotificationQuery
         .select(`
           id,
           is_read,
           sent_at,
           read_at,
+          tenant_id,
           notifications!inner(
             id,
             message,
             type,
-            created_at
+            created_at,
+            tenant_id
           )
         `)
         .eq('recipient_type', 'Parent')

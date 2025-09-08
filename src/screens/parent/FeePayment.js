@@ -24,6 +24,13 @@ import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 import { supabase, TABLES, dbHelpers, isValidUUID } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
+import { 
+  validateTenantAccess, 
+  createTenantQuery, 
+  validateDataTenancy,
+  TENANT_ERROR_MESSAGES 
+} from '../../utils/tenantValidation';
+import { useTenantContext } from '../../contexts/TenantContext';
 import { format } from 'date-fns';
 import { getSchoolLogoBase64, getLogoHTML, getReceiptHeaderCSS } from '../../utils/logoUtils';
 import FeeService from '../../services/FeeService';
@@ -32,6 +39,7 @@ const { width } = Dimensions.get('window');
 
 const FeePayment = () => {
   const { user } = useAuth();
+  const { tenantId } = useTenantContext();
   const navigation = useNavigation();
   const [feeStructure, setFeeStructure] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);

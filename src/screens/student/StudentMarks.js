@@ -6,6 +6,13 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { 
+  validateTenantAccess, 
+  createTenantQuery, 
+  validateDataTenancy,
+  TENANT_ERROR_MESSAGES 
+} from '../../utils/tenantValidation';
+import { useTenantContext } from '../../contexts/TenantContext';
 import Header from '../../components/Header';
 
 // Helper function to get grade color

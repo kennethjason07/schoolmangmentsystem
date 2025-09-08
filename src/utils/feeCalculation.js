@@ -1,7 +1,7 @@
 import { supabase, TABLES, getUserTenantId } from './supabase';
 
 /**
- * Helper function to find matching fee component using fuzzy matching
+ * Helper function to find matching fee component using enhanced fuzzy matching
  * @param {string} paymentComponent - Payment fee component name
  * @param {Array} feeComponents - Available fee component names
  * @returns {string|null} Matching fee component or null
@@ -9,41 +9,83 @@ import { supabase, TABLES, getUserTenantId } from './supabase';
 const findMatchingFeeComponent = (paymentComponent, feeComponents) => {
   if (!paymentComponent) return null;
   
-  // Exact match first
+  // Exact match first (case-sensitive)
   if (feeComponents.includes(paymentComponent)) {
     return paymentComponent;
   }
   
-  const normalizedPayment = paymentComponent.toLowerCase().replace(/\s+/g, '');
-  
-  // Check for similar names (tuition variations)
+  // Case-insensitive exact match
+  const paymentLower = paymentComponent.toLowerCase();
   for (const feeComp of feeComponents) {
-    const normalizedFee = feeComp.toLowerCase().replace(/\s+/g, '');
+    if (feeComp.toLowerCase() === paymentLower) {
+      console.log(`  Case-insensitive match: ${paymentComponent} -> ${feeComp}`);
+      return feeComp;
+    }
+  }
+  
+  const normalizedPayment = paymentComponent.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+  
+  // Enhanced fuzzy matching with better normalization
+  for (const feeComp of feeComponents) {
+    const normalizedFee = feeComp.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
     
-    // Handle tuition variations
+    // Exact normalized match
+    if (normalizedPayment === normalizedFee) {
+      console.log(`  Normalized exact match: ${paymentComponent} -> ${feeComp}`);
+      return feeComp;
+    }
+    
+    // Handle tuition variations (tution/tuition)
     if ((normalizedPayment.includes('tuition') || normalizedPayment.includes('tution')) &&
         (normalizedFee.includes('tuition') || normalizedFee.includes('tution'))) {
+      console.log(`  Tuition variation match: ${paymentComponent} -> ${feeComp}`);
       return feeComp;
     }
     
     // Handle transport/bus variations
     if ((normalizedPayment.includes('transport') || normalizedPayment.includes('bus')) &&
         (normalizedFee.includes('transport') || normalizedFee.includes('bus'))) {
+      console.log(`  Transport variation match: ${paymentComponent} -> ${feeComp}`);
       return feeComp;
     }
     
     // Handle library/book variations  
     if ((normalizedPayment.includes('library') || normalizedPayment.includes('book')) &&
         (normalizedFee.includes('library') || normalizedFee.includes('book'))) {
+      console.log(`  Library variation match: ${paymentComponent} -> ${feeComp}`);
       return feeComp;
     }
     
-    // Other close matches
-    if (normalizedPayment.includes(normalizedFee) || normalizedFee.includes(normalizedPayment)) {
+    // Handle uniform variations
+    if (normalizedPayment.includes('uniform') && normalizedFee.includes('uniform')) {
+      console.log(`  Uniform variation match: ${paymentComponent} -> ${feeComp}`);
       return feeComp;
+    }
+    
+    // Handle exam/examination variations
+    if ((normalizedPayment.includes('exam') || normalizedPayment.includes('examination')) &&
+        (normalizedFee.includes('exam') || normalizedFee.includes('examination'))) {
+      console.log(`  Exam variation match: ${paymentComponent} -> ${feeComp}`);
+      return feeComp;
+    }
+    
+    // Handle activity/activities variations
+    if ((normalizedPayment.includes('activity') || normalizedPayment.includes('activities')) &&
+        (normalizedFee.includes('activity') || normalizedFee.includes('activities'))) {
+      console.log(`  Activity variation match: ${paymentComponent} -> ${feeComp}`);
+      return feeComp;
+    }
+    
+    // Substring matches (more lenient)
+    if (normalizedPayment.length > 3 && normalizedFee.length > 3) {
+      if (normalizedPayment.includes(normalizedFee) || normalizedFee.includes(normalizedPayment)) {
+        console.log(`  Substring match: ${paymentComponent} -> ${feeComp}`);
+        return feeComp;
+      }
     }
   }
   
+  console.log(`  No match found for payment component: ${paymentComponent}`);
   return null;
 };
 
@@ -261,37 +303,51 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
     const finalAmount = Math.max(0, baseAmount - totalDiscount);
     console.log(`💸 Final amount (₹${baseAmount} - ₹${totalDiscount}): ₹${finalAmount}`);
 
-      // Find matching payments for this specific component and academic year
+      // Find matching payments for this specific component with improved matching
       const matchingPayments = (allPaymentData || []).filter(payment => {
         // Skip already used payments
         if (usedPaymentIds.has(payment.id)) return false;
         
         const paymentYear = normalizeAcademicYear(payment.academic_year);
-        const isYearMatch = paymentYear === academicYear || !payment.academic_year; // Also match if no year specified
+        console.log(`  🔍 Checking payment: component="${payment.fee_component}", year="${payment.academic_year}" -> normalized="${paymentYear}", amount=${payment.amount_paid}`);
         
-        // Try exact match first
+        // Academic year matching - be more flexible
+        const isYearMatch = (
+          paymentYear === academicYear ||           // Exact year match
+          !payment.academic_year ||                // Payment has no year specified
+          !paymentYear ||                          // Normalized year is empty
+          paymentYear === '' ||                    // Normalized year is empty string
+          paymentYear === academicYear.replace('-', '/') || // Handle different year formats
+          academicYear === paymentYear.replace('-', '/')    // Handle different year formats
+        );
+        
+        console.log(`    Year match check: payment="${paymentYear}" vs expected="${academicYear}" = ${isYearMatch}`);
+        
+        // Try exact component match first
         if (payment.fee_component === component && isYearMatch) {
+          console.log(`    ✅ Exact match: ${payment.fee_component} === ${component}`);
           return true;
         }
         
-        // Try fuzzy match for same academic year or no year
+        // Try fuzzy component matching if year matches
         if (isYearMatch) {
           const matchedComponent = findMatchingFeeComponent(payment.fee_component, [component]);
           if (matchedComponent === component) {
-            console.log(`  Fuzzy matched payment: ${payment.fee_component} -> ${component}`);
+            console.log(`    ✅ Fuzzy matched payment: ${payment.fee_component} -> ${component}`);
             return true;
           }
         }
         
-        // If no year-specific match found and payment has no academic year, try fuzzy match
-        if (!payment.academic_year) {
+        // Fallback: Try fuzzy match regardless of year if payment has no year
+        if (!payment.academic_year || payment.academic_year === '') {
           const matchedComponent = findMatchingFeeComponent(payment.fee_component, [component]);
           if (matchedComponent === component) {
-            console.log(`  Year-agnostic fuzzy matched payment: ${payment.fee_component} -> ${component}`);
+            console.log(`    ✅ Year-agnostic fuzzy matched payment: ${payment.fee_component} -> ${component}`);
             return true;
           }
         }
         
+        console.log(`    ❌ No match for payment: ${payment.fee_component}`);
         return false;
       });
 

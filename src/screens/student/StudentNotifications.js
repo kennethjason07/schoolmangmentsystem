@@ -3,7 +3,14 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Activity
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
-import { supabase, TABLES, dbHelpers, getUserTenantId } from '../../utils/supabase';
+import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { 
+  validateTenantAccess, 
+  createTenantQuery, 
+  validateDataTenancy,
+  TENANT_ERROR_MESSAGES 
+} from '../../utils/tenantValidation';
+import { useTenantContext } from '../../contexts/TenantContext';
 import Header from '../../components/Header';
 import universalNotificationService from '../../services/UniversalNotificationService';
 
@@ -16,6 +23,7 @@ const FILTERS = [
 
 const StudentNotifications = () => {
   const { user } = useAuth();
+  const { tenantId } = useTenantContext();
   const [notifications, setNotifications] = useState([]);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -66,18 +74,19 @@ const StudentNotifications = () => {
       console.log('User ID:', user.id);
       console.log('Linked Student ID:', user.linked_student_id);
 
-      // Get student details to filter notifications properly
-      const tenantId = await getUserTenantId();
-      if (!tenantId) {
-        console.error('Cannot fetch notifications: tenant_id is null');
-        throw new Error('Tenant ID not available');
+      // Validate tenant access before proceeding
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Student notifications tenant validation failed:', tenantValidation.error);
+        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+        return;
       }
       
-      const { data: studentData, error: studentError } = await supabase
-        .from(TABLES.STUDENTS)
-        .select('id, class_id, classes(id, class_name, section)')
+      // Get student details to filter notifications properly with tenant-aware query
+      const tenantStudentQuery = createTenantQuery(supabase.from(TABLES.STUDENTS), tenantId);
+      const { data: studentData, error: studentError } = await tenantStudentQuery
+        .select('id, class_id, classes(id, class_name, section), tenant_id')
         .eq('id', user.linked_student_id)
-        .eq('tenant_id', tenantId)
         .single();
         
       if (studentError || !studentData) {
@@ -92,14 +101,15 @@ const StudentNotifications = () => {
         section: studentData.classes?.section
       });
       
-      // Fetch notifications that are specifically for this student
+      // Fetch notifications that are specifically for this student with tenant-aware query
       // This includes notifications that have recipients records for this user
-      const { data: recipientRecords, error: recipientError } = await supabase
-        .from('notification_recipients')
+      const tenantNotificationQuery = createTenantQuery(supabase.from('notification_recipients'), tenantId);
+      const { data: recipientRecords, error: recipientError } = await tenantNotificationQuery
         .select(`
           notification_id,
           is_read,
           id,
+          tenant_id,
           notifications(
             id,
             message,
@@ -108,6 +118,7 @@ const StudentNotifications = () => {
             sent_by,
             delivery_status,
             delivery_mode,
+            tenant_id,
             users!sent_by(
               id,
               role_id,
@@ -117,7 +128,6 @@ const StudentNotifications = () => {
         `)
         .eq('recipient_id', user.id)
         .eq('recipient_type', 'Student')
-        .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false, foreignTable: 'notifications' })
         .limit(50);
       

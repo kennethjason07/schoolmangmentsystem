@@ -16,12 +16,25 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { Picker } from '@react-native-picker/picker';
-import { supabase } from '../../utils/supabase';
-import { useTenant } from '../../contexts/TenantContext';
+import { supabase, TABLES } from '../../utils/supabase';
+import { useTenantContext } from '../../contexts/TenantContext';
+import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
+import { useAuth } from '../../utils/AuthContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 const ManageClasses = ({ navigation }) => {
-  const { tenantId } = useTenant();
+  const { tenantId, currentTenant, loading: tenantLoading } = useTenantContext();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
+  
+  // 🏢 LOG: Component initialization with optimized logging
+  console.log('🏢 ManageClasses: Component initialized with email-based tenant system');
+  console.log('🏢 ManageClasses: Initial context:', {
+    tenantId: tenantId || 'NULL',
+    tenantName: currentTenant?.name || 'NULL',
+    userEmail: user?.email || 'NULL',
+    tenantLoading
+  });
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [sections, setSections] = useState(['A', 'B', 'C', 'D']);
@@ -39,73 +52,161 @@ const ManageClasses = ({ navigation }) => {
   const [classSubjects, setClassSubjects] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
 
+  // 🔍 LOG: Tenant context changes
   useEffect(() => {
-    loadAllData();
-  }, []);
+    console.log('🔄 ManageClasses: Tenant context changed');
+    console.log('📍 ManageClasses: Updated tenant context:', {
+      tenantId: tenantId || 'null',
+      currentTenant: currentTenant ? {
+        id: currentTenant.id,
+        name: currentTenant.name
+      } : 'null',
+      tenantLoading,
+      userId: user?.id || 'null'
+    });
+    
+    // Only load data when tenant and user are available
+    if (tenantId && user && !tenantLoading) {
+      console.log('🚀 ManageClasses: All requirements met, loading data...');
+      console.log('📍 ManageClasses: Using tenant_id:', tenantId);
+      console.log('👤 ManageClasses: Using user_id:', user.id);
+      loadAllData();
+    } else {
+      console.log('⏳ ManageClasses: Waiting for required context...', {
+        hasTenantId: !!tenantId,
+        hasUser: !!user,
+        isTenantLoading: tenantLoading,
+        actualTenantId: tenantId,
+        actualUserId: user?.id
+      });
+    }
+  }, [tenantId, user, tenantLoading]);
 
   const loadAllData = async () => {
+    const startTime = performance.now();
+    setLoading(true);
+    
+    // 🚀 Add timeout to prevent infinite loading
+    const timeoutId = setTimeout(() => {
+      console.error('❌ ManageClasses: Loading timeout (10s)');
+      setError('Loading timeout. Please check your internet connection.');
+      setLoading(false);
+    }, 10000);
+    
     try {
-      setLoading(true);
+      console.log('🏢 ManageClasses: Starting optimized data loading...');
       
-      // Get all classes - as specified in easy.txt
-      const { data: classData, error: classError } = await supabase
-        .from('classes')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .order('class_name', { ascending: true });
+      // Verify tenant context or use email fallback
+      if (!tenantId) {
+        console.warn('🏢 ManageClasses: No tenantId from context, trying email lookup...');
+        const emailResult = await getCurrentUserTenantByEmail();
+        
+        if (!emailResult.success) {
+          throw new Error(`No tenant available: ${emailResult.error}`);
+        }
+        
+        console.log('🏢 ManageClasses: Email lookup successful but context is null');
+        throw new Error('Tenant context loading issue. Please refresh.');
+      }
+      // 🚀 OPTIMIZED: Parallel loading of classes and teachers
+      console.log('🏢 ManageClasses: Fetching classes and teachers in parallel...');
       
-      if (classError) throw classError;
-
-      // Get student count and subjects count for each class
-      const classesWithCounts = await Promise.all(
-        classData.map(async (cls) => {
-          const { count } = await supabase
-            .from('students')
-            .select('*', { count: 'exact', head: true })
-            .eq('class_id', cls.id)
-            .eq('tenant_id', tenantId);
-          
-          const { count: subjectsCount } = await supabase
-            .from('subjects')
-            .select('*', { count: 'exact', head: true })
-            .eq('class_id', cls.id)
-            .eq('tenant_id', tenantId);
-          
-          return {
-            ...cls,
-            students_count: count || 0,
-            subjects_count: subjectsCount || 0
-          };
-        })
-      );
-
-      setClasses(classesWithCounts);
-
-      // Get all teachers - as specified in easy.txt
-      const { data: teacherData, error: teacherError } = await supabase
-        .from('teachers')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .order('name', { ascending: true });
+      const [classesResult, teachersResult] = await Promise.all([
+        supabase
+          .from(TABLES.CLASSES)
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .order('class_name', { ascending: true }),
+        supabase
+          .from(TABLES.TEACHERS)
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .order('name', { ascending: true })
+      ]);
       
-      if (teacherError) throw teacherError;
-      setTeachers(teacherData);
+      const { data: classData, error: classError } = classesResult;
+      const { data: teacherData, error: teacherError } = teachersResult;
+      
+      if (classError) {
+        console.error('❌ ManageClasses: Classes query failed:', classError.message);
+        throw new Error(`Failed to load classes: ${classError.message}`);
+      }
+      
+      if (teacherError) {
+        console.error('❌ ManageClasses: Teachers query failed:', teacherError.message);
+        throw new Error(`Failed to load teachers: ${teacherError.message}`);
+      }
+      
+      console.log('🏢 ManageClasses: Basic data loaded:', {
+        classes: classData?.length || 0,
+        teachers: teacherData?.length || 0
+      });
+      
+      // 🚀 OPTIMIZED: Simple processing without complex counts initially
+      const processedClasses = (classData || []).map(cls => ({
+        ...cls,
+        students_count: 0, // Load on-demand if needed
+        subjects_count: 0  // Load on-demand if needed
+      }));
+      // 🚀 OPTIMIZED: Set data immediately
+      setClasses(processedClasses);
+      setTeachers(teacherData || []);
+      
+      console.log('📊 ManageClasses: Data loaded successfully:', {
+        classes: processedClasses.length,
+        teachers: teacherData?.length || 0,
+        tenantId
+      });
+      
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.log(`✅ ManageClasses: Data loaded in ${loadTime}ms`);
+      
+      if (loadTime > 2000) {
+        console.warn('⚠️ ManageClasses: Slow loading (>2s). Check network.');
+      } else {
+        console.log('🚀 ManageClasses: Fast loading achieved!');
+      }
+      
     } catch (error) {
-      Alert.alert('Error', 'Failed to load classes and teachers');
+      clearTimeout(timeoutId);
+      console.error('❌ ManageClasses: Failed to load data:', error.message);
+      Alert.alert('Error', error.message || 'Failed to load classes and teachers');
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
 
   const handleAddClass = async () => {
     try {
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'ManageClasses - handleAddClass');
+      if (!validation.isValid) {
+        Alert.alert('Access Denied', validation.error);
+        return;
+      }
+
       if (!newClass.class_name || !newClass.section) {
         Alert.alert('Error', 'Please fill in class name and section');
         return;
       }
 
+      console.log('🏫 ManageClasses: Creating new class');
+      console.log('📍 ManageClasses: Insert will use tenant_id:', tenantId);
+      console.log('📍 ManageClasses: Insert tenant_id type:', typeof tenantId);
+      console.log('📋 ManageClasses: Complete class data for insert:', {
+        class_name: newClass.class_name,
+        academic_year: newClass.academic_year,
+        section: newClass.section,
+        class_teacher_id: newClass.class_teacher_id || null,
+        tenant_id: tenantId,
+        tenant_id_type: typeof tenantId
+      });
+      
       // Insert a new class - as specified in easy.txt
-      const { error } = await supabase
+      const { data: insertedData, error } = await supabase
         .from('classes')
         .insert({
           class_name: newClass.class_name,
@@ -113,11 +214,29 @@ const ManageClasses = ({ navigation }) => {
           section: newClass.section,
           class_teacher_id: newClass.class_teacher_id || null,
           tenant_id: tenantId,
-        });
+        })
+        .select();
 
       if (error) {
-        console.error('Database error adding class:', error);
+        console.error('❌ ManageClasses: Database error adding class:', error);
         throw error;
+      }
+      
+      console.log('✅ ManageClasses: Class created successfully!');
+      console.log('📋 ManageClasses: Inserted class details:');
+      if (insertedData && insertedData.length > 0) {
+        insertedData.forEach((cls, index) => {
+          console.log(`   [${index + 1}] New Class: ${cls.class_name} | tenant_id: ${cls.tenant_id} | id: ${cls.id}`);
+          
+          // Verify the inserted class has the correct tenant_id
+          if (cls.tenant_id === tenantId) {
+            console.log('✅ ManageClasses: New class has correct tenant_id');
+          } else {
+            console.error('❌ ManageClasses: NEW CLASS TENANT MISMATCH!');
+            console.error('❌ Expected tenant_id:', tenantId);
+            console.error('❌ Actual tenant_id:', cls.tenant_id);
+          }
+        });
       }
 
       // Refresh data
@@ -138,12 +257,19 @@ const ManageClasses = ({ navigation }) => {
 
   const handleEditClass = async () => {
     try {
+      // 🛡️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'ManageClasses - handleEditClass');
+      if (!validation.isValid) {
+        Alert.alert('Access Denied', validation.error);
+        return;
+      }
+
       if (!selectedClass.class_name || !selectedClass.section) {
         Alert.alert('Error', 'Please fill in class name and section');
         return;
       }
 
-      // Update a class - as specified in easy.txt
+      // Update a class with tenant validation
       const { error } = await supabase
         .from('classes')
         .update({
@@ -152,7 +278,8 @@ const ManageClasses = ({ navigation }) => {
           section: selectedClass.section,
           class_teacher_id: selectedClass.class_teacher_id || null,
         })
-        .eq('id', selectedClass.id);
+        .eq('id', selectedClass.id)
+        .eq('tenant_id', tenantId);
 
       if (error) {
         console.error('Database error updating class:', error);
@@ -181,13 +308,20 @@ const ManageClasses = ({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
+              // 🛡️ Validate tenant access first
+              const validation = await validateTenantAccess(tenantId, user?.id, 'ManageClasses - handleDeleteClass');
+              if (!validation.isValid) {
+                Alert.alert('Access Denied', validation.error);
+                return;
+              }
+              
               console.log('Starting class deletion process for class ID:', classId);
 
-              // Step 1: Get all subjects for this class to handle cascading deletes
-              const { data: classSubjects } = await supabase
-                .from('subjects')
+              // Step 1: Get all subjects for this class to handle cascading deletes using tenant-aware query
+              const { data: classSubjects } = await createTenantQuery(tenantId, 'subjects')
                 .select('id')
-                .eq('class_id', classId);
+                .eq('class_id', classId)
+                .execute();
               
               const subjectIds = classSubjects?.map(s => s.id) || [];
               console.log('Found subjects to delete:', subjectIds);
@@ -314,11 +448,12 @@ const ManageClasses = ({ navigation }) => {
                 throw subjectsError;
               }
 
-              // Step 13: Finally, delete the class
+              // Step 13: Finally, delete the class with tenant validation
               const { error: classDeleteError } = await supabase
                 .from('classes')
                 .delete()
-                .eq('id', classId);
+                .eq('id', classId)
+                .eq('tenant_id', tenantId);
               if (classDeleteError) {
                 console.error('Error deleting class:', classDeleteError);
                 throw classDeleteError;
@@ -351,9 +486,8 @@ const ManageClasses = ({ navigation }) => {
     try {
       setSelectedClassDetails(classItem);
       
-      // Fetch subjects for this class with their assigned teachers
-      const { data: subjectsData, error: subjectsError } = await supabase
-        .from('subjects')
+      // Fetch subjects for this class with their assigned teachers using tenant-aware query
+      const { data: subjectsData, error: subjectsError } = await createTenantQuery(tenantId, 'subjects')
         .select(`
           *,
           teacher_subjects(
@@ -364,9 +498,20 @@ const ManageClasses = ({ navigation }) => {
           )
         `)
         .eq('class_id', classItem.id)
-        .eq('tenant_id', tenantId);
+        .execute();
       
       if (subjectsError) throw subjectsError;
+      
+      // 🛡️ Validate subjects data belongs to correct tenant
+      if (subjectsData && subjectsData.length > 0) {
+        const subjectsValid = validateDataTenancy(subjectsData, tenantId, 'ManageClasses - Class Subjects');
+        if (!subjectsValid) {
+          console.error('Class subjects data validation failed');
+          setClassSubjects([]);
+          setClassDetailsModal(true);
+          return;
+        }
+      }
       
       // Process the data to get teacher info for each subject
       const processedSubjects = subjectsData?.map(subject => ({
@@ -380,6 +525,91 @@ const ManageClasses = ({ navigation }) => {
       console.error('Error loading class details:', error);
       Alert.alert('Error', 'Failed to load class details');
     }
+  };
+
+  // 🔍 DIAGNOSTIC FUNCTION
+  const runTenantDiagnostic = async () => {
+    console.log('🔍 ========== TENANT DIAGNOSTIC START ==========');
+    console.log('🔍 Current Context:');
+    console.log('   - tenantId:', tenantId);
+    console.log('   - currentTenant:', currentTenant);
+    console.log('   - user.id:', user?.id);
+    console.log('   - user.email:', user?.email);
+    
+    try {
+      // Check current user's tenant_id in database
+      console.log('🔍 Step 1: Checking user record in database...');
+      const { data: userRecord, error: userError } = await supabase
+        .from('users')
+        .select('id, email, tenant_id')
+        .eq('id', user?.id)
+        .single();
+      
+      if (userError) {
+        console.error('❌ User record error:', userError);
+      } else {
+        console.log('👤 User record:', userRecord);
+      }
+      
+      // Check if tenant exists
+      if (tenantId) {
+        console.log('🔍 Step 2: Checking tenant record...');
+        const { data: tenantRecord, error: tenantError } = await supabase
+          .from('tenants')
+          .select('*')
+          .eq('id', tenantId)
+          .single();
+        
+        if (tenantError) {
+          console.error('❌ Tenant record error:', tenantError);
+        } else {
+          console.log('🏢 Tenant record:', tenantRecord);
+        }
+      }
+      
+      // Check all classes in database
+      console.log('🔍 Step 3: Checking all classes...');
+      const { data: allClasses, error: classesError } = await supabase
+        .from('classes')
+        .select('id, class_name, tenant_id')
+        .limit(20);
+      
+      if (classesError) {
+        console.error('❌ Classes query error:', classesError);
+      } else {
+        console.log('📋 All classes (first 20):', allClasses);
+        
+        const uniqueTenants = [...new Set(allClasses?.map(c => c.tenant_id).filter(Boolean))];
+        console.log('🏢 Unique tenant_ids in classes:', uniqueTenants);
+        
+        const classesForCurrentTenant = allClasses?.filter(c => c.tenant_id === tenantId);
+        console.log(`📋 Classes for current tenant (${tenantId}):`, classesForCurrentTenant);
+      }
+      
+      // Test tenant-aware query
+      if (tenantId) {
+        console.log('🔍 Step 4: Testing tenant-aware query...');
+        try {
+          const tenantQuery = createTenantQuery(tenantId, 'classes');
+          const { data: tenantClasses, error: tenantError } = await tenantQuery
+            .select('id, class_name, tenant_id')
+            .execute();
+          
+          if (tenantError) {
+            console.error('❌ Tenant query error:', tenantError);
+          } else {
+            console.log('📋 Tenant-aware query result:', tenantClasses);
+          }
+        } catch (tenantQueryError) {
+          console.error('❌ Tenant query exception:', tenantQueryError);
+        }
+      }
+      
+    } catch (error) {
+      console.error('❌ Diagnostic error:', error);
+    }
+    
+    console.log('🔍 ========== TENANT DIAGNOSTIC END ==========');
   };
 
   const onRefresh = async () => {
@@ -673,6 +903,12 @@ const ManageClasses = ({ navigation }) => {
           <Text style={styles.headerTitle}>Total Classes: {classes.length}</Text>
         </View>
         <TouchableOpacity 
+          style={[styles.addButton, { marginRight: 10 }]}
+          onPress={runTenantDiagnostic}
+        >
+          <Ionicons name="bug" size={20} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity 
           style={styles.addButton}
           onPress={() => setIsAddModalVisible(true)}
         >
@@ -680,10 +916,12 @@ const ManageClasses = ({ navigation }) => {
         </TouchableOpacity>
       </View>
 
-      {loading ? (
+      {(loading || tenantLoading) ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2196F3" />
-          <Text style={styles.loadingText}>Loading classes...</Text>
+          <Text style={styles.loadingText}>
+            {tenantLoading ? 'Loading tenant context...' : 'Loading classes...'}
+          </Text>
         </View>
       ) : (
         <FlatList

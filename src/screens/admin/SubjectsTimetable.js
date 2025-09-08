@@ -6,7 +6,8 @@ import CrossPlatformDatePicker, { DatePickerButton } from '../../components/Cros
 import { format } from 'date-fns';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-import { useTenant } from '../../contexts/TenantContext';
+import { useTenantContext } from '../../contexts/TenantContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 
 // Helper to calculate duration in minutes
@@ -40,7 +41,13 @@ function formatTime(t) {
 
 const SubjectsTimetable = ({ route }) => {
   const { classId } = route?.params || {};
-  const { tenantId } = useTenant();
+  const { currentTenant } = useTenantContext();
+  
+  // 🔍 DEBUG: Log tenant info on component load
+  console.log('🏢 SubjectsTimetable - Tenant Debug:', {
+    currentTenant,
+    classId
+  });
   const [tab, setTab] = useState(classId ? 'timetable' : 'subjects');
   const [subjects, setSubjects] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -58,6 +65,7 @@ const SubjectsTimetable = ({ route }) => {
   const [copyDayModal, setCopyDayModal] = useState({ visible: false });
   const [periodSettingsModal, setPeriodSettingsModal] = useState({ visible: false });
   const [periodSettings, setPeriodSettings] = useState([]);
+  const [periods, setPeriods] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -96,107 +104,319 @@ const SubjectsTimetable = ({ route }) => {
 
   useEffect(() => {
     const fetchData = async () => {
-      setLoading(true);
-      setError(null);
+      const startTime = performance.now();
+      let timeoutId;
+      
       try {
-// Fetch classes
-        const { data: classData, error: classError } = await dbHelpers.getClasses();
-        if (classError) throw classError;
-        setClasses(classData || []);
-
+        console.log('🚀 SubjectsTimetable: Starting optimized data load...');
+        setLoading(true);
+        setError(null);
+        
+        // ⏰ Set timeout protection
+        timeoutId = setTimeout(() => {
+          console.warn('⚠️ SubjectsTimetable: Load timeout (10s)');
+          throw new Error('Loading timeout - please check your connection');
+        }, 10000);
+        
+        // 🔍 Validate tenant context with email fallback
+        let tenantId = currentTenant?.id;
+        console.log('📋 SubjectsTimetable: Current tenant ID:', tenantId);
+        
+        if (!tenantId) {
+          console.log('⚠️ SubjectsTimetable: No tenant from context, trying email lookup...');
+          
+          try {
+            const emailTenant = await getCurrentUserTenantByEmail();
+            tenantId = emailTenant?.id;
+            console.log('📧 SubjectsTimetable: Email-based tenant ID:', tenantId);
+          } catch (emailError) {
+            console.error('❌ SubjectsTimetable: Email tenant lookup failed:', emailError);
+          }
+          
+          if (!tenantId) {
+            throw new Error('Unable to determine tenant context. Please contact support.');
+          }
+        }
+        
+        console.log('🚀 SubjectsTimetable.fetchData: Starting with tenant_id:', tenantId);
+        
+        // 🏃‍♂️ Fast parallel data fetching
+        console.log('📊 SubjectsTimetable: Fetching data in parallel...');
+        
+        const [classesResult, teachersResult, subjectsResult] = await Promise.all([
+          supabase
+            .from(TABLES.CLASSES)
+            .select('*')
+            .eq('tenant_id', tenantId)
+            .order('class_name'),
+          supabase
+            .from(TABLES.TEACHERS)
+            .select('*')
+            .eq('tenant_id', tenantId)
+            .order('name'),
+          supabase
+            .from(TABLES.SUBJECTS)
+            .select(`
+              *,
+              teacher_subjects(
+                teachers(id, name)
+              ),
+              classes(
+                id,
+                class_name,
+                section
+              )
+            `)
+            .eq('tenant_id', tenantId)
+            .order('name')
+        ]);
+        
+        if (classesResult.error) throw classesResult.error;
+        if (teachersResult.error) throw teachersResult.error;
+        if (subjectsResult.error) throw subjectsResult.error;
+        
+        clearTimeout(timeoutId);
+        
+        // ✅ Set data immediately
+        const classData = classesResult.data || [];
+        const teacherData = teachersResult.data || [];
+        const subjectData = subjectsResult.data || [];
+        
+        setClasses(classData);
+        setTeachers(teacherData);
+        setSubjects(subjectData);
+        
+        console.log(`✅ SubjectsTimetable: Loaded ${classData.length} classes, ${teacherData.length} teachers, ${subjectData.length} subjects`);
+        
         const defaultClassId = classId || classData?.[0]?.id || null;
         setSelectedClass(defaultClassId);
 
-        // Fetch teachers
-        const { data: teacherData, error: teacherError } = await dbHelpers.getTeachers();
-        if (teacherError) throw teacherError;
-        setTeachers(teacherData || []);
-
-// Fetch all subjects with teacher and class information through junction table
-        const { data: subjectData, error: subjectError } = await supabase
-          .from(TABLES.SUBJECTS)
-          .select(`
-            *,
-            teacher_subjects(
-              teachers(id, name)
-            ),
-            classes(
-              id,
-              class_name,
-              section
-            )
-          `)
+        // 📊 Performance: Fetch period settings
+        console.log('⏰ SubjectsTimetable: Fetching period settings...');
+        const { data: periodData, error: periodError } = await supabase
+          .from(TABLES.PERIOD_SETTINGS)
+          .select('*')
           .eq('tenant_id', tenantId)
-          .order('name');
-        if (subjectError) throw subjectError;
-        setSubjects(subjectData || []);
-
-        // Fetch period settings
-        await fetchPeriodSettings();
-
-        // Fetch timetable for the default class
-        if (defaultClassId) {
-          await fetchTimetableForClass(defaultClassId);
+          .single();
+        
+        if (periodError) {
+          console.warn('⚠️ Period settings error:', periodError.message);
+          // Use default if error
+          setPeriods(Array.from({ length: 8 }, (_, i) => i + 1));
+        } else {
+          const calculatedPeriods = Array.from({ 
+            length: periodData?.number_of_periods || 8 
+          }, (_, i) => i + 1);
+          setPeriods(calculatedPeriods);
+          console.log('✅ Periods configured:', calculatedPeriods.length);
         }
+
+        // 📊 Performance: Fetch timetable data if class is selected
+        if (defaultClassId) {
+          console.log('🗓️ SubjectsTimetable: Loading timetable for class:', defaultClassId);
+          const timetableStart = Date.now();
+          
+          const { data: timetableData, error: timetableError } = await supabase
+            .from(TABLES.TIMETABLE)
+            .select(`
+              *,
+              subjects(id, name)
+            `)
+            .eq('class_id', defaultClassId)
+            .eq('tenant_id', tenantId);
+          
+          if (timetableError) throw timetableError;
+          
+          // Process timetable data
+          const grouped = {
+            Monday: [],
+            Tuesday: [],
+            Wednesday: [],
+            Thursday: [],
+            Friday: [],
+            Saturday: [],
+            Sunday: []
+          };
+
+          timetableData?.forEach(period => {
+            const dayName = period.day_of_week;
+            if (grouped[dayName]) {
+              grouped[dayName].push({
+                id: period.id,
+                type: 'subject',
+                subjectId: period.subject_id,
+                subject: period.subjects,
+                startTime: period.start_time,
+                endTime: period.end_time,
+                label: period.subjects?.name
+              });
+            }
+          });
+
+          // Sort periods by start time for each day
+          Object.keys(grouped).forEach(day => {
+            grouped[day].sort((a, b) => {
+              const timeA = a.startTime || '00:00';
+              const timeB = b.startTime || '00:00';
+              return timeA.localeCompare(timeB);
+            });
+          });
+
+          setTimetables(prev => ({ ...prev, [defaultClassId]: grouped }));
+          console.log(`📅 Timetable loaded: ${timetableData?.length || 0} entries in ${Date.now() - timetableStart}ms`);
+        } else {
+          console.log('ℹ️ No default class selected, skipping timetable fetch');
+        }
+        
+        const totalTime = performance.now() - startTime;
+        console.log(`✅ SubjectsTimetable: All data loaded in ${totalTime.toFixed(2)}ms for tenant:`, tenantId);
+        
       } catch (err) {
-        console.error('Error fetching data:', err);
-        setError('Failed to load timetable data.');
+        clearTimeout(timeoutId);
+        console.error('❌ SubjectsTimetable.fetchData: Error loading data for tenant:', tenantId, err);
+        setError('Failed to load timetable data: ' + (err.message || 'Unknown error'));
       } finally {
         setLoading(false);
       }
     };
+    
+    // Always run on component mount - tenant validation happens inside fetchData
     fetchData();
-  }, []);
+  }, [currentTenant?.id]);
 
-const fetchTimetableForClass = async (classId) => {
-    console.log('Timetable fetch - using tenantId:', tenantId);
+  // 🚀 Optimized timetable fetching for class selection changes
+  const fetchTimetableForClass = async (classId) => {
+    // 🔍 Validate tenant context with email fallback
+    let operationTenantId = currentTenant?.id;
+    console.log('🏷️ fetchTimetableForClass: Current tenant ID:', operationTenantId);
+    
+    if (!operationTenantId) {
+      console.log('⚠️ fetchTimetableForClass: No tenant from context, trying email lookup...');
+      
+      try {
+        const emailTenant = await getCurrentUserTenantByEmail();
+        operationTenantId = emailTenant?.id;
+        console.log('📧 fetchTimetableForClass: Email-based tenant ID:', operationTenantId);
+      } catch (emailError) {
+        console.error('❌ fetchTimetableForClass: Email tenant lookup failed:', emailError);
+      }
+      
+      if (!operationTenantId) {
+        console.error('❌ fetchTimetableForClass: No tenant_id available');
+        return;
+      }
+    }
+    
+    console.log('🔍 fetchTimetableForClass - using tenantId:', operationTenantId, 'for classId:', classId);
+    const fetchStart = Date.now();
+    
     try {
-      const { data: timetableData, error: timetableError } = await dbHelpers.getTimetableByClass(classId);
-      if (timetableError) throw timetableError;
+      console.log('🔍 fetchTimetableForClass: Starting Supabase query...');
+      
+      // Fetch timetable with strict tenant filtering (simplified query first)
+      console.log('📎 fetchTimetableForClass: Attempting simplified query first...');
+      
+      const { data: timetableData, error: timetableError } = await supabase
+        .from(TABLES.TIMETABLE)
+        .select('*')
+        .eq('class_id', classId)
+        .eq('tenant_id', operationTenantId);
+      
+      console.log('📄 fetchTimetableForClass: Query completed', {
+        dataCount: timetableData?.length || 0,
+        hasError: !!timetableError,
+        errorMessage: timetableError?.message
+      });
+      
+      if (timetableError) {
+        console.error('❌ fetchTimetableForClass: Supabase error:', timetableError);
+        throw timetableError;
+      }
 
-      // Group timetable by day
-      const grouped = {
-        Monday: [],
-        Tuesday: [],
-        Wednesday: [],
-        Thursday: [],
-        Friday: [],
-        Saturday: [],
-        Sunday: []
-      };
+      try {
+        // Group timetable by day
+        const grouped = {
+          Monday: [],
+          Tuesday: [],
+          Wednesday: [],
+          Thursday: [],
+          Friday: [],
+          Saturday: [],
+          Sunday: []
+        };
 
-      timetableData?.forEach(period => {
-        // day_of_week is always a string according to schema
-        const dayName = period.day_of_week;
+        console.log('📊 fetchTimetableForClass: Processing', timetableData?.length || 0, 'timetable entries');
         
-        if (grouped[dayName]) {
-          grouped[dayName].push({
-            id: period.id,
-            type: 'subject', // Schema doesn't have period_type, all entries are subjects
-            subjectId: period.subject_id,
-            subject: period.subjects,
-            startTime: period.start_time,
-            endTime: period.end_time,
-            label: period.subjects?.name, // Use subject name as label
-            room: null // Schema doesn't have room_number column
+        if (timetableData && Array.isArray(timetableData)) {
+          timetableData.forEach((period, index) => {
+            try {
+              const dayName = period?.day_of_week;
+              console.log(`🗓️ Period ${index + 1}:`, {
+                day: dayName,
+                startTime: period?.start_time,
+                endTime: period?.end_time,
+                subjectId: period?.subject_id,
+                fullPeriod: period
+              });
+              
+              if (dayName && grouped[dayName]) {
+                // Find subject name from the subjects array (since we're not joining)
+                const subject = subjects.find(s => s.id === period.subject_id);
+                
+                grouped[dayName].push({
+                  id: period.id,
+                  type: 'subject',
+                  subjectId: period.subject_id,
+                  subject: subject ? { id: subject.id, name: subject.name } : null,
+                  startTime: period.start_time,
+                  endTime: period.end_time,
+                  label: subject?.name || 'Unknown Subject'
+                });
+              } else {
+                console.warn('⚠️ Unknown or missing day name:', dayName, 'for period:', period);
+              }
+            } catch (periodError) {
+              console.error('❌ Error processing period', index + 1, ':', periodError, 'Period data:', period);
+            }
           });
+        } else {
+          console.log('ℹ️ No timetable data or data is not an array');
         }
-      });
 
-      // Sort periods by start time for each day
-      Object.keys(grouped).forEach(day => {
-        grouped[day].sort((a, b) => a.startTime.localeCompare(b.startTime));
-      });
+        // Sort periods by start time for each day
+        try {
+          Object.keys(grouped).forEach(day => {
+            grouped[day].sort((a, b) => {
+              const timeA = a.startTime || '00:00';
+              const timeB = b.startTime || '00:00';
+              return timeA.localeCompare(timeB);
+            });
+          });
+          console.log('✅ Sorting completed successfully');
+        } catch (sortError) {
+          console.error('❌ Error during sorting:', sortError);
+          // Continue without sorting if there's an error
+        }
 
-      // Force state update to ensure UI refreshes
-      setTimetables(prev => {
-        const newState = { ...prev, [classId]: grouped };
-        console.log('Updated timetables state for class:', classId, newState[classId]);
-        return newState;
-      });
+        setTimetables(prev => ({ ...prev, [classId]: grouped }));
+        
+        const fetchTime = Date.now() - fetchStart;
+        console.log(`📅 Timetable updated for class ${classId}: ${timetableData?.length || 0} entries in ${fetchTime}ms`);
+        
+      } catch (processingError) {
+        console.error('❌ Error during timetable processing:', processingError);
+        throw processingError;
+      }
+      
     } catch (err) {
-      console.error('Error fetching timetable:', err);
-      setError('Failed to load timetable for selected class.');
+      console.error('❌ Error in fetchTimetableForClass:', {
+        error: err,
+        message: err.message,
+        stack: err.stack,
+        classId: classId,
+        tenantId: operationTenantId
+      });
+      setError('Failed to load timetable for selected class: ' + (err.message || 'Unknown error'));
     }
   };
 
@@ -242,6 +462,29 @@ const fetchTimetableForClass = async (classId) => {
 
     try {
       setLoading(true);
+      console.log('💾 SubjectsTimetable.handleSaveSubject: Starting save operation...');
+      
+      // 🔍 Validate tenant context with email fallback
+      let operationTenantId = currentTenant?.id;
+      console.log('🏷️ handleSaveSubject: Current tenant ID:', operationTenantId);
+      
+      if (!operationTenantId) {
+        console.log('⚠️ handleSaveSubject: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          operationTenantId = emailTenant?.id;
+          console.log('📧 handleSaveSubject: Email-based tenant ID:', operationTenantId);
+        } catch (emailError) {
+          console.error('❌ handleSaveSubject: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!operationTenantId) {
+          Alert.alert('Error', 'Unable to determine tenant context. Please try logging out and back in.');
+          setLoading(false);
+          return;
+        }
+      }
 
       // Validate that a class is selected in the form
       if (!subjectForm.classId) {
@@ -256,7 +499,7 @@ const fetchTimetableForClass = async (classId) => {
           .from(TABLES.SUBJECTS)
           .select('id, name')
           .eq('class_id', subjectForm.classId)
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', operationTenantId)
           .ilike('name', subjectForm.name.trim());
 
         if (checkError) {
@@ -279,7 +522,7 @@ const fetchTimetableForClass = async (classId) => {
           .from(TABLES.SUBJECTS)
           .select('id, name')
           .eq('class_id', subjectForm.classId)
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', operationTenantId)
           .ilike('name', subjectForm.name.trim())
           .neq('id', editSubject.id); // Exclude the current subject being edited
 
@@ -303,12 +546,12 @@ const fetchTimetableForClass = async (classId) => {
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
 
-const subjectData = {
+      const subjectData = {
         name: subjectForm.name,
         class_id: subjectForm.classId,
         academic_year: academicYear,
         is_optional: false, // Default to false, can be made configurable later
-        tenant_id: tenantId,
+        tenant_id: operationTenantId,
       };
 
       if (editSubject) {
@@ -324,19 +567,19 @@ const subjectData = {
         // Handle teacher assignment through junction table
         if (subjectForm.teacherId) {
           // First, remove existing teacher assignments for this subject
-await supabase
+          await supabase
             .from(TABLES.TEACHER_SUBJECTS)
             .delete()
             .eq('subject_id', editSubject.id)
-            .eq('tenant_id', tenantId);
+            .eq('tenant_id', operationTenantId);
 
           // Then add the new teacher assignment
-await supabase
+          await supabase
             .from(TABLES.TEACHER_SUBJECTS)
             .insert([{
               teacher_id: subjectForm.teacherId,
               subject_id: editSubject.id,
-              tenant_id: tenantId,
+              tenant_id: operationTenantId,
             }]);
         }
 
@@ -353,12 +596,12 @@ await supabase
 
         // Handle teacher assignment through junction table
         if (subjectForm.teacherId && data[0]) {
-await supabase
+          await supabase
             .from(TABLES.TEACHER_SUBJECTS)
             .insert([{
               teacher_id: subjectForm.teacherId,
               subject_id: data[0].id,
-              tenant_id: tenantId,
+              tenant_id: operationTenantId,
             }]);
         }
 
@@ -378,7 +621,30 @@ await supabase
 
   const refreshSubjects = async () => {
     try {
-const { data: subjectData, error: subjectError } = await supabase
+      console.log('🔄 SubjectsTimetable.refreshSubjects: Starting refresh...');
+      
+      // 🔍 Validate tenant context with email fallback
+      let operationTenantId = currentTenant?.id;
+      console.log('🏷️ refreshSubjects: Current tenant ID:', operationTenantId);
+      
+      if (!operationTenantId) {
+        console.log('⚠️ refreshSubjects: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          operationTenantId = emailTenant?.id;
+          console.log('📧 refreshSubjects: Email-based tenant ID:', operationTenantId);
+        } catch (emailError) {
+          console.error('❌ refreshSubjects: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!operationTenantId) {
+          console.error('❌ refreshSubjects: No tenant context available');
+          return;
+        }
+      }
+      
+      const { data: subjectData, error: subjectError } = await supabase
         .from(TABLES.SUBJECTS)
         .select(`
           *,
@@ -391,12 +657,19 @@ const { data: subjectData, error: subjectError } = await supabase
             section
           )
         `)
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', operationTenantId)
         .order('name');
-      if (subjectError) throw subjectError;
+        
+      if (subjectError) {
+        console.error('❌ refreshSubjects: Database error:', subjectError);
+        throw subjectError;
+      }
+      
       setSubjects(subjectData || []);
+      console.log(`✅ refreshSubjects: Loaded ${subjectData?.length || 0} subjects`);
+      
     } catch (error) {
-      console.error('Error refreshing subjects:', error);
+      console.error('❌ refreshSubjects: Error refreshing subjects:', error);
     }
   };
 
@@ -406,18 +679,51 @@ const { data: subjectData, error: subjectError } = await supabase
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try {
           setLoading(true);
+          console.log('🗑️ SubjectsTimetable.handleDeleteSubject: Starting delete operation for:', id);
+          
+          // 🔍 Validate tenant context with email fallback
+          let operationTenantId = currentTenant?.id;
+          console.log('🏷️ handleDeleteSubject: Current tenant ID:', operationTenantId);
+          
+          if (!operationTenantId) {
+            console.log('⚠️ handleDeleteSubject: No tenant from context, trying email lookup...');
+            
+            try {
+              const emailTenant = await getCurrentUserTenantByEmail();
+              operationTenantId = emailTenant?.id;
+              console.log('📧 handleDeleteSubject: Email-based tenant ID:', operationTenantId);
+            } catch (emailError) {
+              console.error('❌ handleDeleteSubject: Email tenant lookup failed:', emailError);
+            }
+            
+            if (!operationTenantId) {
+              Alert.alert('Error', 'Unable to determine tenant context. Please try logging out and back in.');
+              setLoading(false);
+              return;
+            }
+          }
+          
+          // 🗿 Delete with tenant validation
           const { error } = await supabase
             .from(TABLES.SUBJECTS)
             .delete()
-            .eq('id', id);
+            .eq('id', id)
+            .eq('tenant_id', operationTenantId); // 🔒 Ensure tenant ownership
 
-          if (error) throw error;
+          if (error) {
+            console.error('❌ handleDeleteSubject: Delete error:', error);
+            throw error;
+          }
+          
+          console.log('✅ handleDeleteSubject: Subject deleted successfully');
 
           setSubjects(subjects.filter(s => s.id !== id));
           Alert.alert('Success', 'Subject deleted successfully');
+          
         } catch (error) {
-          console.error('Error deleting subject:', error);
-          Alert.alert('Error', 'Failed to delete subject');
+          console.error('❌ handleDeleteSubject: Error deleting subject:', error);
+          const errorMessage = error.message || 'Failed to delete subject';
+          Alert.alert('Error', errorMessage);
         } finally {
           setLoading(false);
         }
@@ -427,7 +733,6 @@ const { data: subjectData, error: subjectError } = await supabase
 
   // Timetable helpers
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const periods = [1, 2, 3, 4, 5, 6];
   const getSubjectName = (subjectId) => {
     const subj = subjects.find(s => s.id === subjectId);
     return subj ? subj.name : '-';
@@ -491,6 +796,29 @@ const { data: subjectData, error: subjectError } = await supabase
 
     try {
       setLoading(true);
+      console.log('💾 SubjectsTimetable.handleSavePeriod: Starting save operation...');
+      
+      // 🔍 Validate tenant context with email fallback
+      let operationTenantId = currentTenant?.id;
+      console.log('🏷️ handleSavePeriod: Current tenant ID:', operationTenantId);
+      
+      if (!operationTenantId) {
+        console.log('⚠️ handleSavePeriod: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          operationTenantId = emailTenant?.id;
+          console.log('📧 handleSavePeriod: Email-based tenant ID:', operationTenantId);
+        } catch (emailError) {
+          console.error('❌ handleSavePeriod: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!operationTenantId) {
+          Alert.alert('Error', 'Unable to determine tenant context. Please try logging out and back in.');
+          setLoading(false);
+          return;
+        }
+      }
 
       // Validate that a subject is selected (current schema only supports subjects, not breaks)
       if (!subjectId) {
@@ -506,18 +834,21 @@ const { data: subjectData, error: subjectError } = await supabase
       // Generate period number based on start time
       const periodNumber = Math.floor((parseInt(startTime.split(':')[0]) - 8) * 2) + 1;
 
-      // Get teacher for the selected subject
+      // 🔍 Get teacher for the selected subject with tenant filtering
+      console.log('👨‍🏫 handleSavePeriod: Finding teacher for subject:', subjectId);
       let teacherId = null;
       const { data: teacherSubject, error: teacherError } = await supabase
         .from('teacher_subjects')
         .select('teacher_id')
         .eq('subject_id', subjectId)
+        .eq('tenant_id', operationTenantId)
         .single();
 
       if (teacherError) {
-        console.log('No teacher assigned to this subject yet');
+        console.log('⚠️ No teacher assigned to this subject yet:', teacherError.message);
       } else {
         teacherId = teacherSubject?.teacher_id;
+        console.log('✅ Found teacher ID:', teacherId, 'for subject:', subjectId);
       }
 
       // If no teacher is assigned to the subject, we need to assign one
@@ -539,13 +870,33 @@ const { data: subjectData, error: subjectError } = await supabase
         period_number: periodNumber,
         start_time: startTime,
         end_time: endTime,
-        academic_year: academicYear
+        academic_year: academicYear,
+        tenant_id: operationTenantId // 🏷️ Ensure tenant context is included
       };
+      
+      console.log('💾 handleSavePeriod: Timetable data prepared:', { ...timetableData, tenant_id: '[REDACTED]' });
 
       if (periodModal.period) {
-        // Edit existing period
-        const { data, error } = await dbHelpers.updateTimetableEntry(periodModal.period.id, timetableData);
-        if (error) throw error;
+        // 🔄 Edit existing period with enhanced tenant validation
+        console.log('🔄 handleSavePeriod: Updating existing period:', periodModal.period.id);
+        
+        const { data, error } = await supabase
+          .from(TABLES.TIMETABLE)
+          .update(timetableData)
+          .eq('id', periodModal.period.id)
+          .eq('tenant_id', operationTenantId) // 🔒 Double-check tenant ownership
+          .select('*');
+        
+        if (error) {
+          console.error('❌ handleSavePeriod: Update error:', error);
+          throw error;
+        }
+        
+        if (!data || data.length === 0) {
+          throw new Error('Period not found or access denied. Please refresh and try again.');
+        }
+        
+        console.log('✅ handleSavePeriod: Period updated successfully');
 
         // Update local state
         setTimetables(prev => {
@@ -557,20 +908,36 @@ const { data: subjectData, error: subjectError } = await supabase
             const subject = subjects.find(s => s.id === data[0].subject_id);
             dayTT[idx] = {
               id: data[0].id,
+              type: 'subject',
               subjectId: data[0].subject_id,
-              subject: subject?.name || 'Unknown Subject',
+              subject: { id: data[0].subject_id, name: subject?.name || 'Unknown Subject' },
               startTime: data[0].start_time,
               endTime: data[0].end_time,
-              periodNumber: data[0].period_number
+              label: subject?.name || 'Unknown Subject'
             };
           }
           classTT[periodModal.day] = dayTT;
           return { ...prev, [selectedClass]: classTT };
         });
       } else {
-        // Add new period
-        const { data, error } = await dbHelpers.createTimetableEntry(timetableData);
-        if (error) throw error;
+        // ➕ Add new period with tenant validation
+        console.log('➕ handleSavePeriod: Creating new period');
+        
+        const { data, error } = await supabase
+          .from(TABLES.TIMETABLE)
+          .insert([timetableData])
+          .select('*');
+        
+        if (error) {
+          console.error('❌ handleSavePeriod: Insert error:', error);
+          throw error;
+        }
+        
+        if (!data || data.length === 0) {
+          throw new Error('Failed to create period. Please try again.');
+        }
+        
+        console.log('✅ handleSavePeriod: Period created successfully');
 
         // Update local state
         setTimetables(prev => {
@@ -580,11 +947,12 @@ const { data: subjectData, error: subjectError } = await supabase
           const subject = subjects.find(s => s.id === data[0].subject_id);
           dayTT.push({
             id: data[0].id,
+            type: 'subject',
             subjectId: data[0].subject_id,
-            subject: subject?.name || 'Unknown Subject',
+            subject: { id: data[0].subject_id, name: subject?.name || 'Unknown Subject' },
             startTime: data[0].start_time,
             endTime: data[0].end_time,
-            periodNumber: data[0].period_number
+            label: subject?.name || 'Unknown Subject'
           });
           // Sort by start time
           dayTT.sort((a, b) => a.startTime.localeCompare(b.startTime));
@@ -594,10 +962,14 @@ const { data: subjectData, error: subjectError } = await supabase
       }
 
       setPeriodModal({ visible: false, day: '', period: null });
-      Alert.alert('Success', `Period ${periodModal.period ? 'updated' : 'added'} successfully`);
+      const operationType = periodModal.period ? 'updated' : 'added';
+      console.log(`✅ handleSavePeriod: Period ${operationType} successfully`);
+      Alert.alert('Success', `Period ${operationType} successfully`);
+      
     } catch (error) {
-      console.error('Error saving period:', error);
-      Alert.alert('Error', 'Failed to save period');
+      console.error('❌ handleSavePeriod: Error saving period:', error);
+      const errorMessage = error.message || 'Failed to save period';
+      Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -609,21 +981,58 @@ const { data: subjectData, error: subjectError } = await supabase
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try {
           setLoading(true);
-          const { error } = await dbHelpers.deleteTimetableEntry(id);
-          if (error) throw error;
+          console.log('🗑️ SubjectsTimetable.handleDeletePeriod: Starting delete operation for:', id);
+          
+          // 🔍 Validate tenant context with email fallback
+          let operationTenantId = currentTenant?.id;
+          console.log('🏷️ handleDeletePeriod: Current tenant ID:', operationTenantId);
+          
+          if (!operationTenantId) {
+            console.log('⚠️ handleDeletePeriod: No tenant from context, trying email lookup...');
+            
+            try {
+              const emailTenant = await getCurrentUserTenantByEmail();
+              operationTenantId = emailTenant?.id;
+              console.log('📧 handleDeletePeriod: Email-based tenant ID:', operationTenantId);
+            } catch (emailError) {
+              console.error('❌ handleDeletePeriod: Email tenant lookup failed:', emailError);
+            }
+            
+            if (!operationTenantId) {
+              Alert.alert('Error', 'Unable to determine tenant context. Please try logging out and back in.');
+              setLoading(false);
+              return;
+            }
+          }
+          
+          // 🗿 Delete with tenant validation
+          const { error } = await supabase
+            .from(TABLES.TIMETABLE)
+            .delete()
+            .eq('id', id)
+            .eq('tenant_id', operationTenantId); // 🔒 Ensure tenant ownership
+          
+          if (error) {
+            console.error('❌ handleDeletePeriod: Delete error:', error);
+            throw error;
+          }
+          
+          console.log('✅ handleDeletePeriod: Period deleted successfully');
 
           // Update local state
           setTimetables(prev => {
             const classTT = { ...prev[selectedClass] };
             const dayTT = classTT[day] ? [...classTT[day]] : [];
             classTT[day] = dayTT.filter(p => p.id !== id);
+            console.log(`🔄 Updated timetable state for ${day}: ${classTT[day].length} periods remaining`);
             return { ...prev, [selectedClass]: classTT };
           });
 
           Alert.alert('Success', 'Period deleted successfully');
         } catch (error) {
-          console.error('Error deleting period:', error);
-          Alert.alert('Error', 'Failed to delete period');
+          console.error('❌ handleDeletePeriod: Error deleting period:', error);
+          const errorMessage = error.message || 'Failed to delete period';
+          Alert.alert('Error', errorMessage);
         } finally {
           setLoading(false);
         }
@@ -672,16 +1081,33 @@ const { data: subjectData, error: subjectError } = await supabase
     return days[date.getDay() === 0 ? 6 : date.getDay() - 1]; // 0=Sunday, 1=Monday...
   }
 
-// Fetch period settings from database
+  // Fetch period settings from database
   const fetchPeriodSettings = async () => {
     try {
+      console.log('🔄 SubjectsTimetable.fetchPeriodSettings: Starting...');
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
 
-      if (!tenantId) {
-        console.warn('Could not determine tenantId from context for period settings; using defaults');
-        setPeriodSettings(getDefaultPeriods());
-        return;
+      // 🔍 Validate tenant context with email fallback
+      let operationTenantId = currentTenant?.id;
+      console.log('🏷️ fetchPeriodSettings: Current tenant ID:', operationTenantId);
+      
+      if (!operationTenantId) {
+        console.log('⚠️ fetchPeriodSettings: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          operationTenantId = emailTenant?.id;
+          console.log('📧 fetchPeriodSettings: Email-based tenant ID:', operationTenantId);
+        } catch (emailError) {
+          console.error('❌ fetchPeriodSettings: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!operationTenantId) {
+          console.warn('Could not determine tenantId from context for period settings; using defaults');
+          setPeriodSettings(getDefaultPeriods());
+          return;
+        }
       }
 
       const { data: periodData, error: periodError } = await supabase
@@ -690,7 +1116,7 @@ const { data: subjectData, error: subjectError } = await supabase
         .eq('academic_year', academicYear)
         .eq('period_type', 'class')
         .eq('is_active', true)
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', operationTenantId)
         .order('start_time');
       
       if (periodError) {
@@ -760,13 +1186,34 @@ const { data: subjectData, error: subjectError } = await supabase
     }
 
     try {
+      // 🔍 Validate tenant context with email fallback
+      let operationTenantId = currentTenant?.id;
+      console.log('🏷️ handleSubjectChange: Current tenant ID:', operationTenantId);
+      
+      if (!operationTenantId) {
+        console.log('⚠️ handleSubjectChange: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          operationTenantId = emailTenant?.id;
+          console.log('📧 handleSubjectChange: Email-based tenant ID:', operationTenantId);
+        } catch (emailError) {
+          console.error('❌ handleSubjectChange: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!operationTenantId) {
+          Alert.alert('Error', 'Unable to determine tenant context. Please try logging out and back in.');
+          return;
+        }
+      }
+      
       // Get teacher for the selected subject
       let teacherId = null;
-const { data: teacherSubject, error: teacherError } = await supabase
+      const { data: teacherSubject, error: teacherError } = await supabase
         .from('teacher_subjects')
         .select('teacher_id')
         .eq('subject_id', subjectId)
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', operationTenantId)
         .single();
 
       if (!teacherError && teacherSubject) {
@@ -787,7 +1234,7 @@ const { data: teacherSubject, error: teacherError } = await supabase
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
 
-const timetableData = {
+      const timetableData = {
         class_id: selectedClass,
         subject_id: subjectId,
         teacher_id: teacherId,
@@ -796,7 +1243,7 @@ const timetableData = {
         start_time: slot.startTime,
         end_time: slot.endTime,
         academic_year: academicYear,
-        tenant_id: tenantId,
+        tenant_id: operationTenantId,
       };
 
       // Check if period already exists for this slot (by start time)
@@ -805,13 +1252,13 @@ const timetableData = {
       );
 
       // Also check if there's already a period for this exact slot (class, day, period_number)
-const { data: existingPeriodBySlot, error: checkError } = await supabase
+      const { data: existingPeriodBySlot, error: checkError } = await supabase
         .from(TABLES.TIMETABLE)
         .select('id')
         .eq('class_id', selectedClass)
         .eq('day_of_week', day)
         .eq('period_number', slot.number)
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', operationTenantId)
         .maybeSingle();
 
       if (checkError && checkError.code !== 'PGRST116') {
@@ -831,7 +1278,7 @@ const { data: existingPeriodBySlot, error: checkError } = await supabase
         if (error) throw error;
       } else {
         // Create new period - use upsert to handle conflicts
-const { data, error } = await supabase
+        const { data, error } = await supabase
           .from(TABLES.TIMETABLE)
           .upsert([timetableData], {
             onConflict: 'class_id,day_of_week,period_number'
@@ -985,11 +1432,26 @@ const { data, error } = await supabase
               for (const copiedPeriod of copiedDayData) {
                 // Get teacher for the subject
                 let teacherId = null;
-const { data: teacherSubject, error: teacherError } = await supabase
+                // 🔍 Validate tenant context with email fallback
+                let operationTenantId = currentTenant?.id;
+                if (!operationTenantId) {
+                  try {
+                    const emailTenant = await getCurrentUserTenantByEmail();
+                    operationTenantId = emailTenant?.id;
+                  } catch (emailError) {
+                    console.error('❌ pasteTimetable: Email tenant lookup failed:', emailError);
+                  }
+                  
+                  if (!operationTenantId) {
+                    throw new Error('Unable to determine tenant context');
+                  }
+                }
+                
+                const { data: teacherSubject, error: teacherError } = await supabase
                   .from('teacher_subjects')
                   .select('teacher_id')
                   .eq('subject_id', copiedPeriod.subjectId)
-                  .eq('tenant_id', tenantId)
+                  .eq('tenant_id', operationTenantId)
                   .single();
 
                 if (!teacherError && teacherSubject) {
@@ -999,7 +1461,7 @@ const { data: teacherSubject, error: teacherError } = await supabase
                 // Generate period number based on start time
                 const periodNumber = Math.floor((parseInt(copiedPeriod.startTime.split(':')[0]) - 8) * 2) + 1;
 
-const timetableData = {
+                const timetableData = {
                   class_id: selectedClass,
                   subject_id: copiedPeriod.subjectId,
                   teacher_id: teacherId,
@@ -1008,10 +1470,10 @@ const timetableData = {
                   start_time: copiedPeriod.startTime,
                   end_time: copiedPeriod.endTime,
                   academic_year: academicYear,
-                  tenant_id: tenantId,
+                  tenant_id: operationTenantId,
                 };
 
-await supabase
+                await supabase
                   .from(TABLES.TIMETABLE)
                   .insert([timetableData]);
               }
@@ -1084,21 +1546,47 @@ await supabase
     setPeriodSettings(updated);
   };
 
-// Save period settings to database
+  // Save period settings to database
   const savePeriodSettingsToDatabase = async (periods, academicYear) => {
     try {
-      if (!tenantId) {
-        throw new Error('No tenantId available from context');
+      // 🔍 Validate tenant context with email fallback
+      let operationTenantId = currentTenant?.id;
+      console.log('🏷️ savePeriodSettingsToDatabase: Current tenant ID:', operationTenantId);
+      
+      if (!operationTenantId) {
+        console.log('⚠️ savePeriodSettingsToDatabase: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          operationTenantId = emailTenant?.id;
+          console.log('📧 savePeriodSettingsToDatabase: Email-based tenant ID:', operationTenantId);
+        } catch (emailError) {
+          console.error('❌ savePeriodSettingsToDatabase: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!operationTenantId) {
+          throw new Error('No tenantId available from context');
+        }
       }
       
+      console.log('🔍 Saving period settings for tenant:', operationTenantId, 'academic year:', academicYear);
+      
       // First, delete existing periods for this academic year and tenant
-      await supabase
+      const { error: deleteError } = await supabase
         .from('period_settings')
         .delete()
         .eq('academic_year', academicYear)
-        .eq('tenant_id', tenantId);
+        .eq('tenant_id', operationTenantId);
+        
+      if (deleteError) {
+        console.error('❌ Error deleting existing period settings:', deleteError);
+        throw deleteError;
+      }
+      
+      console.log('✅ Deleted existing period settings for tenant:', operationTenantId);
 
       // Insert new period settings with tenant_id
+      // Note: duration_minutes is a generated column, so we don't include it
       const periodsToInsert = periods.map(period => ({
         period_number: period.number,
         start_time: period.startTime,
@@ -1106,21 +1594,36 @@ await supabase
         period_name: period.name || `Period ${period.number}`,
         period_type: 'class',
         academic_year: academicYear,
-        tenant_id: tenantId,
+        tenant_id: operationTenantId,
         is_active: true
+        // duration_minutes will be calculated automatically by the database
       }));
+      
+      console.log('📄 Inserting', periodsToInsert.length, 'period settings for tenant:', operationTenantId);
 
       const { error: insertError } = await supabase
         .from('period_settings')
         .insert(periodsToInsert);
 
       if (insertError) {
+        console.error('❌ Insert error:', insertError);
+        
+        // Handle specific error types
+        if (insertError.code === '23505' && insertError.message?.includes('period_settings_unique_period')) {
+          console.error('❌ Unique constraint violation - period settings may exist for different tenant');
+          throw new Error('Period settings conflict detected. Please run the database fix script to resolve constraint issues.');
+        } else if (insertError.code === '428C9' && insertError.message?.includes('generated column')) {
+          console.error('❌ Generated column error - trying to insert into computed column');
+          throw new Error('Database schema issue with generated columns. Please contact support.');
+        }
+        
         throw insertError;
       }
-
+      
+      console.log('✅ Successfully inserted period settings for tenant:', operationTenantId);
       return true;
     } catch (error) {
-      console.error('Error saving period settings to database:', error);
+      console.error('❌ Error saving period settings to database:', error);
       throw error;
     }
   };

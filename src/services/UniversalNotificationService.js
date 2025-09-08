@@ -1,4 +1,5 @@
-import { supabase, TABLES, getUserTenantId } from '../utils/supabase';
+import { supabase, TABLES } from '../utils/supabase';
+import { createTenantQuery } from '../utils/tenantValidation';
 
 /**
  * Universal Notification Service
@@ -103,9 +104,13 @@ export class UniversalNotificationService {
     try {
       if (!userId) return 0;
 
-      const { data, error } = await supabase
-        .from(TABLES.MESSAGES)
-        .select('id')
+      // Get tenant ID from context or storage for tenant-aware query
+      const tenantId = global.currentTenantId; // Assume tenant ID is available globally
+      if (!tenantId) return 0;
+      
+      const tenantQuery = createTenantQuery(supabase.from(TABLES.MESSAGES), tenantId);
+      const { data, error } = await tenantQuery
+        .select('id, tenant_id')
         .eq('receiver_id', userId)
         .eq('is_read', false);
 
@@ -131,28 +136,30 @@ export class UniversalNotificationService {
     try {
       if (!userId || !userType) return 0;
 
-      const tenantId = await getUserTenantId();
+      // Get tenant ID from context or storage for tenant-aware query
+      const tenantId = global.currentTenantId; // Assume tenant ID is available globally
       if (!tenantId) return 0;
 
       const recipientType = this.getUserTypeForDB(userType);
 
-      // Get unread notifications with filtering similar to the screens
-      const { data: notificationData, error } = await supabase
-        .from(TABLES.NOTIFICATION_RECIPIENTS)
+      // Get unread notifications with filtering using tenant-aware query
+      const tenantNotificationQuery = createTenantQuery(supabase.from(TABLES.NOTIFICATION_RECIPIENTS), tenantId);
+      const { data: notificationData, error } = await tenantNotificationQuery
         .select(`
           id,
           is_read,
+          tenant_id,
           notifications(
             id,
             message,
             type,
             delivery_status,
-            delivery_mode
+            delivery_mode,
+            tenant_id
           )
         `)
         .eq('recipient_id', userId)
         .eq('recipient_type', recipientType)
-        .eq('tenant_id', tenantId)
         .eq('is_read', false);
 
       if (error) {

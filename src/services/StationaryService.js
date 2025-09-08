@@ -19,6 +19,8 @@ class StationaryService {
    */
   static async getStationaryItems(tenantId, activeOnly = false) {
     try {
+      console.log('🔍 StationaryService.getStationaryItems called with:', { tenantId, activeOnly });
+      
       let query = supabase
         .from(TABLES.STATIONARY_ITEMS)
         .select('*')
@@ -30,6 +32,13 @@ class StationaryService {
       }
 
       const { data, error } = await query;
+      
+      console.log('📊 StationaryService query result:', {
+        itemsFound: data?.length || 0,
+        tenantIdUsed: tenantId,
+        firstItem: data?.[0],
+        error: error?.message
+      });
 
       if (error) throw error;
       return data || [];
@@ -206,6 +215,8 @@ class StationaryService {
    */
   static async getPurchases(tenantId, filters = {}) {
     try {
+      console.log('🔍 StationaryService.getPurchases called with:', { tenantId, filters });
+      
       let query = supabase
         .from(TABLES.STATIONARY_PURCHASES)
         .select(`
@@ -231,6 +242,13 @@ class StationaryService {
       }
 
       const { data, error } = await query;
+      
+      console.log('📄 StationaryService purchases result:', {
+        purchasesFound: data?.length || 0,
+        tenantIdUsed: tenantId,
+        firstPurchase: data?.[0],
+        error: error?.message
+      });
 
       if (error) throw error;
       return data || [];

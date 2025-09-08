@@ -19,11 +19,22 @@ import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { ActivityIndicator as PaperActivityIndicator } from 'react-native-paper';
-import { useTenant } from '../../contexts/TenantContext';
+import { useTenantContext } from '../../contexts/TenantContext';
+import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
+import { useAuth } from '../../utils/AuthContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 // Will be fetched from Supabase
 const ManageTeachers = ({ navigation, route }) => {
-  const { tenantId, currentTenant } = useTenant();
+  const { tenantId, currentTenant } = useTenantContext();
+  const { user } = useAuth();
+  
+  // Debug tenant context
+  console.log('🏢 ManageTeachers: Component initialized with:', {
+    tenantId: tenantId || 'NULL',
+    currentTenant: currentTenant ? currentTenant.name : 'NULL',
+    userEmail: user?.email || 'NULL'
+  });
   const [subjects, setSubjects] = useState([]);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -40,8 +51,16 @@ const ManageTeachers = ({ navigation, route }) => {
   
   // Load data on component mount and when tenant changes
   useEffect(() => {
-    if (tenantId) {
+    console.log('🏢 ManageTeachers: useEffect triggered:', {
+      tenantId: tenantId || 'NULL',
+      user: user?.email || 'NULL'
+    });
+    
+    if (tenantId && user) {
+      console.log('🏢 ManageTeachers: Loading data with tenant and user available');
       loadData();
+    } else {
+      console.warn('🏢 ManageTeachers: Waiting for tenant context or user authentication...');
     }
     
     // Check if we need to open edit modal from navigation
@@ -50,7 +69,7 @@ const ManageTeachers = ({ navigation, route }) => {
         openEditModal(route.params.editTeacher);
       }, 500);
     }
-  }, [route.params, tenantId]);
+  }, [route.params, tenantId, user]);
 
   useEffect(() => {
     // When selected classes change, filter out subjects that are no longer valid
@@ -72,185 +91,156 @@ const ManageTeachers = ({ navigation, route }) => {
 
   }, [form.classes, subjects]);
   
-  // Function to load all necessary data
+  // Function to load all necessary data with timeout
   const loadData = async () => {
     const startTime = performance.now(); // 📊 Performance monitoring
     setLoading(true);
     setError(null);
     
+    // 🚀 Add timeout to prevent infinite loading
+    const timeoutId = setTimeout(() => {
+      console.error('❌ ManageTeachers: Loading timeout (10s) - probably network issue');
+      setError('Loading timeout. Please check your internet connection and try again.');
+      setLoading(false);
+    }, 10000); // 10 second timeout
+    
     try {
-      // Check if we have a valid tenant
+      console.log('🏢 ManageTeachers: Starting loadData function...');
+      
+      // Verify tenant context is available
       if (!tenantId) {
-        console.warn('No tenant ID available, waiting for tenant context...');
-        setError('No school/tenant selected. Please contact your administrator.');
+        console.error('❌ ManageTeachers: No tenantId available from context');
+        
+        // Try to get tenant via email as fallback
+        console.log('🏢 ManageTeachers: Attempting email-based tenant lookup as fallback...');
+        const emailTenantResult = await getCurrentUserTenantByEmail();
+        
+        if (!emailTenantResult.success) {
+          const errorMsg = `No tenant context available: ${emailTenantResult.error}`;
+          console.error('❌ ManageTeachers:', errorMsg);
+          setError(errorMsg);
+          setLoading(false);
+          return;
+        }
+        
+        console.log('🏢 ManageTeachers: Email-based tenant lookup successful, but context is null');
+        setError('Tenant context loading issue. Please refresh the page.');
+        setLoading(false);
+        return;
+      }
+      
+      // 🛑️ Validate tenant access first
+      const validation = await validateTenantAccess(tenantId, user?.id, 'ManageTeachers');
+      if (!validation.isValid) {
+        console.error('❌ ManageTeachers: Tenant validation failed:', validation.error);
+        setError(validation.error);
         setLoading(false);
         return;
       }
 
-      console.log('🚀 Loading teachers with optimized query for tenant:', tenantId);
+      console.log('🚀 ManageTeachers: Loading teachers with optimized query for tenant:', tenantId);
       
-      // Use a single JOIN query to get all teacher data with related information (filtered by tenant)
+      // 🚀 OPTIMIZED: Simple direct query - much faster
+      console.log('🏢 ManageTeachers: Fetching teachers with optimized query...');
       const { data: teachersData, error: teachersError } = await supabase
         .from(TABLES.TEACHERS)
-        .select(`
-          *,
-          users(
-            id,
-            full_name,
-            email,
-            phone,
-            profile_url
-          )
-        `)
+        .select('*')
         .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false });
+      
+      console.log('🏢 ManageTeachers: Teachers query result:', {
+        success: !teachersError,
+        count: teachersData?.length || 0,
+        error: teachersError?.message || 'none'
+      });
       
       if (teachersError) {
         console.error("Supabase error loading teachers:", teachersError);
         throw new Error('Failed to load teachers');
       }
       
-      // Load classes (filtered by tenant)
-      const { data: classesData, error: classesError } = await supabase
-        .from(TABLES.CLASSES)
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .order('class_name');
-      if (classesError) throw new Error('Failed to load classes');
+      // 🚀 OPTIMIZED: Direct parallel queries - much faster
+      console.log('🏢 ManageTeachers: Fetching classes and subjects...');
+      const [classesResult, subjectsResult] = await Promise.all([
+        supabase
+          .from(TABLES.CLASSES)
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .order('class_name'),
+        supabase
+          .from(TABLES.SUBJECTS)
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .order('name')
+      ]);
       
-      // Load subjects (filtered by tenant)
-      const { data: subjectsData, error: subjectsError } = await supabase
-        .from(TABLES.SUBJECTS)
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .order('name');
-      if (subjectsError) throw new Error('Failed to load subjects');
+      const { data: classesData, error: classesError } = classesResult;
+      const { data: subjectsData, error: subjectsError } = subjectsResult;
+      
+      console.log('🏢 ManageTeachers: Classes result:', {
+        success: !classesError,
+        count: classesData?.length || 0
+      });
+      console.log('🏢 ManageTeachers: Subjects result:', {
+        success: !subjectsError,
+        count: subjectsData?.length || 0
+      });
+      
+      if (classesError) throw new Error(`Failed to load classes: ${classesError.message}`);
+      if (subjectsError) throw new Error(`Failed to load subjects: ${subjectsError.message}`);
+      
+      // 🚀 OPTIMIZED: Set data immediately and load assignments later if needed
+      console.log('🏢 ManageTeachers: Setting basic data immediately...');
+      setClasses(classesData || []);
+      setSubjects(subjectsData || []);
       
       if (!teachersData || teachersData.length === 0) {
+        console.log('🏢 ManageTeachers: No teachers found, setting empty state');
         setTeachers([]);
-        setClasses(classesData);
-        setSubjects(subjectsData);
         return;
       }
       
-      // Get all teacher subject assignments in a single query (filtered by tenant)
-      const teacherIds = teachersData.map(t => t.id);
-      let allTeacherSubjects = [];
-      let classTeacherAssignments = [];
+      // 🚀 OPTIMIZED: Simplified teacher processing - no complex assignments for initial load
+      console.log('🏢 ManageTeachers: Processing', teachersData.length, 'teachers...');
+      const processedTeachers = teachersData.map(teacher => ({
+        ...teacher,
+        subjects: [], // Load these on-demand when editing
+        classes: [], // Load these on-demand when editing
+        isClassTeacher: false // Will be updated when needed
+      }));
       
-      if (teacherIds.length > 0) {
-        const { data: teacherSubjectsData } = await supabase
-          .from(TABLES.TEACHER_SUBJECTS)
-          .select(`
-            teacher_id,
-            subject_id,
-            subjects(
-              id,
-              name,
-              class_id
-            )
-          `)
-          .eq('tenant_id', tenantId)
-          .in('teacher_id', teacherIds);
-        allTeacherSubjects = teacherSubjectsData || [];
-        
-        // Also get direct class teacher assignments from classes table (filtered by tenant)
-        const { data: classTeacherData } = await supabase
-          .from('classes')
-          .select('id, class_teacher_id')
-          .eq('tenant_id', tenantId)
-          .in('class_teacher_id', teacherIds)
-          .not('class_teacher_id', 'is', null);
-        classTeacherAssignments = classTeacherData || [];
-      }
-      
-      // Create teacher subjects lookup map for O(1) access
-      const teacherSubjectsLookup = {};
-      (allTeacherSubjects || []).forEach(assignment => {
-        if (!teacherSubjectsLookup[assignment.teacher_id]) {
-          teacherSubjectsLookup[assignment.teacher_id] = [];
-        }
-        teacherSubjectsLookup[assignment.teacher_id].push(assignment);
-      });
-      
-      // Create class teacher lookup map
-      const classTeacherLookup = {};
-      (classTeacherAssignments || []).forEach(assignment => {
-        if (!classTeacherLookup[assignment.class_teacher_id]) {
-          classTeacherLookup[assignment.class_teacher_id] = [];
-        }
-        classTeacherLookup[assignment.class_teacher_id].push(assignment.id);
-      });
-      
-      // Process teacher data - no async operations needed
-      const processedTeachers = teachersData.map(teacher => {
-        const teacherSubjects = teacherSubjectsLookup[teacher.id] || [];
-        const directClassAssignments = classTeacherLookup[teacher.id] || [];
-        
-        // Extract unique subject IDs and class IDs from subject assignments
-        const subjectIds = new Set();
-        const classIds = new Set();
-        teacherSubjects.forEach(ts => {
-          if (ts.subject_id) subjectIds.add(ts.subject_id);
-          if (ts.subjects?.class_id) classIds.add(ts.subjects.class_id);
-        });
-        
-        // Add direct class teacher assignments (classes where this teacher is the class teacher)
-        directClassAssignments.forEach(classId => {
-          classIds.add(classId);
-        });
-        
-        return {
-          ...teacher,
-          subjects: Array.from(subjectIds),
-          classes: Array.from(classIds),
-          isClassTeacher: directClassAssignments.length > 0, // Flag to indicate if they're a class teacher
-        };
-      });
-      
-      // Update state with loaded data
+      // 🚀 OPTIMIZED: Set teachers immediately without complex processing
       setTeachers(processedTeachers);
-      setClasses(classesData || []);
-      // Ensure subjects are unique by ID before setting to state
-      const uniqueSubjects = Array.from(new Map((subjectsData || []).map(subject => [subject.id, subject])).values());
-      setSubjects(uniqueSubjects);
       
-      // Debug logging
-      console.log('📊 Data loaded for tenant', tenantId, ':', {
-        teachers: processedTeachers?.length || 0,
+      // Simple logging
+      console.log('📊 ManageTeachers: Data loaded successfully:', {
+        teachers: processedTeachers.length,
         classes: classesData?.length || 0,
-        subjects: uniqueSubjects?.length || 0
-      });
-      
-      // Debug teacher photo data
-      console.log('🖼️ Teacher photo debug:');
-      processedTeachers?.forEach(teacher => {
-        console.log(`Teacher: ${teacher.name}`);
-        console.log(`  - Has user data: ${!!teacher.users}`);
-        console.log(`  - User full_name: ${teacher.users?.full_name || 'N/A'}`);
-        console.log(`  - Profile URL: ${teacher.users?.profile_url || 'N/A'}`);
-        console.log(`  - User ID: ${teacher.users?.id || 'N/A'}`);
-        console.log('---');
+        subjects: subjectsData?.length || 0,
+        tenantId
       });
       
       // 📊 Performance monitoring
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
-      console.log(`✅ Teachers loaded successfully in ${loadTime}ms`);
-      console.log(`📈 Performance: ${processedTeachers.length} teachers processed`);
+      console.log(`✅ ManageTeachers: Data loaded in ${loadTime}ms - ${processedTeachers.length} teachers`);
       
-      if (loadTime > 1000) {
-        console.warn('⚠️ Slow loading detected. Consider adding more database indexes.');
+      if (loadTime > 2000) {
+        console.warn('⚠️ ManageTeachers: Slow loading (>2s). Check network connection.');
+      } else if (loadTime > 500) {
+        console.log('🟠 ManageTeachers: Moderate loading speed');
       } else {
-        console.log('🚀 Fast loading achieved!');
+        console.log('🚀 ManageTeachers: Fast loading achieved!');
       }
       
     } catch (err) {
+      clearTimeout(timeoutId); // Clear timeout on error
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
-      console.error(`❌ Error loading teachers after ${loadTime}ms:`, err);
-      setError(err.message);
+      console.error(`❌ ManageTeachers: Error loading after ${loadTime}ms:`, err);
+      setError(err.message || 'Failed to load teachers data');
     } finally {
+      clearTimeout(timeoutId); // Clear timeout on completion
       setLoading(false);
     }
   };
@@ -283,7 +273,7 @@ const ManageTeachers = ({ navigation, route }) => {
     }
     
     try {
-      // Load sections for all selected classes from the classes table (filtered by tenant)
+      // 🚀 OPTIMIZED: Simple direct query
       const { data, error } = await supabase
         .from(TABLES.CLASSES)
         .select('section')
@@ -292,19 +282,20 @@ const ManageTeachers = ({ navigation, route }) => {
         .not('section', 'is', null);
       
       if (error) {
-        console.warn('Error loading sections:', error);
+        console.warn('🏢 ManageTeachers: Error loading sections:', error.message);
         setSections([]);
         return;
       }
       
       // Extract unique sections
-      const uniqueSections = [...new Set(data.map(item => item.section))]
+      const uniqueSections = [...new Set((data || []).map(item => item.section))]
         .filter(section => section && section.trim() !== '')
         .map(section => ({ id: section, section_name: section }));
       
       setSections(uniqueSections);
+      console.log('🏢 ManageTeachers: Loaded', uniqueSections.length, 'unique sections');
     } catch (error) {
-      console.warn('Error in loadSectionsForClasses:', error);
+      console.warn('🏢 ManageTeachers: Error in loadSectionsForClasses:', error.message);
       setSections([]);
     }
   };
@@ -403,7 +394,22 @@ const ManageTeachers = ({ navigation, route }) => {
     setSelectedTeacher(null);
   };
   const handleSave = async () => {
-    console.log('Save button clicked, form data:', form);
+    console.log('🏢 ManageTeachers: Save button clicked, form data:', form);
+    console.log('🏢 ManageTeachers: Saving with tenant context:', {
+      tenantId: tenantId || 'NULL',
+      modalMode,
+      userEmail: user?.email || 'NULL'
+    });
+    
+    // 🛑️ Validate tenant access first
+    const validation = await validateTenantAccess(tenantId, user?.id, 'ManageTeachers - Save');
+    if (!validation.isValid) {
+      console.error('❌ ManageTeachers: Save validation failed:', validation.error);
+      Alert.alert('Access Denied', validation.error);
+      return;
+    }
+    
+    console.log('🏢 ManageTeachers: Validation passed, proceeding with save...');
 
     if (!form.name.trim() || !form.phone.trim() || !form.age.trim()) {
       Alert.alert('Error', 'Please fill all required fields (name, phone, age).');
@@ -497,12 +503,18 @@ const ManageTeachers = ({ navigation, route }) => {
       console.log('Saving assignments for teacher:', teacherId);
       console.log('Form data:', { subjects: form.subjects, classes: form.classes, sections: form.sections });
 
+      // 🛡️ Validate tenant access for assignments
+      const validation = await validateTenantAccess(tenantId, user?.id, 'ManageTeachers - Assignments');
+      if (!validation.isValid) {
+        throw new Error(`Assignment access denied: ${validation.error}`);
+      }
+
       // 1. Handle subject assignments first
-      // Get all existing subject assignments for this teacher
-      const { data: existingAssignments, error: fetchError } = await supabase
-        .from(TABLES.TEACHER_SUBJECTS)
+      // Get all existing subject assignments for this teacher using tenant-aware query
+      const { data: existingAssignments, error: fetchError } = await createTenantQuery(tenantId, TABLES.TEACHER_SUBJECTS)
         .select('*')
-        .eq('teacher_id', teacherId);
+        .eq('teacher_id', teacherId)
+        .execute();
       if (fetchError) {
         console.error('Failed to fetch existing assignments:', fetchError);
         throw new Error('Failed to fetch existing assignments');
@@ -622,6 +634,18 @@ const ManageTeachers = ({ navigation, route }) => {
           onPress: async () => {
             setLoading(true);
             try {
+              // 🛑️ Validate tenant access for deletion
+              console.log('🏢 ManageTeachers: Delete validation for tenant:', tenantId);
+              const validation = await validateTenantAccess(tenantId, user?.id, 'ManageTeachers - Delete');
+              if (!validation.isValid) {
+                console.error('❌ ManageTeachers: Delete validation failed:', validation.error);
+                Alert.alert('Access Denied', validation.error);
+                setLoading(false);
+                return;
+              }
+              
+              console.log('🏢 ManageTeachers: Delete validation passed');
+              
               console.log(`Starting deletion process for teacher: ${teacher.name} (ID: ${teacher.id})`);
               
               // Delete all related data in the correct order (from most dependent to least)

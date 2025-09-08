@@ -14,6 +14,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
+import { useTenantContext } from '../../contexts/TenantContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 // NEW: Modern Filter System
 import ModernFilters from '../../components/ui/ModernFilters';
@@ -30,6 +32,7 @@ const { width } = Dimensions.get('window');
 
 const LeaveManagementModern = ({ navigation, route }) => {
   console.log('🎬 [LEAVE_MGMT] Component render started');
+  const { currentTenant } = useTenantContext();
   
   // Existing state
   const [leaveApplications, setLeaveApplications] = useState([]);
@@ -319,10 +322,38 @@ const LeaveManagementModern = ({ navigation, route }) => {
 
   // Load leave applications from Supabase database
   const loadLeaveApplications = async () => {
+    const startTime = performance.now();
+    let timeoutId;
+    
     try {
       setIsLoading(true);
-      console.log('📄 [LEAVE_MGMT] Starting to load leave applications from database...');
-      console.log('📄 [LEAVE_MGMT] Current user:', user?.email || 'Not logged in');
+      console.log('🚀 LeaveManagementModern: Starting optimized data load...');
+      
+      // ⏰ Set timeout protection
+      timeoutId = setTimeout(() => {
+        console.warn('⚠️ LeaveManagementModern: Load timeout (10s)');
+        throw new Error('Loading timeout - please check your connection');
+      }, 10000);
+      
+      // 🔍 Validate tenant context
+      let tenantId = currentTenant?.id;
+      console.log('📋 LeaveManagementModern: Current tenant ID:', tenantId);
+      
+      if (!tenantId) {
+        console.log('⚠️ LeaveManagementModern: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          tenantId = emailTenant?.id;
+          console.log('📧 LeaveManagementModern: Email-based tenant ID:', tenantId);
+        } catch (emailError) {
+          console.error('❌ LeaveManagementModern: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!tenantId) {
+          throw new Error('Unable to determine tenant context. Please contact support.');
+        }
+      }
       
       // Check current session first
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -337,7 +368,7 @@ const LeaveManagementModern = ({ navigation, route }) => {
         return;
       }
       
-      console.log('📄 [LEAVE_MGMT] Querying leave_applications table...');
+      console.log('📊 LeaveManagementModern: Querying leave_applications table with tenant filter...');
       
       // Query leave applications from Supabase with joins to get employee names
       const { data: applications, error } = await supabase
@@ -347,6 +378,7 @@ const LeaveManagementModern = ({ navigation, route }) => {
           teacher:teachers!leave_applications_teacher_id_fkey(name),
           applied_by_user:users!leave_applications_applied_by_fkey(full_name)
         `)
+        .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false });
       
       console.log('📊 [LEAVE_MGMT] Leave applications query result:');
@@ -420,24 +452,30 @@ const LeaveManagementModern = ({ navigation, route }) => {
         return transformed;
       });
       
-      console.log('✅ [LEAVE_MGMT] Successfully loaded and transformed', transformedApplications.length, 'leave applications');
-      console.log('📊 [LEAVE_MGMT] Final transformed data:', JSON.stringify(transformedApplications, null, 2));
+      clearTimeout(timeoutId);
+      
+      console.log(`✅ LeaveManagementModern: Successfully loaded ${transformedApplications.length} leave applications`);
       
       setLeaveApplications(transformedApplications);
       setFilteredApplications(transformedApplications);
       
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.log(`✅ LeaveManagementModern: Data loaded in ${loadTime}ms`);
+      
+      if (loadTime > 2000) {
+        console.warn('⚠️ LeaveManagementModern: Slow loading (>2s). Check network.');
+      } else {
+        console.log('🚀 LeaveManagementModern: Fast loading achieved!');
+      }
+      
     } catch (error) {
-      console.error('💥 [LEAVE_MGMT] Error loading leave applications:', error);
-      console.error('💥 [LEAVE_MGMT] Error stack:', error.stack);
-      console.error('💥 [LEAVE_MGMT] Error details:', {
-        message: error.message,
-        code: error.code,
-        hint: error.hint,
-        details: error.details,
-        name: error.name
-      });
-      Alert.alert('Error', 'An unexpected error occurred while loading leave applications.');
+      clearTimeout(timeoutId);
+      console.error('❌ LeaveManagementModern: Failed to load data:', error.message);
+      Alert.alert('Error', error.message || 'An unexpected error occurred while loading leave applications.');
     } finally {
+      clearTimeout(timeoutId);
       console.log('🏁 [LEAVE_MGMT] Finished loading leave applications, setting loading to false');
       setIsLoading(false);
     }

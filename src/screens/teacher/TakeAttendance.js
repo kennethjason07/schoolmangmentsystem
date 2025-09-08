@@ -8,6 +8,13 @@ import * as Print from 'expo-print';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import { createBulkAttendanceNotifications } from '../../utils/attendanceNotificationHelpers';
+import { 
+  validateTenantAccess, 
+  createTenantQuery, 
+  validateDataTenancy,
+  TENANT_ERROR_MESSAGES 
+} from '../../utils/tenantValidation';
+import { useTenantContext } from '../../contexts/TenantContext';
 
 function formatDateDMY(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') return '';
@@ -41,6 +48,7 @@ const TakeAttendance = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [clearMode, setClearMode] = useState(false); // Track if user manually cleared attendance
   const { user } = useAuth();
+  const { tenantId } = useTenantContext();
 
   // Fetch teacher's assigned classes and students
   const fetchClassesAndStudents = async () => {
@@ -48,15 +56,23 @@ const TakeAttendance = () => {
       setLoading(true);
       setError(null);
       
+      // Validate tenant access before proceeding
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Tenant validation failed:', tenantValidation.error);
+        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+        return;
+      }
+      
       // Get teacher info using the helper function
       const { data: teacherData, error: teacherError } = await dbHelpers.getTeacherByUserId(user.id);
 
       if (teacherError || !teacherData) throw new Error('Teacher not found');
       setTeacherInfo(teacherData);
 
-      // Get assigned classes and subjects
-      const { data: assignedSubjects, error: subjectsError } = await supabase
-        .from(TABLES.TEACHER_SUBJECTS)
+      // Get assigned classes and subjects with tenant isolation
+      const tenantQuery = createTenantQuery(supabase.from(TABLES.TEACHER_SUBJECTS), tenantId);
+      const { data: assignedSubjects, error: subjectsError } = await tenantQuery
         .select(`
           *,
           subjects(
@@ -69,6 +85,21 @@ const TakeAttendance = () => {
         .eq('teacher_id', teacherData.id);
 
       if (subjectsError) throw subjectsError;
+
+      // Validate fetched data belongs to correct tenant
+      const validationResult = await validateDataTenancy(
+        assignedSubjects?.map(s => ({ 
+          id: s.id, 
+          tenant_id: s.tenant_id 
+        })) || [],
+        tenantId
+      );
+      
+      if (!validationResult.isValid) {
+        console.error('❌ Tenant data validation failed:', validationResult.error);
+        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
+        return;
+      }
 
       // Extract unique classes
       const classMap = new Map();
@@ -113,19 +144,44 @@ const TakeAttendance = () => {
     try {
       setLoading(true);
       
-      // Get students for the selected class
-      const { data: studentsData, error: studentsError } = await supabase
-        .from(TABLES.STUDENTS)
+      // Validate tenant access before fetching students
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Tenant validation failed for students:', tenantValidation.error);
+        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+        return;
+      }
+      
+      // Get students for the selected class with tenant isolation
+      const tenantQuery = createTenantQuery(supabase.from(TABLES.STUDENTS), tenantId);
+      const { data: studentsData, error: studentsError } = await tenantQuery
         .select(`
           id,
           name,
           admission_no,
-          classes(class_name, section)
+          classes(class_name, section),
+          tenant_id
         `)
         .eq('class_id', selectedClass)
         .order('admission_no');
 
       if (studentsError) throw studentsError;
+      
+      // Validate fetched students belong to correct tenant
+      const validationResult = await validateDataTenancy(
+        studentsData?.map(s => ({ 
+          id: s.id, 
+          tenant_id: s.tenant_id 
+        })) || [],
+        tenantId
+      );
+      
+      if (!validationResult.isValid) {
+        console.error('❌ Student data validation failed:', validationResult.error);
+        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
+        return;
+      }
+      
       setStudents(studentsData || []);
 
     } catch (err) {
@@ -147,19 +203,40 @@ const TakeAttendance = () => {
     }
     
     try {
+      // Validate tenant access before fetching attendance
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Tenant validation failed for attendance:', tenantValidation.error);
+        return; // Silent return for better UX on attendance fetch
+      }
+      
       console.log('🔍 [DEBUG] Fetching existing attendance...');
       console.log('🔍 [DEBUG] Class ID:', selectedClass);
       console.log('🔍 [DEBUG] Date:', selectedDate);
       console.log('🔍 [DEBUG] Student IDs:', students.map(s => s.id));
       
-      // Get existing attendance records
-      const { data: attendanceData, error: attendanceError } = await supabase
-        .from(TABLES.STUDENT_ATTENDANCE)
-        .select('student_id, status')  // Only get what we need
+      // Get existing attendance records with tenant isolation
+      const tenantQuery = createTenantQuery(supabase.from(TABLES.STUDENT_ATTENDANCE), tenantId);
+      const { data: attendanceData, error: attendanceError } = await tenantQuery
+        .select('student_id, status, tenant_id')  // Include tenant_id for validation
         .eq('date', selectedDate)
         .eq('class_id', selectedClass);
 
       if (attendanceError) throw attendanceError;
+
+      // Validate fetched attendance data belongs to correct tenant
+      const validationResult = await validateDataTenancy(
+        attendanceData?.map(a => ({ 
+          id: a.student_id, 
+          tenant_id: a.tenant_id 
+        })) || [],
+        tenantId
+      );
+      
+      if (!validationResult.isValid) {
+        console.error('❌ Attendance data validation failed:', validationResult.error);
+        return; // Silent return for better UX
+      }
 
       console.log('🔍 [DEBUG] Found attendance records:', attendanceData?.length || 0);
       console.log('🔍 [DEBUG] Attendance data:', JSON.stringify(attendanceData, null, 2));
@@ -265,6 +342,14 @@ const TakeAttendance = () => {
       
       setLoading(true);
       
+      // Validate tenant access before saving attendance
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Tenant validation failed for saving attendance:', tenantValidation.error);
+        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+        return;
+      }
+      
       if (students.length === 0) {
         Alert.alert('No Students', 'No students found for the selected class and section.');
         return;
@@ -309,13 +394,13 @@ const TakeAttendance = () => {
       // we'll delete existing records for these students on this date, then insert new ones
       console.log('🔄 [WORKAROUND] Delete existing records then insert new ones (no unique constraint available)');
       
-      // Step 1: Delete existing attendance records for these students on this date
-      // RLS policies will automatically ensure only records from the current user's tenant are affected
+      // Step 1: Delete existing attendance records for these students on this date with tenant isolation
+      // Use tenant-aware query to ensure only records from the current tenant are affected
       const studentIds = attendanceRecords.map(record => record.student_id);
-      console.log('🗑️ [DELETE] Removing existing records for students (RLS-filtered):', studentIds);
+      console.log('🗑️ [DELETE] Removing existing records for students with tenant isolation:', studentIds);
       
-      const { error: deleteError } = await supabase
-        .from(TABLES.STUDENT_ATTENDANCE)
+      const tenantDeleteQuery = createTenantQuery(supabase.from(TABLES.STUDENT_ATTENDANCE), tenantId);
+      const { error: deleteError } = await tenantDeleteQuery
         .delete()
         .eq('date', selectedDate)
         .eq('class_id', selectedClass)
@@ -328,11 +413,11 @@ const TakeAttendance = () => {
       
       console.log('✅ [DELETE] Successfully deleted existing records');
       
-      // Step 2: Insert the new attendance records
-      console.log('➕ [INSERT] Inserting new attendance records');
+      // Step 2: Insert the new attendance records with tenant isolation
+      console.log('➕ [INSERT] Inserting new attendance records with tenant isolation');
       
-      const { error: insertError } = await supabase
-        .from(TABLES.STUDENT_ATTENDANCE)
+      const tenantInsertQuery = createTenantQuery(supabase.from(TABLES.STUDENT_ATTENDANCE), tenantId);
+      const { error: insertError } = await tenantInsertQuery
         .insert(attendanceRecords);
         
       if (insertError) {
@@ -374,28 +459,67 @@ const TakeAttendance = () => {
     if (!viewClass || !viewDate) return;
     
     try {
-      // Get students for the view class
-      const { data: viewStudents } = await supabase
-        .from(TABLES.STUDENTS)
-        .select('id, name, admission_no')
+      // Validate tenant access before fetching view attendance
+      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      if (!tenantValidation.isValid) {
+        console.error('❌ Tenant validation failed for view attendance:', tenantValidation.error);
+        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+        return;
+      }
+      
+      // Get students for the view class with tenant isolation
+      const tenantStudentQuery = createTenantQuery(supabase.from(TABLES.STUDENTS), tenantId);
+      const { data: viewStudents } = await tenantStudentQuery
+        .select('id, name, admission_no, tenant_id')
         .eq('class_id', viewClass);
 
       if (!viewStudents || viewStudents.length === 0) {
         setViewAttendance([]);
         return;
       }
+      
+      // Validate students belong to correct tenant
+      const studentValidation = await validateDataTenancy(
+        viewStudents?.map(s => ({ 
+          id: s.id, 
+          tenant_id: s.tenant_id 
+        })) || [],
+        tenantId
+      );
+      
+      if (!studentValidation.isValid) {
+        console.error('❌ Student validation failed for view:', studentValidation.error);
+        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
+        return;
+      }
 
-      // Get attendance records
-      const { data: attendanceData, error: attendanceError } = await supabase
-        .from(TABLES.STUDENT_ATTENDANCE)
+      // Get attendance records with tenant isolation
+      const tenantAttendanceQuery = createTenantQuery(supabase.from(TABLES.STUDENT_ATTENDANCE), tenantId);
+      const { data: attendanceData, error: attendanceError } = await tenantAttendanceQuery
         .select(`
           *,
-          students(name, admission_no)
+          students(name, admission_no),
+          tenant_id
         `)
         .eq('date', viewDate)
         .in('student_id', viewStudents.map(s => s.id));
 
       if (attendanceError) throw attendanceError;
+      
+      // Validate attendance data belongs to correct tenant
+      const attendanceValidation = await validateDataTenancy(
+        attendanceData?.map(a => ({ 
+          id: a.id, 
+          tenant_id: a.tenant_id 
+        })) || [],
+        tenantId
+      );
+      
+      if (!attendanceValidation.isValid) {
+        console.error('❌ Attendance validation failed for view:', attendanceValidation.error);
+        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
+        return;
+      }
 
       // Combine student info with attendance
       const combinedAttendance = viewStudents.map(student => {
@@ -483,6 +607,37 @@ const TakeAttendance = () => {
         [studentId]: status
       };
     });
+  };
+
+  // Mark all students as present
+  const markAllAsPresent = () => {
+    if (students.length === 0) {
+      Alert.alert('No Students', 'No students found to mark as present.');
+      return;
+    }
+
+    Alert.alert(
+      'Mark All as Present',
+      `Are you sure you want to mark all ${students.length} students as Present for ${displayDate || formatDateDMY(selectedDate)}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Mark All Present',
+          style: 'default',
+          onPress: () => {
+            const newAttendanceMark = {};
+            students.forEach(student => {
+              newAttendanceMark[student.id] = 'Present';
+            });
+            setAttendanceMark(newAttendanceMark);
+            
+            // Show success message
+            Alert.alert('Success', `All ${students.length} students have been marked as Present.`);
+            console.log(`✅ Marked all ${students.length} students as Present`);
+          }
+        }
+      ]
+    );
   };
 
   // Handle pull-to-refresh
@@ -662,56 +817,65 @@ const TakeAttendance = () => {
                 <View style={[styles.headerCellContainer, { flex: 3.5 }]}>
                   <Ionicons name="person" size={16} color="#1976d2" style={{ marginRight: 4 }} />
                   <Text style={styles.headerCell}>Student Details</Text>
-                  <TouchableOpacity 
-                    style={styles.clearButton}
-                    onPress={() => {
-                      Alert.alert(
-                        'Clear Attendance',
-                        'Are you sure you want to clear all attendance marks? This will permanently delete the attendance records for this date.',
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          { 
-                            text: 'Clear All', 
-                            style: 'destructive',
-                            onPress: async () => {
-                              try {
-                                setLoading(true);
-                                
-                                // Delete attendance records from database
-                                const { error: deleteError } = await supabase
-                                  .from(TABLES.STUDENT_ATTENDANCE)
-                                  .delete()
-                                  .eq('date', selectedDate)
-                                  .eq('class_id', selectedClass);
-                                
-                                if (deleteError) {
-                                  console.error('Error deleting attendance records:', deleteError);
-                                  Alert.alert('Error', 'Failed to clear attendance records from database.');
-                                  return;
+                  <View style={styles.headerButtonsContainer}>
+                    <TouchableOpacity 
+                      style={styles.markAllPresentButton}
+                      onPress={markAllAsPresent}
+                    >
+                      <Ionicons name="checkmark-done" size={14} color="#4caf50" />
+                      <Text style={styles.markAllPresentButtonText}>All Present</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.clearButton}
+                      onPress={() => {
+                        Alert.alert(
+                          'Clear Attendance',
+                          'Are you sure you want to clear all attendance marks? This will permanently delete the attendance records for this date.',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            { 
+                              text: 'Clear All', 
+                              style: 'destructive',
+                              onPress: async () => {
+                                try {
+                                  setLoading(true);
+                                  
+                                  // Delete attendance records from database
+                                  const { error: deleteError } = await supabase
+                                    .from(TABLES.STUDENT_ATTENDANCE)
+                                    .delete()
+                                    .eq('date', selectedDate)
+                                    .eq('class_id', selectedClass);
+                                  
+                                  if (deleteError) {
+                                    console.error('Error deleting attendance records:', deleteError);
+                                    Alert.alert('Error', 'Failed to clear attendance records from database.');
+                                    return;
+                                  }
+                                  
+                                  // Clear local state
+                                  setAttendanceMark({});
+                                  setClearMode(true);
+                                  
+                                  Alert.alert('Success', 'Attendance records cleared successfully!');
+                                  console.log('Attendance records cleared from database and local state');
+                                  
+                                } catch (error) {
+                                  console.error('Error clearing attendance:', error);
+                                  Alert.alert('Error', 'Failed to clear attendance records.');
+                                } finally {
+                                  setLoading(false);
                                 }
-                                
-                                // Clear local state
-                                setAttendanceMark({});
-                                setClearMode(true);
-                                
-                                Alert.alert('Success', 'Attendance records cleared successfully!');
-                                console.log('Attendance records cleared from database and local state');
-                                
-                              } catch (error) {
-                                console.error('Error clearing attendance:', error);
-                                Alert.alert('Error', 'Failed to clear attendance records.');
-                              } finally {
-                                setLoading(false);
                               }
                             }
-                          }
-                        ]
-                      );
-                    }}
-                  >
-                    <Ionicons name="refresh" size={14} color="#ff9800" />
-                    <Text style={styles.clearButtonText}>Clear</Text>
-                  </TouchableOpacity>
+                          ]
+                        );
+                      }}
+                    >
+                      <Ionicons name="refresh" size={14} color="#ff9800" />
+                      <Text style={styles.clearButtonText}>Clear</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
                 <View style={[styles.headerCellContainer, { flex: 1 }]}>
                   <Ionicons name="close" size={18} color="#f44336" style={{ marginRight: 4 }} />
@@ -1398,6 +1562,37 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     textAlign: 'center',
   },
+  // Header buttons container
+  headerButtonsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  // Mark All as Present button styles
+  markAllPresentButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e8f5e8',
+    borderWidth: 1,
+    borderColor: '#81c784',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginRight: 6,
+    elevation: 1,
+    shadowColor: '#4caf50',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  markAllPresentButtonText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#4caf50',
+    marginLeft: 3,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   // Clear button styles
   clearButton: {
     flexDirection: 'row',
@@ -1408,7 +1603,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    marginLeft: 8,
     elevation: 1,
     shadowColor: '#ff9800',
     shadowOffset: { width: 0, height: 1 },

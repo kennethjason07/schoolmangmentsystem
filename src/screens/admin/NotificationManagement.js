@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, TextInput, ScrollView, ActivityIndicator, Modal, Button, Platform, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase, TABLES, dbHelpers, getUserTenantId } from '../../utils/supabase';
+import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
+import { useTenant } from '../../contexts/TenantContext';
 import universalNotificationService from '../../services/UniversalNotificationService';
 import Header from '../../components/Header';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
@@ -26,6 +27,7 @@ const getNotificationTypeColor = (type) => {
 
 const NotificationManagement = () => {
   const { user } = useAuth(); // Get current admin user
+  const { tenantId, currentTenant } = useTenant(); // Get tenant info from context
   const [notifications, setNotifications] = useState([]);
   const [typeFilter, setTypeFilter] = useState('');
   const [modal, setModal] = useState({ visible: false, mode: 'view', notification: null });
@@ -43,6 +45,44 @@ const NotificationManagement = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+
+  // Helper function to get user's tenant ID
+  const getUserTenantId = async () => {
+    // First try to use the tenant ID from TenantContext
+    if (tenantId) {
+      console.log('✅ [NOTIF_MGMT] Using tenant_id from TenantContext:', tenantId);
+      return tenantId;
+    }
+    
+    // Fallback: Get from database if TenantContext is not available
+    try {
+      console.log('🔍 [NOTIF_MGMT] TenantContext not available, fetching from database...');
+      
+      if (!user?.id) {
+        console.error('❌ [NOTIF_MGMT] No user ID available for tenant lookup');
+        return null;
+      }
+      
+      const { data: userRecord, error } = await supabase
+        .from('users')
+        .select('tenant_id')
+        .eq('id', user.id)
+        .single();
+      
+      if (error) {
+        console.error('❌ [NOTIF_MGMT] Error fetching user tenant_id:', error);
+        return null;
+      }
+      
+      const dbTenantId = userRecord?.tenant_id;
+      console.log('✅ [NOTIF_MGMT] Found tenant_id from database:', dbTenantId);
+      return dbTenantId;
+      
+    } catch (error) {
+      console.error('❌ [NOTIF_MGMT] Error in getUserTenantId:', error);
+      return null;
+    }
+  };
 
   // Load notifications from Supabase
   useEffect(() => {
@@ -71,12 +111,17 @@ const NotificationManagement = () => {
       
       // JWT DEBUG: Check what's in the JWT token
       console.log('🔍 [JWT_DEBUG] Analyzing JWT token content...');
+      let metadataTenantId = null; // Initialize the variable
+      
       if (session?.access_token) {
         try {
           // Decode JWT payload (not verifying signature, just reading)
           const token = session.access_token;
           const base64Payload = token.split('.')[1];
           const payload = JSON.parse(atob(base64Payload));
+          
+          // Extract tenant_id from user_metadata if available
+          metadataTenantId = payload.user_metadata?.tenant_id || payload.tenant_id;
           
           console.log('🔍 [JWT_DEBUG] JWT Payload:');
           console.log('   - iss (issuer):', payload.iss);
@@ -109,11 +154,15 @@ const NotificationManagement = () => {
         return;
       }
 
-      // Get current user's tenant_id from metadata
-      const metadataTenantId = await getUserTenantId();
-      console.log('🏢 [NOTIF_MGMT] Metadata tenant ID:', metadataTenantId);
+      // 🏢 Use tenant_id from TenantContext (already handles fallbacks properly)
+      console.log('🏢 [NOTIF_MGMT] Using tenant_id from TenantContext:', {
+        tenantId,
+        tenantName: currentTenant?.name,
+        userId: user?.id,
+        userEmail: user?.email
+      });
       
-      // Also get tenant_id from user database record
+      // Additional debug: Check user's database record for tenant_id consistency
       const { data: userRecord, error: userRecordError } = await supabase
         .from('users')
         .select('tenant_id, email, role_id')
@@ -121,19 +170,19 @@ const NotificationManagement = () => {
         .single();
       
       const dbTenantId = userRecord?.tenant_id;
-      console.log('🏢 [NOTIF_MGMT] Database tenant ID:', dbTenantId);
+      console.log('🔍 [NOTIF_MGMT] User database record check:', {
+        dbTenantId,
+        contextTenantId: tenantId,
+        matches: dbTenantId === tenantId,
+        error: userRecordError?.message
+      });
       
-      // Check for tenant_id mismatch
-      if (metadataTenantId && dbTenantId && metadataTenantId !== dbTenantId) {
+      if (dbTenantId && tenantId && dbTenantId !== tenantId) {
         console.log('⚠️ [NOTIF_MGMT] TENANT MISMATCH DETECTED!');
-        console.log('   - Metadata tenant_id:', metadataTenantId);
+        console.log('   - Context tenant_id:', tenantId);
         console.log('   - Database tenant_id:', dbTenantId);
-        console.log('   - Using database tenant_id for queries');
+        console.log('   - This indicates a data consistency issue!');
       }
-      
-      // Use database tenant_id as primary, fallback to metadata
-      const tenantId = dbTenantId || metadataTenantId;
-      console.log('🏢 [NOTIF_MGMT] Final tenant ID for queries:', tenantId);
       
       if (!tenantId) {
         console.error('❌ [NOTIF_MGMT] No tenant_id found for user');
@@ -296,77 +345,32 @@ const NotificationManagement = () => {
       console.log('   - Found with tenant filter:', data?.length || 0);
       console.log('   - Error:', error?.message || 'None');
       
-      // TEMPORARY BYPASS: If no notifications found with tenant filter, try without filter
-      let finalNotifications = data || [];
+      // STRICT TENANT FILTERING: Only show notifications for current tenant
+      const finalNotifications = data || [];
+      
       if ((!data || data.length === 0) && !error) {
-        console.log('🔍 [NOTIF_MGMT] TENANT BYPASS: Trying without tenant filter...');
+        console.log('🔍 [NOTIF_MGMT] No notifications found for tenant:', tenantId);
+        console.log('✅ [NOTIF_MGMT] This is correct behavior - only showing tenant-specific notifications');
         
-        const { data: unfiltered, error: unfilteredError } = await supabase
+        // Optional: Log info about other tenants for debugging (but don't show their data)
+        const { data: debugInfo } = await supabase
           .from('notifications')
-          .select(`
-            *,
-            notification_recipients(
-              id,
-              recipient_id,
-              recipient_type,
-              delivery_status,
-              sent_at,
-              tenant_id
-            ),
-            users!sent_by(
-              id,
-              full_name,
-              role_id
-            )
-          `)
-          .order('created_at', { ascending: false })
-          .limit(50);
+          .select('tenant_id')
+          .limit(5);
         
-        console.log('🔍 [NOTIF_MGMT] Unfiltered notifications query result:');
-        console.log('   - Found without filter:', unfiltered?.length || 0);
-        console.log('   - Error:', unfilteredError?.message || 'None');
-        
-        if (unfilteredError) {
-          console.log('❌ [NOTIF_MGMT] Even unfiltered query failed');
-          throw unfilteredError;
-        }
-        
-        if (unfiltered && unfiltered.length > 0) {
-          console.log('🎯 [NOTIF_MGMT] TENANT MISMATCH CONFIRMED!');
-          console.log(`   - Found ${unfiltered.length} notifications without tenant filter`);
-          console.log(`   - But 0 notifications with tenant_id: ${tenantId}`);
-          
-          console.log('🔍 [NOTIF_MGMT] Analyzing tenant_ids in notifications:');
-          const notificationTenants = {};
-          unfiltered.forEach(notif => {
-            const tid = notif.tenant_id || 'NULL';
-            if (!notificationTenants[tid]) notificationTenants[tid] = 0;
-            notificationTenants[tid]++;
-          });
-          
-          Object.keys(notificationTenants).forEach(tid => {
-            console.log(`   - Tenant '${tid}': ${notificationTenants[tid]} notifications`);
-            console.log(`     * Matches current user tenant: ${tid === tenantId}`);
-          });
-          
-          // TEMPORARY: Show all notifications regardless of tenant for debugging
-          console.log('⚠️ [NOTIF_MGMT] TEMPORARY: Showing all notifications for debugging');
-          finalNotifications = unfiltered;
-          
-          // Show alert about tenant mismatch
-          Alert.alert(
-            'Tenant ID Mismatch Detected',
-            `Found ${unfiltered.length} notifications in database, but none match your tenant ID (${tenantId}). Showing all notifications for debugging. This needs to be fixed in the database.`,
-            [
-              { text: 'OK' }
-            ]
-          );
+        if (debugInfo && debugInfo.length > 0) {
+          const otherTenants = [...new Set(debugInfo.map(n => n.tenant_id))];
+          console.log('🔍 [NOTIF_MGMT] Other tenants found in database:', otherTenants.length);
+          console.log('   - Current user tenant:', tenantId);
+          console.log('   - Other tenant IDs found:', otherTenants.filter(t => t !== tenantId));
+          console.log('ℹ️ [NOTIF_MGMT] Not showing other tenants\' notifications (correct behavior)');
         }
       }
       
       console.log('🔔 [NOTIF_MGMT] Final notifications result:');
       console.log('   - Found:', finalNotifications?.length || 0);
-      console.log('   - Using tenant filter:', (!data || data.length === 0) ? 'No (bypassed)' : 'Yes');
+      console.log('   - Tenant filter applied:', 'Yes (strict mode)');
+      console.log('   - Tenant ID used:', tenantId);
       
       if (error) {
         console.error('❌ [NOTIF_MGMT] Error loading notifications:', error);

@@ -18,8 +18,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { useTenantContext } from '../../contexts/TenantContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 const StudentAccountManagement = ({ navigation }) => {
+  const { currentTenant } = useTenantContext();
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState('all');
@@ -45,45 +48,83 @@ const StudentAccountManagement = ({ navigation }) => {
   }, []);
 
   const loadStudents = async () => {
+    const startTime = performance.now();
+    let timeoutId;
+    
     try {
+      console.log('🚀 StudentAccountManagement: Starting data load...');
       setLoading(true);
-
+      
+      // ⏰ Set timeout protection
+      timeoutId = setTimeout(() => {
+        console.warn('⚠️ StudentAccountManagement: Load timeout (10s)');
+        throw new Error('Loading timeout - please check your connection');
+      }, 10000);
+      
+      // 🔍 Validate tenant context
+      let tenantId = currentTenant?.id;
+      console.log('📋 StudentAccountManagement: Current tenant ID:', tenantId);
+      
+      if (!tenantId) {
+        console.log('⚠️ StudentAccountManagement: No tenant from context, trying email lookup...');
+        
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          tenantId = emailTenant?.id;
+          console.log('📧 StudentAccountManagement: Email-based tenant ID:', tenantId);
+        } catch (emailError) {
+          console.error('❌ StudentAccountManagement: Email tenant lookup failed:', emailError);
+        }
+        
+        if (!tenantId) {
+          throw new Error('Unable to determine tenant context. Please contact support.');
+        }
+      }
+      
       // Test auth connection
       await dbHelpers.testAuthConnection();
-
-      // Load classes first
-      const { data: classesData, error: classesError } = await supabase
-        .from(TABLES.CLASSES)
-        .select('id, class_name, section')
-        .order('class_name');
-
-      if (classesError) throw classesError;
-      setClasses(classesData || []);
-
-      // Load students with their class information and check if they have accounts
-      const { data: studentsData, error: studentsError } = await supabase
-        .from(TABLES.STUDENTS)
-        .select(`
-          *,
-          classes(id, class_name, section),
-          parents:parent_id(id, name, phone, email)
-        `)
-        .order('name');
-
-      if (studentsError) throw studentsError;
-
-      // Check which students already have login accounts
-      const { data: existingAccounts, error: accountsError } = await supabase
-        .from(TABLES.USERS)
-        .select('id, email, linked_student_id, role_id, full_name')
-        .not('linked_student_id', 'is', null);
-
-      if (accountsError) throw accountsError;
-
+      
+      // 🏃‍♂️ Fast parallel data fetching
+      console.log('📊 StudentAccountManagement: Fetching data in parallel...');
+      
+      const [classesResult, studentsResult, accountsResult] = await Promise.all([
+        supabase
+          .from(TABLES.CLASSES)
+          .select('id, class_name, section')
+          .eq('tenant_id', tenantId)
+          .order('class_name'),
+        supabase
+          .from(TABLES.STUDENTS)
+          .select(`
+            *,
+            classes(id, class_name, section),
+            parents:parent_id(id, name, phone, email)
+          `)
+          .eq('tenant_id', tenantId)
+          .order('name'),
+        supabase
+          .from(TABLES.USERS)
+          .select('id, email, linked_student_id, role_id, full_name')
+          .not('linked_student_id', 'is', null)
+      ]);
+      
+      if (classesResult.error) throw classesResult.error;
+      if (studentsResult.error) throw studentsResult.error;
+      if (accountsResult.error) throw accountsResult.error;
+      
+      clearTimeout(timeoutId);
+      
+      // ✅ Set data immediately
+      const classesData = classesResult.data || [];
+      const studentsData = studentsResult.data || [];
+      const existingAccounts = accountsResult.data || [];
+      
+      setClasses(classesData);
+      
       // Map students with their account status
-      const studentsWithAccountStatus = (studentsData || []).map(student => {
-        const hasAccount = existingAccounts?.some(account => account.linked_student_id === student.id);
-        const accountInfo = existingAccounts?.find(account => account.linked_student_id === student.id);
+      const studentsWithAccountStatus = studentsData.map(student => {
+        const hasAccount = existingAccounts.some(account => account.linked_student_id === student.id);
+        const accountInfo = existingAccounts.find(account => account.linked_student_id === student.id);
         
         return {
           ...student,
@@ -91,12 +132,28 @@ const StudentAccountManagement = ({ navigation }) => {
           accountInfo
         };
       });
-
+      
       setStudents(studentsWithAccountStatus);
+      
+      console.log(`✅ StudentAccountManagement: Loaded ${classesData.length} classes, ${studentsWithAccountStatus.length} students`);
+      
+      // 📊 Performance monitoring
+      const endTime = performance.now();
+      const loadTime = Math.round(endTime - startTime);
+      console.log(`✅ StudentAccountManagement: Data loaded in ${loadTime}ms`);
+      
+      if (loadTime > 2000) {
+        console.warn('⚠️ StudentAccountManagement: Slow loading (>2s). Check network.');
+      } else {
+        console.log('🚀 StudentAccountManagement: Fast loading achieved!');
+      }
+      
     } catch (error) {
-      console.error('Error loading students:', error);
-      Alert.alert('Error', 'Failed to load students');
+      clearTimeout(timeoutId);
+      console.error('❌ StudentAccountManagement: Failed to load data:', error.message);
+      Alert.alert('Error', error.message || 'Failed to load students');
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
       setRefreshing(false);
     }

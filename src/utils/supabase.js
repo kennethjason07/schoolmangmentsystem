@@ -49,47 +49,48 @@ export const isValidUUID = (uuid) => {
 
 // Tenant management utilities
 export const tenantHelpers = {
-  // Get current tenant ID from user session
+  // Get current tenant ID using email-based lookup
   async getCurrentTenantId() {
     try {
-      const { data: { user }, error } = await supabase.auth.getUser();
-      if (error || !user) {
-        console.warn('No authenticated user found for tenant context');
+      console.log('🏢 tenantHelpers: Getting tenant ID via email lookup...');
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        console.warn('🏢 tenantHelpers: No authenticated user found');
         return null;
       }
       
-      // PRIORITIZE database tenant_id over metadata to avoid stale metadata issues
-      try {
-        const { data: userProfile, error: profileError } = await supabase
-          .from('users')
-          .select('tenant_id, email, role_id')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (!profileError && userProfile && userProfile.tenant_id) {
-          return userProfile.tenant_id;
-        }
-      } catch (profileError) {
-        console.warn('Could not access user profile table for tenant_id:', profileError);
+      console.log('🏢 tenantHelpers: Authenticated user:', user.email);
+      
+      // Look up user record by email address
+      const { data: userRecord, error: userError } = await supabase
+        .from('users')
+        .select('tenant_id, email')
+        .eq('email', user.email)
+        .maybeSingle();
+      
+      if (userError) {
+        console.error('🏢 tenantHelpers: Error querying users by email:', userError);
+        return null;
       }
       
-      // PRIORITY 2: Check user metadata for tenant_id as fallback
-      const metadataTenantId = user.app_metadata?.tenant_id || user.user_metadata?.tenant_id;
-      if (metadataTenantId) {
-        return metadataTenantId;
+      if (!userRecord) {
+        console.warn('🏢 tenantHelpers: No user record found for email:', user.email);
+        return null;
       }
       
-      // FALLBACK: Use known tenant_id for this school system
-      // Since you confirmed all users belong to this tenant, we can safely use it as fallback
-      const knownTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
-      console.warn('No tenant_id found in metadata or database, using known school tenant_id as fallback:', knownTenantId);
-      return knownTenantId;
+      if (!userRecord.tenant_id) {
+        console.warn('🏢 tenantHelpers: User record exists but no tenant_id assigned:', user.email);
+        return null;
+      }
+      
+      console.log('🏢 tenantHelpers: ✅ Found tenant ID via email:', userRecord.tenant_id);
+      return userRecord.tenant_id;
+      
     } catch (error) {
-      console.error('Error getting current tenant ID:', error);
-      // Return known tenant as final fallback for this school
-      const knownTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
-      console.warn('Using known school tenant_id due to error:', knownTenantId);
-      return knownTenantId;
+      console.error('🏢 tenantHelpers: Error getting tenant ID:', error);
+      return null;
     }
   },
 
@@ -241,40 +242,60 @@ export const getCurrentUserId = async () => {
 // User tenant helper function
 export const getUserTenantId = async () => {
   try {
+    console.log('🔍 getUserTenantId: Starting tenant lookup...');
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
+      console.log('❌ getUserTenantId: No user found');
       return null;
     }
+    
+    console.log('👤 getUserTenantId: User found:', user.email);
 
     // Check database for tenant_id first
     try {
       const { data: userProfile, error: profileError } = await supabase
         .from('users')
-        .select('tenant_id')
+        .select('tenant_id, email')
         .eq('id', user.id)
         .maybeSingle();
 
+      console.log('📊 getUserTenantId: Database query result:', {
+        found: !!userProfile,
+        tenantId: userProfile?.tenant_id,
+        email: userProfile?.email,
+        error: profileError?.message
+      });
+
       if (!profileError && userProfile?.tenant_id) {
+        console.log('✅ getUserTenantId: Found tenant_id in database:', userProfile.tenant_id);
         return userProfile.tenant_id;
       }
     } catch (profileError) {
+      console.error('❌ getUserTenantId: Database query failed:', profileError);
       // Continue to metadata check
     }
 
     // Check user metadata for tenant_id as fallback
     const metadataTenantId = user.app_metadata?.tenant_id || user.user_metadata?.tenant_id;
+    console.log('📊 getUserTenantId: Metadata check:', {
+      appMetadata: user.app_metadata?.tenant_id,
+      userMetadata: user.user_metadata?.tenant_id,
+      foundTenantId: metadataTenantId
+    });
     
     if (metadataTenantId) {
+      console.log('✅ getUserTenantId: Found tenant_id in metadata:', metadataTenantId);
       return metadataTenantId;
     }
 
-    // Use known tenant_id for this school system as final fallback
-    const knownTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
-    return knownTenantId;
+    // 🚫 REMOVED HARDCODED FALLBACK - Users must have proper tenant assignment
+    console.error('❌ getUserTenantId: CRITICAL - No tenant_id found for user:', user.email);
+    console.error('❌ getUserTenantId: User must be properly assigned to a tenant in the users table');
+    return null;
   } catch (error) {
-    // Return known tenant as final fallback for this school
-    const knownTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
-    return knownTenantId;
+    console.error('❌ getUserTenantId: Unexpected error:', error);
+    // 🚫 REMOVED HARDCODED FALLBACK - Return null to force proper error handling
+    return null;
   }
 };
 
@@ -2002,9 +2023,18 @@ export const dbHelpers = {
   // School Details management
   async getSchoolDetails() {
     try {
+      // Get the current tenant_id to filter results
+      const currentTenantId = await tenantHelpers.getCurrentTenantId();
+      
+      if (!currentTenantId) {
+        console.warn('No tenant_id found for getSchoolDetails');
+        return { data: null, error: new Error('No tenant context available') };
+      }
+
       const { data, error } = await supabase
         .from(TABLES.SCHOOL_DETAILS)
         .select('*')
+        .eq('tenant_id', currentTenantId)
         .limit(1);
 
       if (error) {
@@ -2203,10 +2233,16 @@ export const dbHelpers = {
 
         return { data, error: null };
       } else {
-        // Create new record
+        // Create new record - add tenant_id
+        const currentTenantId = await tenantHelpers.getCurrentTenantId();
+        if (!currentTenantId) {
+          return { data: null, error: new Error('No tenant context available for creating school details') };
+        }
+        
+        const schoolDataWithTenant = { ...schoolData, tenant_id: currentTenantId };
         const { data, error } = await supabase
           .from(TABLES.SCHOOL_DETAILS)
-          .insert(schoolData)
+          .insert(schoolDataWithTenant)
           .select()
           .single();
 
@@ -2585,15 +2621,19 @@ export const dbHelpers = {
   // Get expense categories
   async getExpenseCategories(tenantId = null) {
     try {
+      // Get current tenant ID if not explicitly provided
+      const currentTenantId = tenantId || await tenantHelpers.getCurrentTenantId();
+      
+      if (!currentTenantId) {
+        console.warn('No tenant ID available for getExpenseCategories, this may return data from all tenants!');
+        return { data: [], error: new Error('Tenant context required for expense categories') };
+      }
+      
       let query = supabase
         .from(TABLES.EXPENSE_CATEGORIES)
         .select('*')
+        .eq('tenant_id', currentTenantId)  // Always filter by tenant_id
         .order('name');
-        
-      // Apply tenant filter if provided
-      if (tenantId) {
-        query = query.eq('tenant_id', tenantId);
-      }
       
       const { data, error } = await query;
       return { data, error };
@@ -2607,15 +2647,23 @@ export const dbHelpers = {
     try {
       const { startDate = null, endDate = null, category = null, tenantId = null } = filters;
       
+      console.log('🏢 getExpenses: Input filters:', { startDate, endDate, category, providedTenantId: tenantId });
+      
+      // Get current tenant ID if not explicitly provided
+      const currentTenantId = tenantId || await tenantHelpers.getCurrentTenantId();
+      
+      console.log('🏢 getExpenses: Using tenant ID:', currentTenantId);
+      
+      if (!currentTenantId) {
+        console.warn('❌ getExpenses: No tenant ID available, this may return data from all tenants!');
+        return { data: [], error: new Error('Tenant context required for expense data') };
+      }
+      
       let query = supabase
         .from(TABLES.SCHOOL_EXPENSES)
         .select('*')
+        .eq('tenant_id', currentTenantId)  // Always filter by tenant_id
         .order('expense_date', { ascending: false });
-
-      // Apply tenant filter first if provided
-      if (tenantId) {
-        query = query.eq('tenant_id', tenantId);
-      }
       
       if (startDate) {
         query = query.gte('expense_date', startDate);
@@ -2628,6 +2676,18 @@ export const dbHelpers = {
       }
 
       const { data, error } = await query;
+      
+      console.log('✅ getExpenses: Retrieved', data?.length || 0, 'expenses for tenant:', currentTenantId);
+      if (data && data.length > 0) {
+        console.log('📊 getExpenses: Sample data (first expense):', {
+          id: data[0].id,
+          title: data[0].title,
+          amount: data[0].amount,
+          tenant_id: data[0].tenant_id,
+          expense_date: data[0].expense_date
+        });
+      }
+      
       return { data, error };
     } catch (error) {
       return { data: null, error };
@@ -2751,11 +2811,22 @@ export const dbHelpers = {
   // Get expense statistics for a date range
   async getExpenseStats(startDate, endDate) {
     try {
-      const { data: expenses, error } = await this.getExpenses({ startDate, endDate });
+      // Get current tenant ID to ensure tenant-aware queries
+      const currentTenantId = await tenantHelpers.getCurrentTenantId();
+      
+      if (!currentTenantId) {
+        return { data: null, error: new Error('Tenant context required for expense statistics') };
+      }
+      
+      const { data: expenses, error } = await this.getExpenses({ 
+        startDate, 
+        endDate, 
+        tenantId: currentTenantId 
+      });
       
       if (error) return { data: null, error };
 
-      const { data: categories, error: categoriesError } = await this.getExpenseCategories();
+      const { data: categories, error: categoriesError } = await this.getExpenseCategories(currentTenantId);
       
       if (categoriesError) return { data: null, error: categoriesError };
 
