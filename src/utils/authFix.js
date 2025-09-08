@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { supabase } from './supabase';
 
 /**
@@ -8,7 +9,19 @@ import { supabase } from './supabase';
 
 export class AuthFix {
   /**
-   * Clear all authentication data from storage
+   * Timeout wrapper for async operations
+   */
+  static async withTimeout(promise, timeoutMs = 5000) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs)
+      )
+    ]);
+  }
+
+  /**
+   * Clear all authentication data from storage (web-compatible)
    */
   static async clearAllAuthData() {
     try {
@@ -28,28 +41,53 @@ export class AuthFix {
       // Clear each key
       for (const key of authKeys) {
         try {
-          await AsyncStorage.removeItem(key);
+          await this.withTimeout(AsyncStorage.removeItem(key), 2000);
           console.log(`✅ Cleared: ${key}`);
         } catch (error) {
           console.warn(`⚠️ Could not clear ${key}:`, error.message);
         }
       }
       
-      // Clear all keys that start with supabase auth pattern
-      const allKeys = await AsyncStorage.getAllKeys();
-      const authRelatedKeys = allKeys.filter(key => 
-        key.includes('supabase') || 
-        key.includes('auth') || 
-        key.includes('session') ||
-        key.includes('dmagnsbdjsnzsddxqrwd')
-      );
-      
-      for (const key of authRelatedKeys) {
+      // Only try to get all keys on non-web platforms to avoid hanging
+      if (Platform.OS !== 'web') {
         try {
-          await AsyncStorage.removeItem(key);
-          console.log(`✅ Cleared auth-related key: ${key}`);
+          const allKeys = await this.withTimeout(AsyncStorage.getAllKeys(), 3000);
+          const authRelatedKeys = allKeys.filter(key => 
+            key.includes('supabase') || 
+            key.includes('auth') || 
+            key.includes('session') ||
+            key.includes('dmagnsbdjsnzsddxqrwd')
+          );
+          
+          for (const key of authRelatedKeys) {
+            try {
+              await AsyncStorage.removeItem(key);
+              console.log(`✅ Cleared auth-related key: ${key}`);
+            } catch (error) {
+              console.warn(`⚠️ Could not clear ${key}:`, error.message);
+            }
+          }
         } catch (error) {
-          console.warn(`⚠️ Could not clear ${key}:`, error.message);
+          console.warn('⚠️ Could not enumerate all storage keys (this is normal on web):', error.message);
+        }
+      } else {
+        console.log('🌐 Web platform - skipping key enumeration to prevent hanging');
+        
+        // On web, try to clear additional web-specific keys
+        const webAuthKeys = [
+          'supabase.auth.token.dmagnsbdjsnzsddxqrwd',
+          'sb.auth.token',
+          'auth.session',
+          'user.session'
+        ];
+        
+        for (const key of webAuthKeys) {
+          try {
+            await AsyncStorage.removeItem(key);
+            console.log(`✅ Cleared web key: ${key}`);
+          } catch (error) {
+            // Ignore errors for web-specific keys
+          }
         }
       }
       
@@ -92,12 +130,43 @@ export class AuthFix {
   }
 
   /**
-   * Check if current session is valid and handle invalid refresh tokens
+   * Check if current session is valid and handle invalid refresh tokens (web-safe with timeout)
    */
   static async validateAndFixSession() {
+    const VALIDATION_TIMEOUT = Platform.OS === 'web' ? 8000 : 10000; // Shorter timeout for web
+    
     try {
       console.log('🔍 Validating current session...');
       
+      // Wrap the validation in a timeout to prevent hanging
+      const result = await this.withTimeout(this._performSessionValidation(), VALIDATION_TIMEOUT);
+      return result;
+      
+    } catch (error) {
+      console.error('❌ Session validation failed or timed out:', error.message);
+      
+      // If validation times out or fails, assume we need to reauth
+      if (error.message.includes('timed out')) {
+        console.log('⏱️ Session validation timed out - forcing sign out to prevent infinite loading');
+        
+        // Don't wait for force sign out to complete if it might also hang
+        try {
+          await this.withTimeout(this.forceSignOut(), 3000);
+        } catch (signOutError) {
+          console.warn('⚠️ Force sign out also timed out, continuing anyway:', signOutError.message);
+        }
+      }
+      
+      return { valid: false, needsReauth: true, error };
+    }
+  }
+  
+  /**
+   * Internal method to perform the actual session validation
+   */
+  static async _performSessionValidation() {
+    try {
+      // Step 1: Get current session
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       
       if (sessionError) {
@@ -122,31 +191,43 @@ export class AuthFix {
       console.log('✅ Session is valid');
       console.log('User:', sessionData.session.user.email);
       
-      // Try to refresh the session to ensure it's working
-      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-      
-      if (refreshError) {
-        console.error('❌ Session refresh failed:', refreshError.message);
-        
-        if (refreshError.message.includes('Invalid Refresh Token') || 
-            refreshError.message.includes('Refresh Token Not Found')) {
-          console.log('🔧 Refresh failed, clearing auth data...');
-          await this.forceSignOut();
-          return { valid: false, needsReauth: true };
-        }
-        
-        return { valid: true, refreshError }; // Session exists but refresh failed
+      // Step 2: On web, skip refresh to avoid hanging - just return valid session
+      if (Platform.OS === 'web') {
+        console.log('🌐 Web platform - skipping session refresh to prevent hanging');
+        return { valid: true, session: sessionData.session };
       }
       
-      console.log('✅ Session refresh successful');
-      return { valid: true, session: sessionData.session };
+      // Step 3: On native platforms, try to refresh the session to ensure it's working
+      try {
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        
+        if (refreshError) {
+          console.error('❌ Session refresh failed:', refreshError.message);
+          
+          if (refreshError.message.includes('Invalid Refresh Token') || 
+              refreshError.message.includes('Refresh Token Not Found')) {
+            console.log('🔧 Refresh failed, clearing auth data...');
+            await this.forceSignOut();
+            return { valid: false, needsReauth: true };
+          }
+          
+          // Refresh failed but session exists, allow it
+          console.log('⚠️ Session refresh failed but session is valid, allowing access');
+          return { valid: true, refreshError, session: sessionData.session };
+        }
+        
+        console.log('✅ Session refresh successful');
+        return { valid: true, session: refreshData.session || sessionData.session };
+        
+      } catch (refreshError) {
+        console.error('❌ Session refresh exception:', refreshError.message);
+        // If refresh throws an error, but we have a session, allow it
+        return { valid: true, refreshError, session: sessionData.session };
+      }
       
     } catch (error) {
-      console.error('❌ Session validation error:', error);
-      
-      // If it's any auth error, clear everything to be safe
-      await this.forceSignOut();
-      return { valid: false, needsReauth: true, error };
+      console.error('❌ Internal session validation error:', error);
+      throw error; // Re-throw to be handled by the wrapper
     }
   }
 

@@ -50,11 +50,14 @@ export const getSchoolLogoBase64 = async (logoUrl) => {
     try {
       const testResponse = await fetch(fullLogoUrl, { method: 'HEAD' });
       if (!testResponse.ok) {
-        console.log('❌ Logo URL is not accessible:', testResponse.status);
+        console.log('❌ Logo URL is not accessible:', testResponse.status, testResponse.statusText);
+        console.log('🔍 URL being tested:', fullLogoUrl);
         return null;
       }
+      console.log('✅ Logo URL is accessible');
     } catch (testError) {
       console.log('❌ Logo accessibility test failed:', testError.message);
+      console.log('🔍 URL being tested:', fullLogoUrl);
       return null;
     }
 
@@ -68,6 +71,7 @@ export const getSchoolLogoBase64 = async (logoUrl) => {
     
     if (downloadResult.status !== 200) {
       console.log('❌ Failed to download logo:', downloadResult.status);
+      console.log('🔍 Download details:', downloadResult);
       return null;
     }
 
@@ -99,11 +103,13 @@ export const getSchoolLogoBase64 = async (logoUrl) => {
 
     const dataUrl = `data:${mimeType};base64,${base64String}`;
     console.log('✅ Logo converted to base64 successfully, MIME type:', mimeType);
+    console.log('📏 Base64 data size:', base64String.length, 'characters');
     
     return dataUrl;
 
   } catch (error) {
     console.error('❌ Error loading school logo for receipt:', error);
+    console.error('🔍 Original logo URL:', logoUrl);
     return null;
   }
 };

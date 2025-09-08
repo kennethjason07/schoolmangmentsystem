@@ -33,6 +33,7 @@ import {
 import { useTenantContext } from '../../contexts/TenantContext';
 import { format } from 'date-fns';
 import { getSchoolLogoBase64, getLogoHTML, getReceiptHeaderCSS } from '../../utils/logoUtils';
+import { runLogoTests } from '../../utils/logoTest';
 import FeeService from '../../services/FeeService';
 
 const { width } = Dimensions.get('window');
@@ -57,25 +58,110 @@ const FeePayment = () => {
   // Add state and function for school details similar to AdminDashboard
   const [schoolData, setSchoolData] = useState(null);
 
-  // Fetch school details
+  // Fetch school details with logo diagnostics
   const fetchSchoolData = async () => {
     try {
+      console.log('🏫 Fetching school details...');
       const { data: schools, error } = await supabase
         .from('school_details')
         .select('*')
         .single();
 
       if (error) {
-        console.log('Error fetching school data:', error);
+        console.log('❌ Error fetching school data:', error);
         return null;
+      }
+
+      console.log('✅ School data fetched successfully');
+      console.log('📊 School name:', schools?.name);
+      console.log('🔗 School logo URL:', schools?.logo_url);
+      console.log('📍 Logo URL type:', typeof schools?.logo_url);
+      console.log('🔍 Logo URL length:', schools?.logo_url?.length || 0);
+      
+      // If logo URL exists, test its accessibility
+      if (schools?.logo_url) {
+        await diagnoseLogo(schools.logo_url);
+      } else {
+        console.log('⚠️ No logo URL found in school_details');
       }
 
       setSchoolData(schools);
       return schools;
     } catch (error) {
-      console.error('Error in fetchSchoolData:', error);
+      console.error('❌ Error in fetchSchoolData:', error);
       return null;
     }
+  };
+
+  // Logo diagnostic function
+  const diagnoseLogo = async (logoUrl) => {
+    console.log('🔍 === LOGO DIAGNOSTICS START ===');
+    console.log('📋 Logo URL:', logoUrl);
+    
+    try {
+      // Test 1: Check if URL format is correct
+      let urlToTest = logoUrl;
+      if (!logoUrl.startsWith('http')) {
+        console.log('🔧 URL is not complete, generating public URL...');
+        
+        // Try profiles bucket
+        const { data: publicUrlData } = supabase.storage
+          .from('profiles')
+          .getPublicUrl(logoUrl);
+        
+        if (publicUrlData?.publicUrl) {
+          urlToTest = publicUrlData.publicUrl;
+          console.log('✅ Generated public URL:', urlToTest);
+        } else {
+          console.log('❌ Failed to generate public URL');
+          return;
+        }
+      }
+      
+      // Test 2: Check URL accessibility
+      console.log('🌐 Testing URL accessibility:', urlToTest);
+      try {
+        const response = await fetch(urlToTest, { method: 'HEAD' });
+        console.log('📡 Response status:', response.status, response.statusText);
+        console.log('📋 Response headers:');
+        for (const [key, value] of response.headers.entries()) {
+          console.log(`  ${key}: ${value}`);
+        }
+        
+        if (!response.ok) {
+          console.log('❌ Logo URL is not accessible');
+        } else {
+          console.log('✅ Logo URL is accessible');
+        }
+      } catch (fetchError) {
+        console.log('❌ Logo fetch failed:', fetchError.message);
+      }
+      
+      // Test 3: List files in profiles bucket
+      console.log('📁 Listing files in profiles bucket...');
+      try {
+        const { data: files, error: listError } = await supabase.storage
+          .from('profiles')
+          .list('', { limit: 10 });
+        
+        if (listError) {
+          console.log('❌ Error listing profiles bucket:', listError);
+        } else {
+          console.log('📂 Files in profiles bucket:');
+          files?.forEach((file, index) => {
+            const isMatch = file.name === logoUrl || logoUrl.includes(file.name);
+            console.log(`  ${index + 1}. ${file.name} ${isMatch ? '👈 MATCH!' : ''}`);
+          });
+        }
+      } catch (listError) {
+        console.log('❌ Exception listing profiles bucket:', listError);
+      }
+      
+    } catch (error) {
+      console.error('❌ Logo diagnostics failed:', error);
+    }
+    
+    console.log('🏁 === LOGO DIAGNOSTICS END ===');
   };
 
   // Helper function to convert image URL to base64 (deprecated - use logoUtils)
@@ -193,7 +279,7 @@ const FeePayment = () => {
               amount: Number(payment.amount) || 0,
               paymentDate: payment.paymentDate || new Date().toISOString().split('T')[0],
               paymentMethod: payment.paymentMode || 'Online',
-              transactionId: payment.id ? `TXN${payment.id.toString().slice(-8).toUpperCase()}` : `TXN${Date.now()}`,
+              transactionId: payment.id ? `FEE${payment.id.toString().slice(-6)}` : `FEE${Date.now().toString().slice(-6)}`,
               receiptNumber: payment.receiptNumber || null,
               status: 'completed',
               receiptUrl: null,
@@ -415,7 +501,7 @@ const FeePayment = () => {
               amount: Number(payment.amount_paid) || 0,
               paymentDate: payment.payment_date || new Date().toISOString().split('T')[0],
               paymentMethod: payment.payment_mode || 'Online',
-              transactionId: payment.id ? `TXN${payment.id.slice(-8).toUpperCase()}` : `TXN${Date.now()}`,
+              transactionId: payment.id ? `FEE${payment.id.slice(-6)}` : `FEE${Date.now().toString().slice(-6)}`,
               receiptNumber: payment.receipt_number || null,
               status: 'completed',
               receiptUrl: null,
@@ -434,7 +520,7 @@ const FeePayment = () => {
               amount: 5000,
               paymentDate: '2024-08-15',
               paymentMethod: 'Card',
-              transactionId: 'TXN12345678',
+              transactionId: 'FEE456789',
               receiptNumber: 1001,
               status: 'completed',
               receiptUrl: null,
@@ -448,7 +534,7 @@ const FeePayment = () => {
               amount: 2000,
               paymentDate: '2024-08-20',
               paymentMethod: 'UPI',
-              transactionId: 'TXN87654321',
+              transactionId: 'FEE234567',
               receiptNumber: 1002,
               status: 'completed',
               receiptUrl: null,
@@ -782,18 +868,18 @@ const FeePayment = () => {
 
         console.log('FeePayment - Payment saved successfully to database:', data);
         
-        // Show success alert
+        // Show success alert with simple message
         Alert.alert(
-          'Payment Recorded',
-          `Payment of ₹${parseFloat(paymentAmount).toFixed(2)} has been successfully recorded for ${selectedFeeComponent.name}.`,
+          'Payment Successful',
+          `Fee payment for ${studentData?.name || 'student'} - ${selectedFeeComponent.name} has been completed successfully.`,
           [{ text: 'OK', style: 'default' }]
         );
       } else {
         console.log('FeePayment - Skipping database save (invalid student ID or demo mode)');
         // Show demo mode success message
         Alert.alert(
-          'Demo Payment Recorded',
-          `Demo payment of ₹${parseFloat(paymentAmount).toFixed(2)} recorded for ${selectedFeeComponent.name}.`,
+          'Payment Successful',
+          `Fee payment for ${studentData?.name || 'student'} - ${selectedFeeComponent.name} has been completed successfully.`,
           [{ text: 'OK', style: 'default' }]
         );
       }
@@ -810,7 +896,7 @@ const FeePayment = () => {
         payment_date_formatted: formatSafeDate(paymentDate),
         payment_mode: paymentMode,
         academic_year: selectedFeeComponent.academicYear || '2024-2025',
-        transaction_id: `PAY${Date.now()}`,
+        transaction_id: `FEE${Date.now().toString().slice(-6)}`,
         payment_details: `${paymentMode} payment`,
         amount_in_words: numberToWords(parseFloat(paymentAmount))
       };
@@ -1257,7 +1343,7 @@ const FeePayment = () => {
         const success = Math.random() > 0.1;
         resolve({
           success,
-          transactionId: success ? `CARD${Date.now()}` : null,
+          transactionId: success ? `FEE${Date.now().toString().slice(-6)}` : null,
           error: success ? null : 'Card payment failed. Please check your card details.',
           paymentDetails: {
             cardNumber: `****-****-****-${formData.cardNumber.slice(-4)}`,
@@ -1276,7 +1362,7 @@ const FeePayment = () => {
         const success = Math.random() > 0.05;
         resolve({
           success,
-          transactionId: success ? `UPI${Date.now()}` : null,
+          transactionId: success ? `FEE${Date.now().toString().slice(-6)}` : null,
           error: success ? null : 'UPI payment failed. Please try again.',
           paymentDetails: {
             upiId: formData.upiId
@@ -1294,7 +1380,7 @@ const FeePayment = () => {
         const success = Math.random() > 0.15;
         resolve({
           success,
-          transactionId: success ? `NET${Date.now()}` : null,
+          transactionId: success ? `FEE${Date.now().toString().slice(-6)}` : null,
           error: success ? null : 'Online payment failed. Please check your internet connection.',
           paymentDetails: {
             bankName: formData.bankName,
@@ -1309,7 +1395,7 @@ const FeePayment = () => {
     // Cash payments are always successful (recorded manually)
     return Promise.resolve({
       success: true,
-      transactionId: `CASH${Date.now()}`,
+      transactionId: `FEE${Date.now().toString().slice(-6)}`,
       error: null,
       paymentDetails: {
         receiptNumber: formData.receiptNumber || 'N/A',
@@ -1420,31 +1506,9 @@ const FeePayment = () => {
   const handleDownloadReceipt = async (receipt) => {
     console.log('=== RECEIPT DOWNLOAD DEBUG ===');
     console.log('Selected Receipt Object:', JSON.stringify(receipt, null, 2));
-    console.log('Receipt Number from Object:', receipt.receiptNumber);
     console.log('Receipt ID:', receipt.id);
     console.log('School Data:', schoolData);
     
-    // If receipt number is missing, try to fetch it directly from the database
-    if (!receipt.receiptNumber && receipt.id) {
-      console.log('Receipt number missing, fetching from database...');
-      try {
-        const { data: freshData, error } = await supabase
-          .from('student_fees')
-          .select('receipt_number')
-          .eq('id', receipt.id)
-          .single();
-          
-        if (!error && freshData?.receipt_number) {
-          console.log('Found receipt number in database:', freshData.receipt_number);
-          // Update the receipt object with the fresh receipt number
-          receipt.receiptNumber = freshData.receipt_number;
-        } else {
-          console.log('No receipt number found in database for ID:', receipt.id);
-        }
-      } catch (fetchError) {
-        console.error('Error fetching receipt number:', fetchError);
-      }
-    }
     
     setSelectedReceipt(receipt);
     setReceiptModalVisible(true);
@@ -1463,9 +1527,7 @@ const FeePayment = () => {
         base64: false
       });
 
-      const fileName = selectedReceipt.receiptNumber ? 
-        `Receipt_${selectedReceipt.receiptNumber}.pdf` : 
-        `Receipt_${selectedReceipt.feeName.replace(/\s+/g, '_')}.pdf`;
+      const fileName = `Receipt_${selectedReceipt.feeName.replace(/\s+/g, '_')}.pdf`;
 
       if (Platform.OS === 'android') {
         try {
@@ -1539,12 +1601,23 @@ const FeePayment = () => {
   const generateReceiptHTML = async (receipt) => {
     console.log('=== GENERATE RECEIPT HTML DEBUG ===');
     console.log('Receipt object in generateReceiptHTML:', JSON.stringify(receipt, null, 2));
-    console.log('Receipt number being used:', receipt.receiptNumber);
-    console.log('School data:', schoolData);
+    console.log('📊 LOGO DEBUG: School data:', schoolData);
+    console.log('📊 LOGO DEBUG: School logo_url:', schoolData?.logo_url);
+    console.log('📊 LOGO DEBUG: Logo URL exists:', !!schoolData?.logo_url);
     
     // Get school logo as base64 if available using standardized utility
-    const logoBase64 = schoolData?.logo_url ? await getSchoolLogoBase64(schoolData.logo_url) : null;
+    let logoBase64 = null;
+    if (schoolData?.logo_url) {
+      console.log('📷 LOGO DEBUG: Attempting to load logo from:', schoolData.logo_url);
+      logoBase64 = await getSchoolLogoBase64(schoolData.logo_url);
+      console.log('📷 LOGO DEBUG: Logo base64 result:', logoBase64 ? 'SUCCESS (length: ' + logoBase64.length + ')' : 'FAILED (null)');
+    } else {
+      console.log('📷 LOGO DEBUG: No logo URL found, skipping logo loading');
+    }
+    
     const logoHTML = getLogoHTML(logoBase64, { width: '80px', height: '80px' });
+    console.log('📷 LOGO DEBUG: Generated logo HTML:', logoHTML ? 'SUCCESS (length: ' + logoHTML.length + ')' : 'EMPTY');
+    console.log('📷 LOGO DEBUG: Logo HTML preview:', logoHTML.substring(0, 200) + (logoHTML.length > 200 ? '...' : ''));
     
     return `
       <!DOCTYPE html>
@@ -1617,7 +1690,6 @@ const FeePayment = () => {
             ${schoolData?.phone ? `<div class="school-info">Phone: ${schoolData.phone}</div>` : ''}
             ${schoolData?.email ? `<div class="school-info">Email: ${schoolData.email}</div>` : ''}
             <div class="receipt-title">FEE PAYMENT RECEIPT</div>
-            ${receipt.receiptNumber ? `<div class="receipt-number">Receipt No: ${receipt.receiptNumber}</div>` : ''}
           </div>
 
           <div class="receipt-info">
@@ -1633,11 +1705,9 @@ const FeePayment = () => {
               <span><strong>Transaction ID:</strong> ${receipt.transactionId}</span>
               <span><strong>Payment Method:</strong> ${receipt.paymentMethod}</span>
             </div>
-            ${receipt.receiptNumber ? `
             <div class="info-row">
-              <span><strong>Receipt Number:</strong> ${receipt.receiptNumber}</span>
               <span><strong>Academic Year:</strong> ${receipt.academicYear || '2024-2025'}</span>
-            </div>` : ''}
+            </div>
           </div>
 
           <div class="amount-section">
@@ -1710,7 +1780,7 @@ const FeePayment = () => {
       <View style={styles.historyDetails}>
         <Text style={styles.historyDate}>{item.paymentDate}</Text>
         <Text style={styles.historyMethod}>{item.paymentMethod}</Text>
-        <Text style={styles.historyId}>TXN: {item.transactionId}</Text>
+        <Text style={styles.historyId}>{item.transactionId}</Text>
       </View>
       <TouchableOpacity 
         style={styles.downloadButton}
@@ -1851,11 +1921,11 @@ const FeePayment = () => {
           }
         }, 1000);
       } else {
-        Alert.alert('Payment Failed', paymentResult.error || 'Payment processing failed');
+        Alert.alert('Payment Failed', paymentResult.error || 'Payment could not be processed. Please try again.');
       }
     } catch (error) {
       console.error('Error processing payment:', error);
-      Alert.alert('Error', 'An error occurred while processing your payment. Please try again.');
+      Alert.alert('Payment Error', 'Unable to process payment at this time. Please try again.');
     } finally {
       setPaymentProcessing(false);
     }
@@ -1983,7 +2053,6 @@ const FeePayment = () => {
               ${schoolDetails?.phone ? `<div class="school-info">Phone: ${schoolDetails.phone}</div>` : ''}
               ${schoolDetails?.email ? `<div class="school-info">Email: ${schoolDetails.email}</div>` : ''}
               <div class="receipt-title">FEE PAYMENT RECEIPT</div>
-              <div class="receipt-number">Receipt No: ${receiptInfo.receipt_no}</div>
             </div>
             
             <div class="receipt-details">
@@ -2346,6 +2415,26 @@ const FeePayment = () => {
           </View>
         </View>
 
+        {/* Logo Test Button */}
+        <View style={styles.logoTestContainer}>
+          <TouchableOpacity 
+            style={styles.logoTestButton} 
+            onPress={async () => {
+              console.log('🧪 Starting logo tests...');
+              try {
+                await runLogoTests();
+                Alert.alert('Logo Test', 'Logo tests completed! Check the console logs for detailed results.');
+              } catch (error) {
+                console.error('❌ Logo test error:', error);
+                Alert.alert('Logo Test Error', `Failed to run logo tests: ${error.message}`);
+              }
+            }}
+          >
+            <Ionicons name="bug" size={16} color="#fff" />
+            <Text style={styles.logoTestButtonText}>Test Logo</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Content based on selected tab */}
         {selectedTab === 'overview' ? (
           <FlatList
@@ -2609,14 +2698,13 @@ const FeePayment = () => {
               <ScrollView style={styles.receiptPreviewContent}>
                 <View style={styles.successIcon}>
                   <Ionicons name="checkmark-circle" size={64} color="#4CAF50" />
-                  <Text style={styles.successMessage}>Payment completed successfully!</Text>
+                  <Text style={styles.successMessage}>Fee payment completed successfully!</Text>
                 </View>
                 
                 <View style={styles.receiptPreview}>
                   <View style={styles.receiptHeader}>
                     <Text style={styles.receiptSchoolName}>{schoolDetails?.name || 'School Management System'}</Text>
                     <Text style={styles.receiptTitle}>Fee Payment Receipt</Text>
-                    <Text style={styles.receiptNumber}>Receipt No: {receiptData.receipt_no}</Text>
                   </View>
 
                   <View style={styles.receiptInfo}>
@@ -2700,9 +2788,6 @@ const FeePayment = () => {
                   <View style={styles.receiptHeader}>
                     <Text style={styles.receiptSchoolName}>{schoolData?.school_name || 'ABC School'}</Text>
                     <Text style={styles.receiptTitle}>Fee Receipt</Text>
-                    {selectedReceipt.receiptNumber && (
-                      <Text style={styles.receiptNumber}>Receipt No: {selectedReceipt.receiptNumber}</Text>
-                    )}
                   </View>
 
                   <View style={styles.receiptInfo}>
@@ -2730,12 +2815,6 @@ const FeePayment = () => {
                       <Text style={styles.receiptInfoLabel}>Payment Method:</Text>
                       <Text style={styles.receiptInfoValue}>{selectedReceipt.paymentMethod}</Text>
                     </View>
-                    {selectedReceipt.receiptNumber && (
-                      <View style={styles.receiptInfoRow}>
-                        <Text style={styles.receiptInfoLabel}>Receipt Number:</Text>
-                        <Text style={styles.receiptInfoValue}>{selectedReceipt.receiptNumber}</Text>
-                      </View>
-                    )}
                     <View style={styles.receiptInfoRow}>
                       <Text style={styles.receiptInfoLabel}>Status:</Text>
                       <View style={styles.receiptStatusRow}>
@@ -2795,14 +2874,13 @@ const FeePayment = () => {
               <ScrollView style={styles.receiptPreviewContent}>
                 <View style={styles.successIcon}>
                   <Ionicons name="checkmark-circle" size={64} color="#4CAF50" />
-                  <Text style={styles.successMessage}>Payment recorded successfully!</Text>
+                  <Text style={styles.successMessage}>Fee payment recorded successfully!</Text>
                 </View>
                 
                 <View style={styles.receiptPreview}>
                   <View style={styles.receiptHeader}>
                     <Text style={styles.receiptSchoolName}>{schoolDetails?.name || 'School Management System'}</Text>
                     <Text style={styles.receiptTitle}>Fee Payment Receipt</Text>
-                    <Text style={styles.receiptNumber}>Receipt No: {lastPaymentRecord.receipt_no}</Text>
                   </View>
 
                   <View style={styles.receiptInfo}>
@@ -3981,6 +4059,39 @@ const styles = StyleSheet.create({
   fullScreenSubmitButtonText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  // Logo test button styles
+  logoTestContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    alignItems: 'center',
+  },
+  logoTestButton: {
+    backgroundColor: '#FF5722',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  logoTestButtonText: {
+    color: '#fff',
+    fontSize: 14,
     fontWeight: 'bold',
     marginLeft: 8,
   },

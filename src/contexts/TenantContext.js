@@ -439,22 +439,26 @@ export const TenantProvider = ({ children }) => {
       
       if (!sessionError && session?.user) {  
         // Update JWT claims with tenant_id (this would typically be done server-side)
-        // For now, we'll use a configuration setting
+        // For now, we'll use a configuration setting - but handle errors gracefully
         try {
           await supabase.rpc('set_config', {
             setting_name: 'app.current_tenant_id',
             setting_value: tenantId
           });
+          console.log('✅ Successfully set tenant context via RPC');
         } catch (rpcError) {
-          // If the RPC doesn't exist, that's okay for now
-          console.log('set_config RPC not available, using client-side tenant context');
+          // If the RPC doesn't exist or fails, that's okay - we'll use client-side context
+          console.warn('⚠️ set_config RPC not available or failed:', rpcError.message);
+          console.log('📍 Continuing with client-side tenant context for tenant:', tenantId);
+          // We don't throw here to avoid breaking the app flow
         }
       } else {
         console.log('No active session found, skipping RPC call');
       }
     } catch (error) {
-      console.error('Error updating Supabase context:', error);
+      console.error('❌ Error updating Supabase context:', error);
       // Don't throw the error to prevent breaking the app
+      // The application can still work with client-side tenant filtering
     }
   };
 
