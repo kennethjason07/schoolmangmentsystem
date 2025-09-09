@@ -45,7 +45,7 @@ const ProfileScreen = ({ navigation, route }) => {
   const [scrollY, setScrollY] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
   const [scrollViewHeight, setScrollViewHeight] = useState(0);
-  const { signOut, user: authUser } = useAuth();
+  const { signOut, user: authUser, loading: authLoading } = useAuth();
 
   // Load user data
   const loadUserData = async () => {
@@ -182,31 +182,59 @@ const ProfileScreen = ({ navigation, route }) => {
   useEffect(() => {
     loadUserData();
     
-    // Inject CSS for web to ensure scrolling works
+    // Inject CSS for web to prevent double scrolling
     if (Platform.OS === 'web') {
       const style = document.createElement('style');
+      style.id = 'profile-screen-styles';
       style.textContent = `
-        .profile-scroll-container {
-          height: 100vh !important;
+        /* Only apply to current screen container - prevent double scrolling */
+        .profile-screen-container {
+          position: relative;
+          height: 100%;
+          overflow: hidden;
+        }
+        
+        /* Ensure parent containers don't scroll */
+        .profile-screen-container > div:first-child {
+          height: 100%;
+          overflow: hidden;
+        }
+        
+        /* Only the ScrollView inside should scroll */
+        .profile-scroll-view {
+          height: 100% !important;
           overflow-y: auto !important;
           overflow-x: hidden !important;
           -webkit-overflow-scrolling: touch !important;
           scroll-behavior: smooth !important;
+          scrollbar-width: thin;
         }
         
-        body {
-          overflow: hidden !important;
+        /* Hide scrollbar on webkit browsers for cleaner look */
+        .profile-scroll-view::-webkit-scrollbar {
+          width: 8px;
         }
         
-        #root, [data-reactroot] {
-          height: 100vh !important;
-          overflow: hidden !important;
+        .profile-scroll-view::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        
+        .profile-scroll-view::-webkit-scrollbar-thumb {
+          background: rgba(0,0,0,0.2);
+          border-radius: 4px;
+        }
+        
+        .profile-scroll-view::-webkit-scrollbar-thumb:hover {
+          background: rgba(0,0,0,0.4);
         }
       `;
       document.head.appendChild(style);
       
       return () => {
-        document.head.removeChild(style);
+        const existingStyle = document.getElementById('profile-screen-styles');
+        if (existingStyle) {
+          document.head.removeChild(existingStyle);
+        }
       };
     }
 
@@ -479,7 +507,7 @@ const ProfileScreen = ({ navigation, route }) => {
     }
   };
 
-  // Handle logout
+  // Handle logout with improved web compatibility
   const handleLogout = async () => {
     Alert.alert(
       'Logout',
@@ -494,24 +522,76 @@ const ProfileScreen = ({ navigation, route }) => {
           style: 'destructive',
           onPress: async () => {
               try {
-                const result = await signOut();
+                console.log('🚪 Starting logout process...');
+                setLoading(true);
+                
+                // Add timeout for web platform to prevent hanging
+                const LOGOUT_TIMEOUT = Platform.OS === 'web' ? 5000 : 10000;
+                
+                const logoutPromise = signOut();
+                const timeoutPromise = new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('Logout timed out')), LOGOUT_TIMEOUT)
+                );
+                
+                const result = await Promise.race([logoutPromise, timeoutPromise]);
+                
+                console.log('🚪 Logout result:', result);
+                
                 if (result?.error) {
                   // Check if it's a session missing error (which means already logged out)
-                  if (result.error.message?.includes('Auth session missing') || result.error.name === 'AuthSessionMissingError') {
-                    console.log('Session already missing during logout, proceeding...');
+                  if (result.error.message?.includes('Auth session missing') || 
+                      result.error.name === 'AuthSessionMissingError') {
+                    console.log('✅ Session already missing during logout, proceeding...');
                     // Don't show error, this is expected if session expired
                   } else {
-                    console.error('Logout error:', result.error);
+                    console.error('❌ Logout error:', result.error);
                     Alert.alert('Error', `Failed to logout: ${result.error.message || 'Unknown error'}`);
+                    return;
                   }
                 }
+                
+                console.log('✅ Logout successful');
                 // AuthContext will handle navigation automatically on successful logout
+                
               } catch (error) {
-                console.error('Logout error:', error);
-                // Don't show error for session missing issues
-                if (!error.message?.includes('Auth session missing') && error.name !== 'AuthSessionMissingError') {
-                  Alert.alert('Error', 'Failed to logout');
+                console.error('💥 Logout error:', error);
+                
+                // Handle timeout specifically
+                if (error.message?.includes('timed out')) {
+                  console.log('⏱️ Logout timed out, forcing local logout...');
+                  Alert.alert(
+                    'Logout', 
+                    'Logout completed (connection timeout). You will be redirected to the login screen.',
+                    [
+                      {
+                        text: 'OK',
+                        onPress: () => {
+                          // Try to navigate manually
+                          if (navigation?.reset) {
+                            navigation.reset({
+                              index: 0,
+                              routes: [{ name: 'Auth' }],
+                            });
+                          } else if (navigation?.navigate) {
+                            navigation.navigate('Auth');
+                          }
+                        }
+                      }
+                    ]
+                  );
+                  return;
                 }
+                
+                // Don't show error for session missing issues
+                if (!error.message?.includes('Auth session missing') && 
+                    error.name !== 'AuthSessionMissingError') {
+                  console.error('❌ Unexpected logout error:', error);
+                  Alert.alert('Error', 'Failed to logout. Please try again.');
+                } else {
+                  console.log('✅ Session was already missing, logout completed');
+                }
+              } finally {
+                setLoading(false);
               }
           },
         },
@@ -528,37 +608,41 @@ const ProfileScreen = ({ navigation, route }) => {
   }
 
   return (
-    <View style={[styles.container, webContainerStyle, Platform.OS === 'web' && { minHeight: '100vh', height: 'auto' }]}>
+    <View style={styles.container} className="profile-screen-container">
       <Header title="Profile" showBack={true} />
-      <KeyboardAvoidingView 
-        style={[styles.keyboardAvoidingView, Platform.OS === 'web' && { flex: 1, height: '100%', overflow: 'visible' }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'web' ? undefined : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-        enabled={Platform.OS !== 'web'} // Disable KeyboardAvoidingView on web for better scrolling
-      >
-        <ScrollView
-          ref={scrollViewRef}
-          style={[webScrollViewStyles.scrollView, Platform.OS === 'web' && { 
-            overflowY: 'auto !important',
-            WebkitOverflowScrolling: 'touch',
-            height: isFromAdmin ? 'calc(100vh - 80px)' : '100vh',
-          }]}
-          className={Platform.OS === 'web' ? 'profile-scroll-container' : undefined}
-          contentContainerStyle={[styles.scrollContent, webScrollViewStyles.scrollViewContent]}
-          {...getWebScrollProps()}
-          refreshControl={
-            <RefreshControl refreshing={loading} onRefresh={loadUserData} />
-          }
-          onScroll={(event) => {
-            setScrollY(event.nativeEvent.contentOffset.y);
-          }}
-          onContentSizeChange={(width, height) => {
-            setContentHeight(height);
-          }}
-          onLayout={(event) => {
-            setScrollViewHeight(event.nativeEvent.layout.height);
-          }}
+      
+      {/* Scroll Wrapper for web optimization */}
+      <View style={styles.scrollWrapper}>
+        <KeyboardAvoidingView 
+          style={styles.keyboardAvoidingView}
+          behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'web' ? undefined : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+          enabled={Platform.OS !== 'web'}
         >
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.scrollContainer}
+            contentContainerStyle={styles.scrollContent}
+            className="profile-scroll-view"
+            showsVerticalScrollIndicator={Platform.OS === 'web'}
+            nestedScrollEnabled={true}
+            bounces={false}
+            overScrollMode="never"
+            scrollBehavior="smooth"
+            WebkitOverflowScrolling="touch"
+            refreshControl={
+              <RefreshControl refreshing={loading} onRefresh={loadUserData} />
+            }
+            onScroll={(event) => {
+              setScrollY(event.nativeEvent.contentOffset.y);
+            }}
+            onContentSizeChange={(width, height) => {
+              setContentHeight(height);
+            }}
+            onLayout={(event) => {
+              setScrollViewHeight(event.nativeEvent.layout.height);
+            }}
+          >
           <View style={styles.profileHeader}>
             {user?.profile_url ? (
               <TouchableOpacity onPress={handlePickPhoto}>
@@ -659,9 +743,9 @@ const ProfileScreen = ({ navigation, route }) => {
               <Text style={styles.logoutButtonText}>Logout</Text>
             </TouchableOpacity>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </View>
     </View>
   );
 };
@@ -915,6 +999,31 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginLeft: 4,
     fontWeight: 'bold',
+  },
+  // Web scroll optimization styles
+  scrollWrapper: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        height: 'calc(100vh - 120px)',
+        minHeight: 0,
+        maxHeight: '100vh',
+        overflow: 'hidden',
+      },
+      default: {
+        flex: 1,
+      },
+    }),
+  },
+  scrollContainer: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        overflowY: 'auto',
+        scrollBehavior: 'smooth',
+        WebkitOverflowScrolling: 'touch',
+      },
+    }),
   },
 });
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,9 @@ import {
   RefreshControl,
   Modal,
   Image,
+  FlatList,
+  Platform,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -55,6 +58,13 @@ const ClassStudentDetails = ({ route, navigation }) => {
   const [showUPIQRModal, setShowUPIQRModal] = useState(false);
   const [upiTransactionData, setUpiTransactionData] = useState(null);
   const { user } = useAuth();
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
+  
+  // Refs for scrolling
+  const mainScrollViewRef = useRef(null);
+  const studentListRef = useRef(null);
+  const modalScrollViewRef = useRef(null);
+  const scrollY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     loadSchoolDetails();
@@ -419,6 +429,12 @@ const ClassStudentDetails = ({ route, navigation }) => {
   const handleStudentClick = (student) => {
     setSelectedStudent(student);
     setStudentHistoryModal(true);
+    // Reset modal scroll position to top
+    setTimeout(() => {
+      if (modalScrollViewRef.current) {
+        modalScrollViewRef.current.scrollTo({ y: 0, animated: true });
+      }
+    }, 100);
   };
 
   // Load fee components for the class
@@ -1043,6 +1059,193 @@ const ClassStudentDetails = ({ route, navigation }) => {
     }
   };
 
+  // Handle scroll events for scroll-to-top button
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    {
+      useNativeDriver: false,
+      listener: (event) => {
+        const offsetY = event.nativeEvent.contentOffset.y;
+        setShowScrollToTop(offsetY > 300); // Show button after scrolling 300px
+      },
+    }
+  );
+
+  // Scroll to top function
+  const scrollToTop = () => {
+    if (mainScrollViewRef.current) {
+      mainScrollViewRef.current.scrollTo({ y: 0, animated: true });
+    }
+    if (studentListRef.current) {
+      studentListRef.current.scrollToOffset({ offset: 0, animated: true });
+    }
+  };
+
+  // Optimized render function for student cards
+  const renderStudentCard = useCallback(({ item: student, index }) => (
+    <TouchableOpacity
+      key={student.id}
+      style={[
+        styles.studentCard,
+        {
+          borderLeftColor: student.paymentStatus === 'Paid' ? '#4CAF50' :
+            student.paymentStatus === 'Partial' ? '#FF9800' : '#F44336'
+        }
+      ]}
+      onPress={() => handleStudentClick(student)}
+      activeOpacity={0.7}
+    >
+      {/* Student Header */}
+      <View style={styles.studentHeader}>
+        <View style={styles.studentInfo}>
+          <Text style={styles.studentName}>{student.name}</Text>
+          <Text style={styles.studentDetails}>
+            Roll: {student.rollNo || 'N/A'} • Admission: {student.admissionNo}
+          </Text>
+        </View>
+        <View style={[
+          styles.statusBadge,
+          {
+            backgroundColor: student.paymentStatus === 'Paid' ? '#4CAF50' :
+              student.paymentStatus === 'Partial' ? '#FF9800' : '#F44336'
+          }
+        ]}>
+          <Text style={styles.statusText}>{student.paymentStatus}</Text>
+        </View>
+      </View>
+
+      {/* Fee Details */}
+      <View style={styles.feeDetails}>
+        <View style={styles.feeRow}>
+          <Text style={styles.feeLabel}>Total Fee:</Text>
+          <Text style={styles.feeValue}>{formatSafeCurrency(student.totalFeeStructure)}</Text>
+        </View>
+        {student.totalConcessions > 0 && (
+          <View style={styles.feeRow}>
+            <Text style={styles.feeLabel}>Fee Concession:</Text>
+            <Text style={[styles.feeValue, { color: '#FF9800' }]}>
+              -{formatSafeCurrency(student.totalConcessions)}
+            </Text>
+          </View>
+        )}
+        <View style={styles.feeRow}>
+          <Text style={styles.feeLabel}>Amount Paid:</Text>
+          <Text style={[styles.feeValue, { color: '#4CAF50' }]}>
+            {formatSafeCurrency(student.totalPaid)}
+          </Text>
+        </View>
+        <View style={styles.feeRow}>
+          <Text style={styles.feeLabel}>Outstanding:</Text>
+          <Text style={[styles.feeValue, { color: '#F44336' }]}>
+            {formatSafeCurrency(student.outstanding)}
+          </Text>
+        </View>
+      </View>
+
+      {/* Fee Concession Display */}
+      {student.totalConcessions > 0 && (
+        <View style={styles.concessionsContainer}>
+          <View style={styles.concessionsHeader}>
+            <View style={styles.concessionsIconContainer}>
+              <Ionicons name="pricetags" size={18} color="#FF9800" />
+              <Text style={styles.concessionsHeaderText}>Fee Concession Applied</Text>
+            </View>
+            <View style={styles.concessionsStats}>
+              <Text style={styles.concessionsAmount}>
+                {formatSafeCurrency(student.totalConcessions)}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.concessionsDetails}>
+            <Text style={styles.concessionsDetailsText}>
+              Adjusted fee after concession: {formatSafeCurrency(student.adjustedFeeAmount)}
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* Payment History */}
+      {student.payments.length > 0 && (
+        <View style={styles.paymentHistory}>
+          <Text style={styles.paymentHistoryTitle}>
+            Recent Payments ({student.paymentCount})
+          </Text>
+          {student.payments.slice(0, 3).map((payment, payIndex) => (
+            <View key={payment.id} style={styles.paymentItem}>
+              <Text style={styles.paymentComponent}>{payment.fee_component}</Text>
+              <View style={styles.paymentDetails}>
+                <Text style={styles.paymentAmount}>
+                  {formatSafeCurrency(payment.amount_paid)}
+                </Text>
+                <Text style={styles.paymentDate}>
+                  {formatSafeDate(payment.payment_date)}
+                </Text>
+              </View>
+            </View>
+          ))}
+          {student.payments.length > 3 && (
+            <Text style={styles.morePayments}>
+              +{student.payments.length - 3} more payments
+            </Text>
+          )}
+        </View>
+      )}
+
+      {/* Last Payment */}
+      {student.latestPaymentDate && (
+        <Text style={styles.lastPayment}>
+          Last payment: {formatSafeDate(student.latestPaymentDate)}
+          {student.latestPaymentMode && ` via ${student.latestPaymentMode}`}
+        </Text>
+      )}
+
+      {/* Action Buttons */}
+      {student.outstanding > 0 && (
+        <View style={styles.actionButtonsContainer}>
+          {/* Pay Button */}
+          <TouchableOpacity
+            style={styles.markAsPaidButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleMarkAsPaid(student);
+            }}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="card" size={16} color="#fff" style={{ marginRight: 6 }} />
+            <Text style={styles.markAsPaidButtonText}>
+              Pay
+            </Text>
+          </TouchableOpacity>
+
+          {/* Fee Concession Button */}
+          <TouchableOpacity
+            style={styles.feeConcessionButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleFeeConcesssionClick(student);
+            }}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="pricetags" size={16} color="#fff" style={{ marginRight: 6 }} />
+            <Text style={styles.feeConcessionButtonText}>
+              Fee Concession
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </TouchableOpacity>
+  ), [formatSafeCurrency, formatSafeDate, handleStudentClick, handleMarkAsPaid, handleFeeConcesssionClick]);
+
+  // Key extractor for FlatList
+  const keyExtractor = useCallback((item) => item.id.toString(), []);
+
+  // Get item layout for better performance
+  const getItemLayout = useCallback((data, index) => ({
+    length: 200, // Approximate height of each student card
+    offset: 200 * index,
+    index,
+  }), []);
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -1079,12 +1282,25 @@ const ClassStudentDetails = ({ route, navigation }) => {
         </TouchableOpacity>
       </View>
       
-      <ScrollView 
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
+      <View style={styles.scrollWrapper}>
+        <ScrollView 
+          ref={mainScrollViewRef}
+          style={styles.scrollContainer}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          keyboardShouldPersistTaps="handled"
+          bounces={Platform.OS !== 'web'}
+          nestedScrollEnabled={true}
+          overScrollMode="always"
+          scrollEventThrottle={1}
+          onScroll={handleScroll}
+          removeClippedSubviews={Platform.OS === 'android'}
+          maxToRenderPerBatch={10}
+          windowSize={10}
+        >
         {/* Tab Content */}
         {activeTab === 'students' ? (
           <>
@@ -1149,7 +1365,11 @@ const ClassStudentDetails = ({ route, navigation }) => {
 
           {/* Filter Chips */}
           <View style={styles.filterContainer}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={Platform.OS === 'web'}
+              contentContainerStyle={styles.horizontalScrollContent}
+            >
               {['All', 'Paid', 'Partial', 'Pending'].map((status) => (
                 <TouchableOpacity
                   key={status}
@@ -1228,163 +1448,23 @@ const ClassStudentDetails = ({ route, navigation }) => {
               </TouchableOpacity>
             </View>
           ) : (
-            filteredStudents.map((student, index) => (
-              <TouchableOpacity
-                key={student.id}
-                style={[
-                  styles.studentCard,
-                  {
-                    borderLeftColor: student.paymentStatus === 'Paid' ? '#4CAF50' :
-                      student.paymentStatus === 'Partial' ? '#FF9800' : '#F44336'
-                  }
-                ]}
-                onPress={() => handleStudentClick(student)}
-                activeOpacity={0.7}
-              >
-                {/* Student Header */}
-                <View style={styles.studentHeader}>
-                  <View style={styles.studentInfo}>
-                    <Text style={styles.studentName}>{student.name}</Text>
-                    <Text style={styles.studentDetails}>
-                      Roll: {student.rollNo || 'N/A'} • Admission: {student.admissionNo}
-                    </Text>
-                  </View>
-                  <View style={[
-                    styles.statusBadge,
-                    {
-                      backgroundColor: student.paymentStatus === 'Paid' ? '#4CAF50' :
-                        student.paymentStatus === 'Partial' ? '#FF9800' : '#F44336'
-                    }
-                  ]}>
-                    <Text style={styles.statusText}>{student.paymentStatus}</Text>
-                  </View>
-                </View>
-
-                {/* Fee Details */}
-                <View style={styles.feeDetails}>
-                  <View style={styles.feeRow}>
-                    <Text style={styles.feeLabel}>Total Fee:</Text>
-                    <Text style={styles.feeValue}>{formatSafeCurrency(student.totalFeeStructure)}</Text>
-                  </View>
-                  {student.totalConcessions > 0 && (
-                    <View style={styles.feeRow}>
-                      <Text style={styles.feeLabel}>Fee Concession:</Text>
-                      <Text style={[styles.feeValue, { color: '#FF9800' }]}>
-                        -{formatSafeCurrency(student.totalConcessions)}
-                      </Text>
-                    </View>
-                  )}
-                  <View style={styles.feeRow}>
-                    <Text style={styles.feeLabel}>Amount Paid:</Text>
-                    <Text style={[styles.feeValue, { color: '#4CAF50' }]}>
-                      {formatSafeCurrency(student.totalPaid)}
-                    </Text>
-                  </View>
-                  <View style={styles.feeRow}>
-                    <Text style={styles.feeLabel}>Outstanding:</Text>
-                    <Text style={[styles.feeValue, { color: '#F44336' }]}>
-                      {formatSafeCurrency(student.outstanding)}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Fee Concession Display */}
-                {student.totalConcessions > 0 && (
-                  <View style={styles.concessionsContainer}>
-                    <View style={styles.concessionsHeader}>
-                      <View style={styles.concessionsIconContainer}>
-                        <Ionicons name="pricetags" size={18} color="#FF9800" />
-                        <Text style={styles.concessionsHeaderText}>Fee Concession Applied</Text>
-                      </View>
-                      <View style={styles.concessionsStats}>
-                        <Text style={styles.concessionsAmount}>
-                          {formatSafeCurrency(student.totalConcessions)}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={styles.concessionsDetails}>
-                      <Text style={styles.concessionsDetailsText}>
-                        Adjusted fee after concession: {formatSafeCurrency(student.adjustedFeeAmount)}
-                      </Text>
-                    </View>
-                  </View>
-                )}
-
-
-                {/* Payment Summary - Compact */}
-                {student.paymentCount > 0 && (
-                  <View style={styles.compactPaymentSummary}>
-                    <View style={styles.paymentSummaryRow}>
-                      <Ionicons name="receipt" size={16} color="#4CAF50" style={{ marginRight: 6 }} />
-                      <Text style={styles.paymentSummaryText}>
-                        {student.paymentCount} payment{student.paymentCount > 1 ? 's' : ''} made
-                      </Text>
-                      <Text style={styles.paymentSummaryAmount}>
-                        {formatSafeCurrency(student.totalPaid)}
-                      </Text>
-                    </View>
-                    <View style={styles.progressContainer}>
-                      <View style={styles.progressBar}>
-                        <View 
-                          style={[styles.progressFill, { 
-                            width: `${student.paymentPercentage}%`,
-                            backgroundColor: student.paymentStatus === 'Paid' ? '#4CAF50' :
-                              student.paymentStatus === 'Partial' ? '#FF9800' : '#F44336'
-                          }]} 
-                        />
-                      </View>
-                      <Text style={styles.progressText}>
-                        {student.paymentPercentage.toFixed(0)}% completed
-                      </Text>
-                    </View>
-                  </View>
-                )}
-
-                {/* Last Payment */}
-                {student.latestPaymentDate && (
-                  <Text style={styles.lastPayment}>
-                    Last payment: {formatSafeDate(student.latestPaymentDate)}
-                    {student.latestPaymentMode && ` via ${student.latestPaymentMode}`}
-                  </Text>
-                )}
-
-                {/* Action Buttons */}
-                {student.outstanding > 0 && (
-                  <View style={styles.actionButtonsContainer}>
-                    {/* Pay Button */}
-                    <TouchableOpacity
-                      style={styles.markAsPaidButton}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleMarkAsPaid(student);
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="card" size={16} color="#fff" style={{ marginRight: 6 }} />
-                      <Text style={styles.markAsPaidButtonText}>
-                        Pay
-                      </Text>
-                    </TouchableOpacity>
-
-
-                    {/* Fee Concession Button */}
-                    <TouchableOpacity
-                      style={styles.feeConcessionButton}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleFeeConcesssionClick(student);
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="pricetags" size={16} color="#fff" style={{ marginRight: 6 }} />
-                      <Text style={styles.feeConcessionButtonText}>
-                        Fee Concession
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </TouchableOpacity>
-            ))
+            <FlatList
+              ref={studentListRef}
+              data={filteredStudents}
+              renderItem={renderStudentCard}
+              keyExtractor={keyExtractor}
+              showsVerticalScrollIndicator={false}
+              removeClippedSubviews={Platform.OS === 'android'}
+              maxToRenderPerBatch={5}
+              windowSize={10}
+              initialNumToRender={10}
+              updateCellsBatchingPeriod={50}
+              scrollEventThrottle={1}
+              getItemLayout={getItemLayout}
+              nestedScrollEnabled={false}
+              style={styles.studentFlatList}
+              contentContainerStyle={styles.studentFlatListContent}
+            />
           )}
         </View>
           </>
@@ -1573,7 +1653,39 @@ const ClassStudentDetails = ({ route, navigation }) => {
           </View>
           </>
         )}
-      </ScrollView>
+        </ScrollView>
+      </View>
+      
+      {/* Scroll to Top Button */}
+      {showScrollToTop && (
+        <Animated.View 
+          style={[
+            styles.scrollToTopButton,
+            {
+              opacity: scrollY.interpolate({
+                inputRange: [300, 400],
+                outputRange: [0, 1],
+                extrapolate: 'clamp',
+              }),
+              transform: [{
+                translateY: scrollY.interpolate({
+                  inputRange: [300, 400],
+                  outputRange: [100, 0],
+                  extrapolate: 'clamp',
+                })
+              }]
+            }
+          ]}
+        >
+          <TouchableOpacity
+            onPress={scrollToTop}
+            style={styles.scrollToTopButtonInner}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="chevron-up" size={24} color="#fff" />
+          </TouchableOpacity>
+        </Animated.View>
+      )}
 
       {/* Student Payment History Modal */}
       <Modal
@@ -1595,7 +1707,15 @@ const ClassStudentDetails = ({ route, navigation }) => {
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.modalContent}>
+          <ScrollView 
+            ref={modalScrollViewRef}
+            style={styles.modalContent}
+            showsVerticalScrollIndicator={Platform.OS === 'web'}
+            scrollEventThrottle={1}
+            removeClippedSubviews={Platform.OS === 'android'}
+            keyboardShouldPersistTaps="handled"
+            bounces={Platform.OS !== 'web'}
+          >
             {selectedStudent && (
               <>
                 {/* Student Summary */}
@@ -2301,6 +2421,50 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  scrollWrapper: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        height: 'calc(100vh - 120px)',
+        maxHeight: 'calc(100vh - 120px)',
+        minHeight: 500,
+        overflow: 'hidden',
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+      },
+      default: {
+        minHeight: 400,
+      },
+    }),
+  },
+  scrollContainer: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        overflowY: 'scroll',
+        overflowX: 'hidden',
+        height: '100%',
+        maxHeight: '100%',
+        WebkitOverflowScrolling: 'touch',
+        scrollBehavior: 'smooth',
+      },
+    }),
+  },
+  scrollContent: {
+    flexGrow: 1,
+    padding: 16,
+    paddingBottom: 40,
+    ...Platform.select({
+      web: {
+        paddingBottom: 100,
+        paddingTop: 8,
+        minHeight: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+      },
+    }),
   },
   content: {
     flex: 1,
@@ -3637,6 +3801,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+<<<<<<< HEAD
   // UPI Payment Note Styles
   upiPaymentNote: {
     fontSize: 12,
@@ -3678,6 +3843,56 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'right',
     marginTop: 4,
+=======
+  // FlatList Styles
+  studentFlatList: {
+    flex: 1,
+  },
+  studentFlatListContent: {
+    paddingBottom: 20,
+  },
+  // Horizontal Scroll Content
+  horizontalScrollContent: {
+    paddingHorizontal: 4,
+  },
+  // Scroll to Top Button
+  scrollToTopButton: {
+    position: 'absolute',
+    bottom: 30,
+    right: 20,
+    zIndex: 1000,
+    ...Platform.select({
+      web: {
+        position: 'fixed',
+        bottom: 30,
+        right: 30,
+      },
+    }),
+  },
+  scrollToTopButtonInner: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#2196F3',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 12px rgba(33, 150, 243, 0.4)',
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+        '&:hover': {
+          backgroundColor: '#1976D2',
+          transform: 'scale(1.1)',
+        },
+      },
+    }),
+>>>>>>> origin/something
   },
 });
 

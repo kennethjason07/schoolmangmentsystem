@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated, RefreshControl, Image, FlatList, Modal, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
@@ -16,6 +16,7 @@ import StatCard from '../../components/StatCard';
 import StudentFeeCard from '../../components/StudentFeeCard';
 import LogoDisplay from '../../components/LogoDisplay';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
+import NotificationPopup from '../../components/NotificationPopup';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { calculateStudentFees, getFeeStatusText, getFeeStatusColor } from '../../utils/feeCalculation';
 import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCount';
@@ -39,9 +40,49 @@ const StudentDashboard = ({ navigation }) => {
   const [recentActivities, setRecentActivities] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [showStudentDetailsModal, setShowStudentDetailsModal] = useState(false);
+  
+  // Ref for enhanced scroll functionality
+  const scrollViewRef = useRef(null);
 
   // Hook for notification count with auto-refresh
   const { unreadCount: hookUnreadCount, refresh: refreshNotificationCount } = useUnreadNotificationCount('Student');
+  
+  // Enhanced scroll event handler (simplified for smooth scrolling only)
+  const handleScroll = (event) => {
+    // This can be used for future scroll-based features if needed
+    // Currently just enables smooth scrolling behavior
+  };
+  
+  // Quick navigation to specific sections (enhanced for web)
+  const scrollToSection = (yOffset) => {
+    if (scrollViewRef.current) {
+      if (Platform.OS === 'web') {
+        // For web, use a more reliable scrolling method
+        try {
+          scrollViewRef.current.scrollTo({ 
+            y: yOffset, 
+            animated: true
+          });
+        } catch (error) {
+          console.warn('Web scroll error:', error);
+          // Fallback for web - use native DOM scrolling
+          const scrollElement = scrollViewRef.current?.getScrollableNode?.();
+          if (scrollElement) {
+            scrollElement.scrollTo({ 
+              top: yOffset, 
+              behavior: 'smooth' 
+            });
+          }
+        }
+      } else {
+        // Mobile scrolling
+        scrollViewRef.current.scrollTo({ 
+          y: yOffset, 
+          animated: true
+        });
+      }
+    }
+  };
 
   // Utility function to format date from yyyy-mm-dd to dd-mm-yyyy
   const formatDateToDDMMYYYY = (dateString) => {
@@ -106,6 +147,71 @@ const StudentDashboard = ({ navigation }) => {
   const handleNotificationsPress = () => {
     navigation.navigate('StudentNotifications');
   };
+
+  // Handle individual notification press from popup
+  const handleNotificationPress = (notification) => {
+    console.log('Notification pressed:', notification);
+    // You can add custom navigation or action based on notification type
+    switch (notification.type) {
+      case 'assignment':
+        navigation.navigate('Assignments');
+        break;
+      case 'grade':
+        navigation.navigate('Marks', { activeTab: 'marks' });
+        break;
+      case 'attendance':
+        navigation.navigate('Attendance');
+        break;
+      case 'fee':
+        navigation.navigate('StudentFeePayment');
+        break;
+      case 'announcement':
+        navigation.navigate('StudentNotifications');
+        break;
+      default:
+        navigation.navigate('StudentNotifications');
+    }
+  };
+
+  // Custom right component for header with NotificationPopup and Profile
+  const renderRightComponent = () => (
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      <NotificationPopup
+        userType="Student"
+        onNotificationPress={handleNotificationPress}
+        iconSize={24}
+        iconColor="#333"
+      />
+      {user && (
+        <TouchableOpacity 
+          onPress={() => {
+            try {
+              navigation.navigate('Profile');
+            } catch (error) {
+              console.warn('Profile navigation failed:', error);
+              try {
+                navigation.navigate('Settings');
+              } catch (settingsError) {
+                console.warn('Settings navigation also failed:', settingsError);
+              }
+            }
+          }} 
+          style={styles.profileButtonCustom}
+          activeOpacity={0.7}
+        >
+          {studentProfile?.profile_url ? (
+            <Image 
+              source={{ uri: studentProfile.profile_url }} 
+              style={styles.profileImageCustom}
+              onError={() => setStudentProfile(prev => ({ ...prev, profile_url: null }))}
+            />
+          ) : (
+            <Ionicons name="person-circle" size={32} color="#2196F3" />
+          )}
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 
   // Function to fetch only assignments data (for focus refresh)
   const fetchAssignmentsData = async () => {
@@ -849,26 +955,84 @@ const StudentDashboard = ({ navigation }) => {
       <Header
         title="Student Dashboard"
         showBack={false}
-        showNotifications={true}
-        unreadCount={unreadCount}
-        onNotificationsPress={handleNotificationsPress}
+        rightComponent={renderRightComponent}
       />
 
       <View style={styles.scrollWrapper}>
+        {/* Quick Navigation Bar */}
+        <View style={styles.quickNavBar}>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quickNavContent}
+            bounces={false}
+          >
+            <TouchableOpacity 
+              style={styles.quickNavButton}
+              onPress={() => scrollToSection(0)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="home" size={16} color="#1976d2" />
+              <Text style={styles.quickNavText}>Overview</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.quickNavButton}
+              onPress={() => scrollToSection(400)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="person" size={16} color="#4CAF50" />
+              <Text style={styles.quickNavText}>Profile</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.quickNavButton}
+              onPress={() => scrollToSection(600)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="analytics" size={16} color="#FF9800" />
+              <Text style={styles.quickNavText}>Stats</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.quickNavButton}
+              onPress={() => scrollToSection(1200)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="library" size={16} color="#9C27B0" />
+              <Text style={styles.quickNavText}>Activities</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+        
         <ScrollView 
+          ref={scrollViewRef}
           style={styles.scrollContainer}
           contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={Platform.OS === 'web'} 
+          showsVerticalScrollIndicator={Platform.OS !== 'web'}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={['#1976d2']}
+              colors={['#1976d2', '#4CAF50']}
               tintColor="#1976d2"
+              title="Pull to refresh dashboard"
+              titleColor="#666"
             />
           }
           keyboardShouldPersistTaps="handled"
           bounces={Platform.OS !== 'web'}
+          scrollEventThrottle={Platform.OS === 'web' ? 32 : 16}
+          onScroll={handleScroll}
+          decelerationRate={Platform.OS === 'ios' ? 0.998 : 'normal'}
+          // Enhanced accessibility
+          accessible={true}
+          accessibilityLabel="Student dashboard scroll view"
+          accessibilityHint="Scroll to view your academic information and activities"
+          // Web-specific optimizations
+          {...(Platform.OS === 'web' && {
+            style: {
+              ...styles.scrollContainer,
+              scrollBehavior: 'smooth',
+            }
+          })}
         >
 
         {/* School Details Card */}
@@ -1329,6 +1493,14 @@ const styles = StyleSheet.create({
   },
   scrollContainer: {
     flex: 1,
+    ...Platform.select({
+      web: {
+        // Enhanced scrolling for web
+        scrollBehavior: 'smooth',
+        overflowY: 'auto',
+        WebkitOverflowScrolling: 'touch',
+      }
+    }),
   },
   scrollContent: {
     flexGrow: 1,
@@ -1918,6 +2090,56 @@ const styles = StyleSheet.create({
     flex: 2,
     textAlign: 'right',
   },
+  
+  // Quick Navigation Bar Styles
+  quickNavBar: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    paddingVertical: 8,
+  },
+  quickNavContent: {
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  quickNavButton: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: '#f8f9fa',
+    minWidth: 70,
+  },
+  quickNavText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#333',
+    marginTop: 4,
+  },
+  
+  // Custom Profile Button Styles
+  profileButtonCustom: {
+    padding: 4,
+    marginLeft: 12,
+    flexShrink: 0,
+  },
+  profileImageCustom: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#2196F3',
+  },
+  
 });
 
 export default StudentDashboard;

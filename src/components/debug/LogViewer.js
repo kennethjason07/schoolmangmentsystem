@@ -318,11 +318,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 8,
-    gap: 8,
   },
   actionButtonText: {
     color: colors.white,
     fontWeight: '600',
+    marginLeft: 8,
   },
   logCount: {
     fontSize: 14,

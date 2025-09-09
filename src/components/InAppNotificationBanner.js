@@ -204,9 +204,9 @@ const InAppNotificationBanner = () => {
           top: insets.top,
           transform: [{ translateY: slideAnim }],
           opacity: opacityAnim,
+          pointerEvents: currentNotification ? 'auto' : 'none',
         },
       ]}
-      pointerEvents={currentNotification ? 'auto' : 'none'}
     >
       <TouchableOpacity
         style={[styles.banner, { backgroundColor: getNotificationColor() }]}

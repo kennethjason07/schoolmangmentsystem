@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, FlatList, TouchableOpacity, TextInput, Alert, ActivityIndicator, RefreshControl, Image } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { LineChart } from 'react-native-chart-kit';
@@ -536,7 +537,7 @@ function groupAndSortSchedule(schedule) {
       
       // Lazy load the actual attendance stats after dashboard is shown
       setTimeout(() => {
-        fetchAttendanceAnalytics(classMap);
+        fetchAttendanceAnalytics(classMap, assignedSubjects, classTeacherClasses);
       }, 2000);
 
       // Recent activities (using function-level variables with unique IDs)
@@ -1076,7 +1077,7 @@ function groupAndSortSchedule(schedule) {
   // No need for manual refresh - universal hook handles everything automatically
   
   // Function to fetch attendance analytics separately after dashboard loads
-  const fetchAttendanceAnalytics = async (classMap) => {
+  const fetchAttendanceAnalytics = async (classMap, assignedSubjects, classTeacherClasses) => {
     if (!classMap) return;
     
     try {
@@ -1099,6 +1100,8 @@ function groupAndSortSchedule(schedule) {
           .select('id, tenant_id')
           .eq('class_name', className)
           .limit(5); // Only check 5 students per class
+
+        console.log(`📊 [ANALYTICS] Found ${studentsData?.length || 0} students in class ${classId}`);
 
         if (studentsData && studentsData.length > 0) {
           // Validate student data belongs to correct tenant
@@ -1125,19 +1128,24 @@ function groupAndSortSchedule(schedule) {
               attendanceDataFetched = true;
               totalAttendance += attendanceData.filter(a => a.status === 'Present').length;
               totalDays += attendanceData.length;
+              console.log(`📊 [ANALYTICS] Student ${student.name}: ${attendanceData.filter(a => a.status === 'Present').length}/${attendanceData.length} present`);
             }
           }
         }
       }
       
       if (attendanceDataFetched) {
+        const calculatedRate = totalDays ? Math.round((totalAttendance / totalDays) * 100) : 92;
+        console.log(`📊 [ANALYTICS] Calculated attendance rate: ${calculatedRate}% (${totalAttendance}/${totalDays})`);
         setAnalytics(prev => ({ 
           ...prev,
-          attendanceRate: totalDays ? Math.round((totalAttendance / totalDays) * 100) : prev.attendanceRate
+          attendanceRate: calculatedRate
         }));
+      } else {
+        console.log('📊 [ANALYTICS] No attendance data found, keeping default rate');
       }
     } catch (error) {
-      console.log('Error calculating attendance analytics:', error);
+      console.log('📊 [ANALYTICS] Error calculating attendance analytics:', error);
     }
   };
 
@@ -1281,25 +1289,28 @@ function groupAndSortSchedule(schedule) {
   }
 
   return (
-    <View style={styles.container}>
-      <Header 
-        title="Teacher Dashboard" 
-        showNotifications={true}
-        unreadCount={unreadCount}
-        onNotificationsPress={() => navigation.navigate('TeacherNotifications')}
-      />
-      <ScrollView 
-        style={styles.scrollView} 
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#1976d2']}
-            tintColor="#1976d2"
-          />
-        }
-      >
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={styles.container}>
+        <Header 
+          title="Teacher Dashboard" 
+          showNotifications={true}
+          unreadCount={unreadCount}
+          onNotificationsPress={() => navigation.navigate('TeacherNotifications')}
+        />
+        <ScrollView 
+          style={styles.scrollView} 
+          contentContainerStyle={styles.scrollViewContent}
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled={true}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#FF9800']}
+              progressBackgroundColor="#fff"
+            />
+          }
+        >
         {/* Welcome Section at the very top */}
         <View style={styles.welcomeSection}>
           <Text style={styles.welcomeText}>
@@ -2300,17 +2311,39 @@ function groupAndSortSchedule(schedule) {
           </View>
         </View>
       )}
-    </View>
+      </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#1976d2',
+  },
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        overflow: 'hidden',
+      },
+    }),
   },
   scrollView: {
     flex: 1,
+    ...Platform.select({
+      web: {
+        overflow: 'auto',
+        height: '100%',
+        WebkitOverflowScrolling: 'touch',
+      }
+    })
+  },
+  scrollViewContent: {
+    flexGrow: 1,
+    paddingBottom: Platform.OS === 'web' ? 40 : 20,
   },
   welcomeSection: {
     padding: 16,

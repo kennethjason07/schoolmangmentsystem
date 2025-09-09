@@ -22,7 +22,8 @@ const StudentFeeCard = ({
   onPress, 
   onDiscountManage,
   showDiscountButton = false,
-  showPaymentButton = true 
+  showPaymentButton = true,
+  compact = false 
 }) => {
   const [loading, setLoading] = useState(true);
   const [feeData, setFeeData] = useState(null);
@@ -210,30 +211,32 @@ const StudentFeeCard = ({
         )}
       </View>
 
-      {/* Action Buttons */}
-      <View style={styles.actionSection}>
-        {showPaymentButton && fees.totalOutstanding > 0 && (
-          <TouchableOpacity 
-            style={styles.payButton}
-            onPress={() => onPress && onPress('payment')}
-          >
-            <Ionicons name="card" size={16} color="white" />
-            <Text style={styles.payButtonText}>Pay Now</Text>
-          </TouchableOpacity>
-        )}
-        
-        {showDiscountButton && (
-          <TouchableOpacity 
-            style={styles.discountButton}
-            onPress={() => onDiscountManage && onDiscountManage(studentId, studentName)}
-          >
-            <Ionicons name="pricetag-outline" size={16} color="#1976d2" />
-            <Text style={styles.discountButtonText}>
-              {hasDiscounts ? 'Manage Discounts' : 'Add Discount'}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      {/* Action Buttons - Only show Pay Now in student/parent views, not admin */}
+      {!compact && (
+        <View style={styles.actionSection}>
+          {showPaymentButton && fees.totalOutstanding > 0 && (
+            <TouchableOpacity 
+              style={styles.payButton}
+              onPress={() => onPress && onPress('payment')}
+            >
+              <Ionicons name="card" size={16} color="white" />
+              <Text style={styles.payButtonText}>Pay Now</Text>
+            </TouchableOpacity>
+          )}
+          
+          {showDiscountButton && (
+            <TouchableOpacity 
+              style={styles.discountButton}
+              onPress={() => onDiscountManage && onDiscountManage(studentId, studentName)}
+            >
+              <Ionicons name="pricetag-outline" size={16} color="#1976d2" />
+              <Text style={styles.discountButtonText}>
+                {hasDiscounts ? 'Manage Discounts' : 'Add Discount'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       {/* Fee Component Count (for detailed view trigger) */}
       <View style={styles.detailsHint}>

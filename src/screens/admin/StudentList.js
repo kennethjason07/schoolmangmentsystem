@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, Animated, RefreshControl } from 'react-native';
 import Header from '../../components/Header';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../utils/supabase';
@@ -9,60 +9,96 @@ const StudentList = ({ route, navigation }) => {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  
+  // Refs for scroll functionality
+  const flatListRef = useRef(null);
+  const scrollTopOpacity = useRef(new Animated.Value(0)).current;
+
+  // Move fetchStudents outside useEffect to make it reusable
+  const fetchStudents = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      console.log('StudentList: Received classId:', classId);
+      
+      if (!classId) {
+        console.log('StudentList: No classId provided');
+        setError('No class ID provided');
+        setLoading(false);
+        return;
+      }
+      
+      // Get students by class ID - using direct Supabase query
+      const { data, error } = await supabase
+        .from('students')
+        .select(`
+          *,
+          classes(class_name, section),
+          parents:parent_id(name, phone, email)
+        `)
+        .eq('class_id', classId)
+        .order('roll_no', { ascending: true });
+
+      if (error) {
+        console.error('StudentList: Supabase error:', error);
+        throw error;
+      }
+      
+      console.log('StudentList: Query result:', { data, error });
+      console.log('StudentList: Number of students found:', data?.length || 0);
+      
+      if (data && data.length > 0) {
+        console.log('StudentList: First student:', data[0]);
+      }
+      
+      setStudents(data || []);
+    } catch (err) {
+      console.error('Error fetching students:', err);
+      setError('Failed to load students.');
+      Alert.alert('Error', 'Failed to load students');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     console.log('StudentList: Component mounted');
     console.log('StudentList: route.params:', route.params);
     console.log('StudentList: classId from params:', classId);
     
-    const fetchStudents = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        console.log('StudentList: Received classId:', classId);
-        
-        if (!classId) {
-          console.log('StudentList: No classId provided');
-          setError('No class ID provided');
-          setLoading(false);
-          return;
-        }
-        
-        // Get students by class ID - using direct Supabase query
-        const { data, error } = await supabase
-          .from('students')
-          .select(`
-            *,
-            classes(class_name, section),
-            parents:parent_id(name, phone, email)
-          `)
-          .eq('class_id', classId)
-          .order('roll_no', { ascending: true });
-
-        if (error) {
-          console.error('StudentList: Supabase error:', error);
-          throw error;
-        }
-        
-        console.log('StudentList: Query result:', { data, error });
-        console.log('StudentList: Number of students found:', data?.length || 0);
-        
-        if (data && data.length > 0) {
-          console.log('StudentList: First student:', data[0]);
-        }
-        
-        setStudents(data || []);
-      } catch (err) {
-        console.error('Error fetching students:', err);
-        setError('Failed to load students.');
-        Alert.alert('Error', 'Failed to load students');
-      } finally {
-        setLoading(false);
-      }
-    };
-    
     fetchStudents();
   }, [classId]);
+
+  // Refresh handler
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchStudents();
+    setRefreshing(false);
+  };
+
+  // Scroll event handler for scroll-to-top button
+  const handleScroll = (event) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    const shouldShow = offsetY > (Platform.OS === 'web' ? 100 : 150);
+    
+    if (shouldShow !== showScrollTop) {
+      setShowScrollTop(shouldShow);
+      Animated.timing(scrollTopOpacity, {
+        toValue: shouldShow ? 1 : 0,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+    }
+  };
+
+  // Scroll to top function
+  const scrollToTop = () => {
+    if (flatListRef.current) {
+      flatListRef.current.scrollToOffset({ animated: true, offset: 0 });
+    }
+  };
 
   const renderStudent = ({ item }) => (
     <TouchableOpacity
@@ -138,13 +174,66 @@ const StudentList = ({ route, navigation }) => {
       </View>
 
       <FlatList
+        ref={flatListRef}
         data={students}
         renderItem={renderStudent}
         keyExtractor={item => item.id.toString()}
         contentContainerStyle={styles.list}
         ListEmptyComponent={renderEmptyState}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        nestedScrollEnabled={true}
+        overScrollMode={Platform.OS === 'android' ? 'always' : 'never'}
+        scrollEventThrottle={Platform.OS === 'web' ? 50 : 16} // Less aggressive throttling on web
+        removeClippedSubviews={Platform.OS !== 'web'}
+        maxToRenderPerBatch={Platform.OS === 'web' ? 15 : 10} // More items per batch on web
+        windowSize={Platform.OS === 'web' ? 15 : 10} // Larger window on web
+        initialNumToRender={Platform.OS === 'web' ? 20 : 15} // More initial items on web
+        updateCellsBatchingPeriod={Platform.OS === 'web' ? 100 : 50} // Less frequent updates on web
+        onScroll={handleScroll}
+        // Web-specific optimizations
+        {...(Platform.OS === 'web' && {
+          keyboardShouldPersistTaps: 'handled',
+          maintainVisibleContentPosition: null,
+        })}
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            colors={['#2196F3']}
+            progressBackgroundColor="#fff"
+          />
+        }
+        getItemLayout={Platform.OS === 'web' ? undefined : (data, index) => ({
+          length: 90, // Approximate item height
+          offset: 90 * index,
+          index,
+        })}
       />
+      
+      {/* Scroll to Top Button */}
+      <Animated.View 
+        style={[
+          styles.scrollToTopButton,
+          {
+            opacity: scrollTopOpacity,
+            transform: [{
+              scale: scrollTopOpacity.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.8, 1],
+              })
+            }]
+          }
+        ]}
+        pointerEvents={showScrollTop ? 'auto' : 'none'}
+      >
+        <TouchableOpacity
+          style={styles.scrollToTopInner}
+          onPress={scrollToTop}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="chevron-up" size={24} color="#fff" />
+        </TouchableOpacity>
+      </Animated.View>
     </View>
   );
 };
@@ -254,6 +343,34 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
     marginBottom: 1,
+  },
+  
+  // Scroll to Top Button Styles
+  scrollToTopButton: {
+    position: 'absolute',
+    right: 20,
+    bottom: 30,
+    zIndex: 1000,
+  },
+  scrollToTopInner: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#2196F3',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    // Enhanced visibility for web
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0 6px 20px rgba(33, 150, 243, 0.4)',
+      border: '2px solid rgba(255, 255, 255, 0.2)',
+      cursor: 'pointer',
+      transition: 'all 0.2s ease',
+    }),
   },
 });
 

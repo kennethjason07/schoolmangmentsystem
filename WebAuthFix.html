@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emergency Web Auth Fix</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            color: #d32f2f;
+            margin: 0;
+            font-size: 24px;
+        }
+        .header p {
+            color: #666;
+            margin: 10px 0 0 0;
+        }
+        .button {
+            background: #d32f2f;
+            color: white;
+            border: none;
+            padding: 15px 25px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            margin: 10px 0;
+            transition: background-color 0.2s;
+        }
+        .button:hover {
+            background: #b71c1c;
+        }
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .button.debug {
+            background: #1976d2;
+        }
+        .button.debug:hover {
+            background: #1565c0;
+        }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 20px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .step {
+            margin: 20px 0;
+            padding: 15px;
+            background: #e8f5e8;
+            border-left: 4px solid #4caf50;
+            border-radius: 4px;
+        }
+        .step h3 {
+            margin: 0 0 10px 0;
+            color: #2e7d32;
+        }
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            color: #856404;
+        }
+        .warning h3 {
+            color: #856404;
+        }
+        .manual-steps {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .manual-steps ol {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        .manual-steps li {
+            margin: 8px 0;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚨 Emergency Web Auth Fix</h1>
+            <p>Fix login timeout issues in your web browser</p>
+        </div>
+
+        <div class="step warning">
+            <h3>⚠️ Current Issue</h3>
+            <p>Your web application is experiencing authentication timeout errors that prevent login. This fix will clear corrupted browser data.</p>
+        </div>
+
+        <button class="button" onclick="emergencyAuthFix()">🔧 Apply Emergency Fix</button>
+        <button class="button debug" onclick="debugAuthState()">🔍 Debug Current State</button>
+
+        <div id="log" class="log" style="display: none;"></div>
+
+        <div class="manual-steps">
+            <h3>📋 Manual Steps (if automatic fix fails):</h3>
+            <ol>
+                <li><strong>Clear Browser Data:</strong>
+                    <ul>
+                        <li>Press <code>Ctrl+Shift+Delete</code> (Windows) or <code>Cmd+Shift+Delete</code> (Mac)</li>
+                        <li>Select "All time" or "Everything"</li>
+                        <li>Check: Cookies, Local Storage, Session Storage</li>
+                        <li>Click "Clear data"</li>
+                    </ul>
+                </li>
+                <li><strong>Developer Tools Method:</strong>
+                    <ul>
+                        <li>Press <code>F12</code> to open Developer Tools</li>
+                        <li>Go to <strong>Application</strong> tab</li>
+                        <li>Click <strong>Local Storage</strong> → Select your domain</li>
+                        <li>Right-click → <strong>Clear</strong></li>
+                        <li>Click <strong>Session Storage</strong> → Select your domain</li>
+                        <li>Right-click → <strong>Clear</strong></li>
+                        <li>Go to <strong>Cookies</strong> → Select your domain</li>
+                        <li>Right-click → <strong>Clear</strong></li>
+                    </ul>
+                </li>
+                <li><strong>Hard Refresh:</strong>
+                    <ul>
+                        <li>Press <code>Ctrl+F5</code> (Windows) or <code>Cmd+Shift+R</code> (Mac)</li>
+                        <li>This bypasses cache and forces fresh page load</li>
+                    </ul>
+                </li>
+                <li><strong>Incognito/Private Mode:</strong>
+                    <ul>
+                        <li>Try logging in using Incognito/Private browsing mode</li>
+                        <li>This uses fresh storage without corrupted data</li>
+                    </ul>
+                </li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        let logElement;
+
+        function log(message) {
+            if (!logElement) {
+                logElement = document.getElementById('log');
+                logElement.style.display = 'block';
+            }
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.textContent += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        async function emergencyAuthFix() {
+            log('🚨 EMERGENCY WEB AUTH FIX STARTING...\n');
+            
+            try {
+                // Step 1: Clear all authentication-related localStorage
+                log('Step 1: Clearing localStorage...');
+                const authKeys = [
+                    'sb-dmagnsbdjsnzsddxqrwd-auth-token',
+                    'supabase.auth.token',
+                    'auth-token',
+                    'session',
+                    'user',
+                    'access_token',
+                    'refresh_token',
+                    // Additional Supabase keys
+                    'supabase.auth.token.dmagnsbdjsnzsddxqrwd',
+                    'sb.auth.token',
+                    'auth.session',
+                    'user.session'
+                ];
+                
+                let clearedCount = 0;
+                for (const key of authKeys) {
+                    try {
+                        if (localStorage.getItem(key) !== null) {
+                            localStorage.removeItem(key);
+                            log(`✅ Cleared localStorage: ${key}`);
+                            clearedCount++;
+                        }
+                    } catch (e) {
+                        log(`⚠️ Could not clear localStorage ${key}: ${e.message}`);
+                    }
+                }
+                log(`📊 Cleared ${clearedCount} localStorage items`);
+
+                // Step 2: Clear sessionStorage
+                log('\nStep 2: Clearing sessionStorage...');
+                let sessionClearedCount = 0;
+                for (const key of authKeys) {
+                    try {
+                        if (sessionStorage.getItem(key) !== null) {
+                            sessionStorage.removeItem(key);
+                            log(`✅ Cleared sessionStorage: ${key}`);
+                            sessionClearedCount++;
+                        }
+                    } catch (e) {
+                        log(`⚠️ Could not clear sessionStorage ${key}: ${e.message}`);
+                    }
+                }
+                log(`📊 Cleared ${sessionClearedCount} sessionStorage items`);
+
+                // Step 3: Clear any domain-specific storage
+                log('\nStep 3: Clearing additional storage...');
+                try {
+                    // Clear all localStorage items that might be auth-related
+                    const allKeys = Object.keys(localStorage);
+                    const authRelatedKeys = allKeys.filter(key => 
+                        key.includes('supabase') || 
+                        key.includes('auth') || 
+                        key.includes('session') ||
+                        key.includes('token') ||
+                        key.includes('dmagnsbdjsnzsddxqrwd')
+                    );
+                    
+                    for (const key of authRelatedKeys) {
+                        localStorage.removeItem(key);
+                        log(`✅ Cleared auth-related key: ${key}`);
+                    }
+                    log(`📊 Cleared ${authRelatedKeys.length} additional auth-related items`);
+                } catch (e) {
+                    log(`⚠️ Error clearing additional storage: ${e.message}`);
+                }
+
+                // Step 4: Clear cookies (if possible)
+                log('\nStep 4: Attempting to clear cookies...');
+                try {
+                    // This only works for cookies that can be accessed by JavaScript
+                    const cookies = document.cookie.split(";");
+                    let cookieCount = 0;
+                    
+                    for (let cookie of cookies) {
+                        const eqPos = cookie.indexOf("=");
+                        const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+                        if (name.includes('auth') || name.includes('session') || name.includes('token') || name.includes('supabase')) {
+                            // Clear the cookie by setting it to expire
+                            document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+                            document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=${window.location.hostname}`;
+                            log(`✅ Cleared cookie: ${name}`);
+                            cookieCount++;
+                        }
+                    }
+                    log(`📊 Attempted to clear ${cookieCount} auth-related cookies`);
+                } catch (e) {
+                    log(`⚠️ Cookie clearing error: ${e.message}`);
+                }
+
+                // Step 5: Clear any IndexedDB data (if accessible)
+                log('\nStep 5: Clearing IndexedDB...');
+                try {
+                    if ('indexedDB' in window) {
+                        // Try to delete common Supabase IndexedDB databases
+                        const dbsToDelete = ['supabase-auth', 'supabase-storage'];
+                        for (const dbName of dbsToDelete) {
+                            try {
+                                indexedDB.deleteDatabase(dbName);
+                                log(`✅ Cleared IndexedDB: ${dbName}`);
+                            } catch (e) {
+                                log(`⚠️ Could not clear IndexedDB ${dbName}: ${e.message}`);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    log(`⚠️ IndexedDB clearing error: ${e.message}`);
+                }
+
+                log('\n✅ EMERGENCY FIX COMPLETED!\n');
+                log('🎯 NEXT STEPS:');
+                log('1. Close this tab');
+                log('2. Hard refresh your app (Ctrl+F5 or Cmd+Shift+R)');
+                log('3. Try logging in again with your credentials');
+                log('4. If issues persist, try incognito/private mode');
+                
+                // Show success message
+                setTimeout(() => {
+                    alert('✅ Emergency fix applied!\n\n' +
+                          'Next steps:\n' +
+                          '1. Close this tab\n' +
+                          '2. Hard refresh your app (Ctrl+F5)\n' +
+                          '3. Try logging in again\n\n' +
+                          'The login timeout issue should now be resolved.');
+                }, 1000);
+
+            } catch (error) {
+                log(`\n❌ Emergency fix failed: ${error.message}`);
+                log('\n🔧 MANUAL STEPS REQUIRED:');
+                log('1. Use browser settings to clear all site data');
+                log('2. Use Developer Tools to manually clear storage');
+                log('3. Try incognito/private browsing mode');
+                
+                alert('❌ Automatic fix encountered issues.\n\n' +
+                      'Please use the manual steps below to clear browser data.');
+            }
+        }
+
+        function debugAuthState() {
+            log('🔍 WEB AUTH DEBUG INFORMATION\n');
+            
+            try {
+                // Check localStorage
+                log('📱 Checking localStorage...');
+                const authKeys = [
+                    'sb-dmagnsbdjsnzsddxqrwd-auth-token',
+                    'supabase.auth.token',
+                    'auth-token',
+                    'session',
+                    'user'
+                ];
+                
+                let foundItems = 0;
+                for (const key of authKeys) {
+                    const value = localStorage.getItem(key);
+                    if (value) {
+                        log(`${key}: Present (${value.length} chars)`);
+                        foundItems++;
+                        
+                        // Try to parse and show expiry if it's a token
+                        try {
+                            const parsed = JSON.parse(value);
+                            if (parsed.expires_at || parsed.exp) {
+                                const expiry = parsed.expires_at ? new Date(parsed.expires_at * 1000) : new Date(parsed.exp * 1000);
+                                const isExpired = expiry < new Date();
+                                log(`  Expires: ${expiry.toISOString()} ${isExpired ? '(EXPIRED)' : '(Valid)'}`);
+                            }
+                        } catch (e) {
+                            log('  Data appears corrupted or not JSON');
+                        }
+                    } else {
+                        log(`${key}: None`);
+                    }
+                }
+                
+                log(`\n📊 Found ${foundItems} auth items in localStorage`);
+                
+                // Check sessionStorage
+                log('\n📱 Checking sessionStorage...');
+                let sessionFoundItems = 0;
+                for (const key of authKeys) {
+                    const value = sessionStorage.getItem(key);
+                    if (value) {
+                        log(`${key}: Present (${value.length} chars)`);
+                        sessionFoundItems++;
+                    } else {
+                        log(`${key}: None`);
+                    }
+                }
+                log(`📊 Found ${sessionFoundItems} auth items in sessionStorage`);
+                
+                // Check cookies
+                log('\n🍪 Checking cookies...');
+                const cookies = document.cookie.split(';');
+                const authCookies = cookies.filter(cookie => {
+                    const name = cookie.split('=')[0].trim().toLowerCase();
+                    return name.includes('auth') || name.includes('session') || name.includes('token') || name.includes('supabase');
+                });
+                
+                if (authCookies.length > 0) {
+                    log(`Found ${authCookies.length} auth-related cookies:`);
+                    authCookies.forEach(cookie => {
+                        const [name] = cookie.split('=');
+                        log(`  ${name.trim()}`);
+                    });
+                } else {
+                    log('No auth-related cookies found');
+                }
+                
+                // Browser info
+                log('\n🌐 Browser Information:');
+                log(`User Agent: ${navigator.userAgent}`);
+                log(`Location: ${window.location.href}`);
+                log(`Local Storage Supported: ${typeof(Storage) !== "undefined"}`);
+                log(`Cookies Enabled: ${navigator.cookieEnabled}`);
+                
+                // Recommendations
+                log('\n💡 Recommendations:');
+                if (foundItems > 0 || sessionFoundItems > 0) {
+                    log('⚠️ Found corrupted auth data - use Emergency Fix to clear');
+                } else {
+                    log('✅ No corrupted auth data found - try normal login');
+                }
+                
+            } catch (error) {
+                log(`\n❌ Debug failed: ${error.message}`);
+            }
+            
+            log('\n=== END DEBUG INFO ===');
+        }
+
+        // Auto-run debug on page load
+        window.addEventListener('load', () => {
+            setTimeout(debugAuthState, 500);
+        });
+    </script>
+</body>
+</html>

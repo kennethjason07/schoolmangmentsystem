@@ -839,9 +839,18 @@ const ManageClasses = ({ navigation }) => {
           renderItem={renderClassItem}
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={styles.listContainer}
-          showsVerticalScrollIndicator={false}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          nestedScrollEnabled={true}
+          overScrollMode={Platform.OS === 'android' ? 'always' : 'never'}
+          scrollEventThrottle={16}
+          removeClippedSubviews={Platform.OS !== 'web'}
           refreshing={refreshing}
           onRefresh={onRefresh}
+          getItemLayout={Platform.OS === 'web' ? undefined : (data, index) => ({
+            length: 200, // Approximate item height for class cards
+            offset: 200 * index,
+            index,
+          })}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="school" size={64} color="#ccc" />

@@ -816,7 +816,8 @@ const ViewAssignments = () => {
   return (
     <View style={styles.container}>
       <Header title="Assignments" showBack={true} showProfile={true} />
-      <ScrollView style={styles.scrollContainer}>
+      {/* Fixed height container for assignments list */}
+      <View style={styles.fixedAssignmentsContainer}>
         {assignments.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="document-text-outline" size={64} color="#ccc" />
@@ -826,24 +827,36 @@ const ViewAssignments = () => {
             </Text>
           </View>
         ) : (
-          grouped.map(([subject, assignments]) => (
-            <View key={subject} style={styles.subjectGroup}>
-              <Text style={styles.subjectTitle}>{subject}</Text>
-              {assignments.map(assignment => (
-                <TouchableOpacity key={assignment.id} style={styles.assignmentCard} activeOpacity={0.85} onPress={() => openAssignmentModal(assignment)}>
-                  <View style={styles.assignmentHeader}>
-                    <Text style={styles.assignmentTitle}>{assignment.title}</Text>
-                    <View style={[styles.statusBadge, { backgroundColor: statusColors[assignment.status] }]}>
-                      <Text style={styles.statusText}>{statusLabels[assignment.status]}</Text>
+          <FlatList
+            data={grouped}
+            keyExtractor={([subject]) => subject}
+            renderItem={({ item: [subject, assignments] }) => (
+              <View style={styles.subjectGroup}>
+                <Text style={styles.subjectTitle}>{subject}</Text>
+                {assignments.map(assignment => (
+                  <TouchableOpacity 
+                    key={assignment.id} 
+                    style={styles.assignmentCard} 
+                    activeOpacity={0.85} 
+                    onPress={() => openAssignmentModal(assignment)}
+                  >
+                    <View style={styles.assignmentHeader}>
+                      <Text style={styles.assignmentTitle}>{assignment.title}</Text>
+                      <View style={[styles.statusBadge, { backgroundColor: statusColors[assignment.status] }]}>
+                        <Text style={styles.statusText}>{statusLabels[assignment.status]}</Text>
+                      </View>
                     </View>
-                  </View>
-                  <Text style={styles.dueDate}>Due: {assignment.dueDate}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ))
+                    <Text style={styles.dueDate}>Due: {assignment.dueDate}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            contentContainerStyle={styles.listContainer}
+            showsVerticalScrollIndicator={true}
+            scrollEventThrottle={16}
+          />
         )}
-      </ScrollView>
+      </View>
       {/* Assignment Details Modal */}
       <Modal
         visible={!!selectedAssignment}
@@ -1035,6 +1048,21 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f7fa',
+  },
+  fixedAssignmentsContainer: {
+    flex: 1,
+    margin: 16,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  listContainer: {
+    padding: 16,
+    flexGrow: 1,
   },
   scrollContainer: {
     padding: 16,
@@ -1253,6 +1281,7 @@ const styles = StyleSheet.create({
 
   // Empty State Styles
   emptyContainer: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 60,

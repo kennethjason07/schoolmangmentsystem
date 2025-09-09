@@ -1152,10 +1152,6 @@ const ManageStudents = () => {
               <Text style={styles.contactText}>
                 Contact: {item.parentPhone || 'Not Available'}
               </Text>
-              <StudentFeeCard 
-                studentId={item.id}
-                compact={true}
-              />
             </View>
           </View>
 
@@ -1166,6 +1162,14 @@ const ManageStudents = () => {
                 { color: item.academicPercentage >= 80 ? '#4CAF50' : item.academicPercentage >= 60 ? '#FF9800' : '#f44336' }
               ]}>{item.hasMarks ? item.academicPercentage : '0'}%</Text>
               <Text style={styles.academicLabel}>Academic</Text>
+            </View>
+            
+            <View style={styles.feeContainer}>
+              <Text style={[
+                styles.feeStatus,
+                { color: item.feesStatus === 'Paid' ? '#4CAF50' : '#f44336' }
+              ]}>{item.feesStatus}</Text>
+              <Text style={styles.feeLabel}>Fee Status</Text>
             </View>
           </View>
         </View>
@@ -1218,8 +1222,9 @@ const ManageStudents = () => {
       {/* Use the proper Header component for consistent profile photo loading */}
       <Header title="Manage Students" showBack={true} />
 
-      {/* Filters Section */}
-      <View style={styles.filtersSection}>
+      <View style={styles.scrollWrapper}>
+        {/* Filters Section */}
+        <View style={styles.filtersSection}>
         <View style={styles.filterRow}>
           <View style={styles.filterDropdown}>
             <Text style={styles.filterLabel}>Class</Text>
@@ -1310,15 +1315,20 @@ const ManageStudents = () => {
 
 
 
-      {/* Students List */}
-      <FlatList
-        data={filteredStudents}
-        keyExtractor={(item) => item.id}
-        renderItem={renderStudent}
-        contentContainerStyle={{ paddingBottom: 80 }}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
+        {/* Students List */}
+        <FlatList
+          data={filteredStudents}
+          keyExtractor={(item) => item.id}
+          renderItem={renderStudent}
+          style={styles.scrollContainer}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          nestedScrollEnabled={true}
+          overScrollMode="always"
+          scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <View style={styles.emptyIconContainer}>
@@ -1365,7 +1375,8 @@ const ManageStudents = () => {
 
           </View>
         }
-      />
+        />
+      </View>
 
       {/* Simple FAB */}
       <TouchableOpacity style={styles.fab} onPress={handleAddStudent}>
@@ -1761,6 +1772,47 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+  scrollWrapper: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        height: 'calc(100vh - 120px)',
+        maxHeight: 'calc(100vh - 120px)',
+        minHeight: 500,
+        overflow: 'hidden',
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+      },
+      default: {
+        minHeight: 400,
+      },
+    }),
+  },
+  scrollContainer: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        overflowY: 'scroll',
+        overflowX: 'hidden',
+        height: '100%',
+        maxHeight: '100%',
+        WebkitOverflowScrolling: 'touch',
+        scrollBehavior: 'smooth',
+      },
+    }),
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 80,
+    ...Platform.select({
+      web: {
+        paddingBottom: 100,
+        paddingTop: 8,
+        minHeight: '100%',
+      },
+    }),
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -2020,6 +2072,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   academicLabel: {
+    fontSize: 10,
+    color: '#666',
+    marginTop: 2,
+  },
+  feeContainer: {
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  feeStatus: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  feeLabel: {
     fontSize: 10,
     color: '#666',
     marginTop: 2,

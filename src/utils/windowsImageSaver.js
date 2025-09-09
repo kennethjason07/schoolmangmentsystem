@@ -43,30 +43,36 @@ export class WindowsImageSaver {
   async initializeDirectory() {
     try {
       // Check if FileSystem is available (not available on web)
-      if (!FileSystem) {
+      if (!FileSystem || Platform.OS === 'web') {
         console.log('🌐 FileSystem not available on web platform, skipping directory initialization');
+        this.downloadDirectory = null; // Set to null for web
         return;
       }
 
-      // Use different paths based on platform
-      if (this.isWindows) {
-        // Windows-specific directory structure
-        this.downloadDirectory = FileSystem.documentDirectory + 'SchoolApp_Images/';
-      } else {
-        // Mobile platforms
-        this.downloadDirectory = FileSystem.documentDirectory + 'Downloads/';
-      }
+      // Only proceed if we have FileSystem and not on web
+      if (FileSystem && FileSystem.getInfoAsync) {
+        // Use different paths based on platform
+        if (this.isWindows) {
+          // Windows-specific directory structure
+          this.downloadDirectory = FileSystem.documentDirectory + 'SchoolApp_Images/';
+        } else {
+          // Mobile platforms
+          this.downloadDirectory = FileSystem.documentDirectory + 'Downloads/';
+        }
 
-      const dirInfo = await FileSystem.getInfoAsync(this.downloadDirectory);
-      if (!dirInfo.exists) {
-        await FileSystem.makeDirectoryAsync(this.downloadDirectory, { intermediates: true });
-        console.log('📁 Created directory:', this.downloadDirectory);
+        const dirInfo = await FileSystem.getInfoAsync(this.downloadDirectory);
+        if (!dirInfo.exists) {
+          await FileSystem.makeDirectoryAsync(this.downloadDirectory, { intermediates: true });
+          console.log('📁 Created directory:', this.downloadDirectory);
+        }
       }
     } catch (error) {
-      console.error('Failed to initialize directory:', error);
+      console.warn('Failed to initialize directory:', error.message);
       // Fallback to document directory if available
-      if (FileSystem) {
+      if (FileSystem && FileSystem.documentDirectory) {
         this.downloadDirectory = FileSystem.documentDirectory;
+      } else {
+        this.downloadDirectory = null;
       }
     }
   }

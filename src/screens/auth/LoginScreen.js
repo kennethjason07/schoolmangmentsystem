@@ -436,20 +436,28 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.4)',
     marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
+    } : {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.3,
+      shadowRadius: 4,
+      elevation: 5,
+    }),
   },
   textLogoMain: {
     fontSize: 24,
     fontWeight: '900',
     color: '#fff',
     letterSpacing: 1,
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+    ...(Platform.OS === 'web' ? {
+      textShadow: '1px 1px 2px rgba(0, 0, 0, 0.3)',
+    } : {
+      textShadowColor: 'rgba(0, 0, 0, 0.3)',
+      textShadowOffset: { width: 1, height: 1 },
+      textShadowRadius: 2,
+    }),
   },
   bridgeSymbol: {
     flexDirection: 'row',
@@ -479,18 +487,19 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 20,
     elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 14,
-    // Web-specific enhancements
-    ...(Platform.OS === 'web' && {
+    ...(Platform.OS === 'web' ? {
       backdropFilter: 'blur(10px)',
       border: '1px solid rgba(255, 255, 255, 0.2)',
       boxShadow: '0 15px 35px rgba(0, 0, 0, 0.1)',
+    } : {
+      shadowColor: '#000',
+      shadowOffset: {
+        width: 0,
+        height: 10,
+      },
+      shadowOpacity: 0.25,
+      shadowRadius: 14,
+      elevation: 10,
     }),
   },
   roleContainer: {

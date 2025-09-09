@@ -1608,111 +1608,117 @@ const FeeManagement = () => {
             }
           </Text>
           
-          {paymentModal ? (
-            <View>
-              <Text style={styles.studentInfo}>Student: {selectedStudent?.name || 'Unknown'}</Text>
-              <Text style={styles.studentInfo}>Fee: {selectedFee?.type || 'Unknown'}</Text>
-              <Text style={styles.studentInfo}>Amount: {formatSafeCurrency(paymentAmount)}</Text>
-              <Text style={styles.studentInfo}>Payment Date: {formatSafeDate(paymentDate)}</Text>
-              <TextInput
-                style={styles.input}
-                value={paymentAmount}
-                onChangeText={setPaymentAmount}
-                placeholder="Enter payment amount"
-                keyboardType="numeric"
-              />
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => setShowDatePicker(true)}
-              >
-                <Text style={styles.dateButtonText}>Select Payment Date</Text>
-              </TouchableOpacity>
-              {showDatePicker && (
-                <DateTimePicker
-                  value={paymentDate && !isNaN(new Date(paymentDate).getTime()) ? new Date(paymentDate) : new Date()}
-                  mode="date"
-                  is24Hour={true}
-                  display="default"
-                  onChange={handleDateChange}
+          <ScrollView 
+            style={styles.modalScrollView}
+            contentContainerStyle={styles.modalScrollContent}
+            showsVerticalScrollIndicator={true}
+            keyboardShouldPersistTaps="handled"
+          >
+            {paymentModal ? (
+              <View>
+                <Text style={styles.studentInfo}>Student: {selectedStudent?.name || 'Unknown'}</Text>
+                <Text style={styles.studentInfo}>Fee: {selectedFee?.type || 'Unknown'}</Text>
+                <Text style={styles.studentInfo}>Amount: {formatSafeCurrency(paymentAmount)}</Text>
+                <Text style={styles.studentInfo}>Payment Date: {formatSafeDate(paymentDate)}</Text>
+                <TextInput
+                  style={styles.input}
+                  value={paymentAmount}
+                  onChangeText={setPaymentAmount}
+                  placeholder="Enter payment amount"
+                  keyboardType="numeric"
                 />
-              )}
-            </View>
-          ) : feeModal.visible ? (
-            <View>
-              <TextInput
-                style={styles.input}
-                placeholder="Fee Type"
-                value={feeModal.fee.type}
-                onChangeText={text => {
-                  setFeeModal(prev => ({
-                    ...prev,
-                    fee: {
-                      ...prev.fee,
-                      type: text
-                    }
-                  }));
-                }}
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Amount"
-                value={feeModal.fee.amount}
-                onChangeText={text => {
-                  setFeeModal(prev => ({
-                    ...prev,
-                    fee: {
-                      ...prev.fee,
-                      amount: text
-                    }
-                  }));
-                }}
-                keyboardType="numeric"
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Description"
-                value={feeModal.fee.description}
-                onChangeText={text => {
-                  setFeeModal(prev => ({
-                    ...prev,
-                    fee: {
-                      ...prev.fee,
-                      description: text
-                    }
-                  }));
-                }}
-                multiline
-                numberOfLines={3}
-              />
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => setShowDatePicker(true)}
-              >
-                <Text style={styles.dateButtonText}>Select Due Date</Text>
-              </TouchableOpacity>
-              {showDatePicker && (
-                <DateTimePicker
-                  value={feeModal.fee.dueDate ? new Date(feeModal.fee.dueDate) : new Date()}
-                  mode="date"
-                  display="default"
-                  onChange={(event, selectedDate) => {
-                    setShowDatePicker(false);
-                    if (selectedDate) {
-                      setFeeModal(prev => ({
-                        ...prev,
-                        fee: {
-                          ...prev.fee,
-                          dueDate: selectedDate.toISOString().split('T')[0]
-                        }
-                      }));
-                    }
+                <TouchableOpacity
+                  style={styles.dateButton}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <Text style={styles.dateButtonText}>Select Payment Date</Text>
+                </TouchableOpacity>
+                {showDatePicker && (
+                  <DateTimePicker
+                    value={paymentDate && !isNaN(new Date(paymentDate).getTime()) ? new Date(paymentDate) : new Date()}
+                    mode="date"
+                    is24Hour={true}
+                    display="default"
+                    onChange={handleDateChange}
+                  />
+                )}
+              </View>
+            ) : feeModal.visible ? (
+              <View>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Fee Type"
+                  value={feeModal.fee.type}
+                  onChangeText={text => {
+                    setFeeModal(prev => ({
+                      ...prev,
+                      fee: {
+                        ...prev.fee,
+                        type: text
+                      }
+                    }));
                   }}
-                  minimumDate={new Date()}
                 />
-              )}
-            </View>
-          ) : (
-            <ScrollView style={{ maxHeight: 400 }}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Amount"
+                  value={feeModal.fee.amount}
+                  onChangeText={text => {
+                    setFeeModal(prev => ({
+                      ...prev,
+                      fee: {
+                        ...prev.fee,
+                        amount: text
+                      }
+                    }));
+                  }}
+                  keyboardType="numeric"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Description"
+                  value={feeModal.fee.description}
+                  onChangeText={text => {
+                    setFeeModal(prev => ({
+                      ...prev,
+                      fee: {
+                        ...prev.fee,
+                        description: text
+                      }
+                    }));
+                  }}
+                  multiline
+                  numberOfLines={3}
+                />
+                <TouchableOpacity
+                  style={styles.dateButton}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <Text style={styles.dateButtonText}>Select Due Date</Text>
+                </TouchableOpacity>
+                {showDatePicker && (
+                  <DateTimePicker
+                    value={feeModal.fee.dueDate ? new Date(feeModal.fee.dueDate) : new Date()}
+                    mode="date"
+                    display="default"
+                    onChange={(event, selectedDate) => {
+                      setShowDatePicker(false);
+                      if (selectedDate) {
+                        setFeeModal(prev => ({
+                          ...prev,
+                          fee: {
+                            ...prev.fee,
+                            dueDate: selectedDate.toISOString().split('T')[0]
+                          }
+                        }));
+                      }
+                    }}
+                    minimumDate={new Date()}
+                  />
+                )}
+              </View>
+            ) : (
+              <View>
               {/* Multiple Class Selection */}
               <Text style={styles.inputLabel}>Select Classes *</Text>
               <Text style={styles.helperText}>Tap classes to select/deselect multiple</Text>
@@ -1846,8 +1852,9 @@ const FeeManagement = () => {
                   )}
                 </View>
               )}
-            </ScrollView>
-          )}
+              </View>
+            )}
+          </ScrollView>
           
           <View style={styles.modalButtons}>
             <TouchableOpacity
@@ -2054,6 +2061,14 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     width: '90%',
     maxHeight: '90%',
+    maxWidth: 500,
+  },
+  modalScrollView: {
+    maxHeight: '70vh',
+    flexGrow: 1,
+  },
+  modalScrollContent: {
+    paddingBottom: 20,
   },
   modalTitle: {
     fontSize: 20,

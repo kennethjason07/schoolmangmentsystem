@@ -7,7 +7,8 @@ import {
   TouchableOpacity,
   Alert,
   RefreshControl,
-  ActivityIndicator
+  ActivityIndicator,
+  Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
@@ -21,6 +22,12 @@ import {
   TENANT_ERROR_MESSAGES 
 } from '../../utils/tenantValidation';
 import { useTenantContext } from '../../contexts/TenantContext';
+import {
+  getResponsiveScrollProps,
+  getResponsiveContentStyle,
+  getRefreshControlConfig,
+  getResponsiveGridConfig
+} from '../../utils/ResponsiveScrollUtils';
 
 const TeacherNotifications = ({ navigation }) => {
   const [notifications, setNotifications] = useState([]);
@@ -472,15 +479,21 @@ const TeacherNotifications = ({ navigation }) => {
         renderItem={renderNotification}
         keyExtractor={(item) => item.id.toString()}
         style={styles.notificationsList}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={[
+          styles.listContainer,
+          getResponsiveContentStyle({
+            minHeight: notifications.length === 0,
+            paddingBottom: 24
+          })
+        ]}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#1976d2']}
-            tintColor="#1976d2"
+            {...getRefreshControlConfig(refreshing, onRefresh, ['#1976d2'])}
           />
         }
+        {...getResponsiveScrollProps({
+          keyboardShouldPersistTaps: 'handled'
+        })}
         ListEmptyComponent={() => (
           <View style={styles.emptyContainer}>
             <Ionicons name="notifications-outline" size={64} color="#ccc" />
@@ -490,7 +503,15 @@ const TeacherNotifications = ({ navigation }) => {
             </Text>
           </View>
         )}
-        showsVerticalScrollIndicator={false}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={10}
+        removeClippedSubviews={Platform.OS === 'android'}
+        getItemLayout={(data, index) => ({
+          length: 120,
+          offset: 120 * index,
+          index,
+        })}
       />
     </View>
   );

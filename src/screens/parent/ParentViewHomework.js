@@ -702,7 +702,8 @@ const ParentViewHomework = ({ navigation }) => {
         showProfile={true}
         subtitle={`for ${studentName}`}
       />
-      <ScrollView style={styles.scrollContainer}>
+      {/* Fixed height container for homework list */}
+      <View style={styles.fixedHomeworkContainer}>
         {assignments.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="library-outline" size={64} color="#ccc" />
@@ -712,45 +713,52 @@ const ParentViewHomework = ({ navigation }) => {
             </Text>
           </View>
         ) : (
-          grouped.map(([subject, assignments]) => (
-            <View key={subject} style={styles.subjectGroup}>
-              <Text style={styles.subjectTitle}>{subject}</Text>
-              {assignments.map(assignment => (
-                <TouchableOpacity 
-                  key={assignment.id} 
-                  style={styles.assignmentCard} 
-                  activeOpacity={0.85} 
-                  onPress={() => openAssignmentModal(assignment)}
-                >
-                  <View style={styles.assignmentHeader}>
-                    <Text style={styles.assignmentTitle}>{assignment.title}</Text>
-                    <View style={[styles.statusBadge, { backgroundColor: statusColors[assignment.status] }]}>
-                      <Text style={styles.statusText}>{statusLabels[assignment.status]}</Text>
+          <FlatList
+            data={grouped}
+            keyExtractor={([subject]) => subject}
+            renderItem={({ item: [subject, assignments] }) => (
+              <View style={styles.subjectGroup}>
+                <Text style={styles.subjectTitle}>{subject}</Text>
+                {assignments.map(assignment => (
+                  <TouchableOpacity 
+                    key={assignment.id} 
+                    style={styles.assignmentCard} 
+                    activeOpacity={0.85} 
+                    onPress={() => openAssignmentModal(assignment)}
+                  >
+                    <View style={styles.assignmentHeader}>
+                      <Text style={styles.assignmentTitle}>{assignment.title}</Text>
+                      <View style={[styles.statusBadge, { backgroundColor: statusColors[assignment.status] }]}>
+                        <Text style={styles.statusText}>{statusLabels[assignment.status]}</Text>
+                      </View>
                     </View>
-                  </View>
-                  <Text style={styles.assignmentMeta}>
-                    Assigned by: {assignment.assignedBy}
-                  </Text>
-                  <Text style={styles.dueDate}>
-                    Due: {assignment.dueDate ? new Date(assignment.dueDate).toLocaleDateString('en-US', {
-                      weekday: 'short',
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric'
-                    }) : 'No due date'}
-                  </Text>
-                  {assignment.files.length > 0 && (
-                    <View style={styles.filesIndicator}>
-                      <Ionicons name="attach" size={16} color="#666" />
-                      <Text style={styles.filesText}>{assignment.files.length} file(s) attached</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          ))
+                    <Text style={styles.assignmentMeta}>
+                      Assigned by: {assignment.assignedBy}
+                    </Text>
+                    <Text style={styles.dueDate}>
+                      Due: {assignment.dueDate ? new Date(assignment.dueDate).toLocaleDateString('en-US', {
+                        weekday: 'short',
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric'
+                      }) : 'No due date'}
+                    </Text>
+                    {assignment.files.length > 0 && (
+                      <View style={styles.filesIndicator}>
+                        <Ionicons name="attach" size={16} color="#666" />
+                        <Text style={styles.filesText}>{assignment.files.length} file(s) attached</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            contentContainerStyle={styles.listContainer}
+            showsVerticalScrollIndicator={true}
+            scrollEventThrottle={16}
+          />
         )}
-      </ScrollView>
+      </View>
 
       {/* Assignment Details Modal */}
       <Modal
@@ -925,6 +933,21 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f7fa',
+  },
+  fixedHomeworkContainer: {
+    flex: 1,
+    margin: 16,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    shadowColor: '#FF9800',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  listContainer: {
+    padding: 16,
+    flexGrow: 1,
   },
   scrollContainer: {
     padding: 16,
@@ -1125,6 +1148,7 @@ const styles = StyleSheet.create({
 
   // Empty State Styles
   emptyContainer: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 60,

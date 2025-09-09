@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -34,6 +34,7 @@ import { useUnreadMessageCount } from '../../hooks/useUnreadMessageCount';
 import { badgeNotifier } from '../../utils/badgeNotifier';
 import DebugBadge from '../../components/DebugBadge';
 import NotificationTester from '../../components/NotificationTester';
+import universalNotificationService from '../../services/UniversalNotificationService';
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -161,6 +162,7 @@ const ParentDashboard = ({ navigation }) => {
   const [showExamsModal, setShowExamsModal] = useState(false);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [showStudentDetailsModal, setShowStudentDetailsModal] = useState(false);
+  const [showQuickNotificationsModal, setShowQuickNotificationsModal] = useState(false);
 
   // Function to refresh notifications
   const refreshNotifications = async () => {
@@ -2608,78 +2610,83 @@ const ParentDashboard = ({ navigation }) => {
     }
   }, [user]);
 
-  // Use the unread message count hook to show message count on bell icon
-  const { unreadCount, refreshCount: refreshMessageCount } = useUnreadMessageCount();
+  // Use universal notification service for proper count display
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [universalCounts, setUniversalCounts] = useState({ messageCount: 0, notificationCount: 0, totalCount: 0 });
+  
+  // Fetch universal notification counts for bell icon
+  const refreshUniversalCounts = useCallback(async () => {
+    if (!user?.id || !user) return;
+    
+    try {
+      console.log('🔔 [PARENT DASHBOARD] Refreshing universal notification counts for user:', user.id);
+      
+      // Use the universal notification service to get accurate counts
+      const counts = await universalNotificationService.getUnreadCounts(user.id, 'parent');
+      
+      console.log('🔔 [PARENT DASHBOARD] Universal counts received:', counts);
+      setUniversalCounts(counts);
+      setUnreadCount(counts.totalCount);
+      
+    } catch (error) {
+      console.error('🔔 [PARENT DASHBOARD] Error fetching universal counts:', error);
+      setUniversalCounts({ messageCount: 0, notificationCount: 0, totalCount: 0 });
+      setUnreadCount(0);
+    }
+  }, [user?.id]);
+  
+  // Set up real-time subscription for notification updates
+  useEffect(() => {
+    if (!user?.id) return;
+    
+    console.log('🔔 [PARENT DASHBOARD] Setting up universal notification subscription');
+    
+    // Initial fetch
+    refreshUniversalCounts();
+    
+    // Set up real-time subscription
+    const unsubscribe = universalNotificationService.subscribeToUpdates(
+      user.id,
+      'parent',
+      (reason) => {
+        console.log('🔔 [PARENT DASHBOARD] Real-time notification update:', reason);
+        // Small delay to ensure database consistency
+        setTimeout(refreshUniversalCounts, 100);
+      }
+    );
+    
+    return () => {
+      console.log('🔔 [PARENT DASHBOARD] Cleaning up universal notification subscription');
+      unsubscribe();
+    };
+  }, [user?.id, refreshUniversalCounts]);
   
   // Manual test function to verify badge notifications and debug messages
   const testBadgeNotification = async () => {
-    console.log('🧪 MANUAL TEST: Testing badge notification system');
-    console.log('🧪 Current unread count:', unreadCount);
+    console.log('🧪 MANUAL TEST: Testing universal notification system');
+    console.log('🧪 Current universal counts:', universalCounts);
+    console.log('🧪 Current bell icon count:', unreadCount);
     console.log('🧪 Current user ID:', user?.id);
+    console.log('🧪 Local notifications array length:', notifications.length);
     
-    // Debug: Check messages table directly
-    if (user?.id) {
-      try {
-        console.log('🧪 MANUAL TEST: Fetching messages directly from database...');
-        
-        // Get ALL messages for this user
-        const { data: allMessages, error: allError } = await supabase
-          .from('messages')
-          .select('id, sender_id, receiver_id, is_read, message, sent_at')
-          .eq('receiver_id', user.id)
-          .order('sent_at', { ascending: false });
-          
-        // Get ONLY unread messages for this user
-        const { data: unreadMessages, error: unreadError } = await supabase
-          .from('messages')
-          .select('id, sender_id, receiver_id, is_read, message, sent_at')
-          .eq('receiver_id', user.id)
-          .eq('is_read', false)
-          .order('sent_at', { ascending: false });
-        
-        console.log('🧪 MANUAL TEST: Database query results:');
-        console.log('  Total messages for user:', allMessages?.length || 0);
-        console.log('  Unread messages for user:', unreadMessages?.length || 0);
-        
-        if (allMessages && allMessages.length > 0) {
-          console.log('🧪 MANUAL TEST: All messages breakdown:');
-          allMessages.forEach((msg, idx) => {
-            console.log(`    ${idx + 1}. ID: ${msg.id}, Read: ${msg.is_read}, Sender: ${msg.sender_id}, Message: ${msg.message?.substring(0, 50)}...`);
-          });
-        }
-        
-        if (unreadMessages && unreadMessages.length > 0) {
-          console.log('🧪 MANUAL TEST: Unread messages details:');
-          unreadMessages.forEach((msg, idx) => {
-            console.log(`    ${idx + 1}. ID: ${msg.id}, Sender: ${msg.sender_id}, Message: ${msg.message?.substring(0, 50)}...`);
-          });
-        }
-        
-        if (allError) console.log('🧪 MANUAL TEST: Error fetching all messages:', allError);
-        if (unreadError) console.log('🧪 MANUAL TEST: Error fetching unread messages:', unreadError);
-        
-      } catch (error) {
-        console.log('🧪 MANUAL TEST: Error in direct database query:', error);
-      }
-    }
+    // Force refresh universal counts
+    await refreshUniversalCounts();
     
-    // Force refresh the message count
-    refreshMessageCount().then(() => {
-      console.log('🧪 MANUAL TEST: Refresh completed, new count should be visible');
-    });
+    // Also refresh local notifications for modal display
+    await refreshNotifications();
     
-    // Trigger badge notifier manually
-    if (user?.id) {
-      console.log('🧪 MANUAL TEST: Triggering badge notifier for user:', user.id);
-      badgeNotifier.notifyBadgeRefresh(user.id, 'manual-test');
-    }
+    console.log('🧪 MANUAL TEST: Refresh completed');
   };
   
-  // Debug logging for unread message count - simplified to avoid confusion
-  console.log('=== PARENT DASHBOARD MESSAGE COUNT ===');
-  console.log('Final unread message count from hook:', unreadCount);
+  // Debug logging for notification count - comprehensive
+  console.log('=== PARENT DASHBOARD NOTIFICATION COUNT DEBUG ===');
+  console.log('Universal counts:', universalCounts);
+  console.log('Bell icon count:', unreadCount);
   console.log('Local notifications array length:', notifications.length);
-  console.log('=====================================');
+  console.log('Local unread notifications:', notifications.filter(n => !n.is_read).length);
+  console.log('User ID:', user?.id);
+  console.log('User type: parent');
+  console.log('================================================');
 
   // Calculate attendance percentage with useMemo for better performance and updates
   const attendanceStats = React.useMemo(() => {
@@ -2986,17 +2993,91 @@ const ParentDashboard = ({ navigation }) => {
     </View>
   );
 
+  // Function to mark notification as read
+  const markNotificationAsRead = async (notificationRecipientId, notificationId) => {
+    if (!notificationRecipientId || !user?.id) return;
+    
+    console.log('🔔 [MARK AS READ] Marking notification as read:', {
+      recipientId: notificationRecipientId,
+      notificationId: notificationId,
+      userId: user.id
+    });
+    
+    try {
+      // Update the notification recipient record
+      const { error } = await supabase
+        .from('notification_recipients')
+        .update({
+          is_read: true,
+          read_at: new Date().toISOString()
+        })
+        .eq('id', notificationRecipientId)
+        .eq('recipient_id', user.id)
+        .eq('recipient_type', 'Parent');
+      
+      if (error) {
+        console.error('🔔 [MARK AS READ] Error marking notification as read:', error);
+        return;
+      }
+      
+      console.log('✅ [MARK AS READ] Successfully marked notification as read');
+      
+      // Update local state to reflect the change immediately
+      setNotifications(prevNotifications => 
+        prevNotifications.map(notification => {
+          if (notification.recipientId === notificationRecipientId || notification.id === notificationId) {
+            return { ...notification, is_read: true, read_at: new Date().toISOString() };
+          }
+          return notification;
+        })
+      );
+      
+      // Refresh universal counts to update bell icon
+      await refreshUniversalCounts();
+      
+    } catch (error) {
+      console.error('🔔 [MARK AS READ] Exception marking notification as read:', error);
+    }
+  };
+
   const renderNotificationItem = ({ item, index }) => (
-    <View style={[styles.notificationItem, { borderLeftColor: getNotificationColor(item.type) }]}>
-      <View style={styles.notificationIcon}>
+    <TouchableOpacity 
+      style={[
+        styles.notificationItem, 
+        { 
+          borderLeftColor: getNotificationColor(item.type),
+          opacity: item.is_read ? 0.8 : 1.0,
+          backgroundColor: item.is_read ? '#f8f9fa' : '#fff'
+        }
+      ]}
+      onPress={() => {
+        if (!item.is_read) {
+          markNotificationAsRead(item.recipientId || item.id, item.id);
+        }
+      }}
+      activeOpacity={0.7}
+    >
+      <View style={[styles.notificationIcon, { backgroundColor: item.is_read ? '#f0f0f0' : '#fff' }]}>
         <Ionicons name={getNotificationIcon(item.type)} size={20} color={getNotificationColor(item.type)} />
       </View>
       <View style={styles.notificationContent}>
-        <Text style={styles.notificationTitle}>{item.title}</Text>
-        <Text style={styles.notificationMessage}>{item.message}</Text>
-        <Text style={styles.notificationTime}>{formatDateToDDMMYYYY(item.created_at)}</Text>
+        <View style={styles.notificationHeader}>
+          <Text style={[styles.notificationTitle, { color: item.is_read ? '#666' : '#333' }]}>{item.title}</Text>
+          {!item.is_read && (
+            <View style={styles.unreadIndicator}>
+              <View style={styles.unreadDot} />
+            </View>
+          )}
+        </View>
+        <Text style={[styles.notificationMessage, { color: item.is_read ? '#888' : '#666' }]}>{item.message}</Text>
+        <View style={styles.notificationFooter}>
+          <Text style={styles.notificationTime}>{formatDateToDDMMYYYY(item.created_at)}</Text>
+          {item.is_read && (
+            <Text style={styles.readStatus}>Read</Text>
+          )}
+        </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const getNotificationColor = (type) => {
@@ -3101,6 +3182,7 @@ const ParentDashboard = ({ navigation }) => {
           showBack={false} 
           showNotifications={true}
           unreadCount={unreadCount}
+          onNotificationsPress={() => setShowQuickNotificationsModal(true)}
         />
       
       {/* Student Switch Banner - Show when parent has multiple children */}
@@ -3190,6 +3272,7 @@ const ParentDashboard = ({ navigation }) => {
               />
             </TouchableOpacity>
           ))}
+          
         </View>
 
         {/* Quick Actions */}
@@ -3792,6 +3875,58 @@ const ParentDashboard = ({ navigation }) => {
         </View>
       )}
 
+      {/* Quick Notifications Modal - Scrollable (Web-optimized) */}
+      {showQuickNotificationsModal && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>All Notifications</Text>
+              <TouchableOpacity onPress={() => setShowQuickNotificationsModal(false)}>
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.notificationScrollContainer}>
+              <ScrollView 
+                style={styles.notificationScrollView}
+                showsVerticalScrollIndicator={true}
+                nestedScrollEnabled={true}
+                scrollEventThrottle={16}
+                contentContainerStyle={styles.notificationScrollContent}
+                keyboardShouldPersistTaps="handled"
+              >
+                {notifications.length > 0 ? (
+                  notifications.map((item, idx) => (
+                    <View key={idx} style={[styles.notificationModalItem, { borderLeftWidth: 4, borderLeftColor: getNotificationColor(item.type) }]}>
+                      <View style={styles.notificationIcon}>
+                        <Ionicons name={getNotificationIcon(item.type)} size={20} color={getNotificationColor(item.type)} />
+                      </View>
+                      <View style={styles.notificationContent}>
+                        <View style={styles.notificationHeader}>
+                          <Text style={styles.notificationTitle}>{item.title}</Text>
+                          {!item.is_read && (
+                            <View style={styles.unreadBadge}>
+                              <Text style={styles.unreadBadgeText}>NEW</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={styles.notificationMessage}>{item.message}</Text>
+                        <Text style={styles.notificationTime}>{formatDateToDDMMYYYY(item.created_at)}</Text>
+                      </View>
+                    </View>
+                  ))
+                ) : (
+                  <View style={styles.emptyNotifications}>
+                    <Ionicons name="notifications-outline" size={48} color="#ccc" />
+                    <Text style={styles.emptyNotificationsText}>No notifications yet</Text>
+                    <Text style={styles.emptyNotificationsSubtext}>You'll see important updates here</Text>
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </View>
+      )}
+
       {/* Student Details Modal */}
       {showStudentDetailsModal && (
         <View style={styles.modalOverlay}>
@@ -4091,8 +4226,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     paddingVertical: 12,
+    paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+    borderLeftWidth: 4,
+    borderLeftColor: '#ddd',
+    backgroundColor: '#fff',
+    marginBottom: 2,
   },
   notificationIcon: {
     width: 32,
@@ -4746,11 +4886,110 @@ const styles = StyleSheet.create({
     color: '#856404',
     marginBottom: 8,
   },
+<<<<<<< HEAD
   debugText: {
     fontSize: 12,
     color: '#856404',
     marginTop: 5,
     fontStyle: 'italic',
+=======
+
+  // Web-optimized Notification Modal Styles
+  notificationScrollContainer: {
+    height: 450,
+    maxHeight: 450,
+    overflow: 'hidden',
+    borderRadius: 8,
+    backgroundColor: '#f8f9fa',
+  },
+  notificationScrollView: {
+    flex: 1,
+    height: '100%',
+    maxHeight: 450,
+  },
+  notificationScrollContent: {
+    paddingBottom: 20,
+    paddingTop: 8,
+    paddingHorizontal: 4,
+    minHeight: 450,
+  },
+  notificationModalItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  notificationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  unreadBadge: {
+    backgroundColor: '#FF5722',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    elevation: 1,
+  },
+  unreadBadgeText: {
+    fontSize: 10,
+    color: '#fff',
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
+  emptyNotifications: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+  },
+  emptyNotificationsText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#666',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  emptyNotificationsSubtext: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 8,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+
+  // Notification read/unread indicator styles
+  unreadIndicator: {
+    marginLeft: 8,
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FF5722',
+  },
+  notificationFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  readStatus: {
+    fontSize: 11,
+    color: '#4CAF50',
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+>>>>>>> origin/something
   },
 });
 

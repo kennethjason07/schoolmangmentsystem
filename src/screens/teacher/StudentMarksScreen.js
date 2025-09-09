@@ -772,7 +772,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    borderLeft: 4,
+    borderLeftWidth: 4,
     borderLeftColor: '#1976d2',
   },
   modalSubjectHeader: {

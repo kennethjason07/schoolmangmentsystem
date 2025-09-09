@@ -9,6 +9,7 @@ import {
   RefreshControl,
   TouchableOpacity,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
@@ -374,13 +375,26 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        overflow: 'hidden',
+      },
+    }),
   },
   content: {
     flex: 1,
     padding: 16,
+    ...Platform.select({
+      web: {
+        overflow: 'auto',
+        height: '100%',
+        WebkitOverflowScrolling: 'touch',
+      }
+    })
   },
   scrollContent: {
-    paddingBottom: 40,
+    paddingBottom: Platform.OS === 'web' ? 40 : 20,
   },
   loadingContainer: {
     flex: 1,

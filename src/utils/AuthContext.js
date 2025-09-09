@@ -49,8 +49,16 @@ export const AuthProvider = ({ children }) => {
       try {
         console.log('🔄 Initializing authentication...');
         
-        // First, validate and fix any session issues using AuthFix
-        const sessionResult = await AuthFix.validateAndFixSession();
+        // Use shorter timeout for web platform to prevent hanging
+        const WEB_TIMEOUT = Platform.OS === 'web' ? 5000 : 10000;
+        
+        // First, validate and fix any session issues using AuthFix with timeout
+        const sessionResult = await Promise.race([
+          AuthFix.validateAndFixSession(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Session validation timed out')), WEB_TIMEOUT)
+          )
+        ]);
         
         if (sessionResult.valid && sessionResult.session) {
           // Session is valid, proceed with normal auth handling
@@ -156,7 +164,10 @@ export const AuthProvider = ({ children }) => {
           key: supabase.supabaseKey ? 'Set' : 'Missing'
         });
         
-        // First try with exact email match
+        // Use shorter timeout for web platform database queries
+        const DB_TIMEOUT = Platform.OS === 'web' ? 6000 : 10000;
+        
+        // First try with exact email match with timeout
         let profileQuery = supabase
           .from('users')
           .select('*')
@@ -165,7 +176,13 @@ export const AuthProvider = ({ children }) => {
         
         console.log('📧 [AUTH] Querying with exact email:', authUser.email);
         console.log('📧 [AUTH] Query object:', profileQuery);
-        let result = await profileQuery;
+        
+        let result = await Promise.race([
+          profileQuery,
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Database query timed out')), DB_TIMEOUT)
+          )
+        ]);
         
         console.log('📊 [AUTH] Exact email query result:', {
           data: result.data,

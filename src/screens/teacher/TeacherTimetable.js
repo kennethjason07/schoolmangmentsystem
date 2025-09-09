@@ -8,6 +8,7 @@ import {
   Alert,
   RefreshControl,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -473,6 +474,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        overflow: 'hidden',
+      },
+    }),
   },
   loadingContainer: {
     flex: 1,
@@ -487,6 +494,13 @@ const styles = StyleSheet.create({
   timetableContainer: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+    ...Platform.select({
+      web: {
+        overflow: 'auto',
+        height: '100%',
+        WebkitOverflowScrolling: 'touch',
+      }
+    })
   },
   classSelector: {
     backgroundColor: '#fff',

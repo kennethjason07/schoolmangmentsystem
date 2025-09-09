@@ -5,6 +5,9 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../utils/AuthContext';
 import { supabase } from '../utils/supabase';
 import UniversalNotificationBadge from './UniversalNotificationBadge';
+import WebOptimizedNotificationBadge from './WebOptimizedNotificationBadge';
+import NotificationPopup from './NotificationPopup';
+import DebugBadge from './DebugBadge';
 import universalNotificationService from '../services/UniversalNotificationService';
 
 const Header = ({ title, showBack = false, showProfile = true, showNotifications = false, onProfilePress, onNotificationsPress, unreadCount = 0, rightComponent }) => {
@@ -93,13 +96,22 @@ const Header = ({ title, showBack = false, showProfile = true, showNotifications
               <TouchableOpacity 
                 onPress={onNotificationsPress || (() => navigation.navigate(getNotificationScreen()))}
                 style={styles.notificationButton}
+                activeOpacity={0.7}
               >
                 <Ionicons 
                   name="notifications" 
                   size={24} 
                   color="#333"
                 />
-                <UniversalNotificationBadge />
+                {/* Use WebOptimizedNotificationBadge for web, UniversalNotificationBadge for mobile */}
+                {Platform.OS === 'web' ? (
+                  <WebOptimizedNotificationBadge 
+                    userType={userType}
+                    showZero={false}
+                  />
+                ) : (
+                  <UniversalNotificationBadge />
+                )}
               </TouchableOpacity>
             )}
             {showProfile && authUser && userType && (
@@ -118,6 +130,7 @@ const Header = ({ title, showBack = false, showProfile = true, showNotifications
                   }
                 })} 
                 style={styles.profileButton}
+                activeOpacity={0.7}
               >
                 {userProfileUrl ? (
                   <Image 

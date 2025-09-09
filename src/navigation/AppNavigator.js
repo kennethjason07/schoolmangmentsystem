@@ -88,6 +88,8 @@ import ViewAssignments from '../screens/student/ViewAssignments';
 import StudentAttendanceMarks from '../screens/student/StudentAttendanceMarks';
 import StudentMarks from '../screens/student/StudentMarks';
 import StudentNotifications from '../screens/student/StudentNotifications';
+import TestNotifications from '../screens/student/TestNotifications';
+import ScrollingDiagnostic from '../screens/student/ScrollingDiagnostic';
 import StudentChatWithTeacher from '../screens/student/StudentChatWithTeacher';
 import StudentFeePayment from '../screens/student/FeePayment';
 
@@ -467,6 +469,8 @@ export default function AppNavigator() {
               <>
                 <Stack.Screen name="StudentTabs" component={StudentTabNavigator} />
                 <Stack.Screen name="StudentNotifications" component={StudentNotifications} />
+                <Stack.Screen name="TestNotifications" component={TestNotifications} />
+                <Stack.Screen name="ScrollingDiagnostic" component={ScrollingDiagnostic} />
                 <Stack.Screen name="StudentFeePayment" component={StudentFeePayment} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
