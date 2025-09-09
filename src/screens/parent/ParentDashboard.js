@@ -4886,13 +4886,12 @@ const styles = StyleSheet.create({
     color: '#856404',
     marginBottom: 8,
   },
-<<<<<<< HEAD
   debugText: {
     fontSize: 12,
     color: '#856404',
     marginTop: 5,
     fontStyle: 'italic',
-=======
+  },
 
   // Web-optimized Notification Modal Styles
   notificationScrollContainer: {
@@ -4989,7 +4988,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
->>>>>>> origin/something
   },
 });
 

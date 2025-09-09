@@ -3801,7 +3801,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-<<<<<<< HEAD
   // UPI Payment Note Styles
   upiPaymentNote: {
     fontSize: 12,
@@ -3843,7 +3842,7 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'right',
     marginTop: 4,
-=======
+  },
   // FlatList Styles
   studentFlatList: {
     flex: 1,
@@ -3892,7 +3891,6 @@ const styles = StyleSheet.create({
         },
       },
     }),
->>>>>>> origin/something
   },
 });
 
