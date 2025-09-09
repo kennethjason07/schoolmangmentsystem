@@ -47,6 +47,7 @@ const ProfileScreen = ({ navigation, route }) => {
   const [scrollViewHeight, setScrollViewHeight] = useState(0);
   const { signOut, user: authUser, loading: authLoading } = useAuth();
 
+
   // Load user data
   const loadUserData = async () => {
     try {
@@ -507,96 +508,35 @@ const ProfileScreen = ({ navigation, route }) => {
     }
   };
 
-  // Handle logout with improved web compatibility
+  // Handle logout - Method 2 (Direct signOut) only
   const handleLogout = async () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-              try {
-                console.log('🚪 Starting logout process...');
-                setLoading(true);
-                
-                // Add timeout for web platform to prevent hanging
-                const LOGOUT_TIMEOUT = Platform.OS === 'web' ? 5000 : 10000;
-                
-                const logoutPromise = signOut();
-                const timeoutPromise = new Promise((_, reject) => 
-                  setTimeout(() => reject(new Error('Logout timed out')), LOGOUT_TIMEOUT)
-                );
-                
-                const result = await Promise.race([logoutPromise, timeoutPromise]);
-                
-                console.log('🚪 Logout result:', result);
-                
-                if (result?.error) {
-                  // Check if it's a session missing error (which means already logged out)
-                  if (result.error.message?.includes('Auth session missing') || 
-                      result.error.name === 'AuthSessionMissingError') {
-                    console.log('✅ Session already missing during logout, proceeding...');
-                    // Don't show error, this is expected if session expired
-                  } else {
-                    console.error('❌ Logout error:', result.error);
-                    Alert.alert('Error', `Failed to logout: ${result.error.message || 'Unknown error'}`);
-                    return;
-                  }
-                }
-                
-                console.log('✅ Logout successful');
-                // AuthContext will handle navigation automatically on successful logout
-                
-              } catch (error) {
-                console.error('💥 Logout error:', error);
-                
-                // Handle timeout specifically
-                if (error.message?.includes('timed out')) {
-                  console.log('⏱️ Logout timed out, forcing local logout...');
-                  Alert.alert(
-                    'Logout', 
-                    'Logout completed (connection timeout). You will be redirected to the login screen.',
-                    [
-                      {
-                        text: 'OK',
-                        onPress: () => {
-                          // Try to navigate manually
-                          if (navigation?.reset) {
-                            navigation.reset({
-                              index: 0,
-                              routes: [{ name: 'Auth' }],
-                            });
-                          } else if (navigation?.navigate) {
-                            navigation.navigate('Auth');
-                          }
-                        }
-                      }
-                    ]
-                  );
-                  return;
-                }
-                
-                // Don't show error for session missing issues
-                if (!error.message?.includes('Auth session missing') && 
-                    error.name !== 'AuthSessionMissingError') {
-                  console.error('❌ Unexpected logout error:', error);
-                  Alert.alert('Error', 'Failed to logout. Please try again.');
-                } else {
-                  console.log('✅ Session was already missing, logout completed');
-                }
-              } finally {
-                setLoading(false);
-              }
-          },
-        },
-      ]
-    );
+    try {
+      // Confirm on web using native confirm; on mobile use Alert
+      if (Platform.OS === 'web') {
+        const ok = window.confirm('Are you sure you want to logout?');
+        if (!ok) return;
+      } else {
+        const ok = await new Promise((resolve) => {
+          Alert.alert('Logout', 'Are you sure you want to logout?', [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Logout', style: 'destructive', onPress: () => resolve(true) },
+          ]);
+        });
+        if (!ok) return;
+      }
+
+      setLoading(true);
+      const result = await signOut();
+      if (result?.error) {
+        const msg = `Failed to logout: ${result.error.message || 'Unknown error'}`;
+        if (Platform.OS === 'web') alert(msg); else Alert.alert('Error', msg);
+      }
+    } catch (error) {
+      const msg = `Logout failed: ${error.message || error}`;
+      if (Platform.OS === 'web') alert(msg); else Alert.alert('Error', msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (loading) {
@@ -735,12 +675,85 @@ const ProfileScreen = ({ navigation, route }) => {
           </View>
           {/* Logout Section */}
           <View style={styles.logoutSection}>
+            {/* Debug info for troubleshooting */}
+            {Platform.OS === 'web' && (
+              <View style={{
+                backgroundColor: '#f0f8ff',
+                padding: 8,
+                marginBottom: 8,
+                borderRadius: 4,
+                borderLeft: '3px solid #2196F3'
+              }}>
+                <Text style={{ fontSize: 12, color: '#2196F3', fontWeight: '600' }}>
+                  🔍 DEBUG: Platform: {Platform.OS} | User: {user?.email || 'none'} | Role: {roles?.[0] || 'none'} | Loading: {loading.toString()}
+                </Text>
+                <Text style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
+                  AuthUser: {authUser?.email || 'null'} | Profile ID: {user?.id || 'null'} | Full Name: {user?.full_name || 'null'}
+                </Text>
+              </View>
+            )}
+            
             <TouchableOpacity
-              style={styles.logoutButton}
-              onPress={handleLogout}
+              style={[
+                styles.logoutButton,
+                Platform.OS === 'web' && {
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  outline: 'none'
+                }
+              ]}
+              onPress={() => {
+                console.log('🔴 [LOGOUT] Logout button pressed!');
+                console.log('🔴 [LOGOUT] Platform.OS:', Platform.OS);
+                console.log('🔴 [LOGOUT] User email:', user?.email);
+                console.log('🔴 [LOGOUT] Current loading state:', loading);
+                
+                if (Platform.OS === 'web') {
+                  console.log('🔴 [WEB] Browser user agent:', navigator.userAgent);
+                  console.log('🔴 [WEB] Touch event support:', 'ontouchstart' in window);
+                  console.log('🔴 [WEB] Alert function available:', typeof Alert);
+                  console.log('🔴 [WEB] signOut function available:', typeof signOut);
+                }
+                
+                try {
+                  handleLogout();
+                } catch (error) {
+                  console.error('💥 [LOGOUT] Error calling handleLogout:', error);
+                  alert('Logout button error: ' + error.message); // Fallback for web
+                }
+              }}
+              onPressIn={() => {
+                console.log('🔴 [LOGOUT] onPressIn triggered');
+              }}
+              onPressOut={() => {
+                console.log('🔴 [LOGOUT] onPressOut triggered');
+              }}
+              activeOpacity={0.8}
+              disabled={loading}
+              accessible={true}
+              accessibilityLabel="Logout button"
+              accessibilityRole="button"
+              {...(Platform.OS === 'web' && {
+                // Add web-specific event handlers
+                onClick: (e) => {
+                  console.log('🔴 [WEB] onClick triggered', e);
+                },
+                onMouseDown: (e) => {
+                  console.log('🔴 [WEB] onMouseDown triggered', e);
+                },
+                onMouseUp: (e) => {
+                  console.log('🔴 [WEB] onMouseUp triggered', e);
+                }
+              })}
             >
-              <Ionicons name="log-out-outline" size={20} color="#fff" style={styles.logoutIcon} />
-              <Text style={styles.logoutButtonText}>Logout</Text>
+              {loading ? (
+                <ActivityIndicator size={20} color="#fff" style={styles.logoutIcon} />
+              ) : (
+                <Ionicons name="log-out-outline" size={20} color="#fff" style={styles.logoutIcon} />
+              )}
+              <Text style={styles.logoutButtonText}>
+                {loading ? 'Logging out...' : 'Logout'}
+              </Text>
             </TouchableOpacity>
           </View>
           </ScrollView>

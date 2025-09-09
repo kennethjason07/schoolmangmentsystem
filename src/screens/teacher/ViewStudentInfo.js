@@ -724,13 +724,28 @@ const ViewStudentInfo = () => {
         
         <ScrollView 
           style={styles.scrollView}
+          contentContainerStyle={styles.scrollViewContent}
           showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+          nestedScrollEnabled={true}
+          bounces={true}
+          bouncesZoom={false}
+          scrollEventThrottle={16}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          decelerationRate="normal"
+          alwaysBounceVertical={true}
+          overScrollMode="auto"
+          automaticallyAdjustKeyboardInsets={true}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
               colors={['#FF9800']}
               progressBackgroundColor="#fff"
+              tintColor="#FF9800"
+              titleColor="#1976d2"
+              title="Pull to refresh student data"
             />
           }
         >
@@ -1056,11 +1071,40 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+    backgroundColor: 'transparent',
     ...Platform.select({
       web: {
         overflow: 'auto',
         height: '100%',
         WebkitOverflowScrolling: 'touch',
+        scrollBehavior: 'smooth',
+        msOverflowStyle: 'auto',
+        scrollbarWidth: 'thin',
+      },
+      ios: {
+        bounces: true,
+        scrollIndicatorInsets: { right: 1 },
+        contentInsetAdjustmentBehavior: 'automatic',
+      },
+      android: {
+        overScrollMode: 'auto',
+        fadingEdgeLength: 150,
+      }
+    })
+  },
+  scrollViewContent: {
+    flexGrow: 1,
+    paddingBottom: Platform.OS === 'web' ? 80 : 60,
+    minHeight: '100%',
+    ...Platform.select({
+      web: {
+        minHeight: 'calc(100vh - 150px)',
+      },
+      ios: {
+        paddingBottom: 80,
+      },
+      android: {
+        paddingBottom: 70,
       }
     })
   },

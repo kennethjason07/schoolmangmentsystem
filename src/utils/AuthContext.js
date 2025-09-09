@@ -220,20 +220,14 @@ export const AuthProvider = ({ children }) => {
         if (error.message?.includes('timeout') || error.message?.includes('network') || error.name === 'AbortError') {
           console.log('🔄 Using fallback authentication due to connection issues');
           
-          // Create basic user object from auth data only
-          const fallbackUserData = {
-            id: authUser.id,
-            email: authUser.email,
-            role_id: 1, // Default to admin for fallback (hardcoded safe value)
-            photo_url: null,
-            full_name: authUser.email.split('@')[0], // Use email prefix as name
-            phone: '',
-            created_at: new Date().toISOString()
-          };
+          // Create basic user object from auth data only - DO NOT DEFAULT TO ADMIN
+          console.log('⚠️ [AUTH] Database timeout/network error - cannot determine user role safely');
+          console.log('⚠️ [AUTH] User email:', authUser.email);
+          console.log('⚠️ [AUTH] Refusing to default to admin role due to connection issues');
           
-          console.log('🚨 Setting fallback user data:', fallbackUserData);
-          setUser(fallbackUserData);
-          setUserType('admin'); // Default to admin for fallback
+          // Don't set user data if we can't verify the role - force re-login
+          setUser(null);
+          setUserType(null);
           setLoading(false);
           return;
         }
@@ -245,21 +239,14 @@ export const AuthProvider = ({ children }) => {
       if (!userProfile) {
         console.log('❌ User profile not found for:', authUser.email);
         
-        // Try fallback for missing profile as well
-        console.log('🔄 Using fallback authentication for missing profile');
-        const fallbackUserData = {
-          id: authUser.id,
-          email: authUser.email,
-          role_id: 1, // Default to admin (hardcoded safe value)
-          photo_url: null,
-          full_name: authUser.email.split('@')[0],
-          phone: '',
-          created_at: new Date().toISOString()
-        };
+        // Missing user profile - this is a critical issue, don't default to admin
+        console.log('❌ [AUTH] User profile not found in database for:', authUser.email);
+        console.log('❌ [AUTH] This indicates a database inconsistency - refusing to proceed');
+        console.log('❌ [AUTH] User must be properly registered in users table');
         
-        console.log('🚨 Setting fallback user data for missing profile:', fallbackUserData);
-        setUser(fallbackUserData);
-        setUserType('admin');
+        // Don't create fallback user data - force proper registration
+        setUser(null);
+        setUserType(null);
         setLoading(false);
         return;
       }
@@ -267,30 +254,26 @@ export const AuthProvider = ({ children }) => {
       console.log('✅ User profile found:', userProfile);
       console.log('🎯 User role_id:', userProfile.role_id);
       
-      // CRITICAL: Fix any users with invalid role_id in the database
-      if (!userProfile.role_id || userProfile.role_id === null || userProfile.role_id === undefined || 
-          typeof userProfile.role_id !== 'number' || userProfile.role_id < 1 || userProfile.role_id > 10) {
-        console.warn('🚨 [AuthContext] CRITICAL: User has invalid role_id in database:', userProfile.role_id);
-        console.log('🔧 [AuthContext] Fixing user role_id in database...');
-        
-        try {
-          // Update the user's role_id in the database to admin (1)
-          const { error: updateError } = await supabase
-            .from('users')
-            .update({ role_id: 1 })
-            .eq('id', authUser.id);
-          
-          if (updateError) {
-            console.error('❌ [AuthContext] Failed to update user role_id:', updateError);
-          } else {
-            console.log('✅ [AuthContext] Successfully fixed user role_id to 1 (admin)');
-            userProfile.role_id = 1; // Update the local copy too
-          }
-        } catch (fixError) {
-          console.error('❌ [AuthContext] Exception while fixing role_id:', fixError);
-          userProfile.role_id = 1; // Use fallback locally even if DB update fails
-        }
+      // Log the role_id for debugging but don't auto-fix it
+      if (!userProfile.role_id || userProfile.role_id === null || userProfile.role_id === undefined) {
+        console.warn('⚠️ [AuthContext] User has null/undefined role_id in database:', userProfile.role_id);
+        console.log('🎯 [AuthContext] User email:', authUser.email);
+        console.log('🎯 [AuthContext] User profile:', userProfile);
+      } else if (typeof userProfile.role_id !== 'number') {
+        console.warn('⚠️ [AuthContext] User has non-numeric role_id:', userProfile.role_id, 'type:', typeof userProfile.role_id);
+      } else {
+      console.log('✅ [AUTH] User has valid role_id:', userProfile.role_id);
       }
+      
+      // CRITICAL DEBUG: Log the exact role_id for parent login debugging
+      console.log('🐞 [PARENT-DEBUG] ===== ROLE_ID DEBUG =====');
+      console.log('🐞 [PARENT-DEBUG] User email:', authUser.email);
+      console.log('🐞 [PARENT-DEBUG] Full user profile:', JSON.stringify(userProfile, null, 2));
+      console.log('🐞 [PARENT-DEBUG] User role_id:', userProfile.role_id);
+      console.log('🐞 [PARENT-DEBUG] role_id type:', typeof userProfile.role_id);
+      console.log('🐞 [PARENT-DEBUG] role_id === 3?', userProfile.role_id === 3);
+      console.log('🐞 [PARENT-DEBUG] role_id == 3?', userProfile.role_id == 3);
+      console.log('🐞 [PARENT-DEBUG] =============================');
 
       // Try to get role name separately, but don't fail if it doesn't work
       let roleName = null;
@@ -311,8 +294,8 @@ export const AuthProvider = ({ children }) => {
           } else {
             console.log('⚠️ Role lookup failed, using fallback. Error code:', roleError?.code, 'Message:', roleError?.message);
             // Fallback role names for when database doesn't have roles yet
-            const roleMap = { 1: 'admin', 2: 'teacher', 3: 'parent', 4: 'student', 5: 'teacher', 6: 'teacher', 7: 'student', 8: 'parent' };
-            roleName = roleMap[userProfile.role_id] || 'user';
+            const roleMap = { 1: 'admin', 2: 'teacher', 3: 'parent', 4: 'student' };
+            roleName = roleMap[userProfile.role_id] || 'admin'; // Default to admin for unknown roles
             console.log('🔄 Using fallback role name:', roleName, 'for role_id:', userProfile.role_id);
             
             // Log specific error if it's the PGRST116 error
@@ -322,8 +305,8 @@ export const AuthProvider = ({ children }) => {
           }
         } catch (roleError) {
           console.log('💥 Role lookup exception, using fallback:', roleError);
-          const roleMap = { 1: 'admin', 2: 'teacher', 3: 'parent', 4: 'student', 5: 'teacher', 6: 'teacher', 7: 'student', 8: 'parent' };
-          roleName = roleMap[userProfile.role_id] || 'user';
+          const roleMap = { 1: 'admin', 2: 'teacher', 3: 'parent', 4: 'student' };
+          roleName = roleMap[userProfile.role_id] || 'admin'; // Default to admin for unknown roles
           
           if (roleError?.code === 'PGRST116') {
             console.log('🎯 PGRST116 exception caught in role lookup - using fallback successfully');
@@ -348,6 +331,18 @@ export const AuthProvider = ({ children }) => {
 
       console.log('👤 Final user data:', userData);
       console.log('🎭 Final role name:', roleName);
+      
+      // EMERGENCY DEBUG: Alert if parent becomes admin
+      if (authUser.email && authUser.email.toLowerCase().includes('parent') && roleName !== 'parent') {
+        console.error('🚨 CRITICAL BUG DETECTED: Parent user getting non-parent role!');
+        console.error('🚨 Email:', authUser.email);
+        console.error('🚨 Expected role: parent');
+        console.error('🚨 Actual role:', roleName);
+        console.error('🚨 User role_id:', userProfile?.role_id);
+        // Don't proceed with wrong role
+        alert('CRITICAL ERROR: Parent user is being assigned wrong role. Check console logs.');
+        return;
+      }
 
       // Set tenant context in SupabaseService if user has tenant_id
       if (userData.tenant_id) {
@@ -486,13 +481,13 @@ export const AuthProvider = ({ children }) => {
             console.log('Role lookup failed, using fallback. Error:', roleError?.message);
             // Fallback role names
             const fallbackRoleMap = { 1: 'Admin', 2: 'Teacher', 3: 'Parent', 4: 'Student' };
-            actualRoleName = fallbackRoleMap[userProfile.role_id] || 'Teacher';
+            actualRoleName = fallbackRoleMap[userProfile.role_id] || 'Admin'; // Default to Admin for unknown roles
             console.log('Using fallback role:', actualRoleName);
           }
         } catch (roleError) {
           console.log('Role lookup exception, using fallback:', roleError);
           const fallbackRoleMap = { 1: 'Admin', 2: 'Teacher', 3: 'Parent', 4: 'Student' };
-          actualRoleName = fallbackRoleMap[userProfile.role_id] || 'Teacher';
+          actualRoleName = fallbackRoleMap[userProfile.role_id] || 'Admin'; // Default to Admin for unknown roles
         }
       }
 
@@ -776,55 +771,94 @@ export const AuthProvider = ({ children }) => {
   };
 
   const signOut = async () => {
+    console.log('🚪 [AUTH] signOut function called');
+    console.log('🚪 [AUTH] Current user before logout:', user?.email);
+    console.log('🚪 [AUTH] Current userType before logout:', userType);
+    
     try {
+      console.log('🚪 [AUTH] Setting loading to true');
       setLoading(true);
       
       // Check if there's a current session
+      console.log('🚪 [AUTH] Checking for current session...');
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
+      console.log('🚪 [AUTH] Session check result:', {
+        hasSession: !!session,
+        sessionError: sessionError?.message || 'None',
+        userId: session?.user?.id || 'None'
+      });
+      
       if (sessionError) {
-        console.log('Session error during logout:', sessionError);
+        console.log('⚠️ [AUTH] Session error during logout:', sessionError);
       }
       
       if (!session) {
         // No session exists, user is already logged out
-        console.log('No active session found, cleaning up local state');
+        console.log('✅ [AUTH] No active session found, cleaning up local state');
         setUser(null);
         setUserType(null);
+        console.log('✅ [AUTH] Local state cleared (no session case)');
         return { error: null };
       }
       
       // Attempt to sign out from Supabase
+      console.log('🚪 [AUTH] Attempting to sign out from Supabase...');
+      console.log('🚪 [AUTH] authHelpers.signOut available:', typeof authHelpers.signOut);
+      
       const { error } = await authHelpers.signOut();
+      
+      console.log('🚪 [AUTH] Supabase signOut result:', {
+        hasError: !!error,
+        errorMessage: error?.message || 'None',
+        errorName: error?.name || 'None'
+      });
       
       if (error) {
         // If error is about missing session, treat it as success
         if (error.message?.includes('Auth session missing') || error.name === 'AuthSessionMissingError') {
-          console.log('Session already missing, cleaning up local state');
+          console.log('✅ [AUTH] Session already missing during signOut, cleaning up local state');
           setUser(null);
           setUserType(null);
+          console.log('✅ [AUTH] Local state cleared (missing session case)');
           return { error: null };
         }
+        console.error('❌ [AUTH] SignOut error returned:', error);
         return { error };
       }
       
       // Clear local state
+      console.log('🧹 [AUTH] Clearing local state after successful signOut');
       setUser(null);
       setUserType(null);
+      console.log('✅ [AUTH] Local state cleared successfully');
+      
+      // Verify state is cleared
+      setTimeout(() => {
+        console.log('🔍 [AUTH] Post-signOut verification - user should be null:', user);
+        console.log('🔍 [AUTH] Post-signOut verification - userType should be null:', userType);
+      }, 100);
+      
       return { error: null };
     } catch (error) {
-      console.error('Sign out error:', error);
+      console.error('💥 [AUTH] Sign out error caught:', error);
+      console.error('💥 [AUTH] Error name:', error.name);
+      console.error('💥 [AUTH] Error message:', error.message);
+      console.error('💥 [AUTH] Error stack:', error.stack);
       
       // If it's a session missing error, clear local state and treat as success
       if (error.message?.includes('Auth session missing') || error.name === 'AuthSessionMissingError') {
-        console.log('Caught AuthSessionMissingError, cleaning up local state');
+        console.log('✅ [AUTH] Caught AuthSessionMissingError, cleaning up local state');
         setUser(null);
         setUserType(null);
+        console.log('✅ [AUTH] Local state cleared (exception case)');
         return { error: null };
       }
       
+      console.error('❌ [AUTH] Unexpected signOut error:', error);
       return { error };
     } finally {
+      console.log('🔄 [AUTH] Setting loading to false in signOut finally block');
       setLoading(false);
     }
   };
