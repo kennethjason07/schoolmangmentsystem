@@ -30,11 +30,6 @@ import { getEventDisplayProps } from '../../utils/eventIcons';
 import { useAuth } from '../../utils/AuthContext';
 import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
 import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificationCount';
-import { fixUserSetup, checkUserSetup } from '../../utils/fixUserSetup';
-import { runTenantTest } from '../../utils/testTenantFetch';
-import { fixUserAndTenantSetup } from '../../utils/fixMissingUser';
-import { getCurrentUserTenantByEmail, getAllUserEmails } from '../../utils/getTenantByEmail';
-import { runManageTeachersTest } from '../../utils/testManageTeachers';
 
 const { width } = Dimensions.get('window');
 
@@ -345,44 +340,6 @@ const AdminDashboard = ({ navigation }) => {
     };
   }, []);
 
-  // Test function for admin notifications - Define before usage
-  const testAdminNotifications = async () => {
-    try {
-      Alert.alert(
-        'Test Admin Notifications',
-        'This will create a test notification for all admin users. You should see the notification badge update instantly.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Create Test',
-            onPress: async () => {
-              console.log('🧪 Starting admin notification test...');
-              const result = await createTestAdminNotification();
-              
-              if (result.success) {
-                Alert.alert(
-                  'Test Notification Created!',
-                  `Successfully sent test notification to ${result.recipientCount} admin users. Check if the notification badge updated instantly!`,
-                  [{ text: 'OK' }]
-                );
-                
-                // Also check counts for current admin
-                if (user?.id) {
-                  const counts = await checkAdminNotificationCounts(user.id);
-                  console.log('📊 Current admin notification counts:', counts);
-                }
-              } else {
-                Alert.alert('Test Failed', result.error || 'Failed to create test notification');
-              }
-            }
-          }
-        ]
-      );
-    } catch (error) {
-      console.error('Error in test function:', error);
-      Alert.alert('Error', 'Failed to run notification test');
-    }
-  };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -400,145 +357,6 @@ const AdminDashboard = ({ navigation }) => {
   };
 
   const quickActions = [
-    {
-      title: 'Tenant Debug Test',
-      icon: 'bug',
-      color: '#34C759',
-      action: async () => {
-        console.log('🧪 Admin Dashboard: Running tenant debug test...');
-        try {
-          const result = await runTenantTest();
-          if (result.success) {
-            Alert.alert(
-              'Tenant Test Success ✅',
-              `Tenant: ${result.data.tenant.name}\n` +
-              `Status: ${result.data.tenant.status}\n` +
-              `User: ${result.data.user.email}\n\n` +
-              'Database connection is working correctly!'
-            );
-          } else {
-            Alert.alert(
-              'Tenant Test Failed ❌',
-              `Error: ${result.error}\n\n` +
-              'Check console for detailed logs.'
-            );
-          }
-        } catch (error) {
-          console.error('❌ Admin Dashboard: Tenant test failed:', error);
-          Alert.alert('Error', `Test failed: ${error.message}`);
-        }
-      }
-    },
-    {
-      title: 'Fix User Setup',
-      icon: 'hammer',
-      color: '#FF6B35',
-      action: async () => {
-        console.log('🔨 Admin Dashboard: Running user setup fix...');
-        try {
-          const result = await fixUserAndTenantSetup();
-          if (result.success) {
-            Alert.alert(
-              'Setup Fix Success ✅',
-              `${result.message}\n\n` +
-              `Tenant: ${result.userResult?.tenant?.name || 'Existing'}\n` +
-              `User: ${result.userResult?.userRecord?.email || 'Existing'}\n\n` +
-              'Try the Tenant Debug Test again to verify!',
-              [
-                { text: 'OK', onPress: () => console.log('✅ User setup completed successfully') }
-              ]
-            );
-          } else {
-            Alert.alert(
-              'Setup Fix Failed ❌',
-              `Error: ${result.error}\n\n` +
-              'Check console for detailed logs.'
-            );
-          }
-        } catch (error) {
-          console.error('❌ Admin Dashboard: Setup fix failed:', error);
-          Alert.alert('Error', `Setup fix failed: ${error.message}`);
-        }
-      }
-    },
-    {
-      title: 'Email Tenant Lookup',
-      icon: 'mail',
-      color: '#007AFF',
-      action: async () => {
-        console.log('📧 Admin Dashboard: Running email tenant lookup...');
-        try {
-          // First, show all users for debugging
-          const allUsersResult = await getAllUserEmails();
-          if (allUsersResult.success) {
-            console.log('📧 Found', allUsersResult.data.count, 'users in database');
-          }
-          
-          // Then try to get tenant for current user by email
-          const result = await getCurrentUserTenantByEmail();
-          
-          if (result.success) {
-            Alert.alert(
-              'Email Lookup Success ✅',
-              `Found tenant by email!\n\n` +
-              `Email: ${result.data.userRecord.email}\n` +
-              `Tenant: ${result.data.tenant.name}\n` +
-              `Status: ${result.data.tenant.status}\n` +
-              `User ID in DB: ${result.data.userRecord.id}\n\n` +
-              'This shows the database has the user record!'
-            );
-          } else if (result.notFound) {
-            Alert.alert(
-              'Email Lookup - No Record ℹ️',
-              `No user record found for current email.\n\n` +
-              `This confirms the user needs to be created in the database.\n\n` +
-              `Users in DB: ${allUsersResult.data?.count || 0}\n\n` +
-              'Check console for all user emails in database.'
-            );
-          } else {
-            Alert.alert(
-              'Email Lookup Failed ❌',
-              `Error: ${result.error}\n\n` +
-              'Check console for detailed logs.'
-            );
-          }
-        } catch (error) {
-          console.error('❌ Admin Dashboard: Email lookup failed:', error);
-          Alert.alert('Error', `Email lookup failed: ${error.message}`);
-        }
-      }
-    },
-    {
-      title: 'Test Teachers System',
-      icon: 'school',
-      color: '#9C27B0',
-      action: async () => {
-        console.log('🏢 Admin Dashboard: Running ManageTeachers test...');
-        try {
-          const result = await runManageTeachersTest();
-          if (result.success) {
-            Alert.alert(
-              'Teachers Test Success ✅',
-              `Tenant: ${result.data.tenant.name}\n` +
-              `Teachers: ${result.data.counts.teachers}\n` +
-              `Classes: ${result.data.counts.classes}\n` +
-              `Subjects: ${result.data.counts.subjects}\n` +
-              `Assignments: ${result.data.counts.assignments}\n\n` +
-              'ManageTeachers system is working correctly!'
-            );
-          } else {
-            Alert.alert(
-              'Teachers Test Failed ❌',
-              `Error: ${result.error}\n\n` +
-              'Check console for detailed logs.'
-            );
-          }
-        } catch (error) {
-          console.error('❌ Admin Dashboard: Teachers test failed:', error);
-          Alert.alert('Error', `Test failed: ${error.message}`);
-        }
-      }
-    },
     { title: 'School Details', icon: 'business', color: '#673AB7', screen: 'SchoolDetails' }, // Stack screen
     { title: 'Manage Teachers', icon: 'person', color: '#FF9800', screen: 'Teachers' }, // Tab name
     { title: 'Teacher Accounts', icon: 'person-add', color: '#3F51B5', screen: 'TeacherAccountManagement' }, // Stack screen
@@ -815,43 +633,6 @@ const AdminDashboard = ({ navigation }) => {
     setIsEventModalVisible(true);
   };
 
-  const handleFixUserSetup = async () => {
-    try {
-      Alert.alert(
-        'Fix User Setup',
-        'This will resolve any user account issues that may be causing database errors. Continue?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Fix Now',
-            onPress: async () => {
-              console.log('🔧 Starting user setup fix...');
-              const result = await fixUserSetup();
-              
-              if (result.success) {
-                Alert.alert(
-                  'Success',
-                  result.message,
-                  [{ text: 'OK' }]
-                );
-                // Reload dashboard data to reflect changes
-                await loadDashboardData();
-              } else {
-                Alert.alert(
-                  'Fix Failed',
-                  result.message || 'An error occurred while fixing user setup',
-                  [{ text: 'OK' }]
-                );
-              }
-            }
-          }
-        ]
-      );
-    } catch (error) {
-      console.error('Error in handleFixUserSetup:', error);
-      Alert.alert('Error', 'Failed to fix user setup');
-    }
-  };
 
   const saveEvent = async () => {
     console.log('🔥 SaveEvent called');

@@ -20,6 +20,9 @@ import { handleFileView, formatFileSize as formatFileSizeDisplay, getFileTypeCol
 import ImageViewer from '../../components/ImageViewer';
 import { getGlobalMessageHandler } from '../../utils/realtimeMessageHandler';
 
+// Debug mode configuration
+const DEBUG_MODE = __DEV__ && true; // Enable debug logging and UI elements
+
 const TeacherChat = () => {
   const { user } = useAuth();
   const { markMessagesAsRead } = useMessageStatus();
@@ -42,6 +45,14 @@ const TeacherChat = () => {
   const [currentImage, setCurrentImage] = useState(null);
   const flatListRef = useRef(null);
   const badgeSubscriptionRef = useRef(null);
+  
+  // Debug state variables
+  const [tenantLoading, setTenantLoading] = useState(true);
+  const [debugInfo, setDebugInfo] = useState({
+    tenantContext: null,
+    teacherResolution: null,
+    dataFetchStatus: null
+  });
 
   // Keyboard visibility listeners
   useEffect(() => {
@@ -246,14 +257,66 @@ const TeacherChat = () => {
   // Fetch both parents and students data
   const fetchData = async () => {
     setLoading(true);
+    setTenantLoading(true);
     setError(null);
     
+    if (DEBUG_MODE) {
+      console.log('💬 === TEACHER CHAT DEBUG ===');
+      console.log('🔍 Debug Mode: ENABLED');
+      console.log('👨‍🏫 Teacher User ID:', user?.id);
+      console.log('⏰ Fetch Time:', new Date().toISOString());
+      console.log('🏢 User Tenant Info:', {
+        tenant_id: user?.tenant_id,
+        email_domain: user?.email?.split('@')[1],
+        linked_teacher_id: user?.linked_teacher_id
+      });
+      
+      setDebugInfo(prev => ({
+        ...prev,
+        tenantContext: {
+          user_id: user?.id,
+          tenant_id: user?.tenant_id,
+          email_domain: user?.email?.split('@')[1],
+          linked_teacher_id: user?.linked_teacher_id,
+          fetch_time: new Date().toISOString()
+        }
+      }));
+    }
+    
     try {
+      if (DEBUG_MODE) {
+        console.log('🔄 Starting data fetch for teacher chat...');
+        setDebugInfo(prev => ({
+          ...prev,
+          dataFetchStatus: {
+            started_at: new Date().toISOString(),
+            parents_fetch: 'starting',
+            students_fetch: 'starting',
+            unread_counts_fetch: 'starting'
+          }
+        }));
+        setTenantLoading(false); // Tenant context resolved
+      }
+      
       await Promise.all([
         fetchParents(),
         fetchStudents(),
         fetchUnreadCounts()
       ]);
+      
+      if (DEBUG_MODE) {
+        console.log('✅ Teacher chat data fetch completed!');
+        setDebugInfo(prev => ({
+          ...prev,
+          dataFetchStatus: {
+            ...prev.dataFetchStatus,
+            completed_at: new Date().toISOString(),
+            parents_fetch: 'completed',
+            students_fetch: 'completed',
+            unread_counts_fetch: 'completed'
+          }
+        }));
+      }
     } catch (err) {
       console.error('Error fetching data:', err);
       setError(err.message);
@@ -265,6 +328,10 @@ const TeacherChat = () => {
   // Fetch parents of students assigned to the teacher - SUPER OPTIMIZED
   const fetchParents = async () => {
     try {
+      if (DEBUG_MODE) {
+        console.log('👨‍👩‍👧 Starting parent data fetch for teacher chat...');
+      }
+      
       // Get teacher info from users table
       const { data: userInfo, error: userError } = await supabase
         .from(TABLES.USERS)
@@ -272,11 +339,38 @@ const TeacherChat = () => {
         .eq('id', user.id)
         .single();
 
+      if (DEBUG_MODE) {
+        console.log('👨‍🏫 Teacher lookup result:', { userInfo, userError });
+      }
+
       if (userError || !userInfo?.linked_teacher_id) {
+        if (DEBUG_MODE) {
+          console.error('❌ Teacher information not found:', userError);
+          setDebugInfo(prev => ({
+            ...prev,
+            teacherResolution: {
+              method: 'user_table_lookup',
+              success: false,
+              error: userError?.message || 'No linked_teacher_id'
+            }
+          }));
+        }
         throw new Error('Teacher information not found. Please contact administrator.');
       }
 
       const teacherId = userInfo.linked_teacher_id;
+      
+      if (DEBUG_MODE) {
+        console.log('✅ Teacher ID resolved:', teacherId);
+        setDebugInfo(prev => ({
+          ...prev,
+          teacherResolution: {
+            method: 'user_table_lookup',
+            teacher_id: teacherId,
+            success: true
+          }
+        }));
+      }
       const uniqueParents = [];
       const seen = new Set();
 
@@ -1112,15 +1206,22 @@ const TeacherChat = () => {
   return (
     <View style={styles.container}>
       <Header title="Teacher Chat" showBack={true} />
-      {loading ? (
+      {loading || tenantLoading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           <ActivityIndicator size="large" color="#1976d2" />
           <Text style={{ marginTop: 16, fontSize: 16, color: '#666', textAlign: 'center' }}>
-            Loading your students and parents...
+            {tenantLoading ? 'Loading tenant context...' : 'Loading your students and parents...'}
           </Text>
-          <Text style={{ marginTop: 8, fontSize: 14, color: '#999', textAlign: 'center' }}>
-            This may take a moment
-          </Text>
+          {DEBUG_MODE && tenantLoading && (
+            <Text style={styles.debugText}>
+              Resolving teacher context and permissions...
+            </Text>
+          )}
+          {DEBUG_MODE && !tenantLoading && loading && (
+            <Text style={styles.debugText}>
+              Fetching contacts and unread counts...
+            </Text>
+          )}
         </View>
       ) : error ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -1775,6 +1876,14 @@ const TeacherChat = () => {
 };
 
 const styles = StyleSheet.create({
+  // Debug styles
+  debugText: {
+    fontSize: 12,
+    color: '#1976d2',
+    marginTop: 6,
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   contactListContainer: { flex: 1 },
   

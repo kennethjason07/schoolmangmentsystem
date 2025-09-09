@@ -86,9 +86,11 @@ export const testTenantBuilderVsDirectComparison = async () => {
   }
 };
 
-// Auto-run tests
-console.log('🚀 Auto-running TenantAwareQueryBuilder tests...');
-setTimeout(async () => {
-  const comparisonResult = await testTenantBuilderVsDirectComparison();
-  console.log('🎯 FINAL RESULT:', comparisonResult.bothWork ? 'BOTH METHODS WORKING!' : 'NEEDS MORE WORK');
-}, 2000);
+// Auto-run tests - DISABLED to prevent pre-login database queries
+// console.log('🚀 Auto-running TenantAwareQueryBuilder tests...');
+// setTimeout(async () => {
+//   const comparisonResult = await testTenantBuilderVsDirectComparison();
+//   console.log('🎯 FINAL RESULT:', comparisonResult.bothWork ? 'BOTH METHODS WORKING!' : 'NEEDS MORE WORK');
+// }, 2000);
+
+// Tests can now be run manually after authentication

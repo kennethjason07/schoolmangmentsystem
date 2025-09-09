@@ -16,10 +16,32 @@ import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from
 import { badgeNotifier } from '../../utils/badgeNotifier';
 import { testRealtimeConnection, testUserFilteredConnection, insertTestMessage } from '../../utils/testRealtime';
 import ImageViewer from '../../components/ImageViewer';
+import { useTenantContext } from '../../contexts/TenantContext';
+import { 
+  validateTenantAccess, 
+  createTenantQuery, 
+  validateDataTenancy, 
+  TENANT_ERROR_MESSAGES 
+} from '../../utils/tenantValidation';
+
+// Debug mode constant (following EMAIL_BASED_TENANT_SYSTEM.md)
+const DEBUG_MODE = __DEV__ && true; // Enable debug logging in development
 
 const ChatWithTeacher = () => {
   const { user } = useAuth();
   const { markMessagesAsRead } = useMessageStatus();
+  
+  // Add tenant context integration
+  const { 
+    tenantId, 
+    currentTenant, 
+    validateCurrentTenantAccess, 
+    executeSafeTenantQuery, 
+    loading: tenantLoading, 
+    retryTenantLoading, 
+    debugTenantLoading 
+  } = useTenantContext();
+  
   const [teachers, setTeachers] = useState([]);
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -36,6 +58,70 @@ const ChatWithTeacher = () => {
   const [showImageViewer, setShowImageViewer] = useState(false);
   const [selectedImageData, setSelectedImageData] = useState(null);
   const flatListRef = useRef(null);
+  
+  // Add debug state for tenant troubleshooting
+  const [debugInfo, setDebugInfo] = useState({
+    tenantContext: null,
+    teacherResolution: null,
+    chatDataFetchStatus: null
+  });
+  
+  // Enhanced tenant debugging following EMAIL_BASED_TENANT_SYSTEM.md
+  if (DEBUG_MODE) {
+    console.log('🏢 [CHAT TENANT DEBUG]:', {
+      tenantId: tenantId || 'NO TENANT',
+      tenantName: currentTenant?.name || 'NO TENANT NAME',
+      tenantStatus: currentTenant?.status || 'UNKNOWN',
+      tenantLoading: tenantLoading || false,
+      userEmail: user?.email || 'NO USER',
+      timestamp: new Date().toISOString()
+    });
+    
+    // Add global test functions for development debugging
+    if (typeof window !== 'undefined') {
+      window.debugChatTenantContext = () => {
+        console.log('🏢 [CHAT TENANT DEBUG] Current tenant context state:', {
+          tenantId: tenantId || 'NOT SET',
+          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : 'NOT SET',
+          tenantLoading: tenantLoading,
+          user: user ? { id: user.id, email: user.email } : 'NOT SET'
+        });
+        return {
+          tenantId,
+          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : null,
+          tenantLoading,
+          user: user ? { id: user.id, email: user.email } : null,
+          isReady: !tenantLoading && !!tenantId && !!user
+        };
+      };
+      
+      window.retryChatTenantLoading = async () => {
+        console.log('🔄 [CHAT MANUAL TENANT RETRY] Starting manual tenant retry...');
+        if (retryTenantLoading) {
+          await retryTenantLoading();
+          console.log('🔄 [CHAT MANUAL TENANT RETRY] Completed');
+        } else {
+          console.log('❌ [CHAT MANUAL TENANT RETRY] Function not available');
+        }
+      };
+      
+      window.debugChatTenantLoading = async () => {
+        console.log('📝 [CHAT DEBUG TENANT LOADING] Starting enhanced debug...');
+        if (debugTenantLoading) {
+          const result = await debugTenantLoading();
+          console.log('📝 [CHAT DEBUG TENANT LOADING] Result:', result);
+          return result;
+        } else {
+          console.log('❌ [CHAT DEBUG TENANT LOADING] Function not available');
+        }
+      };
+      
+      console.log('🧪 [CHAT DEV TOOLS] Added global functions:');
+      console.log('   • window.debugChatTenantContext() - Debug current tenant context state');
+      console.log('   • window.retryChatTenantLoading() - Manually retry tenant loading');
+      console.log('   • window.debugChatTenantLoading() - Run enhanced tenant loading debug');
+    }
+  }
 
   // Helper function to get teacher's user ID (exact copy from student logic)
   const getTeacherUserId = async (teacherId) => {
@@ -129,31 +215,110 @@ const ChatWithTeacher = () => {
     }
   };
 
-  // Fetch teachers assigned to the student (exact copy of student logic)
+  // Fetch teachers assigned to the student with tenant validation
   const fetchTeachersAndChats = async () => {
     try {
       setLoading(true);
       setError(null);
-
-      console.log('🚀 === STARTING TEACHER FETCH (PARENT VERSION) ===');
+      
+      console.log('🚀 === [TENANT-AWARE] STARTING TEACHER FETCH (PARENT VERSION) ===');
       console.log('👤 Current user:', user);
+      
+      // Enhanced tenant validation following EMAIL_BASED_TENANT_SYSTEM.md
+      
+      // Check if tenant is still loading
+      if (tenantLoading) {
+        console.log('🔄 [TENANT-AWARE] Tenant context is loading, delaying chat data fetch...');
+        return;
+      }
+      
+      // If tenant context is not loaded, try to resolve tenant directly by email
+      let resolvedTenantId = tenantId;
+      let resolvedTenant = currentTenant;
+      
+      if (!tenantId || !currentTenant) {
+        console.log('🔍 [TENANT-AWARE] Tenant context not loaded, attempting direct email-based tenant resolution...');
+        
+        if (!user || !user.email) {
+          console.error('❌ [TENANT-AWARE] Cannot resolve tenant: No authenticated user');
+          setError('Authentication required. Please log in again.');
+          setLoading(false);
+          return;
+        }
+        
+        try {
+          // Direct tenant lookup using email
+          console.log('📧 [TENANT-AWARE] Looking up tenant for email:', user.email);
+          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          const emailTenantResult = await getTenantIdByEmail(user.email);
+          
+          if (emailTenantResult.success) {
+            resolvedTenantId = emailTenantResult.data.tenant.id;
+            resolvedTenant = emailTenantResult.data.tenant;
+            console.log('✅ [TENANT-AWARE] Successfully resolved tenant via email:', {
+              tenantId: resolvedTenantId,
+              tenantName: resolvedTenant.name,
+              userEmail: user.email
+            });
+          } else {
+            console.error('❌ [TENANT-AWARE] Email-based tenant resolution failed:', emailTenantResult.error);
+            setError(emailTenantResult.error || 'Unable to determine your school. Please contact administrator.');
+            setLoading(false);
+            return;
+          }
+        } catch (emailLookupError) {
+          console.error('❌ [TENANT-AWARE] Error during email-based tenant lookup:', emailLookupError);
+          setError('Unable to load school information. Please try again.');
+          setLoading(false);
+          return;
+        }
+      }
 
-      // Step 1: Get parent user data and linked student
-      const { data: parentData, error: parentError } = await supabase
-        .from(TABLES.USERS)
+      if (DEBUG_MODE) {
+        console.log('📊 === [TENANT-AWARE] CHAT FETCH DEBUG ===');
+        console.log('🔍 Debug Mode: ENABLED');
+        console.log('🏢 Resolved Tenant:', resolvedTenant.name, '(ID:', resolvedTenantId, ')');
+        console.log('👤 Parent User ID:', user?.id);
+        console.log('⏰ Fetch Time:', new Date().toISOString());
+        console.log('📧 User Email:', user?.email);
+        
+        setDebugInfo(prev => ({
+          ...prev,
+          tenantContext: {
+            user_id: user?.id,
+            resolved_tenant_id: resolvedTenantId,
+            tenant_name: resolvedTenant.name,
+            email: user?.email,
+            fetch_time: new Date().toISOString()
+          }
+        }));
+      }
+
+      // Step 1: Get parent user data and linked student using tenant-aware query
+      const tenantUserQuery = createTenantQuery(resolvedTenantId, TABLES.USERS);
+      const { data: parentData, error: parentError } = await tenantUserQuery
         .select(`
-          *,
+          id,
+          email,
+          full_name,
+          linked_parent_of,
+          linked_student_id,
+          role_id,
+          tenant_id,
           students!users_linked_parent_of_fkey(
             id,
             name,
             class_id,
-            classes(id, class_name, section)
+            academic_year,
+            tenant_id,
+            classes(id, class_name, section, academic_year)
           )
         `)
         .eq('id', user.id)
-        .single();
+        .execute()
+        .then(result => ({ data: result.data?.[0] || null, error: result.error }));
 
-      console.log('👪 Parent query result:', { parentData, parentError });
+      console.log('👪 [TENANT-AWARE] Parent query result:', { parentData, parentError });
 
       if (parentError || !parentData?.linked_parent_of) {
         throw new Error('Parent account is not linked to any student. Please contact the administrator.');
@@ -163,17 +328,29 @@ const ChatWithTeacher = () => {
       if (!student) {
         throw new Error('Student information not found.');
       }
+      
+      // Validate student belongs to current tenant
+      if (student.tenant_id && student.tenant_id !== resolvedTenantId) {
+        console.error('❌ [TENANT-AWARE] Student belongs to different tenant:', {
+          studentTenant: student.tenant_id,
+          currentTenant: resolvedTenantId
+        });
+        setError(TENANT_ERROR_MESSAGES.WRONG_TENANT_DATA);
+        setLoading(false);
+        return;
+      }
 
-      console.log('👦 Student data:', student);
-      console.log('🏫 Student class:', student.classes);
-      console.log('Student class_id:', student.class_id);
+      console.log('👦 [TENANT-AWARE] Student data:', student);
+      console.log('🏦 [TENANT-AWARE] Student class:', student.classes);
+      console.log('[TENANT-AWARE] Student class_id:', student.class_id);
 
-      // Step 2: Get all existing messages for this parent user
-      const { data: allMessages, error: msgError } = await supabase
-        .from('messages')
-        .select('*')
+      // Step 2: Get all existing messages for this parent user using tenant-aware query
+      const tenantMessagesQuery = createTenantQuery(resolvedTenantId, 'messages');
+      const { data: allMessages, error: msgError } = await tenantMessagesQuery
+        .select('id, sender_id, receiver_id, student_id, message, sent_at, is_read, message_type, file_url, file_name, file_size, file_type, tenant_id')
         .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-        .order('sent_at', { ascending: true });
+        .order('sent_at', { ascending: true })
+        .execute();
 
       console.log('💬 Messages query:', { count: allMessages?.length, error: msgError });
 
@@ -204,24 +381,27 @@ const ChatWithTeacher = () => {
       console.log('🔍 Finding teachers for class:', studentClassId);
       console.log('🎯 Class:', student.classes?.class_name, student.classes?.section);
       
-      // Method 1A: Get class teacher from classes table (using class_teacher_id)
-      console.log('Fetching class teacher via classes table for class_id:', student.class_id);
-      const { data: classInfo, error: classInfoError } = await supabase
-        .from(TABLES.CLASSES)
+      // Method 1A: Get class teacher from classes table using tenant-aware query
+      console.log('[TENANT-AWARE] Fetching class teacher via classes table for class_id:', student.class_id);
+      const tenantClassesQuery = createTenantQuery(resolvedTenantId, TABLES.CLASSES);
+      const { data: classInfo, error: classInfoError } = await tenantClassesQuery
         .select(`
           id,
           class_name,
           section,
           class_teacher_id,
+          tenant_id,
           teachers!classes_class_teacher_id_fkey(
             id,
             name,
             qualification,
-            phone
+            phone,
+            tenant_id
           )
         `)
         .eq('id', student.class_id)
-        .single();
+        .execute()
+        .then(result => ({ data: result.data?.[0] || null, error: result.error }));
       
       if (!classInfoError && classInfo) {
         console.log('Found class info:', classInfo);
@@ -275,14 +455,15 @@ const ChatWithTeacher = () => {
         console.log('Class info fetch error:', classInfoError);
       }
       
-      // Method 1B: Alternative - Get class teacher directly from teachers table
+      // Method 1B: Alternative - Get class teacher directly from teachers table using tenant-aware query
       if (uniqueTeachers.length === 0) {
-        console.log('Trying direct teacher fetch for class_id:', student.class_id);
-        const { data: directClassTeacher, error: directTeacherError } = await supabase
-          .from(TABLES.TEACHERS)
-          .select('id, name, qualification, is_class_teacher, assigned_class_id, phone')
+        console.log('[TENANT-AWARE] Trying direct teacher fetch for class_id:', student.class_id);
+        const tenantTeachersQuery = createTenantQuery(resolvedTenantId, TABLES.TEACHERS);
+        const { data: directClassTeacher, error: directTeacherError } = await tenantTeachersQuery
+          .select('id, name, qualification, is_class_teacher, assigned_class_id, phone, tenant_id')
           .eq('assigned_class_id', student.class_id)
-          .eq('is_class_teacher', true);
+          .eq('is_class_teacher', true)
+          .execute();
         
         if (!directTeacherError && directClassTeacher && directClassTeacher.length > 0) {
           console.log('Found class teacher directly:', directClassTeacher[0]);
@@ -326,35 +507,40 @@ const ChatWithTeacher = () => {
         }
       }
       
-      // Method 2A: Get subject teachers via direct teacher_subjects query
-      console.log('Fetching subject teachers for class_id:', student.class_id);
+      // Method 2A: Get subject teachers via direct teacher_subjects query using tenant-aware queries
+      console.log('[TENANT-AWARE] Fetching subject teachers for class_id:', student.class_id);
       
-      // First, get all subjects for this specific class
-      const { data: classSubjects, error: classSubjectsError } = await supabase
-        .from(TABLES.SUBJECTS)
-        .select('id, name')
-        .eq('class_id', student.class_id);
+      // First, get all subjects for this specific class using tenant-aware query
+      const tenantSubjectsQuery = createTenantQuery(resolvedTenantId, TABLES.SUBJECTS);
+      const { data: classSubjects, error: classSubjectsError } = await tenantSubjectsQuery
+        .select('id, name, class_id, academic_year, tenant_id')
+        .eq('class_id', student.class_id)
+        .execute();
       
       console.log('Class subjects:', classSubjects, 'Error:', classSubjectsError);
       
       if (!classSubjectsError && classSubjects && classSubjects.length > 0) {
-        // For each subject, find the assigned teachers
+        // For each subject, find the assigned teachers using tenant-aware query
         for (const subject of classSubjects) {
-          console.log('Finding teachers for subject:', subject.name, 'ID:', subject.id);
+          console.log('[TENANT-AWARE] Finding teachers for subject:', subject.name, 'ID:', subject.id);
           
-          const { data: teacherAssignments, error: teacherError } = await supabase
-            .from(TABLES.TEACHER_SUBJECTS)
+          const tenantTeacherSubjectsQuery = createTenantQuery(resolvedTenantId, TABLES.TEACHER_SUBJECTS);
+          const { data: teacherAssignments, error: teacherError } = await tenantTeacherSubjectsQuery
             .select(`
               teacher_id,
+              subject_id,
+              tenant_id,
               teachers!inner(
                 id,
                 name,
                 qualification,
                 is_class_teacher,
-                phone
+                phone,
+                tenant_id
               )
             `)
-            .eq('subject_id', subject.id);
+            .eq('subject_id', subject.id)
+            .execute();
           
           console.log('Teacher assignments for', subject.name, ':', teacherAssignments, 'Error:', teacherError);
           
@@ -545,12 +731,13 @@ const ChatWithTeacher = () => {
       if (uniqueTeachers.length === 0) {
         console.log('No teachers found at all in the database for class', student.class_id);
         
-        // Get class info for debugging
-        const { data: classDebugInfo, error: classDebugError } = await supabase
-          .from(TABLES.CLASSES)
+        // Get class info for debugging using tenant-aware query
+        const tenantClassesDebugQuery = createTenantQuery(resolvedTenantId, TABLES.CLASSES);
+        const { data: classDebugInfo, error: classDebugError } = await tenantClassesDebugQuery
           .select('*')
           .eq('id', student.class_id)
-          .single();
+          .execute()
+          .then(result => ({ data: result.data?.[0] || null, error: result.error }));
         
         console.log('Student class debug info:', classDebugInfo, classDebugError);
         
@@ -682,13 +869,21 @@ const ChatWithTeacher = () => {
     };
   }, [selectedTeacher?.userId, user.id, messageHandler, markMessagesAsRead]);
 
-  // Reset teacher selection and messages on screen focus
+  // Reset teacher selection and messages on screen focus with tenant-aware initialization
   useFocusEffect(
     React.useCallback(() => {
       setSelectedTeacher(null);
       setMessages([]);
-      fetchTeachersAndChats();
-    }, [])
+      if (user && tenantId && !tenantLoading) {
+        console.log('🔄 [TENANT-AWARE] Tenant context loaded, initializing chat data...');
+        fetchTeachersAndChats();
+      } else if (tenantLoading) {
+        console.log('🔄 [TENANT-AWARE] Tenant context is loading, waiting for initialization...');
+      } else if (user && !tenantId) {
+        console.log('🔄 [TENANT-AWARE] User available but no tenant context, will try email-based resolution');
+        fetchTeachersAndChats(); // This will trigger email-based tenant resolution
+      }
+    }, [user, tenantId, tenantLoading])
   );
 
   // Select a teacher and load chat
@@ -738,7 +933,7 @@ const ChatWithTeacher = () => {
     }
   };
 
-  // Send a message with optimistic UI using RealtimeMessageHandler
+  // Send a message with optimistic UI using RealtimeMessageHandler and tenant validation
   const handleSend = async () => {
     if (!input.trim() || !selectedTeacher || sending) return;
     
@@ -749,16 +944,23 @@ const ChatWithTeacher = () => {
     setSending(true);
     
     try {
-      console.log('Starting to send message...');
-      console.log('User ID:', user.id);
-      console.log('Selected Teacher:', selectedTeacher);
+      console.log('[TENANT-AWARE] Starting to send message...');
+      console.log('[TENANT-AWARE] User ID:', user.id);
+      console.log('[TENANT-AWARE] Selected Teacher:', selectedTeacher);
+      
+      // Tenant validation before sending
+      const currentTenantId = tenantId || currentTenant?.id;
+      if (!currentTenantId) {
+        throw new Error('Unable to determine school context. Please try again.');
+      }
 
-      // Get parent's linked student ID directly from users table
-      const { data: parentUser, error: parentError } = await supabase
-        .from(TABLES.USERS)
-        .select('linked_parent_of')
+      // Get parent's linked student ID using tenant-aware query
+      const tenantUserQuery = createTenantQuery(currentTenantId, TABLES.USERS);
+      const { data: parentUser, error: parentError } = await tenantUserQuery
+        .select('id, linked_parent_of, tenant_id')
         .eq('id', user.id)
-        .single();
+        .execute()
+        .then(result => ({ data: result.data?.[0] || null, error: result.error }));
 
       if (parentError || !parentUser?.linked_parent_of) {
         throw new Error('Parent data not found or no student linked');
@@ -771,13 +973,14 @@ const ChatWithTeacher = () => {
         throw new Error('Teacher user account not found. Please contact admin to ensure teacher has a user account.');
       }
 
-      // Prepare message data for the handler
+      // Prepare message data for the handler with tenant information
       const messageData = {
         sender_id: user.id,
         receiver_id: teacherUserId,
         student_id: parentUser.linked_parent_of,
         message: messageText,
-        message_type: 'text'
+        message_type: 'text',
+        tenant_id: currentTenantId // Include tenant_id for proper isolation
       };
       
       // Use the message handler for optimistic UI and reliable sending

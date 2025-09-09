@@ -527,90 +527,6 @@ const ManageClasses = ({ navigation }) => {
     }
   };
 
-  // 🔍 DIAGNOSTIC FUNCTION
-  const runTenantDiagnostic = async () => {
-    console.log('🔍 ========== TENANT DIAGNOSTIC START ==========');
-    console.log('🔍 Current Context:');
-    console.log('   - tenantId:', tenantId);
-    console.log('   - currentTenant:', currentTenant);
-    console.log('   - user.id:', user?.id);
-    console.log('   - user.email:', user?.email);
-    
-    try {
-      // Check current user's tenant_id in database
-      console.log('🔍 Step 1: Checking user record in database...');
-      const { data: userRecord, error: userError } = await supabase
-        .from('users')
-        .select('id, email, tenant_id')
-        .eq('id', user?.id)
-        .single();
-      
-      if (userError) {
-        console.error('❌ User record error:', userError);
-      } else {
-        console.log('👤 User record:', userRecord);
-      }
-      
-      // Check if tenant exists
-      if (tenantId) {
-        console.log('🔍 Step 2: Checking tenant record...');
-        const { data: tenantRecord, error: tenantError } = await supabase
-          .from('tenants')
-          .select('*')
-          .eq('id', tenantId)
-          .single();
-        
-        if (tenantError) {
-          console.error('❌ Tenant record error:', tenantError);
-        } else {
-          console.log('🏢 Tenant record:', tenantRecord);
-        }
-      }
-      
-      // Check all classes in database
-      console.log('🔍 Step 3: Checking all classes...');
-      const { data: allClasses, error: classesError } = await supabase
-        .from('classes')
-        .select('id, class_name, tenant_id')
-        .limit(20);
-      
-      if (classesError) {
-        console.error('❌ Classes query error:', classesError);
-      } else {
-        console.log('📋 All classes (first 20):', allClasses);
-        
-        const uniqueTenants = [...new Set(allClasses?.map(c => c.tenant_id).filter(Boolean))];
-        console.log('🏢 Unique tenant_ids in classes:', uniqueTenants);
-        
-        const classesForCurrentTenant = allClasses?.filter(c => c.tenant_id === tenantId);
-        console.log(`📋 Classes for current tenant (${tenantId}):`, classesForCurrentTenant);
-      }
-      
-      // Test tenant-aware query
-      if (tenantId) {
-        console.log('🔍 Step 4: Testing tenant-aware query...');
-        try {
-          const tenantQuery = createTenantQuery(tenantId, 'classes');
-          const { data: tenantClasses, error: tenantError } = await tenantQuery
-            .select('id, class_name, tenant_id')
-            .execute();
-          
-          if (tenantError) {
-            console.error('❌ Tenant query error:', tenantError);
-          } else {
-            console.log('📋 Tenant-aware query result:', tenantClasses);
-          }
-        } catch (tenantQueryError) {
-          console.error('❌ Tenant query exception:', tenantQueryError);
-        }
-      }
-      
-    } catch (error) {
-      console.error('❌ Diagnostic error:', error);
-    }
-    
-    console.log('🔍 ========== TENANT DIAGNOSTIC END ==========');
-  };
 
   const onRefresh = async () => {
     try {
@@ -902,12 +818,6 @@ const ManageClasses = ({ navigation }) => {
         <View style={styles.headerInfo}>
           <Text style={styles.headerTitle}>Total Classes: {classes.length}</Text>
         </View>
-        <TouchableOpacity 
-          style={[styles.addButton, { marginRight: 10 }]}
-          onPress={runTenantDiagnostic}
-        >
-          <Ionicons name="bug" size={20} color="#fff" />
-        </TouchableOpacity>
         <TouchableOpacity 
           style={styles.addButton}
           onPress={() => setIsAddModalVisible(true)}

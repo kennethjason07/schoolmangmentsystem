@@ -149,10 +149,12 @@ export const runAllProductionTests = () => {
   console.log('='.repeat(50));
 };
 
-// Auto-run test in development
-if (__DEV__) {
-  setTimeout(() => {
-    console.log('🧪 Auto-running production tests in 2 seconds...');
-    runAllProductionTests();
-  }, 2000);
-}
+// Auto-run test in development - DISABLED to prevent pre-login database queries
+// if (__DEV__) {
+//   setTimeout(() => {
+//     console.log('🧪 Auto-running production tests in 2 seconds...');
+//     runAllProductionTests();
+//   }, 2000);
+// }
+
+// Tests can now be run manually by calling runAllProductionTests() after authentication

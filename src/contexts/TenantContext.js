@@ -2,10 +2,12 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../utils/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentUserTenantByEmail } from '../utils/getTenantByEmail';
-import { runAllProductionTests } from '../utils/supabaseProductionTest';
-import { testTenantQueryHelper, createTenantQuery, executeTenantQuery } from '../utils/tenantQueryHelper';
-import '../utils/quickSupabaseTest'; // Auto-run quick tests
-import '../utils/testFixedTenantBuilder'; // Auto-run fixed builder tests
+import { validateTenantAccess, createTenantQuery } from '../utils/tenantValidation';
+// DISABLED: Auto-importing test utilities that run database queries before login
+// import { runAllProductionTests } from '../utils/supabaseProductionTest';
+// import { testTenantQueryHelper, createTenantQuery, executeTenantQuery } from '../utils/tenantQueryHelper';
+// import '../utils/quickSupabaseTest'; // Auto-run quick tests
+// import '../utils/testFixedTenantBuilder'; // Auto-run fixed builder tests
 
 const TenantContext = createContext({});
 
@@ -23,24 +25,25 @@ export const useTenantContext = useTenant;
 export const TenantProvider = ({ children }) => {
   console.log('🏗️ TenantProvider: Component initialized');
   
-  // Run successful query tests only
-  console.log('🧪 TenantProvider: Running successful query pattern tests...');
-  try {
-    // Test only the working tenant query helper with the known tenant ID
-    const testTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
-    console.log('🧪 TenantProvider: Testing working tenant patterns with tenant:', testTenantId);
-    testTenantQueryHelper(testTenantId).then(success => {
-      console.log('🧪 TenantProvider: ✅ All tenant query tests:', success ? 'PASSED' : 'FAILED');
-      if (success) {
-        console.log('🎉 TENANT QUERIES FULLY OPERATIONAL!');
-      }
-    }).catch(error => {
-      console.error('🧪 TenantProvider: Tenant query test error:', error);
-    });
-    
-  } catch (testError) {
-    console.error('🧪 TenantProvider: Query tests failed:', testError);
-  }
+  // DISABLED: Database query tests before authentication
+  // These tests are now only run after successful authentication
+  // console.log('🧪 TenantProvider: Running successful query pattern tests...');
+  // try {
+  //   // Test only the working tenant query helper with the known tenant ID
+  //   const testTenantId = 'b8f8b5f0-1234-4567-8901-123456789000';
+  //   console.log('🧪 TenantProvider: Testing working tenant patterns with tenant:', testTenantId);
+  //   testTenantQueryHelper(testTenantId).then(success => {
+  //     console.log('🧪 TenantProvider: ✅ All tenant query tests:', success ? 'PASSED' : 'FAILED');
+  //     if (success) {
+  //       console.log('🎉 TENANT QUERIES FULLY OPERATIONAL!');
+  //     }
+  //   }).catch(error => {
+  //     console.error('🧪 TenantProvider: Tenant query test error:', error);
+  //   });
+  //   
+  // } catch (testError) {
+  //   console.error('🧪 TenantProvider: Query tests failed:', testError);
+  // }
   
   const [currentTenant, setCurrentTenant] = useState(null);
   const [availableTenants, setAvailableTenants] = useState([]);
@@ -125,9 +128,23 @@ export const TenantProvider = ({ children }) => {
       setLoading(true);
       setError(null);
       console.log('🔍 TenantContext: Starting email-based tenant loading...');
+      console.log('🔍 TenantContext: Timestamp:', new Date().toISOString());
+      console.log('🔍 TenantContext: Current state before loading:', {
+        currentTenant: currentTenant ? 'SET' : 'NULL',
+        loading,
+        error: error || 'none'
+      });
       
       // Use the email-based lookup function
+      console.log('🔍 TenantContext: Calling getCurrentUserTenantByEmail()...');
       const result = await getCurrentUserTenantByEmail();
+      console.log('🔍 TenantContext: getCurrentUserTenantByEmail result:', {
+        success: result.success,
+        hasData: !!result.data,
+        error: result.error || 'none',
+        isAuthError: result.isAuthError || false,
+        code: result.code || 'none'
+      });
       
       if (!result.success) {
         // Check if this is just "no authenticated user" or other expected authentication errors
@@ -652,6 +669,51 @@ export const TenantProvider = ({ children }) => {
     console.log('🔄 TenantContext: Manual retry tenant loading...');
     await loadTenantFromStorage();
   };
+  
+  // Enhanced manual tenant loading with detailed debugging
+  const debugTenantLoading = async () => {
+    console.log('📝 TenantContext: DEBUG - Starting enhanced tenant loading debug...');
+    
+    try {
+      // Step 1: Check current auth state
+      console.log('📝 Step 1: Checking auth state...');
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      console.log('📝 Auth state result:', {
+        hasUser: !!user,
+        userEmail: user?.email || 'none',
+        authError: authError?.message || 'none'
+      });
+      
+      if (!user) {
+        console.log('📝 Auth issue detected - user not authenticated');
+        return { success: false, issue: 'not_authenticated' };
+      }
+      
+      // Step 2: Test tenant lookup directly
+      console.log('📝 Step 2: Testing tenant lookup directly...');
+      const { getTenantIdByEmail } = await import('../utils/getTenantByEmail');
+      const directResult = await getTenantIdByEmail(user.email);
+      console.log('📝 Direct tenant lookup result:', {
+        success: directResult.success,
+        error: directResult.error || 'none',
+        hasTenantData: !!directResult.data
+      });
+      
+      if (directResult.success) {
+        console.log('📝 SUCCESS - Manual tenant loading should work');
+        console.log('📝 Triggering actual tenant loading...');
+        await loadTenantFromStorage();
+        return { success: true, tenant: directResult.data.tenant };
+      } else {
+        console.log('📝 FAILED - Issue with tenant lookup:', directResult.error);
+        return { success: false, issue: 'tenant_lookup_failed', error: directResult.error };
+      }
+      
+    } catch (error) {
+      console.error('📝 ERROR in debug tenant loading:', error);
+      return { success: false, issue: 'exception', error: error.message };
+    }
+  };
 
   // Clear tenant data (on logout)
   const clearTenant = async () => {
@@ -689,6 +751,7 @@ export const TenantProvider = ({ children }) => {
     loadAvailableTenants,
     clearTenant,
     retryTenantLoading,
+    debugTenantLoading,
     
     // Feature checks
     getTenantFeatures,
@@ -703,23 +766,90 @@ export const TenantProvider = ({ children }) => {
     tenantName: currentTenant?.name || 'Unknown School',
     tenantSubdomain: currentTenant?.subdomain || null,
     
-    // Tenant query helpers - RELIABLE ALTERNATIVE TO TenantAwareQueryBuilder
-    createTenantQuery: (tableName, selectClause = '*') => {
+    // Enhanced tenant-aware query helpers following EMAIL_BASED_TENANT_SYSTEM.md patterns
+    createTenantAwareQuery: (tableName) => {
       const tenantId = currentTenant?.id;
       if (!tenantId) {
-        console.warn('No current tenant for query creation');
-        return null;
+        console.warn('❌ No current tenant for tenant-aware query creation');
+        throw new Error('No tenant context available. Please contact administrator.');
       }
-      return createTenantQuery(tableName, tenantId, selectClause);
+      console.log(`🔍 Creating tenant-aware query for '${tableName}' with tenant_id: ${tenantId}`);
+      return createTenantQuery(tenantId, tableName);
     },
     
-    executeTenantQuery: async (tableName, options = {}) => {
+    // Validate tenant access for current user
+    validateCurrentTenantAccess: async (screenName = 'Unknown') => {
       const tenantId = currentTenant?.id;
       if (!tenantId) {
-        console.warn('No current tenant for query execution');
-        return { data: null, error: new Error('No tenant context') };
+        return {
+          isValid: false,
+          tenant: null,
+          error: 'No tenant context available. Please contact administrator.'
+        };
       }
-      return await executeTenantQuery(tableName, tenantId, options);
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        return {
+          isValid: false,
+          tenant: null,
+          error: 'User not authenticated.'
+        };
+      }
+      
+      return await validateTenantAccess(tenantId, user.id, screenName);
+    },
+    
+    // Safe tenant query execution with automatic validation
+    executeSafeTenantQuery: async (tableName, queryOptions = {}) => {
+      try {
+        // Validate tenant access first
+        const validation = await value.validateCurrentTenantAccess(`${tableName} Query`);
+        if (!validation.isValid) {
+          console.error(`❌ Tenant validation failed for ${tableName}:`, validation.error);
+          return { data: null, error: new Error(validation.error) };
+        }
+        
+        const tenantId = currentTenant?.id;
+        const queryBuilder = createTenantQuery(tenantId, tableName);
+        
+        // Apply query options
+        let query = queryBuilder.select(queryOptions.select || '*');
+        
+        if (queryOptions.filters) {
+          Object.entries(queryOptions.filters).forEach(([column, value]) => {
+            query = query.eq(column, value);
+          });
+        }
+        
+        if (queryOptions.orderBy) {
+          query = query.order(queryOptions.orderBy.column || queryOptions.orderBy, 
+            queryOptions.orderBy.ascending ? { ascending: true } : { ascending: false }
+          );
+        }
+        
+        if (queryOptions.limit) {
+          query = query.limit(queryOptions.limit);
+        }
+        
+        const result = await query.execute();
+        
+        // Additional client-side validation
+        if (result.data && Array.isArray(result.data)) {
+          const invalidItems = result.data.filter(item => item.tenant_id !== tenantId);
+          if (invalidItems.length > 0) {
+            console.error(`❌ Data validation failed: Found ${invalidItems.length} items with wrong tenant_id`);
+            return { data: null, error: new Error('Data integrity violation detected') };
+          }
+        }
+        
+        console.log(`✅ Safe tenant query for '${tableName}' completed: ${result.data?.length || 0} records`);
+        return result;
+        
+      } catch (error) {
+        console.error(`❌ Safe tenant query failed for '${tableName}':`, error);
+        return { data: null, error };
+      }
     },
   };
 

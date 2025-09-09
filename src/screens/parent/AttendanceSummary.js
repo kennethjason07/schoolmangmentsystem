@@ -23,9 +23,19 @@ import * as Sharing from 'expo-sharing';
 import Header from '../../components/Header';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers, isValidUUID, safeQuery } from '../../utils/supabase';
+import { 
+  validateTenantAccess, 
+  createTenantQuery, 
+  validateDataTenancy,
+  TENANT_ERROR_MESSAGES 
+} from '../../utils/tenantValidation';
+import { useTenantContext } from '../../contexts/TenantContext';
 import { getCurrentMonthAttendance, calculateAttendanceStats, generateSampleAttendanceData } from '../../services/attendanceService';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
+
+// Debug mode configuration
+const DEBUG_MODE = __DEV__ && true; // Enable debug logging and UI elements
 
 const { width } = Dimensions.get('window');
 
@@ -119,6 +129,9 @@ const TERM_MONTHS = generateTermMonths();
 const MONTH_BG_COLORS = ['#f3f8fd', '#fdf7f3', '#f7fdf3']; // Light blue, light orange, light green
 
 const AttendanceSummary = () => {
+  const { user } = useAuth();
+  const { tenantId, currentTenant, validateCurrentTenantAccess, executeSafeTenantQuery, loading: tenantLoading, retryTenantLoading, debugTenantLoading } = useTenantContext();
+  
   const [selectedMonth, setSelectedMonth] = useState('all');
   const [selectedSubject, setSelectedSubject] = useState('All');
   const [selectedTerm, setSelectedTerm] = useState('Term 1');
@@ -141,7 +154,70 @@ const AttendanceSummary = () => {
   const [error, setError] = useState(null);
   // Add dashboard-style attendance state
   const [dashboardAttendance, setDashboardAttendance] = useState([]);
-  const { user } = useAuth();
+  
+  // Enhanced tenant debugging following EMAIL_BASED_TENANT_SYSTEM.md
+  if (DEBUG_MODE) {
+    console.log('🏢 [ATTENDANCE TENANT DEBUG]:', {
+      tenantId: tenantId || 'NO TENANT',
+      tenantName: currentTenant?.name || 'NO TENANT NAME',
+      tenantStatus: currentTenant?.status || 'UNKNOWN',
+      tenantLoading: tenantLoading || false,
+      userEmail: user?.email || 'NO USER',
+      timestamp: new Date().toISOString()
+    });
+    
+    // Add global test functions for development debugging
+    if (typeof window !== 'undefined') {
+      window.debugAttendanceTenantContext = () => {
+        console.log('🏢 [ATTENDANCE TENANT DEBUG] Current tenant context state:', {
+          tenantId: tenantId || 'NOT SET',
+          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : 'NOT SET',
+          tenantLoading: tenantLoading,
+          user: user ? { id: user.id, email: user.email } : 'NOT SET'
+        });
+        return {
+          tenantId,
+          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : null,
+          tenantLoading,
+          user: user ? { id: user.id, email: user.email } : null,
+          isReady: !tenantLoading && !!tenantId && !!user
+        };
+      };
+      
+      window.retryAttendanceTenantLoading = async () => {
+        console.log('🔄 [ATTENDANCE MANUAL TENANT RETRY] Starting manual tenant retry...');
+        if (retryTenantLoading) {
+          await retryTenantLoading();
+          console.log('🔄 [ATTENDANCE MANUAL TENANT RETRY] Completed');
+        } else {
+          console.log('❌ [ATTENDANCE MANUAL TENANT RETRY] Function not available');
+        }
+      };
+      
+      window.debugAttendanceTenantLoading = async () => {
+        console.log('📝 [ATTENDANCE DEBUG TENANT LOADING] Starting enhanced debug...');
+        if (debugTenantLoading) {
+          const result = await debugTenantLoading();
+          console.log('📝 [ATTENDANCE DEBUG TENANT LOADING] Result:', result);
+          return result;
+        } else {
+          console.log('❌ [ATTENDANCE DEBUG TENANT LOADING] Function not available');
+        }
+      };
+      
+      console.log('🧪 [ATTENDANCE DEV TOOLS] Added global functions:');
+      console.log('   • window.debugAttendanceTenantContext() - Debug current tenant context state');
+      console.log('   • window.retryAttendanceTenantLoading() - Manually retry tenant loading');
+      console.log('   • window.debugAttendanceTenantLoading() - Run enhanced tenant loading debug');
+    }
+  }
+  
+  // Debug state variables
+  const [debugInfo, setDebugInfo] = useState({
+    tenantContext: null,
+    studentResolution: null,
+    dataFetchStatus: null
+  });
 
   // Pull-to-refresh functionality with enhanced reload
   const { refreshing, onRefresh } = usePullToRefresh(async () => {
@@ -154,11 +230,81 @@ const AttendanceSummary = () => {
     console.log('✅ Pull-to-refresh completed');
   });
 
-  // Fetch attendance data with improved error handling
+  // Fetch attendance data with improved error handling and EMAIL_BASED_TENANT_SYSTEM
   const fetchAttendanceData = async () => {
     try {
       setLoading(true);
       setError(null);
+      
+      // Enhanced tenant validation following EMAIL_BASED_TENANT_SYSTEM.md
+      
+      // Check if tenant is still loading
+      if (tenantLoading) {
+        console.log('🔄 [TENANT-AWARE] Tenant context is loading, delaying attendance fetch...');
+        return;
+      }
+      
+      // If tenant context is not loaded, try to resolve tenant directly by email
+      let resolvedTenantId = tenantId;
+      let resolvedTenant = currentTenant;
+      
+      if (!tenantId || !currentTenant) {
+        console.log('🔍 [TENANT-AWARE] Tenant context not loaded, attempting direct email-based tenant resolution...');
+        
+        if (!user || !user.email) {
+          console.error('❌ [TENANT-AWARE] Cannot resolve tenant: No authenticated user');
+          setError('Authentication required. Please log in again.');
+          setLoading(false);
+          return;
+        }
+        
+        try {
+          // Direct tenant lookup using email
+          console.log('📧 [TENANT-AWARE] Looking up tenant for email:', user.email);
+          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          const emailTenantResult = await getTenantIdByEmail(user.email);
+          
+          if (emailTenantResult.success) {
+            resolvedTenantId = emailTenantResult.data.tenant.id;
+            resolvedTenant = emailTenantResult.data.tenant;
+            console.log('✅ [TENANT-AWARE] Successfully resolved tenant via email:', {
+              tenantId: resolvedTenantId,
+              tenantName: resolvedTenant.name,
+              userEmail: user.email
+            });
+          } else {
+            console.error('❌ [TENANT-AWARE] Email-based tenant resolution failed:', emailTenantResult.error);
+            setError(emailTenantResult.error || 'Unable to determine your school. Please contact administrator.');
+            setLoading(false);
+            return;
+          }
+        } catch (emailLookupError) {
+          console.error('❌ [TENANT-AWARE] Error during email-based tenant lookup:', emailLookupError);
+          setError('Unable to load school information. Please try again.');
+          setLoading(false);
+          return;
+        }
+      }
+
+      if (DEBUG_MODE) {
+        console.log('📊 === [TENANT-AWARE] ATTENDANCE SUMMARY DEBUG ===');
+        console.log('🔍 Debug Mode: ENABLED');
+        console.log('🏢 Resolved Tenant:', resolvedTenant.name, '(ID:', resolvedTenantId, ')');
+        console.log('👤 Parent User ID:', user?.id);
+        console.log('⏰ Fetch Time:', new Date().toISOString());
+        console.log('📧 User Email:', user?.email);
+        
+        setDebugInfo(prev => ({
+          ...prev,
+          tenantContext: {
+            user_id: user?.id,
+            resolved_tenant_id: resolvedTenantId,
+            tenant_name: resolvedTenant.name,
+            email: user?.email,
+            fetch_time: new Date().toISOString()
+          }
+        }));
+      }
 
       console.log('🔍 [DEBUG] AttendanceSummary - Starting data fetch for user:', user?.id);
       console.log('🔍 [DEBUG] Current time:', new Date().toISOString());
@@ -171,14 +317,28 @@ const AttendanceSummary = () => {
       let studentDetails = null;
       let parentError = null;
 
+      if (DEBUG_MODE) {
+        console.log('🔄 Starting student data resolution for attendance...');
+        console.log('📊 Resolution strategies available:', {
+          strategy1: 'linked_parent_of field',
+          strategy2: 'linked_student_id field',
+          strategy3: 'parents table lookup by email'
+        });
+      }
+
       try {
         // Strategy 1: Check if user has linked_parent_of field directly
+        if (DEBUG_MODE) {
+          console.log('🔍 [STRATEGY 1] Getting user data to check linked_parent_of field');
+        }
         console.log('🔍 [STRATEGY 1] Getting user data to check linked_parent_of field');
-        const { data: userData, error: userError } = await supabase
-          .from(TABLES.USERS)
+        // Use tenant-aware query for user lookup
+        const tenantUserQuery = createTenantQuery(resolvedTenantId, TABLES.USERS);
+        const { data: userData, error: userError } = await tenantUserQuery
           .select('id, email, full_name, linked_parent_of, linked_student_id, role_id')
           .eq('id', user.id)
-          .single();
+          .execute()
+          .then(result => ({ data: result.data?.[0] || null, error: result.error }));
         
         console.log('🔍 [USER DATA] User data result:', { userData, userError });
         
@@ -187,8 +347,9 @@ const AttendanceSummary = () => {
           if (userData.linked_parent_of) {
             console.log('🔍 [PARENT LINK] User is linked as parent of student ID:', userData.linked_parent_of);
             
-            const { data: studentData, error: studentError } = await supabase
-              .from(TABLES.STUDENTS)
+            // Use tenant-aware query for student lookup
+            const tenantStudentQuery = createTenantQuery(resolvedTenantId, TABLES.STUDENTS);
+            const { data: studentData, error: studentError } = await tenantStudentQuery
               .select(`
                 id,
                 name,
@@ -201,12 +362,30 @@ const AttendanceSummary = () => {
                 classes(id, class_name, section)
               `)
               .eq('id', userData.linked_parent_of)
-              .single();
+              .execute()
+              .then(result => ({ data: result.data?.[0] || null, error: result.error }));
               
             console.log('🔍 [STUDENT QUERY] Student query result:', { studentData, studentError });
               
             if (!studentError && studentData) {
               studentDetails = studentData;
+              if (DEBUG_MODE) {
+                console.log('✅ [STRATEGY 1 SUCCESS] Found student via linked_parent_of:', {
+                  student_id: studentDetails.id,
+                  student_name: studentDetails.name,
+                  class_id: studentDetails.class_id
+                });
+                setDebugInfo(prev => ({
+                  ...prev,
+                  studentResolution: {
+                    method: 'linked_parent_of',
+                    student_id: studentDetails.id,
+                    student_name: studentDetails.name,
+                    class_id: studentDetails.class_id,
+                    success: true
+                  }
+                }));
+              }
               console.log('✅ [STUDENT FOUND] Found student via linked_parent_of:', studentDetails.name);
               console.log('✅ [STUDENT FOUND] Student ID:', studentDetails.id);
               console.log('✅ [STUDENT FOUND] Class ID:', studentDetails.class_id);
@@ -219,8 +398,9 @@ const AttendanceSummary = () => {
           if (!studentDetails && userData.linked_student_id) {
             console.log('🔍 [STUDENT LINK] User is linked as student ID:', userData.linked_student_id);
             
-            const { data: studentData, error: studentError } = await supabase
-              .from(TABLES.STUDENTS)
+            // Use tenant-aware query for student lookup (linked_student_id)
+            const tenantStudentQuery2 = createTenantQuery(resolvedTenantId, TABLES.STUDENTS);
+            const { data: studentData, error: studentError } = await tenantStudentQuery2
               .select(`
                 id,
                 name,
@@ -233,7 +413,8 @@ const AttendanceSummary = () => {
                 classes(id, class_name, section)
               `)
               .eq('id', userData.linked_student_id)
-              .single();
+              .execute()
+              .then(result => ({ data: result.data?.[0] || null, error: result.error }));
               
             console.log('🔍 [STUDENT QUERY] Student query result:', { studentData, studentError });
               
@@ -259,8 +440,9 @@ const AttendanceSummary = () => {
       if (!studentDetails) {
         try {
           console.log('🔍 [STRATEGY 2] Checking parents table for user email:', user.email);
-          const { data: parentRecords, error: parentsError } = await supabase
-            .from(TABLES.PARENTS)
+          // Use tenant-aware query for parents lookup
+          const tenantParentsQuery = createTenantQuery(resolvedTenantId, TABLES.PARENTS);
+          const { data: parentRecords, error: parentsError } = await tenantParentsQuery
             .select(`
               id,
               student_id,
@@ -278,7 +460,9 @@ const AttendanceSummary = () => {
                 classes(id, class_name, section)
               )
             `)
-            .eq('email', user.email);
+            .eq('email', user.email)
+            .execute()
+            .then(result => ({ data: result.data || [], error: result.error }));
             
           console.log('🔍 [PARENTS QUERY] Parents query result:', { parentRecords, parentsError });
           
@@ -300,6 +484,24 @@ const AttendanceSummary = () => {
       
       // Log final student details status
       if (studentDetails) {
+        if (DEBUG_MODE) {
+          console.log('✅ Student resolution completed successfully!');
+          console.log('📚 Starting attendance data fetch for student:', {
+            student_id: studentDetails.id,
+            student_name: studentDetails.name,
+            class_id: studentDetails.class_id
+          });
+          setDebugInfo(prev => ({
+            ...prev,
+            dataFetchStatus: {
+              started_at: new Date().toISOString(),
+              student_resolved: true,
+              attendance_fetch: 'starting',
+              records_processed: 0
+            }
+          }));
+        }
+        
         console.log('🎯 [FINAL STUDENT] Using REAL student data:', {
           id: studentDetails.id,
           name: studentDetails.name,
@@ -344,10 +546,11 @@ const AttendanceSummary = () => {
             
             // Strategy 1: Use student_attendance table as per schema
             try {
-              console.log('🔍 [ATTENDANCE FETCH] Strategy 1: Using student_attendance table');
+              console.log('🔍 [TENANT-AWARE] Strategy 1: Using tenant-aware student_attendance table query');
           
-          const { data, error } = await supabase
-            .from('student_attendance')
+          // Use tenant-aware query for attendance lookup
+          const tenantAttendanceQuery = createTenantQuery(resolvedTenantId, 'student_attendance');
+          const { data, error } = await tenantAttendanceQuery
             .select(`
               id,
               student_id,
@@ -358,7 +561,8 @@ const AttendanceSummary = () => {
               created_at
             `)
             .eq('student_id', studentDetails.id)
-            .order('date', { ascending: false });
+            .order('date', { ascending: false })
+            .execute();
             
         console.log('🔍 [ATTENDANCE FETCH] Strategy 1 - Raw response:', {
             data: data,
@@ -986,10 +1190,21 @@ const AttendanceSummary = () => {
 
   // Remove Saturday attendance generation - only show real data
 
-  // Fetch data on component mount
+  // Fetch data on component mount with tenant-aware loading
   useEffect(() => {
+    // Wait for both authentication and tenant loading to complete
+    if (!user || tenantLoading) {
+      console.log('🔄 [TENANT-AWARE] Waiting for auth and tenant loading to complete...');
+      return;
+    }
+    
+    // Enhanced tenant-aware loading check
+    if (!tenantId && !currentTenant) {
+      console.log('🔄 [TENANT-AWARE] useEffect: Tenant not ready yet, will attempt direct resolution in fetchAttendanceData');
+    }
+    
     fetchAttendanceData();
-  }, []);
+  }, [user, tenantLoading, tenantId, currentTenant]);
   
   // Set up real-time subscription when student data is available
   useEffect(() => {
@@ -1533,14 +1748,32 @@ const AttendanceSummary = () => {
   // Since we're showing single month, no need to group by month
   // Just create a single array with all days of the current month
 
-  if (loading) {
+  if (loading || tenantLoading) {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.container}>
           <Header title="Attendance Summary" showBack={true} />
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#1976d2" />
-            <Text style={styles.loadingText}>Loading attendance data...</Text>
+            <Text style={styles.loadingText}>
+              {tenantLoading ? 'Loading tenant context...' : 'Loading attendance data...'}
+            </Text>
+            {DEBUG_MODE && (
+              <View style={styles.debugContainer}>
+                <Text style={styles.debugLabel}>TENANT DEBUG INFO:</Text>
+                <Text style={styles.debugText}>Tenant Loading: {tenantLoading ? 'Yes' : 'No'}</Text>
+                <Text style={styles.debugText}>Auth Loading: {loading ? 'Yes' : 'No'}</Text>
+                <Text style={styles.debugText}>Tenant ID: {tenantId || 'Not Set'}</Text>
+                <Text style={styles.debugText}>Tenant Name: {currentTenant?.name || 'Not Set'}</Text>
+                <Text style={styles.debugText}>User: {user?.email || 'Not Set'}</Text>
+                {tenantLoading && (
+                  <Text style={styles.debugText}>Status: Resolving school context...</Text>
+                )}
+                {!tenantLoading && loading && (
+                  <Text style={styles.debugText}>Status: Fetching attendance data...</Text>
+                )}
+              </View>
+            )}
           </View>
         </View>
       </SafeAreaView>
@@ -1557,6 +1790,16 @@ const AttendanceSummary = () => {
             <TouchableOpacity style={styles.retryButton} onPress={fetchAttendanceData}>
               <Text style={styles.retryButtonText}>Retry</Text>
             </TouchableOpacity>
+            {DEBUG_MODE && (
+              <View style={styles.debugContainer}>
+                <Text style={styles.debugLabel}>TENANT DEBUG INFO:</Text>
+                <Text style={styles.debugText}>Tenant Loading: {tenantLoading ? 'Yes' : 'No'}</Text>
+                <Text style={styles.debugText}>Tenant ID: {tenantId || 'Not Set'}</Text>
+                <Text style={styles.debugText}>Tenant Name: {currentTenant?.name || 'Not Set'}</Text>
+                <Text style={styles.debugText}>User: {user?.email || 'Not Set'}</Text>
+                <Text style={styles.debugText}>Error Type: {error?.includes('tenant') ? 'Tenant-related' : 'Other'}</Text>
+              </View>
+            )}
           </View>
         </View>
       </SafeAreaView>
@@ -3651,6 +3894,29 @@ const styles = StyleSheet.create({
     color: '#5d4037',
     marginBottom: 6,
     lineHeight: 18,
+  },
+  
+  // Debug Section Styles
+  debugText: {
+    fontSize: 12,
+    color: '#1976d2',
+    marginTop: 5,
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  debugContainer: {
+    backgroundColor: '#e3f2fd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#90caf9',
+  },
+  debugLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#0d47a1',
+    marginBottom: 8,
   },
 });
 

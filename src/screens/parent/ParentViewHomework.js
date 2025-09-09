@@ -3,6 +3,13 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, Modal, 
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { 
+  validateTenantAccess, 
+  createTenantQuery, 
+  validateDataTenancy,
+  TENANT_ERROR_MESSAGES 
+} from '../../utils/tenantValidation';
+import { useTenantContext } from '../../contexts/TenantContext';
 import Header from '../../components/Header';
 import ImageViewerModal from '../../components/ImageViewerModal';
 import { useSelectedStudent } from '../../contexts/SelectedStudentContext';
@@ -75,7 +82,71 @@ const getFileUrlFromBucket = (filePathOrUrl, fileName, bucketName = 'homework-fi
 
 const ParentViewHomework = ({ navigation }) => {
   const { user, loading: authLoading } = useAuth();
+  const { tenantId, currentTenant, validateCurrentTenantAccess, executeSafeTenantQuery, loading: tenantLoading, retryTenantLoading, debugTenantLoading } = useTenantContext();
   const { selectedStudent } = useSelectedStudent();
+  
+  // Enhanced tenant debugging following EMAIL_BASED_TENANT_SYSTEM.md
+  const DEBUG_MODE = process.env.NODE_ENV === 'development';
+  
+  if (DEBUG_MODE) {
+    console.log('🏢 [PARENT HOMEWORK TENANT DEBUG]:', {
+      tenantId: tenantId || 'NO TENANT',
+      tenantName: currentTenant?.name || 'NO TENANT NAME',
+      tenantStatus: currentTenant?.status || 'UNKNOWN',
+      tenantLoading: tenantLoading || false,
+      userEmail: user?.email || 'NO USER',
+      selectedStudent: selectedStudent?.name || 'None',
+      authLoading: authLoading || false,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Add global test functions for development debugging
+    if (typeof window !== 'undefined') {
+      window.debugParentHomeworkTenantContext = () => {
+        console.log('🏢 [HOMEWORK TENANT DEBUG] Current tenant context state:', {
+          tenantId: tenantId || 'NOT SET',
+          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : 'NOT SET',
+          tenantLoading: tenantLoading,
+          user: user ? { id: user.id, email: user.email } : 'NOT SET',
+          selectedStudent: selectedStudent ? { id: selectedStudent.id, name: selectedStudent.name } : 'NOT SET',
+          authLoading: authLoading
+        });
+        return {
+          tenantId,
+          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : null,
+          tenantLoading,
+          user: user ? { id: user.id, email: user.email } : null,
+          isReady: !tenantLoading && !authLoading && !!tenantId && !!user
+        };
+      };
+      
+      window.retryTenantLoading = async () => {
+        console.log('🔄 [MANUAL TENANT RETRY] Starting manual tenant retry...');
+        if (retryTenantLoading) {
+          await retryTenantLoading();
+          console.log('🔄 [MANUAL TENANT RETRY] Completed');
+        } else {
+          console.log('❌ [MANUAL TENANT RETRY] Function not available');
+        }
+      };
+      
+      window.debugTenantLoading = async () => {
+        console.log('📝 [DEBUG TENANT LOADING] Starting enhanced debug...');
+        if (debugTenantLoading) {
+          const result = await debugTenantLoading();
+          console.log('📝 [DEBUG TENANT LOADING] Result:', result);
+          return result;
+        } else {
+          console.log('❌ [DEBUG TENANT LOADING] Function not available');
+        }
+      };
+      
+      console.log('🧪 [DEV TOOLS] Added global functions:');
+      console.log('   • window.debugParentHomeworkTenantContext() - Debug current tenant context state');
+      console.log('   • window.retryTenantLoading() - Manually retry tenant loading');
+      console.log('   • window.debugTenantLoading() - Run enhanced tenant loading debug');
+    }
+  }
   const [assignments, setAssignments] = useState([]);
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -87,9 +158,16 @@ const ParentViewHomework = ({ navigation }) => {
   const [selectedImageName, setSelectedImageName] = useState('');
 
   useEffect(() => {
-    if (authLoading) {
-      return; // Wait for auth to finish loading
+    if (authLoading || tenantLoading) {
+      return; // Wait for auth and tenant to finish loading
     }
+    
+    // Enhanced tenant-aware loading check
+    if (!tenantId || !currentTenant) {
+      console.log('🔄 [TENANT-AWARE] useEffect: Tenant not ready yet, skipping homework fetch');
+      return;
+    }
+    
     if (user && (selectedStudent || user.linked_parent_of)) {
       fetchHomework();
     }
@@ -109,14 +187,65 @@ const ParentViewHomework = ({ navigation }) => {
       assignmentsSub.unsubscribe();
       homeworksSub.unsubscribe();
     };
-  }, [authLoading, user, selectedStudent]);
+  }, [authLoading, tenantLoading, tenantId, currentTenant, user, selectedStudent]);
 
   const fetchHomework = async () => {
     try {
       setLoading(true);
       setError(null);
+      
+      // Enhanced tenant validation following EMAIL_BASED_TENANT_SYSTEM.md
+      
+      // Check if tenant is still loading
+      if (tenantLoading) {
+        console.log('🔄 [TENANT-AWARE] Tenant context is loading, delaying homework fetch...');
+        return;
+      }
+      
+      // If tenant context is not loaded, try to resolve tenant directly by email
+      let resolvedTenantId = tenantId;
+      let resolvedTenant = currentTenant;
+      
+      if (!tenantId || !currentTenant) {
+        console.log('🔍 [TENANT-AWARE] Tenant context not loaded, attempting direct email-based tenant resolution...');
+        
+        if (!user || !user.email) {
+          console.error('❌ [TENANT-AWARE] Cannot resolve tenant: No authenticated user');
+          setError('Authentication required. Please log in again.');
+          setLoading(false);
+          return;
+        }
+        
+        try {
+          // Direct tenant lookup using email
+          console.log('📧 [TENANT-AWARE] Looking up tenant for email:', user.email);
+          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          const emailTenantResult = await getTenantIdByEmail(user.email);
+          
+          if (emailTenantResult.success) {
+            resolvedTenantId = emailTenantResult.data.tenant.id;
+            resolvedTenant = emailTenantResult.data.tenant;
+            console.log('✅ [TENANT-AWARE] Successfully resolved tenant via email:', {
+              tenantId: resolvedTenantId,
+              tenantName: resolvedTenant.name,
+              userEmail: user.email
+            });
+          } else {
+            console.error('❌ [TENANT-AWARE] Email-based tenant resolution failed:', emailTenantResult.error);
+            setError(emailTenantResult.error || 'Unable to determine your school. Please contact administrator.');
+            setLoading(false);
+            return;
+          }
+        } catch (emailLookupError) {
+          console.error('❌ [TENANT-AWARE] Error during email-based tenant lookup:', emailLookupError);
+          setError('Unable to load school information. Please try again.');
+          setLoading(false);
+          return;
+        }
+      }
 
-      console.log('=== PARENT FETCHING ASSIGNMENTS ===');
+      console.log('=== [TENANT-AWARE] PARENT FETCHING ASSIGNMENTS ===');
+      console.log('🏢 Resolved Tenant:', resolvedTenant.name, '(ID:', resolvedTenantId, ')');
       console.log('Parent User ID:', user.id);
       console.log('Selected Student:', selectedStudent);
 
@@ -168,15 +297,28 @@ const ParentViewHomework = ({ navigation }) => {
       if (!studentData) {
         throw new Error('Student profile not found');
       }
+      
+      // Validate that student belongs to resolved tenant
+      if (studentData.tenant_id && studentData.tenant_id !== resolvedTenantId) {
+        console.error('❌ [TENANT-AWARE] Student belongs to different tenant:', {
+          studentTenant: studentData.tenant_id,
+          resolvedTenant: resolvedTenantId
+        });
+        throw new Error(TENANT_ERROR_MESSAGES.WRONG_TENANT_DATA);
+      }
 
-      console.log('Student data for homework fetch:', { id: studentData.id, class_id: studentData.class_id, name: studentData.name });
+      console.log('📚 [TENANT-AWARE] Student data for homework fetch:', { id: studentData.id, class_id: studentData.class_id, name: studentData.name, tenant_id: studentData.tenant_id });
 
       let allAssignments = [];
 
-      // Get assignments from assignments table
+      // Get assignments from assignments table using tenant-aware query
       try {
-        const { data: assignmentsData, error: assignmentsError } = await supabase
-          .from(TABLES.ASSIGNMENTS)
+        console.log('🔍 [TENANT-AWARE] Fetching assignments for class ID:', studentData.class_id);
+        
+        
+        // Use direct tenant-aware query with resolved tenant ID
+        const tenantAssignmentQuery = createTenantQuery(resolvedTenantId, TABLES.ASSIGNMENTS);
+        const { data: assignmentsData, error: assignmentsError } = await tenantAssignmentQuery
           .select(`
             *,
             subjects(name),
@@ -185,7 +327,7 @@ const ParentViewHomework = ({ navigation }) => {
           .eq('class_id', studentData.class_id)
           .order('due_date', { ascending: true });
 
-        console.log('Assignments query result for parent:', { assignmentsData, assignmentsError });
+        console.log('📚 [TENANT-AWARE] Assignments query result for parent:', { data: assignmentsData?.length || 0, error: assignmentsError });
 
         if (assignmentsError) {
           if (assignmentsError.code === '42P01') {
@@ -223,8 +365,13 @@ const ParentViewHomework = ({ navigation }) => {
         console.error('Error fetching assignments:', err);
       }
 
-      // Get homeworks from homeworks table
+      // Get homeworks from homeworks table using tenant-aware query
       try {
+        console.log('🔍 [TENANT-AWARE] Fetching homeworks for class ID:', studentData.class_id, 'student ID:', studentData.id);
+        
+        
+        // Use direct tenant-aware query (bypassing complex TenantAwareQueryBuilder for OR queries)
+        console.log('🔧 [TENANT-AWARE] Using direct tenant query for homeworks...');
         const { data: homeworksData, error: homeworksError } = await supabase
           .from(TABLES.HOMEWORKS)
           .select(`
@@ -232,10 +379,19 @@ const ParentViewHomework = ({ navigation }) => {
             subjects(name),
             teachers(name)
           `)
+          .eq('tenant_id', resolvedTenantId)
           .or(`class_id.eq.${studentData.class_id},assigned_students.cs.{${studentData.id}}`)
           .order('due_date', { ascending: true });
+        
+        console.log('🔧 [TENANT-AWARE] Direct homework query completed:', {
+          tenantId: resolvedTenantId,
+          classId: studentData.class_id,
+          studentId: studentData.id,
+          results: homeworksData?.length || 0,
+          error: homeworksError?.message || 'none'
+        });
 
-        console.log('Homeworks query result for parent:', { homeworksData, homeworksError });
+        console.log('📝 [TENANT-AWARE] Homeworks query result for parent:', { data: homeworksData?.length || 0, error: homeworksError });
 
         if (homeworksError) {
           if (homeworksError.code === '42P01') {
@@ -322,14 +478,17 @@ const ParentViewHomework = ({ navigation }) => {
         console.error('Error fetching homeworks:', err);
       }
 
-      // Get existing submissions for this student
+      // Get existing submissions for this student using tenant-aware query
       try {
-        const { data: submissionsData, error: submissionsError } = await supabase
-          .from('assignment_submissions')
+        console.log('🔍 [TENANT-AWARE] Fetching submissions for student ID:', studentData.id);
+        
+        // Use direct tenant-aware query for submissions with resolved tenant ID
+        const tenantSubmissionQuery = createTenantQuery(resolvedTenantId, 'assignment_submissions');
+        const { data: submissionsData, error: submissionsError } = await tenantSubmissionQuery
           .select('*')
           .eq('student_id', studentData.id);
 
-        console.log('Submissions query result for parent:', { submissionsData, submissionsError });
+        console.log('💬 [TENANT-AWARE] Submissions query result for parent:', { data: submissionsData?.length || 0, error: submissionsError });
 
         if (submissionsError && submissionsError.code !== '42P01') {
           console.error('Submissions error:', submissionsError);
@@ -491,11 +650,21 @@ const ParentViewHomework = ({ navigation }) => {
     }
   };
 
-  if (loading) {
+  if (loading || tenantLoading) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}> 
         <ActivityIndicator size="large" color="#FF9800" />
         <Text style={{ marginTop: 10, color: '#FF9800' }}>Loading homework...</Text>
+        {DEBUG_MODE && (
+          <View style={styles.debugContainer}>
+            <Text style={styles.debugLabel}>DEBUG INFO:</Text>
+            <Text style={styles.debugText}>Auth Loading: {authLoading ? 'Yes' : 'No'}</Text>
+            <Text style={styles.debugText}>Tenant Loading: {tenantLoading ? 'Yes' : 'No'}</Text>
+            <Text style={styles.debugText}>Tenant ID: {tenantId || 'Not Set'}</Text>
+            <Text style={styles.debugText}>User: {user?.email || 'Not Set'}</Text>
+            <Text style={styles.debugText}>Student: {selectedStudent?.name || 'Not Set'}</Text>
+          </View>
+        )}
       </View>
     );
   }
@@ -507,6 +676,18 @@ const ParentViewHomework = ({ navigation }) => {
         <TouchableOpacity onPress={fetchHomework} style={{ backgroundColor: '#FF9800', padding: 12, borderRadius: 8 }}>
           <Text style={{ color: '#fff', fontWeight: 'bold' }}>Retry</Text>
         </TouchableOpacity>
+        {DEBUG_MODE && (
+          <View style={styles.debugContainer}>
+            <Text style={styles.debugLabel}>TENANT DEBUG INFO:</Text>
+            <Text style={styles.debugText}>Auth Loading: {authLoading ? 'Yes' : 'No'}</Text>
+            <Text style={styles.debugText}>Tenant Loading: {tenantLoading ? 'Yes' : 'No'}</Text>
+            <Text style={styles.debugText}>Tenant ID: {tenantId || 'Not Set'}</Text>
+            <Text style={styles.debugText}>Tenant Name: {currentTenant?.name || 'Not Set'}</Text>
+            <Text style={styles.debugText}>User: {user?.email || 'Not Set'}</Text>
+            <Text style={styles.debugText}>Student: {selectedStudent?.name || 'Not Set'}</Text>
+            <Text style={styles.debugText}>Error Type: {error?.includes('tenant') ? 'Tenant-related' : 'Other'}</Text>
+          </View>
+        )}
       </View>
     );
   }
@@ -962,6 +1143,30 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
     lineHeight: 22,
+  },
+  
+  // Debug styles for tenant information
+  debugContainer: {
+    marginTop: 20,
+    padding: 12,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    maxWidth: '90%',
+  },
+  debugLabel: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#FF9800',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  debugText: {
+    fontSize: 10,
+    color: '#666',
+    marginBottom: 2,
+    fontFamily: 'monospace',
   },
 });
 

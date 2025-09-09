@@ -20,53 +20,40 @@ import { Picker } from '@react-native-picker/picker';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { useTenant } from '../../contexts/TenantContext';
 import { useAuth } from '../../utils/AuthContext';
-import StationaryService from '../../services/StationaryService';
+import StationaryServiceEnhanced from '../../services/StationaryServiceEnhanced';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import { supabase } from '../../utils/supabase';
-import TenantDiagnostic from '../../utils/tenantDiagnostic';
-import TenantDebugger from '../../components/TenantDebugger';
 
 const StationaryManagement = ({ navigation }) => {
-  const { tenantId, currentTenant } = useTenant();
   const { user } = useAuth();
   
-  // 🔍 DEBUG: Log tenant info on component load
-  console.log('🏢 StationaryManagement - Tenant Debug:', {
-    tenantId,
-    currentTenant,
+  // 🏢 EMAIL-BASED TENANT SYSTEM: All tenant info derived from user email
+  console.log('🔐 StationaryManagement - Email-Based Authentication:', {
     userId: user?.id,
-    userEmail: user?.email
+    userEmail: user?.email,
+    timestamp: new Date().toISOString()
   });
   
-  // 🚨 CRITICAL: Validate tenant_id before proceeding
+  // 🚨 CRITICAL: Validate authenticated user before proceeding
   useEffect(() => {
-    if (!tenantId) {
-      console.warn('⚠️ StationaryManagement: No tenant_id available from context');
-      console.log('🔍 Current tenant context:', { tenantId, currentTenant });
+    if (!user?.email) {
+      console.warn('⚠️ StationaryManagement: No authenticated user or email available');
       Alert.alert(
-        'Tenant Error', 
-        'No tenant context available. Please try logging out and back in.',
+        'Authentication Error', 
+        'No authenticated user found. Please log in again.',
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
       return;
     }
     
-    console.log('✅ StationaryManagement: Using tenant_id:', tenantId);
-  }, [tenantId]);
+    console.log('✅ StationaryManagement: Using authenticated user:', user.email);
+  }, [user]);
   
-  // 🔍 Enhanced debug logging for tenant validation
-  useEffect(() => {
-    if (tenantId) {
-      console.log('🏢 StationaryManagement - Validating tenant access:', {
-        tenantId,
-        tenantName: currentTenant?.name,
-        userEmail: user?.email,
-        timestamp: new Date().toISOString()
-      });
-    }
-  }, [tenantId, currentTenant, user]);
+  // 📊 Store tenant information (loaded dynamically via email)
+  const [tenantInfo, setTenantInfo] = useState(null);
+  const [tenantLoading, setTenantLoading] = useState(true);
   
   // Tab state
   const [activeTab, setActiveTab] = useState('items');
@@ -126,119 +113,97 @@ const StationaryManagement = ({ navigation }) => {
   // Load data on component mount and focus
   useFocusEffect(
     useCallback(() => {
-      initializeComponent();
-    }, [tenantId])
+      if (user?.email) {
+        initializeComponent();
+      }
+    }, [user?.email])
   );
   
-  // Initialize component with tenant validation
+  // Initialize component with email-based tenant validation
   const initializeComponent = async () => {
-    console.log('🚀 StationaryManagement: Initializing component...');
+    console.log('🚀 StationaryManagement: Initializing email-based tenant system...');
     
-    // Run quick tenant validation first
-    const tenantCheck = await TenantDiagnostic.quickTenantCheck();
-    console.log('🔍 Tenant Check Result:', tenantCheck);
-    
-    if (!tenantCheck.valid) {
-      console.error('❌ Tenant validation failed:', tenantCheck.reason);
-      Alert.alert(
-        'Tenant Configuration Error',
-        `Cannot load stationary data: ${tenantCheck.reason}. Please contact support.`,
-        [
-          { text: 'Run Diagnostic', onPress: runFullDiagnostic },
-          { text: 'Go Back', onPress: () => navigation.goBack() }
-        ]
-      );
+    if (!user?.email) {
+      console.error('❌ No authenticated user email available');
+      setTenantLoading(false);
       return;
     }
     
-    console.log('✅ Tenant validation passed. Loading data...');
-    loadData();
-  };
-  
-  // Run full diagnostic (for troubleshooting)
-  const runFullDiagnostic = async () => {
-    console.log('🔍 Running full tenant diagnostic...');
-    setLoading(true);
-    
     try {
-      const diagnostic = await TenantDiagnostic.diagnoseCurrentUser();
-      console.log('📊 Full Diagnostic Result:', diagnostic);
+      setTenantLoading(true);
       
-      if (diagnostic.success) {
+      // Use enhanced service to load all data with tenant validation
+      const result = await StationaryServiceEnhanced.loadAllData(user);
+      
+      if (!result.success) {
+        console.error('❌ Failed to initialize tenant system:', result.error);
         Alert.alert(
-          'Diagnostic Complete',
-          `Tenant: ${diagnostic.tenant.name}\nData Access: ${diagnostic.dataAccess.items} items, ${diagnostic.dataAccess.purchases} purchases`,
-          [{ text: 'Continue', onPress: loadData }]
-        );
-      } else {
-        Alert.alert(
-          'Diagnostic Failed',
-          `Error: ${diagnostic.error}\n\nRecommendation: ${diagnostic.recommendation || 'Contact support'}`,
+          'Access Denied',
+          result.error,
           [{ text: 'OK', onPress: () => navigation.goBack() }]
         );
+        return;
       }
+      
+      // Store tenant info and load data
+      setTenantInfo(result.tenant);
+      setItems(result.data.items || []);
+      setClasses(result.data.classes || []);
+      setSchoolDetails(result.data.schoolDetails);
+      
+      console.log('✅ Email-based tenant system initialized successfully');
+      console.log('🏢 Tenant:', result.tenant.name);
+      
+      // Load additional data
+      await Promise.all([
+        loadPurchases(),
+        loadAnalytics()
+      ]);
+      
     } catch (error) {
-      console.error('❌ Diagnostic failed:', error);
-      Alert.alert('Diagnostic Error', 'Failed to run diagnostic. Please try again.');
+      console.error('❌ Failed to initialize component:', error);
+      Alert.alert(
+        'Initialization Error',
+        `Failed to load stationary management: ${error.message}`,
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
     } finally {
+      setTenantLoading(false);
       setLoading(false);
     }
   };
+  
 
   const loadData = async () => {
-    // 🔍 DEBUGGING: Let's check what we actually have
-    console.log('🔍 DEBUGGING StationaryManagement.loadData:', {
-      tenantId,
-      currentTenant,
-      tenantName: currentTenant?.name,
-      user: user?.email
-    });
+    console.log('🔄 StationaryManagement: Refreshing data with email-based tenant system...');
     
-    // 🚨 STRICT ENFORCEMENT: Only use tenant from context - no fallbacks
-    if (!tenantId) {
-      console.error('❌ StationaryManagement.loadData: No tenant_id available from context');
-      console.error('❌ This indicates a tenant configuration problem');
-      Alert.alert(
-        'Tenant Configuration Error', 
-        'No tenant context available. This user may not be assigned to a tenant.\n\nPlease run the SQL diagnostic script to fix tenant assignments.',
-        [
-          { text: 'Run Diagnostic', onPress: runFullDiagnostic },
-          { text: 'Go Back', onPress: () => navigation.goBack() }
-        ]
-      );
+    if (!user?.email) {
+      console.error('❌ No authenticated user email available for data refresh');
       return;
     }
     
-    console.log('🚀 StationaryManagement.loadData: Starting with tenant_id:', tenantId);
     setLoading(true);
     try {
       await Promise.all([
-        loadItems(tenantId),
-        loadPurchases(tenantId),
-        loadClasses(tenantId),
-        loadSchoolDetails(tenantId),
-        loadAnalytics(tenantId)
+        loadItems(),
+        loadPurchases(),
+        loadClasses(),
+        loadAnalytics()
       ]);
-      console.log('✅ StationaryManagement.loadData: All data loaded successfully for tenant:', tenantId);
+      console.log('✅ StationaryManagement: All data refreshed successfully');
     } catch (error) {
-      console.error('❌ StationaryManagement.loadData: Error loading data for tenant:', tenantId, error);
-      Alert.alert('Error', `Failed to load data for tenant ${tenantId}. Please try again.`);
+      console.error('❌ StationaryManagement: Error refreshing data:', error);
+      Alert.alert('Error', `Failed to refresh data: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
   const loadItems = async () => {
-    if (!tenantId) {
-      console.error('❌ loadItems: No tenant_id available');
-      return;
-    }
-    
     try {
-      console.log('🔍 Loading stationary items for tenant:', tenantId);
-      const itemsData = await StationaryService.getStationaryItems(tenantId, true);
-      console.log('📦 Loaded items:', itemsData?.length, 'items for tenant:', tenantId);
-      console.log('📦 First few items:', itemsData?.slice(0, 3));
+      console.log('🔍 Loading stationary items via email-based tenant system');
+      const itemsData = await StationaryServiceEnhanced.getStationaryItems(true);
+      console.log('📦 Loaded items:', itemsData?.length, 'items');
       setItems(itemsData);
     } catch (error) {
       console.error('❌ Error loading items:', error);
@@ -246,18 +211,13 @@ const StationaryManagement = ({ navigation }) => {
   };
 
   const loadPurchases = async () => {
-    if (!tenantId) {
-      console.error('❌ loadPurchases: No tenant_id available');
-      return;
-    }
     try {
-      console.log('🔍 Loading purchases for tenant:', tenantId, 'date range:', dateRange);
-      const purchasesData = await StationaryService.getPurchases(tenantId, {
+      console.log('🔍 Loading purchases via email-based tenant system, date range:', dateRange);
+      const purchasesData = await StationaryServiceEnhanced.getPurchases({
         startDate: dateRange.start,
         endDate: dateRange.end
       });
-      console.log('📄 Loaded purchases:', purchasesData?.length, 'purchases for tenant:', tenantId);
-      console.log('📄 First few purchases:', purchasesData?.slice(0, 3));
+      console.log('📄 Loaded purchases:', purchasesData?.length, 'purchases');
       setPurchases(purchasesData);
     } catch (error) {
       console.error('❌ Error loading purchases:', error);
@@ -265,15 +225,10 @@ const StationaryManagement = ({ navigation }) => {
   };
 
   const loadClasses = async () => {
-    if (!tenantId) {
-      console.error('❌ loadClasses: No tenant_id available');
-      return;
-    }
-    
     try {
-      console.log('🔍 Loading classes for tenant:', tenantId);
-      const classesData = await StationaryService.getClasses(tenantId);
-      console.log('🏢 Loaded classes:', classesData?.length, 'classes for tenant:', tenantId);
+      console.log('🔍 Loading classes via email-based tenant system');
+      const classesData = await StationaryServiceEnhanced.getClasses();
+      console.log('🏢 Loaded classes:', classesData?.length, 'classes');
       setClasses(classesData);
     } catch (error) {
       console.error('❌ Error loading classes:', error);
@@ -282,7 +237,9 @@ const StationaryManagement = ({ navigation }) => {
 
   const loadStudents = async (classId) => {
     try {
-      const studentsData = await StationaryService.getStudentsByClass(classId, tenantId);
+      console.log('🔍 Loading students for class:', classId, 'via email-based tenant system');
+      const studentsData = await StationaryServiceEnhanced.getStudentsByClass(classId);
+      console.log('👥 Loaded students:', studentsData?.length, 'students');
       setStudents(studentsData);
     } catch (error) {
       console.error('Error loading students:', error);
@@ -290,42 +247,24 @@ const StationaryManagement = ({ navigation }) => {
   };
 
   const loadSchoolDetails = async () => {
-    if (!tenantId) {
-      console.error('❌ loadSchoolDetails: No tenant_id available');
-      return;
-    }
-    
     try {
-      console.log('🔍 Loading school details for tenant:', tenantId);
-      const { data: schoolData, error } = await supabase
-        .from('school_details')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .single();
-      
-      if (!error && schoolData) {
-        console.log('🏠 Loaded school details for tenant:', tenantId);
-        setSchoolDetails(schoolData);
-      }
+      console.log('🔍 Loading school details via email-based tenant system');
+      const schoolData = await StationaryServiceEnhanced.getSchoolDetails();
+      console.log('🏠 Loaded school details');
+      setSchoolDetails(schoolData);
     } catch (error) {
       console.error('❌ Error loading school details:', error);
     }
   };
 
   const loadAnalytics = async () => {
-    if (!tenantId) {
-      console.error('❌ loadAnalytics: No tenant_id available');
-      return;
-    }
-    
     try {
-      console.log('🔍 Loading analytics for tenant:', tenantId);
-      const analyticsData = await StationaryService.getSalesAnalytics(
-        tenantId,
+      console.log('🔍 Loading analytics via email-based tenant system');
+      const analyticsData = await StationaryServiceEnhanced.getSalesAnalytics(
         dateRange.start,
         dateRange.end
       );
-      console.log('📊 Loaded analytics for tenant:', tenantId, analyticsData);
+      console.log('📈 Loaded analytics:', analyticsData);
       setAnalytics(analyticsData);
     } catch (error) {
       console.error('❌ Error loading analytics:', error);
@@ -355,10 +294,10 @@ const StationaryManagement = ({ navigation }) => {
       };
 
       if (itemModal.editMode && itemModal.item.id) {
-        await StationaryService.updateStationaryItem(itemModal.item.id, itemData, tenantId);
+        await StationaryServiceEnhanced.updateStationaryItem(itemModal.item.id, itemData);
         Alert.alert('Success', 'Fee item updated successfully');
       } else {
-        await StationaryService.addStationaryItem(itemData, tenantId);
+        await StationaryServiceEnhanced.addStationaryItem(itemData);
         Alert.alert('Success', 'Fee item added successfully');
       }
 
@@ -390,7 +329,7 @@ const StationaryManagement = ({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await StationaryService.deleteStationaryItem(itemId, tenantId);
+              await StationaryServiceEnhanced.deleteStationaryItem(itemId);
               Alert.alert('Success', 'Fee item deleted successfully');
               loadItems();
             } catch (error) {
@@ -481,7 +420,7 @@ const StationaryManagement = ({ navigation }) => {
             receipt_number: receiptNumber
           };
           
-          return StationaryService.recordPurchase(purchaseData, tenantId);
+          return StationaryServiceEnhanced.recordPurchase(purchaseData);
         })
       );
 
@@ -530,28 +469,8 @@ const StationaryManagement = ({ navigation }) => {
   
   const generateReceiptNumber = async () => {
     try {
-      // Get the latest receipt number from the database
-      const { data: latestPurchase, error } = await supabase
-        .from('stationary_purchases')
-        .select('receipt_number')
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-      
-      if (error && error.code !== 'PGRST116') { // PGRST116 is "no rows returned"
-        throw error;
-      }
-      
-      let nextNumber = 1000; // Start from 1000
-      
-      if (latestPurchase && latestPurchase.receipt_number) {
-        // Extract number from receipt number (remove any non-digit characters)
-        const currentNumber = parseInt(latestPurchase.receipt_number.replace(/\D/g, ''));
-        nextNumber = currentNumber + 1;
-      }
-      
-      return nextNumber.toString();
+      // Use enhanced service for receipt generation (handles tenant automatically)
+      return await StationaryServiceEnhanced.generateReceiptNumber();
     } catch (error) {
       console.error('Error generating receipt number:', error);
       // Fallback to timestamp-based receipt number
@@ -828,7 +747,8 @@ const StationaryManagement = ({ navigation }) => {
 
   const getClassReport = async (classId) => {
     try {
-      const classReport = await StationaryService.getClassWiseReport(tenantId, classId, dateRange.start, dateRange.end);
+      console.log('📈 Loading class report via email-based tenant system');
+      const classReport = await StationaryServiceEnhanced.getClassWiseReport(classId, dateRange.start, dateRange.end);
       return classReport;
     } catch (error) {
       console.error('Error loading class report:', error);
@@ -1064,18 +984,54 @@ const StationaryManagement = ({ navigation }) => {
     </ScrollView>
   );
 
-  if (loading && !refreshing) {
+  // Enhanced loading state for email-based tenant system
+  if ((loading || tenantLoading) && !refreshing) {
+    const loadingMessage = tenantLoading 
+      ? 'Initializing tenant access...'
+      : 'Loading Stationary Management...';
+      
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#2196F3" />
-        <Text style={styles.loadingText}>Loading Stationary Management...</Text>
+        <Text style={styles.loadingText}>{loadingMessage}</Text>
+        {tenantLoading && (
+          <Text style={[styles.loadingText, { fontSize: 14, marginTop: 5 }]}>
+            Verifying admin access via email: {user?.email}
+          </Text>
+        )}
+      </View>
+    );
+  }
+  
+  // Show error state if no tenant info after initialization
+  if (!tenantLoading && !tenantInfo) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Ionicons name="alert-circle-outline" size={64} color="#f44336" />
+        <Text style={[styles.loadingText, { color: '#f44336', marginTop: 16 }]}>
+          Access Denied
+        </Text>
+        <Text style={[styles.loadingText, { fontSize: 14, marginTop: 8 }]}>
+          Unable to access stationary management for this account
+        </Text>
+        <TouchableOpacity
+          style={[styles.payButton, { marginTop: 20, backgroundColor: '#f44336' }]}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.payButtonText}>Go Back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <Header title="Stationary Fee Management" navigation={navigation} showBack={true} />
+      <Header 
+        title="Stationary Fee Management" 
+        navigation={navigation} 
+        showBack={true}
+        subtitle={tenantInfo ? `${tenantInfo.name} - ${user?.email}` : user?.email}
+      />
       
       {/* Tab Navigation */}
       <View style={styles.tabContainer}>
@@ -1282,7 +1238,7 @@ const StationaryManagement = ({ navigation }) => {
                       }))}
                       style={styles.picker}
                     >
-                      {StationaryService.getAvailablePaymentModes().map(mode => (
+                      {StationaryServiceEnhanced.getAvailablePaymentModes().map(mode => (
                         <Picker.Item key={mode} label={mode} value={mode} />
                       ))}
                     </Picker>
@@ -1415,8 +1371,6 @@ const StationaryManagement = ({ navigation }) => {
         </View>
       </Modal>
       
-      {/* Temporary Debugger - Remove in production */}
-      <TenantDebugger />
     </View>
   );
 };

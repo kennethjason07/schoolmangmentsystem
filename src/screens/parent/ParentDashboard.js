@@ -32,20 +32,68 @@ import { useFocusEffect } from '@react-navigation/native';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { useUnreadMessageCount } from '../../hooks/useUnreadMessageCount';
 import { badgeNotifier } from '../../utils/badgeNotifier';
+import DebugBadge from '../../components/DebugBadge';
+import NotificationTester from '../../components/NotificationTester';
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
-  const { tenantId } = useTenantContext();
+  const { tenantId, currentTenant, validateCurrentTenantAccess, executeSafeTenantQuery, loading: tenantLoading } = useTenantContext();
   const { selectedStudent, hasMultipleStudents, availableStudents, loading: studentLoading } = useSelectedStudent();
   const [studentData, setStudentData] = useState(null);
   
-  // Debug logging for context values
-  console.log('ParentDashboard - Context values:', {
-    hasMultipleStudents,
-    availableStudentsCount: availableStudents?.length || 0,
-    selectedStudent: selectedStudent?.name || 'None',
-    studentLoading
-  });
+  // Enhanced tenant debugging following EMAIL_BASED_TENANT_SYSTEM.md
+  const DEBUG_MODE = process.env.NODE_ENV === 'development';
+  
+  if (DEBUG_MODE) {
+    console.log('🏢 [PARENT DASHBOARD TENANT DEBUG]:', {
+      tenantId: tenantId || 'NO TENANT',
+      tenantName: currentTenant?.name || 'NO TENANT NAME',
+      tenantStatus: currentTenant?.status || 'UNKNOWN',
+      tenantLoading: tenantLoading || false,
+      userEmail: user?.email || 'NO USER',
+      hasMultipleStudents,
+      availableStudentsCount: availableStudents?.length || 0,
+      selectedStudent: selectedStudent?.name || 'None',
+      studentLoading,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Add global test functions for development debugging
+    if (typeof window !== 'undefined') {
+      window.runParentDashboardTenantTests = async () => {
+        const { runAllParentDashboardTenantTests } = await import('../../utils/parentDashboardTenantTests');
+        return await runAllParentDashboardTenantTests();
+      };
+      
+      window.quickTenantCheck = async () => {
+        const { quickTenantCheck } = await import('../../utils/parentDashboardTenantTests');
+        return await quickTenantCheck();
+      };
+      
+      window.debugTenantContext = () => {
+        console.log('🏢 [TENANT DEBUG] Current tenant context state:', {
+          tenantId: tenantId || 'NOT SET',
+          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : 'NOT SET',
+          tenantLoading: tenantLoading,
+          user: user ? { id: user.id, email: user.email } : 'NOT SET',
+          selectedStudent: selectedStudent ? { id: selectedStudent.id, name: selectedStudent.name } : 'NOT SET',
+          studentLoading: studentLoading
+        });
+        return {
+          tenantId,
+          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : null,
+          tenantLoading,
+          user: user ? { id: user.id, email: user.email } : null,
+          isReady: !tenantLoading && !!tenantId && !!user
+        };
+      };
+      
+      console.log('🧪 [DEV TOOLS] Added global functions:');
+      console.log('   • window.runParentDashboardTenantTests() - Run full tenant isolation test suite');
+      console.log('   • window.quickTenantCheck() - Quick tenant validation check');
+      console.log('   • window.debugTenantContext() - Debug current tenant context state');
+    }
+  }
   const [notifications, setNotifications] = useState([]);
   const [exams, setExams] = useState([]);
   const [events, setEvents] = useState([]);
@@ -117,17 +165,37 @@ const ParentDashboard = ({ navigation }) => {
   // Function to refresh notifications
   const refreshNotifications = async () => {
     try {
-      // Validate tenant access before refreshing notifications
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      // Enhanced tenant validation following EMAIL_BASED_TENANT_SYSTEM.md patterns
+      
+      // Check if tenant is still loading
+      if (tenantLoading) {
+        console.log('🔄 [TENANT-AWARE] Tenant context is loading, skipping notification refresh...');
+        return;
+      }
+      
+      if (!tenantId) {
+        // Check if user is authenticated first
+        if (!user) {
+          console.log('🔄 [TENANT-AWARE] User not authenticated yet, skipping notification refresh...');
+          return;
+        }
+        console.error('❌ Parent dashboard: No tenant context available for notifications (user authenticated but no tenant)');
+        console.log('🔍 [DEBUG] Tenant context state:', { tenantId, currentTenant: !!currentTenant, tenantLoading, user: !!user });
+        setNotifications([]);
+        return;
+      }
+      
+      const tenantValidation = await validateTenantAccess(tenantId, user.id, 'Parent Dashboard Notifications');
       if (!tenantValidation.isValid) {
         console.error('❌ Parent dashboard notification validation failed:', tenantValidation.error);
+        setNotifications([]);
         return; // Silent return for better UX
       }
       
-      console.log('Refreshing notifications for parent:', user.id);
+      console.log('🔄 [TENANT-AWARE] Refreshing notifications for parent:', user.id, 'tenant:', tenantValidation.tenant.name);
       
-      // Get notifications with recipients for this parent using tenant-aware query
-      const tenantNotificationQuery = createTenantQuery(supabase.from(TABLES.NOTIFICATION_RECIPIENTS), tenantId);
+      // Create tenant-aware query following the documentation pattern
+      const tenantNotificationQuery = createTenantQuery(tenantId, TABLES.NOTIFICATION_RECIPIENTS);
       const { data: notificationsData, error: notificationsError } = await tenantNotificationQuery
         .select(`
           id,
@@ -146,11 +214,19 @@ const ParentDashboard = ({ navigation }) => {
         .eq('recipient_type', 'Parent')
         .eq('recipient_id', user.id)
         .order('sent_at', { ascending: false })
-        .limit(10);
+        .limit(10)
+        .execute();
 
       if (notificationsError && notificationsError.code !== '42P01') {
-        console.log('Notifications refresh error:', notificationsError);
+        console.error('❌ [TENANT-AWARE] Notifications refresh error:', notificationsError);
+        setNotifications([]);
       } else {
+        // Validate that all notification data belongs to current tenant
+        if (notificationsData && !validateDataTenancy(notificationsData, tenantId, 'Parent Dashboard Notifications')) {
+          console.error('❌ [TENANT-AWARE] Notification data validation failed - potential data leak!');
+          setNotifications([]);
+          return;
+        }
         // First, map all notifications
         const allMappedNotifications = (notificationsData || []).map(n => {
           // Create proper title and message for absence notifications
@@ -224,14 +300,24 @@ const ParentDashboard = ({ navigation }) => {
     }
   };
 
+  // Effect to load notifications when tenant context becomes available
+  useEffect(() => {
+    if (user && tenantId && !tenantLoading) {
+      console.log('🔄 [TENANT-AWARE] Tenant context loaded, initializing notifications...');
+      refreshNotifications();
+    }
+  }, [user, tenantId, tenantLoading]);
+
   // Add focus effect to refresh notifications when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      if (user) {
+      if (user && !tenantLoading && tenantId) {
         console.log('Parent Dashboard - Screen focused, refreshing notifications...');
         refreshNotifications();
+      } else if (tenantLoading) {
+        console.log('Parent Dashboard - Screen focused, but tenant is still loading...');
       }
-    }, [user])
+    }, [user, tenantLoading, tenantId])
   );
 
   // Pull-to-refresh functionality
@@ -266,12 +352,14 @@ const ParentDashboard = ({ navigation }) => {
 
   // Effect to refetch data when selected student changes
   useEffect(() => {
-    console.log('ParentDashboard - Selected student changed:', selectedStudent?.name, 'Loading:', studentLoading);
-    if (selectedStudent && !studentLoading) {
+    console.log('ParentDashboard - Selected student changed:', selectedStudent?.name, 'Loading:', studentLoading, 'TenantLoading:', tenantLoading);
+    if (selectedStudent && !studentLoading && !tenantLoading && tenantId) {
       console.log('ParentDashboard - Fetching data for selected student:', selectedStudent.name);
       fetchDashboardDataForStudent(selectedStudent);
+    } else if (tenantLoading) {
+      console.log('ParentDashboard - Waiting for tenant context to load before fetching student data...');
     }
-  }, [selectedStudent?.id, studentLoading]);
+  }, [selectedStudent?.id, studentLoading, tenantLoading, tenantId]);
 
   // Force re-render counter to ensure StatCards update immediately
   const [updateCounter, setUpdateCounter] = useState(0);
@@ -303,11 +391,7 @@ const ParentDashboard = ({ navigation }) => {
           end_date,
           remarks,
           class_id,
-          academic_year,
-          subjects(
-            id,
-            name
-          )
+          academic_year
         `)
         .eq('class_id', classId)
         .gte('start_date', today)
@@ -789,12 +873,49 @@ const ParentDashboard = ({ navigation }) => {
   const fetchDashboardDataForStudent = async (student) => {
     if (!student) return;
     
+    // Enhanced tenant validation following EMAIL_BASED_TENANT_SYSTEM.md
+    
+    // Check if tenant is still loading
+    if (tenantLoading) {
+      console.log('🔄 [TENANT-AWARE] Tenant context is loading, delaying dashboard data fetch...');
+      setLoading(true);
+      return;
+    }
+    
+    if (!tenantId || !currentTenant) {
+      console.error('❌ [TENANT-AWARE] Cannot fetch dashboard data: No tenant context');
+      console.log('🔍 [DEBUG] Tenant context state:', { tenantId, currentTenant: !!currentTenant, tenantLoading, user: !!user });
+      setError(TENANT_ERROR_MESSAGES.NO_TENANT);
+      setLoading(false);
+      return;
+    }
+    
     setLoading(true);
     setError(null);
     
     try {
-      console.log('Parent Dashboard - Fetching data for selected student:', student.name);
-      console.log('Parent Dashboard - Student profile_url from context:', student.profile_url);
+      // Validate tenant access before proceeding
+      const tenantValidation = await validateCurrentTenantAccess('Parent Dashboard Data Fetch');
+      if (!tenantValidation.isValid) {
+        console.error('❌ [TENANT-AWARE] Dashboard data fetch validation failed:', tenantValidation.error);
+        setError(tenantValidation.error);
+        setLoading(false);
+        return;
+      }
+      
+      console.log('✅ [TENANT-AWARE] Fetching dashboard data for student:', student.name, 'in tenant:', tenantValidation.tenant.name);
+      console.log('🔍 [TENANT-AWARE] Student profile_url from context:', student.profile_url);
+      
+      // Validate that student belongs to current tenant
+      if (student.tenant_id && student.tenant_id !== tenantId) {
+        console.error('❌ [TENANT-AWARE] Student belongs to different tenant:', {
+          studentTenant: student.tenant_id,
+          currentTenant: tenantId
+        });
+        setError(TENANT_ERROR_MESSAGES.WRONG_TENANT_DATA);
+        setLoading(false);
+        return;
+      }
       
       // Set the student data from the selected student context
       // Ensure profile_url is preserved from the context
@@ -806,76 +927,75 @@ const ParentDashboard = ({ navigation }) => {
       // Get notifications for parent (independent of student)
       await refreshNotifications();
       
-        // Get upcoming exams for student's class
+        // Get upcoming exams for student's class using tenant-aware query
         try {
-          console.log('🔍 Parent Dashboard - Fetching upcoming exams for student class ID:', student.class_id);
+          console.log('🔍 [TENANT-AWARE] Fetching upcoming exams for student class ID:', student.class_id);
           
           const today = new Date().toISOString().split('T')[0];
-          console.log('🔍 Parent Dashboard - Today date for exam filter:', today);
-          console.log('🔍 Parent Dashboard - Current date details:', {
-            fullDate: new Date(),
-            isoString: new Date().toISOString(),
-            splitResult: today,
-            expectedExamDate: '2025-09-08',
-            shouldMatch: today <= '2025-09-08'
-          });
-        
-        const { data: examsData, error: examsError } = await supabase
-          .from(TABLES.EXAMS)
-          .select(`
-            id,
-            name,
-            start_date,
-            end_date,
-            remarks,
-            class_id,
-            academic_year,
-            subjects(
+          console.log('🔍 [TENANT-AWARE] Today date for exam filter:', today);
+          
+          // Use tenant-aware query following EMAIL_BASED_TENANT_SYSTEM.md patterns
+          const examQueryResult = await executeSafeTenantQuery(TABLES.EXAMS, {
+            select: `
               id,
-              name
-            )
-          `)
-          .eq('class_id', student.class_id)
-          .gte('start_date', today)
-          .order('start_date', { ascending: true })
-          .limit(5);
+              name,
+              start_date,
+              end_date,
+              remarks,
+              class_id,
+              academic_year,
+              tenant_id
+            `,
+            filters: { class_id: student.class_id },
+            orderBy: { column: 'start_date', ascending: true },
+            limit: 5
+          });
+          
+          const { data: examsData, error: examsError } = examQueryResult;
+          
+          // Additional client-side filtering for date (since executeSafeTenantQuery doesn't support gte)
+          const filteredExamsData = examsData?.filter(exam => exam.start_date >= today) || [];
 
-        console.log('📊 Parent Dashboard - Exams query result:', { examsData, examsError });
-        console.log('📊 Parent Dashboard - Exams found:', examsData?.length || 0);
+        console.log('📅 [TENANT-AWARE] Exams query result:', { data: filteredExamsData?.length || 0, error: examsError });
         
-        if (examsData && examsData.length > 0) {
-          console.log('📋 Parent Dashboard - Exam details:');
-          examsData.forEach((exam, index) => {
-            console.log(`   ${index + 1}. "${exam.name}" - Date: ${exam.start_date}, Subject: ${exam.subjects?.name || 'No subject'}`);
+        if (filteredExamsData && filteredExamsData.length > 0) {
+          console.log('📋 [TENANT-AWARE] Upcoming exam details:');
+          filteredExamsData.forEach((exam, index) => {
+            console.log(`   ${index + 1}. "${exam.name}" - Date: ${exam.start_date}, Tenant: ${exam.tenant_id}`);
           });
         }
 
-        if (examsError && examsError.code !== '42P01') {
-          console.log('❌ Parent Dashboard - Exams error:', examsError);
+        if (examsError) {
+          console.error('❌ [TENANT-AWARE] Exams query error:', examsError);
         }
-        setExams(examsData || []);
+        setExams(filteredExamsData);
       } catch (err) {
         console.log('Exams fetch error:', err);
         setExams([]);
       }
 
-      // Get upcoming events from the events table
+      // Get upcoming events from the events table using tenant-aware query
       try {
         const today = new Date().toISOString().split('T')[0];
-        console.log('🔍 Parent Dashboard - Fetching upcoming events from date:', today);
+        console.log('🔍 [TENANT-AWARE] Fetching upcoming events from date:', today);
         
-        // Get all upcoming events (today and future) that are active
-        const { data: upcomingEventsData, error: eventsError } = await supabase
-          .from('events')
-          .select('*')
-          .eq('status', 'Active')
-          .gte('event_date', today)
-          .order('event_date', { ascending: true });
+        // Use tenant-aware query for events
+        const eventsQueryResult = await executeSafeTenantQuery('events', {
+          select: '*',
+          filters: { status: 'Active' },
+          orderBy: { column: 'event_date', ascending: true },
+          limit: 10
+        });
+        
+        const { data: allEventsData, error: eventsError } = eventsQueryResult;
+        
+        // Client-side filtering for date (since executeSafeTenantQuery doesn't support gte)
+        const upcomingEventsData = allEventsData?.filter(event => event.event_date >= today) || [];
           
-        console.log('📊 Parent Dashboard - Upcoming events found:', upcomingEventsData?.length || 0);
+        console.log('📅 [TENANT-AWARE] Upcoming events found:', upcomingEventsData?.length || 0);
         
         if (eventsError) {
-          console.error('❌ Parent Dashboard - Events query error:', eventsError);
+          console.error('❌ [TENANT-AWARE] Events query error:', eventsError);
         }
         
         // Map the events to the format expected by the UI
@@ -2067,11 +2187,7 @@ const ParentDashboard = ({ navigation }) => {
               end_date,
               remarks,
               class_id,
-              academic_year,
-              subjects(
-                id,
-                name
-              )
+              academic_year
             `)
             .eq('class_id', studentDetails.class_id)
             .order('start_date', { ascending: true });
@@ -2081,7 +2197,7 @@ const ParentDashboard = ({ navigation }) => {
             allClassExams.forEach((exam, index) => {
               const examDate = exam.start_date;
               const isUpcoming = examDate >= today;
-              console.log(`   ${index + 1}. "${exam.name}" - Date: ${examDate}, Upcoming: ${isUpcoming}, Subject: ${exam.subjects?.name || 'No subject'}`);
+              console.log(`   ${index + 1}. "${exam.name}" - Date: ${examDate}, Upcoming: ${isUpcoming}`);
             });
           } else {
             console.log('🕵️ Parent Dashboard (Main) - Error fetching all exams:', allExamsError);
@@ -2096,11 +2212,7 @@ const ParentDashboard = ({ navigation }) => {
               end_date,
               remarks,
               class_id,
-              academic_year,
-              subjects(
-                id,
-                name
-              )
+              academic_year
             `)
             .eq('class_id', studentDetails.class_id)
             .gte('start_date', today)
@@ -2113,7 +2225,7 @@ const ParentDashboard = ({ navigation }) => {
           if (examsData && examsData.length > 0) {
             console.log('📋 Parent Dashboard (Main) - Exam details:');
             examsData.forEach((exam, index) => {
-              console.log(`   ${index + 1}. "${exam.name}" - Date: ${exam.start_date}, Subject: ${exam.subjects?.name || 'No subject'}`);
+              console.log(`   ${index + 1}. "${exam.name}" - Date: ${exam.start_date}`);
             });
           }
 
@@ -2747,7 +2859,7 @@ const ParentDashboard = ({ navigation }) => {
     });
     
     const count = String(exams.length);
-    const subtitle = exams.length > 0 ? `Next: ${exams[0]?.subjects?.name || exams[0]?.name || 'TBA'}` : 'No upcoming exams';
+    const subtitle = exams.length > 0 ? `Next: ${exams[0]?.name || 'TBA'}` : 'No upcoming exams';
     
     console.log('✅ STATCARD UPDATE - Exam calculation complete:', {
       count,
@@ -2926,7 +3038,7 @@ const ParentDashboard = ({ navigation }) => {
     </View>
   );
 
-  if (loading) {
+  if (loading || tenantLoading) {
     return (
       <View style={styles.container}>
         <Header 
@@ -2937,7 +3049,14 @@ const ParentDashboard = ({ navigation }) => {
         />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#FF9800" />
-          <Text style={styles.loadingText}>Loading dashboard...</Text>
+          <Text style={styles.loadingText}>
+            {tenantLoading ? 'Loading tenant context...' : 'Loading dashboard...'}
+          </Text>
+          {DEBUG_MODE && tenantLoading && (
+            <Text style={styles.debugText}>
+              Waiting for email-based tenant resolution...
+            </Text>
+          )}
         </View>
       </View>
     );
@@ -4626,6 +4745,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#856404',
     marginBottom: 8,
+  },
+  debugText: {
+    fontSize: 12,
+    color: '#856404',
+    marginTop: 5,
+    fontStyle: 'italic',
   },
 });
 

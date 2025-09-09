@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
@@ -6,26 +6,85 @@ import { useAuth } from '../../utils/AuthContext';
 import { setupTeacherData, DatabaseSetupHelper } from '../../utils/DatabaseSetupHelper';
 import { DatabaseDiagnostic } from '../../utils/DatabaseDiagnostic';
 import { createSampleParents, verifyParentStudentRelationships } from '../../utils/createSampleParents';
+import { getCurrentUserTenantByEmail, showTenantErrorAlert } from '../../utils/getTenantByEmail';
 
 const DatabaseSetup = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState([]);
+  const [tenantInfo, setTenantInfo] = useState(null);
+  const [tenantLoading, setTenantLoading] = useState(true);
   const { user } = useAuth();
 
   const addProgress = (message) => {
     setProgress(prev => [...prev, { message, timestamp: new Date().toLocaleTimeString() }]);
   };
 
+  // Initialize tenant context on component mount
+  useEffect(() => {
+    const initializeTenant = async () => {
+      if (!user?.email) {
+        Alert.alert(
+          'Authentication Required',
+          'Please log in to access the database setup.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+        return;
+      }
+
+      setTenantLoading(true);
+      try {
+        console.log('🏢 DatabaseSetup: Initializing tenant context for:', user.email);
+        const tenantResult = await getCurrentUserTenantByEmail();
+        
+        if (!tenantResult.success) {
+          console.error('❌ DatabaseSetup: Failed to get tenant:', tenantResult.error);
+          showTenantErrorAlert(
+            tenantResult,
+            () => initializeTenant(), // Retry function
+            () => navigation.goBack()  // Cancel function
+          );
+          return;
+        }
+
+        setTenantInfo(tenantResult.data);
+        console.log('✅ DatabaseSetup: Tenant context initialized for:', tenantResult.data.tenant.name);
+        
+      } catch (error) {
+        console.error('❌ DatabaseSetup: Error initializing tenant:', error);
+        Alert.alert(
+          'Initialization Error',
+          'Failed to initialize database setup. Please try again.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+      } finally {
+        setTenantLoading(false);
+      }
+    };
+
+    initializeTenant();
+  }, [user?.email, navigation]);
+
   const handleSetupAll = async () => {
+    if (!tenantInfo) {
+      Alert.alert(
+        'Tenant Not Initialized',
+        'School information is still loading. Please wait and try again.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     setLoading(true);
     setProgress([]);
     
     try {
-      addProgress('🚀 Starting complete database setup...');
+      addProgress(`🚀 Starting complete database setup for ${tenantInfo.tenant.name}...`);
+      addProgress(`👤 Current user: ${user.email}`);
+      addProgress(`🏢 Tenant ID: ${tenantInfo.tenantId}`);
       
-      // Step 1: Setup Bheem Rao Patil as class teacher
-      addProgress('🏫 Setting up Bheem Rao Patil as Class Teacher of 3 A...');
-      const bheemResult = await DatabaseSetupHelper.setupBheemRaoPatilAsClassTeacher();
+      // Step 1: Setup Bheem Rao Patil as class teacher (tenant-aware)
+      addProgress('🏦 Setting up Bheem Rao Patil as Class Teacher of 3 A...');
+      const bheemResult = await DatabaseSetupHelper.setupBheemRaoPatilAsClassTeacher(tenantInfo.tenantId);
       if (bheemResult.success) {
         addProgress('✅ Bheem Rao Patil setup completed!');
         addProgress(`   Teacher: ${bheemResult.teacher?.name}`);
@@ -34,24 +93,24 @@ const DatabaseSetup = ({ navigation }) => {
         addProgress(`⚠️ Bheem setup: ${bheemResult.error}`);
       }
       
-      // Step 2: Create parent accounts
-      addProgress('👨‍👩‍👧‍👦 Creating parent accounts...');
-      const parentResult = await DatabaseSetupHelper.createParentAccounts();
+      // Step 2: Create parent accounts (tenant-aware)
+      addProgress('👨‍👩‍👧‍👦 Creating parent accounts for current tenant...');
+      const parentResult = await DatabaseSetupHelper.createParentAccounts(tenantInfo.tenantId);
       if (parentResult.success) {
         addProgress('✅ Parent accounts created!');
       } else {
         addProgress(`❌ Parent creation failed: ${parentResult.error}`);
       }
       
-      // Step 3: Setup teacher assignments
+      // Step 3: Setup teacher assignments (tenant-aware)
       addProgress('👨‍🏫 Setting up teacher assignments...');
-      const result = await setupTeacherData(user.id);
+      const result = await setupTeacherData(user.id, tenantInfo.tenantId);
       
       if (result.success) {
-        addProgress('✅ Database setup completed successfully!');
+        addProgress(`✅ Database setup completed successfully for ${tenantInfo.tenant.name}!`);
         Alert.alert(
           'Success! 🎉',
-          'Database setup completed successfully!\n\n✅ Bheem Rao Patil is now Class Teacher of 3 A\n✅ Parent accounts created\n✅ Subject assignments completed\n✅ Sample timetable created\n\nPlease go back and refresh the dashboard.',
+          `Database setup completed successfully for ${tenantInfo.tenant.name}!\n\n✅ Bheem Rao Patil is now Class Teacher of 3 A\n✅ Parent accounts created\n✅ Subject assignments completed\n✅ Sample timetable created\n\nPlease go back and refresh the dashboard.`,
           [
             { 
               text: 'Go to Dashboard', 
@@ -226,9 +285,60 @@ const DatabaseSetup = ({ navigation }) => {
     }
   };
 
+  // Show tenant loading state
+  if (tenantLoading) {
+    return (
+      <View style={styles.container}>
+        <Header title="Database Setup" showBack={true} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#2196F3" />
+          <Text style={styles.loadingText}>Initializing tenant context...</Text>
+          <Text style={styles.loadingSubtext}>Connecting to {user?.email}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Show error state if no tenant info
+  if (!tenantInfo) {
+    return (
+      <View style={styles.container}>
+        <Header title="Database Setup" showBack={true} />
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle" size={64} color="#F44336" />
+          <Text style={styles.errorTitle}>Tenant Not Available</Text>
+          <Text style={styles.errorText}>Unable to load school information. Please try again.</Text>
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={() => {
+              setTenantLoading(true);
+              // Re-run tenant initialization
+              const initializeTenant = async () => {
+                try {
+                  const tenantResult = await getCurrentUserTenantByEmail();
+                  if (tenantResult.success) {
+                    setTenantInfo(tenantResult.data);
+                  } else {
+                    showTenantErrorAlert(tenantResult, null, () => navigation.goBack());
+                  }
+                } finally {
+                  setTenantLoading(false);
+                }
+              };
+              initializeTenant();
+            }}
+          >
+            <Ionicons name="refresh" size={20} color="#fff" />
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      <Header title="Database Setup" showBack={true} />
+      <Header title={`Database Setup - ${tenantInfo.tenant.name}`} showBack={true} />
       
       <ScrollView style={styles.content}>
         <View style={styles.warningBox}>
@@ -442,6 +552,45 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 14,
     color: '#2196F3',
+  },
+  loadingSubtext: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#F44336',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: '#2196F3',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
   progressLog: {
     maxHeight: 200,

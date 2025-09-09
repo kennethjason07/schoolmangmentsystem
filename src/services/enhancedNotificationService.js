@@ -1,8 +1,10 @@
 import { supabase, TABLES } from '../utils/supabase';
+import { getCurrentUserTenantByEmail } from '../utils/getTenantByEmail';
+import { validateTenantAccess, validateNotificationRecipients } from '../utils/tenantValidation';
 
 /**
  * Enhanced Notification Service for Grade Entry and Homework Upload
- * Handles automated notifications for various school events
+ * Handles automated notifications for various school events with tenant isolation
  */
 class EnhancedNotificationService {
   constructor() {
@@ -27,6 +29,30 @@ class EnhancedNotificationService {
   }
 
   /**
+   * Get current user's tenant context using email-based lookup
+   * @returns {Promise<Object>} Tenant context or error
+   */
+  async getTenantContext() {
+    try {
+      const result = await getCurrentUserTenantByEmail();
+      if (!result.success) {
+        console.error('❌ [NOTIF_SERVICE] Failed to get tenant context:', result.error);
+        return { success: false, error: result.error };
+      }
+      
+      return {
+        success: true,
+        tenantId: result.data.tenant.id,
+        tenantName: result.data.tenant.name,
+        userRecord: result.data.userRecord
+      };
+    } catch (error) {
+      console.error('❌ [NOTIF_SERVICE] Error getting tenant context:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
    * Notify parents when grades/marks are entered for a class
    * @param {Object} gradeData - Grade entry data
    * @param {string} gradeData.classId - Class UUID
@@ -40,12 +66,20 @@ class EnhancedNotificationService {
     try {
       console.log('🎯 [GRADE NOTIFICATION] Creating grade entry notification:', gradeData);
 
+      // Get tenant context first
+      const tenantContext = await this.getTenantContext();
+      if (!tenantContext.success) {
+        throw new Error(`Tenant context error: ${tenantContext.error}`);
+      }
+
       const { classId, subjectId, examId, teacherId, enteredBy } = gradeData;
 
       // Validate required fields
       if (!classId || !subjectId || !examId || !teacherId) {
         throw new Error('Missing required fields for grade notification');
       }
+      
+      console.log(`🎯 [GRADE NOTIFICATION] Processing for tenant: ${tenantContext.tenantName} (${tenantContext.tenantId})`);
 
       // Use database function to create notification
       const { data: notificationId, error: dbError } = await supabase
@@ -97,12 +131,20 @@ class EnhancedNotificationService {
     try {
       console.log('📚 [HOMEWORK NOTIFICATION] Creating homework upload notification:', homeworkData);
 
+      // Get tenant context first
+      const tenantContext = await this.getTenantContext();
+      if (!tenantContext.success) {
+        throw new Error(`Tenant context error: ${tenantContext.error}`);
+      }
+
       const { homeworkId, classId, subjectId, teacherId } = homeworkData;
 
       // Validate required fields
       if (!homeworkId || !classId || !subjectId || !teacherId) {
         throw new Error('Missing required fields for homework notification');
       }
+      
+      console.log(`📚 [HOMEWORK NOTIFICATION] Processing for tenant: ${tenantContext.tenantName} (${tenantContext.tenantId})`);
 
       // Use database function to create notification
       const { data: notificationId, error: dbError } = await supabase
@@ -192,13 +234,21 @@ class EnhancedNotificationService {
   }
 
   /**
-   * Create bulk notification with recipients
+   * Create bulk notification with recipients (tenant-aware)
    */
   async createBulkNotification(options) {
     const { type, message, classId, sentBy, recipientTypes = ['Parent'], deliveryMode = 'InApp' } = options;
 
     try {
-      // Use database function for bulk creation
+      // Get tenant context
+      const tenantContext = await this.getTenantContext();
+      if (!tenantContext.success) {
+        throw new Error(`Tenant context error: ${tenantContext.error}`);
+      }
+      
+      console.log(`📦 [BULK NOTIFICATION] Creating for tenant: ${tenantContext.tenantName}`);
+      
+      // Use database function for bulk creation with tenant context
       const { data: notificationId, error } = await supabase
         .rpc('create_bulk_notification', {
           p_notification_type: type,
@@ -206,7 +256,8 @@ class EnhancedNotificationService {
           p_sent_by: sentBy,
           p_class_id: classId,
           p_recipient_types: recipientTypes,
-          p_delivery_mode: deliveryMode
+          p_delivery_mode: deliveryMode,
+          p_tenant_id: tenantContext.tenantId
         });
 
       if (error) {
@@ -260,7 +311,7 @@ class EnhancedNotificationService {
   }
 
   /**
-   * Get user notifications
+   * Get user notifications (tenant-aware)
    * @param {string} userId - User UUID
    * @param {Object} options - Query options
    */
@@ -268,12 +319,48 @@ class EnhancedNotificationService {
     const { limit = 50, offset = 0, unreadOnly = false } = options;
 
     try {
+      // Get tenant context
+      const tenantContext = await this.getTenantContext();
+      if (!tenantContext.success) {
+        console.warn('⚠️ [USER NOTIFICATIONS] No tenant context, falling back to direct query');
+        
+        // Fallback to direct query with manual tenant filtering
+        const { data, error } = await supabase
+          .from(TABLES.NOTIFICATION_RECIPIENTS)
+          .select(`
+            *,
+            notifications!inner(
+              id,
+              type,
+              message,
+              delivery_status,
+              created_at,
+              tenant_id
+            )
+          `)
+          .eq('recipient_id', userId)
+          .eq('is_read', unreadOnly ? false : undefined)
+          .order('created_at', { ascending: false })
+          .limit(limit);
+          
+        if (error) throw error;
+        
+        return {
+          success: true,
+          notifications: data || [],
+          count: data?.length || 0
+        };
+      }
+      
+      console.log(`📱 [USER NOTIFICATIONS] Getting notifications for user in tenant: ${tenantContext.tenantName}`);
+      
       const { data, error } = await supabase
         .rpc('get_user_notifications', {
           p_user_id: userId,
           p_limit: limit,
           p_offset: offset,
-          p_unread_only: unreadOnly
+          p_unread_only: unreadOnly,
+          p_tenant_id: tenantContext.tenantId
         });
 
       if (error) {

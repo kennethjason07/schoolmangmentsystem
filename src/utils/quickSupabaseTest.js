@@ -60,14 +60,16 @@ export const testTenantQueryHelperFixed = async () => {
   }
 };
 
-// Auto-run tests
-console.log('🧪 Auto-running quick Supabase pattern tests...');
-const patternTest = testSupabasePattern();
-if (patternTest) {
-  testTenantQueryHelperFixed().then(helperTest => {
-    console.log('🧪 QUICK TESTS COMPLETED:', {
-      patternTest: patternTest ? 'PASSED' : 'FAILED',
-      helperTest: helperTest ? 'PASSED' : 'FAILED'
-    });
-  });
-}
+// Auto-run tests - DISABLED to prevent pre-login database queries
+// console.log('🧪 Auto-running quick Supabase pattern tests...');
+// const patternTest = testSupabasePattern();
+// if (patternTest) {
+//   testTenantQueryHelperFixed().then(helperTest => {
+//     console.log('🧪 QUICK TESTS COMPLETED:', {
+//       patternTest: patternTest ? 'PASSED' : 'FAILED',
+//       helperTest: helperTest ? 'PASSED' : 'FAILED'
+//     });
+//   });
+// }
+
+// Tests can now be run manually after authentication

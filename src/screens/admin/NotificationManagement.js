@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import { useTenant } from '../../contexts/TenantContext';
+import { getTenantFilteredNotifications, getCurrentTenantId, validateNotificationTenantAccess } from '../../utils/tenantNotificationFilter';
 import universalNotificationService from '../../services/UniversalNotificationService';
 import Header from '../../components/Header';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
@@ -46,42 +47,19 @@ const NotificationManagement = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
-  // Helper function to get user's tenant ID
-  const getUserTenantId = async () => {
-    // First try to use the tenant ID from TenantContext
-    if (tenantId) {
-      console.log('✅ [NOTIF_MGMT] Using tenant_id from TenantContext:', tenantId);
-      return tenantId;
+  // Helper function to validate tenant context
+  const validateTenantContext = () => {
+    if (!tenantId) {
+      console.error('❌ [NOTIF_MGMT] No tenant context available');
+      setError('Tenant information not available. Please try logging out and back in.');
+      return false;
     }
-    
-    // Fallback: Get from database if TenantContext is not available
-    try {
-      console.log('🔍 [NOTIF_MGMT] TenantContext not available, fetching from database...');
-      
-      if (!user?.id) {
-        console.error('❌ [NOTIF_MGMT] No user ID available for tenant lookup');
-        return null;
-      }
-      
-      const { data: userRecord, error } = await supabase
-        .from('users')
-        .select('tenant_id')
-        .eq('id', user.id)
-        .single();
-      
-      if (error) {
-        console.error('❌ [NOTIF_MGMT] Error fetching user tenant_id:', error);
-        return null;
-      }
-      
-      const dbTenantId = userRecord?.tenant_id;
-      console.log('✅ [NOTIF_MGMT] Found tenant_id from database:', dbTenantId);
-      return dbTenantId;
-      
-    } catch (error) {
-      console.error('❌ [NOTIF_MGMT] Error in getUserTenantId:', error);
-      return null;
+    if (!user?.id) {
+      console.error('❌ [NOTIF_MGMT] No user ID available');
+      setError('User not authenticated');
+      return false;
     }
+    return true;
   };
 
   // Load notifications from Supabase
@@ -93,310 +71,39 @@ const NotificationManagement = () => {
     setLoading(true);
     setError(null);
     try {
-      console.log('🔔 [NOTIF_MGMT] Starting to load notifications...');
-      console.log('🔔 [NOTIF_MGMT] Current user:', user?.email || 'Not logged in');
+      console.log('🔔 [NOTIF_MGMT] Loading tenant-filtered notifications...');
       
-      if (!user?.id) {
-        console.log('❌ [NOTIF_MGMT] No user ID available');
-        setError('User not authenticated');
-        return;
-      }
-
-      // Check current session first
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      console.log('🔔 [NOTIF_MGMT] Session check:');
-      console.log('   - Session exists:', !!session);
-      console.log('   - Session user:', session?.user?.email || 'None');
-      console.log('   - Session error:', sessionError?.message || 'None');
-      
-      // JWT DEBUG: Check what's in the JWT token
-      console.log('🔍 [JWT_DEBUG] Analyzing JWT token content...');
-      let metadataTenantId = null; // Initialize the variable
-      
-      if (session?.access_token) {
-        try {
-          // Decode JWT payload (not verifying signature, just reading)
-          const token = session.access_token;
-          const base64Payload = token.split('.')[1];
-          const payload = JSON.parse(atob(base64Payload));
-          
-          // Extract tenant_id from user_metadata if available
-          metadataTenantId = payload.user_metadata?.tenant_id || payload.tenant_id;
-          
-          console.log('🔍 [JWT_DEBUG] JWT Payload:');
-          console.log('   - iss (issuer):', payload.iss);
-          console.log('   - sub (subject/user_id):', payload.sub);
-          console.log('   - email:', payload.email);
-          console.log('   - role:', payload.role);
-          console.log('   - tenant_id:', payload.tenant_id || '❌ MISSING!');
-          console.log('   - user_metadata:', JSON.stringify(payload.user_metadata || {}, null, 2));
-          console.log('   - app_metadata:', JSON.stringify(payload.app_metadata || {}, null, 2));
-          
-          if (!payload.tenant_id) {
-            console.log('❌ [JWT_DEBUG] CRITICAL: No tenant_id in JWT token!');
-            console.log('❌ [JWT_DEBUG] This explains why RLS policies block all access');
-            console.log('💡 [JWT_DEBUG] Need to update user authentication to include tenant_id in JWT');
-          } else {
-            console.log('✅ [JWT_DEBUG] tenant_id found in JWT:', payload.tenant_id);
-            console.log('🔍 [JWT_DEBUG] Matches expected tenant?', payload.tenant_id === 'b8f8b5f0-1234-4567-8901-123456789000');
-          }
-          
-        } catch (e) {
-          console.log('❌ [JWT_DEBUG] Failed to decode JWT:', e.message);
-        }
-      } else {
-        console.log('❌ [JWT_DEBUG] No access token in session');
-      }
-      
-      if (!session) {
-        console.log('❌ [NOTIF_MGMT] No active session found');
-        setError('No active session');
-        return;
-      }
-
-      // 🏢 Use tenant_id from TenantContext (already handles fallbacks properly)
-      console.log('🏢 [NOTIF_MGMT] Using tenant_id from TenantContext:', {
-        tenantId,
-        tenantName: currentTenant?.name,
-        userId: user?.id,
-        userEmail: user?.email
+      // Use the tenant filtering utility to get ONLY current tenant's notifications
+      const result = await getTenantFilteredNotifications({
+        limit: 100 // Reasonable limit
       });
       
-      // Additional debug: Check user's database record for tenant_id consistency
-      const { data: userRecord, error: userRecordError } = await supabase
-        .from('users')
-        .select('tenant_id, email, role_id')
-        .eq('id', user.id)
-        .single();
-      
-      const dbTenantId = userRecord?.tenant_id;
-      console.log('🔍 [NOTIF_MGMT] User database record check:', {
-        dbTenantId,
-        contextTenantId: tenantId,
-        matches: dbTenantId === tenantId,
-        error: userRecordError?.message
-      });
-      
-      if (dbTenantId && tenantId && dbTenantId !== tenantId) {
-        console.log('⚠️ [NOTIF_MGMT] TENANT MISMATCH DETECTED!');
-        console.log('   - Context tenant_id:', tenantId);
-        console.log('   - Database tenant_id:', dbTenantId);
-        console.log('   - This indicates a data consistency issue!');
-      }
-      
-      if (!tenantId) {
-        console.error('❌ [NOTIF_MGMT] No tenant_id found for user');
-        setError('Tenant information not found');
-        return;
-      }
-      
-      console.log('🔔 [NOTIF_MGMT] Querying notifications table...');
-      
-      // First, let's check what notifications exist in the database without tenant filtering
-      console.log('🔍 [NOTIF_MGMT] Checking all notifications in database...');
-      const { data: allNotifications, error: allError } = await supabase
-        .from('notifications')
-        .select('id, tenant_id, type, message, created_at, sent_by')
-        .order('created_at', { ascending: false })
-        .limit(20);
-      
-      console.log('🔍 [NOTIF_MGMT] All notifications check:');
-      console.log('   - Total found:', allNotifications?.length || 0);
-      console.log('   - Error:', allError?.message || 'None');
-      console.log('   - Error code:', allError?.code || 'None');
-      console.log('   - Error hint:', allError?.hint || 'None');
-      console.log('   - Error details:', allError?.details || 'None');
-      
-      // If we get 0 notifications, let's check if this is an RLS issue
-      if ((!allNotifications || allNotifications.length === 0) && !allError) {
-        console.log('🔍 [NOTIF_MGMT] Zero notifications found - checking RLS policies...');
+      if (result.error) {
+        console.error('❌ [NOTIF_MGMT] Error loading notifications:', result.error);
+        setError(result.error);
         
-        // Try a simple count query to see if RLS is blocking us
-        const { data: countData, error: countError } = await supabase
-          .from('notifications')
-          .select('count', { count: 'exact', head: true });
-        
-        console.log('🔍 [NOTIF_MGMT] Count query result:');
-        console.log('   - Count:', countData || 'ERROR');
-        console.log('   - Count error:', countError?.message || 'None');
-        console.log('   - Count error code:', countError?.code || 'None');
-        
-        // Try to check current user's role and permissions
-        console.log('🔍 [NOTIF_MGMT] Checking user permissions...');
-        const { data: userData, error: userError } = await supabase
-          .from('users')
-          .select('id, email, role_id, tenant_id')
-          .eq('id', user.id)
-          .single();
-        
-        console.log('🔍 [NOTIF_MGMT] User data check:');
-        console.log('   - User found:', !!userData);
-        console.log('   - User email:', userData?.email || 'None');
-        console.log('   - User role_id:', userData?.role_id || 'None');
-        console.log('   - User tenant_id:', userData?.tenant_id || 'None');
-        console.log('   - User error:', userError?.message || 'None');
-        console.log('   - User error code:', userError?.code || 'None');
-        
-        // Try to check if any tables are accessible
-        console.log('🔍 [NOTIF_MGMT] Testing basic table access...');
-        const { data: rolesData, error: rolesError } = await supabase
-          .from('roles')
-          .select('count', { count: 'exact', head: true });
-        
-        console.log('🔍 [NOTIF_MGMT] Roles table access:');
-        console.log('   - Accessible:', !rolesError);
-        console.log('   - Error:', rolesError?.message || 'None');
-        console.log('   - Error code:', rolesError?.code || 'None');
-        
-        // Let's also check if we can access the information_schema to see table definitions
-        console.log('🔍 [NOTIF_MGMT] Checking database schema info...');
-        try {
-          const { data: tableInfo, error: tableError } = await supabase.rpc('check_table_exists', { table_name: 'notifications' });
-          console.log('🔍 [NOTIF_MGMT] Table check RPC result:');
-          console.log('   - Table exists:', tableInfo);
-          console.log('   - Error:', tableError?.message || 'None');
-        } catch (rpcError) {
-          console.log('🔍 [NOTIF_MGMT] RPC not available, trying direct schema query...');
-          
-          // Fallback: try a simple RLS bypass test by checking a known system table
-          const { data: schemaData, error: schemaError } = await supabase
-            .from('information_schema.tables')
-            .select('table_name')
-            .eq('table_name', 'notifications')
-            .limit(1);
-          
-          console.log('🔍 [NOTIF_MGMT] Schema query result:');
-          console.log('   - Schema accessible:', !schemaError);
-          console.log('   - Schema error:', schemaError?.message || 'None');
-          console.log('   - Schema error code:', schemaError?.code || 'None');
-          console.log('   - Table found in schema:', schemaData?.length > 0);
-        }
-        
-        // Try querying the exact table name used in TABLES constant
-        console.log('🔍 [NOTIF_MGMT] Testing exact table name from TABLES constant...');
-        console.log('   - TABLES.NOTIFICATIONS value:', TABLES.NOTIFICATIONS);
-        
-        const { data: exactTableData, error: exactTableError } = await supabase
-          .from(TABLES.NOTIFICATIONS)
-          .select('count', { count: 'exact', head: true });
-        
-        console.log('🔍 [NOTIF_MGMT] Exact table name test:');
-        console.log('   - Accessible via TABLES.NOTIFICATIONS:', !exactTableError);
-        console.log('   - Error:', exactTableError?.message || 'None');
-        console.log('   - Error code:', exactTableError?.code || 'None');
-        
-        // Also check notification_recipients table
-        const { data: recipientsTableData, error: recipientsTableError } = await supabase
-          .from('notification_recipients')
-          .select('count', { count: 'exact', head: true });
-        
-        console.log('🔍 [NOTIF_MGMT] Recipients table test:');
-        console.log('   - Accessible:', !recipientsTableError);
-        console.log('   - Error:', recipientsTableError?.message || 'None');
-        console.log('   - Error code:', recipientsTableError?.code || 'None');
-      }
-      
-      if (allNotifications && allNotifications.length > 0) {
-        console.log('🔍 [NOTIF_MGMT] ALL notifications found in database:');
-        allNotifications.forEach((notif, index) => {
-          console.log(`   ${index + 1}. ID: ${notif.id}`);
-          console.log(`      Tenant: ${notif.tenant_id}`);
-          console.log(`      Type: ${notif.type}`);
-          console.log(`      Sent by: ${notif.sent_by}`);
-          console.log(`      Message: ${notif.message?.substring(0, 50)}...`);
-          console.log(`      Matches our tenant: ${notif.tenant_id === tenantId}`);
-          console.log(`      Matches metadata tenant: ${notif.tenant_id === metadataTenantId}`);
-        });
-        
-        // Check if any notifications match either tenant_id
-        const metadataMatches = allNotifications.filter(n => n.tenant_id === metadataTenantId).length;
-        const dbMatches = allNotifications.filter(n => n.tenant_id === dbTenantId).length;
-        console.log('🔍 [NOTIF_MGMT] Tenant matching summary:');
-        console.log(`   - Notifications matching metadata tenant (${metadataTenantId}): ${metadataMatches}`);
-        console.log(`   - Notifications matching database tenant (${dbTenantId}): ${dbMatches}`);
-      } else {
-        console.log('🔍 [NOTIF_MGMT] No notifications found in the entire database!');
-      }
-      
-      // TEMPORARY FIX: Try both queries - with and without tenant filtering
-      console.log('🔔 [NOTIF_MGMT] Querying with tenant filter...');
-      const { data, error } = await supabase
-        .from('notifications')
-        .select(`
-          *,
-          notification_recipients(
-            id,
-            recipient_id,
-            recipient_type,
-            delivery_status,
-            sent_at,
-            tenant_id
-          ),
-          users!sent_by(
-            id,
-            full_name,
-            role_id
-          )
-        `)
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false });
-      
-      console.log('🔔 [NOTIF_MGMT] Tenant-filtered notifications query result:');
-      console.log('   - Found with tenant filter:', data?.length || 0);
-      console.log('   - Error:', error?.message || 'None');
-      
-      // STRICT TENANT FILTERING: Only show notifications for current tenant
-      const finalNotifications = data || [];
-      
-      if ((!data || data.length === 0) && !error) {
-        console.log('🔍 [NOTIF_MGMT] No notifications found for tenant:', tenantId);
-        console.log('✅ [NOTIF_MGMT] This is correct behavior - only showing tenant-specific notifications');
-        
-        // Optional: Log info about other tenants for debugging (but don't show their data)
-        const { data: debugInfo } = await supabase
-          .from('notifications')
-          .select('tenant_id')
-          .limit(5);
-        
-        if (debugInfo && debugInfo.length > 0) {
-          const otherTenants = [...new Set(debugInfo.map(n => n.tenant_id))];
-          console.log('🔍 [NOTIF_MGMT] Other tenants found in database:', otherTenants.length);
-          console.log('   - Current user tenant:', tenantId);
-          console.log('   - Other tenant IDs found:', otherTenants.filter(t => t !== tenantId));
-          console.log('ℹ️ [NOTIF_MGMT] Not showing other tenants\' notifications (correct behavior)');
-        }
-      }
-      
-      console.log('🔔 [NOTIF_MGMT] Final notifications result:');
-      console.log('   - Found:', finalNotifications?.length || 0);
-      console.log('   - Tenant filter applied:', 'Yes (strict mode)');
-      console.log('   - Tenant ID used:', tenantId);
-      
-      if (error) {
-        console.error('❌ [NOTIF_MGMT] Error loading notifications:', error);
-        
-        // Check for RLS errors
-        if (error.code === '42501') {
-          console.log('🔒 [NOTIF_MGMT] RLS blocking notifications access');
-          setError('Database permissions issue - please contact support');
+        // Check for specific error types
+        if (result.error.includes('permission') || result.error.includes('RLS')) {
           Alert.alert(
             'Database Access Issue',
             'Unable to load notifications due to database permissions. Please contact support.',
-            [
-              { text: 'OK' },
-              { text: 'Retry', onPress: loadNotifications }
-            ]
+            [{ text: 'OK' }, { text: 'Retry', onPress: loadNotifications }]
           );
-          return;
+        } else if (result.error.includes('tenant')) {
+          Alert.alert(
+            'Tenant Error',
+            'Unable to identify your organization. Please log out and log back in.',
+            [{ text: 'OK' }]
+          );
         }
-        
-        throw error;
+        return;
       }
       
-      console.log(`✅ [NOTIF_MGMT] Successfully loaded ${finalNotifications?.length || 0} notifications`);
-      setNotifications(finalNotifications || []);
+      console.log(`✅ [NOTIF_MGMT] Successfully loaded ${result.data.length} notifications for tenant: ${result.tenantName}`);
+      setNotifications(result.data);
+      
     } catch (err) {
-      console.error('💥 [NOTIF_MGMT] Error loading notifications:', err);
+      console.error('💥 [NOTIF_MGMT] Exception in loadNotifications:', err);
       setError('Failed to load notifications');
       Alert.alert('Error', `Failed to load notifications: ${err.message}`);
     } finally {
@@ -408,57 +115,24 @@ const NotificationManagement = () => {
   const handleRefresh = async () => {
     try {
       setRefreshing(true);
-      console.log('🔄 [NOTIF_MGMT] Pull-to-refresh triggered in Notification Management');
+      console.log('🔄 [NOTIF_MGMT] Pull-to-refresh triggered');
       
       // Clear any existing errors
       setError(null);
       
-      // Get tenant_id for filtering
-      const tenantId = await getUserTenantId();
-      if (!tenantId) {
-        console.error('❌ [NOTIF_MGMT] No tenant_id found during refresh');
-        setError('Tenant information not found');
-        return;
-      }
+      // Use the tenant filtering utility for refresh
+      const result = await getTenantFilteredNotifications({
+        limit: 100
+      });
       
-      // Load from notifications table with recipients, filtered by tenant_id
-      const { data, error } = await supabase
-        .from('notifications')
-        .select(`
-          *,
-          notification_recipients(
-            id,
-            recipient_id,
-            recipient_type,
-            delivery_status,
-            sent_at,
-            tenant_id
-          ),
-          users!sent_by(
-            id,
-            full_name,
-            role_id
-          )
-        `)
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false });
-      
-      if (error) {
-        console.error('❌ [NOTIF_MGMT] Refresh error:', error);
-        
-        // Check for RLS errors
-        if (error.code === '42501') {
-          console.log('🔒 [NOTIF_MGMT] RLS blocking notifications access during refresh');
-          setError('Database permissions issue - please contact support');
-          return;
-        }
-        
+      if (result.error) {
+        console.error('❌ [NOTIF_MGMT] Refresh error:', result.error);
         setError('Failed to refresh notifications');
         return;
       }
       
-      console.log(`✅ [NOTIF_MGMT] Refreshed ${data?.length || 0} notifications`);
-      setNotifications(data || []);
+      console.log(`✅ [NOTIF_MGMT] Refreshed ${result.data.length} notifications for tenant: ${result.tenantName}`);
+      setNotifications(result.data);
       
     } catch (err) {
       console.error('💥 [NOTIF_MGMT] Error refreshing notifications:', err);
@@ -541,11 +215,10 @@ const NotificationManagement = () => {
           try {
             setLoading(true);
             
-            // Get tenant_id for RLS compliance
-            const tenantId = await getUserTenantId();
-            if (!tenantId) {
-              console.error('❌ [NOTIF_MGMT] No tenant_id found for deleting notification');
-              Alert.alert('Error', 'Tenant information not found');
+            // Validate notification belongs to current tenant
+            const validation = await validateNotificationTenantAccess(notificationId);
+            if (!validation.isValid) {
+              Alert.alert('Access Denied', validation.error || 'You can only delete notifications from your organization.');
               return;
             }
             
@@ -554,7 +227,7 @@ const NotificationManagement = () => {
               .from(TABLES.NOTIFICATIONS)
               .delete()
               .eq('id', notificationId)
-              .eq('tenant_id', tenantId);
+              .eq('tenant_id', validation.tenantId);
             
             if (error) {
               console.error('❌ [NOTIF_MGMT] Error deleting notification:', error);
@@ -587,11 +260,8 @@ const NotificationManagement = () => {
     try {
       setLoading(true);
       
-      // Get tenant_id for RLS compliance
-      const tenantId = await getUserTenantId();
-      if (!tenantId) {
-        console.error('❌ [NOTIF_MGMT] No tenant_id found for resending notification');
-        Alert.alert('Error', 'Tenant information not found');
+      // Validate tenant context
+      if (!validateTenantContext()) {
         return;
       }
       
@@ -656,11 +326,8 @@ const NotificationManagement = () => {
     try {
       setLoading(true);
       
-      // Get tenant_id for RLS compliance
-      const tenantId = await getUserTenantId();
-      if (!tenantId) {
-        console.error('❌ [NOTIF_MGMT] No tenant_id found for duplicating notification');
-        Alert.alert('Error', 'Tenant information not found');
+      // Validate tenant context
+      if (!validateTenantContext()) {
         return;
       }
       
@@ -782,29 +449,12 @@ const NotificationManagement = () => {
         }
       }
       
-      // Get tenant_id for RLS compliance - use the same logic as loadNotifications
-      const metadataTenantId = await getUserTenantId();
-      console.log('💾 [NOTIF_CREATE] Metadata tenant ID:', metadataTenantId);
-      
-      // Get database tenant_id
-      const { data: userRecord } = await supabase
-        .from('users')
-        .select('tenant_id')
-        .eq('id', user.id)
-        .single();
-      
-      const dbTenantId = userRecord?.tenant_id;
-      console.log('💾 [NOTIF_CREATE] Database tenant ID:', dbTenantId);
-      
-      // Use database tenant_id as primary
-      const tenantId = dbTenantId || metadataTenantId;
-      console.log('💾 [NOTIF_CREATE] Using tenant ID for creation:', tenantId);
-      
-      if (!tenantId) {
-        console.error('❌ [NOTIF_CREATE] No tenant_id found for creating notification');
-        Alert.alert('Error', 'Tenant information not found');
+      // Validate tenant context
+      if (!validateTenantContext()) {
         return;
       }
+      
+      console.log('💾 [NOTIF_CREATE] Using tenant ID for creation:', tenantId, '- Tenant:', currentTenant?.name);
 
       console.log('💾 [NOTIF_CREATE] Starting notification creation process...');
       console.log('💾 [NOTIF_CREATE] Selected roles:', createForm.selectedRoles);

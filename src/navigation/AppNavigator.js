@@ -68,8 +68,6 @@ import MarksEntryStudentsScreen from '../screens/teacher/MarksEntryStudentsScree
 import StudentAttendanceScreen from '../screens/teacher/StudentAttendanceScreen';
 import StudentMarksScreen from '../screens/teacher/StudentMarksScreen';
 import ViewSubmissions from '../screens/teacher/ViewSubmissions';
-import DatabaseSetup from '../screens/teacher/DatabaseSetup';
-import NotificationDebugScreen from '../screens/teacher/NotificationDebugScreen';
 import LeaveApplication from '../screens/teacher/LeaveApplication';
 import TeacherNotifications from '../screens/teacher/TeacherNotifications';
 
@@ -447,8 +445,6 @@ export default function AppNavigator() {
                 <Stack.Screen name="StudentAttendanceScreen" component={StudentAttendanceScreen} />
                 <Stack.Screen name="StudentMarksScreen" component={StudentMarksScreen} />
                 <Stack.Screen name="ViewSubmissions" component={ViewSubmissions} />
-                <Stack.Screen name="DatabaseSetup" component={DatabaseSetup} />
-                <Stack.Screen name="NotificationDebug" component={NotificationDebugScreen} />
                 <Stack.Screen name="LeaveApplication" component={LeaveApplication} />
                 <Stack.Screen name="TeacherNotifications" component={TeacherNotifications} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />

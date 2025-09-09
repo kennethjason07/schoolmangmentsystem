@@ -38,9 +38,20 @@ import FeeService from '../../services/FeeService';
 
 const { width } = Dimensions.get('window');
 
+// Debug mode constant (following EMAIL_BASED_TENANT_SYSTEM.md)
+const DEBUG_MODE = __DEV__ && true; // Enable debug logging in development
+
 const FeePayment = () => {
   const { user } = useAuth();
-  const { tenantId } = useTenantContext();
+  const { 
+    tenantId, 
+    currentTenant, 
+    validateCurrentTenantAccess, 
+    executeSafeTenantQuery, 
+    loading: tenantLoading, 
+    retryTenantLoading, 
+    debugTenantLoading 
+  } = useTenantContext();
   const navigation = useNavigation();
   const [feeStructure, setFeeStructure] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
@@ -57,15 +68,117 @@ const FeePayment = () => {
 
   // Add state and function for school details similar to AdminDashboard
   const [schoolData, setSchoolData] = useState(null);
+  
+  // Add debug state for tenant troubleshooting
+  const [debugInfo, setDebugInfo] = useState({
+    tenantContext: null,
+    studentResolution: null,
+    feeDataFetchStatus: null
+  });
+  
+  // Enhanced tenant debugging following EMAIL_BASED_TENANT_SYSTEM.md
+  if (DEBUG_MODE) {
+    console.log('🏢 [FEE PAYMENT TENANT DEBUG]:', {
+      tenantId: tenantId || 'NO TENANT',
+      tenantName: currentTenant?.name || 'NO TENANT NAME',
+      tenantStatus: currentTenant?.status || 'UNKNOWN',
+      tenantLoading: tenantLoading || false,
+      userEmail: user?.email || 'NO USER',
+      timestamp: new Date().toISOString()
+    });
+    
+    // Add global test functions for development debugging
+    if (typeof window !== 'undefined') {
+      window.debugFeePaymentTenantContext = () => {
+        console.log('🏢 [FEE PAYMENT TENANT DEBUG] Current tenant context state:', {
+          tenantId: tenantId || 'NOT SET',
+          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : 'NOT SET',
+          tenantLoading: tenantLoading,
+          user: user ? { id: user.id, email: user.email } : 'NOT SET'
+        });
+        return {
+          tenantId,
+          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : null,
+          tenantLoading,
+          user: user ? { id: user.id, email: user.email } : null,
+          isReady: !tenantLoading && !!tenantId && !!user
+        };
+      };
+      
+      window.retryFeePaymentTenantLoading = async () => {
+        console.log('🔄 [FEE PAYMENT MANUAL TENANT RETRY] Starting manual tenant retry...');
+        if (retryTenantLoading) {
+          await retryTenantLoading();
+          console.log('🔄 [FEE PAYMENT MANUAL TENANT RETRY] Completed');
+        } else {
+          console.log('❌ [FEE PAYMENT MANUAL TENANT RETRY] Function not available');
+        }
+      };
+      
+      window.debugFeePaymentTenantLoading = async () => {
+        console.log('📝 [FEE PAYMENT DEBUG TENANT LOADING] Starting enhanced debug...');
+        if (debugTenantLoading) {
+          const result = await debugTenantLoading();
+          console.log('📝 [FEE PAYMENT DEBUG TENANT LOADING] Result:', result);
+          return result;
+        } else {
+          console.log('❌ [FEE PAYMENT DEBUG TENANT LOADING] Function not available');
+        }
+      };
+      
+      console.log('🧪 [FEE PAYMENT DEV TOOLS] Added global functions:');
+      console.log('   • window.debugFeePaymentTenantContext() - Debug current tenant context state');
+      console.log('   • window.retryFeePaymentTenantLoading() - Manually retry tenant loading');
+      console.log('   • window.debugFeePaymentTenantLoading() - Run enhanced tenant loading debug');
+    }
+  }
 
-  // Fetch school details with logo diagnostics
-  const fetchSchoolData = async () => {
+  // Fetch school details with logo diagnostics using tenant-aware queries
+  const fetchSchoolData = async (resolvedTenantId = null) => {
     try {
-      console.log('🏫 Fetching school details...');
-      const { data: schools, error } = await supabase
-        .from('school_details')
-        .select('*')
-        .single();
+      console.log('🏦 [TENANT-AWARE] Fetching school details...');
+      
+      let schools = null;
+      let error = null;
+      
+      // Use tenant-aware query if tenant ID is available
+      if (resolvedTenantId || tenantId) {
+        const activeTenantId = resolvedTenantId || tenantId;
+        console.log('🏦 [TENANT-AWARE] Using tenant-aware school query for tenant:', activeTenantId);
+        
+        try {
+          const tenantSchoolQuery = createTenantQuery(activeTenantId, 'school_details');
+          const result = await tenantSchoolQuery
+            .select('*')
+            .execute()
+            .then(result => ({ data: result.data?.[0] || null, error: result.error }));
+          
+          schools = result.data;
+          error = result.error;
+        } catch (tenantQueryError) {
+          console.log('🔄 [TENANT-AWARE] Tenant query failed, trying fallback:', tenantQueryError);
+          
+          // Fallback to direct query
+          const fallbackResult = await supabase
+            .from('school_details')
+            .select('*')
+            .single();
+          
+          schools = fallbackResult.data;
+          error = fallbackResult.error;
+        }
+      } else {
+        console.log('🔄 [TENANT-AWARE] No tenant context, using direct school query');
+        
+        // Direct query without tenant filtering
+        const directResult = await supabase
+          .from('school_details')
+          .select('*')
+          .single();
+        
+        schools = directResult.data;
+        error = directResult.error;
+      }
 
       if (error) {
         console.log('❌ Error fetching school data:', error);
@@ -170,24 +283,191 @@ const FeePayment = () => {
     return await getSchoolLogoBase64(imageUrl);
   };
 
-  // Move fetchFeeData outside useEffect to make it accessible throughout component
+  // Move fetchFeeData outside useEffect to make it accessible throughout component with tenant validation
   const fetchFeeData = async () => {
       setLoading(true);
       setError(null);
+      
       try {
-        console.log('FeePayment - Starting fetchFeeData...');
+        console.log('💳 [TENANT-AWARE] Starting fetchFeeData...');
         
-        // Fetch school data alongside fee data
-        await fetchSchoolData();
+        // Enhanced tenant validation following EMAIL_BASED_TENANT_SYSTEM.md
         
-        // Get parent's student data using the helper function
-        const { data: parentUserData, error: parentError } = await dbHelpers.getParentByUserId(user.id);
+        // Check if tenant is still loading
+        if (tenantLoading) {
+          console.log('🔄 [TENANT-AWARE] Tenant context is loading, delaying fee data fetch...');
+          return;
+        }
+        
+        // If tenant context is not loaded, try to resolve tenant directly by email
+        let resolvedTenantId = tenantId;
+        let resolvedTenant = currentTenant;
+        
+        if (!tenantId || !currentTenant) {
+          console.log('🔍 [TENANT-AWARE] Tenant context not loaded, attempting direct email-based tenant resolution...');
+          
+          if (!user || !user.email) {
+            console.error('❌ [TENANT-AWARE] Cannot resolve tenant: No authenticated user');
+            setError('Authentication required. Please log in again.');
+            setLoading(false);
+            return;
+          }
+          
+          try {
+            // Direct tenant lookup using email
+            console.log('📧 [TENANT-AWARE] Looking up tenant for email:', user.email);
+            const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+            const emailTenantResult = await getTenantIdByEmail(user.email);
+            
+            if (emailTenantResult.success) {
+              resolvedTenantId = emailTenantResult.data.tenant.id;
+              resolvedTenant = emailTenantResult.data.tenant;
+              console.log('✅ [TENANT-AWARE] Successfully resolved tenant via email:', {
+                tenantId: resolvedTenantId,
+                tenantName: resolvedTenant.name,
+                userEmail: user.email
+              });
+            } else {
+              console.error('❌ [TENANT-AWARE] Email-based tenant resolution failed:', emailTenantResult.error);
+              setError(emailTenantResult.error || 'Unable to determine your school. Please contact administrator.');
+              setLoading(false);
+              return;
+            }
+          } catch (emailLookupError) {
+            console.error('❌ [TENANT-AWARE] Error during email-based tenant lookup:', emailLookupError);
+            setError('Unable to load school information. Please try again.');
+            setLoading(false);
+            return;
+          }
+        }
+
+        if (DEBUG_MODE) {
+          console.log('📊 === [TENANT-AWARE] FEE PAYMENT DEBUG ===');
+          console.log('🔍 Debug Mode: ENABLED');
+          console.log('🏢 Resolved Tenant:', resolvedTenant.name, '(ID:', resolvedTenantId, ')');
+          console.log('👤 Parent User ID:', user?.id);
+          console.log('⏰ Fetch Time:', new Date().toISOString());
+          console.log('📧 User Email:', user?.email);
+          
+          setDebugInfo(prev => ({
+            ...prev,
+            tenantContext: {
+              user_id: user?.id,
+              resolved_tenant_id: resolvedTenantId,
+              tenant_name: resolvedTenant.name,
+              email: user?.email,
+              fetch_time: new Date().toISOString()
+            }
+          }));
+        }
+        
+        // Fetch school data alongside fee data with tenant context
+        await fetchSchoolData(resolvedTenantId);
+        
+        // Get parent's student data using tenant-aware query
+        let parentUserData = null;
+        let parentError = null;
+        let studentDetails = null;
+        
+        // Strategy 1: Try using tenant-aware user query
+        try {
+          console.log('🔍 [TENANT-AWARE] Strategy 1: Using tenant-aware user query for parent lookup');
+          const tenantUserQuery = createTenantQuery(resolvedTenantId, TABLES.USERS);
+          const { data: userData, error: userError } = await tenantUserQuery
+            .select(`
+              id,
+              email,
+              full_name,
+              linked_parent_of,
+              linked_student_id,
+              role_id,
+              tenant_id,
+              students!users_linked_parent_of_fkey(
+                id,
+                name,
+                admission_no,
+                roll_no,
+                dob,
+                gender,
+                address,
+                class_id,
+                academic_year,
+                tenant_id,
+                classes(id, class_name, section, academic_year)
+              )
+            `)
+            .eq('id', user.id)
+            .execute()
+            .then(result => ({ data: result.data?.[0] || null, error: result.error }));
+            
+          if (!userError && userData?.students) {
+            parentUserData = userData;
+            studentDetails = userData.students;
+            console.log('✅ [TENANT-AWARE] Found parent and student via tenant-aware query');
+          } else if (!userError && userData?.linked_student_id) {
+            // Try linked_student_id if linked_parent_of doesn't work
+            console.log('🔍 [TENANT-AWARE] Trying linked_student_id approach');
+            const tenantStudentQuery = createTenantQuery(resolvedTenantId, TABLES.STUDENTS);
+            const { data: studentData, error: studentError } = await tenantStudentQuery
+              .select(`
+                id,
+                name,
+                admission_no,
+                roll_no,
+                dob,
+                gender,
+                address,
+                class_id,
+                academic_year,
+                tenant_id,
+                classes(id, class_name, section, academic_year)
+              `)
+              .eq('id', userData.linked_student_id)
+              .execute()
+              .then(result => ({ data: result.data?.[0] || null, error: result.error }));
+              
+            if (!studentError && studentData) {
+              parentUserData = userData;
+              studentDetails = studentData;
+              console.log('✅ [TENANT-AWARE] Found student via linked_student_id');
+            }
+          }
+        } catch (tenantQueryError) {
+          console.log('❌ [TENANT-AWARE] Tenant query failed, trying fallback:', tenantQueryError);
+          parentError = tenantQueryError;
+        }
+        
+        // Strategy 2: Fallback to original dbHelpers if tenant query fails
+        if (!parentUserData || !studentDetails) {
+          console.log('🔄 [TENANT-AWARE] Using fallback dbHelpers approach');
+          const fallbackResult = await dbHelpers.getParentByUserId(user.id);
+          parentUserData = fallbackResult.data;
+          parentError = fallbackResult.error;
+          
+          if (parentUserData?.students) {
+            studentDetails = parentUserData.students;
+          }
+        }
+        
         if (parentError || !parentUserData) {
           throw new Error('Parent data not found');
         }
-
-        // Get student details from the linked student
-        const studentDetails = parentUserData.students;
+        
+        if (!studentDetails) {
+          throw new Error('Student data not found for this parent');
+        }
+        
+        // Validate student belongs to current tenant
+        if (studentDetails.tenant_id && studentDetails.tenant_id !== resolvedTenantId) {
+          console.error('❌ [TENANT-AWARE] Student belongs to different tenant:', {
+            studentTenant: studentDetails.tenant_id,
+            currentTenant: resolvedTenantId
+          });
+          setError(TENANT_ERROR_MESSAGES.WRONG_TENANT_DATA);
+          setLoading(false);
+          return;
+        }
+        
         setStudentData(studentDetails);
 
         console.log('FeePayment - Student details:', studentDetails);
@@ -197,12 +477,29 @@ const FeePayment = () => {
         let studentPayments = null;
         let paymentsError = null;
 
-        // Only fetch data if we have valid student details - use centralized FeeService
+        // Only fetch data if we have valid student details - use centralized FeeService with tenant validation
         if (studentDetails && isValidUUID(studentDetails.id)) {
-          console.log('🎯 FeePayment - Using NEW class-based FeeService for student:', studentDetails.id);
+          console.log('🎤 [TENANT-AWARE] FeePayment - Using NEW class-based FeeService for student:', studentDetails.id);
+          console.log('🎤 [TENANT-AWARE] Student tenant validation passed, proceeding with fee fetch');
           
-          // Use the NEW class-based FeeService for proper fee structure
-          const feeServiceResult = await FeeService.getStudentFeesWithClassBase(studentDetails.id);
+          if (DEBUG_MODE) {
+            setDebugInfo(prev => ({
+              ...prev,
+              feeDataFetchStatus: {
+                started_at: new Date().toISOString(),
+                student_id: studentDetails.id,
+                student_name: studentDetails.name,
+                resolved_tenant_id: resolvedTenantId,
+                fee_service_call: 'starting'
+              }
+            }));
+          }
+          
+          // Use the NEW class-based FeeService for proper fee structure with tenant context
+          const feeServiceResult = await FeeService.getStudentFeesWithClassBase(studentDetails.id, {
+            tenantId: resolvedTenantId,
+            tenantValidation: true
+          });
           
           if (feeServiceResult.success && feeServiceResult.data) {
             const feeData = feeServiceResult.data;
@@ -568,12 +865,18 @@ const FeePayment = () => {
       }
     };
 
-  // useEffect to call fetchFeeData when component mounts
+  // useEffect to call fetchFeeData when component mounts with tenant-aware dependencies
   useEffect(() => {
-    if (user) {
+    if (user && tenantId && !tenantLoading) {
+      console.log('🔄 [TENANT-AWARE] Tenant context loaded, initializing fee payment data...');
       fetchFeeData();
+    } else if (tenantLoading) {
+      console.log('🔄 [TENANT-AWARE] Tenant context is loading, waiting for initialization...');
+    } else if (user && !tenantId) {
+      console.log('🔄 [TENANT-AWARE] User available but no tenant context, will try email-based resolution');
+      fetchFeeData(); // This will trigger email-based tenant resolution
     }
-  }, [user]);
+  }, [user, tenantId, tenantLoading]);
 
   // Get fee statistics for current academic year
   const getFeeStatistics = async (studentId, academicYear = '2024-2025') => {
@@ -834,10 +1137,16 @@ const FeePayment = () => {
       const receiptNumber = await getNextReceiptNumber();
       console.log('FeePayment - Generated receipt number:', receiptNumber);
 
-      // Prepare payment data
+      // Prepare payment data with proper tenant validation
+      const currentTenantId = tenantId || currentTenant?.id;
+      if (!currentTenantId) {
+        Alert.alert('Error', 'Unable to determine school context. Please try again.');
+        return;
+      }
+      
       const paymentData = {
         student_id: studentData?.id,
-        tenant_id: user?.tenant_id || null,
+        tenant_id: currentTenantId, // Use resolved tenant ID
         academic_year: selectedFeeComponent.academicYear || '2024-2025',
         fee_component: selectedFeeComponent.name,
         amount_paid: parseFloat(paymentAmount),

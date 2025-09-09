@@ -1,12 +1,115 @@
 import { enhancedNotificationService } from '../services/enhancedNotificationService';
 import { supabase, TABLES } from './supabase';
+import { getCurrentUserTenantByEmail } from './getTenantByEmail';
+import { getUserTenantFilteredNotifications, getTenantFilteredUnreadCount, markTenantNotificationAsRead } from './tenantNotificationFilter';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 
 /**
  * Notification Manager Utility for React Native App
  * Provides UI-level notification management functions and delivery mechanisms
+ * Implements email-based tenant system for multi-tenant isolation
  */
+
+/**
+ * Tenant validation and context management for notifications
+ */
+export const TenantNotificationUtils = {
+  /**
+   * Get current user's tenant information using email-based lookup
+   * @returns {Promise<Object>} Tenant information or error
+   */
+  async getCurrentUserTenant() {
+    try {
+      const result = await getCurrentUserTenantByEmail();
+      if (!result.success) {
+        console.error('❌ [TENANT_NOTIF] Failed to get current tenant:', result.error);
+        return { success: false, error: result.error };
+      }
+      
+      console.log('✅ [TENANT_NOTIF] Current tenant:', result.data.tenant.name);
+      return {
+        success: true,
+        tenantId: result.data.tenant.id,
+        tenantName: result.data.tenant.name,
+        userRecord: result.data.userRecord
+      };
+    } catch (error) {
+      console.error('❌ [TENANT_NOTIF] Error getting current tenant:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  /**
+   * Validate that a notification belongs to the current user's tenant
+   * @param {string} notificationId - Notification ID to validate
+   * @returns {Promise<Object>} Validation result
+   */
+  async validateNotificationAccess(notificationId) {
+    try {
+      const tenantResult = await this.getCurrentUserTenant();
+      if (!tenantResult.success) {
+        return { isValid: false, error: tenantResult.error };
+      }
+
+      // Check if notification belongs to current tenant
+      const { data: notification, error } = await supabase
+        .from(TABLES.NOTIFICATIONS)
+        .select('id, tenant_id, type')
+        .eq('id', notificationId)
+        .eq('tenant_id', tenantResult.tenantId)
+        .single();
+
+      if (error) {
+        console.error('❌ [TENANT_NOTIF] Error validating notification access:', error);
+        return { isValid: false, error: error.message };
+      }
+
+      if (!notification) {
+        return { isValid: false, error: 'Notification not found or access denied' };
+      }
+
+      return { isValid: true, notification, tenantId: tenantResult.tenantId };
+    } catch (error) {
+      console.error('❌ [TENANT_NOTIF] Error in validateNotificationAccess:', error);
+      return { isValid: false, error: error.message };
+    }
+  },
+
+  /**
+   * Get all users for the current tenant (for recipient selection)
+   * @returns {Promise<Array>} List of users in current tenant
+   */
+  async getTenantUsers() {
+    try {
+      const tenantResult = await this.getCurrentUserTenant();
+      if (!tenantResult.success) {
+        return { success: false, error: tenantResult.error, users: [] };
+      }
+
+      const { data: users, error } = await supabase
+        .from('users')
+        .select('id, email, full_name, role_id')
+        .eq('tenant_id', tenantResult.tenantId);
+
+      if (error) {
+        console.error('❌ [TENANT_NOTIF] Error fetching tenant users:', error);
+        return { success: false, error: error.message, users: [] };
+      }
+
+      console.log(`✅ [TENANT_NOTIF] Found ${users?.length || 0} users in tenant`);
+      return {
+        success: true,
+        users: users || [],
+        tenantId: tenantResult.tenantId,
+        tenantName: tenantResult.tenantName
+      };
+    } catch (error) {
+      console.error('❌ [TENANT_NOTIF] Error in getTenantUsers:', error);
+      return { success: false, error: error.message, users: [] };
+    }
+  }
+};
 
 /**
  * Notification delivery mechanisms
@@ -281,6 +384,12 @@ export class NotificationDeliveryManager {
 
   static async processNotificationDelivery(notificationId) {
     try {
+      // Validate tenant access before processing
+      const validation = await TenantNotificationUtils.validateNotificationAccess(notificationId);
+      if (!validation.isValid) {
+        throw new Error(`Access denied: ${validation.error}`);
+      }
+
       // Get notification and recipients
       const notification = await this.getNotificationById(notificationId);
       if (!notification) {
@@ -315,25 +424,59 @@ export class NotificationDeliveryManager {
   }
 
   static async getNotificationById(notificationId) {
-    const { data, error } = await supabase
-      .from(TABLES.NOTIFICATIONS)
-      .select('*')
-      .eq('id', notificationId)
-      .single();
+    try {
+      const tenantResult = await TenantNotificationUtils.getCurrentUserTenant();
+      if (!tenantResult.success) {
+        console.error('❌ [NOTIF_DELIVERY] No tenant context for notification fetch');
+        return null;
+      }
 
-    return error ? null : data;
+      const { data, error } = await supabase
+        .from(TABLES.NOTIFICATIONS)
+        .select('*')
+        .eq('id', notificationId)
+        .eq('tenant_id', tenantResult.tenantId)
+        .single();
+
+      if (error) {
+        console.error('❌ [NOTIF_DELIVERY] Error fetching notification:', error);
+        return null;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('❌ [NOTIF_DELIVERY] Exception in getNotificationById:', error);
+      return null;
+    }
   }
 
   static async getNotificationRecipients(notificationId) {
-    const { data, error } = await supabase
-      .from(TABLES.NOTIFICATION_RECIPIENTS)
-      .select(`
-        *,
-        users!inner(id, full_name, email, phone)
-      `)
-      .eq('notification_id', notificationId);
+    try {
+      const tenantResult = await TenantNotificationUtils.getCurrentUserTenant();
+      if (!tenantResult.success) {
+        console.error('❌ [NOTIF_DELIVERY] No tenant context for recipients fetch');
+        return [];
+      }
 
-    return error ? [] : data;
+      const { data, error } = await supabase
+        .from(TABLES.NOTIFICATION_RECIPIENTS)
+        .select(`
+          *,
+          users!inner(id, full_name, email, phone)
+        `)
+        .eq('notification_id', notificationId)
+        .eq('tenant_id', tenantResult.tenantId);
+
+      if (error) {
+        console.error('❌ [NOTIF_DELIVERY] Error fetching recipients:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('❌ [NOTIF_DELIVERY] Exception in getNotificationRecipients:', error);
+      return [];
+    }
   }
 
   static async updateDeliveryStatus(notificationId, deliveryResult) {
@@ -379,43 +522,79 @@ export class NotificationDeliveryManager {
  */
 export const NotificationUIUtils = {
   /**
-   * Get notifications for current user
+   * Get notifications for current user (tenant-aware using filtering utility)
    * @param {string} userId - Current user ID
    * @param {Object} options - Query options
    * @returns {Promise<Array>} Array of notifications
    */
   async getUserNotifications(userId, options = {}) {
-    const result = await enhancedNotificationService.getUserNotifications(userId, options);
-    return result.success ? result.notifications : [];
+    try {
+      console.log(`📱 [NOTIF_UI] Getting tenant-filtered notifications for user: ${userId}`);
+      
+      // Use the tenant filtering utility to get ONLY current tenant's notifications
+      const result = await getUserTenantFilteredNotifications(userId, {
+        unreadOnly: options.unreadOnly,
+        limit: options.limit || 50
+      });
+      
+      if (result.error) {
+        console.error('❌ [NOTIF_UI] Error fetching user notifications:', result.error);
+        return [];
+      }
+      
+      console.log(`✅ [NOTIF_UI] Found ${result.data.length} notifications for user in tenant ${result.tenantName}`);
+      return result.data;
+      
+    } catch (error) {
+      console.error('❌ [NOTIF_UI] Exception in getUserNotifications:', error);
+      return [];
+    }
   },
 
   /**
-   * Mark notification as read
+   * Mark notification as read (tenant-aware using filtering utility)
    * @param {string} notificationId - Notification ID
    * @param {string} userId - User ID
    * @returns {Promise<boolean>} Success status
    */
   async markAsRead(notificationId, userId) {
-    const result = await enhancedNotificationService.markNotificationAsRead(notificationId, userId);
-    return result.success;
+    try {
+      console.log(`📋 [NOTIF_UI] Marking notification as read with tenant validation`);
+      
+      // Use the tenant filtering utility to mark as read with validation
+      const result = await markTenantNotificationAsRead(notificationId, userId);
+      
+      if (!result.success) {
+        console.error('❌ [NOTIF_UI] Failed to mark as read:', result.error);
+        return false;
+      }
+      
+      console.log(`✅ [NOTIF_UI] Successfully marked notification ${notificationId} as read`);
+      return true;
+      
+    } catch (error) {
+      console.error('❌ [NOTIF_UI] Exception in markAsRead:', error);
+      return false;
+    }
   },
 
   /**
-   * Get unread notification count
+   * Get unread notification count (tenant-aware using filtering utility)
    * @param {string} userId - User ID
    * @returns {Promise<number>} Unread count
    */
   async getUnreadCount(userId) {
     try {
-      const { count, error } = await supabase
-        .from(TABLES.NOTIFICATION_RECIPIENTS)
-        .select('*', { count: 'exact', head: true })
-        .eq('recipient_id', userId)
-        .eq('is_read', false);
-
-      return error ? 0 : count;
+      console.log(`🔢 [UNREAD_COUNT] Getting tenant-filtered unread count for user: ${userId}`);
+      
+      // Use the tenant filtering utility to get unread count with validation
+      const count = await getTenantFilteredUnreadCount(userId);
+      
+      console.log(`✅ [UNREAD_COUNT] Found ${count} unread notifications with tenant filtering`);
+      return count;
+      
     } catch (error) {
-      console.error('❌ [UNREAD_COUNT] Error:', error);
+      console.error('❌ [UNREAD_COUNT] Exception:', error);
       return 0;
     }
   },

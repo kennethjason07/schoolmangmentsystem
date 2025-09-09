@@ -14,9 +14,23 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../utils/supabase';
 import { useAuth } from '../utils/AuthContext';
+import { useTenant } from '../contexts/TenantContext';
+import { TenantNotificationUtils } from '../utils/notificationManager';
+
+// Helper function to convert role_id to role name
+const getRoleName = (roleId) => {
+  const roleMap = {
+    1: 'admin',
+    2: 'student', 
+    3: 'parent',
+    4: 'teacher'
+  };
+  return roleMap[roleId] || 'unknown';
+};
 
 const PushNotificationManager = ({ visible, onClose }) => {
   const { user } = useAuth();
+  const { tenantId, tenantName, loading: tenantLoading } = useTenant();
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   
@@ -66,31 +80,47 @@ const PushNotificationManager = ({ visible, onClose }) => {
     try {
       setLoading(true);
       
-      // Load users with push tokens
-      const { data: usersData, error } = await supabase
+      // Check tenant context first
+      if (!tenantId) {
+        console.error('❌ [PUSH_NOTIF] No tenant context available');
+        Alert.alert('Error', 'Tenant information not available. Please try again.');
+        return;
+      }
+      
+      console.log(`📱 [PUSH_NOTIF] Loading users for tenant: ${tenantName} (${tenantId})`);
+      
+      // Load tenant users using the utility function
+      const tenantUsersResult = await TenantNotificationUtils.getTenantUsers();
+      if (!tenantUsersResult.success) {
+        console.error('❌ [PUSH_NOTIF] Failed to load tenant users:', tenantUsersResult.error);
+        Alert.alert('Error', `Failed to load users: ${tenantUsersResult.error}`);
+        return;
+      }
+      
+      // Filter users with push tokens
+      const { data: pushTokenUsers, error } = await supabase
         .from('users')
         .select(`
           id,
           email,
-          role,
-          profile:user_profiles(first_name, last_name),
+          role_id,
+          full_name,
           push_tokens!inner(id, is_active)
         `)
+        .eq('tenant_id', tenantId)
         .eq('push_tokens.is_active', true);
 
       if (error) {
-        console.error('Error loading users:', error);
+        console.error('❌ [PUSH_NOTIF] Error loading users with push tokens:', error);
         Alert.alert('Error', 'Failed to load users with push notifications enabled');
         return;
       }
 
-      const processedUsers = (usersData || []).map(user => ({
+      const processedUsers = (pushTokenUsers || []).map(user => ({
         id: user.id,
         email: user.email,
-        role: user.role,
-        name: user.profile ? 
-          `${user.profile.first_name || ''} ${user.profile.last_name || ''}`.trim() :
-          user.email,
+        role: getRoleName(user.role_id), // Convert role_id to role name
+        name: user.full_name || user.email,
         hasActiveTokens: user.push_tokens && user.push_tokens.length > 0,
       }));
 
@@ -188,41 +218,83 @@ const PushNotificationManager = ({ visible, onClose }) => {
 
       setSending(true);
 
-      // Create notification records
-      const notifications = selectedUsers.map(user => ({
-        user_id: user.id,
+      // Check tenant context before creating notifications
+      if (!tenantId) {
+        Alert.alert('Error', 'Tenant information not available. Please try again.');
+        return;
+      }
+      
+      console.log(`📱 [PUSH_NOTIF] Creating notifications for tenant: ${tenantName}`);
+      
+      // Create notification record (one notification with multiple recipients)
+      const notificationData = {
         title: title.trim(),
         message: message.trim(),
         type: 'push_notification',
+        delivery_mode: 'InApp',
+        delivery_status: 'Pending',
         priority: isUrgent ? 'urgent' : priority,
-        is_read: false,
-        created_by: user.id, // Admin who sent it
+        created_by: user?.id || null,
+        tenant_id: tenantId, // Include tenant_id for data isolation
         created_at: new Date().toISOString(),
         data: {
           push_notification: true,
           sender_name: 'School Administration',
-          sender_id: user.id,
+          sender_id: user?.id,
+          tenant_name: tenantName
         }
-      }));
+      };
 
-      // Store notifications in database
-      const { error: notificationError } = await supabase
+      // Store notification in database
+      const { data: notificationResult, error: notificationError } = await supabase
         .from('notifications')
-        .insert(notifications);
+        .insert(notificationData)
+        .select()
+        .single();
 
       if (notificationError) {
-        console.error('Error storing notifications:', notificationError);
-        Alert.alert('Error', 'Failed to store notifications in database');
+        console.error('❌ [PUSH_NOTIF] Error storing notification:', notificationError);
+        Alert.alert('Error', 'Failed to store notification in database');
         return;
       }
+      
+      console.log(`✅ [PUSH_NOTIF] Created notification with ID: ${notificationResult.id}`);
+      
+      // Create notification recipients
+      const recipients = selectedUsers.map(selectedUser => ({
+        notification_id: notificationResult.id,
+        recipient_id: selectedUser.id,
+        recipient_type: selectedUser.role === 'student' ? 'Student' : selectedUser.role === 'parent' ? 'Parent' : 'User',
+        delivery_status: 'Pending',
+        tenant_id: tenantId,
+        created_at: new Date().toISOString()
+      }));
+      
+      // Insert recipients
+      const { error: recipientsError } = await supabase
+        .from('notification_recipients')
+        .insert(recipients);
+      
+      if (recipientsError) {
+        console.error('❌ [PUSH_NOTIF] Error creating recipients:', recipientsError);
+        Alert.alert('Error', 'Failed to create notification recipients');
+        return;
+      }
+      
+      console.log(`✅ [PUSH_NOTIF] Created ${recipients.length} notification recipients`);
 
-      // Get push tokens for selected users
+      // Get push tokens for selected users (with tenant validation)
       const userIds = selectedUsers.map(u => u.id);
       const { data: tokens, error: tokensError } = await supabase
         .from('push_tokens')
-        .select('token, user_id')
+        .select(`
+          token, 
+          user_id,
+          users!inner(tenant_id)
+        `)
         .in('user_id', userIds)
-        .eq('is_active', true);
+        .eq('is_active', true)
+        .eq('users.tenant_id', tenantId); // Ensure tokens belong to current tenant
 
       if (tokensError) {
         console.error('Error getting push tokens:', tokensError);
@@ -314,6 +386,43 @@ const PushNotificationManager = ({ visible, onClose }) => {
   };
 
   if (!visible) return null;
+  
+  // Show loading if tenant context is still loading
+  if (tenantLoading) {
+    return (
+      <Modal
+        visible={visible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={onClose}
+      >
+        <View style={[styles.container, styles.loadingContainer]}>
+          <ActivityIndicator size="large" color="#2196F3" />
+          <Text style={styles.loadingText}>Loading tenant information...</Text>
+        </View>
+      </Modal>
+    );
+  }
+  
+  // Show error if no tenant context
+  if (!tenantId) {
+    return (
+      <Modal
+        visible={visible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={onClose}
+      >
+        <View style={[styles.container, styles.loadingContainer]}>
+          <Ionicons name="alert-circle-outline" size={64} color="#F44336" />
+          <Text style={styles.errorText}>Tenant information not available</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={onClose}>
+            <Text style={styles.retryButtonText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+    );
+  }
 
   return (
     <Modal
@@ -755,6 +864,24 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 16,
     color: '#666',
+  },
+  errorText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#F44336',
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 20,
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   section: {
     marginBottom: 24,

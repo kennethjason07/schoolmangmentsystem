@@ -5,7 +5,6 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../utils/AuthContext';
 import { supabase } from '../utils/supabase';
 import UniversalNotificationBadge from './UniversalNotificationBadge';
-import DebugBadge from './DebugBadge';
 import universalNotificationService from '../services/UniversalNotificationService';
 
 const Header = ({ title, showBack = false, showProfile = true, showNotifications = false, onProfilePress, onNotificationsPress, unreadCount = 0, rightComponent }) => {

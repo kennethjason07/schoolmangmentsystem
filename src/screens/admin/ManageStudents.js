@@ -302,9 +302,6 @@ const ManageStudents = () => {
       console.log(`📋 Processing ${allParentsData?.length || 0} parent records...`);
       
       (allParentsData || []).forEach((parent, index) => {
-        if (index < 5) { // Log first 5 records for debugging
-          console.log(`Parent Record ${index}:`, parent);
-        }
         
         if (!parentsLookup[parent.student_id]) {
           parentsLookup[parent.student_id] = { father: null, mother: null, phone: null, email: null };
@@ -582,31 +579,6 @@ const ManageStudents = () => {
     setModalVisible(true);
   };
 
-  // Debug function to add a test student
-  const addTestStudent = async () => {
-    try {
-      const testStudent = {
-        admission_no: `TEST${Date.now()}`,
-        name: 'Test Student',
-        dob: '2010-01-01',
-        gender: 'Male',
-        nationality: 'Indian',
-        academic_year: '2024-25',
-        general_behaviour: 'Normal'
-      };
-
-      const { error } = await supabase
-        .from(TABLES.STUDENTS)
-        .insert(testStudent);
-
-      if (error) throw error;
-
-      Alert.alert('Success', 'Test student added successfully');
-      await loadAllData();
-    } catch (error) {
-      Alert.alert('Error', 'Failed to add test student: ' + error.message);
-    }
-  };
 
   const handleFormChange = (field, value) => {
     setForm({ ...form, [field]: value });
@@ -1373,13 +1345,6 @@ const ManageStudents = () => {
                     <Ionicons name="add-circle" size={20} color="#fff" />
                     <Text style={styles.emptyActionText}>Add First Student</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.emptySecondaryButton}
-                    onPress={addTestStudent}
-                  >
-                    <Ionicons name="flask" size={16} color="#2196F3" />
-                    <Text style={styles.emptySecondaryText}>Add Test Data</Text>
-                  </TouchableOpacity>
                 </>
               ) : (
                 <TouchableOpacity
@@ -1398,10 +1363,6 @@ const ManageStudents = () => {
               )}
             </View>
 
-            {/* Debug Info */}
-            <Text style={styles.debugText}>
-              Total: {students.length} • Filtered: {filteredStudents.length}
-            </Text>
           </View>
         }
       />
@@ -2187,32 +2148,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
-  },
-  emptySecondaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f8f9fa',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#2196F3',
-  },
-  emptySecondaryText: {
-    color: '#2196F3',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 6,
-  },
-  debugText: {
-    fontSize: 12,
-    color: '#999',
-    textAlign: 'center',
-    fontFamily: 'monospace',
-    backgroundColor: '#f8f9fa',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
   },
 
   // Modern FAB
