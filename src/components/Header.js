@@ -7,6 +7,7 @@ import { supabase } from '../utils/supabase';
 import UniversalNotificationBadge from './UniversalNotificationBadge';
 import WebOptimizedNotificationBadge from './WebOptimizedNotificationBadge';
 import NotificationPopup from './NotificationPopup';
+import NotificationBellBadge from './NotificationBellBadge';
 import DebugBadge from './DebugBadge';
 import universalNotificationService from '../services/UniversalNotificationService';
 

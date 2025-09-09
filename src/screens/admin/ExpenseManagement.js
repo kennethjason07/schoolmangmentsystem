@@ -92,8 +92,15 @@ const ExpenseManagement = ({ navigation }) => {
 
   const loadExpenseData = async () => {
     try {
+      // 🛡️ Ensure tenant context is available before proceeding
+      if (!tenantId) {
+        console.log('⏳ ExpenseManagement: Waiting for tenant context to be available...');
+        setLoading(false);
+        return;
+      }
+      
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'ExpenseManagement - loadExpenseData');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ExpenseManagement - loadExpenseData');
       if (!validation.isValid) {
         console.error('❌ ExpenseManagement loadExpenseData: Tenant validation failed:', validation.error);
         Alert.alert('Access Denied', validation.error);
@@ -296,15 +303,21 @@ const ExpenseManagement = ({ navigation }) => {
     }
   };
 
+  // Only load data when tenantId is available
   useEffect(() => {
-    loadExpenseData();
-  }, [selectedMonth]);
+    if (tenantId) {
+      console.log('🔄 ExpenseManagement: tenantId available, loading expense data...');
+      loadExpenseData();
+    } else {
+      console.log('⏳ ExpenseManagement: Waiting for tenantId to become available...');
+    }
+  }, [selectedMonth, tenantId]); // Add tenantId as dependency
   
-  // Load categories on mount and when needed, but don't reload data
+  // Load categories when tenantId is available
   useEffect(() => {
     const loadCategoriesOnMount = async () => {
-      if (expenseCategories.length === 0) {
-        console.log('🏷️ Loading categories on mount...');
+      if (expenseCategories.length === 0 && tenantId) {
+        console.log('🏷️ Loading categories on mount with tenantId:', tenantId);
         const { data: dbCategories, error: categoriesError } = await dbHelpers.getExpenseCategories(tenantId);
         
         if (categoriesError) {
@@ -340,7 +353,7 @@ const ExpenseManagement = ({ navigation }) => {
     };
     
     loadCategoriesOnMount();
-  }, []); // Only run once on mount
+  }, [tenantId]); // Run when tenantId becomes available
   
   // Re-calculate expense stats when categories become available
   useEffect(() => {
@@ -382,7 +395,7 @@ const ExpenseManagement = ({ navigation }) => {
 
   const saveExpense = async () => {
     // 🛡️ Validate tenant access first
-    const validation = await validateTenantAccess(tenantId, user?.id, 'ExpenseManagement - saveExpense');
+    const validation = await validateTenantAccess(user?.id, tenantId, 'ExpenseManagement - saveExpense');
     if (!validation.isValid) {
       Alert.alert('Access Denied', validation.error);
       return;
@@ -468,7 +481,7 @@ const ExpenseManagement = ({ navigation }) => {
           onPress: async () => {
             try {
               // 🛡️ Validate tenant access first
-              const validation = await validateTenantAccess(tenantId, user?.id, 'ExpenseManagement - deleteExpense');
+              const validation = await validateTenantAccess(user?.id, tenantId, 'ExpenseManagement - deleteExpense');
               if (!validation.isValid) {
                 Alert.alert('Access Denied', validation.error);
                 return;
@@ -530,7 +543,7 @@ const ExpenseManagement = ({ navigation }) => {
   const saveBudgets = async () => {
     try {
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'ExpenseManagement - saveBudgets');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ExpenseManagement - saveBudgets');
       if (!validation.isValid) {
         Alert.alert('Access Denied', validation.error);
         return;

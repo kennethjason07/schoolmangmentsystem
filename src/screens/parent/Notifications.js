@@ -65,7 +65,7 @@ const Notifications = ({ navigation }) => {
       // 🛡️ STEP 1: Validate tenant access
       console.log('🛡️ [PARENT_NOTIFICATIONS] Validating tenant access...');
       const tenantId = currentTenant?.id;
-      const validation = await validateTenantAccess(tenantId, user?.id, 'ParentNotifications');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ParentNotifications');
       
       if (!validation.isValid) {
         console.error('❌ [PARENT_NOTIFICATIONS] Tenant validation failed:', validation.error);
@@ -340,7 +340,7 @@ const Notifications = ({ navigation }) => {
       // 🛡️ Validate tenant access before marking as read
       console.log('🛡️ [PARENT_NOTIFICATIONS] Validating tenant access for mark as read...');
       const tenantId = currentTenant?.id;
-      const validation = await validateTenantAccess(tenantId, user?.id, 'ParentNotifications-MarkRead');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ParentNotifications-MarkRead');
       
       if (!validation.isValid) {
         console.error('❌ [PARENT_NOTIFICATIONS] Mark as read failed - tenant validation failed:', validation.error);
@@ -563,7 +563,7 @@ const Notifications = ({ navigation }) => {
       // 🛡️ Validate tenant access before marking as unread
       console.log('🛡️ [PARENT_NOTIFICATIONS] Validating tenant access for mark as unread...');
       const tenantId = currentTenant?.id;
-      const validation = await validateTenantAccess(tenantId, user?.id, 'ParentNotifications-MarkUnread');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ParentNotifications-MarkUnread');
       
       if (!validation.isValid) {
         console.error('❌ [PARENT_NOTIFICATIONS] Mark as unread failed - tenant validation failed:', validation.error);

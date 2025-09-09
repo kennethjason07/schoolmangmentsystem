@@ -50,7 +50,7 @@ const MarksEntry = () => {
       setLoading(true);
       
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'MarksEntry - loadData');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'MarksEntry - loadData');
       if (!validation.isValid) {
         console.error('❌ MarksEntry loadData: Tenant validation failed:', validation.error);
         Alert.alert('Access Denied', validation.error);
@@ -60,7 +60,7 @@ const MarksEntry = () => {
 
       // Load subjects for the class using tenant-aware query
       const { data: subjectsData, error: subjectsError } = await createTenantQuery(tenantId, 'subjects')
-        .select('id, name, class_id, academic_year, is_optional, created_at')
+        .select('id, name, class_id, academic_year, is_optional, tenant_id, created_at')
         .eq('class_id', examClass.id)
         .execute();
 
@@ -68,7 +68,7 @@ const MarksEntry = () => {
 
       // Load students for the class using tenant-aware query
       const { data: studentsData, error: studentsError } = await createTenantQuery(tenantId, 'students')
-        .select('id, admission_no, name, roll_no, class_id, academic_year, created_at')
+        .select('id, admission_no, name, roll_no, class_id, academic_year, tenant_id, created_at')
         .eq('class_id', examClass.id)
         .execute();
 
@@ -76,7 +76,7 @@ const MarksEntry = () => {
 
       // Load existing marks for this exam using tenant-aware query
       const { data: marksData, error: marksError } = await createTenantQuery(tenantId, 'marks')
-        .select('id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks, created_at')
+        .select('id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks, tenant_id, created_at')
         .eq('exam_id', exam.id)
         .execute();
 
@@ -169,7 +169,7 @@ const MarksEntry = () => {
   const handleBulkSaveMarks = async () => {
     try {
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'MarksEntry - handleBulkSaveMarks');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'MarksEntry - handleBulkSaveMarks');
       if (!validation.isValid) {
         Alert.alert('Access Denied', validation.error);
         return;
@@ -211,7 +211,7 @@ const MarksEntry = () => {
               marks_obtained: marksValue,
               grade: grade,
               max_marks: maxMarks, // Store exam's max_marks
-              remarks: null,
+              remarks: exam.name || 'Exam', // Store exam name as remarks
               tenant_id: tenantId
             });
           }
@@ -239,7 +239,7 @@ const MarksEntry = () => {
           await createBulkMarksNotifications(
             marksToSave,
             exam,
-            null // Admin user ID - you can pass actual admin user ID here
+            user?.id // Pass the current user ID as admin user ID
           );
         } catch (notificationError) {
           // Log error but don't show to user - notifications are secondary

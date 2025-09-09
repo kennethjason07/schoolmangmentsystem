@@ -18,7 +18,7 @@ const getCacheKey = (tenantId, userId) => `${tenantId}_${userId}`;
  * @param {string} screenName - Name of the screen/component for logging
  * @returns {Promise<{isValid: boolean, tenant: object|null, error: string|null}>}
  */
-export const validateTenantAccess = async (tenantId, userId, screenName = 'Unknown') => {
+export const validateTenantAccess = async (userId, tenantId, screenName = 'Unknown') => {
   // Check cache first
   const cacheKey = getCacheKey(tenantId, userId);
   const cached = validationCache.get(cacheKey);
@@ -26,21 +26,21 @@ export const validateTenantAccess = async (tenantId, userId, screenName = 'Unkno
     return cached.result;
   }
   
-  // Step 1: Check if tenant ID is provided
-  if (!tenantId) {
-    return {
-      isValid: false,
-      tenant: null,
-      error: 'No tenant context available. Please contact administrator.'
-    };
-  }
-  
-  // Step 2: Check if user ID is provided
+  // Step 1: Check if user ID is provided
   if (!userId) {
     return {
       isValid: false,
       tenant: null,
       error: 'User not authenticated.'
+    };
+  }
+  
+  // Step 2: Check if tenant ID is provided
+  if (!tenantId) {
+    return {
+      isValid: false,
+      tenant: null,
+      error: 'No tenant context available. Please contact administrator.'
     };
   }
   
@@ -233,10 +233,110 @@ export class TenantAwareQueryBuilder {
     return this;
   }
   
+  overlaps(column, values) {
+    if (!this.currentQuery) throw new Error('Call .select() first');
+    this.currentQuery = this.currentQuery.overlaps(column, values);
+    return this;
+  }
+  
+  contains(column, values) {
+    if (!this.currentQuery) throw new Error('Call .select() first');
+    this.currentQuery = this.currentQuery.contains(column, values);
+    return this;
+  }
+  
+  containedBy(column, values) {
+    if (!this.currentQuery) throw new Error('Call .select() first');
+    this.currentQuery = this.currentQuery.containedBy(column, values);
+    return this;
+  }
+  
+  like(column, pattern) {
+    if (!this.currentQuery) throw new Error('Call .select() first');
+    this.currentQuery = this.currentQuery.like(column, pattern);
+    return this;
+  }
+  
+  ilike(column, pattern) {
+    if (!this.currentQuery) throw new Error('Call .select() first');
+    this.currentQuery = this.currentQuery.ilike(column, pattern);
+    return this;
+  }
+  
+  is(column, value) {
+    if (!this.currentQuery) throw new Error('Call .select() first');
+    this.currentQuery = this.currentQuery.is(column, value);
+    return this;
+  }
+  
+  not(column, operator, value) {
+    if (!this.currentQuery) throw new Error('Call .select() first');
+    this.currentQuery = this.currentQuery.not(column, operator, value);
+    return this;
+  }
+  
+  or(filters) {
+    if (!this.currentQuery) throw new Error('Call .select() first');
+    this.currentQuery = this.currentQuery.or(filters);
+    return this;
+  }
+  
+  and(filters) {
+    if (!this.currentQuery) throw new Error('Call .select() first');
+    this.currentQuery = this.currentQuery.and(filters);
+    return this;
+  }
+  
+  // UPDATE operations
+  update(data) {
+    if (!this.baseQuery) {
+      throw new Error(`Base query not initialized for table '${this.tableName}'`);
+    }
+    
+    // Ensure tenant_id is included in update data
+    const updatedData = { ...data, tenant_id: this.tenantId };
+    
+    // Start with update and apply tenant filter
+    this.currentQuery = this.baseQuery.update(updatedData).eq('tenant_id', this.tenantId);
+    
+    return this;
+  }
+  
+  // INSERT operations
+  insert(data) {
+    if (!this.baseQuery) {
+      throw new Error(`Base query not initialized for table '${this.tableName}'`);
+    }
+    
+    // Ensure tenant_id is included in all insert data
+    let insertData;
+    if (Array.isArray(data)) {
+      insertData = data.map(item => ({ ...item, tenant_id: this.tenantId }));
+    } else {
+      insertData = { ...data, tenant_id: this.tenantId };
+    }
+    
+    this.currentQuery = this.baseQuery.insert(insertData);
+    
+    return this;
+  }
+  
+  // DELETE operations
+  delete() {
+    if (!this.baseQuery) {
+      throw new Error(`Base query not initialized for table '${this.tableName}'`);
+    }
+    
+    // Start with delete and apply tenant filter
+    this.currentQuery = this.baseQuery.delete().eq('tenant_id', this.tenantId);
+    
+    return this;
+  }
+  
   // Execute the query
   async execute() {
     if (!this.currentQuery) {
-      throw new Error(`Query not properly initialized for table '${this.tableName}'. Call .select() first.`);
+      throw new Error(`Query not properly initialized for table '${this.tableName}'. Call .select(), .update(), .insert(), or .delete() first.`);
     }
     
     console.log(`🔍 [TENANT_QUERY] Executing query for table '${this.tableName}' with tenant_id: ${this.tenantId}`);

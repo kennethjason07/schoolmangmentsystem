@@ -130,7 +130,7 @@ const ManageTeachers = ({ navigation, route }) => {
       }
       
       // 🛑️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'ManageTeachers');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ManageTeachers');
       if (!validation.isValid) {
         console.error('❌ ManageTeachers: Tenant validation failed:', validation.error);
         setError(validation.error);
@@ -402,7 +402,7 @@ const ManageTeachers = ({ navigation, route }) => {
     });
     
     // 🛑️ Validate tenant access first
-    const validation = await validateTenantAccess(tenantId, user?.id, 'ManageTeachers - Save');
+    const validation = await validateTenantAccess(user?.id, tenantId, 'ManageTeachers - Save');
     if (!validation.isValid) {
       console.error('❌ ManageTeachers: Save validation failed:', validation.error);
       Alert.alert('Access Denied', validation.error);
@@ -504,7 +504,7 @@ const ManageTeachers = ({ navigation, route }) => {
       console.log('Form data:', { subjects: form.subjects, classes: form.classes, sections: form.sections });
 
       // 🛡️ Validate tenant access for assignments
-      const validation = await validateTenantAccess(tenantId, user?.id, 'ManageTeachers - Assignments');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ManageTeachers - Assignments');
       if (!validation.isValid) {
         throw new Error(`Assignment access denied: ${validation.error}`);
       }
@@ -636,7 +636,7 @@ const ManageTeachers = ({ navigation, route }) => {
             try {
               // 🛑️ Validate tenant access for deletion
               console.log('🏢 ManageTeachers: Delete validation for tenant:', tenantId);
-              const validation = await validateTenantAccess(tenantId, user?.id, 'ManageTeachers - Delete');
+              const validation = await validateTenantAccess(user?.id, tenantId, 'ManageTeachers - Delete');
               if (!validation.isValid) {
                 console.error('❌ ManageTeachers: Delete validation failed:', validation.error);
                 Alert.alert('Access Denied', validation.error);

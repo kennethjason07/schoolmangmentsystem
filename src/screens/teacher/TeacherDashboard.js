@@ -12,8 +12,6 @@ import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import MessageBadge from '../../components/MessageBadge';
 import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificationCount';
-import DebugBadge from '../../components/DebugBadge';
-import NotificationTester from '../../components/NotificationTester';
 import { 
   validateTenantAccess, 
   createTenantQuery, 
@@ -21,6 +19,7 @@ import {
   TENANT_ERROR_MESSAGES 
 } from '../../utils/tenantValidation';
 import { useTenantContext } from '../../contexts/TenantContext';
+import { useGlobalRefresh } from '../../contexts/GlobalRefreshContext';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -33,7 +32,7 @@ const TeacherDashboard = ({ navigation }) => {
   const [showAllAdminTasks, setShowAllAdminTasks] = useState(false);
   const [showAllPersonalTasks, setShowAllPersonalTasks] = useState(false);
   const [showAddTaskBar, setShowAddTaskBar] = useState(false);
-  const [newTask, setNewTask] = useState({ task: '', type: 'attendance', due: '', priority: 'medium' });
+  const [newTask, setNewTask] = useState({ title: '', description: '', type: 'attendance', due: '', priority: 'medium' });
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [addTaskModalVisible, setAddTaskModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -52,6 +51,9 @@ const [teacherProfile, setTeacherProfile] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date()); // Add current time state
   const { user } = useAuth();
   const { tenantId } = useTenantContext();
+  
+  // Global refresh hook for cross-screen refresh functionality
+  const { registerRefreshCallback, triggerScreenRefresh } = useGlobalRefresh();
 
 // Helper to extract class order key
 function getClassOrderKey(className) {
@@ -220,13 +222,13 @@ function groupAndSortSchedule(schedule) {
       
       // Validate teacher data belongs to correct tenant
       if (teacherData && teacherData.tenant_id) {
-        const teacherValidation = await validateDataTenancy([{ 
+        const teacherValidation = validateDataTenancy([{ 
           id: teacherData.id, 
           tenant_id: teacherData.tenant_id 
-        }], tenantId);
+        }], tenantId, 'Teacher data validation');
         
-        if (!teacherValidation.isValid) {
-          console.error('❌ Teacher data validation failed:', teacherValidation.error);
+        if (!teacherValidation) {
+          console.error('❌ Teacher data validation failed: undefined');
           Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
           setError('Data validation failed');
           setLoading(false);
@@ -238,10 +240,10 @@ function groupAndSortSchedule(schedule) {
       setTeacherProfile(teacher);
 
       // Start fetching multiple data sources in parallel for better performance with tenant isolation
-      const tenantSubjectQuery = createTenantQuery(supabase.from(TABLES.TEACHER_SUBJECTS), tenantId);
-      const tenantClassQuery = createTenantQuery(supabase.from(TABLES.CLASSES), tenantId);
-      const tenantNotificationQuery = createTenantQuery(supabase.from(TABLES.NOTIFICATIONS), tenantId);
-      const tenantTaskQuery = createTenantQuery(supabase.from(TABLES.PERSONAL_TASKS), tenantId);
+      const tenantSubjectQuery = createTenantQuery(tenantId, TABLES.TEACHER_SUBJECTS);
+      const tenantClassQuery = createTenantQuery(tenantId, TABLES.CLASSES);
+      const tenantNotificationQuery = createTenantQuery(tenantId, TABLES.NOTIFICATIONS);
+      const tenantTaskQuery = createTenantQuery(tenantId, TABLES.PERSONAL_TASKS);
       
       const [
         subjectsResponse,
@@ -260,7 +262,8 @@ function groupAndSortSchedule(schedule) {
               classes(class_name, section)
             )
           `)
-          .eq('teacher_id', teacher.id),
+          .eq('teacher_id', teacher.id)
+          .execute(),
         
         // Get class teacher assignments with tenant isolation
         tenantClassQuery
@@ -271,13 +274,15 @@ function groupAndSortSchedule(schedule) {
             academic_year,
             tenant_id
           `)
-          .eq('class_teacher_id', teacher.id),
+          .eq('class_teacher_id', teacher.id)
+          .execute(),
           
         // Get notifications with tenant isolation
         tenantNotificationQuery
           .select('*, tenant_id')
           .order('created_at', { ascending: false })
-          .limit(5),
+          .limit(5)
+          .execute(),
           
         // Get personal tasks with tenant isolation
         tenantTaskQuery
@@ -286,6 +291,7 @@ function groupAndSortSchedule(schedule) {
           .eq('status', 'pending')
           .order('priority', { ascending: false })
           .order('due_date', { ascending: true })
+          .execute()
       ]);
       
       // Process subject assignments
@@ -294,16 +300,17 @@ function groupAndSortSchedule(schedule) {
       if (subjectsError) throw subjectsError;
       
       // Validate subject assignments belong to correct tenant
-      const subjectValidation = await validateDataTenancy(
+      const subjectValidation = validateDataTenancy(
         assignedSubjects?.map(s => ({ 
           id: s.id, 
           tenant_id: s.tenant_id 
         })) || [],
-        tenantId
+        tenantId,
+        'Subject data validation'
       );
       
-      if (!subjectValidation.isValid) {
-        console.error('❌ Subject data validation failed:', subjectValidation.error);
+      if (!subjectValidation) {
+        console.error('❌ Subject data validation failed');
         Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
         return;
       }
@@ -315,16 +322,17 @@ function groupAndSortSchedule(schedule) {
       
       // Validate class teacher assignments belong to correct tenant
       if (classTeacherClasses && classTeacherClasses.length > 0) {
-        const classValidation = await validateDataTenancy(
+        const classValidation = validateDataTenancy(
           classTeacherClasses?.map(c => ({ 
             id: c.id, 
             tenant_id: c.tenant_id 
           })) || [],
-          tenantId
+          tenantId,
+          'Class teacher data validation'
         );
         
-        if (!classValidation.isValid) {
-          console.error('❌ Class teacher data validation failed:', classValidation.error);
+        if (!classValidation) {
+          console.error('❌ Class teacher data validation failed');
           Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
           return;
         }
@@ -367,7 +375,7 @@ function groupAndSortSchedule(schedule) {
       const todayName = dayNames[today];
 
       // Start another parallel fetch for the timetable with tenant isolation
-      const tenantTimetableQuery = createTenantQuery(supabase.from(TABLES.TIMETABLE), tenantId);
+      const tenantTimetableQuery = createTenantQuery(tenantId, TABLES.TIMETABLE);
       const timetableResponse = await tenantTimetableQuery
         .select(`
           id, start_time, end_time, period_number, day_of_week, academic_year, tenant_id,
@@ -376,7 +384,8 @@ function groupAndSortSchedule(schedule) {
         `)
         .eq('teacher_id', teacher.id)
         .eq('day_of_week', todayName)
-        .order('start_time');
+        .order('start_time')
+        .execute();
         
       // Process notifications from parallel fetch
       const notificationsData = notificationsResponse.data || [];
@@ -386,6 +395,21 @@ function groupAndSortSchedule(schedule) {
       // Process personal tasks from parallel fetch
       const personalTasksData = personalTasksResponse.data || [];
       const allPersonalTasks = personalTasksData || [];
+      
+      // Debug: Log the actual task data to understand the "Happy" issue
+      console.log('🔍 [DEBUG] Personal tasks data:', allPersonalTasks);
+      allPersonalTasks.forEach((task, index) => {
+        console.log(`📝 [DEBUG] Task ${index + 1}:`, {
+          id: task.id,
+          task_title: task.task_title,
+          task_description: task.task_description,
+          task_type: task.task_type,
+          priority: task.priority,
+          due_date: task.due_date,
+          status: task.status
+        });
+      });
+      
       setAllPersonalTasks(allPersonalTasks);
       setPersonalTasks(allPersonalTasks.slice(0, 3)); // Show first 3
       
@@ -407,16 +431,17 @@ function groupAndSortSchedule(schedule) {
         
         // Validate timetable data belongs to correct tenant
         if (timetableData && timetableData.length > 0) {
-          const timetableValidation = await validateDataTenancy(
+          const timetableValidation = validateDataTenancy(
             timetableData?.map(t => ({ 
               id: t.id, 
               tenant_id: t.tenant_id 
             })) || [],
-            tenantId
+            tenantId,
+            'Timetable data validation'
           );
           
-          if (!timetableValidation.isValid) {
-            console.error('❌ Timetable data validation failed:', timetableValidation.error);
+          if (!timetableValidation) {
+            console.error('❌ Timetable data validation failed');
             // Don't throw error, just set empty schedule for better UX
             setSchedule([]);
             return;
@@ -456,8 +481,8 @@ function groupAndSortSchedule(schedule) {
       setAnnouncements(notificationsData?.slice(0, 3) || []);
       
       // Start fetching admin tasks and events in parallel with tenant isolation
-      const tenantAdminTaskQuery = createTenantQuery(supabase.from(TABLES.TASKS), tenantId);
-      const tenantEventQuery = createTenantQuery(supabase.from('events'), tenantId);
+      const tenantAdminTaskQuery = createTenantQuery(tenantId, TABLES.TASKS);
+      const tenantEventQuery = createTenantQuery(tenantId, 'events');
       
       const [adminTasksResponse, eventsResponse] = await Promise.all([
         // Get admin tasks with tenant isolation
@@ -466,7 +491,8 @@ function groupAndSortSchedule(schedule) {
           .overlaps('assigned_teacher_ids', [teacher.id])
           .eq('status', 'Pending')
           .order('priority', { ascending: false })
-          .order('due_date', { ascending: true }),
+          .order('due_date', { ascending: true })
+          .execute(),
           
         // Get events with tenant isolation
         tenantEventQuery
@@ -475,6 +501,7 @@ function groupAndSortSchedule(schedule) {
           .gte('event_date', new Date().toISOString().split('T')[0])
           .order('event_date', { ascending: true })
           .limit(5)
+          .execute()
       ]);
 
       // Process events data from parallel fetch
@@ -581,22 +608,24 @@ function groupAndSortSchedule(schedule) {
         
         if (uniqueClassIds.length > 0) {
           // Get all students from these classes with tenant isolation
-          const tenantStudentQuery = createTenantQuery(supabase.from(TABLES.STUDENTS), tenantId);
+          const tenantStudentQuery = createTenantQuery(tenantId, TABLES.STUDENTS);
           const { data: allStudentsData, error: studentsError } = await tenantStudentQuery
             .select('id, class_id, name, tenant_id')
-            .in('class_id', uniqueClassIds);
+            .in('class_id', uniqueClassIds)
+            .execute();
 
           if (!studentsError && allStudentsData) {
             // Validate student data belongs to correct tenant
-            const studentValidation = await validateDataTenancy(
+            const studentValidation = validateDataTenancy(
               allStudentsData?.map(s => ({ 
                 id: s.id, 
                 tenant_id: s.tenant_id 
               })) || [],
-              tenantId
+              tenantId,
+              'TeacherDashboard-Students'
             );
             
-            if (studentValidation.isValid) {
+            if (studentValidation) {
               console.log('👥 Total students found across all classes:', allStudentsData.length);
               allStudentsData.forEach(student => {
                 uniqueStudentIds.add(student.id);
@@ -604,7 +633,7 @@ function groupAndSortSchedule(schedule) {
               });
               totalStudents = allStudentsData.length;
             } else {
-              console.error('❌ Student data validation failed:', studentValidation.error);
+              console.error('❌ Student data validation failed: Students do not belong to tenant', tenantId);
             }
           } else {
             console.log('❌ Error fetching students:', studentsError);
@@ -623,13 +652,14 @@ function groupAndSortSchedule(schedule) {
       let currentEventsForStats = [];
       try {
         const today = new Date().toISOString().split('T')[0];
-        const tenantStatsEventQuery = createTenantQuery(supabase.from('events'), tenantId);
+        const tenantStatsEventQuery = createTenantQuery(tenantId, 'events');
         const { data: statsEventsData } = await tenantStatsEventQuery
           .select('*, tenant_id')
           .eq('status', 'Active')
           .gte('event_date', today)
           .order('event_date', { ascending: true })
-          .limit(5);
+          .limit(5)
+          .execute();
         
         currentEventsForStats = statsEventsData || [];
         console.log('📊 Using current events for stats calculation:', currentEventsForStats.length);
@@ -710,6 +740,9 @@ function groupAndSortSchedule(schedule) {
 
   useEffect(() => {
     fetchDashboardData();
+    
+    // Register dashboard refresh callback with global refresh context
+    registerRefreshCallback('TeacherDashboard', fetchDashboardData);
     
     // Set up real-time subscriptions for dashboard updates
     const dashboardSubscription = supabase
@@ -844,11 +877,17 @@ function groupAndSortSchedule(schedule) {
     }
   }, [schedule, loading]);
 
-  // Pull-to-refresh handler
+  // Pull-to-refresh handler with cross-screen refresh
   const onRefresh = async () => {
     setRefreshing(true);
     try {
+      // Refresh dashboard data
       await fetchDashboardData();
+      
+      // Trigger refresh on TeacherNotifications screen to keep notifications in sync
+      console.log('🔄 [TeacherDashboard] Triggering cross-screen refresh for TeacherNotifications...');
+      triggerScreenRefresh('TeacherNotifications');
+      
     } catch (error) {
       console.error('Error refreshing dashboard:', error);
     } finally {
@@ -861,37 +900,43 @@ function groupAndSortSchedule(schedule) {
       // Validate tenant access before completing task
       const tenantValidation = await validateTenantAccess(user.id, tenantId);
       if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed for complete task:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+        console.error('❌ [COMPLETE_TASK] Tenant validation failed:', tenantValidation.error);
+        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.ACCESS_DENIED);
         return;
       }
       
-      const tenantTaskQuery = createTenantQuery(supabase.from(TABLES.PERSONAL_TASKS), tenantId);
-      const { error } = await tenantTaskQuery
+      console.log('🔄 [COMPLETE_TASK] Completing personal task:', { id, user_id: user.id, tenantId });
+      
+      const tenantTaskQuery = createTenantQuery(tenantId, TABLES.PERSONAL_TASKS);
+      const { data, error } = await tenantTaskQuery
         .update({
           status: 'completed',
           completed_at: new Date().toISOString()
         })
         .eq('id', id)
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .execute();
 
       if (error) {
-        console.error('Error completing task:', error);
+        console.error('❌ [COMPLETE_TASK] Database error:', error);
         Alert.alert('Error', 'Failed to complete task. Please try again.');
         return;
       }
 
+      console.log('✅ [COMPLETE_TASK] Task completed successfully:', data);
+      
       // Remove the task from local state
       setPersonalTasks(tasks => tasks.filter(t => t.id !== id));
+      setAllPersonalTasks(tasks => tasks.filter(t => t.id !== id)); // Also remove from all tasks list
       Alert.alert('Success', 'Task completed successfully!');
     } catch (error) {
-      console.error('Error completing task:', error);
+      console.error('❌ [COMPLETE_TASK] Unexpected error:', error);
       Alert.alert('Error', 'Failed to complete task. Please try again.');
     }
   }
   async function handleAddTask() {
-    if (!newTask.task || !newTask.due) {
-      Alert.alert('Missing Fields', 'Please enter both a task description and due date.');
+    if (!newTask.title || !newTask.due) {
+      Alert.alert('Missing Fields', 'Please enter both a task title and due date.');
       return;
     }
 
@@ -899,43 +944,120 @@ function groupAndSortSchedule(schedule) {
       // Validate tenant access before adding task
       const tenantValidation = await validateTenantAccess(user.id, tenantId);
       if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed for add task:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+        console.error('❌ [ADD_TASK] Tenant validation failed:', tenantValidation.error);
+        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.ACCESS_DENIED);
         return;
       }
 
-      const tenantTaskQuery = createTenantQuery(supabase.from(TABLES.PERSONAL_TASKS), tenantId);
-      const { data, error } = await tenantTaskQuery
-        .insert([
-          {
-            user_id: user.id,
-            task_title: newTask.task,
-            task_description: newTask.task,
-            task_type: newTask.type,
-            priority: newTask.priority,
-            due_date: newTask.due,
-            status: 'pending',
-            tenant_id: tenantId // Use tenantId from context
-          }
-        ])
+      console.log('🔄 [ADD_TASK] Creating new task with data:', {
+        title: newTask.title,
+        description: newTask.description,
+        type: newTask.type,
+        priority: newTask.priority,
+        due: newTask.due,
+        user_id: user.id,
+        tenant_id: tenantId
+      });
+      
+      // Validate required fields
+      if (!user.id || !tenantId) {
+        console.error('❌ [ADD_TASK] Missing required IDs:', { user_id: user.id, tenant_id: tenantId });
+        Alert.alert('Error', 'Missing user or tenant information. Please log in again.');
+        return;
+      }
+      
+      // Check if personal_tasks table exists, if not, use the tasks table as fallback
+      let tableToUse = TABLES.PERSONAL_TASKS;
+      let insertData = {
+        user_id: user.id,
+        task_title: newTask.title,
+        task_description: newTask.description || newTask.title,
+        task_type: newTask.type,
+        priority: newTask.priority.toLowerCase(), // Match constraint (low, medium, high)
+        due_date: newTask.due,
+        status: 'pending', // Match constraint (pending, in progress, completed)
+        tenant_id: tenantId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      
+      // Try personal_tasks table first
+      console.log('🔄 [ADD_TASK] Attempting insert with data:', insertData);
+      console.log('🔄 [ADD_TASK] Using table:', tableToUse);
+      
+      let { data, error } = await supabase
+        .from(tableToUse)
+        .insert(insertData)
         .select();
+        
+      console.log('🔄 [ADD_TASK] Insert response:', { data, error });
+      
+      // If personal_tasks table doesn't exist or has issues, try the tasks table
+      if (error && (error.code === '42P01' || error.message.includes('relation "personal_tasks" does not exist'))) {
+        console.warn('⚠️ [ADD_TASK] personal_tasks table not found, using tasks table as fallback');
+        tableToUse = TABLES.TASKS;
+        // Adjust data format for tasks table which uses assigned_teacher_ids array
+        insertData = {
+          title: newTask.title,
+          description: newTask.description || newTask.title,
+          task_type: newTask.type,
+          priority: newTask.priority.charAt(0).toUpperCase() + newTask.priority.slice(1),
+          due_date: newTask.due,
+          status: 'Pending',
+          assigned_teacher_ids: [user.id], // Use array for tasks table
+          tenant_id: tenantId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        
+        const result = await supabase
+          .from(tableToUse)
+          .insert(insertData)
+          .select();
+        
+        data = result.data;
+        error = result.error;
+      }
 
       if (error) {
-        console.error('Error adding task:', error);
-        Alert.alert('Error', 'Failed to add task. Please try again.');
+        console.error('❌ [ADD_TASK] Database error:', error);
+        console.error('❌ [ADD_TASK] Error details:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+          table_used: tableToUse
+        });
+        Alert.alert('Error', `Failed to add task: ${error.message}`);
         return;
       }
 
       // Add the new task to the local state
       if (data && data[0]) {
-        setPersonalTasks(tasks => [data[0], ...tasks]);
+        console.log('✅ [ADD_TASK] Task created successfully in table:', tableToUse, data[0]);
+        
+        // Normalize the data structure for display
+        const normalizedTask = {
+          ...data[0],
+          task_title: data[0].task_title || data[0].title,
+          task_description: data[0].task_description || data[0].description,
+          task_type: data[0].task_type,
+          user_id: data[0].user_id || (data[0].assigned_teacher_ids && data[0].assigned_teacher_ids[0])
+        };
+        
+        setPersonalTasks(tasks => [normalizedTask, ...tasks]);
+        setAllPersonalTasks(tasks => [normalizedTask, ...tasks]);
+        
+        // Reset form and close modal
+        setNewTask({ title: '', description: '', type: 'attendance', due: '', priority: 'medium' });
+        setAddTaskModalVisible(false);
+        Alert.alert('Success', 'Personal task created successfully!');
+      } else {
+        console.error('❌ [ADD_TASK] No data returned from insert operation');
+        Alert.alert('Error', 'Task creation failed - no data returned.');
       }
-
-      setNewTask({ task: '', type: 'attendance', due: '', priority: 'medium' });
-      setAddTaskModalVisible(false);
-      Alert.alert('Success', 'Task added successfully!');
     } catch (error) {
-      console.error('Error adding task:', error);
+      console.error('❌ [ADD_TASK] Unexpected error:', error);
       Alert.alert('Error', 'Failed to add task. Please try again.');
     }
   }
@@ -949,14 +1071,15 @@ function groupAndSortSchedule(schedule) {
         return;
       }
       
-      const tenantAdminTaskQuery = createTenantQuery(supabase.from(TABLES.TASKS), tenantId);
+      const tenantAdminTaskQuery = createTenantQuery(tenantId, TABLES.TASKS);
       const { error } = await tenantAdminTaskQuery
         .update({
           status: 'Completed',
           completed_at: new Date().toISOString()
         })
         .eq('id', id)
-        .overlaps('assigned_teacher_ids', [teacherProfile?.id]);
+        .overlaps('assigned_teacher_ids', [teacherProfile?.id])
+        .execute();
 
       if (error) {
         console.error('Error completing admin task:', error);
@@ -1059,19 +1182,35 @@ function groupAndSortSchedule(schedule) {
   };
 
   // Use universal notification count hook for real-time badge updates
-  const { totalCount: unreadCount = 0, loading: notificationLoading, refresh: refreshNotificationCount } = useUniversalNotificationCount({
+  // IMPORTANT: Using notificationCount for bell icon (system notifications ONLY)
+  const { 
+    totalCount = 0, 
+    notificationCount = 0, 
+    messageCount = 0, 
+    loading: notificationLoading, 
+    refresh: refreshNotificationCount 
+  } = useUniversalNotificationCount({
     autoRefresh: true,
     realTime: true,
+    context: 'TeacherDashboard-BellIcon', // For debugging purposes
     onCountChange: (counts) => {
       console.log('🔔 [TeacherDashboard] Notification counts updated:', counts);
+      console.log('📊 [TeacherDashboard] Count usage: Bell icon shows notificationCount =', counts.notificationCount);
     }
   }) || {};
   
-  // Debug the notification count only when needed
-  console.log('📱 TeacherDashboard - Universal notification count:', {
-    unreadCount,
+  // Use notificationCount for bell icon (EXCLUDES chat messages - system notifications only)
+  const unreadCount = notificationCount;
+  
+  // Debug the notification count separation with clear explanation
+  console.log('📱 TeacherDashboard - Notification counts breakdown:', {
+    totalCount: totalCount + ' (messages + notifications combined)',
+    notificationCount: notificationCount + ' (system notifications only - USED IN BELL ICON)',
+    messageCount: messageCount + ' (chat messages only - NOT used in bell)',
+    unreadCount: unreadCount + ' (what actually shows in bell icon)',
     notificationLoading,
-    userId: user?.id
+    userId: user?.id,
+    '⚠️ NOTE': 'Bell icon should ONLY show system notifications, NOT chat messages'
   });
 
   // No need for manual refresh - universal hook handles everything automatically
@@ -1092,14 +1231,18 @@ function groupAndSortSchedule(schedule) {
       let attendanceDataFetched = false;
       
       // Get attendance data for a sample of students for quicker loading with tenant isolation
-      const tenantStudentQuery = createTenantQuery(supabase.from(TABLES.STUDENTS), tenantId);
-      const tenantAttendanceQuery = createTenantQuery(supabase.from(TABLES.STUDENT_ATTENDANCE), tenantId);
+      const tenantStudentQuery = createTenantQuery(tenantId, TABLES.STUDENTS);
+      const tenantAttendanceQuery = createTenantQuery(tenantId, TABLES.STUDENT_ATTENDANCE);
       
-      for (const className of Object.keys(classMap).slice(0, 2)) { // Only check first 2 classes
+      // Get class IDs from the class map for analytics
+      const classIds = uniqueClassIds.slice(0, 2); // Only check first 2 classes for performance
+      
+      if (classIds.length > 0) {
         const { data: studentsData } = await tenantStudentQuery
-          .select('id, tenant_id')
-          .eq('class_name', className)
-          .limit(5); // Only check 5 students per class
+          .select('id, tenant_id, class_id')
+          .in('class_id', classIds)
+          .limit(10) // Check up to 10 students total
+          .execute();
 
         console.log(`📊 [ANALYTICS] Found ${studentsData?.length || 0} students in class ${classId}`);
 
@@ -1113,16 +1256,17 @@ function groupAndSortSchedule(schedule) {
             tenantId
           );
           
-          if (!studentValidation.isValid) {
-            console.error('❌ Student data validation failed in analytics:', studentValidation.error);
-            continue; // Skip this class and continue with next
+          if (!studentValidation) {
+            console.error('❌ Student data validation failed in analytics: Students do not belong to tenant', tenantId);
+            return; // Exit analytics function since validation failed
           }
           
           for (const student of studentsData) {
             const { data: attendanceData } = await tenantAttendanceQuery
               .select('status, tenant_id')
               .eq('student_id', student.id)
-              .limit(10); // Only check 10 most recent attendance records
+              .limit(10)
+              .execute(); // Only check 10 most recent attendance records
 
             if (attendanceData && attendanceData.length > 0) {
               attendanceDataFetched = true;
@@ -1275,7 +1419,6 @@ function groupAndSortSchedule(schedule) {
         <Header 
           title="Teacher Dashboard" 
           showNotifications={true}
-          unreadCount={unreadCount}
           onNotificationsPress={() => navigation.navigate('TeacherNotifications')}
         />
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -1835,7 +1978,16 @@ function groupAndSortSchedule(schedule) {
                         </View>
                         <View style={styles.taskInfo}>
                           <View style={styles.taskTitleRow}>
-                            <Text style={styles.taskTitle}>{task.task_title || task.task || task.message}</Text>
+                            <View style={styles.taskTitleContainer}>
+                              <Text style={styles.taskTitle}>
+                                {task.task_title || 'Untitled Task'}
+                              </Text>
+                              {task.task_description && task.task_description !== task.task_title && (
+                                <Text style={styles.taskDescription} numberOfLines={2}>
+                                  {task.task_description}
+                                </Text>
+                              )}
+                            </View>
                             <View style={[styles.priorityBadge, { backgroundColor: priorityInfo.bgColor }]}>
                               <Text style={[styles.priorityText, { color: priorityInfo.color }]}>
                                 {priorityInfo.label}
@@ -2080,27 +2232,6 @@ function groupAndSortSchedule(schedule) {
           </View>
         </View>
 
-        {/* Debug Section - Notification Testing */}
-        <View style={styles.section}>
-          <View style={styles.sectionTitleContainer}>
-            <View style={styles.sectionIcon}>
-              <Ionicons name="bug" size={20} color="#856404" />
-            </View>
-            <Text style={[styles.sectionTitle, { color: '#856404' }]}>🔧 Debug Tools (Teacher)</Text>
-          </View>
-          
-          {/* Debug Badge */}
-          <View style={styles.debugContainer}>
-            <Text style={styles.debugLabel}>Message Count Debug:</Text>
-            <DebugBadge />
-          </View>
-          
-          {/* Notification Tester */}
-          <View style={styles.debugContainer}>
-            <Text style={styles.debugLabel}>Notification Test Tools:</Text>
-            <NotificationTester />
-          </View>
-        </View>
       </ScrollView>
       {/* Add Task Modal rendered outside the ScrollView for proper centering */}
       {addTaskModalVisible && (
@@ -2121,7 +2252,7 @@ function groupAndSortSchedule(schedule) {
               <TouchableOpacity
                 onPress={() => {
                   setAddTaskModalVisible(false);
-                  setNewTask({ task: '', type: 'attendance', due: '', priority: 'medium' });
+                  setNewTask({ title: '', description: '', type: 'attendance', due: '', priority: 'medium' });
                 }}
                 style={styles.addTaskModalClose}
               >
@@ -2135,11 +2266,20 @@ function groupAndSortSchedule(schedule) {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              <Text style={styles.addTaskFieldLabel}>Task Description</Text>
+              <Text style={styles.addTaskFieldLabel}>Task Title</Text>
               <TextInput
-                placeholder="Enter task description..."
-                value={newTask.task}
-                onChangeText={text => setNewTask(t => ({ ...t, task: text }))}
+                placeholder="Enter task title (e.g., 'Mark attendance for Grade 5')"
+                value={newTask.title}
+                onChangeText={text => setNewTask(t => ({ ...t, title: text }))}
+                style={styles.addTaskTitleInput}
+                autoFocus={true}
+              />
+              
+              <Text style={styles.addTaskFieldLabel}>Task Description (Optional)</Text>
+              <TextInput
+                placeholder="Enter additional details about the task..."
+                value={newTask.description}
+                onChangeText={text => setNewTask(t => ({ ...t, description: text }))}
                 style={styles.addTaskInput}
                 multiline={true}
                 numberOfLines={3}
@@ -2291,7 +2431,7 @@ function groupAndSortSchedule(schedule) {
               <TouchableOpacity
                 onPress={() => {
                   setAddTaskModalVisible(false);
-                  setNewTask({ task: '', type: 'attendance', due: '', priority: 'medium' });
+                  setNewTask({ title: '', description: '', type: 'attendance', due: '', priority: 'medium' });
                 }}
                 style={styles.addTaskCancelButton}
                 activeOpacity={0.8}
@@ -2300,9 +2440,9 @@ function groupAndSortSchedule(schedule) {
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleAddTask}
-                style={[styles.addTaskCreateButton, (!newTask.task || !newTask.due) && styles.addTaskCreateButtonDisabled]}
+                style={[styles.addTaskCreateButton, (!newTask.title || !newTask.due) && styles.addTaskCreateButtonDisabled]}
                 activeOpacity={0.8}
-                disabled={!newTask.task || !newTask.due}
+                disabled={!newTask.title || !newTask.due}
               >
                 <Ionicons name="add-circle" size={20} color="#fff" style={{ marginRight: 6 }} />
                 <Text style={styles.addTaskCreateButtonText}>Create Task</Text>
@@ -2664,13 +2804,23 @@ const styles = StyleSheet.create({
   taskInfo: {
     flex: 1,
   },
-  taskTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    lineHeight: 22,
+  taskTitleContainer: {
     flex: 1,
     marginRight: 8,
+  },
+  taskTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1976d2',
+    lineHeight: 22,
+    marginBottom: 2,
+  },
+  taskDescription: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#666',
+    lineHeight: 18,
+    marginTop: 2,
   },
   priorityBadge: {
     borderRadius: 12,
@@ -2715,7 +2865,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     width: '90%',
     maxWidth: 420,
-    maxHeight: '80%',
+    maxHeight: '85%',
     elevation: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -2758,15 +2908,26 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginTop: 16,
   },
+  addTaskTitleInput: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 16,
+    backgroundColor: '#fafafa',
+    fontWeight: '500',
+    color: '#333',
+  },
   addTaskInput: {
     borderWidth: 1,
     borderColor: '#e0e0e0',
     borderRadius: 12,
     padding: 12,
-    fontSize: 16,
+    fontSize: 15,
     backgroundColor: '#fafafa',
     textAlignVertical: 'top',
     minHeight: 80,
+    color: '#666',
   },
   addTaskTypeGrid: {
     flexDirection: 'row',

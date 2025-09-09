@@ -58,6 +58,15 @@ const FeePayment = () => {
       setLoading(true);
       setError(null);
       try {
+        // Validate tenant access before proceeding
+        const tenantValidation = await validateTenantAccess(user.id, tenantId);
+        if (!tenantValidation.isValid) {
+          console.error('❌ FeePayment tenant validation failed:', tenantValidation.error);
+          Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+          setError(tenantValidation.error);
+          return;
+        }
+
         // Load school details first
         console.log('🏫 FeePayment - Loading school details');
         const { data: schoolData, error: schoolError } = await dbHelpers.getSchoolDetails();
@@ -65,18 +74,32 @@ const FeePayment = () => {
         console.log('🏫 FeePayment - Logo URL:', schoolData?.logo_url);
         setSchoolDetails(schoolData);
 
-        // Get student data directly using linked_student_id
+        // Get student data directly using linked_student_id with tenant filtering
         const { data: studentDetails, error: studentError } = await supabase
           .from(TABLES.STUDENTS)
           .select(`
             *,
-            classes(id, class_name, section, academic_year)
+            classes(id, class_name, section, academic_year),
+            tenant_id
           `)
+          .eq('tenant_id', tenantId)
           .eq('id', user.linked_student_id)
           .single();
 
         if (studentError || !studentDetails) {
           throw new Error('Student data not found');
+        }
+
+        // Validate student data belongs to correct tenant
+        const studentValidation = validateDataTenancy([{ 
+          id: studentDetails.id, 
+          tenant_id: studentDetails.tenant_id 
+        }], tenantId, 'FeePayment');
+        
+        if (!studentValidation) {
+          console.error('❌ Student data validation failed: Student data does not belong to tenant', tenantId);
+          Alert.alert('Data Error', TENANT_ERROR_MESSAGES.WRONG_TENANT_DATA);
+          return;
         }
 
         setStudentData(studentDetails);

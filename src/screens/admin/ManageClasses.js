@@ -182,7 +182,7 @@ const ManageClasses = ({ navigation }) => {
   const handleAddClass = async () => {
     try {
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'ManageClasses - handleAddClass');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ManageClasses - handleAddClass');
       if (!validation.isValid) {
         Alert.alert('Access Denied', validation.error);
         return;
@@ -258,7 +258,7 @@ const ManageClasses = ({ navigation }) => {
   const handleEditClass = async () => {
     try {
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'ManageClasses - handleEditClass');
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ManageClasses - handleEditClass');
       if (!validation.isValid) {
         Alert.alert('Access Denied', validation.error);
         return;
@@ -309,7 +309,7 @@ const ManageClasses = ({ navigation }) => {
           onPress: async () => {
             try {
               // 🛡️ Validate tenant access first
-              const validation = await validateTenantAccess(tenantId, user?.id, 'ManageClasses - handleDeleteClass');
+              const validation = await validateTenantAccess(user?.id, tenantId, 'ManageClasses - handleDeleteClass');
               if (!validation.isValid) {
                 Alert.alert('Access Denied', validation.error);
                 return;

@@ -13,14 +13,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { useAuth } from '../../utils/AuthContext';
-import { supabase } from '../../utils/supabase';
+import { supabase, TABLES, getUserTenantId } from '../../utils/supabase';
 import universalNotificationService from '../../services/UniversalNotificationService';
-import { 
-  validateTenantAccess, 
-  createTenantQuery, 
-  validateDataTenancy,
-  TENANT_ERROR_MESSAGES 
-} from '../../utils/tenantValidation';
 import { useTenantContext } from '../../contexts/TenantContext';
 import {
   getResponsiveScrollProps,
@@ -69,20 +63,20 @@ const TeacherNotifications = ({ navigation }) => {
     try {
       if (!user?.id) return;
 
-      // Validate tenant access before proceeding
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+      // Get tenant_id using the email-based tenant system
+      const currentTenantId = await getUserTenantId();
+      if (!currentTenantId) {
+        console.error('❌ No tenant_id found for teacher notifications');
+        setNotifications([]);
         return;
       }
 
-      console.log('📱 Fetching notifications for teacher user ID:', user.id);
+      console.log('📱 Fetching notifications for teacher user ID:', user.id, 'with tenant:', currentTenantId);
 
-      // Method: Use notification_recipients table to get notifications for this teacher with tenant isolation
-      // Now using proper Teacher recipient_type after database constraint update
-      const tenantQuery = createTenantQuery(supabase.from('notification_recipients'), tenantId);
-      const { data: teacherNotificationRecipients, error: recipientError } = await tenantQuery
+      // Method: Use notification_recipients table to get notifications for this teacher with tenant filtering
+      // Following the email-based tenant system pattern
+      const { data: teacherNotificationRecipients, error: recipientError } = await supabase
+        .from(TABLES.NOTIFICATION_RECIPIENTS)
         .select(`
           id,
           notification_id,
@@ -92,6 +86,7 @@ const TeacherNotifications = ({ navigation }) => {
           sent_at,
           is_read,
           read_at,
+          tenant_id,
           notifications!inner (
             id,
             type,
@@ -106,7 +101,8 @@ const TeacherNotifications = ({ navigation }) => {
           )
         `)
         .eq('recipient_id', user.id)
-        .eq('recipient_type', 'Teacher') // Now using proper Teacher recipient type
+        .eq('recipient_type', 'Teacher') // Using proper Teacher recipient type
+        .eq('tenant_id', currentTenantId) // Filter by tenant_id as per documentation
         .order('sent_at', { ascending: false });
 
       if (recipientError) {
@@ -115,38 +111,8 @@ const TeacherNotifications = ({ navigation }) => {
         return;
       }
 
-      // Validate fetched data belongs to correct tenant
-      const validationResult = await validateDataTenancy(
-        teacherNotificationRecipients?.map(r => ({ 
-          id: r.id, 
-          tenant_id: r.notifications?.tenant_id 
-        })) || [],
-        tenantId
-      );
-      
-      if (!validationResult.isValid) {
-        console.error('❌ Tenant data validation failed:', validationResult.error);
-        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
-        setNotifications([]);
-        return;
-      }
-
       console.log(`📨 Found ${teacherNotificationRecipients?.length || 0} notifications from recipients table`);
       
-      // Debug: Check for duplicates by notification_id
-      if (teacherNotificationRecipients && teacherNotificationRecipients.length > 0) {
-        const notificationIds = teacherNotificationRecipients.map(r => r.notification_id);
-        const uniqueNotificationIds = [...new Set(notificationIds)];
-        
-        if (notificationIds.length !== uniqueNotificationIds.length) {
-          console.log('⚠️ DUPLICATE NOTIFICATIONS DETECTED!');
-          console.log('📊 Total recipients:', notificationIds.length);
-          console.log('📊 Unique notifications:', uniqueNotificationIds.length);
-          console.log('📋 All notification IDs:', notificationIds);
-          console.log('📋 Duplicate IDs:', notificationIds.filter((id, index) => notificationIds.indexOf(id) !== index));
-        }
-      }
-
       const teacherNotifications = [];
 
       if (teacherNotificationRecipients && teacherNotificationRecipients.length > 0) {
@@ -218,23 +184,15 @@ const TeacherNotifications = ({ navigation }) => {
 
   const markAsRead = async (notificationId) => {
     try {
-      // Validate tenant access before marking as read
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed for mark as read:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
-        return;
-      }
-
       console.log('🔔 [TEACHER_NOTIF] Marking notification as read:', notificationId);
       
       // Find the notification to get its actual notification_id for broadcasting
       const notification = notifications.find(n => n.id === notificationId);
       const actualNotificationId = notification?.notificationId || notificationId;
       
-      // Update the notification_recipients table with tenant-aware query
-      const tenantQuery = createTenantQuery(supabase.from('notification_recipients'), tenantId);
-      const { error: updateError } = await tenantQuery
+      // Update the notification_recipients table directly
+      const { error: updateError } = await supabase
+        .from(TABLES.NOTIFICATION_RECIPIENTS)
         .update({
           is_read: true,
           read_at: new Date().toISOString()
@@ -275,14 +233,6 @@ const TeacherNotifications = ({ navigation }) => {
 
   const markAllAsRead = async () => {
     try {
-      // Validate tenant access before marking all as read
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed for mark all as read:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
-        return;
-      }
-
       const unreadNotifications = notifications.filter(notif => !notif.isRead);
 
       if (unreadNotifications.length === 0) {
@@ -292,15 +242,15 @@ const TeacherNotifications = ({ navigation }) => {
 
       console.log('🔔 [TEACHER_NOTIF] Marking all notifications as read:', unreadNotifications.length);
 
-      // Update all unread notifications in notification_recipients table with tenant isolation
-      const tenantQuery = createTenantQuery(supabase.from('notification_recipients'), tenantId);
-      const { error: updateError } = await tenantQuery
+      // Update all unread notifications in notification_recipients table
+      const { error: updateError } = await supabase
+        .from(TABLES.NOTIFICATION_RECIPIENTS)
         .update({
           is_read: true,
           read_at: new Date().toISOString()
         })
         .eq('recipient_id', user.id)
-        .eq('recipient_type', 'Teacher') // Now using proper Teacher recipient type
+        .eq('recipient_type', 'Teacher') // Using proper Teacher recipient type
         .eq('is_read', false);
       
       if (updateError) {

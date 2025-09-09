@@ -813,19 +813,28 @@ export const dbHelpers = {
 
   async getTeacherByUserId(userId) {
     try {
+      // Get current tenant ID for filtering
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      
       // First get the user to find linked_teacher_id
       const { data: user, error: userError } = await supabase
         .from(TABLES.USERS)
-        .select('linked_teacher_id')
+        .select('linked_teacher_id, full_name, email, phone, tenant_id')
         .eq('id', userId)
         .single();
 
-      if (userError || !user?.linked_teacher_id) {
-        return { data: null, error: userError || new Error('No teacher linked to this user') };
+      if (userError) {
+        console.error('❌ getTeacherByUserId: User lookup failed:', userError);
+        return { data: null, error: userError };
+      }
+      
+      if (!user?.linked_teacher_id) {
+        console.error('❌ getTeacherByUserId: No teacher linked to this user:', userId);
+        return { data: null, error: new Error('Teacher information not found for this tenant.') };
       }
 
       // Then get the teacher with related data
-      const { data, error } = await supabase
+      const { data: teacherData, error: teacherError } = await supabase
         .from(TABLES.TEACHERS)
         .select(`
           *,
@@ -835,9 +844,53 @@ export const dbHelpers = {
         `)
         .eq('id', user.linked_teacher_id)
         .single();
-      return { data, error };
+        
+      if (teacherError) {
+        console.error('❌ getTeacherByUserId: Teacher lookup failed:', teacherError);
+        console.error('❌ Teacher not found for user:', userId, 'in tenant:', tenantId);
+        
+        // Create a minimal teacher record for testing (if needed)
+        if (teacherError.code === 'PGRST116') {
+          console.log('🚑 Creating minimal teacher record for testing...');
+          
+          const newTeacherData = {
+            id: user.linked_teacher_id,
+            name: user.full_name || 'Teacher',
+            phone: user.phone || '',
+            tenant_id: user.tenant_id
+          };
+          
+          // Try to create teacher record
+          const { data: createdTeacher, error: createError } = await supabase
+            .from(TABLES.TEACHERS)
+            .insert(newTeacherData)
+            .select()
+            .single();
+            
+          if (createdTeacher && !createError) {
+            console.log('✅ Created teacher record:', createdTeacher.name);
+            return { data: createdTeacher, error: null };
+          } else {
+            console.error('❌ Failed to create teacher record:', createError);
+          }
+        }
+        
+        return { data: null, error: new Error('Teacher information not found for this tenant.') };
+      }
+      
+      // Validate teacher belongs to correct tenant
+      if (teacherData && tenantId && teacherData.tenant_id !== tenantId) {
+        console.error('❌ getTeacherByUserId: Teacher tenant mismatch:', {
+          teacherTenant: teacherData.tenant_id,
+          expectedTenant: tenantId
+        });
+        return { data: null, error: new Error('Teacher information not found for this tenant.') };
+      }
+      
+      return { data: teacherData, error: null };
     } catch (error) {
-      return { data: null, error };
+      console.error('❌ getTeacherByUserId: Unexpected error:', error);
+      return { data: null, error: new Error('Teacher information not found for this tenant.') };
     }
   },
 

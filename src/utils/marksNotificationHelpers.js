@@ -345,22 +345,28 @@ export async function createBulkMarksNotifications(marksData, exam, adminUserId 
           console.warn(`⚠️ [MARKS] Broadcasting failed (not critical):`, broadcastError);
         }
 
-        // Create message record using correct schema fields
-        const { error: messageError } = await supabase
-          .from(TABLES.MESSAGES)
-          .insert({
-            sender_id: adminUserId || null,
-            receiver_id: parent.id,
-            student_id: student.id,
-            message: messageContent,
-            message_type: 'text',
-            is_read: false,
-            sent_at: new Date().toISOString()
-          });
+        // Create message record using correct schema fields with tenant_id
+        // Only create message if we have a valid sender_id (adminUserId)
+        if (adminUserId) {
+          const { error: messageError } = await supabase
+            .from(TABLES.MESSAGES)
+            .insert({
+              sender_id: adminUserId,
+              receiver_id: parent.id,
+              student_id: student.id,
+              message: messageContent,
+              message_type: 'text',
+              is_read: false,
+              sent_at: new Date().toISOString(),
+              tenant_id: marksData[0]?.tenant_id || null // Use tenant_id from marks data
+            });
 
-        if (messageError) {
-          console.error('⚠️ [MARKS] Warning: Could not create message:', messageError);
-          // Continue anyway, notification was successful
+          if (messageError) {
+            console.error('⚠️ [MARKS] Warning: Could not create message:', messageError);
+            // Continue anyway, notification was successful
+          }
+        } else {
+          console.log('ℹ️ [MARKS] Skipping message creation - no admin user ID provided');
         }
 
         results.push({

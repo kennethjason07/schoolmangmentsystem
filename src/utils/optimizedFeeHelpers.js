@@ -32,7 +32,7 @@ const getCache = (key) => {
  */
 export const getOptimizedFeeManagementData = async (tenantId, user) => {
   // 🛡️ Validate tenant access first
-  const validation = await validateTenantAccess(tenantId, user?.id, 'OptimizedFeeHelpers - getOptimizedFeeManagementData');
+  const validation = await validateTenantAccess(user?.id, tenantId, 'OptimizedFeeHelpers - getOptimizedFeeManagementData');
   if (!validation.isValid) {
     throw new Error(`Tenant validation failed: ${validation.error}`);
   }

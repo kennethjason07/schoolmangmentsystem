@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { TenantProvider } from './src/contexts/TenantContext';
 import { AuthProvider } from './src/utils/AuthContext';
 import { SelectedStudentProvider } from './src/contexts/SelectedStudentContext';
+import { GlobalRefreshProvider } from './src/contexts/GlobalRefreshContext';
 import AppNavigator from './src/navigation/AppNavigator';
 
 export default function App() {
@@ -22,8 +23,10 @@ export default function App() {
       <TenantProvider>
         <AuthProvider>
           <SelectedStudentProvider>
-            <AppNavigator />
-            <StatusBar style="auto" />
+            <GlobalRefreshProvider>
+              <AppNavigator />
+              <StatusBar style="auto" />
+            </GlobalRefreshProvider>
           </SelectedStudentProvider>
         </AuthProvider>
       </TenantProvider>

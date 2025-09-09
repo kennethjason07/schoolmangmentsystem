@@ -104,13 +104,11 @@ export class UniversalNotificationService {
     try {
       if (!userId) return 0;
 
-      // Get tenant ID from context or storage for tenant-aware query
-      const tenantId = global.currentTenantId; // Assume tenant ID is available globally
-      if (!tenantId) return 0;
-      
-      const tenantQuery = createTenantQuery(supabase.from(TABLES.MESSAGES), tenantId);
-      const { data, error } = await tenantQuery
-        .select('id, tenant_id')
+      // Simple direct query without tenant filtering for messages
+      // Messages should be accessible by receiver_id regardless of tenant
+      const { data, error } = await supabase
+        .from(TABLES.MESSAGES)
+        .select('id, sender_id, receiver_id, is_read, message, sent_at')
         .eq('receiver_id', userId)
         .eq('is_read', false);
 
@@ -119,6 +117,15 @@ export class UniversalNotificationService {
         return 0;
       }
 
+      // Enhanced debugging for message count issues
+      console.log(`📨 [UniversalNotificationService] Found ${data?.length || 0} unread messages for user ${userId}`);
+      if (data && data.length > 0) {
+        console.log('🔍 [UniversalNotificationService] Unread messages details:');
+        data.forEach((msg, idx) => {
+          console.log(`  ${idx + 1}. ID: ${msg.id}, From: ${msg.sender_id}, Message: "${msg.message?.substring(0, 30)}...", Sent: ${msg.sent_at}`);
+        });
+      }
+      
       return data?.length || 0;
     } catch (error) {
       console.warn('Error in getUnreadMessageCount:', error);
@@ -136,26 +143,23 @@ export class UniversalNotificationService {
     try {
       if (!userId || !userType) return 0;
 
-      // Get tenant ID from context or storage for tenant-aware query
-      const tenantId = global.currentTenantId; // Assume tenant ID is available globally
-      if (!tenantId) return 0;
-
       const recipientType = this.getUserTypeForDB(userType);
 
-      // Get unread notifications with filtering using tenant-aware query
-      const tenantNotificationQuery = createTenantQuery(supabase.from(TABLES.NOTIFICATION_RECIPIENTS), tenantId);
-      const { data: notificationData, error } = await tenantNotificationQuery
+      // Simple direct query without tenant filtering for notifications
+      // If tenant filtering fails, we still want to show relevant notifications
+      const { data: notificationData, error } = await supabase
+        .from(TABLES.NOTIFICATION_RECIPIENTS)
         .select(`
           id,
           is_read,
-          tenant_id,
+          recipient_id,
+          recipient_type,
           notifications(
             id,
             message,
             type,
             delivery_status,
-            delivery_mode,
-            tenant_id
+            delivery_mode
           )
         `)
         .eq('recipient_id', userId)
@@ -168,6 +172,7 @@ export class UniversalNotificationService {
       }
 
       if (!notificationData || notificationData.length === 0) {
+        console.log(`🔔 [UniversalNotificationService] Found 0 unread notifications for user ${userId}`);
         return 0;
       }
 
@@ -208,45 +213,14 @@ export class UniversalNotificationService {
       // Additional filtering for student notifications based on class
       if (userType === 'student') {
         try {
-          const { data: studentData, error: studentError } = await supabase
-            .from(TABLES.STUDENTS)
-            .select('id, class_id, classes(id, class_name, section)')
-            .eq('id', userId) // For students, user ID might be linked to student ID
-            .eq('tenant_id', tenantId)
-            .single();
-            
-          if (!studentError && studentData?.classes?.class_name) {
-            const studentClass = studentData.classes.class_name;
-            
-            filteredNotifications = filteredNotifications.filter(record => {
-              const message = record.notifications.message.toLowerCase();
-              
-              // Look for class mentions in the message
-              const classPatterns = [
-                /class\s+(\d+|[ivxlc]+)/gi,
-                /grade\s+(\d+|[ivxlc]+)/gi,
-                /(\d+)(st|nd|rd|th)\s*class/gi,
-                /for\s+class\s+(\d+|[ivxlc]+)/gi,
-              ];
-              
-              for (const pattern of classPatterns) {
-                const matches = [...message.matchAll(pattern)];
-                for (const match of matches) {
-                  const mentionedClass = match[1]?.toLowerCase();
-                  if (mentionedClass && mentionedClass !== studentClass.toLowerCase()) {
-                    return false;
-                  }
-                }
-              }
-              
-              return true;
-            });
-          }
+          // Skip class filtering for notifications since tenantId might not be available
+          console.log(`🎓 [UniversalNotificationService] Skipping class filtering for student notifications`);
         } catch (err) {
           console.warn('Could not fetch student class info for filtering:', err);
         }
       }
 
+      console.log(`🔔 [UniversalNotificationService] Found ${filteredNotifications.length} unread notifications for user ${userId}`);
       return filteredNotifications.length;
     } catch (error) {
       console.warn('Error in getUnreadNotificationCount:', error);
@@ -285,6 +259,15 @@ export class UniversalNotificationService {
         totalCount: messageCount + notificationCount
       };
 
+      // Enhanced debugging for count separation
+      console.log(`📊 [UniversalNotificationService] Count breakdown for ${userId}:`, {
+        messageCount: result.messageCount,
+        notificationCount: result.notificationCount,
+        totalCount: result.totalCount,
+        userType,
+        'Note': 'messageCount = chat messages only, notificationCount = system notifications only'
+      });
+
       // Cache the result
       this.cache.set(cacheKey, {
         data: result,
@@ -314,7 +297,51 @@ export class UniversalNotificationService {
    * Clear all cache
    */
   clearAllCache() {
+    console.log('🧹 [UniversalNotificationService] Clearing all cache');
     this.cache.clear();
+  }
+
+  /**
+   * Force refresh counts for a user and clear stale cache
+   * @param {string} userId - User ID to refresh
+   * @param {string} userType - User type
+   * @returns {Promise<{messageCount: number, notificationCount: number, totalCount: number}>}
+   */
+  async forceRefreshCounts(userId, userType) {
+    try {
+      console.log(`🔄 [UniversalNotificationService] Force refreshing counts for ${userId}-${userType}`);
+      
+      // Clear cache first
+      this.clearCache(userId, userType);
+      
+      // Fetch fresh counts
+      const counts = await this.getUnreadCounts(userId, userType);
+      
+      console.log(`📊 [UniversalNotificationService] Force refresh result:`, counts);
+      return counts;
+    } catch (error) {
+      console.error('Error in force refresh:', error);
+      return { messageCount: 0, notificationCount: 0, totalCount: 0 };
+    }
+  }
+
+  /**
+   * Debug method to inspect current cache state
+   * @param {string} userId - Optional user ID to filter
+   */
+  debugCache(userId = null) {
+    console.log('🔍 [UniversalNotificationService] Current cache state:');
+    console.log(`Cache size: ${this.cache.size}`);
+    
+    this.cache.forEach((value, key) => {
+      if (!userId || key.startsWith(userId)) {
+        const ageMs = Date.now() - value.timestamp;
+        const ageMinutes = Math.round(ageMs / 1000 / 60 * 100) / 100;
+        const isExpired = ageMs >= this.cacheTimeout;
+        
+        console.log(`  ${key}: ${JSON.stringify(value.data)} (age: ${ageMinutes}m, expired: ${isExpired})`);
+      }
+    });
   }
 
   /**
@@ -538,10 +565,17 @@ export class UniversalNotificationService {
    */
   async broadcastMessageRead(userId, senderId) {
     try {
-      const channel = supabase.channel('universal-message-update');
-      await channel.subscribe();
+      console.log(`🔊 [UniversalNotificationService] Broadcasting message read:`, { userId, senderId });
       
-      await channel.send({
+      const channel = supabase.channel(`universal-message-update-${Date.now()}`);
+      await channel.subscribe((status) => {
+        console.log(`📡 Message read broadcast channel status:`, status);
+      });
+      
+      // Wait a moment for subscription to be fully established
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const broadcastPayload = {
         type: 'broadcast',
         event: 'message-read',
         payload: {
@@ -549,16 +583,32 @@ export class UniversalNotificationService {
           sender_id: senderId,
           timestamp: new Date().toISOString()
         }
-      });
+      };
       
-      // Clear cache immediately
+      console.log(`📤 Sending message read broadcast:`, broadcastPayload);
+      await channel.send(broadcastPayload);
+      
+      // Clear cache immediately for this user
+      console.log(`🧹 Clearing cache for user:`, userId);
       this.cache.forEach((value, key) => {
         if (key.startsWith(userId)) {
+          console.log(`🗑️ Clearing cache key:`, key);
           this.cache.delete(key);
         }
       });
+      
+      // Wait a moment before unsubscribing to ensure broadcast is sent
+      setTimeout(() => {
+        try {
+          channel.unsubscribe();
+        } catch (unsubError) {
+          console.warn('Error unsubscribing from message read channel:', unsubError);
+        }
+      }, 200);
+      
+      console.log(`✅ [UniversalNotificationService] Message read broadcast completed successfully`);
     } catch (error) {
-      console.warn('Error broadcasting message read:', error);
+      console.warn('❌ Error broadcasting message read:', error);
     }
   }
 

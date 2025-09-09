@@ -14,15 +14,10 @@ import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import Header from '../../components/Header';
-import { supabase } from '../../utils/supabase';
+import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
-import { 
-  validateTenantAccess, 
-  createTenantQuery, 
-  validateDataTenancy,
-  TENANT_ERROR_MESSAGES 
-} from '../../utils/tenantValidation';
 import { useTenantContext } from '../../contexts/TenantContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 const TeacherTimetable = ({ navigation }) => {
   const { user } = useAuth();
@@ -53,153 +48,181 @@ const TeacherTimetable = ({ navigation }) => {
     }
   }, []);
 
-  // 🚨 CRITICAL: Validate tenant_id before proceeding
+  // Load data on component mount - tenant validation happens inside loadData
   useEffect(() => {
-    if (!tenantId) {
-      console.warn('⚠️ TeacherTimetable: No tenant_id available from context');
-      Alert.alert('Tenant Error', 'No tenant context available. Please try logging out and back in.');
-      setLoading(false);
-      return;
-    }
-    
-    console.log('✅ TeacherTimetable: Using tenant_id:', tenantId);
+    console.log('🔄 TeacherTimetable: Component mounted, loading data...');
     loadData();
-  }, [tenantId]);
+  }, []);
 
   const loadData = async () => {
     try {
       setLoading(true);
       
-      // Validate tenant access before proceeding
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
-        return;
-      }
+      console.log('🚀 TeacherTimetable.loadData: Starting for user:', user?.email);
       
-      console.log('🚀 TeacherTimetable.loadData: Starting with tenant_id:', tenantId, 'user:', user.id);
-
-      // First get teacher info from users table with tenant-aware query
-      console.log('🔍 Loading teacher info for user:', user.id, 'tenant:', tenantId);
-      const tenantUserQuery = createTenantQuery(supabase.from('users'), tenantId);
-      const { data: userInfo, error: userError } = await tenantUserQuery
-        .select('linked_teacher_id, tenant_id')
-        .eq('id', user.id)
-        .single();
-
-      if (userError || !userInfo?.linked_teacher_id) {
-        console.error('❌ Error fetching user info for tenant:', tenantId, userError);
-        Alert.alert('Error', 'Failed to load teacher information for this tenant. Please contact admin.');
-        return;
-      }
+      // Get the current tenant using the email-based lookup method
+      let currentTenantId = tenantId;
       
-      // Validate user info belongs to correct tenant
-      const userValidation = await validateDataTenancy([{ 
-        id: userInfo.linked_teacher_id, 
-        tenant_id: userInfo.tenant_id 
-      }], tenantId);
-      
-      if (!userValidation.isValid) {
-        console.error('❌ User data validation failed:', userValidation.error);
-        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
-        return;
-      }
-
-      const teacher = { id: userInfo.linked_teacher_id };
-      console.log('👨‍🏫 Found teacher ID:', teacher.id, 'for tenant:', tenantId);
-      setTeacherInfo(teacher);
-
-      // Get current academic year
-      const currentYear = new Date().getFullYear();
-      const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
-
-      // Load subjects that this teacher teaches with their classes using tenant-aware query
-      const tenantSubjectQuery = createTenantQuery(supabase.from('teacher_subjects'), tenantId);
-      const { data: teacherSubjects, error: subjectError } = await tenantSubjectQuery
-        .select(`
-          subject_id,
-          tenant_id,
-          subjects(
-            id, 
-            name,
-            class_id,
-            classes(id, class_name, section)
-          )
-        `)
-        .eq('teacher_id', teacher.id);
-
-      if (!subjectError && teacherSubjects) {
-        // Validate fetched subjects belong to correct tenant
-        const subjectValidation = await validateDataTenancy(
-          teacherSubjects?.map(ts => ({ 
-            id: ts.subject_id, 
-            tenant_id: ts.tenant_id 
-          })) || [],
-          tenantId
-        );
-        
-        if (!subjectValidation.isValid) {
-          console.error('❌ Subject data validation failed:', subjectValidation.error);
-          Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
-          return;
+      if (!currentTenantId) {
+        console.log('⚠️ No tenant from context, trying email lookup...');
+        try {
+          const emailTenant = await getCurrentUserTenantByEmail();
+          currentTenantId = emailTenant?.id;
+          console.log('📧 Email-based tenant ID:', currentTenantId);
+        } catch (emailError) {
+          console.error('❌ Email tenant lookup failed:', emailError);
         }
         
-        // Extract subjects
-        const subjectList = teacherSubjects.map(ts => ts.subjects).filter(Boolean);
-        setSubjects(subjectList);
-
-        // Extract unique classes from the subjects this teacher teaches
-        const uniqueClasses = [];
-        const classIds = new Set();
-        
-        teacherSubjects.forEach(ts => {
-          if (ts.subjects && ts.subjects.classes && !classIds.has(ts.subjects.classes.id)) {
-            classIds.add(ts.subjects.classes.id);
-            uniqueClasses.push(ts.subjects.classes);
-          }
-        });
-        
-        setClasses(uniqueClasses);
-        console.log('🔍 TEACHER DEBUG - Classes found:', uniqueClasses.map(c => `${c.class_name} ${c.section}`));
-        console.log('🔍 TEACHER DEBUG - Subjects found:', subjectList.map(s => s.name));
-      } else {
-        console.error('Error fetching teacher subjects:', subjectError);
+        if (!currentTenantId) {
+          throw new Error('Unable to determine tenant context. Please contact support.');
+        }
       }
-
-      // Load timetable data for all classes this teacher teaches
-      await loadTimetableData(teacher.id, academicYear);
-
+      
+      console.log('✅ Using tenant_id:', currentTenantId);
+      
+      // Use the robust teacher lookup from dbHelpers
+      console.log('🔍 Getting teacher info using dbHelpers...');
+      const { data: teacherData, error: teacherError } = await dbHelpers.getTeacherByUserId(user.id);
+      
+      if (teacherError || !teacherData) {
+        console.error('❌ Teacher lookup failed:', teacherError);
+        
+        // Try fallback lookups like in TeacherSubjects
+        console.log('🔄 Trying fallback: user lookup by email within tenant...');
+        const { data: userRecord, error: userLookupError } = await supabase
+          .from(TABLES.USERS)
+          .select('id, email, linked_teacher_id, tenant_id')
+          .eq('email', user.email)
+          .eq('tenant_id', currentTenantId)
+          .single();
+        
+        if (userLookupError || !userRecord?.linked_teacher_id) {
+          console.error('❌ Fallback user lookup failed:', userLookupError);
+          
+          // Fallback 2: Cross-tenant user lookup for better error messaging
+          const { data: crossTenantUser, error: crossTenantError } = await supabase
+            .from(TABLES.USERS)
+            .select('id, email, tenant_id, linked_teacher_id')
+            .eq('email', user.email)
+            .single();
+            
+          if (!crossTenantError && crossTenantUser) {
+            if (crossTenantUser.tenant_id !== currentTenantId) {
+              throw new Error(`User account exists in tenant "${crossTenantUser.tenant_id}" but current tenant is "${currentTenantId}". Please contact admin to fix tenant assignment.`);
+            } else if (!crossTenantUser.linked_teacher_id) {
+              throw new Error(`User account found but not linked to a teacher profile. Please contact admin to complete account setup.`);
+            }
+          }
+          
+          throw new Error(`User record not found for email: ${user.email} in tenant: ${currentTenantId}. Please contact admin.`);
+        }
+        
+        // Get teacher info using the linked teacher ID
+        const { data: fallbackTeacher, error: fallbackTeacherError } = await supabase
+          .from(TABLES.TEACHERS)
+          .select('*')
+          .eq('id', userRecord.linked_teacher_id)
+          .eq('tenant_id', currentTenantId)
+          .single();
+          
+        if (fallbackTeacherError || !fallbackTeacher) {
+          throw new Error('Teacher profile not found or does not belong to current tenant.');
+        }
+        
+        // Use fallback teacher data
+        setTeacherInfo(fallbackTeacher);
+        console.log('✅ Fallback teacher lookup successful:', fallbackTeacher.name);
+      } else {
+        // Validate teacher belongs to current tenant
+        if (teacherData.tenant_id !== currentTenantId) {
+          throw new Error(`Teacher belongs to tenant "${teacherData.tenant_id}" but current tenant is "${currentTenantId}".`);
+        }
+        
+        setTeacherInfo(teacherData);
+        console.log('✅ Teacher lookup successful:', teacherData.name);
+      }
+      
+      const teacherId = teacherData?.id || teacherInfo?.id;
+      if (!teacherId) {
+        throw new Error('Teacher ID could not be determined');
+      }
+      
+      // Get assigned subjects and classes with proper tenant filtering
+      console.log('📚 Loading teacher subjects and classes...');
+      const { data: assignedSubjects, error: subjectsError } = await supabase
+        .from(TABLES.TEACHER_SUBJECTS)
+        .select(`
+          *,
+          subjects(
+            id,
+            name,
+            class_id,
+            classes(class_name, id, section)
+          )
+        `)
+        .eq('teacher_id', teacherId)
+        .eq('tenant_id', currentTenantId);
+      
+      if (subjectsError) {
+        console.error('❌ Error fetching assigned subjects:', subjectsError);
+        throw subjectsError;
+      }
+      
+      // Process subjects and classes
+      const subjectList = assignedSubjects.map(assignment => assignment.subjects).filter(Boolean);
+      setSubjects(subjectList);
+      
+      // Extract unique classes
+      const classMap = new Map();
+      assignedSubjects.forEach(assignment => {
+        if (assignment.subjects?.classes) {
+          const classData = assignment.subjects.classes;
+          const uniqueKey = `${classData.class_name}-${classData.section}`;
+          if (!classMap.has(uniqueKey)) {
+            classMap.set(uniqueKey, classData);
+          }
+        }
+      });
+      
+      const uniqueClasses = Array.from(classMap.values());
+      setClasses(uniqueClasses);
+      
+      console.log('📊 Found', subjectList.length, 'subjects and', uniqueClasses.length, 'classes');
+      console.log('🔍 Classes:', uniqueClasses.map(c => `${c.class_name} ${c.section}`));
+      console.log('🔍 Subjects:', subjectList.map(s => s.name));
+      
+      // Load timetable data
+      await loadTimetableData(teacherId, currentTenantId);
+      
     } catch (error) {
-      console.error('Error loading data:', error);
-      Alert.alert('Error', 'Failed to load data');
+      console.error('❌ Error in loadData:', error);
+      Alert.alert('Error', error.message || 'Failed to load teacher timetable data');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
-  const loadTimetableData = async (teacherId, academicYear) => {
+  const loadTimetableData = async (teacherId, currentTenantId) => {
     try {
-      // Validate tenant access before fetching timetable data
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed for timetable:', tenantValidation.error);
-        return; // Silent return for better UX
-      }
+      console.log('🗺 Loading timetable data for teacher:', teacherId, 'tenant:', currentTenantId);
       
-      console.log('🔍 Loading timetable data for teacher:', teacherId, 'tenant:', tenantId, 'year:', academicYear);
+      // Get current academic year
+      const currentYear = new Date().getFullYear();
+      const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
       
-      // Fetch timetable entries for this teacher with tenant-aware query
-      const tenantTimetableQuery = createTenantQuery(supabase.from('timetable_entries'), tenantId);
-      const { data: timetableData, error: timetableError } = await tenantTimetableQuery
+      console.log('🎓 Using academic year:', academicYear);
+      
+      // Fetch timetable entries for this teacher with proper table reference and tenant filtering
+      const { data: timetableData, error: timetableError } = await supabase
+        .from(TABLES.TIMETABLE)
         .select(`
           *,
           classes(class_name, section),
-          subjects(name),
-          tenant_id
+          subjects(name)
         `)
         .eq('teacher_id', teacherId)
+        .eq('tenant_id', currentTenantId)
         .eq('academic_year', academicYear)
         .order('day_of_week')
         .order('period_number');
@@ -207,28 +230,20 @@ const TeacherTimetable = ({ navigation }) => {
       console.log('📅 Timetable entries found:', timetableData?.length, 'for teacher:', teacherId);
 
       if (timetableError) {
-        console.error('Error fetching timetable:', timetableError);
+        console.error('❌ Error fetching timetable:', timetableError);
         return;
       }
       
-      // Validate fetched timetable data belongs to correct tenant
-      const timetableValidation = await validateDataTenancy(
-        timetableData?.map(entry => ({ 
-          id: entry.id, 
-          tenant_id: entry.tenant_id 
-        })) || [],
-        tenantId
-      );
-      
-      if (!timetableValidation.isValid) {
-        console.error('❌ Timetable data validation failed:', timetableValidation.error);
-        return; // Silent return for better UX
+      if (!timetableData || timetableData.length === 0) {
+        console.log('📋 No timetable data found for teacher', teacherId, 'in academic year', academicYear);
+        setTimetables({});
+        return;
       }
 
       // Organize timetable by class, then by day
       const organizedTimetable = {};
 
-      timetableData?.forEach(entry => {
+      timetableData.forEach(entry => {
         const classId = entry.class_id;
         const dayName = entry.day_of_week;
 
@@ -250,8 +265,10 @@ const TeacherTimetable = ({ navigation }) => {
       });
 
       setTimetables(organizedTimetable);
+      console.log('✅ Timetable data organized successfully');
+      
     } catch (error) {
-      console.error('Error loading timetable data:', error);
+      console.error('❌ Error loading timetable data:', error);
     }
   };
 

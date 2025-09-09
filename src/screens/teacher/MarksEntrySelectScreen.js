@@ -17,10 +17,13 @@ export default function MarksEntrySelectScreen({ navigation }) {
       setLoading(true);
       setError(null);
 
-      // Get teacher info using the helper function
+      // Get teacher info using the helper function (which uses email-based lookup)
       const { data: teacherData, error: teacherError } = await dbHelpers.getTeacherByUserId(user.id);
 
-      if (teacherError || !teacherData) throw new Error('Teacher not found');
+      if (teacherError || !teacherData) {
+        console.error('❌ Teacher not found for user:', user.id, 'Error:', teacherError);
+        throw new Error('Teacher information not found for this tenant.');
+      }
 
       // Get assigned subjects
       const { data: assignedSubjects, error: subjectsError } = await supabase
