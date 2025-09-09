@@ -67,41 +67,19 @@ export class StationaryTenantQuery {
     }
 
     console.log('🔍 StationaryTenantQuery: Creating query for table:', this.tableName, 'tenant:', this.tenantId);
-    console.log('🔧 StationaryTenantQuery: supabase object:', typeof supabase, !!supabase);
-    console.log('🔧 StationaryTenantQuery: supabase.from function:', typeof supabase?.from);
 
-    if (!supabase || typeof supabase.from !== 'function') {
-      console.error('❌ StationaryTenantQuery: supabase client is not properly initialized!');
-      throw new Error('Supabase client not properly initialized');
-    }
-
-    try {
-      const fromQuery = supabase.from(this.tableName);
-      console.log('🔧 StationaryTenantQuery: from() result:', typeof fromQuery, !!fromQuery);
-      
-      if (!fromQuery || typeof fromQuery.select !== 'function') {
-        console.error('❌ StationaryTenantQuery: from() did not return valid query builder');
-        throw new Error('Invalid query builder from supabase.from()');
-      }
-      
-      const selectQuery = fromQuery.select(selectColumns);
-      console.log('🔧 StationaryTenantQuery: select() result:', typeof selectQuery, !!selectQuery);
-      
-      if (!selectQuery || typeof selectQuery.eq !== 'function') {
-        console.error('❌ StationaryTenantQuery: select() did not return valid query builder');
-        throw new Error('Invalid query builder after select()');
-      }
-      
-      const finalQuery = selectQuery.eq('tenant_id', this.tenantId);
-      console.log('🔧 StationaryTenantQuery: Final query created:', typeof finalQuery, !!finalQuery);
-      console.log('🔧 StationaryTenantQuery: Query methods available:', Object.getOwnPropertyNames(finalQuery || {}).slice(0, 10));
-      
-      return finalQuery;
-      
-    } catch (error) {
-      console.error('❌ StationaryTenantQuery: Error creating query:', error);
-      throw error;
-    }
+    // Return the base query builder with select applied, but without tenant filter
+    // The tenant filter will be applied by the calling method to avoid premature execution
+    const baseQuery = supabase.from(this.tableName).select(selectColumns);
+    
+    console.log('🔧 StationaryTenantQuery: Base query created, adding tenant filter manually');
+    
+    // Apply tenant filter and return the query builder (not executed)
+    const tenantQuery = baseQuery.eq('tenant_id', this.tenantId);
+    
+    console.log('🔧 StationaryTenantQuery: Query methods after tenant filter:', Object.getOwnPropertyNames(tenantQuery || {}).slice(0, 10));
+    
+    return tenantQuery;
   }
 
   /**
@@ -287,7 +265,7 @@ export const validateStationaryAdminAccess = async (user) => {
     }
 
     // Step 5: Additional security validation
-    const accessValidation = await validateTenantAccess(tenant.id, user.id, 'StationaryManagement');
+    const accessValidation = await validateTenantAccess(userRecord.id, tenant.id, 'StationaryManagement');
     
     if (!accessValidation.isValid) {
       return {

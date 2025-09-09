@@ -102,7 +102,9 @@ const TeacherAccountManagement = ({ navigation }) => {
       
       // 🏃‍♂️ Fast parallel data fetching
       console.log('📊 TeacherAccountManagement: Fetching teachers data...');
-      const { data, error } = await dbHelpers.getTeachers();
+      const { data, error } = await dbHelpers.getTeachers({ 
+        includeUserDetails: true // Include user details for account management
+      });
       
       if (error) throw error;
       

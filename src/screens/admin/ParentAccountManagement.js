@@ -79,9 +79,14 @@ const ParentAccountManagement = ({ navigation }) => {
         console.log('⚠️ ParentAccountManagement: No tenant from context, trying email lookup...');
         
         try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          tenantId = emailTenant?.id;
-          console.log('📧 ParentAccountManagement: Email-based tenant ID:', tenantId);
+          const emailTenantResult = await getCurrentUserTenantByEmail();
+          if (emailTenantResult.success) {
+            tenantId = emailTenantResult.data.tenantId;
+            console.log('📧 ParentAccountManagement: Email-based tenant ID:', tenantId);
+            console.log('📧 ParentAccountManagement: Email-based tenant name:', emailTenantResult.data.tenantName);
+          } else {
+            console.error('❌ ParentAccountManagement: Email tenant lookup failed:', emailTenantResult.error);
+          }
         } catch (emailError) {
           console.error('❌ ParentAccountManagement: Email tenant lookup failed:', emailError);
         }

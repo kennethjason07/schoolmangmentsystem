@@ -23,6 +23,7 @@ import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Print from 'expo-print';
 import { formatDate } from '../../utils/helpers';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 const ManageStudents = () => {
   const navigation = useNavigation();
@@ -123,6 +124,16 @@ const ManageStudents = () => {
     try {
       console.log('🚀 Loading students with optimized query...');
       
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      console.log('🏢 Loading students for tenant:', tenantResult.data.tenant.name);
+      
       // Use a single JOIN query to get all student data with related information including profile photos
       const { data: studentsData, error } = await supabase
         .from(TABLES.STUDENTS)
@@ -134,6 +145,7 @@ const ManageStudents = () => {
             section
           )
         `)
+        .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false });
 
       console.log('📸 Fetching student profile photos from users table...');
@@ -426,9 +438,19 @@ const ManageStudents = () => {
   // Load classes
   const loadClasses = async () => {
     try {
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      
       const { data: classData, error } = await supabase
         .from(TABLES.CLASSES)
         .select('*')
+        .eq('tenant_id', tenantId)
         .order('class_name');
 
       if (error) throw error;
@@ -441,9 +463,19 @@ const ManageStudents = () => {
   // Load parents from parents table
   const loadParents = async () => {
     try {
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      
       const { data: parentData, error } = await supabase
         .from(TABLES.PARENTS)
         .select('id, name, phone')
+        .eq('tenant_id', tenantId)
         .order('name');
 
       if (error) throw error;
@@ -620,6 +652,16 @@ const ManageStudents = () => {
 
       setLoading(true);
 
+      // Get current tenant for proper tenant assignment
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        setLoading(false);
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+
       // First, create the student record
       const { data: studentResult, error: studentError } = await supabase
         .from(TABLES.STUDENTS)
@@ -642,7 +684,8 @@ const ManageStudents = () => {
           academic_year: form.academic_year,
           general_behaviour: form.general_behaviour,
           remarks: form.remarks || null,
-          class_id: form.class_id || null
+          class_id: form.class_id || null,
+          tenant_id: tenantId
         })
         .select('id')
         .single();
@@ -663,7 +706,8 @@ const ManageStudents = () => {
           phone: form.parent_phone || null,
           email: form.parent_email || null,
           relation: 'Father',
-          student_id: studentId
+          student_id: studentId,
+          tenant_id: tenantId
         });
       }
       
@@ -673,7 +717,8 @@ const ManageStudents = () => {
           phone: form.parent_phone || null,
           email: form.parent_email || null,
           relation: 'Mother',
-          student_id: studentId
+          student_id: studentId,
+          tenant_id: tenantId
         });
       }
 

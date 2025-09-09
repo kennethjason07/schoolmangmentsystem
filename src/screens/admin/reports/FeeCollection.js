@@ -19,6 +19,7 @@ import Header from '../../../components/Header';
 import ExportModal from '../../../components/ExportModal';
 import { supabase, TABLES } from '../../../utils/supabase';
 import { exportFeeData, EXPORT_FORMATS } from '../../../utils/exportUtils';
+import { getCurrentUserTenantByEmail } from '../../../utils/getTenantByEmail';
 import { PieChart, BarChart } from 'react-native-chart-kit';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../../components/CrossPlatformDatePicker';
 
@@ -95,9 +96,19 @@ const FeeCollection = ({ navigation }) => {
 
   const loadClasses = async () => {
     try {
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      
       const { data, error } = await supabase
         .from(TABLES.CLASSES)
         .select('*')
+        .eq('tenant_id', tenantId)
         .eq('academic_year', selectedAcademicYear)
         .order('class_name');
 
@@ -110,12 +121,22 @@ const FeeCollection = ({ navigation }) => {
 
   const loadStudents = async () => {
     try {
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      
       let query = supabase
         .from(TABLES.STUDENTS)
         .select(`
           *,
           classes(id, class_name, section)
         `)
+        .eq('tenant_id', tenantId)
         .eq('academic_year', selectedAcademicYear);
 
       if (selectedClass !== 'All') {
@@ -132,6 +153,15 @@ const FeeCollection = ({ navigation }) => {
 
   const loadFeeStructure = async () => {
     try {
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      
       let query = supabase
         .from(TABLES.FEE_STRUCTURE)
         .select(`
@@ -139,6 +169,7 @@ const FeeCollection = ({ navigation }) => {
           classes(id, class_name, section),
           students(id, name, admission_no)
         `)
+        .eq('tenant_id', tenantId)
         .eq('academic_year', selectedAcademicYear);
 
       if (selectedClass !== 'All') {
@@ -206,12 +237,22 @@ const FeeCollection = ({ navigation }) => {
         return;
       }
 
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+
       let query = supabase
         .from(TABLES.STUDENT_FEES)
         .select(`
           *,
           students(id, name, admission_no, class_id, classes(id, class_name, section))
         `)
+        .eq('tenant_id', tenantId)
         .eq('academic_year', selectedAcademicYear)
         .gte('payment_date', start.toISOString().split('T')[0])
         .lte('payment_date', end.toISOString().split('T')[0])

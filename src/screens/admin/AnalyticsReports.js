@@ -15,6 +15,7 @@ import { ActivityIndicator as PaperActivityIndicator } from 'react-native-paper'
 import Header from '../../components/Header';
 import { supabase, TABLES } from '../../utils/supabase';
 import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -96,12 +97,22 @@ const AnalyticsReports = ({ navigation }) => {
     try {
       const dateRange = getDateRange();
 
-      // Load basic counts
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      console.log('🏢 Loading analytics overview for tenant:', tenantResult.data.tenant.name);
+
+      // Load basic counts with tenant filtering
       const [studentsResult, teachersResult, classesResult, subjectsResult] = await Promise.all([
-        supabase.from(TABLES.STUDENTS).select('id, created_at, class_id'),
-        supabase.from(TABLES.TEACHERS).select('id, created_at, salary_amount'),
-        supabase.from(TABLES.CLASSES).select('id, class_name, section'),
-        supabase.from(TABLES.SUBJECTS).select('id, name, class_id')
+        supabase.from(TABLES.STUDENTS).select('id, created_at, class_id').eq('tenant_id', tenantId),
+        supabase.from(TABLES.TEACHERS).select('id, created_at, salary_amount').eq('tenant_id', tenantId),
+        supabase.from(TABLES.CLASSES).select('id, class_name, section').eq('tenant_id', tenantId),
+        supabase.from(TABLES.SUBJECTS).select('id, name, class_id').eq('tenant_id', tenantId)
       ]);
 
       const students = studentsResult.data || [];
@@ -134,7 +145,16 @@ const AnalyticsReports = ({ navigation }) => {
     try {
       const dateRange = getDateRange();
 
-      // Load student attendance
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+
+      // Load student attendance with tenant filtering
       const { data: studentAttendance } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
         .select(`
@@ -142,16 +162,18 @@ const AnalyticsReports = ({ navigation }) => {
           students(name, class_id),
           classes(class_name, section)
         `)
+        .eq('tenant_id', tenantId)
         .gte('date', dateRange.start.toISOString().split('T')[0])
         .lte('date', dateRange.end.toISOString().split('T')[0]);
 
-      // Load teacher attendance
+      // Load teacher attendance with tenant filtering
       const { data: teacherAttendance } = await supabase
         .from(TABLES.TEACHER_ATTENDANCE)
         .select(`
           *,
           teachers(name)
         `)
+        .eq('tenant_id', tenantId)
         .gte('date', dateRange.start.toISOString().split('T')[0])
         .lte('date', dateRange.end.toISOString().split('T')[0]);
 
@@ -198,7 +220,16 @@ const AnalyticsReports = ({ navigation }) => {
     try {
       const dateRange = getDateRange();
 
-      // Load marks data
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+
+      // Load marks data with tenant filtering
       const { data: marks } = await supabase
         .from(TABLES.MARKS)
         .select(`
@@ -206,19 +237,21 @@ const AnalyticsReports = ({ navigation }) => {
           students(name, class_id),
           subjects(name, class_id),
           exams(name, class_id)
-        `);
+        `)
+        .eq('tenant_id', tenantId);
 
-      // Load exams data
+      // Load exams data with tenant filtering
       const { data: exams } = await supabase
         .from(TABLES.EXAMS)
         .select(`
           *,
           classes(class_name, section)
         `)
+        .eq('tenant_id', tenantId)
         .gte('start_date', dateRange.start.toISOString().split('T')[0])
         .lte('end_date', dateRange.end.toISOString().split('T')[0]);
 
-      // Load assignments data
+      // Load assignments data with tenant filtering
       const { data: assignments } = await supabase
         .from(TABLES.ASSIGNMENTS)
         .select(`
@@ -227,6 +260,7 @@ const AnalyticsReports = ({ navigation }) => {
           subjects(name),
           teachers(name)
         `)
+        .eq('tenant_id', tenantId)
         .gte('assigned_date', dateRange.start.toISOString().split('T')[0])
         .lte('due_date', dateRange.end.toISOString().split('T')[0]);
 
@@ -281,23 +315,34 @@ const AnalyticsReports = ({ navigation }) => {
     try {
       const dateRange = getDateRange();
 
-      // Load fee payments for the selected period
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+
+      // Load fee payments for the selected period with tenant filtering
       const { data: feePayments } = await supabase
         .from(TABLES.STUDENT_FEES)
         .select(`
           *,
           students(name, class_id)
         `)
+        .eq('tenant_id', tenantId)
         .gte('payment_date', dateRange.start.toISOString().split('T')[0])
         .lte('payment_date', dateRange.end.toISOString().split('T')[0]);
 
-      // Load all student fees to calculate total expected vs total collected (overall performance)
+      // Load all student fees to calculate total expected vs total collected (overall performance) with tenant filtering
       const { data: allStudentFees } = await supabase
         .from(TABLES.STUDENT_FEES)
         .select(`
           *,
           fee_structure(amount)
-        `);
+        `)
+        .eq('tenant_id', tenantId);
 
       // Calculate financial statistics
       const totalCollected = feePayments?.reduce((sum, payment) =>

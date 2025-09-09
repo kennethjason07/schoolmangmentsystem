@@ -17,6 +17,7 @@ import Header from '../../../components/Header';
 import ExportModal from '../../../components/ExportModal';
 import { supabase, TABLES } from '../../../utils/supabase';
 import { exportAttendanceData, exportIndividualAttendanceRecord, EXPORT_FORMATS } from '../../../utils/exportUtils';
+import { getCurrentUserTenantByEmail } from '../../../utils/getTenantByEmail';
 import { LineChart, BarChart } from 'react-native-chart-kit';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../../components/CrossPlatformDatePicker';
 import { Platform } from 'react-native';
@@ -85,9 +86,19 @@ const AttendanceReport = ({ navigation }) => {
 
   const loadClasses = async () => {
     try {
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      
       const { data, error } = await supabase
         .from(TABLES.CLASSES)
         .select('*')
+        .eq('tenant_id', tenantId)
         .order('class_name');
 
       if (error) throw error;
@@ -99,12 +110,22 @@ const AttendanceReport = ({ navigation }) => {
 
   const loadStudents = async () => {
     try {
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      
       const { data, error } = await supabase
         .from(TABLES.STUDENTS)
         .select(`
           *,
           classes(id, class_name, section)
-        `);
+        `)
+        .eq('tenant_id', tenantId);
 
       if (error) throw error;
       setStudents(data || []);
@@ -163,6 +184,15 @@ const AttendanceReport = ({ navigation }) => {
         return;
       }
 
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+
       let query = supabase
         .from(TABLES.STUDENT_ATTENDANCE)
         .select(`
@@ -170,6 +200,7 @@ const AttendanceReport = ({ navigation }) => {
           students(id, name, admission_no),
           classes(id, class_name, section)
         `)
+        .eq('tenant_id', tenantId)
         .gte('date', start.toISOString().split('T')[0])
         .lte('date', end.toISOString().split('T')[0])
         .order('date', { ascending: false });

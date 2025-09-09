@@ -795,18 +795,70 @@ export const dbHelpers = {
     }
   },
 
-  // Teacher management
-  async getTeachers() {
+  // Teacher management - Optimized for better performance
+  async getTeachers(options = {}) {
     try {
-      const { data, error } = await supabase
+      const {
+        pageSize = 50,
+        page = 0,
+        includeUserDetails = false,
+        selectColumns = 'id,name,phone,qualification,salary_amount,age,address,tenant_id,created_at,salary_type,is_class_teacher,assigned_class_id'
+      } = options;
+
+      // Get current tenant ID for filtering
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      
+      let query = supabase
         .from(TABLES.TEACHERS)
-        .select(`
-          *,
-          users!users_linked_teacher_id_fkey(id, email, full_name, phone)
-        `)
-        .order('name');
-      return { data, error };
+        .select(selectColumns)
+        .order('name', { ascending: true });
+      
+      // Add tenant filtering
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
+      
+      // Add pagination
+      if (pageSize && pageSize > 0) {
+        const start = page * pageSize;
+        const end = start + pageSize - 1;
+        query = query.range(start, end);
+      }
+      
+      const { data: teachersData, error } = await query;
+      
+      if (error) {
+        return { data: null, error };
+      }
+      
+      // Optionally fetch linked user details only when needed
+      if (includeUserDetails && teachersData && teachersData.length > 0) {
+        const teacherIds = teachersData.map(teacher => teacher.id);
+        
+        const { data: usersData, error: usersError } = await supabase
+          .from(TABLES.USERS)
+          .select('id, email, full_name, phone, linked_teacher_id')
+          .in('linked_teacher_id', teacherIds);
+        
+        if (!usersError && usersData) {
+          // Map user data to teachers
+          const usersLookup = {};
+          usersData.forEach(user => {
+            if (user.linked_teacher_id) {
+              usersLookup[user.linked_teacher_id] = user;
+            }
+          });
+          
+          // Enhance teachers with user data
+          teachersData.forEach(teacher => {
+            teacher.users = usersLookup[teacher.id] || null;
+          });
+        }
+      }
+      
+      return { data: teachersData || [], error: null };
     } catch (error) {
+      console.error('Error in getTeachers:', error);
       return { data: null, error };
     }
   },
@@ -1120,15 +1172,31 @@ export const dbHelpers = {
         throw new Error(`Invalid parent role ID: expected number, got ${typeof parentRoleId}`);
       }
 
-      // 3. Create user profile with linked_parent_of
-      console.log('Creating parent account - Step 6: Creating user profile');
+      // 3. Get tenant_id from student record first
+      console.log('Creating parent account - Step 6: Getting student tenant info');
+      const { data: studentInfo, error: studentInfoError } = await supabase
+        .from(TABLES.STUDENTS)
+        .select('tenant_id')
+        .eq('id', studentData.studentId)
+        .single();
+      
+      if (studentInfoError || !studentInfo.tenant_id) {
+        console.error('Error getting student tenant_id:', studentInfoError);
+        throw new Error('Could not determine tenant context from student record');
+      }
+      
+      console.log('Creating parent account - Step 7: Student tenant_id:', studentInfo.tenant_id);
+      
+      // 4. Create user profile with linked_parent_of and tenant_id
+      console.log('Creating parent account - Step 8: Creating user profile');
       const userProfileData = {
         id: authUser.user.id,
         email: authData.email,
         full_name: authData.full_name,
         phone: authData.phone || '',
         role_id: parentRoleId,
-        linked_parent_of: studentData.studentId  // ✅ Link to student record as parent
+        linked_parent_of: studentData.studentId,  // ✅ Link to student record as parent
+        tenant_id: studentInfo.tenant_id         // ✅ Set tenant_id from student
       };
 
       console.log('User profile data:', userProfileData);
@@ -1144,16 +1212,17 @@ export const dbHelpers = {
         throw userError;
       }
 
-      console.log('Creating parent account - Step 7: User profile created:', userProfile);
+      console.log('Creating parent account - Step 9: User profile created:', userProfile);
 
-      // 4. Create parent record in parents table
-      console.log('Creating parent account - Step 8: Creating parent record');
+      // 5. Create parent record in parents table
+      console.log('Creating parent account - Step 10: Creating parent record');
       const parentRecordData = {
         name: authData.full_name,
         relation: authData.relation || 'Guardian', // Default to Guardian if not specified
         phone: authData.phone || '',
         email: authData.email,
-        student_id: studentData.studentId
+        student_id: studentData.studentId,
+        tenant_id: studentInfo.tenant_id  // ✅ Set tenant_id from student
       };
 
       console.log('Parent record data:', parentRecordData);
@@ -1169,10 +1238,10 @@ export const dbHelpers = {
         throw parentError;
       }
 
-      console.log('Creating parent account - Step 9: Parent record created:', parentRecord);
+      console.log('Creating parent account - Step 11: Parent record created:', parentRecord);
 
-      // 5. Update student record to link to the parent record
-      console.log('Creating parent account - Step 10: Updating student parent_id');
+      // 6. Update student record to link to the parent record
+      console.log('Creating parent account - Step 12: Updating student parent_id');
       const { error: studentUpdateError } = await supabase
         .from(TABLES.STUDENTS)
         .update({ parent_id: parentRecord.id })
@@ -1183,10 +1252,10 @@ export const dbHelpers = {
         throw studentUpdateError;
       }
 
-      console.log('Creating parent account - Step 11: Student parent_id updated successfully');
+      console.log('Creating parent account - Step 13: Student parent_id updated successfully');
 
-      // 6. Get the student record for return
-      console.log('Creating parent account - Step 12: Getting student record for ID:', studentData.studentId);
+      // 7. Get the student record for return
+      console.log('Creating parent account - Step 14: Getting student record for ID:', studentData.studentId);
       const { data: student, error: studentError } = await supabase
         .from(TABLES.STUDENTS)
         .select('*')
@@ -1198,7 +1267,7 @@ export const dbHelpers = {
         throw studentError;
       }
 
-      console.log('Creating parent account - Step 13: Success! Parent account and record created for student:', student.name);
+      console.log('Creating parent account - Step 15: Success! Parent account and record created for student:', student.name);
 
       return {
         data: {

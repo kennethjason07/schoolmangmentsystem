@@ -2697,7 +2697,7 @@ const FeePayment = () => {
 
         {/* Fee Summary Cards */}
         <View style={styles.feeDistributionContainer}>
-          <Text style={styles.feeDistributionTitle}>Fee Distribution Summary</Text>
+          <Text style={styles.feeDistributionTitle}>xxxxxxxxxxxxxx</Text>
           <View style={styles.summaryCards}>
             <View style={styles.summaryCard}>
               <Text style={styles.summaryLabel}>Base Fee Amount</Text>

@@ -28,6 +28,7 @@ import { supabase, dbHelpers } from '../../utils/supabase';
 import { format, addMonths } from 'date-fns';
 import { getEventDisplayProps } from '../../utils/eventIcons';
 import { useAuth } from '../../utils/AuthContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
 import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificationCount';
 
@@ -99,6 +100,16 @@ const AdminDashboard = ({ navigation }) => {
       setLoading(true);
       setError(null);
 
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      console.log('🏢 Loading dashboard data for tenant:', tenantResult.data.tenant.name);
+
       // Load school details
       const { data: schoolData, error: schoolError } = await dbHelpers.getSchoolDetails();
       setSchoolDetails(schoolData);
@@ -106,7 +117,8 @@ const AdminDashboard = ({ navigation }) => {
       // Load students count with gender breakdown
       const { data: studentsData, error: studentError, count: studentCount } = await supabase
         .from('students')
-        .select('id, gender', { count: 'exact' });
+        .select('id, gender', { count: 'exact' })
+        .eq('tenant_id', tenantId);
 
       if (studentError) {
         console.error('Error loading students:', studentError);
@@ -115,7 +127,8 @@ const AdminDashboard = ({ navigation }) => {
       // Load teachers count
       const { data: teachersData, error: teacherError, count: teacherCount } = await supabase
         .from('teachers')
-        .select('id', { count: 'exact' });
+        .select('id', { count: 'exact' })
+        .eq('tenant_id', tenantId);
 
       if (teacherError) {
         console.error('Error loading teachers:', teacherError);
@@ -126,7 +139,8 @@ const AdminDashboard = ({ navigation }) => {
       const { data: studentAttendance, error: attendanceError } = await supabase
         .from('student_attendance')
         .select('id, status')
-        .eq('date', today);
+        .eq('date', today)
+        .eq('tenant_id', tenantId);
 
       if (attendanceError) {
         console.error('Error loading attendance:', attendanceError);
@@ -135,7 +149,8 @@ const AdminDashboard = ({ navigation }) => {
       // Load classes count
       const { data: classesData, error: classesError, count: classesCount } = await supabase
         .from('classes')
-        .select('id', { count: 'exact' });
+        .select('id', { count: 'exact' })
+        .eq('tenant_id', tenantId);
 
       if (classesError) {
         console.error('Error loading classes:', classesError);
@@ -148,6 +163,7 @@ const AdminDashboard = ({ navigation }) => {
       const { data: feeData, error: feeError } = await supabase
         .from('student_fees')
         .select('amount_paid')
+        .eq('tenant_id', tenantId)
         .gte('payment_date', `${currentMonth}-01`)
         .lt('payment_date', `${nextMonth}-01`);
 
@@ -208,6 +224,7 @@ const AdminDashboard = ({ navigation }) => {
       const { data: eventsData, error: eventsError } = await supabase
         .from('events')
         .select('*')
+        .eq('tenant_id', tenantId)
         .gte('event_date', format(new Date(), 'yyyy-MM-dd'))
         .order('event_date', { ascending: true })
         .limit(10);
@@ -240,6 +257,7 @@ const AdminDashboard = ({ navigation }) => {
       const { data: recentStudents, error: studentsActivityError } = await supabase
         .from('students')
         .select('name, created_at')
+        .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false })
         .limit(3);
 
@@ -257,6 +275,7 @@ const AdminDashboard = ({ navigation }) => {
       const { data: recentFees, error: feesActivityError } = await supabase
         .from('student_fees')
         .select('amount_paid, payment_date, students(name)')
+        .eq('tenant_id', tenantId)
         .order('payment_date', { ascending: false })
         .limit(3);
 
@@ -385,16 +404,28 @@ const AdminDashboard = ({ navigation }) => {
   // Load chart data
   const loadChartData = async () => {
     try {
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        console.error('Failed to get tenant for chart data:', tenantResult.error);
+        return;
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      
       // Load fee collection data
       const currentMonth = format(new Date(), 'yyyy-MM');
       const { data: feeData } = await supabase
         .from('student_fees')
         .select('amount_paid')
+        .eq('tenant_id', tenantId)
         .gte('payment_date', `${currentMonth}-01`);
 
       const { data: feeStructureData } = await supabase
         .from('fee_structure')
-        .select('amount');
+        .select('amount')
+        .eq('tenant_id', tenantId);
 
       const collected = feeData?.reduce((sum, fee) => sum + (fee.amount_paid || 0), 0) || 0;
       const totalDue = feeStructureData?.reduce((sum, fee) => sum + (fee.amount || 0), 0) || 0;
@@ -470,9 +501,21 @@ const AdminDashboard = ({ navigation }) => {
   const loadClasses = async () => {
     try {
       setLoadingClasses(true);
+      
+      // Get current tenant for proper filtering
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        console.error('Failed to get tenant for classes:', tenantResult.error);
+        return;
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      
       const { data: classesData, error } = await supabase
         .from('classes')
         .select('id, class_name, section')
+        .eq('tenant_id', tenantId)
         .order('class_name', { ascending: true })
         .order('section', { ascending: true });
 

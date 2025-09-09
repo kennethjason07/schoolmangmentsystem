@@ -1,5 +1,6 @@
 import { supabase, TABLES } from '../utils/supabase';
 import { createTenantQuery } from '../utils/tenantValidation';
+import { getCurrentUserTenantByEmail } from '../utils/getTenantByEmail';
 
 /**
  * Universal Notification Service
@@ -104,13 +105,31 @@ export class UniversalNotificationService {
     try {
       if (!userId) return 0;
 
-      // Simple direct query without tenant filtering for messages
-      // Messages should be accessible by receiver_id regardless of tenant
-      const { data, error } = await supabase
+      // Get tenant context for filtering
+      let tenantId = null;
+      try {
+        const tenantResult = await getCurrentUserTenantByEmail();
+        if (tenantResult.success && tenantResult.data?.tenant?.id) {
+          tenantId = tenantResult.data.tenant.id;
+          console.log(`🏢 [UniversalNotificationService] Using tenant filter for messages: ${tenantId}`);
+        }
+      } catch (tenantError) {
+        console.warn('⚠️ [UniversalNotificationService] Could not get tenant context for messages:', tenantError);
+      }
+
+      // Query with tenant filtering
+      let query = supabase
         .from(TABLES.MESSAGES)
-        .select('id, sender_id, receiver_id, is_read, message, sent_at')
+        .select('id, sender_id, receiver_id, is_read, message, sent_at, tenant_id')
         .eq('receiver_id', userId)
         .eq('is_read', false);
+
+      // Apply tenant filtering if available
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         console.warn('Error fetching unread messages:', error);
@@ -145,26 +164,45 @@ export class UniversalNotificationService {
 
       const recipientType = this.getUserTypeForDB(userType);
 
-      // Simple direct query without tenant filtering for notifications
-      // If tenant filtering fails, we still want to show relevant notifications
-      const { data: notificationData, error } = await supabase
+      // Get tenant context for filtering
+      let tenantId = null;
+      try {
+        const tenantResult = await getCurrentUserTenantByEmail();
+        if (tenantResult.success && tenantResult.data?.tenant?.id) {
+          tenantId = tenantResult.data.tenant.id;
+          console.log(`🏢 [UniversalNotificationService] Using tenant filter: ${tenantId}`);
+        }
+      } catch (tenantError) {
+        console.warn('⚠️ [UniversalNotificationService] Could not get tenant context:', tenantError);
+      }
+
+      // Query with tenant filtering - join with notifications table to access tenant_id
+      let query = supabase
         .from(TABLES.NOTIFICATION_RECIPIENTS)
         .select(`
           id,
           is_read,
           recipient_id,
           recipient_type,
-          notifications(
+          notifications!inner(
             id,
             message,
             type,
             delivery_status,
-            delivery_mode
+            delivery_mode,
+            tenant_id
           )
         `)
         .eq('recipient_id', userId)
         .eq('recipient_type', recipientType)
         .eq('is_read', false);
+
+      // Apply tenant filtering if available
+      if (tenantId) {
+        query = query.eq('notifications.tenant_id', tenantId);
+      }
+
+      const { data: notificationData, error } = await query;
 
       if (error) {
         console.warn('Error fetching unread notifications:', error);

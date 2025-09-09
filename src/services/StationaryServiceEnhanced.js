@@ -91,24 +91,28 @@ class StationaryServiceEnhanced {
     try {
       console.log('🔍 StationaryServiceEnhanced: Getting stationary items, activeOnly:', activeOnly);
       
-      const itemsQuery = createStationaryTenantQuery('stationary_items');
-      console.log('🔧 Debug: itemsQuery created:', typeof itemsQuery);
+      // Get current tenant directly to avoid query builder issues
+      const tenantResult = await getCurrentUserTenantByEmail();
       
-      let query = await itemsQuery.createQuery();
-      console.log('🔧 Debug: query from createQuery:', typeof query, query?.constructor?.name);
-      console.log('🔧 Debug: query methods:', Object.getOwnPropertyNames(query || {}).slice(0, 5));
-      
-      if (activeOnly) {
-        console.log('🔧 Debug: Adding is_active filter...');
-        query = query.eq('is_active', true);
-        console.log('🔧 Debug: After eq filter:', typeof query);
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
       }
       
-      console.log('🔧 Debug: Adding order...');
+      const tenantId = tenantResult.data.tenant.id;
+      console.log('🏢 Using direct query for tenant:', tenantResult.data.tenant.name);
+      
+      // Build query directly using supabase client
+      let query = supabase
+        .from('stationary_items')
+        .select('*')
+        .eq('tenant_id', tenantId);
+      
+      if (activeOnly) {
+        query = query.eq('is_active', true);
+      }
+      
       query = query.order('name', { ascending: true });
-      console.log('🔧 Debug: After order:', typeof query);
 
-      console.log('🔧 Debug: Executing query...');
       const { data, error } = await query;
       
       if (error) throw error;
@@ -197,11 +201,24 @@ class StationaryServiceEnhanced {
    */
   static async getClasses() {
     try {
-      console.log('🏫 StationaryServiceEnhanced: Getting classes');
+      console.log('🏦 StationaryServiceEnhanced: Getting classes');
       
-      const classesQuery = createStationaryTenantQuery('classes');
-      const query = await classesQuery.createQuery('id, class_name, section');
-      const { data, error } = await query.order('class_name', { ascending: true });
+      // Get current tenant directly to avoid query builder issues
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      console.log('🏢 Using direct query for tenant:', tenantResult.data.tenant.name);
+      
+      // Build query directly using supabase client
+      const { data, error } = await supabase
+        .from('classes')
+        .select('id, class_name, section')
+        .eq('tenant_id', tenantId)
+        .order('class_name', { ascending: true });
       
       if (error) throw error;
 
@@ -223,9 +240,21 @@ class StationaryServiceEnhanced {
     try {
       console.log('👥 StationaryServiceEnhanced: Getting students for class:', classId);
       
-      const studentsQuery = createStationaryTenantQuery('students');
-      const query = await studentsQuery.createQuery('id, name, admission_no, class_id');
-      const { data, error } = await query
+      // Get current tenant directly to avoid query builder issues
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      console.log('🏢 Using direct query for tenant:', tenantResult.data.tenant.name);
+      
+      // Build query directly using supabase client
+      const { data, error } = await supabase
+        .from('students')
+        .select('id, name, admission_no, class_id')
+        .eq('tenant_id', tenantId)
         .eq('class_id', classId)
         .order('name', { ascending: true });
       
@@ -294,13 +323,26 @@ class StationaryServiceEnhanced {
     try {
       console.log('📄 StationaryServiceEnhanced: Getting purchases with filters:', filters);
       
-      const purchasesQuery = createStationaryTenantQuery('stationary_purchases');
-      let query = await purchasesQuery.createQuery(`
-        *,
-        students(name, admission_no, class_id),
-        stationary_items(name, fee_amount),
-        classes(class_name, section)
-      `);
+      // Get current tenant directly to avoid query builder issues
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      console.log('🏢 Using direct query for tenant:', tenantResult.data.tenant.name);
+      
+      // Build query directly using supabase client
+      let query = supabase
+        .from('stationary_purchases')
+        .select(`
+          *,
+          students(name, admission_no, class_id),
+          stationary_items(name, fee_amount),
+          classes(class_name, section)
+        `)
+        .eq('tenant_id', tenantId);
 
       // Apply filters
       if (filters.startDate) {
@@ -344,12 +386,7 @@ class StationaryServiceEnhanced {
       console.log('🧾 StationaryServiceEnhanced: Getting purchase by receipt:', receiptNumber);
       
       const purchasesQuery = createStationaryTenantQuery('stationary_purchases');
-      const query = await purchasesQuery.createQuery(`
-        *,
-        students(name, admission_no, class_id),
-        stationary_items(name, description, fee_amount),
-        classes(class_name, section)
-      `);
+      const query = await purchasesQuery.createQuery('*, students(name, admission_no, class_id), stationary_items(name, description, fee_amount), classes(class_name, section)');
 
       const { data, error } = await query
         .eq('receipt_number', receiptNumber)
