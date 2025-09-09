@@ -653,82 +653,167 @@ const ManageStudents = () => {
       setLoading(true);
 
       // Get current tenant for proper tenant assignment
+      console.log('🏢 ManageStudents: Getting tenant for student creation...');
       const tenantResult = await getCurrentUserTenantByEmail();
+      
+      console.log('🏢 ManageStudents: Tenant result:', tenantResult);
       
       if (!tenantResult.success) {
         setLoading(false);
+        console.error('❌ ManageStudents: Failed to get tenant:', tenantResult.error);
         throw new Error(`Failed to get tenant: ${tenantResult.error}`);
       }
       
       const tenantId = tenantResult.data.tenant.id;
+      console.log('🏢 ManageStudents: Using tenant ID for student:', tenantId);
+      console.log('🏢 ManageStudents: Tenant name:', tenantResult.data.tenant.name);
 
-      // First, create the student record
+      // First, check if a student with the same admission number already exists in this tenant
+      console.log('🔍 ManageStudents: Checking for existing admission number in tenant');
+      const { data: existingStudent, error: checkError } = await supabase
+        .from(TABLES.STUDENTS)
+        .select('id, admission_no, name')
+        .eq('admission_no', form.admission_no)
+        .eq('tenant_id', tenantId)
+        .limit(1);
+      
+      if (checkError) {
+        setLoading(false);
+        console.error('❌ ManageStudents: Error checking for existing admission number:', checkError);
+        throw checkError;
+      }
+      
+      if (existingStudent && existingStudent.length > 0) {
+        setLoading(false);
+        console.log('⚠️ ManageStudents: Duplicate admission number found:', existingStudent[0]);
+        const errorMessage = `A student with admission number "${form.admission_no}" already exists in your school (Student: ${existingStudent[0].name}). Please choose a different admission number.`;
+        Alert.alert('Duplicate Admission Number', errorMessage);
+        return; // Don't proceed with insert
+      }
+      
+      console.log('✅ ManageStudents: No duplicate admission number found, proceeding with insert');
+      
+      const studentInsertData = {
+        admission_no: form.admission_no,
+        name: form.name,
+        dob: form.dob,
+        aadhar_no: form.aadhar_no || null,
+        place_of_birth: form.place_of_birth || null,
+        nationality: form.nationality,
+        gender: form.gender,
+        religion: form.religion || null,
+        caste: form.caste,
+        address: form.address || null,
+        pin_code: form.pin_code || null,
+        blood_group: form.blood_group || null,
+        mother_tongue: form.mother_tongue || null,
+        identification_mark_1: form.identification_mark_1 || null,
+        identification_mark_2: form.identification_mark_2 || null,
+        academic_year: form.academic_year,
+        general_behaviour: form.general_behaviour,
+        remarks: form.remarks || null,
+        class_id: form.class_id || null,
+        tenant_id: tenantId
+      };
+      
+      console.log('📝 ManageStudents: Student insert data:', studentInsertData);
+      console.log('🏢 ManageStudents: Confirming tenant_id in insert data:', studentInsertData.tenant_id);
+
+      // Create the student record
       const { data: studentResult, error: studentError } = await supabase
         .from(TABLES.STUDENTS)
-        .insert({
-          admission_no: form.admission_no,
-          name: form.name,
-          dob: form.dob,
-          aadhar_no: form.aadhar_no || null,
-          place_of_birth: form.place_of_birth || null,
-          nationality: form.nationality,
-          gender: form.gender,
-          religion: form.religion || null,
-          caste: form.caste,
-          address: form.address || null,
-          pin_code: form.pin_code || null,
-          blood_group: form.blood_group || null,
-          mother_tongue: form.mother_tongue || null,
-          identification_mark_1: form.identification_mark_1 || null,
-          identification_mark_2: form.identification_mark_2 || null,
-          academic_year: form.academic_year,
-          general_behaviour: form.general_behaviour,
-          remarks: form.remarks || null,
-          class_id: form.class_id || null,
-          tenant_id: tenantId
-        })
+        .insert(studentInsertData)
         .select('id')
         .single();
 
       if (studentError) {
         setLoading(false);
+        console.error('❌ ManageStudents: Database error adding student:', studentError);
+        
+        // Handle specific constraint violations with user-friendly messages
+        if (studentError.code === '23505' && studentError.message.includes('students_admission_no_key')) {
+          const errorMessage = `A student with admission number "${form.admission_no}" already exists in the system. Please choose a different admission number.`;
+          Alert.alert('Duplicate Admission Number', errorMessage);
+          return; // Don't throw, just return to keep modal open
+        }
+        
         throw studentError;
       }
 
       const studentId = studentResult.id;
+      
+      console.log('✅ ManageStudents: Student created successfully!');
+      console.log('📝 ManageStudents: Student result:', studentResult);
+      console.log('🏫 ManageStudents: New student ID:', studentId);
 
       // Create parent records - separate entries for father and mother if both provided
+      console.log('👨‍👩‍👧 ManageStudents: Creating parent records...');
+      console.log('🏢 ManageStudents: TenantId for parents:', tenantId);
+      console.log('🏫 ManageStudents: StudentId for parents:', studentId);
+      
+      // Safety check: Ensure tenantId is still valid
+      if (!tenantId || tenantId === null || tenantId === undefined) {
+        setLoading(false);
+        console.error('❌ ManageStudents: TenantId is null/undefined before parent creation!');
+        console.error('❌ ManageStudents: TenantId value:', tenantId);
+        console.error('❌ ManageStudents: TenantId type:', typeof tenantId);
+        // Delete the student since we can\'t create parents without tenant
+        await supabase.from(TABLES.STUDENTS).delete().eq('id', studentId);
+        Alert.alert('Error', 'Failed to create parent records: Missing tenant information. Student record has been removed.');
+        return;
+      }
+      
       const parentRecords = [];
       
       if (form.father_name) {
-        parentRecords.push({
+        const fatherRecord = {
           name: form.father_name,
           phone: form.parent_phone || null,
           email: form.parent_email || null,
           relation: 'Father',
           student_id: studentId,
           tenant_id: tenantId
-        });
+        };
+        parentRecords.push(fatherRecord);
+        console.log('👨 ManageStudents: Father record:', fatherRecord);
       }
       
       if (form.mother_name) {
-        parentRecords.push({
+        const motherRecord = {
           name: form.mother_name,
           phone: form.parent_phone || null,
           email: form.parent_email || null,
           relation: 'Mother',
           student_id: studentId,
           tenant_id: tenantId
-        });
+        };
+        parentRecords.push(motherRecord);
+        console.log('👩 ManageStudents: Mother record:', motherRecord);
       }
+      
+      console.log('📝 ManageStudents: All parent records to insert:', parentRecords);
 
       if (parentRecords.length > 0) {
+        console.log('🚀 ManageStudents: Inserting parent records...');
         const { error: parentError } = await supabase
           .from(TABLES.PARENTS)
           .insert(parentRecords);
 
         if (parentError) {
           setLoading(false);
+          console.error('❌ ManageStudents: Error creating parent records:', parentError);
+          console.error('❌ ManageStudents: Parent error code:', parentError.code);
+          console.error('❌ ManageStudents: Parent error message:', parentError.message);
+          
+          // Handle specific parent constraint violations
+          if (parentError.code === '23502' && parentError.message.includes('tenant_id')) {
+            const errorMessage = 'Parent creation failed: Missing tenant information. Please try again or contact administrator.';
+            Alert.alert('Parent Creation Error', errorMessage);
+            // Still delete the student to maintain consistency
+            await supabase.from(TABLES.STUDENTS).delete().eq('id', studentId);
+            return;
+          }
+          
           // If parent creation fails, we should delete the student record to maintain consistency
           await supabase.from(TABLES.STUDENTS).delete().eq('id', studentId);
           throw parentError;
@@ -788,10 +873,27 @@ const ManageStudents = () => {
     };
 
     try {
-      const { data: parentData, error: parentError } = await supabase
+      // Get current tenant for tenant-aware parent loading
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        console.warn('⚠️ ManageStudents Edit: Could not get tenant for parent loading:', tenantResult.error);
+      }
+      
+      const tenantId = tenantResult.success ? tenantResult.data.tenant.id : null;
+      
+      // Load parent data with tenant filtering if available
+      let parentQuery = supabase
         .from(TABLES.PARENTS)
         .select('*')
         .eq('student_id', student.id);
+      
+      if (tenantId) {
+        parentQuery = parentQuery.eq('tenant_id', tenantId);
+        console.log('🏢 ManageStudents Edit: Loading parents with tenant filter:', tenantId);
+      }
+      
+      const { data: parentData, error: parentError } = await parentQuery;
 
       if (!parentError && parentData && parentData.length > 0) {
         // Handle multiple parent records (father and mother)
@@ -871,7 +973,46 @@ const ManageStudents = () => {
 
       setLoading(true);
 
-      // Update student record first
+      // Get current tenant for proper tenant validation
+      console.log('🏢 ManageStudents Edit: Getting tenant for student update...');
+      const tenantResult = await getCurrentUserTenantByEmail();
+      
+      if (!tenantResult.success) {
+        setLoading(false);
+        console.error('❌ ManageStudents Edit: Failed to get tenant:', tenantResult.error);
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      
+      const tenantId = tenantResult.data.tenant.id;
+      console.log('🏢 ManageStudents Edit: Using tenant ID:', tenantId);
+      
+      // Check for duplicate admission number in the same tenant (excluding current student)
+      console.log('🔍 ManageStudents Edit: Checking for duplicate admission number...');
+      const { data: existingStudent, error: checkError } = await supabase
+        .from(TABLES.STUDENTS)
+        .select('id, admission_no, name')
+        .eq('admission_no', form.admission_no)
+        .eq('tenant_id', tenantId)
+        .neq('id', selectedStudent.id) // Exclude the current student being edited
+        .limit(1);
+      
+      if (checkError) {
+        setLoading(false);
+        console.error('❌ ManageStudents Edit: Error checking for duplicate admission number:', checkError);
+        throw checkError;
+      }
+      
+      if (existingStudent && existingStudent.length > 0) {
+        setLoading(false);
+        console.log('⚠️ ManageStudents Edit: Duplicate admission number found:', existingStudent[0]);
+        const errorMessage = `A student with admission number "${form.admission_no}" already exists in your school (Student: ${existingStudent[0].name}). Please choose a different admission number.`;
+        Alert.alert('Duplicate Admission Number', errorMessage);
+        return; // Don't proceed with update
+      }
+      
+      console.log('✅ ManageStudents Edit: No duplicate admission number found, proceeding with update');
+
+      // Update student record with tenant validation
       const { error: studentError } = await supabase
         .from(TABLES.STUDENTS)
         .update({
@@ -895,45 +1036,57 @@ const ManageStudents = () => {
           remarks: form.remarks || null,
           class_id: form.class_id || null
         })
-        .eq('id', selectedStudent.id);
+        .eq('id', selectedStudent.id)
+        .eq('tenant_id', tenantId); // Ensure we only update students in our tenant
 
       if (studentError) {
         setLoading(false);
         throw studentError;
       }
 
-      // Delete existing parent records for this student first
+      // Delete existing parent records for this student first (with tenant filtering)
+      console.log('👨‍👩‍👧 ManageStudents Edit: Deleting existing parent records...');
       const { error: deleteError } = await supabase
         .from(TABLES.PARENTS)
         .delete()
-        .eq('student_id', selectedStudent.id);
+        .eq('student_id', selectedStudent.id)
+        .eq('tenant_id', tenantId);
 
       if (deleteError) {
         console.log('Warning: Could not delete existing parent records:', deleteError);
       }
 
       // Create new parent records - separate entries for father and mother if both provided
+      console.log('👨‍👩‍👧 ManageStudents Edit: Creating new parent records...');
       const parentRecords = [];
       
       if (form.father_name) {
-        parentRecords.push({
+        const fatherRecord = {
           name: form.father_name,
           phone: form.parent_phone || null,
           email: form.parent_email || null,
           relation: 'Father',
-          student_id: selectedStudent.id
-        });
+          student_id: selectedStudent.id,
+          tenant_id: tenantId
+        };
+        parentRecords.push(fatherRecord);
+        console.log('👨 ManageStudents Edit: Father record:', fatherRecord);
       }
       
       if (form.mother_name) {
-        parentRecords.push({
+        const motherRecord = {
           name: form.mother_name,
           phone: form.parent_phone || null,
           email: form.parent_email || null,
           relation: 'Mother',
-          student_id: selectedStudent.id
-        });
+          student_id: selectedStudent.id,
+          tenant_id: tenantId
+        };
+        parentRecords.push(motherRecord);
+        console.log('👩 ManageStudents Edit: Mother record:', motherRecord);
       }
+      
+      console.log('📝 ManageStudents Edit: All parent records to insert:', parentRecords);
 
       if (parentRecords.length > 0) {
         const { error: parentError } = await supabase
@@ -942,6 +1095,17 @@ const ManageStudents = () => {
 
         if (parentError) {
           setLoading(false);
+          console.error('❌ ManageStudents Edit: Error creating parent records:', parentError);
+          console.error('❌ ManageStudents Edit: Parent error code:', parentError.code);
+          console.error('❌ ManageStudents Edit: Parent error message:', parentError.message);
+          
+          // Handle specific parent constraint violations
+          if (parentError.code === '23502' && parentError.message.includes('tenant_id')) {
+            const errorMessage = 'Parent update failed: Missing tenant information. Please try again or contact administrator.';
+            Alert.alert('Parent Update Error', errorMessage);
+            return;
+          }
+          
           throw parentError;
         }
       }

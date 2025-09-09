@@ -205,6 +205,31 @@ const ManageClasses = ({ navigation }) => {
         tenant_id_type: typeof tenantId
       });
       
+      // First, check if a class with the same name, section, and academic year already exists in this tenant
+      console.log('🔍 ManageClasses: Checking for existing class in tenant');
+      const { data: existingClass, error: checkError } = await supabase
+        .from('classes')
+        .select('id, class_name, section, academic_year')
+        .eq('class_name', newClass.class_name)
+        .eq('section', newClass.section)
+        .eq('academic_year', newClass.academic_year)
+        .eq('tenant_id', tenantId)
+        .limit(1);
+      
+      if (checkError) {
+        console.error('❌ ManageClasses: Error checking for existing class:', checkError);
+        throw checkError;
+      }
+      
+      if (existingClass && existingClass.length > 0) {
+        console.log('⚠️ ManageClasses: Duplicate class found:', existingClass[0]);
+        const errorMessage = `A class "${newClass.class_name}${newClass.section}" already exists for academic year "${newClass.academic_year}" in your school. Please choose a different class name, section, or academic year.`;
+        Alert.alert('Duplicate Class', errorMessage);
+        return; // Don't proceed with insert
+      }
+      
+      console.log('✅ ManageClasses: No duplicate found, proceeding with insert');
+      
       // Insert a new class - as specified in easy.txt
       const { data: insertedData, error } = await supabase
         .from('classes')
@@ -219,6 +244,14 @@ const ManageClasses = ({ navigation }) => {
 
       if (error) {
         console.error('❌ ManageClasses: Database error adding class:', error);
+        
+        // Handle specific constraint violations with user-friendly messages
+        if (error.code === '23505' && error.message.includes('unique_class_section_year')) {
+          const errorMessage = `A class "${newClass.class_name}${newClass.section}" already exists for academic year "${newClass.academic_year}". Please choose a different class name, section, or academic year.`;
+          Alert.alert('Duplicate Class', errorMessage);
+          return; // Don't throw, just return to keep modal open
+        }
+        
         throw error;
       }
       
@@ -269,6 +302,32 @@ const ManageClasses = ({ navigation }) => {
         return;
       }
 
+      // First, check if another class with the same name, section, and academic year already exists in this tenant
+      console.log('🔍 ManageClasses: Checking for existing class in tenant (edit)');
+      const { data: existingClass, error: checkError } = await supabase
+        .from('classes')
+        .select('id, class_name, section, academic_year')
+        .eq('class_name', selectedClass.class_name)
+        .eq('section', selectedClass.section)
+        .eq('academic_year', selectedClass.academic_year)
+        .eq('tenant_id', tenantId)
+        .neq('id', selectedClass.id) // Exclude the current class being edited
+        .limit(1);
+      
+      if (checkError) {
+        console.error('❌ ManageClasses: Error checking for existing class during edit:', checkError);
+        throw checkError;
+      }
+      
+      if (existingClass && existingClass.length > 0) {
+        console.log('⚠️ ManageClasses: Duplicate class found during edit:', existingClass[0]);
+        const errorMessage = `A class "${selectedClass.class_name}${selectedClass.section}" already exists for academic year "${selectedClass.academic_year}" in your school. Please choose a different class name, section, or academic year.`;
+        Alert.alert('Duplicate Class', errorMessage);
+        return; // Don't proceed with update
+      }
+      
+      console.log('✅ ManageClasses: No duplicate found during edit, proceeding with update');
+
       // Update a class with tenant validation
       const { error } = await supabase
         .from('classes')
@@ -283,6 +342,14 @@ const ManageClasses = ({ navigation }) => {
 
       if (error) {
         console.error('Database error updating class:', error);
+        
+        // Handle specific constraint violations with user-friendly messages
+        if (error.code === '23505' && error.message.includes('unique_class_section_year')) {
+          const errorMessage = `A class "${selectedClass.class_name}${selectedClass.section}" already exists for academic year "${selectedClass.academic_year}". Please choose a different class name, section, or academic year.`;
+          Alert.alert('Duplicate Class', errorMessage);
+          return; // Don't throw, just return to keep modal open
+        }
+        
         throw error;
       }
 
