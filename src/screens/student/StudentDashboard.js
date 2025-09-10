@@ -221,8 +221,30 @@ const StudentDashboard = ({ navigation }) => {
         return;
       }
 
-      // Validate tenant access before proceeding
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      // Check if tenant context is available, if not try to resolve it
+      let effectiveTenantId = tenantId;
+      if (!effectiveTenantId) {
+        console.log('🔍 Student Dashboard - No tenant context, attempting to resolve from user email...');
+        
+        try {
+          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          const emailTenantResult = await getTenantIdByEmail(user.email);
+          
+          if (emailTenantResult.success) {
+            effectiveTenantId = emailTenantResult.data.tenant.id;
+            console.log('✅ Student Dashboard - Successfully resolved tenant via email:', effectiveTenantId);
+          } else {
+            console.error('❌ Student Dashboard - Email-based tenant resolution failed:', emailTenantResult.error);
+            return;
+          }
+        } catch (emailLookupError) {
+          console.error('❌ Student Dashboard - Error during email-based tenant lookup:', emailLookupError);
+          return;
+        }
+      }
+
+      // Validate tenant access before proceeding (with resolved tenant ID)
+      const tenantValidation = await validateTenantAccess(user.id, effectiveTenantId);
       if (!tenantValidation.isValid) {
         console.error('❌ Student dashboard tenant validation failed:', tenantValidation.error);
         return; // Silent return for better UX
@@ -232,7 +254,7 @@ const StudentDashboard = ({ navigation }) => {
       const { data: studentData, error: studentError } = await supabase
         .from(TABLES.STUDENTS)
         .select('id, class_id, tenant_id')
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', effectiveTenantId)
         .eq('id', user.linked_student_id)
         .single();
 
@@ -245,10 +267,10 @@ const StudentDashboard = ({ navigation }) => {
       const studentValidation = validateDataTenancy([{ 
         id: studentData.id, 
         tenant_id: studentData.tenant_id 
-      }], tenantId, 'StudentDashboard-FetchAssignments');
+      }], effectiveTenantId, 'StudentDashboard-FetchAssignments');
       
       if (!studentValidation) {
-        console.error('❌ Student data validation failed: Student data does not belong to tenant', tenantId);
+        console.error('❌ Student data validation failed: Student data does not belong to tenant', effectiveTenantId);
         return;
       }
 
@@ -258,7 +280,7 @@ const StudentDashboard = ({ navigation }) => {
       const { data: assignmentsData, error: assignmentsError } = await supabase
         .from(TABLES.ASSIGNMENTS)
         .select('*, tenant_id')
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', effectiveTenantId)
         .eq('class_id', studentData.class_id)
         .order('due_date', { ascending: true });
 
@@ -272,7 +294,7 @@ const StudentDashboard = ({ navigation }) => {
       const { data: homeworksData, error: homeworksError } = await supabase
         .from(TABLES.HOMEWORKS)
         .select('*, tenant_id')
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', effectiveTenantId)
         .or(`class_id.eq.${studentData.class_id},assigned_students.cs.{${studentData.id}}`)
         .order('due_date', { ascending: true });
 
@@ -286,7 +308,7 @@ const StudentDashboard = ({ navigation }) => {
       const { data: submissionsData, error: submissionsError } = await supabase
         .from('assignment_submissions')
         .select('*, tenant_id')
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', effectiveTenantId)
         .eq('student_id', studentData.id);
 
       if (submissionsError && submissionsError.code !== '42P01') {
@@ -323,8 +345,30 @@ const StudentDashboard = ({ navigation }) => {
         return;
       }
       
-      // Validate tenant access before refreshing notifications
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      // Check if tenant context is available, if not try to resolve it
+      let effectiveTenantId = tenantId;
+      if (!effectiveTenantId) {
+        console.log('🔍 Student Dashboard - No tenant context for notifications, attempting to resolve from user email...');
+        
+        try {
+          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          const emailTenantResult = await getTenantIdByEmail(user.email);
+          
+          if (emailTenantResult.success) {
+            effectiveTenantId = emailTenantResult.data.tenant.id;
+            console.log('✅ Student Dashboard - Successfully resolved tenant via email for notifications:', effectiveTenantId);
+          } else {
+            console.error('❌ Student Dashboard - Email-based tenant resolution failed for notifications:', emailTenantResult.error);
+            return;
+          }
+        } catch (emailLookupError) {
+          console.error('❌ Student Dashboard - Error during email-based tenant lookup for notifications:', emailLookupError);
+          return;
+        }
+      }
+      
+      // Validate tenant access before refreshing notifications (with resolved tenant ID)
+      const tenantValidation = await validateTenantAccess(user.id, effectiveTenantId);
       if (!tenantValidation.isValid) {
         console.error('❌ Student dashboard notification validation failed:', tenantValidation.error);
         return; // Silent return for better UX
@@ -333,7 +377,7 @@ const StudentDashboard = ({ navigation }) => {
       console.log('Dashboard: Refreshing notifications for user:', user.id);
       
       // Fetch notifications with recipient info using tenant-aware query
-      const tenantNotificationQuery = createTenantQuery(supabase.from('notification_recipients'), tenantId);
+      const tenantNotificationQuery = createTenantQuery(supabase.from('notification_recipients'), effectiveTenantId);
       const { data: notificationsData, error: notifError } = await tenantNotificationQuery
         .select(`
           id,
@@ -480,8 +524,34 @@ const StudentDashboard = ({ navigation }) => {
       setLoading(true);
       setError(null);
 
-      // Validate tenant access before proceeding
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      // Check if tenant context is available, if not try to resolve it
+      let effectiveTenantId = tenantId;
+      if (!effectiveTenantId) {
+        console.log('🔍 Student Dashboard - No tenant context for main data fetch, attempting to resolve from user email...');
+        
+        try {
+          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          const emailTenantResult = await getTenantIdByEmail(user.email);
+          
+          if (emailTenantResult.success) {
+            effectiveTenantId = emailTenantResult.data.tenant.id;
+            console.log('✅ Student Dashboard - Successfully resolved tenant via email for main data fetch:', effectiveTenantId);
+          } else {
+            console.error('❌ Student Dashboard - Email-based tenant resolution failed for main data fetch:', emailTenantResult.error);
+            setError('Unable to determine school context. Please contact administrator.');
+            Alert.alert('Access Error', 'Unable to determine school context. Please contact administrator.');
+            return;
+          }
+        } catch (emailLookupError) {
+          console.error('❌ Student Dashboard - Error during email-based tenant lookup for main data fetch:', emailLookupError);
+          setError('Unable to determine school context. Please contact administrator.');
+          Alert.alert('Access Error', 'Unable to determine school context. Please contact administrator.');
+          return;
+        }
+      }
+
+      // Validate tenant access before proceeding (with resolved tenant ID)
+      const tenantValidation = await validateTenantAccess(user.id, effectiveTenantId);
       if (!tenantValidation.isValid) {
         console.error('❌ Student dashboard tenant validation failed:', tenantValidation.error);
         Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
@@ -502,7 +572,7 @@ const StudentDashboard = ({ navigation }) => {
           parents:parent_id(name, phone, email),
           tenant_id
         `)
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', effectiveTenantId)
         .eq('id', user.linked_student_id)
         .single();
 
@@ -510,7 +580,7 @@ const StudentDashboard = ({ navigation }) => {
       const { data: studentUserData, error: studentUserError } = await supabase
         .from(TABLES.USERS)
         .select('id, email, phone, profile_url, full_name, tenant_id')
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', effectiveTenantId)
         .eq('linked_student_id', user.linked_student_id)
         .maybeSingle();
 
@@ -522,10 +592,10 @@ const StudentDashboard = ({ navigation }) => {
       const studentValidation = validateDataTenancy([{ 
         id: studentData.id, 
         tenant_id: studentData.tenant_id 
-      }], tenantId, 'StudentDashboard');
+      }], effectiveTenantId, 'StudentDashboard');
       
       if (!studentValidation) {
-        console.error('❌ Student profile data validation failed: Student data does not belong to tenant', tenantId);
+        console.error('❌ Student profile data validation failed: Student data does not belong to tenant', effectiveTenantId);
         Alert.alert('Data Error', TENANT_ERROR_MESSAGES.WRONG_TENANT_DATA);
         return;
       }
@@ -551,7 +621,7 @@ const StudentDashboard = ({ navigation }) => {
         const { data: upcomingEventsData, error: eventsError } = await supabase
           .from('events')
           .select('*, tenant_id')
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', effectiveTenantId)
           .eq('status', 'Active')
           .gte('event_date', today)
           .order('event_date', { ascending: true });
@@ -589,7 +659,7 @@ const StudentDashboard = ({ navigation }) => {
         const { data: allAttendanceData, error: attendanceError } = await supabase
           .from(TABLES.STUDENT_ATTENDANCE)
           .select('*, tenant_id')
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', effectiveTenantId)
           .eq('student_id', studentData.id)
           .order('date', { ascending: false });
 
@@ -631,7 +701,7 @@ const StudentDashboard = ({ navigation }) => {
             exams(name, start_date),
             tenant_id
           `)
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', effectiveTenantId)
           .eq('student_id', studentData.id)
           .order('created_at', { ascending: false })
           .limit(10);
@@ -701,7 +771,7 @@ const StudentDashboard = ({ navigation }) => {
             classes(class_name, section),
             tenant_id
           `)
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', effectiveTenantId)
           .eq('class_id', studentData.class_id)
           .eq('day', today)
           .order('start_time', { ascending: true });
@@ -742,7 +812,7 @@ const StudentDashboard = ({ navigation }) => {
           .from(TABLES.ASSIGNMENTS)
           .select('*')
           .eq('class_id', studentData.class_id)
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', effectiveTenantId)
           .order('due_date', { ascending: true });
 
         if (assignmentsError && assignmentsError.code !== '42P01') {
@@ -756,7 +826,7 @@ const StudentDashboard = ({ navigation }) => {
           .from(TABLES.HOMEWORKS)
           .select('*')
           .or(`class_id.eq.${studentData.class_id},assigned_students.cs.{${studentData.id}}`)
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', effectiveTenantId)
           .order('due_date', { ascending: true });
 
         if (homeworksError && homeworksError.code !== '42P01') {
@@ -770,7 +840,7 @@ const StudentDashboard = ({ navigation }) => {
           .from('assignment_submissions')
           .select('*')
           .eq('student_id', studentData.id)
-          .eq('tenant_id', tenantId);
+          .eq('tenant_id', effectiveTenantId);
 
         if (submissionsError && submissionsError.code !== '42P01') {
           console.log('Dashboard - Submissions error:', submissionsError);

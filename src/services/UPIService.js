@@ -1,15 +1,20 @@
 // UPI Payment Service
 // Handles UPI QR code generation and transaction management
 import { supabase } from '../utils/supabase';
+import { generateUniqueReferenceNumber } from '../utils/referenceNumberGenerator';
 
 export class UPIService {
   // Fallback UPI ID for development/testing (will be removed in production)
-  static FALLBACK_UPI_ID = 'hanokalure0@okhdfcbank';
+  static FALLBACK_UPI_ID = 'other@primarybank'; // TODO: Replace with your primary UPI ID
   static MERCHANT_NAME = 'School Management System';
   
   // Cache for UPI settings to avoid repeated database queries
   static upiCache = new Map();
   static cacheExpiry = 5 * 60 * 1000; // 5 minutes
+  static lastCacheInvalidation = null;
+  
+  // Global cache invalidation flag for UPI settings changes
+  static shouldInvalidateCache = false;
 
   /**
    * Get tenant-specific UPI settings from database
@@ -85,24 +90,48 @@ export class UPIService {
    */
   static async getPrimaryUPIId(tenantId) {
     try {
+      console.log('🔍 [UPI DEBUG] getPrimaryUPIId called with tenantId:', tenantId);
+      
       if (!tenantId) {
-        console.warn('No tenant ID provided, using fallback UPI ID');
+        console.warn('❌ [UPI DEBUG] No tenant ID provided, using fallback UPI ID:', this.FALLBACK_UPI_ID);
         return this.FALLBACK_UPI_ID;
       }
       
+      console.log('📞 [UPI DEBUG] Calling getTenantUPISettings for tenant:', tenantId);
       const upiSettings = await this.getTenantUPISettings(tenantId);
+      console.log('📊 [UPI DEBUG] getTenantUPISettings result:', upiSettings);
       
       if (upiSettings && upiSettings.upi_id) {
-        console.log('Using tenant-specific UPI ID:', upiSettings.upi_id);
+        console.log('✅ [UPI DEBUG] Using tenant-specific UPI ID:', upiSettings.upi_id);
+        console.log('🎯 [UPI DEBUG] UPI Settings details:', {
+          id: upiSettings.id,
+          upi_id: upiSettings.upi_id,
+          upi_name: upiSettings.upi_name,
+          is_primary: upiSettings.is_primary,
+          is_active: upiSettings.is_active,
+          tenant_id: upiSettings.tenant_id
+        });
         return upiSettings.upi_id;
       }
       
-      console.warn(`No UPI settings found for tenant ${tenantId}, using fallback UPI ID`);
+      console.warn(`⚠️ [UPI DEBUG] No UPI settings found for tenant ${tenantId}, using fallback UPI ID:`, this.FALLBACK_UPI_ID);
+      console.warn('💡 [UPI DEBUG] This means either:');
+      console.warn('   1. No UPI settings configured for this tenant');
+      console.warn('   2. No active UPI settings found');
+      console.warn('   3. Database query failed');
+      console.warn('   4. RLS policies are blocking the query');
       return this.FALLBACK_UPI_ID;
       
     } catch (error) {
-      console.error('Error getting primary UPI ID:', error);
-      console.warn('Falling back to default UPI ID due to error');
+      console.error('❌ [UPI DEBUG] Error getting primary UPI ID:', error);
+      console.error('❌ [UPI DEBUG] Error details:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+        stack: error.stack
+      });
+      console.warn('🔄 [UPI DEBUG] Falling back to default UPI ID due to error:', this.FALLBACK_UPI_ID);
       return this.FALLBACK_UPI_ID;
     }
   }
@@ -115,11 +144,86 @@ export class UPIService {
     if (tenantId) {
       const cacheKey = `upi_settings_${tenantId}`;
       this.upiCache.delete(cacheKey);
-      console.log('Cleared UPI cache for tenant:', tenantId);
+      console.log('🗑️ [UPI CACHE] Cleared UPI cache for tenant:', tenantId);
     } else {
       this.upiCache.clear();
-      console.log('Cleared all UPI cache');
+      console.log('🗑️ [UPI CACHE] Cleared all UPI cache');
     }
+    this.lastCacheInvalidation = Date.now();
+  }
+  
+  /**
+   * Force refresh UPI settings for a tenant by clearing cache and fetching fresh data
+   * @param {string} tenantId - Tenant ID
+   * @returns {Promise<Object>} Fresh UPI settings
+   */
+  static async forceRefreshUPISettings(tenantId) {
+    console.log('🔄 [UPI REFRESH] Force refreshing UPI settings for tenant:', tenantId);
+    
+    // Clear the specific tenant cache
+    this.clearCache(tenantId);
+    
+    // Fetch fresh data
+    const freshSettings = await this.getTenantUPISettings(tenantId);
+    console.log('✅ [UPI REFRESH] Fresh UPI settings retrieved:', freshSettings?.upi_id || 'fallback');
+    
+    return freshSettings;
+  }
+  
+  /**
+   * Check if cache should be invalidated based on global invalidation flag
+   * @param {string} tenantId - Tenant ID
+   * @returns {boolean} Should invalidate cache
+   */
+  static shouldInvalidateTenantCache(tenantId) {
+    if (this.shouldInvalidateCache) {
+      console.log('🚨 [UPI CACHE] Global cache invalidation flag is set, clearing cache for tenant:', tenantId);
+      this.clearCache(tenantId);
+      return true;
+    }
+    return false;
+  }
+  
+  /**
+   * Set global cache invalidation flag (called when admin updates UPI settings)
+   */
+  static markCacheForInvalidation() {
+    console.log('🚨 [UPI CACHE] Marking all UPI caches for invalidation');
+    this.shouldInvalidateCache = true;
+    // Clear all cache immediately
+    this.clearCache();
+  }
+  
+  /**
+   * Reset global cache invalidation flag
+   */
+  static resetCacheInvalidationFlag() {
+    console.log('✅ [UPI CACHE] Resetting cache invalidation flag');
+    this.shouldInvalidateCache = false;
+  }
+  
+  /**
+   * Get fresh payment details with cache refresh option
+   * @param {Object} studentInfo - Student information
+   * @param {Object} feeInfo - Fee information
+   * @param {string} tenantId - Tenant ID
+   * @param {boolean} forceRefresh - Force refresh from database
+   * @returns {Promise<Object>} Payment details
+   */
+  static async getPaymentDetailsWithRefresh(studentInfo, feeInfo, tenantId, forceRefresh = false) {
+    console.log('💳 [UPI DETAILS] Getting payment details with refresh option:', {
+      forceRefresh,
+      tenantId,
+      studentName: studentInfo.name
+    });
+    
+    if (forceRefresh) {
+      // Force refresh UPI settings before generating payment details
+      await this.forceRefreshUPISettings(tenantId);
+    }
+    
+    // Get payment details (will use fresh data if refreshed)
+    return await this.getPaymentDetails(studentInfo, feeInfo, tenantId);
   }
 
   /**
@@ -130,21 +234,21 @@ export class UPIService {
   static generateUPIString(paymentDetails) {
     const {
       amount,
-      transactionRef,
+      referenceNumber,
       merchantName = this.MERCHANT_NAME,
       upiId = this.FALLBACK_UPI_ID,
       note
     } = paymentDetails;
 
-    // Create a shorter transaction ID for UPI (max 20 characters)
-    const shortTid = transactionRef.split('-').pop(); // Use only the last part (timestamp)
+    // Use the 6-digit reference number as transaction ID (compact and readable)
+    const shortTid = referenceNumber || 'REF001';
     
     // Standard UPI QR code format with proper parameters
     // pa = payee address, pn = payee name, am = amount, cu = currency
-    // tn = transaction note (includes full reference), tid = short transaction id
-    const upiString = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(merchantName)}&am=${amount}&cu=INR&tn=${encodeURIComponent(note + ' - Ref: ' + transactionRef)}&tid=${shortTid}`;
+    // tn = transaction note (includes 6-digit reference), tid = 6-digit reference
+    const upiString = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(merchantName)}&am=${amount}&cu=INR&tn=${encodeURIComponent(note + ' - Ref: ' + referenceNumber)}&tid=${shortTid}`;
     
-    console.log('Generated UPI String:', upiString);
+    console.log('Generated UPI String with 6-digit reference:', upiString);
     return upiString;
   }
 
@@ -179,17 +283,24 @@ export class UPIService {
    * @returns {Promise<Object>} Complete payment details
    */
   static async getPaymentDetails(studentInfo, feeInfo, tenantId) {
-    const transactionRef = this.generateTransactionRef(studentInfo.admissionNo);
+    // Generate 6-digit reference number for this payment
+    const referenceNumber = await generateUniqueReferenceNumber(
+      studentInfo.name,
+      tenantId
+    );
+    
     const note = this.createPaymentNote(studentInfo, feeInfo);
     
     // Get tenant-specific UPI ID
     const upiId = await this.getPrimaryUPIId(tenantId);
     
+    console.log('💳 [UPI SERVICE] Generated 6-digit reference number:', referenceNumber);
+    
     return {
       upiId,
       merchantName: this.MERCHANT_NAME,
       amount: feeInfo.amount,
-      transactionRef,
+      referenceNumber,
       note,
       studentInfo,
       feeInfo,
@@ -206,15 +317,17 @@ export class UPIService {
    */
   static getPaymentDetailsSync(studentInfo, feeInfo) {
     console.warn('Using deprecated sync getPaymentDetails method. Please use async version with tenantId.');
+    console.warn('⚠️ Cannot generate unique 6-digit reference in sync method. Using fallback.');
     
-    const transactionRef = this.generateTransactionRef(studentInfo.admissionNo);
+    // Generate a mock reference number since this is sync (not ideal but better than old format)
+    const referenceNumber = 'SYNC' + Math.floor(Math.random() * 100).toString().padStart(2, '0');
     const note = this.createPaymentNote(studentInfo, feeInfo);
 
     return {
       upiId: this.FALLBACK_UPI_ID,
       merchantName: this.MERCHANT_NAME,
       amount: feeInfo.amount,
-      transactionRef,
+      referenceNumber,
       note,
       studentInfo,
       feeInfo

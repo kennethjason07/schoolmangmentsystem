@@ -63,6 +63,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
   // Refs for scrolling
   const mainScrollViewRef = useRef(null);
   const studentListRef = useRef(null);
+  const reportsScrollViewRef = useRef(null);
   const modalScrollViewRef = useRef(null);
   const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -203,13 +204,47 @@ const ClassStudentDetails = ({ route, navigation }) => {
 
   // Load detailed student information for the class
   const loadClassStudentDetails = async () => {
+    console.log('🚀 [DEBUG] loadClassStudentDetails function called!');
+    console.log('🚀 [DEBUG] classData:', classData);
+    console.log('🚀 [DEBUG] user:', user);
+    
+    // Outer try-catch to catch ALL possible errors
     try {
-      setLoading(true);
+      // Inner try-catch for main function logic
+      try {
+        console.log('🚀 [DEBUG] Setting loading to true...');
+        setLoading(true);
+
+      // 🏦 GET TENANT ID FOR DATA ISOLATION
+      const tenantId = user?.tenant_id;
+      
+      // 🐛 COMPREHENSIVE TENANT DEBUGGING
+      console.log('🔍 [TENANT DEBUG] Starting ClassStudentDetails loadClassStudentDetails');
+      console.log('🔍 [TENANT DEBUG] Full user object:', JSON.stringify(user, null, 2));
+      console.log('🔍 [TENANT DEBUG] Extracted tenant_id:', tenantId);
+      console.log('🔍 [TENANT DEBUG] Tenant ID type:', typeof tenantId);
+      console.log('🔍 [TENANT DEBUG] Is tenant_id truthy?', !!tenantId);
+      console.log('🔍 [TENANT DEBUG] ClassData:', JSON.stringify(classData, null, 2));
+      
+      if (!tenantId) {
+        console.error('❌ [TENANT DEBUG] CRITICAL: No tenant_id found in user object');
+        console.error('❌ [TENANT DEBUG] User object keys:', Object.keys(user || {}));
+        console.error('❌ [TENANT DEBUG] This will prevent student data from loading');
+        Alert.alert('Error', 'Tenant context not found. Please re-login.');
+        return;
+      }
+      
+      console.log('✅ [TENANT DEBUG] Tenant ID validation passed:', tenantId);
 
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
 
-      // Get detailed student information for the selected class
+      // Get detailed student information for the selected class with tenant isolation
+      console.log('🎯 [TENANT DEBUG] About to execute student query with parameters:');
+      console.log('🎯 [TENANT DEBUG] Query table:', TABLES.STUDENTS);
+      console.log('🎯 [TENANT DEBUG] Class ID filter:', classData.classId);
+      console.log('🎯 [TENANT DEBUG] Tenant ID filter:', tenantId);
+      
       const { data: studentsData, error } = await supabase
         .from(TABLES.STUDENTS)
         .select(`
@@ -226,18 +261,59 @@ const ClassStudentDetails = ({ route, navigation }) => {
             academic_year
           )
         `)
-        .eq('class_id', classData.classId);
+        .eq('class_id', classData.classId)
+        .eq('tenant_id', tenantId); // 🔒 TENANT ISOLATION
+
+      console.log('📊 [TENANT DEBUG] Student query results:');
+      console.log('📊 [TENANT DEBUG] Students found:', studentsData?.length || 0);
+      console.log('📊 [TENANT DEBUG] Query error:', error);
+      if (studentsData && studentsData.length > 0) {
+        console.log('📊 [TENANT DEBUG] Sample student data:', studentsData[0]);
+      } else {
+        console.log('❌ [TENANT DEBUG] NO STUDENTS FOUND - This is the root cause!');
+        console.log('❌ [TENANT DEBUG] Possible causes:');
+        console.log('❌ [TENANT DEBUG] 1. No students exist for this class_id:', classData.classId);
+        console.log('❌ [TENANT DEBUG] 2. No students exist for this tenant_id:', tenantId);
+        console.log('❌ [TENANT DEBUG] 3. Students exist but with different class_id or tenant_id');
+        console.log('❌ [TENANT DEBUG] 4. Database connectivity issues');
+        
+        // Let's try a broader query to see what students exist
+        try {
+          const { data: allStudentsForTenant } = await supabase
+            .from(TABLES.STUDENTS)
+            .select('id, name, class_id, tenant_id')
+            .eq('tenant_id', tenantId);
+          console.log('🔍 [TENANT DEBUG] All students for this tenant:', allStudentsForTenant?.length || 0);
+          if (allStudentsForTenant && allStudentsForTenant.length > 0) {
+            console.log('🔍 [TENANT DEBUG] Sample tenant student:', allStudentsForTenant[0]);
+          }
+          
+          const { data: allStudentsForClass } = await supabase
+            .from(TABLES.STUDENTS)
+            .select('id, name, class_id, tenant_id')
+            .eq('class_id', classData.classId);
+          console.log('🔍 [TENANT DEBUG] All students for this class (any tenant):', allStudentsForClass?.length || 0);
+          if (allStudentsForClass && allStudentsForClass.length > 0) {
+            console.log('🔍 [TENANT DEBUG] Sample class student:', allStudentsForClass[0]);
+          }
+        } catch (debugError) {
+          console.error('🔍 [TENANT DEBUG] Error in debug queries:', debugError);
+        }
+      }
 
       if (error) throw error;
 
-      // Get fee structure for this class (removed academic year filter)
+      // Get fee structure for this class with tenant isolation
       const { data: feeStructureData, error: feeError } = await supabase
         .from(TABLES.FEE_STRUCTURE)
         .select('*')
-        .eq('class_id', classData.classId);
+        .eq('class_id', classData.classId)
+        .eq('tenant_id', tenantId) // 🔒 TENANT ISOLATION
+        .is('student_id', null); // Only class-level fees
 
       console.log('🏫 ClassStudentDetails Debug Info:');
       console.log('📚 Class ID:', classData.classId);
+      console.log('🏢 Tenant ID:', tenantId);
       console.log('🧮 Fee structures found:', feeStructureData?.length || 0);
       if (feeStructureData && feeStructureData.length > 0) {
         console.log('💰 Sample fee structure:', feeStructureData[0]);
@@ -245,11 +321,11 @@ const ClassStudentDetails = ({ route, navigation }) => {
 
       if (feeError) throw feeError;
 
-      // Calculate total fee structure amount
-      const totalFeeStructure = feeStructureData.reduce((sum, fee) => 
+      // Calculate total fee structure amount (BASE FEE)
+      const totalBaseFeeStructure = feeStructureData.reduce((sum, fee) => 
         sum + (parseFloat(fee.amount) || 0), 0);
 
-      // Get fee concessions for all students in this class - simplified approach
+      // 🎯 GET FEE CONCESSIONS FOR ALL STUDENTS (FIXED AMOUNTS)
       const studentIds = studentsData.map(s => s.id);
       let concessionsData = [];
       
@@ -261,6 +337,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
           .from('student_discounts')
           .select('student_id, discount_value, discount_type, fee_component, description')
           .in('student_id', studentIds)
+          .eq('tenant_id', tenantId) // 🔒 TENANT ISOLATION
           .eq('is_active', true);
         
         console.log('🎫 Raw concessions from DB:', concessions);
@@ -272,7 +349,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
         }
       }
 
-      // Process student data with payment details and concessions
+      // Process student data with CORRECTED concession logic
       const processedStudents = studentsData.map(student => {
         // Filter payments for current academic year
         const currentYearPayments = student.student_fees?.filter(
@@ -283,10 +360,17 @@ const ClassStudentDetails = ({ route, navigation }) => {
         const totalPaid = currentYearPayments.reduce((sum, payment) => 
           sum + (parseFloat(payment.amount_paid) || 0), 0);
 
-        // Calculate concessions for this student - simplified approach
+        // 🎯 CALCULATE CONCESSIONS CORRECTLY (FIXED AMOUNTS DEDUCTED FROM BASE FEE)
         const studentConcessions = concessionsData.filter(c => c.student_id === student.id);
-        const totalConcessions = studentConcessions.reduce((sum, concession) => 
-          sum + (parseFloat(concession.discount_value) || 0), 0);
+        const totalConcessions = studentConcessions.reduce((sum, concession) => {
+          if (concession.discount_type === 'fixed_amount') {
+            return sum + (parseFloat(concession.discount_value) || 0);
+          } else if (concession.discount_type === 'percentage') {
+            // Apply percentage to base fee
+            return sum + (totalBaseFeeStructure * (parseFloat(concession.discount_value) || 0) / 100);
+          }
+          return sum;
+        }, 0);
         
         // Debug concessions for this student
         console.log(`🎫 Student ${student.name} (ID: ${student.id}) concessions:`, {
@@ -295,20 +379,22 @@ const ClassStudentDetails = ({ route, navigation }) => {
           concessionsFound: studentConcessions.length
         });
 
-        // Calculate outstanding amount (no adjustment, just display concession separately)
-        const outstanding = Math.max(0, totalFeeStructure - totalPaid);
-        const adjustedFeeAmount = Math.max(0, totalFeeStructure - totalConcessions);
+        // 🔧 CORRECTED LOGIC: Adjusted Fee = Base Fee - Concessions
+        const adjustedFeeAmount = Math.max(0, totalBaseFeeStructure - totalConcessions);
+        
+        // 🔧 CORRECTED LOGIC: Outstanding = Max(0, Adjusted Fee - Total Paid)
+        const outstanding = Math.max(0, adjustedFeeAmount - totalPaid);
 
         // Calculate payment percentage based on adjusted fee amount
         const paymentPercentage = adjustedFeeAmount > 0 ? 
           Math.min(100, (totalPaid / adjustedFeeAmount) * 100) : 0;
 
-        // Get payment status - Fixed logic to prevent showing 'Paid' for all students
+        // Get payment status - FIXED logic to match mobile
         let paymentStatus;
-        if (totalFeeStructure === 0) {
-          paymentStatus = 'Paid'; // No fees required
-        } else if (totalPaid >= totalFeeStructure) {
-          paymentStatus = 'Paid'; // Fully paid
+        if (adjustedFeeAmount === 0) {
+          paymentStatus = 'Paid'; // No fees required (full concession)
+        } else if (totalPaid >= adjustedFeeAmount) {
+          paymentStatus = 'Paid'; // Fully paid against adjusted fee
         } else if (totalPaid > 0) {
           paymentStatus = 'Partial'; // Partially paid
         } else {
@@ -316,9 +402,11 @@ const ClassStudentDetails = ({ route, navigation }) => {
         }
 
         // Debug logging to trace payment status calculation
-        console.log(`Student: ${student.name}, Fee Structure: ${totalFeeStructure}, Paid: ${totalPaid}, Status: ${paymentStatus}`, {
+        console.log(`Student: ${student.name}, Base Fee: ${totalBaseFeeStructure}, Concessions: ${totalConcessions}, Adjusted Fee: ${adjustedFeeAmount}, Paid: ${totalPaid}, Outstanding: ${outstanding}, Status: ${paymentStatus}`, {
           studentId: student.id,
-          totalFeeStructure,
+          totalBaseFeeStructure,
+          totalConcessions,
+          adjustedFeeAmount,
           totalPaid,
           outstanding,
           paymentCount: currentYearPayments.length,
@@ -336,7 +424,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
           admissionNo: student.admission_no, // Keep both for compatibility
           roll_no: student.roll_no,
           rollNo: student.roll_no, // Keep both for compatibility
-          totalFeeStructure,
+          totalFeeStructure: totalBaseFeeStructure, // Original base fee
           totalPaid,
           outstanding,
           paymentPercentage: Math.round(paymentPercentage * 100) / 100,
@@ -346,7 +434,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
           payments: currentYearPayments,
           paymentCount: currentYearPayments.length,
           totalConcessions,
-          adjustedFeeAmount
+          adjustedFeeAmount // ✅ This is the key field - fee after concessions
         };
       });
 
@@ -356,12 +444,33 @@ const ClassStudentDetails = ({ route, navigation }) => {
       setClassStudents(processedStudents);
       setFilteredStudents(processedStudents);
 
-    } catch (error) {
-      console.error('Error loading class student details:', error);
-      Alert.alert('Error', 'Failed to load student details');
-    } finally {
+      } catch (error) {
+        console.error('❌ Inner try-catch error loading class student details:', error);
+        Alert.alert('Error', 'Failed to load student details');
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    } catch (outerError) {
+      // 🚨 OUTER try-catch to catch ALL possible errors including silent failures
+      console.error('❌ [OUTER CATCH] Critical error in loadClassStudentDetails:', outerError);
+      console.error('❌ [OUTER CATCH] Error name:', outerError.name);
+      console.error('❌ [OUTER CATCH] Error message:', outerError.message);
+      console.error('❌ [OUTER CATCH] Error stack:', outerError.stack);
+      
+      Alert.alert(
+        'Critical Error', 
+        `A critical error occurred while loading student details:\n\n${outerError.message}\n\nPlease check the console for more details and contact support if this persists.`,
+        [{ text: 'OK', style: 'default' }]
+      );
+      
+      // Ensure loading states are reset even in critical failure
       setLoading(false);
       setRefreshing(false);
+      
+      // Set empty state to prevent undefined errors in UI
+      setClassStudents([]);
+      setFilteredStudents([]);
     }
   };
 
@@ -564,7 +673,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
     setShowUPIQRModal(true);
   };
 
-  // Handle UPI payment success
+  // Handle UPI payment success - EXACT MOBILE MATCH
   const handleUPIPaymentSuccess = async (paymentData) => {
     try {
       setPaymentLoading(true);
@@ -621,17 +730,18 @@ const ClassStudentDetails = ({ route, navigation }) => {
       
       setLastPaymentRecord(receiptData);
       
-      // Close modals
+      // 🎯 MOBILE EXACT MATCH: Close UPI QR modal and payment modal first
       setShowUPIQRModal(false);
       setPaymentModal(false);
       
-      // Show receipt modal
+      // 🎯 MOBILE EXACT MATCH: Show receipt modal immediately
       setReceiptModal(true);
+      
+      // 🎯 MOBILE EXACT MATCH: Show success alert
+      Alert.alert('Payment Successful', 'UPI payment has been recorded successfully!');
       
       // Refresh the data to show updated payment status
       await loadClassStudentDetails();
-      
-      Alert.alert('Payment Successful', 'UPI payment has been recorded successfully!');
       
     } catch (error) {
       console.error('Error recording UPI payment:', error);
@@ -716,8 +826,34 @@ const ClassStudentDetails = ({ route, navigation }) => {
     return amount.toString(); // Fallback for very large numbers
   };
 
-  // Generate PDF receipt
+  // Generate PDF receipt using new web receipt generator
   const generateReceiptPDF = async (receiptData) => {
+    try {
+      // Use the new web receipt generator for demo bill format
+      const { generateFeeReceiptHTML } = await import('../../utils/webReceiptGenerator');
+      
+      return await generateFeeReceiptHTML({
+        schoolDetails,
+        studentName: receiptData.student_name,
+        admissionNo: receiptData.student_admission_no,
+        className: receiptData.class_name,
+        feeComponent: receiptData.fee_component,
+        amount: receiptData.amount_paid,
+        paymentMethod: receiptData.payment_mode,
+        transactionId: receiptData.id?.toString() || 'N/A',
+        referenceNumber: receiptData.receipt_no || receiptData.receipt_number || 'N/A',
+        outstandingAmount: 0, // Calculate if needed
+        academicYear: receiptData.academic_year || '2024-25'
+      });
+    } catch (error) {
+      console.error('Error generating receipt HTML with new format:', error);
+      // Fallback to old format if new generator fails
+      return generateOldReceiptPDF(receiptData);
+    }
+  };
+
+  // Keep old receipt generation as fallback
+  const generateOldReceiptPDF = async (receiptData) => {
     try {
       const schoolName = schoolDetails?.name || 'School Management System';
       const schoolAddress = schoolDetails?.address || '';
@@ -988,8 +1124,9 @@ const ClassStudentDetails = ({ route, navigation }) => {
 
   // Submit payment record
   const handlePaymentSubmit = async () => {
-    if (!selectedStudent || !paymentAmount || paymentAmount <= 0) {
-      Alert.alert('Validation Error', 'Please enter a valid payment amount.');
+    // 🛡️ ENHANCED VALIDATION WITH OVERPAYMENT PREVENTION
+    if (!selectedStudent || !paymentAmount || parseFloat(paymentAmount) <= 0) {
+      Alert.alert('Validation Error', 'Please enter a valid payment amount greater than ₹0.');
       return;
     }
 
@@ -998,7 +1135,56 @@ const ClassStudentDetails = ({ route, navigation }) => {
       return;
     }
 
+    // 🚨 ENHANCED OVERPAYMENT VALIDATION LOGIC
+    if (selectedFeeComponent !== 'custom') {
+      const selectedComponent = feeComponents.find(c => c.fee_component === selectedFeeComponent);
+      if (selectedComponent) {
+        const paidForThisComponent = selectedStudent.payments
+          .filter(payment => payment.fee_component === selectedFeeComponent)
+          .reduce((sum, payment) => sum + (parseFloat(payment.amount_paid) || 0), 0);
+        
+        const remainingForComponent = Math.max(0, selectedComponent.amount - paidForThisComponent);
+        const paymentAmountFloat = parseFloat(paymentAmount);
+        
+        // 🚨 PREVENT OVERPAYMENT WITH WARNING POPUP
+        if (paymentAmountFloat > remainingForComponent) {
+          Alert.alert(
+            'Payment Failed', 
+            `Payment amount cannot exceed outstanding balance of ₹${remainingForComponent.toFixed(2)}\n\nEntered: ₹${paymentAmountFloat.toFixed(2)}\nOutstanding: ₹${remainingForComponent.toFixed(2)}\n\nThis prevents duplicate or overpayments to maintain fee accuracy.`,
+            [{ text: 'OK', style: 'default' }]
+          );
+          return;
+        }
+        
+        // 📊 Additional validation: Check if payment would result in negative outstanding
+        const studentOutstanding = selectedStudent.outstanding || 0;
+        if (paymentAmountFloat > studentOutstanding && studentOutstanding > 0) {
+          Alert.alert(
+            'Payment Amount Check',
+            `Payment amount (₹${paymentAmountFloat.toFixed(2)}) is higher than student's total outstanding amount (₹${studentOutstanding.toFixed(2)}).\n\nDo you want to proceed with this payment?`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Proceed Anyway', style: 'default', onPress: () => proceedWithPayment() }
+            ]
+          );
+          return;
+        }
+      }
+    }
+
+    // If all validations pass, proceed with payment
+    await proceedWithPayment();
+  };
+
+  // 🚀 SEPARATE FUNCTION FOR ACTUAL PAYMENT PROCESSING
+  const proceedWithPayment = async () => {
     try {
+      // 🔒 DISABLE BUTTON IMMEDIATELY TO PREVENT DOUBLE SUBMISSION
+      if (paymentLoading) {
+        console.warn('⚠️ Payment already in progress, ignoring duplicate submission');
+        return;
+      }
+      
       setPaymentLoading(true);
       
       const currentYear = new Date().getFullYear();
@@ -1023,7 +1209,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
           payment_mode: paymentMode,
           academic_year: academicYear,
           receipt_number: receiptNumber,
-          tenant_id: user?.tenant_id, // ✅ FIX: Add missing tenant_id for Cash payments
+          tenant_id: user?.tenant_id, // ✅ TENANT ISOLATION
         })
         .select()
         .single();
@@ -1043,17 +1229,41 @@ const ClassStudentDetails = ({ route, navigation }) => {
       };
       
       setLastPaymentRecord(receiptData);
-      setPaymentModal(false);
       
-      // Show receipt modal
+      // 🎯 MOBILE EXACT MATCH: Close payment modal first, then auto-show receipt
+      setPaymentModal(false);
       setReceiptModal(true);
+      
+      // Show success alert while receipt is displayed
+      Alert.alert(
+        'Payment Recorded Successfully! ✅',
+        `Payment of ₹${parseFloat(paymentAmount).toFixed(2)} has been recorded for ${selectedStudent.name}.\n\nReceipt Number: ${receiptNumber}\nFee Component: ${feeComponentName}\nPayment Mode: ${paymentMode}`
+      );
       
       // Refresh the data to show updated payment status
       await loadClassStudentDetails();
       
     } catch (error) {
       console.error('Error recording payment:', error);
-      Alert.alert('Error', 'Failed to record payment. Please try again.');
+      Alert.alert(
+        'Payment Failed',
+        `Failed to record payment: ${error.message}\n\nPlease try again or contact support.`,
+        [
+          {
+            text: 'Try Again',
+            onPress: () => {
+              // Keep modal open for retry
+            }
+          },
+          {
+            text: 'Close',
+            style: 'cancel',
+            onPress: () => {
+              setPaymentModal(false);
+            }
+          }
+        ]
+      );
     } finally {
       setPaymentLoading(false);
     }
@@ -1283,170 +1493,165 @@ const ClassStudentDetails = ({ route, navigation }) => {
       </View>
       
       <View style={styles.scrollWrapper}>
-        <ScrollView 
-          ref={mainScrollViewRef}
-          style={styles.scrollContainer}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={Platform.OS === 'web'}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          keyboardShouldPersistTaps="handled"
-          bounces={Platform.OS !== 'web'}
-          nestedScrollEnabled={true}
-          overScrollMode="always"
-          scrollEventThrottle={1}
-          onScroll={handleScroll}
-          removeClippedSubviews={Platform.OS === 'android'}
-          maxToRenderPerBatch={10}
-          windowSize={10}
-        >
         {/* Tab Content */}
         {activeTab === 'students' ? (
-          <>
-            {/* Class Summary */}
-            <View style={styles.summaryCard}>
-              <View style={styles.summaryHeader}>
-                <Text style={styles.summaryTitle}>Class Overview</Text>
-                <View style={styles.collectionBadge}>
-                  <Text style={styles.collectionBadgeText}>
-                    {classData.collectionRate}% Collected
-                  </Text>
-                </View>
-              </View>
-              
-              <View style={styles.summaryStats}>
-                <View style={styles.summaryStatItem}>
-                  <Text style={styles.summaryStatNumber}>{classStudents.length}</Text>
-                  <Text style={styles.summaryStatLabel}>Total Students</Text>
-                </View>
-                <View style={styles.summaryStatItem}>
-                  <Text style={[styles.summaryStatNumber, { color: '#4CAF50' }]}>
-                    {classStudents.filter(s => s.paymentStatus === 'Paid').length}
-                  </Text>
-                  <Text style={styles.summaryStatLabel}>Paid</Text>
-                </View>
-                <View style={styles.summaryStatItem}>
-                  <Text style={[styles.summaryStatNumber, { color: '#FF9800' }]}>
-                    {classStudents.filter(s => s.paymentStatus === 'Partial').length}
-                  </Text>
-                  <Text style={styles.summaryStatLabel}>Partial</Text>
-                </View>
-                <View style={styles.summaryStatItem}>
-                  <Text style={[styles.summaryStatNumber, { color: '#F44336' }]}>
-                    {classStudents.filter(s => s.paymentStatus === 'Pending').length}
-                  </Text>
-                  <Text style={styles.summaryStatLabel}>Pending</Text>
-                </View>
-              </View>
-            </View>
-
-        {/* Search and Filter Section */}
-        <View style={styles.searchFilterSection}>
-          {/* Search Bar */}
-          <View style={styles.searchContainer}>
-            <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search by name, roll no, or admission no..."
-              value={searchQuery}
-              onChangeText={handleSearchChange}
-              placeholderTextColor="#999"
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity
-                onPress={() => handleSearchChange('')}
-                style={styles.clearButton}
-              >
-                <Ionicons name="close-circle" size={20} color="#999" />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Filter Chips */}
-          <View style={styles.filterContainer}>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={Platform.OS === 'web'}
-              contentContainerStyle={styles.horizontalScrollContent}
+          // 📱 Use the same working logic for both web and mobile
+          filteredStudents.length === 0 ? (
+              <ScrollView 
+              ref={mainScrollViewRef}
+              style={styles.scrollContainer}
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={Platform.OS === 'web'}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+              }
+              keyboardShouldPersistTaps="handled"
+              bounces={Platform.OS !== 'web'}
+              scrollEventThrottle={1}
+              onScroll={handleScroll}
             >
-              {['All', 'Paid', 'Partial', 'Pending'].map((status) => (
+              {/* Class Summary */}
+              <View style={styles.summaryCard}>
+                <View style={styles.summaryHeader}>
+                  <Text style={styles.summaryTitle}>Class Overview</Text>
+                  <View style={styles.collectionBadge}>
+                    <Text style={styles.collectionBadgeText}>
+                      {classData.collectionRate}% Collected
+                    </Text>
+                  </View>
+                </View>
+                
+                <View style={styles.summaryStats}>
+                  <View style={styles.summaryStatItem}>
+                    <Text style={styles.summaryStatNumber}>{classStudents.length}</Text>
+                    <Text style={styles.summaryStatLabel}>Total Students</Text>
+                  </View>
+                  <View style={styles.summaryStatItem}>
+                    <Text style={[styles.summaryStatNumber, { color: '#4CAF50' }]}>
+                      {classStudents.filter(s => s.paymentStatus === 'Paid').length}
+                    </Text>
+                    <Text style={styles.summaryStatLabel}>Paid</Text>
+                  </View>
+                  <View style={styles.summaryStatItem}>
+                    <Text style={[styles.summaryStatNumber, { color: '#FF9800' }]}>
+                      {classStudents.filter(s => s.paymentStatus === 'Partial').length}
+                    </Text>
+                    <Text style={styles.summaryStatLabel}>Partial</Text>
+                  </View>
+                  <View style={styles.summaryStatItem}>
+                    <Text style={[styles.summaryStatNumber, { color: '#F44336' }]}>
+                      {classStudents.filter(s => s.paymentStatus === 'Pending').length}
+                    </Text>
+                    <Text style={styles.summaryStatLabel}>Pending</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Search and Filter Section */}
+              <View style={styles.searchFilterSection}>
+                {/* Search Bar */}
+                <View style={styles.searchContainer}>
+                  <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search by name, roll no, or admission no..."
+                    value={searchQuery}
+                    onChangeText={handleSearchChange}
+                    placeholderTextColor="#999"
+                  />
+                  {searchQuery.length > 0 && (
+                    <TouchableOpacity
+                      onPress={() => handleSearchChange('')}
+                      style={styles.clearButton}
+                    >
+                      <Ionicons name="close-circle" size={20} color="#999" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Filter Chips */}
+                <View style={styles.filterContainer}>
+                  <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={Platform.OS === 'web'}
+                    contentContainerStyle={styles.horizontalScrollContent}
+                  >
+                    {['All', 'Paid', 'Partial', 'Pending'].map((status) => (
+                      <TouchableOpacity
+                        key={status}
+                        style={[
+                          styles.filterChip,
+                          filterStatus === status && styles.activeFilterChip
+                        ]}
+                        onPress={() => handleFilterStatusChange(status)}
+                      >
+                        <Text style={[
+                          styles.filterChipText,
+                          filterStatus === status && styles.activeFilterChipText
+                        ]}>
+                          {status}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* Sort Options */}
+                <View style={styles.sortContainer}>
+                  <Text style={styles.sortLabel}>Sort by:</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {[
+                      { key: 'outstanding', label: 'Outstanding' },
+                      { key: 'name', label: 'Name' }
+                    ].map((sort) => (
+                      <TouchableOpacity
+                        key={sort.key}
+                        style={[
+                          styles.sortChip,
+                          sortBy === sort.key && styles.activeSortChip
+                        ]}
+                        onPress={() => handleSortChange(sort.key)}
+                      >
+                        <Text style={[
+                          styles.sortChipText,
+                          sortBy === sort.key && styles.activeSortChipText
+                        ]}>
+                          {sort.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* Results Summary */}
+                <Text style={styles.resultsText}>
+                  Showing {filteredStudents.length} of {classStudents.length} students
+                  {searchQuery && ` for "${searchQuery}"`}
+                </Text>
+              </View>
+
+              {/* Empty State */}
+              <View style={styles.emptyState}>
+                <Ionicons name="search" size={48} color="#ccc" />
+                <Text style={styles.emptyStateTitle}>No students found</Text>
+                <Text style={styles.emptyStateText}>
+                  {searchQuery
+                    ? `No students match "${searchQuery}"`
+                    : `No students with ${filterStatus.toLowerCase()} status`
+                  }
+                </Text>
                 <TouchableOpacity
-                  key={status}
-                  style={[
-                    styles.filterChip,
-                    filterStatus === status && styles.activeFilterChip
-                  ]}
-                  onPress={() => handleFilterStatusChange(status)}
+                  onPress={() => {
+                    setSearchQuery('');
+                    setFilterStatus('All');
+                    setFilteredStudents(classStudents);
+                  }}
+                  style={styles.resetButton}
                 >
-                  <Text style={[
-                    styles.filterChipText,
-                    filterStatus === status && styles.activeFilterChipText
-                  ]}>
-                    {status}
-                  </Text>
+                  <Text style={styles.resetButtonText}>Show All Students</Text>
                 </TouchableOpacity>
-              ))}
+              </View>
             </ScrollView>
-          </View>
-
-          {/* Sort Options */}
-          <View style={styles.sortContainer}>
-            <Text style={styles.sortLabel}>Sort by:</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {[
-                { key: 'outstanding', label: 'Outstanding' },
-                { key: 'name', label: 'Name' }
-              ].map((sort) => (
-                <TouchableOpacity
-                  key={sort.key}
-                  style={[
-                    styles.sortChip,
-                    sortBy === sort.key && styles.activeSortChip
-                  ]}
-                  onPress={() => handleSortChange(sort.key)}
-                >
-                  <Text style={[
-                    styles.sortChipText,
-                    sortBy === sort.key && styles.activeSortChipText
-                  ]}>
-                    {sort.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-
-          {/* Results Summary */}
-          <Text style={styles.resultsText}>
-            Showing {filteredStudents.length} of {classStudents.length} students
-            {searchQuery && ` for "${searchQuery}"`}
-          </Text>
-        </View>
-
-        {/* Students List */}
-        <View style={styles.studentsSection}>
-          {filteredStudents.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="search" size={48} color="#ccc" />
-              <Text style={styles.emptyStateTitle}>No students found</Text>
-              <Text style={styles.emptyStateText}>
-                {searchQuery
-                  ? `No students match "${searchQuery}"`
-                  : `No students with ${filterStatus.toLowerCase()} status`
-                }
-              </Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setSearchQuery('');
-                  setFilterStatus('All');
-                  setFilteredStudents(classStudents);
-                }}
-                style={styles.resetButton}
-              >
-                <Text style={styles.resetButtonText}>Show All Students</Text>
-              </TouchableOpacity>
-            </View>
           ) : (
             <FlatList
               ref={studentListRef}
@@ -1461,15 +1666,150 @@ const ClassStudentDetails = ({ route, navigation }) => {
               updateCellsBatchingPeriod={50}
               scrollEventThrottle={1}
               getItemLayout={getItemLayout}
-              nestedScrollEnabled={false}
-              style={styles.studentFlatList}
+              onScroll={handleScroll}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+              }
+              ListHeaderComponent={
+                <View style={styles.listHeaderContainer}>
+                  {/* Class Summary */}
+                  <View style={styles.summaryCard}>
+                    <View style={styles.summaryHeader}>
+                      <Text style={styles.summaryTitle}>Class Overview</Text>
+                      <View style={styles.collectionBadge}>
+                        <Text style={styles.collectionBadgeText}>
+                          {classData.collectionRate}% Collected
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.summaryStats}>
+                      <View style={styles.summaryStatItem}>
+                        <Text style={styles.summaryStatNumber}>{classStudents.length}</Text>
+                        <Text style={styles.summaryStatLabel}>Total Students</Text>
+                      </View>
+                      <View style={styles.summaryStatItem}>
+                        <Text style={[styles.summaryStatNumber, { color: '#4CAF50' }]}>
+                          {classStudents.filter(s => s.paymentStatus === 'Paid').length}
+                        </Text>
+                        <Text style={styles.summaryStatLabel}>Paid</Text>
+                      </View>
+                      <View style={styles.summaryStatItem}>
+                        <Text style={[styles.summaryStatNumber, { color: '#FF9800' }]}>
+                          {classStudents.filter(s => s.paymentStatus === 'Partial').length}
+                        </Text>
+                        <Text style={styles.summaryStatLabel}>Partial</Text>
+                      </View>
+                      <View style={styles.summaryStatItem}>
+                        <Text style={[styles.summaryStatNumber, { color: '#F44336' }]}>
+                          {classStudents.filter(s => s.paymentStatus === 'Pending').length}
+                        </Text>
+                        <Text style={styles.summaryStatLabel}>Pending</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Search and Filter Section */}
+                  <View style={styles.searchFilterSection}>
+                    {/* Search Bar */}
+                    <View style={styles.searchContainer}>
+                      <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+                      <TextInput
+                        style={styles.searchInput}
+                        placeholder="Search by name, roll no, or admission no..."
+                        value={searchQuery}
+                        onChangeText={handleSearchChange}
+                        placeholderTextColor="#999"
+                      />
+                      {searchQuery.length > 0 && (
+                        <TouchableOpacity
+                          onPress={() => handleSearchChange('')}
+                          style={styles.clearButton}
+                        >
+                          <Ionicons name="close-circle" size={20} color="#999" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    {/* Filter Chips */}
+                    <View style={styles.filterContainer}>
+                      <ScrollView 
+                        horizontal 
+                        showsHorizontalScrollIndicator={Platform.OS === 'web'}
+                        contentContainerStyle={styles.horizontalScrollContent}
+                      >
+                        {['All', 'Paid', 'Partial', 'Pending'].map((status) => (
+                          <TouchableOpacity
+                            key={status}
+                            style={[
+                              styles.filterChip,
+                              filterStatus === status && styles.activeFilterChip
+                            ]}
+                            onPress={() => handleFilterStatusChange(status)}
+                          >
+                            <Text style={[
+                              styles.filterChipText,
+                              filterStatus === status && styles.activeFilterChipText
+                            ]}>
+                              {status}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+
+                    {/* Sort Options */}
+                    <View style={styles.sortContainer}>
+                      <Text style={styles.sortLabel}>Sort by:</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                        {[
+                          { key: 'outstanding', label: 'Outstanding' },
+                          { key: 'name', label: 'Name' }
+                        ].map((sort) => (
+                          <TouchableOpacity
+                            key={sort.key}
+                            style={[
+                              styles.sortChip,
+                              sortBy === sort.key && styles.activeSortChip
+                            ]}
+                            onPress={() => handleSortChange(sort.key)}
+                          >
+                            <Text style={[
+                              styles.sortChipText,
+                              sortBy === sort.key && styles.activeSortChipText
+                            ]}>
+                              {sort.label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+
+                    {/* Results Summary */}
+                    <Text style={styles.resultsText}>
+                      Showing {filteredStudents.length} of {classStudents.length} students
+                      {searchQuery && ` for "${searchQuery}"`}
+                    </Text>
+                  </View>
+                </View>
+              }
               contentContainerStyle={styles.studentFlatListContent}
             />
-          )}
-        </View>
-          </>
+          )
         ) : (
-          <>
+          <ScrollView 
+            ref={reportsScrollViewRef}
+            style={styles.scrollContainer}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={Platform.OS === 'web'}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            }
+            keyboardShouldPersistTaps="handled"
+            bounces={Platform.OS !== 'web'}
+            scrollEventThrottle={1}
+            onScroll={handleScroll}
+          >
             {/* Reports Tab */}
             <View style={styles.reportsContainer}>
             <Text style={styles.reportsTitle}>Payment Summary & Analytics</Text>
@@ -1651,9 +1991,8 @@ const ClassStudentDetails = ({ route, navigation }) => {
               </View>
             </View>
           </View>
-          </>
+          </ScrollView>
         )}
-        </ScrollView>
       </View>
       
       {/* Scroll to Top Button */}
@@ -1866,120 +2205,13 @@ const ClassStudentDetails = ({ route, navigation }) => {
                 <View style={styles.paymentFormCard}>
                   <Text style={styles.paymentFormTitle}>Payment Details</Text>
                   
-                  {/* Amount Input */}
+                  {/* 🎯 STEP 1: Fee Component Selection (Moved to TOP) */}
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Payment Amount *</Text>
-                    <TextInput
-                      style={styles.textInput}
-                      placeholder="Enter payment amount"
-                      value={paymentAmount}
-                      onChangeText={setPaymentAmount}
-                      keyboardType="numeric"
-                      placeholderTextColor="#999"
-                      editable={true}
-                    />
-                    {selectedFeeComponent && selectedFeeComponent !== 'custom' && (() => {
-                      const selectedComponent = feeComponents.find(c => c.fee_component === selectedFeeComponent);
-                      if (!selectedComponent) return null;
-                      
-                      const paidForThisComponent = selectedStudent.payments
-                        .filter(payment => payment.fee_component === selectedFeeComponent)
-                        .reduce((sum, payment) => sum + (parseFloat(payment.amount_paid) || 0), 0);
-                      
-                      const remainingForComponent = Math.max(0, selectedComponent.amount - paidForThisComponent);
-                      
-                      return (
-                        <View style={styles.feeComponentReference}>
-                          <Text style={styles.feeReferenceLabel}>
-                            {selectedFeeComponent} - Payment Summary:
-                          </Text>
-                          <View style={styles.feeBreakdown}>
-                            <View style={styles.feeBreakdownRow}>
-                              <Text style={styles.feeBreakdownLabel}>Total Fee:</Text>
-                              <Text style={styles.feeBreakdownValue}>
-                                {formatSafeCurrency(selectedComponent.amount)}
-                              </Text>
-                            </View>
-                            <View style={styles.feeBreakdownRow}>
-                              <Text style={styles.feeBreakdownLabel}>Already Paid:</Text>
-                              <Text style={[styles.feeBreakdownValue, { color: '#4CAF50' }]}>
-                                {formatSafeCurrency(paidForThisComponent)}
-                              </Text>
-                            </View>
-                            <View style={[styles.feeBreakdownRow, styles.remainingRow]}>
-                              <Text style={styles.remainingLabel}>Remaining Amount:</Text>
-                              <Text style={styles.remainingAmount}>
-                                {formatSafeCurrency(remainingForComponent)}
-                              </Text>
-                            </View>
-                          </View>
-                          {remainingForComponent === 0 && (
-                            <View style={styles.fullyPaidBanner}>
-                              <Text style={styles.fullyPaidBannerText}>
-                                ✅ This fee component is fully paid!
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                      );
-                    })()}
-                  </View>
-
-                  {/* Payment Date */}
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Payment Date *</Text>
-                    <TouchableOpacity
-                      style={styles.dateInput}
-                      onPress={() => setShowDatePicker(true)}
-                    >
-                      <Text style={styles.dateInputText}>
-                        {formatDateForDisplay(paymentDate)}
-                      </Text>
-                      <Ionicons name="calendar-outline" size={20} color="#666" />
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* Payment Mode - Simplified */}
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Payment Mode *</Text>
-                    <View style={styles.paymentModeContainer}>
-                      <TouchableOpacity
-                        style={[styles.paymentModeChip, styles.activePaymentModeChip]}
-                        disabled
-                      >
-                        <Text style={[styles.paymentModeChipText, styles.activePaymentModeChipText]}>
-                          Cash
-                        </Text>
-                      </TouchableOpacity>
-                      <Text style={styles.paymentModeNote}>
-                        For other payment methods, use "Generate UPI QR Code" below
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* UPI Payment Section */}
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>UPI Payment</Text>
-                    <TouchableOpacity
-                      style={styles.upiPaymentButton}
-                      onPress={() => handleUPIPayment(selectedStudent)}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="qr-code" size={16} color="#fff" style={{ marginRight: 6 }} />
-                      <Text style={styles.upiPaymentButtonText}>
-                        Generate UPI QR Code
-                      </Text>
-                    </TouchableOpacity>
-                    <Text style={styles.upiPaymentNote}>
-                      Generate QR code for UPI payment. Payment will be recorded after verification.
-                    </Text>
-                  </View>
-
-                  {/* Fee Component Selection */}
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Fee Component</Text>
+                    <Text style={styles.inputLabel}>Fee Component *</Text>
+                    <Text style={styles.inputHelperText}>Select the fee component first, then the amount will be auto-populated</Text>
                     {feeComponents.length > 0 ? (
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      <View style={styles.feeComponentScrollContainer}>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled={true}>
                         {feeComponents.map((component, index) => {
                           // Calculate remaining amount for this specific component
                           const paidForThisComponent = selectedStudent.payments
@@ -1998,7 +2230,8 @@ const ClassStudentDetails = ({ route, navigation }) => {
                               ]}
                               onPress={() => {
                                 setSelectedFeeComponent(component.fee_component);
-                                // Suggest the remaining amount but don't auto-fill
+                                // ✅ AUTO-POPULATE the payment amount with the remaining outstanding amount
+                                setPaymentAmount(remainingForComponent.toString());
                                 setPaymentRemarks(`Payment for ${component.fee_component}`);
                               }}
                               disabled={remainingForComponent === 0}
@@ -2052,7 +2285,8 @@ const ClassStudentDetails = ({ route, navigation }) => {
                             Other
                           </Text>
                         </TouchableOpacity>
-                      </ScrollView>
+                        </ScrollView>
+                      </View>
                     ) : (
                       <TouchableOpacity
                         style={[
@@ -2072,6 +2306,77 @@ const ClassStudentDetails = ({ route, navigation }) => {
                     )}
                   </View>
 
+                  {/* 🎯 STEP 2: Payment Amount (LOCKED until fee component selected) */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Payment Amount (₹) *</Text>
+                    <TextInput
+                      style={[
+                        styles.textInput,
+                        !selectedFeeComponent && styles.textInputDisabled // ✅ DISABLED STYLING
+                      ]}
+                      placeholder="Select a fee component first..."
+                      value={paymentAmount}
+                      onChangeText={setPaymentAmount}
+                      keyboardType="decimal-pad"
+                      placeholderTextColor="#999"
+                      editable={!!selectedFeeComponent} // ✅ LOCK INPUT until component selected
+                    />
+                    {!selectedFeeComponent && (
+                      <Text style={styles.inputHelperText}>Please select a fee component above to enable payment amount entry</Text>
+                    )}
+                  </View>
+
+                  {/* 🎯 STEP 3: Payment Date */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Payment Date *</Text>
+                    <TouchableOpacity
+                      style={styles.dateInput}
+                      onPress={() => setShowDatePicker(true)}
+                    >
+                      <Text style={styles.dateInputText}>
+                        {formatDateForDisplay(paymentDate)}
+                      </Text>
+                      <Ionicons name="calendar" size={20} color="#666" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* 🎯 STEP 4: Payment Mode (Button Style with Colors) */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Payment Mode *</Text>
+                    <View style={styles.paymentModeContainer}>
+                      {['Cash', 'UPI'].map((mode) => (
+                        <TouchableOpacity
+                          key={mode}
+                          style={[
+                            styles.paymentModeChip,
+                            paymentMode === mode && styles.activePaymentModeChip
+                          ]}
+                          onPress={() => setPaymentMode(mode)}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={[
+                            styles.paymentModeChipText,
+                            paymentMode === mode && styles.activePaymentModeChipText
+                          ]}>
+                            {mode}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    
+                    {/* 🎯 UPI QR Code Generation Button */}
+                    {paymentMode === 'UPI' && selectedFeeComponent && paymentAmount && (
+                      <TouchableOpacity
+                        style={styles.upiQRButton}
+                        onPress={() => handleUPIPayment()}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="qr-code" size={20} color="#fff" style={{ marginRight: 8 }} />
+                        <Text style={styles.upiQRButtonText}>Generate QR Code</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
                   {/* Additional Remarks */}
                   <View style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>Additional Remarks (Optional)</Text>
@@ -2086,28 +2391,43 @@ const ClassStudentDetails = ({ route, navigation }) => {
                     />
                   </View>
 
-                  {/* Submit Button */}
-                  <TouchableOpacity
-                    style={[
-                      styles.submitButton,
-                      paymentLoading && styles.submitButtonDisabled
-                    ]}
-                    onPress={handlePaymentSubmit}
-                    disabled={paymentLoading}
-                    activeOpacity={0.8}
-                  >
-                    {paymentLoading ? (
-                      <>
-                        <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
-                        <Text style={styles.submitButtonText}>Recording Payment...</Text>
-                      </>
-                    ) : (
-                      <>
-                        <Ionicons name="checkmark-circle" size={20} color="#fff" style={{ marginRight: 8 }} />
-                        <Text style={styles.submitButtonText}>Record Payment</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
+                  {/* Submit Button - Only show for Cash payments or if UPI is selected but QR not generated */}
+                  {paymentMode !== 'UPI' && (
+                    <TouchableOpacity
+                      style={[
+                        styles.submitButton,
+                        (paymentLoading || !selectedFeeComponent || !paymentAmount) && styles.submitButtonDisabled
+                      ]}
+                      onPress={handlePaymentSubmit}
+                      disabled={paymentLoading || !selectedFeeComponent || !paymentAmount}
+                      activeOpacity={0.8}
+                    >
+                      {paymentLoading ? (
+                        <>
+                          <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+                          <Text style={styles.submitButtonText}>Recording Payment...</Text>
+                        </>
+                      ) : (
+                        <>
+                          <Ionicons name="checkmark-circle" size={20} color="#fff" style={{ marginRight: 8 }} />
+                          <Text style={styles.submitButtonText}>
+                            {!selectedFeeComponent ? 'Select Fee Component' : !paymentAmount ? 'Enter Amount' : 'Record Payment'}
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                  
+                  {/* UPI Payment Instructions */}
+                  {paymentMode === 'UPI' && (
+                    <View style={styles.upiInstructionsContainer}>
+                      <Text style={styles.upiInstructionsTitle}>UPI Payment Instructions:</Text>
+                      <Text style={styles.upiInstructionsText}>1. Enter the payment amount and select fee component</Text>
+                      <Text style={styles.upiInstructionsText}>2. Click 'Generate QR Code' to create payment QR</Text>
+                      <Text style={styles.upiInstructionsText}>3. Scan QR with any UPI app to complete payment</Text>
+                      <Text style={styles.upiInstructionsText}>4. Payment will be recorded automatically after confirmation</Text>
+                    </View>
+                  )}
                 </View>
               </>
             )}
@@ -2120,7 +2440,11 @@ const ClassStudentDetails = ({ route, navigation }) => {
         visible={receiptModal}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setReceiptModal(false)}
+        onRequestClose={() => {
+          setReceiptModal(false);
+          // Navigate to fee management home screen after receipt closes
+          navigation.navigate('FeeManagement');
+        }}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
@@ -2128,7 +2452,11 @@ const ClassStudentDetails = ({ route, navigation }) => {
               Payment Receipt
             </Text>
             <TouchableOpacity
-              onPress={() => setReceiptModal(false)}
+              onPress={() => {
+                setReceiptModal(false);
+                // Navigate to fee management home screen after receipt closes
+                navigation.navigate('FeeManagement');
+              }}
               style={styles.closeButton}
             >
               <Ionicons name="close" size={24} color="#666" />
@@ -3801,6 +4129,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  // 🔧 NEW: Disabled Input Styling
+  textInputDisabled: {
+    backgroundColor: '#F5F5F5',
+    borderColor: '#D0D0D0',
+    color: '#999',
+  },
+  // 🔧 NEW: Payment Mode Container Styling
+  paymentModeContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  // 🔧 NEW: Input Helper Text Styling
+  inputHelperText: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    marginTop: 6,
+    lineHeight: 16,
+  },
   // UPI Payment Note Styles
   upiPaymentNote: {
     fontSize: 12,
@@ -3850,9 +4199,60 @@ const styles = StyleSheet.create({
   studentFlatListContent: {
     paddingBottom: 20,
   },
+  // List Header Container
+  listHeaderContainer: {
+    paddingBottom: 8,
+  },
   // Horizontal Scroll Content
   horizontalScrollContent: {
     paddingHorizontal: 4,
+  },
+  // Fee Component Scroll Container
+  feeComponentScrollContainer: {
+    maxHeight: 150,
+    marginVertical: 8,
+  },
+  // UPI QR Button
+  upiQRButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FF9800',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  upiQRButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  // UPI Instructions Container
+  upiInstructionsContainer: {
+    backgroundColor: '#FFF3E0',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9800',
+  },
+  upiInstructionsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#E65100',
+    marginBottom: 8,
+  },
+  upiInstructionsText: {
+    fontSize: 14,
+    color: '#BF360C',
+    marginBottom: 4,
+    lineHeight: 20,
   },
   // Scroll to Top Button
   scrollToTopButton: {

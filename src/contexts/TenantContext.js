@@ -768,6 +768,12 @@ export const TenantProvider = ({ children }) => {
     
     // Enhanced tenant-aware query helpers following EMAIL_BASED_TENANT_SYSTEM.md patterns
     createTenantAwareQuery: (tableName) => {
+      // Check if tenant context is still loading
+      if (loading) {
+        console.warn('❌ Tenant context is still loading, cannot create query yet');
+        throw new Error('Tenant context is loading. Please wait...');
+      }
+      
       const tenantId = currentTenant?.id;
       if (!tenantId) {
         console.warn('❌ No current tenant for tenant-aware query creation');

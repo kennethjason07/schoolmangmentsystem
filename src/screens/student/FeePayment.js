@@ -32,6 +32,7 @@ import { useAuth } from '../../utils/AuthContext';
 import { getSchoolLogoBase64, getLogoHTML, getReceiptHeaderCSS } from '../../utils/logoUtils';
 import FeeService from '../../services/FeeService';
 import { validateFeeConsistency, syncFeeAfterPayment } from '../../services/feeSync';
+import { generateMockReferenceNumber } from '../../utils/referenceNumberGenerator';
 
 const { width } = Dimensions.get('window');
 
@@ -48,6 +49,8 @@ const FeePayment = () => {
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [receiptModalVisible, setReceiptModalVisible] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState(null);
+  const [paymentHistoryView, setPaymentHistoryView] = useState('history'); // 'history', 'cards', or 'status'
+  const [paymentStatusData, setPaymentStatusData] = useState([]); // For payment status cards
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -105,55 +108,44 @@ const FeePayment = () => {
         setStudentData(studentDetails);
         console.log('Student FeePayment - Student details:', studentDetails);
 
-        // 🎯 Use NEW class-based FeeService for proper fee structure
-        console.log('Student FeePayment - Getting fees using class-based FeeService...');
-        const feeServiceResult = await FeeService.getStudentFeesWithClassBase(user.linked_student_id);
-        console.log('Student FeePayment - FeeService result:', feeServiceResult);
+        // 🎯 Load fee data from student_fee_summary view (EMAIL-BASED TENANT SYSTEM)
+        console.log('Student FeePayment - Loading fee data from student_fee_summary view...');
         
-        // Validate fee consistency to ensure data integrity
-        try {
-          const consistencyCheck = await validateFeeConsistency(user.linked_student_id, user.tenant_id);
-          if (!consistencyCheck.isConsistent) {
-            console.warn('Student FeePayment - Fee consistency issues detected:', consistencyCheck.issues);
-            // Still proceed but log the issues for debugging
+        const { data: feeData, error: feeError } = await supabase
+          .from('student_fee_summary')
+          .select('*')
+          .eq('student_id', user.linked_student_id)
+          .single();
+
+        if (feeError) {
+          console.error('Student FeePayment - Error loading fee data:', feeError);
+          // Check if student has no fee data vs actual error
+          if (feeError.code === 'PGRST116') {
+            console.log('Student FeePayment - No fee data found for student, showing empty state');
+            setFeeStructure({
+              studentName: studentDetails.name,
+              class: `${studentDetails.classes?.class_name || 'N/A'} ${studentDetails.classes?.section || ''}`.trim(),
+              academicYear: studentDetails.academic_year || '2024-2025',
+              totalDue: 0,
+              totalPaid: 0,
+              outstanding: 0,
+              fees: [],
+              metadata: { source: 'no-fee-data' }
+            });
+            setPaymentHistory([]);
+            return;
           }
-          if (consistencyCheck.warnings && consistencyCheck.warnings.length > 0) {
-            console.warn('Student FeePayment - Fee warnings:', consistencyCheck.warnings);
-          }
-        } catch (consistencyError) {
-          console.warn('Student FeePayment - Fee consistency check failed (non-critical):', consistencyError);
+          throw feeError;
         }
 
-        // Handle FeeService result
-        if (!feeServiceResult.success || !feeServiceResult.data) {
-          if (feeServiceResult.error) {
-            console.error('Student FeePayment - FeeService error:', feeServiceResult.error);
-          } else {
-            console.log('Student FeePayment - No fee data from FeeService, showing empty state');
-          }
-          setFeeStructure({
-            studentName: studentDetails.name,
-            class: studentDetails.classes?.class_name || 'N/A',
-            academicYear: '2024-2025',
-            totalDue: 0,
-            totalPaid: 0,
-            outstanding: 0,
-            fees: [],
-            metadata: { source: 'empty-state' }
-          });
-          setPaymentHistory([]);
-          return;
-        }
+        console.log('Student FeePayment - Fee data loaded from view:', feeData);
 
-        const feeData = feeServiceResult.data;
-        console.log('Student FeePayment - Using FeeService data:', feeData);
-
-        // Transform fee components from NEW class-based FeeService
-        const transformedFees = feeData.fees.components.map(component => {
-          // Determine category based on fee component
+        // Transform fee components from JSON to array format
+        const transformedFees = (feeData.fee_components || []).map((component, index) => {
+          // Determine category based on fee component name
           let category = 'general';
-          if (component.name) {
-            const componentName = component.name.toLowerCase();
+          if (component.fee_component) {
+            const componentName = component.fee_component.toLowerCase();
             if (componentName.includes('tuition') || componentName.includes('academic')) {
               category = 'tuition';
             } else if (componentName.includes('book') || componentName.includes('library')) {
@@ -170,61 +162,122 @@ const FeePayment = () => {
           }
 
           return {
-            id: component.id || `fee-${component.name}-${Date.now()}`,
-            name: component.name,
-            // Class fee amounts
-            totalAmount: component.baseFeeAmount, // Base class fee
-            discountAmount: component.discountAmount, // Individual discount
-            amount: component.finalAmount, // Final amount after discount
-            dueDate: component.dueDate || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
-            status: component.status,
-            paidAmount: component.paidAmount,
-            remainingAmount: component.remainingAmount,
-            description: component.hasIndividualDiscount ? 
-              `${component.name} - Class Fee: ₹${component.baseFeeAmount}, Your Discount: ₹${component.discountAmount}` :
-              `${component.name} - Standard Class Fee`,
+            id: `fee-${component.fee_component}-${index}`,
+            name: component.fee_component,
+            totalAmount: Number(component.base_amount) || 0,
+            discountAmount: Number(component.discount_amount) || 0,
+            amount: Number(component.final_amount) || 0,
+            dueDate: component.due_date || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
+            status: component.status || 'unpaid',
+            paidAmount: Number(component.paid_amount) || 0,
+            remainingAmount: Number(component.outstanding_amount) || 0,
+            description: component.has_discount ? 
+              `${component.fee_component} - Base: ₹${component.base_amount}, Discount: ₹${component.discount_amount}` :
+              `${component.fee_component} - Standard Fee`,
             category: category,
-            academicYear: feeData.fees.academicYear,
-            isClassFee: component.isClassFee,
-            hasIndividualDiscount: component.hasIndividualDiscount,
-            appliedDiscount: component.appliedDiscount
+            academicYear: feeData.academic_year,
+            hasDiscount: component.has_discount,
+            discountType: component.discount_type,
+            paymentCount: component.payment_count || 0,
+            lastPaymentDate: component.last_payment_date
           };
         });
 
-        // Get payment history from FeeService
-        const paymentHistoryFromService = feeData.fees.payments ? feeData.fees.payments.recentPayments.map(payment => ({
+        // Get payment history from student_fees table
+        const { data: paymentHistory, error: paymentError } = await supabase
+          .from('student_fees')
+          .select('*')
+          .eq('student_id', user.linked_student_id)
+          .order('payment_date', { ascending: false })
+          .limit(10);
+
+        const paymentHistoryTransformed = (paymentHistory || []).map(payment => ({
           id: payment.id,
-          feeName: payment.component || 'Fee Payment',
-          amount: payment.amount,
-          paymentDate: payment.date,
-          paymentMethod: payment.mode || 'Online',
-          transactionId: payment.receipt || `TXN${payment.id.toString().slice(-8).toUpperCase()}`,
+          feeName: payment.fee_component,
+          amount: Number(payment.amount_paid),
+          paymentDate: payment.payment_date,
+          paymentMethod: payment.payment_mode || 'Online',
+          transactionId: payment.receipt_number ? `RCP${payment.receipt_number}` : `TXN${payment.id.toString().slice(-8).toUpperCase()}`,
           status: 'completed',
           receiptUrl: null,
           remarks: payment.remarks || '',
-          academicYear: feeData.student.class_info.academic_year || '2024-25'
-        })) : [];
+          academicYear: payment.academic_year || feeData.academic_year
+        }));
 
-        console.log('Student FeePayment - Payment history from FeeService:', paymentHistoryFromService.length, 'payments');
+        console.log('Student FeePayment - Payment history loaded:', paymentHistoryTransformed.length, 'payments');
 
+        // Set fee structure using data from student_fee_summary view
         setFeeStructure({
-          studentName: feeData.student.name,
-          class: `${feeData.student.class?.name || 'N/A'} ${feeData.student.class?.section || ''}`.trim(),
-          academicYear: feeData.fees.academicYear || '2024-2025',
-          // Class-based fee structure information
-          totalClassFee: feeData.fees.classBaseFee, // What all students in class pay
-          totalDiscounts: feeData.fees.individualDiscounts, // This student's individual discounts
-          totalDue: feeData.fees.totalDue, // Final amount after individual discounts
-          totalPaid: feeData.fees.totalPaid,
-          outstanding: feeData.fees.totalOutstanding,
+          studentName: feeData.student_name,
+          class: `${feeData.class_name || 'N/A'} ${feeData.section || ''}`.trim(),
+          academicYear: feeData.academic_year || '2024-2025',
+          admissionNo: feeData.admission_no,
+          rollNo: feeData.roll_no,
+          // Fee totals from view
+          totalBaseFees: Number(feeData.total_base_fees) || 0,
+          totalDiscounts: Number(feeData.total_discounts) || 0,
+          totalDue: Number(feeData.total_final_fees) || 0,
+          totalPaid: Number(feeData.total_paid) || 0,
+          outstanding: Number(feeData.total_outstanding) || 0,
           fees: transformedFees,
-          // Additional information
-          classFeeInfo: feeData.classFeeStructure,
-          individualInfo: feeData.individualInfo
+          // Status and metadata
+          overallStatus: feeData.overall_status,
+          hasDiscounts: feeData.has_any_discounts,
+          totalFeeComponents: feeData.total_fee_components || 0,
+          calculatedAt: feeData.calculated_at,
+          metadata: { source: 'student_fee_summary_view', tenantId: feeData.tenant_id }
         });
         
-        console.log('Student FeePayment - Payment history loaded:', paymentHistoryFromService.length, 'payments');
-        setPaymentHistory(paymentHistoryFromService);
+        setPaymentHistory(paymentHistoryTransformed);
+        
+        // Get real payment status data from upi_transactions table
+        const { data: upiTransactions, error: upiError } = await supabase
+          .from('upi_transactions')
+          .select(`
+            id,
+            amount,
+            reference_number,
+            payment_status,
+            fee_component,
+            payment_date,
+            created_at,
+            verified_at,
+            verification_notes,
+            admin_verified_by,
+            users!admin_verified_by(full_name)
+          `)
+          .eq('student_id', user.linked_student_id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        const paymentStatusTransformed = (upiTransactions || []).map(transaction => {
+          // Map payment_status from DB to display status
+          let displayStatus = 'pending';
+          if (transaction.payment_status === 'SUCCESS') {
+            displayStatus = 'approved';
+          } else if (transaction.payment_status === 'FAILED') {
+            displayStatus = 'rejected';
+          } else if (transaction.payment_status === 'PENDING_ADMIN_VERIFICATION') {
+            displayStatus = 'pending';
+          }
+
+          return {
+            id: transaction.id,
+            feeName: transaction.fee_component,
+            amount: Number(transaction.amount),
+            referenceNumber: transaction.reference_number,
+            status: displayStatus,
+            submittedDate: transaction.payment_date || transaction.created_at?.split('T')[0],
+            approvedDate: transaction.verified_at?.split('T')[0] || null,
+            remarks: transaction.verification_notes || 
+                    (displayStatus === 'pending' ? 'Waiting for admin approval' : 
+                     displayStatus === 'approved' ? `Approved by ${transaction.users?.full_name || 'admin'}` : 
+                     'Payment verification failed')
+          };
+        });
+
+        console.log('Student FeePayment - Payment status loaded:', paymentStatusTransformed.length, 'transactions');
+        setPaymentStatusData(paymentStatusTransformed);
       } catch (err) {
         console.error('Error fetching fee data:', err);
         setError(err.message);
@@ -357,45 +410,18 @@ const FeePayment = () => {
       console.log('Starting navigation for method:', method.id);
 
       switch (method.id) {
-        case 'Card':
+        case 'UPI_QR':
           try {
-            console.log('Navigating to CardPayment screen');
-            navigation.navigate('CardPayment', {
+            console.log('Navigating to Student QR Payment screen');
+            navigation.navigate('StudentQRPayment', {
               selectedFee,
-              studentData: safeStudentData
+              studentData: safeStudentData,
+              tenantId: tenantId
             });
-            console.log('CardPayment navigation successful');
+            console.log('StudentQRPayment navigation successful');
           } catch (navError) {
-            console.error('CardPayment navigation error:', navError);
-            Alert.alert('Error', 'Failed to open card payment screen. Please try again.');
-          }
-          break;
-
-        case 'UPI':
-          try {
-            console.log('Navigating to UPIPayment screen');
-            navigation.navigate('UPIPayment', {
-              selectedFee,
-              studentData: safeStudentData
-            });
-            console.log('UPIPayment navigation successful');
-          } catch (navError) {
-            console.error('UPIPayment navigation error:', navError);
-            Alert.alert('Error', 'Failed to open UPI payment screen. Please try again.');
-          }
-          break;
-
-        case 'Online':
-          try {
-            console.log('Navigating to OnlineBankingPayment screen');
-            navigation.navigate('OnlineBankingPayment', {
-              selectedFee,
-              studentData: safeStudentData
-            });
-            console.log('OnlineBankingPayment navigation successful');
-          } catch (navError) {
-            console.error('OnlineBankingPayment navigation error:', navError);
-            Alert.alert('Error', 'Failed to open online banking screen. Please try again.');
+            console.error('StudentQRPayment navigation error:', navError);
+            Alert.alert('Error', 'Failed to open QR payment screen. Please try again.');
           }
           break;
 
@@ -527,7 +553,34 @@ const FeePayment = () => {
     return await getSchoolLogoBase64(logoUrl);
   };
 
+  // Generate receipt HTML using the original format
   const generateReceiptHTML = async (receipt) => {
+    try {
+      // Use the new web receipt generator for demo bill format
+      const { generateFeeReceiptHTML } = await import('../../utils/webReceiptGenerator');
+      
+      return await generateFeeReceiptHTML({
+        schoolDetails,
+        studentName: feeStructure?.studentName || 'Student Name',
+        admissionNo: feeStructure?.admissionNo || 'N/A',
+        className: feeStructure?.class || 'Class',
+        feeComponent: receipt.feeName,
+        amount: receipt.amount,
+        paymentMethod: receipt.paymentMethod,
+        transactionId: receipt.transactionId,
+        referenceNumber: receipt.transactionId, // Use transaction ID as reference
+        outstandingAmount: 0, // Calculate if needed
+        academicYear: '2024-25'
+      });
+    } catch (error) {
+      console.error('Error generating receipt HTML with new format:', error);
+      // Fallback to old format if new generator fails
+      return generateOldReceiptHTML(receipt);
+    }
+  };
+
+  // Keep old receipt HTML as fallback
+  const generateOldReceiptHTML = async (receipt) => {
     try {
       // Get school logo using standardized utility
       const logoBase64 = schoolDetails?.logo_url ? await getSchoolLogoBase64(schoolDetails.logo_url) : null;
@@ -734,12 +787,10 @@ const FeePayment = () => {
     }
   };
 
-  // Get payment methods available (informational for students)
+  // Get payment methods available (QR Code only for students)
   const getPaymentMethods = () => {
     return [
-      { id: 'Online', name: 'Online Payment', icon: 'card', description: 'Pay using Net Banking' },
-      { id: 'UPI', name: 'UPI Payment', icon: 'qr-code-outline', description: 'Pay using UPI apps' },
-      { id: 'Card', name: 'Credit/Debit Card', icon: 'card-outline', description: 'Pay using your card' }
+      { id: 'UPI_QR', name: 'Pay via QR Code', icon: 'qr-code-outline', description: 'Scan QR code with any UPI app to pay instantly' }
     ];
   };
 
@@ -809,6 +860,153 @@ const FeePayment = () => {
       </TouchableOpacity>
     </View>
   );
+
+  const renderPaymentStatusCard = ({ item }) => {
+    // Generate a strong reference number for each payment
+    const referenceNumber = generateMockReferenceNumber(item.feeName);
+    
+    return (
+      <View style={styles.paymentStatusCard}>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardHeaderLeft}>
+            <View style={[styles.statusIndicator, { backgroundColor: getStatusColor(item.status) }]} />
+            <View>
+              <Text style={styles.cardFeeType}>{item.feeName}</Text>
+              <Text style={styles.cardReferenceNumber}>Ref: {referenceNumber}</Text>
+            </View>
+          </View>
+          <Text style={styles.cardAmount}>₹{item.amount}</Text>
+        </View>
+        
+        <View style={styles.cardBody}>
+          <View style={styles.cardRow}>
+            <View style={styles.cardField}>
+              <Text style={styles.cardLabel}>Status</Text>
+              <View style={[styles.statusChip, { backgroundColor: getStatusColor(item.status) }]}>
+                <Text style={styles.statusChipText}>{getStatusText(item.status)}</Text>
+              </View>
+            </View>
+            <View style={styles.cardField}>
+              <Text style={styles.cardLabel}>Date</Text>
+              <Text style={styles.cardValue}>{formatDateForReceipt(item.paymentDate)}</Text>
+            </View>
+          </View>
+          
+          <View style={styles.cardRow}>
+            <View style={styles.cardField}>
+              <Text style={styles.cardLabel}>Method</Text>
+              <Text style={styles.cardValue}>{item.paymentMethod}</Text>
+            </View>
+            <View style={styles.cardField}>
+              <Text style={styles.cardLabel}>Transaction ID</Text>
+              <Text style={styles.cardValue}>{item.transactionId}</Text>
+            </View>
+          </View>
+        </View>
+        
+        <View style={styles.cardFooter}>
+          <TouchableOpacity 
+            style={styles.cardActionButton}
+            onPress={() => handleDownloadReceipt(item)}
+          >
+            <Ionicons name="download-outline" size={16} color="#2196F3" />
+            <Text style={styles.cardActionText}>Download Receipt</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.cardActionButton}
+            onPress={() => {
+              // Copy reference number to clipboard
+              // This could be implemented with expo-clipboard if needed
+              Alert.alert('Reference Number', referenceNumber, [
+                { text: 'OK', style: 'default' }
+              ]);
+            }}
+          >
+            <Ionicons name="copy-outline" size={16} color="#666" />
+            <Text style={[styles.cardActionText, { color: '#666' }]}>Copy Ref</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
+  // New render function for payment status items
+  const renderPaymentStatusItem = ({ item }) => {
+    const getStatusColor = (status) => {
+      switch (status) {
+        case 'approved': return '#4CAF50';
+        case 'pending': return '#FF9800';
+        case 'rejected': return '#F44336';
+        default: return '#666';
+      }
+    };
+
+    const getStatusText = (status) => {
+      switch (status) {
+        case 'approved': return 'Approved';
+        case 'pending': return 'Pending';
+        case 'rejected': return 'Rejected';
+        default: return 'Unknown';
+      }
+    };
+
+    return (
+      <View style={styles.paymentStatusItem}>
+        <View style={styles.statusHeader}>
+          <View style={styles.statusLeft}>
+            <Text style={styles.statusFeeName}>{item.feeName}</Text>
+            <Text style={styles.statusReferenceNumber}>REF: {item.referenceNumber}</Text>
+          </View>
+          <View style={styles.statusRight}>
+            <Text style={styles.statusAmount}>₹{item.amount}</Text>
+            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
+              <Text style={styles.statusBadgeText}>{getStatusText(item.status)}</Text>
+            </View>
+          </View>
+        </View>
+        
+        <View style={styles.statusBody}>
+          <View style={styles.statusRow}>
+            <Text style={styles.statusLabel}>Submitted:</Text>
+            <Text style={styles.statusValue}>{formatDateForReceipt(item.submittedDate)}</Text>
+          </View>
+          {item.approvedDate && (
+            <View style={styles.statusRow}>
+              <Text style={styles.statusLabel}>Approved:</Text>
+              <Text style={styles.statusValue}>{formatDateForReceipt(item.approvedDate)}</Text>
+            </View>
+          )}
+          <View style={styles.statusRow}>
+            <Text style={styles.statusLabel}>Remarks:</Text>
+            <Text style={styles.statusValue}>{item.remarks}</Text>
+          </View>
+        </View>
+        
+        {item.status === 'approved' && (
+          <TouchableOpacity 
+            style={styles.statusDownloadButton}
+            onPress={() => {
+              // Create a receipt-like object for approved payments
+              const receiptData = {
+                id: item.id,
+                feeName: item.feeName,
+                amount: item.amount,
+                paymentDate: item.approvedDate,
+                transactionId: item.referenceNumber,
+                paymentMethod: 'QR Code',
+                status: 'completed'
+              };
+              handleDownloadReceipt(receiptData);
+            }}
+          >
+            <Ionicons name="download" size={16} color="#4CAF50" />
+            <Text style={styles.statusDownloadText}>Download Receipt</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
 
   if (loading) {
     return (
@@ -896,6 +1094,7 @@ const FeePayment = () => {
             data={feeStructure.fees}
             renderItem={renderFeeItem}
             keyExtractor={(item) => item.id}
+            style={styles.scrollContainer}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.feeList}
             refreshControl={
@@ -915,28 +1114,113 @@ const FeePayment = () => {
             }
           />
         ) : (
-          <FlatList
-            data={paymentHistory}
-            renderItem={renderPaymentHistoryItem}
-            keyExtractor={(item) => item.id}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.historyList}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={onRefresh}
-                colors={['#2196F3']}
-                progressBackgroundColor="#fff"
+          <View style={styles.scrollContainer}>
+            {/* Payment History Toggle Control - 3 OPTIONS */}
+            <View style={styles.historyToggleContainer}>
+              <TouchableOpacity 
+                style={[styles.toggleButton, paymentHistoryView === 'history' && styles.activeToggleButton]}
+                onPress={() => {
+                  console.log('🔄 History toggle pressed');
+                  setPaymentHistoryView('history');
+                }}
+              >
+                <Ionicons name="list-outline" size={16} color={paymentHistoryView === 'history' ? '#fff' : '#666'} />
+                <Text style={[styles.toggleButtonText, paymentHistoryView === 'history' && styles.activeToggleButtonText]}>History</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.toggleButton, paymentHistoryView === 'cards' && styles.activeToggleButton]}
+                onPress={() => {
+                  console.log('🔄 Cards toggle pressed');
+                  setPaymentHistoryView('cards');
+                }}
+              >
+                <Ionicons name="card-outline" size={16} color={paymentHistoryView === 'cards' ? '#fff' : '#666'} />
+                <Text style={[styles.toggleButtonText, paymentHistoryView === 'cards' && styles.activeToggleButtonText]}>Cards</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.toggleButton, paymentHistoryView === 'status' && styles.activeToggleButton]}
+                onPress={() => {
+                  console.log('🔄 Status toggle pressed');
+                  setPaymentHistoryView('status');
+                }}
+              >
+                <Ionicons name="checkmark-circle-outline" size={16} color={paymentHistoryView === 'status' ? '#fff' : '#666'} />
+                <Text style={[styles.toggleButtonText, paymentHistoryView === 'status' && styles.activeToggleButtonText]}>Status</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Content based on payment history view - 3 OPTIONS */}
+            {paymentHistoryView === 'history' ? (
+              <FlatList
+                data={paymentHistory}
+                renderItem={renderPaymentHistoryItem}
+                keyExtractor={(item) => item.id}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.historyList}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    colors={['#2196F3']}
+                    progressBackgroundColor="#fff"
+                  />
+                }
+                ListEmptyComponent={
+                  <View style={styles.emptyContainer}>
+                    <Ionicons name="receipt-outline" size={48} color="#ccc" />
+                    <Text style={styles.emptyText}>No payment history</Text>
+                    <Text style={styles.emptySubtext}>Payment history will appear here once payments are made.</Text>
+                  </View>
+                }
               />
-            }
-            ListEmptyComponent={
-              <View style={styles.emptyContainer}>
-                <Ionicons name="receipt-outline" size={48} color="#ccc" />
-                <Text style={styles.emptyText}>No payment history</Text>
-                <Text style={styles.emptySubtext}>Payment history will appear here once payments are made.</Text>
-              </View>
-            }
-          />
+            ) : paymentHistoryView === 'cards' ? (
+              <FlatList
+                data={paymentHistory}
+                renderItem={renderPaymentStatusCard}
+                keyExtractor={(item) => item.id}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.historyList}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    colors={['#2196F3']}
+                    progressBackgroundColor="#fff"
+                  />
+                }
+                ListEmptyComponent={
+                  <View style={styles.emptyContainer}>
+                    <Ionicons name="card-outline" size={48} color="#ccc" />
+                    <Text style={styles.emptyText}>No payment records</Text>
+                    <Text style={styles.emptySubtext}>Payment status cards will appear here once payments are made.</Text>
+                  </View>
+                }
+              />
+            ) : (
+              <FlatList
+                data={paymentStatusData}
+                renderItem={renderPaymentStatusItem}
+                keyExtractor={(item) => item.id}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.historyList}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    colors={['#2196F3']}
+                    progressBackgroundColor="#fff"
+                  />
+                }
+                ListEmptyComponent={
+                  <View style={styles.emptyContainer}>
+                    <Ionicons name="checkmark-circle-outline" size={48} color="#ccc" />
+                    <Text style={styles.emptyText}>No payment status</Text>
+                    <Text style={styles.emptySubtext}>Payment status will appear here when you submit payments for approval.</Text>
+                  </View>
+                }
+              />
+            )}
+          </View>
         )}
       </View>
 
@@ -1103,6 +1387,9 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
+  scrollContainer: {
+    flex: 1,
+  },
   summaryCards: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1163,10 +1450,10 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   feeList: {
-    paddingBottom: 150,
+    paddingBottom: 100,
   },
   historyList: {
-    paddingBottom: 20,
+    paddingBottom: 100,
   },
   feeItem: {
     backgroundColor: '#fff',
@@ -1620,6 +1907,238 @@ const styles = StyleSheet.create({
     color: '#999',
     fontSize: 14,
     textAlign: 'center',
+  },
+  // Toggle control styles - 3 BUTTONS ENHANCED VISIBILITY
+  historyToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 20,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  toggleButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    minHeight: 40,
+  },
+  activeToggleButton: {
+    backgroundColor: '#2196F3',
+    elevation: 2,
+    shadowColor: '#2196F3',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  toggleButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+    marginLeft: 6,
+  },
+  activeToggleButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  // Payment Status Item Styles
+  paymentStatusItem: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9800',
+  },
+  statusHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  statusLeft: {
+    flex: 1,
+  },
+  statusFeeName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  statusReferenceNumber: {
+    fontSize: 12,
+    color: '#666',
+    fontFamily: 'monospace',
+  },
+  statusRight: {
+    alignItems: 'flex-end',
+  },
+  statusAmount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 6,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  statusBody: {
+    marginBottom: 12,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  statusLabel: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  statusValue: {
+    fontSize: 12,
+    color: '#333',
+    fontWeight: '500',
+    flex: 1,
+    textAlign: 'right',
+  },
+  statusDownloadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#4CAF50',
+    borderRadius: 8,
+    backgroundColor: '#f1f8e9',
+  },
+  statusDownloadText: {
+    color: '#4CAF50',
+    fontWeight: '500',
+    marginLeft: 4,
+  },
+  // Payment status card styles
+  paymentStatusCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196F3',
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  cardHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusIndicator: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 12,
+  },
+  cardFeeType: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 2,
+  },
+  cardReferenceNumber: {
+    fontSize: 12,
+    color: '#666',
+    fontFamily: 'monospace',
+  },
+  cardAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2196F3',
+  },
+  cardBody: {
+    marginBottom: 12,
+  },
+  cardRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  cardField: {
+    flex: 1,
+  },
+  cardLabel: {
+    fontSize: 11,
+    color: '#999',
+    fontWeight: '500',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  cardValue: {
+    fontSize: 13,
+    color: '#333',
+    fontWeight: '500',
+  },
+  statusChip: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusChipText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  cardActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    backgroundColor: '#f8f9fa',
+  },
+  cardActionText: {
+    fontSize: 12,
+    color: '#2196F3',
+    marginLeft: 4,
+    fontWeight: '500',
   },
 });
 

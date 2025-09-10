@@ -90,6 +90,7 @@ export const StudentMarks = React.lazy(() => import('../screens/student/StudentM
 export const StudentNotifications = React.lazy(() => import('../screens/student/StudentNotifications'));
 export const StudentChatWithTeacher = React.lazy(() => import('../screens/student/StudentChatWithTeacher'));
 export const StudentFeePayment = React.lazy(() => import('../screens/student/FeePayment'));
+export const StudentQRPayment = React.lazy(() => import('../screens/student/StudentQRPayment'));
 
 // Lazy-loaded Universal screens
 export const ProfileScreen = React.lazy(() => import('../screens/universal/ProfileScreen'));

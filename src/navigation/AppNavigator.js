@@ -42,6 +42,9 @@ import LeaveManagement from '../screens/admin/LeaveManagement';
 import AdminNotifications from '../screens/admin/AdminNotifications';
 import HallTicketGeneration from '../screens/admin/HallTicketGeneration';
 import AutoGrading from '../screens/admin/AutoGrading';
+import PendingUPIPayments from '../screens/admin/PendingUPIPayments';
+import PaymentVerificationScreen from '../screens/PaymentVerificationScreen';
+import TestPaymentVerificationNavigation from '../screens/TestPaymentVerificationNavigation';
 
 
 import FeeClassDetails from '../screens/admin/FeeClassDetails';
@@ -93,6 +96,7 @@ import TestNotifications from '../screens/student/TestNotifications';
 import ScrollingDiagnostic from '../screens/student/ScrollingDiagnostic';
 import StudentChatWithTeacher from '../screens/student/StudentChatWithTeacher';
 import StudentFeePayment from '../screens/student/FeePayment';
+import StudentQRPayment from '../screens/student/StudentQRPayment';
 
 // Universal Screens
 import ProfileScreen from '../screens/universal/ProfileScreen';
@@ -419,6 +423,23 @@ export default function AppNavigator() {
                 <Stack.Screen name="AdminNotifications" component={AdminNotifications} />
                 <Stack.Screen name="HallTicketGeneration" component={HallTicketGeneration} />
                 <Stack.Screen name="AutoGrading" component={AutoGrading} />
+                <Stack.Screen name="PendingUPIPayments" component={PendingUPIPayments} />
+                <Stack.Screen 
+                  name="PaymentVerification" 
+                  component={PaymentVerificationScreen}
+                  options={{ 
+                    title: 'Verify Payment',
+                    headerShown: false
+                  }}
+                />
+                <Stack.Screen 
+                  name="TestPaymentVerificationNavigation" 
+                  component={TestPaymentVerificationNavigation}
+                  options={{ 
+                    title: 'Test Payment Verification',
+                    headerShown: false
+                  }}
+                />
 
 
                 <Stack.Screen name="AssignTaskToTeacher" component={AssignTaskToTeacher} />
@@ -473,6 +494,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="TestNotifications" component={TestNotifications} />
                 <Stack.Screen name="ScrollingDiagnostic" component={ScrollingDiagnostic} />
                 <Stack.Screen name="StudentFeePayment" component={StudentFeePayment} />
+                <Stack.Screen name="StudentQRPayment" component={StudentQRPayment} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
                 <Stack.Screen name="NotificationSettings" component={NotificationSettings} />

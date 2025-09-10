@@ -552,6 +552,10 @@ export default function AppNavigator() {
                   name="StudentFeePayment" 
                   component={LazyScreens.withLazyLoading(LazyScreens.StudentFeePayment, 'Student Fee Payment')} 
                 />
+                <Stack.Screen 
+                  name="StudentQRPayment" 
+                  component={LazyScreens.withLazyLoading(LazyScreens.StudentQRPayment, 'Student QR Payment')} 
+                />
               </>
             )}
 
