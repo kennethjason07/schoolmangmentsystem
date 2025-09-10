@@ -49,6 +49,33 @@ const ManageTeachers = ({ navigation, route }) => {
   const [saving, setSaving] = useState(false);
   const [sections, setSections] = useState([]);
   
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(0);
+  const [totalTeachers, setTotalTeachers] = useState(0);
+  const [hasMoreTeachers, setHasMoreTeachers] = useState(true);
+  const PAGE_SIZE = 20; // Load 20 teachers at a time
+  
+  // Cache database user ID to avoid repeated lookups
+  const [dbUserId, setDbUserId] = useState(null);
+  const [actualTenantId, setActualTenantId] = useState(null);
+  
+  // Helper function to get database user ID
+  const getDbUserId = async () => {
+    if (dbUserId) {
+      return { success: true, userId: dbUserId };
+    }
+    
+    const userTenantResult = await getCurrentUserTenantByEmail();
+    if (!userTenantResult.success) {
+      return { success: false, error: userTenantResult.error };
+    }
+    
+    // The result structure is { success: true, data: { userRecord, tenant, tenantId, tenantName } }
+    const userId = userTenantResult.data.userRecord.id;
+    setDbUserId(userId); // Cache for future use
+    return { success: true, userId, userRecord: userTenantResult.data.userRecord, tenant: userTenantResult.data.tenant };
+  };
+  
   // Load data on component mount and when tenant changes
   useEffect(() => {
     console.log('🏢 ManageTeachers: useEffect triggered:', {
@@ -58,7 +85,7 @@ const ManageTeachers = ({ navigation, route }) => {
     
     if (tenantId && user) {
       console.log('🏢 ManageTeachers: Loading data with tenant and user available');
-      loadData();
+      loadData(0, false);
     } else {
       console.warn('🏢 ManageTeachers: Waiting for tenant context or user authentication...');
     }
@@ -91,30 +118,24 @@ const ManageTeachers = ({ navigation, route }) => {
 
   }, [form.classes, subjects]);
   
-  // Function to load all necessary data with timeout
-  const loadData = async () => {
-    const startTime = performance.now(); // 📊 Performance monitoring
-    setLoading(true);
+  // Function to load data using optimized approach with pagination
+  const loadData = async (page = 0, isRefresh = false) => {
+    const startTime = performance.now();
+    
+    // Only show full loading for initial load or refresh
+    if (isRefresh || page === 0) {
+      setLoading(true);
+    }
     setError(null);
     
-    // 🚀 Add timeout to prevent infinite loading
-    const timeoutId = setTimeout(() => {
-      console.error('❌ ManageTeachers: Loading timeout (10s) - probably network issue');
-      setError('Loading timeout. Please check your internet connection and try again.');
-      setLoading(false);
-    }, 10000); // 10 second timeout
-    
     try {
-      console.log('🏢 ManageTeachers: Starting loadData function...');
+      console.log(`🏢 ManageTeachers: Loading page ${page} for tenant:`, tenantId);
       
-      // Verify tenant context is available
+      // Verify tenant context
       if (!tenantId) {
         console.error('❌ ManageTeachers: No tenantId available from context');
         
-        // Try to get tenant via email as fallback
-        console.log('🏢 ManageTeachers: Attempting email-based tenant lookup as fallback...');
         const emailTenantResult = await getCurrentUserTenantByEmail();
-        
         if (!emailTenantResult.success) {
           const errorMsg = `No tenant context available: ${emailTenantResult.error}`;
           console.error('❌ ManageTeachers:', errorMsg);
@@ -123,124 +144,139 @@ const ManageTeachers = ({ navigation, route }) => {
           return;
         }
         
-        console.log('🏢 ManageTeachers: Email-based tenant lookup successful, but context is null');
         setError('Tenant context loading issue. Please refresh the page.');
         setLoading(false);
         return;
       }
       
-      // 🛑️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ManageTeachers');
+      // 🔍 Get database user ID and validate tenant access
+      const userIdResult = await getDbUserId();
+      if (!userIdResult.success) {
+        console.error('❌ ManageTeachers: Failed to get user ID:', userIdResult.error);
+        setError(`Unable to verify user access: ${userIdResult.error}`);
+        setLoading(false);
+        return;
+      }
+      
+      // Check for tenant mismatch - user's actual tenant vs context tenant
+      if (userIdResult.tenant && userIdResult.tenant.id !== tenantId) {
+        console.error('❌ ManageTeachers: Tenant mismatch detected:', {
+          contextTenant: tenantId,
+          userTenant: userIdResult.tenant.id,
+          contextTenantName: currentTenant?.name,
+          userTenantName: userIdResult.tenant.name
+        });
+        
+        setError(`Tenant context mismatch. You belong to "${userIdResult.tenant.name}" but the current context is "${currentTenant?.name}". Please refresh or contact support.`);
+        setLoading(false);
+        return;
+      }
+      
+      // Use the user's actual tenant ID for operations instead of context tenant ID
+      const userActualTenantId = userIdResult.tenant?.id || tenantId;
+      setActualTenantId(userActualTenantId); // Store for use in other functions
+      console.log('🏢 ManageTeachers: Using tenant ID:', userActualTenantId);
+      
+      // Validate tenant access with correct database user ID
+      const validation = await validateTenantAccess(userIdResult.userId, userActualTenantId, 'ManageTeachers');
       if (!validation.isValid) {
         console.error('❌ ManageTeachers: Tenant validation failed:', validation.error);
         setError(validation.error);
         setLoading(false);
         return;
       }
-
-      console.log('🚀 ManageTeachers: Loading teachers with optimized query for tenant:', tenantId);
       
-      // 🚀 OPTIMIZED: Simple direct query - much faster
-      console.log('🏢 ManageTeachers: Fetching teachers with optimized query...');
+      console.log('✅ ManageTeachers: Tenant validation successful');
+
+      // 🚀 Direct query with user's actual tenant ID (bypassing getTeachers for tenant consistency)
+      console.log('🏢 ManageTeachers: Querying teachers directly with user tenant:', userActualTenantId);
+      
+      // Direct query with pagination
+      const start = page * PAGE_SIZE;
+      const end = start + PAGE_SIZE - 1;
+      
       const { data: teachersData, error: teachersError } = await supabase
         .from(TABLES.TEACHERS)
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false });
-      
-      console.log('🏢 ManageTeachers: Teachers query result:', {
-        success: !teachersError,
-        count: teachersData?.length || 0,
-        error: teachersError?.message || 'none'
-      });
+        .select('id,name,phone,qualification,salary_amount,age,address,tenant_id,created_at,is_class_teacher')
+        .eq('tenant_id', userActualTenantId)
+        .order('name', { ascending: true })
+        .range(start, end);
       
       if (teachersError) {
-        console.error("Supabase error loading teachers:", teachersError);
-        throw new Error('Failed to load teachers');
+        console.error('❌ ManageTeachers: Error loading teachers:', teachersError);
+        throw new Error(`Failed to load teachers: ${teachersError.message}`);
       }
       
-      // 🚀 OPTIMIZED: Direct parallel queries - much faster
-      console.log('🏢 ManageTeachers: Fetching classes and subjects...');
-      const [classesResult, subjectsResult] = await Promise.all([
-        supabase
-          .from(TABLES.CLASSES)
-          .select('*')
-          .eq('tenant_id', tenantId)
-          .order('class_name'),
-        supabase
-          .from(TABLES.SUBJECTS)
-          .select('*')
-          .eq('tenant_id', tenantId)
-          .order('name')
-      ]);
+      const teachers = teachersData || [];
+      console.log(`🏢 ManageTeachers: Loaded ${teachers.length} teachers for page ${page}`);
       
-      const { data: classesData, error: classesError } = classesResult;
-      const { data: subjectsData, error: subjectsError } = subjectsResult;
+      // Set pagination info
+      setHasMoreTeachers(teachers.length === PAGE_SIZE);
+      setCurrentPage(page);
       
-      console.log('🏢 ManageTeachers: Classes result:', {
-        success: !classesError,
-        count: classesData?.length || 0
-      });
-      console.log('🏢 ManageTeachers: Subjects result:', {
-        success: !subjectsError,
-        count: subjectsData?.length || 0
-      });
-      
-      if (classesError) throw new Error(`Failed to load classes: ${classesError.message}`);
-      if (subjectsError) throw new Error(`Failed to load subjects: ${subjectsError.message}`);
-      
-      // 🚀 OPTIMIZED: Set data immediately and load assignments later if needed
-      console.log('🏢 ManageTeachers: Setting basic data immediately...');
-      setClasses(classesData || []);
-      setSubjects(subjectsData || []);
-      
-      if (!teachersData || teachersData.length === 0) {
-        console.log('🏢 ManageTeachers: No teachers found, setting empty state');
-        setTeachers([]);
-        return;
+      // Update teachers list based on whether this is initial load or pagination
+      if (page === 0 || isRefresh) {
+        // Initial load or refresh - replace all teachers
+        setTeachers(teachers.map(teacher => ({
+          ...teacher,
+          subjects: [], // Will load on-demand when editing
+          classes: []   // Will load on-demand when editing  
+        })));
+        setTotalTeachers(teachers.length);
+      } else {
+        // Pagination - append to existing teachers
+        setTeachers(prev => [...prev, ...teachers.map(teacher => ({
+          ...teacher,
+          subjects: [],
+          classes: []
+        }))]);
+        setTotalTeachers(prev => prev + teachers.length);
       }
       
-      // 🚀 OPTIMIZED: Simplified teacher processing - no complex assignments for initial load
-      console.log('🏢 ManageTeachers: Processing', teachersData.length, 'teachers...');
-      const processedTeachers = teachersData.map(teacher => ({
-        ...teacher,
-        subjects: [], // Load these on-demand when editing
-        classes: [], // Load these on-demand when editing
-        isClassTeacher: false // Will be updated when needed
-      }));
+      // Load classes and subjects only once (not on each page load)
+      if (page === 0 || isRefresh) {
+        console.log('🏢 ManageTeachers: Loading classes and subjects...');
+        const [classesResult, subjectsResult] = await Promise.all([
+          supabase
+            .from(TABLES.CLASSES)
+            .select('id,class_name,section,tenant_id')
+            .eq('tenant_id', userActualTenantId)
+            .order('class_name'),
+          supabase
+            .from(TABLES.SUBJECTS)
+            .select('id,name,class_id,tenant_id')
+            .eq('tenant_id', userActualTenantId)
+            .order('name')
+        ]);
+        
+        const { data: classesData, error: classesError } = classesResult;
+        const { data: subjectsData, error: subjectsError } = subjectsResult;
+        
+        if (classesError) {
+          console.warn('⚠️ ManageTeachers: Failed to load classes:', classesError.message);
+        } else {
+          setClasses(classesData || []);
+          console.log(`✅ ManageTeachers: Loaded ${(classesData || []).length} classes`);
+        }
+        
+        if (subjectsError) {
+          console.warn('⚠️ ManageTeachers: Failed to load subjects:', subjectsError.message);
+        } else {
+          setSubjects(subjectsData || []);
+          console.log(`✅ ManageTeachers: Loaded ${(subjectsData || []).length} subjects`);
+        }
+      }
       
-      // 🚀 OPTIMIZED: Set teachers immediately without complex processing
-      setTeachers(processedTeachers);
-      
-      // Simple logging
-      console.log('📊 ManageTeachers: Data loaded successfully:', {
-        teachers: processedTeachers.length,
-        classes: classesData?.length || 0,
-        subjects: subjectsData?.length || 0,
-        tenantId
-      });
-      
-      // 📊 Performance monitoring
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
-      console.log(`✅ ManageTeachers: Data loaded in ${loadTime}ms - ${processedTeachers.length} teachers`);
-      
-      if (loadTime > 2000) {
-        console.warn('⚠️ ManageTeachers: Slow loading (>2s). Check network connection.');
-      } else if (loadTime > 500) {
-        console.log('🟠 ManageTeachers: Moderate loading speed');
-      } else {
-        console.log('🚀 ManageTeachers: Fast loading achieved!');
-      }
+      console.log(`✅ ManageTeachers: Page ${page} loaded in ${loadTime}ms - ${teachers.length} teachers`);
       
     } catch (err) {
-      clearTimeout(timeoutId); // Clear timeout on error
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
       console.error(`❌ ManageTeachers: Error loading after ${loadTime}ms:`, err);
       setError(err.message || 'Failed to load teachers data');
     } finally {
-      clearTimeout(timeoutId); // Clear timeout on completion
       setLoading(false);
     }
   };
@@ -249,12 +285,21 @@ const ManageTeachers = ({ navigation, route }) => {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      await loadData();
+      setCurrentPage(0);
+      await loadData(0, true); // Reset to first page
     } catch (error) {
       console.error('Error during refresh:', error);
       Alert.alert('Error', 'Failed to refresh data. Please try again.');
     } finally {
       setRefreshing(false);
+    }
+  };
+  
+  // Handle load more teachers (pagination)
+  const loadMoreTeachers = async () => {
+    if (hasMoreTeachers && !loading) {
+      console.log(`🏢 ManageTeachers: Loading more teachers, page ${currentPage + 1}`);
+      await loadData(currentPage + 1, false);
     }
   };
 
@@ -277,7 +322,7 @@ const ManageTeachers = ({ navigation, route }) => {
       const { data, error } = await supabase
         .from(TABLES.CLASSES)
         .select('section')
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', actualTenantId || tenantId)
         .in('id', classIds)
         .not('section', 'is', null);
       
@@ -402,7 +447,14 @@ const ManageTeachers = ({ navigation, route }) => {
     });
     
     // 🛑️ Validate tenant access first
-    const validation = await validateTenantAccess(user?.id, tenantId, 'ManageTeachers - Save');
+    const userIdResult = await getDbUserId();
+    if (!userIdResult.success) {
+      console.error('❌ ManageTeachers: Failed to get user ID for save:', userIdResult.error);
+      Alert.alert('Access Denied', `Unable to verify user access: ${userIdResult.error}`);
+      return;
+    }
+    
+    const validation = await validateTenantAccess(userIdResult.userId, actualTenantId || tenantId, 'ManageTeachers - Save');
     if (!validation.isValid) {
       console.error('❌ ManageTeachers: Save validation failed:', validation.error);
       Alert.alert('Access Denied', validation.error);
@@ -445,7 +497,7 @@ const ManageTeachers = ({ navigation, route }) => {
           qualification: form.qualification,
           salary_amount: parseFloat(form.salary) || 0,
           salary_type: 'monthly', // Default value
-          tenant_id: tenantId, // Add tenant_id
+          tenant_id: actualTenantId || tenantId, // Add tenant_id
         };
         
         const { data: newTeacher, error } = await supabase
@@ -460,7 +512,7 @@ const ManageTeachers = ({ navigation, route }) => {
         await handleSubjectClassAssignments(newTeacher.id);
         
         // Reload data to get updated list
-        await loadData();
+        await loadData(0, true);
         
         Alert.alert('Success', 'Teacher added successfully.');
       } else if (modalMode === 'edit' && selectedTeacher) {
@@ -485,7 +537,7 @@ const ManageTeachers = ({ navigation, route }) => {
         await handleSubjectClassAssignments(selectedTeacher.id);
         
         // Reload data to get updated list
-        await loadData();
+        await loadData(0, true);
         Alert.alert('Success', 'Changes saved.');
       }
       closeModal();
@@ -504,7 +556,12 @@ const ManageTeachers = ({ navigation, route }) => {
       console.log('Form data:', { subjects: form.subjects, classes: form.classes, sections: form.sections });
 
       // 🛡️ Validate tenant access for assignments
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ManageTeachers - Assignments');
+      const userIdResult = await getDbUserId();
+      if (!userIdResult.success) {
+        throw new Error(`Unable to verify user access: ${userIdResult.error}`);
+      }
+      
+      const validation = await validateTenantAccess(userIdResult.userId, actualTenantId || tenantId, 'ManageTeachers - Assignments');
       if (!validation.isValid) {
         throw new Error(`Assignment access denied: ${validation.error}`);
       }
@@ -539,7 +596,7 @@ const ManageTeachers = ({ navigation, route }) => {
       const assignments = form.subjects.map(subjectId => ({
         teacher_id: teacherId,
         subject_id: subjectId,
-        tenant_id: tenantId, // Add tenant_id
+        tenant_id: actualTenantId || tenantId, // Add tenant_id
       }));
 
       console.log('New subject assignments to insert:', assignments);
@@ -636,7 +693,16 @@ const ManageTeachers = ({ navigation, route }) => {
             try {
               // 🛑️ Validate tenant access for deletion
               console.log('🏢 ManageTeachers: Delete validation for tenant:', tenantId);
-              const validation = await validateTenantAccess(user?.id, tenantId, 'ManageTeachers - Delete');
+              
+              const userIdResult = await getDbUserId();
+              if (!userIdResult.success) {
+                console.error('❌ ManageTeachers: Failed to get user ID for delete:', userIdResult.error);
+                Alert.alert('Access Denied', `Unable to verify user access: ${userIdResult.error}`);
+                setLoading(false);
+                return;
+              }
+              
+              const validation = await validateTenantAccess(userIdResult.userId, actualTenantId || tenantId, 'ManageTeachers - Delete');
               if (!validation.isValid) {
                 console.error('❌ ManageTeachers: Delete validation failed:', validation.error);
                 Alert.alert('Access Denied', validation.error);
@@ -774,7 +840,7 @@ const ManageTeachers = ({ navigation, route }) => {
     );
   };
 
-  // Enhanced filtering and sorting
+  // Enhanced filtering and sorting - simplified for performance
   const filteredTeachers = teachers
     .filter(teacher => {
       if (!searchQuery.trim()) return true;
@@ -782,29 +848,15 @@ const ManageTeachers = ({ navigation, route }) => {
       const query = searchQuery.toLowerCase();
       const name = teacher.name?.toLowerCase() || '';
       const qualification = teacher.qualification?.toLowerCase() || '';
-
-      // Get subject names for this teacher
-      const teacherSubjectNames = subjects
-        .filter(subject => teacher.subjects?.includes(subject.id))
-        .map(subject => subject.name?.toLowerCase() || '')
-        .join(' ');
-
-      // Get class names for this teacher
-      const teacherClassNames = classes
-        .filter(cls => teacher.classes?.includes(cls.id))
-        .map(cls => cls.class_name?.toLowerCase() || '')
-        .join(' ');
+      const phone = teacher.phone?.toLowerCase() || '';
 
       return name.includes(query) ||
              qualification.includes(query) ||
-             teacherSubjectNames.includes(query) ||
-             teacherClassNames.includes(query);
+             phone.includes(query);
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const renderTeacherItem = ({ item }) => {
-    // Remove duplicate subject IDs before rendering
-    const uniqueSubjectIds = [...new Set(item.subjects)];
     return (
       <TouchableOpacity 
         style={styles.teacherCard} 
@@ -837,16 +889,11 @@ const ManageTeachers = ({ navigation, route }) => {
           <View style={styles.teacherDetails}>
             <Text style={styles.teacherName}>{item.name}</Text>
             <Text style={styles.teacherSubject}>
-              {item.subjects.map(s => subjects.find(sub => sub.id === s)?.name).filter(name => name).join(', ') || 'Not assigned'}
+              {item.qualification || 'Qualification not specified'}
             </Text>
-            {item.classes.length > 0 && (
-              <Text style={styles.teacherClass}>
-                {item.classes.map(classId => {
-                  const cls = classes.find(cls => cls.id === classId);
-                  return cls ? `${cls.class_name} (${cls.section || 'No Section'})` : null;
-                }).filter(name => name).join(', ')}
-              </Text>
-            )}
+            <Text style={styles.teacherClass}>
+              {item.is_class_teacher ? 'Class Teacher' : 'Subject Teacher'} • Phone: {item.phone || 'N/A'}
+            </Text>
             {/* Salary and Education */}
             <Text style={styles.teacherSalary}>
               Salary: {item.salary_amount ? `₹${parseFloat(item.salary_amount).toFixed(2)}` : '₹0.00'}
@@ -925,7 +972,7 @@ const ManageTeachers = ({ navigation, route }) => {
       <View style={[styles.container, styles.centerContent]}>
         <Header title="Manage Teachers" showBack={true} />
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={loadData}>
+        <TouchableOpacity style={styles.retryButton} onPress={() => loadData(0, true)}>
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
       </View>
@@ -943,8 +990,10 @@ const ManageTeachers = ({ navigation, route }) => {
       {/* Header Section */}
       <View style={styles.header}>
         <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle}>Total Teachers: {filteredTeachers.length}</Text>
-          <Text style={styles.headerSubtitle}>Active Teachers</Text>
+          <Text style={styles.headerTitle}>Teachers: {totalTeachers}</Text>
+          <Text style={styles.headerSubtitle}>
+            {searchQuery ? `${filteredTeachers.length} filtered` : 'Active Teachers'}
+          </Text>
         </View>
         <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
           <Ionicons name="add" size={24} color="#fff" />
@@ -962,7 +1011,7 @@ const ManageTeachers = ({ navigation, route }) => {
               style={styles.searchIcon}
             />
             <TextInput
-              placeholder="Search by name, qualification, or subject..."
+              placeholder="Search by name, qualification, or phone..."
               value={searchQuery}
               onChangeText={setSearchQuery}
               style={styles.searchInput}
@@ -1004,6 +1053,20 @@ const ManageTeachers = ({ navigation, route }) => {
             colors={['#4CAF50']}
             tintColor="#4CAF50"
           />
+        }
+        onEndReached={loadMoreTeachers}
+        onEndReachedThreshold={0.3}
+        ListFooterComponent={
+          hasMoreTeachers && !searchQuery ? (
+            <View style={styles.loadingMoreContainer}>
+              <PaperActivityIndicator size="small" color="#4CAF50" />
+              <Text style={styles.loadingMoreText}>Loading more teachers...</Text>
+            </View>
+          ) : searchQuery ? null : (
+            <View style={styles.endOfListContainer}>
+              <Text style={styles.endOfListText}>End of teachers list</Text>
+            </View>
+          )
         }
       />
       {/* Add/Edit Modal */}
@@ -2050,6 +2113,30 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
     textAlign: 'center',
+  },
+  // Pagination styles
+  loadingMoreContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+  },
+  loadingMoreText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 8,
+    fontStyle: 'italic',
+  },
+  endOfListContainer: {
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  endOfListText: {
+    fontSize: 12,
+    color: '#999',
+    fontStyle: 'italic',
   },
 });
 

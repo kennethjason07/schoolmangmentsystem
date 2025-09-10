@@ -25,7 +25,7 @@ const AdminNotifications = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [readNotifications, setReadNotifications] = useState(new Set());
   const { user } = useAuth();
-  const { tenantId } = useTenant();
+  const { tenantId, loading: tenantLoading, error: tenantError } = useTenant();
 
   const getNotificationTitle = (type, message) => {
     // Extract title from message or use type-based defaults
@@ -92,17 +92,32 @@ const AdminNotifications = ({ navigation }) => {
     try {
       console.log('🔔 [ADMIN_NOTIF] Starting to fetch admin notifications...');
       console.log('🔔 [ADMIN_NOTIF] Current user:', user?.email || 'Not logged in');
-      
+      console.log('🔔 [ADMIN_NOTIF] Tenant loading state:', tenantLoading);
+      console.log('🔔 [ADMIN_NOTIF] Tenant ID:', tenantId);
+      console.log('🔔 [ADMIN_NOTIF] Tenant error:', tenantError);
+
+      // Ensure tenant context is ready
+      if (tenantLoading) {
+        console.log('⏳ [ADMIN_NOTIF] Tenant context still loading, skipping fetch for now');
+        return;
+      }
+      if (!tenantId) {
+        console.error('❌ AdminNotifications fetchNotifications: Tenant validation failed: No tenant context available. Please contact administrator.');
+        console.error('  - tenantId:', tenantId);
+        console.error('  - tenantLoading:', tenantLoading);
+        console.error('  - tenantError:', tenantError);
+        return;
+      }
+      if (!user?.id) {
+        console.log('❌ [ADMIN_NOTIF] No user ID available');
+        return;
+      }
+
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'AdminNotifications - fetchNotifications');
+      const validation = await validateTenantAccess(user.id, tenantId, 'AdminNotifications - fetchNotifications');
       if (!validation.isValid) {
         console.error('❌ AdminNotifications fetchNotifications: Tenant validation failed:', validation.error);
         Alert.alert('Access Denied', validation.error);
-        return;
-      }
-      
-      if (!user?.id) {
-        console.log('❌ [ADMIN_NOTIF] No user ID available');
         return;
       }
 
@@ -285,8 +300,11 @@ const AdminNotifications = ({ navigation }) => {
   };
 
   useEffect(() => {
-    fetchNotifications();
-  }, [user?.id]);
+    // Only attempt fetch when we have a user and a resolved tenant context
+    if (user?.id && !tenantLoading) {
+      fetchNotifications();
+    }
+  }, [user?.id, tenantId, tenantLoading]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -558,13 +576,25 @@ const AdminNotifications = ({ navigation }) => {
     );
   };
 
-  if (loading) {
+  if (loading || tenantLoading) {
     return (
       <View style={styles.container}>
         <Header title="Admin Notifications" showBack={true} navigation={navigation} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1976d2" />
           <Text style={styles.loadingText}>Loading notifications...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (!tenantId) {
+    return (
+      <View style={styles.container}>
+        <Header title="Admin Notifications" showBack={true} navigation={navigation} />
+        <View style={styles.loadingContainer}>
+          <Ionicons name="warning" size={32} color="#F44336" />
+          <Text style={styles.loadingText}>{tenantError || 'No tenant context available. Please contact administrator.'}</Text>
         </View>
       </View>
     );
