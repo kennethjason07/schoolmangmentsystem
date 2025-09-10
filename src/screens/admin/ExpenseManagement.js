@@ -630,19 +630,110 @@ const ExpenseManagement = ({ navigation }) => {
     ];
     
     try {
+      console.log('📝 ExpenseManagement: Creating default categories for tenant:', tenantId);
+      
+      // First, check if any categories already exist for this tenant
+      const { data: existingCategories, error: checkError } = await dbHelpers.getExpenseCategories(tenantId);
+      
+      if (checkError) {
+        console.warn('⚠️ ExpenseManagement: Could not check existing categories:', checkError);
+      }
+      
+      const existingCategoryNames = new Set((existingCategories || []).map(cat => cat.name));
+      console.log('🗓️ ExpenseManagement: Existing categories for tenant:', Array.from(existingCategoryNames));
+      
       const createdCategories = [];
+      const failedCategories = [];
+      
       for (const category of defaultCategories) {
+        // Skip if category already exists for this tenant
+        if (existingCategoryNames.has(category.name)) {
+          console.log('ℹ️ ExpenseManagement: Category already exists, skipping:', category.name);
+          // Add existing category to our local state with UI fields
+          const existingCategory = existingCategories.find(cat => cat.name === category.name);
+          if (existingCategory) {
+            const categoryWithUIFields = {
+              ...existingCategory,
+              icon: category.icon,
+              color: category.color
+            };
+            createdCategories.push(categoryWithUIFields);
+          }
+          continue;
+        }
+        
         // Create category with only the columns that exist in the database
         const basicCategory = {
           name: category.name,
           monthly_budget: category.monthly_budget
         };
         
+        console.log('➕ ExpenseManagement: Creating new category:', category.name);
         const { data, error } = await dbHelpers.createExpenseCategory(basicCategory, tenantId);
         
         if (error) {
-          console.error('Error creating default category:', category.name, error);
+          console.error('❌ Error creating default category:', category.name, {
+            error: error.message,
+            code: error.code,
+            details: error.details
+          });
+          
+          // If it's a duplicate key error, try alternative names since global names are taken
+          if (error.code === '23505' && error.message.includes('unique constraint')) {
+            console.log('🔍 ExpenseManagement: Category name globally taken, trying tenant-specific alternatives:', category.name);
+            
+            // Generate alternative names with tenant prefix/suffix
+            const alternativeNames = [
+              `${category.name} (${tenantId?.slice(-8) || 'School'})`, // Use last 8 chars of tenant ID
+              `School ${category.name}`,
+              `${category.name} - Tenant`,
+              `Custom ${category.name}`,
+              `${category.name} ${Date.now().toString().slice(-4)}` // Use timestamp suffix as last resort
+            ];
+            
+            let categoryCreated = false;
+            
+            for (const altName of alternativeNames) {
+              console.log('➕ ExpenseManagement: Trying alternative name:', altName);
+              
+              const altCategoryData = {
+                name: altName,
+                monthly_budget: category.monthly_budget
+              };
+              
+              try {
+                const { data: altData, error: altError } = await dbHelpers.createExpenseCategory(altCategoryData, tenantId);
+                
+                if (!altError && altData) {
+                  console.log('✅ ExpenseManagement: Successfully created category with alternative name:', altName);
+                  const categoryWithUIFields = {
+                    ...altData,
+                    icon: category.icon,
+                    color: category.color
+                  };
+                  createdCategories.push(categoryWithUIFields);
+                  categoryCreated = true;
+                  break;
+                } else if (altError?.code === '23505') {
+                  console.log('⚠️ ExpenseManagement: Alternative name also taken, trying next:', altName);
+                  continue;
+                } else {
+                  console.error('❌ ExpenseManagement: Error with alternative name:', altName, altError);
+                }
+              } catch (altErr) {
+                console.error('❌ ExpenseManagement: Exception with alternative name:', altName, altErr);
+              }
+            }
+            
+            if (!categoryCreated) {
+              console.warn('⚠️ ExpenseManagement: All alternative names failed, adding to failed list:', category.name);
+              failedCategories.push(category);
+            }
+          } else {
+            failedCategories.push(category);
+          }
         } else if (data) {
+          console.log('✅ ExpenseManagement: Successfully created category:', category.name);
           // Add UI-only fields that don't exist in database for local state
           const categoryWithUIFields = {
             ...data,
@@ -655,17 +746,46 @@ const ExpenseManagement = ({ navigation }) => {
       
       if (createdCategories.length > 0) {
         setExpenseCategories(createdCategories);
-        console.log('✅ Created default categories:', createdCategories.length);
+        console.log('✅ ExpenseManagement: Set', createdCategories.length, 'categories in state');
+        
+        if (failedCategories.length > 0) {
+          console.log('⚠️ ExpenseManagement: Some categories failed to create, but proceeding with', createdCategories.length, 'successful categories');
+        }
       } else {
-        // Fallback: use local categories for UI if database creation fails
-        console.warn('⚠️ Database category creation failed, using local categories for UI');
-        setExpenseCategories(defaultCategories.map(cat => ({...cat, id: Date.now() + Math.random()})));
+        // Complete fallback: use local categories for UI if all database operations fail
+        console.warn('⚠️ ExpenseManagement: No categories created from database, using local categories for UI');
+        
+        // Create tenant-specific local categories to avoid conflicts
+        const tenantSuffix = tenantId?.slice(-8) || 'School';
+        const localCategories = defaultCategories.map(cat => ({
+          ...cat,
+          id: `local-${cat.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
+          name: `${cat.name} (${tenantSuffix})`, // Add tenant identifier to avoid confusion
+          tenant_id: tenantId, // Include tenant_id for consistency
+          isLocal: true // Mark as local for UI indicators
+        }));
+        
+        setExpenseCategories(localCategories);
+        console.log('✅ ExpenseManagement: Set', localCategories.length, 'local categories for tenant:', tenantSuffix);
       }
+      
     } catch (error) {
-      console.error('Error creating default categories:', error);
+      console.error('❌ ExpenseManagement: Error in createDefaultCategories:', error);
       // Fallback: use local categories for UI if everything fails
-      console.warn('⚠️ Using fallback local categories due to database error');
-      setExpenseCategories(defaultCategories.map(cat => ({...cat, id: Date.now() + Math.random()})));
+      console.warn('⚠️ ExpenseManagement: Using fallback local categories due to database error');
+      
+      const tenantSuffix = tenantId?.slice(-8) || 'School';
+      const fallbackCategories = defaultCategories.map(cat => ({
+        ...cat, 
+        id: `fallback-${cat.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
+        name: `${cat.name} (${tenantSuffix})`, // Add tenant identifier
+        tenant_id: tenantId, // Include tenant_id for consistency
+        isLocal: true, // Mark as local
+        isFallback: true // Mark as fallback for debugging
+      }));
+      
+      setExpenseCategories(fallbackCategories);
+      console.log('✅ ExpenseManagement: Set', fallbackCategories.length, 'fallback categories for tenant:', tenantSuffix);
     }
   };
   
@@ -707,7 +827,7 @@ const ExpenseManagement = ({ navigation }) => {
     try {
       // Only include fields that exist in the database schema
       const databaseCategoryData = {
-        name: categoryInput.name,
+        name: categoryInput.name.trim(),
         monthly_budget: budget
       };
       
@@ -716,7 +836,17 @@ const ExpenseManagement = ({ navigation }) => {
         const categoryToUpdate = expenseCategories[editCategoryIndex];
         const { error } = await dbHelpers.updateExpenseCategory(categoryToUpdate.name, databaseCategoryData, tenantId);
         
-        if (error) throw error;
+        if (error) {
+          console.error('❌ ExpenseManagement: Error updating category:', error);
+          
+          // Provide user-friendly error messages
+          if (error.code === '23505' && error.message.includes('unique constraint')) {
+            Alert.alert('Error', 'A category with this name already exists. Please choose a different name.');
+          } else {
+            Alert.alert('Error', 'Failed to update category: ' + (error.message || 'Unknown error'));
+          }
+          return;
+        }
         
         // Update local state with all UI fields
         const updatedCategories = [...expenseCategories];
@@ -727,11 +857,60 @@ const ExpenseManagement = ({ navigation }) => {
           color: categoryInput.color
         };
         setExpenseCategories(updatedCategories);
+        
+        console.log('✅ ExpenseManagement: Successfully updated category:', databaseCategoryData.name);
       } else {
-        // Create new category
+        // Create new category - check for existing first
+        console.log('➕ ExpenseManagement: Creating new category:', databaseCategoryData.name);
+        
+        // Check if category already exists for this tenant
+        const { data: existingCategories, error: checkError } = await dbHelpers.getExpenseCategories(tenantId);
+        
+        if (!checkError && existingCategories) {
+          const existingCategory = existingCategories.find(cat => 
+            cat.name.toLowerCase().trim() === databaseCategoryData.name.toLowerCase().trim()
+          );
+          
+          if (existingCategory) {
+            Alert.alert('Error', 'A category with this name already exists for your organization. Please choose a different name.');
+            return;
+          }
+        }
+        
         const { data, error } = await dbHelpers.createExpenseCategory(databaseCategoryData, tenantId);
         
-        if (error) throw error;
+        if (error) {
+          console.error('❌ ExpenseManagement: Error creating new category:', error);
+          
+          // Handle constraint violation with better error messages
+          if (error.code === '23505' && error.message.includes('unique constraint')) {
+            // Try to fetch the existing category to see if it belongs to this tenant
+            try {
+              const { data: existingCat, error: fetchError } = await supabase
+                .from('school_expense_categories')
+                .select('*')
+                .eq('name', databaseCategoryData.name)
+                .eq('tenant_id', tenantId)
+                .single();
+                
+              if (!fetchError && existingCat) {
+                // Category exists for this tenant, show appropriate message
+                Alert.alert('Error', 'A category with this name already exists for your organization. Please choose a different name.');
+              } else {
+                // Category exists globally but not for this tenant (database constraint issue)
+                Alert.alert(
+                  'Category Name Unavailable', 
+                  'This category name is not available. Please try a different name or add a prefix like "[Your School] ' + databaseCategoryData.name + '"'
+                );
+              }
+            } catch (fetchErr) {
+              Alert.alert('Error', 'A category with this name already exists. Please choose a different name.');
+            }
+          } else {
+            Alert.alert('Error', 'Failed to create category: ' + (error.message || 'Unknown error'));
+          }
+          return;
+        }
         
         // Add to local state with UI fields
         const categoryWithUIFields = {
@@ -740,13 +919,15 @@ const ExpenseManagement = ({ navigation }) => {
           color: categoryInput.color
         };
         setExpenseCategories([...expenseCategories, categoryWithUIFields]);
+        
+        console.log('✅ ExpenseManagement: Successfully created new category:', databaseCategoryData.name);
       }
       
       setIsCategoryModalVisible(false);
       Alert.alert('Success', 'Category saved successfully!');
     } catch (error) {
-      console.error('Error saving category:', error);
-      Alert.alert('Error', 'Failed to save category');
+      console.error('❌ ExpenseManagement: Error in saveCategory:', error);
+      Alert.alert('Error', 'Failed to save category: ' + (error.message || 'Unknown error'));
     }
   };
   

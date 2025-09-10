@@ -21,11 +21,14 @@ import { format, parseISO, isAfter, differenceInDays } from 'date-fns';
 import { createLeaveRequestNotificationForAdmins } from '../../services/notificationService';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { submitLeaveApplication, loadLeaveApplications } from '../../utils/leaveApplicationUtils';
+import { useAuth } from '../../utils/AuthContext';
 
 const { width } = Dimensions.get('window');
 
 const LeaveApplication = ({ navigation }) => {
   const { currentTenant } = useTenantContext();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [myLeaves, setMyLeaves] = useState([]);
@@ -187,57 +190,35 @@ const LeaveApplication = ({ navigation }) => {
   };
 
   const submitApplication = async (totalDays) => {
-    const startTime = performance.now();
-    
     try {
       setSubmitting(true);
       console.log('🚀 TeacherLeaveApplication: Starting submitApplication...');
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('User not authenticated');
-
-      // Get tenant ID with email fallback
-      let tenantId = currentTenant?.id || await getUserTenantId();
-      
-      if (!tenantId) {
-        console.log('⚠️ TeacherLeaveApplication: No tenant for submit, trying email lookup...');
-        
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          tenantId = emailTenant?.id;
-          console.log('📧 TeacherLeaveApplication: Email-based tenant ID for submit:', tenantId);
-        } catch (emailError) {
-          console.error('❌ TeacherLeaveApplication: Email tenant lookup failed for submit:', emailError);
-        }
-        
-        if (!tenantId) {
-          console.error('No tenant_id found for user during teacher leave insertion');
-          throw new Error('User tenant information not found. Please contact support.');
-        }
+      if (!user) {
+        throw new Error('User not authenticated');
       }
 
-      const leaveData = {
-        teacher_id: teacherProfile.linked_teacher_id,
+      // Prepare application data for the utility
+      const applicationData = {
         leave_type: applicationForm.leave_type,
         start_date: format(applicationForm.start_date, 'yyyy-MM-dd'),
         end_date: format(applicationForm.end_date, 'yyyy-MM-dd'),
         reason: applicationForm.reason.trim(),
-        applied_by: user.id,
-        attachment_url: applicationForm.attachment_url,
-        tenant_id: tenantId, // Include tenant_id for RLS compliance
+        attachment_url: applicationForm.attachment_url
       };
-
-      const { error } = await supabase
-        .from('leave_applications')
-        .insert([leaveData]);
-
-      if (error) throw error;
+      
+      // Use the utility to submit leave application
+      const result = await submitLeaveApplication(applicationData, user, currentTenant);
+      
+      if (!result.success) {
+        Alert.alert('Error', result.error);
+        return;
+      }
 
       // Create notification for admins about the new leave request
       try {
         console.log('📧 Creating notification for admins about new leave request...');
         
-        // Use the proper notification service to create admin notifications with recipients
         const notificationResult = await createLeaveRequestNotificationForAdmins(
           {
             leave_type: applicationForm.leave_type,
@@ -264,9 +245,10 @@ const LeaveApplication = ({ navigation }) => {
       setShowApplicationForm(false);
       resetApplicationForm();
       await loadMyLeaves();
+      
     } catch (error) {
       console.error('Error submitting leave application:', error);
-      Alert.alert('Error', 'Failed to submit leave application');
+      Alert.alert('Error', 'Failed to submit leave application: ' + (error.message || 'Unknown error'));
     } finally {
       setSubmitting(false);
     }

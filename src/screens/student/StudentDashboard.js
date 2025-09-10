@@ -10,6 +10,7 @@ import {
   TENANT_ERROR_MESSAGES 
 } from '../../utils/tenantValidation';
 import { useTenantContext } from '../../contexts/TenantContext';
+import { StudentTenantFix } from '../../utils/studentTenantFix';
 import { useFocusEffect } from '@react-navigation/native';
 import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
@@ -23,10 +24,11 @@ import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCou
 
 const StudentDashboard = ({ navigation }) => {
   const { user } = useAuth();
-  const { tenantId } = useTenantContext();
+  const { tenantId, currentTenant } = useTenantContext();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [studentProfile, setStudentProfile] = useState(null);
+  const [fallbackTenantId, setFallbackTenantId] = useState(null);
   const [summary, setSummary] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -46,6 +48,35 @@ const StudentDashboard = ({ navigation }) => {
 
   // Hook for notification count with auto-refresh
   const { unreadCount: hookUnreadCount, refresh: refreshNotificationCount } = useUnreadNotificationCount('Student');
+  
+  // Helper function to get effective tenant ID (from context or fallback)
+  const getEffectiveTenantId = () => {
+    return tenantId || fallbackTenantId;
+  };
+  
+  // Initialize fallback tenant ID if context tenant is missing
+  const initializeTenantContext = async () => {
+    if (!tenantId && user && !fallbackTenantId) {
+      console.log('🔧 StudentDashboard: Tenant context missing, attempting fallback initialization...');
+      try {
+        const tenantContext = await StudentTenantFix.getStudentTenantContext(user);
+        if (tenantContext.tenantId) {
+          console.log('✅ StudentDashboard: Fallback tenant initialized:', tenantContext.tenantId);
+          setFallbackTenantId(tenantContext.tenantId);
+          return tenantContext.tenantId;
+        } else {
+          console.error('❌ StudentDashboard: Fallback tenant initialization failed:', tenantContext.error);
+          setError(tenantContext.error);
+          return null;
+        }
+      } catch (error) {
+        console.error('💥 StudentDashboard: Error in fallback tenant initialization:', error);
+        setError('Failed to initialize tenant context. Please contact administrator.');
+        return null;
+      }
+    }
+    return tenantId;
+  };
   
   // Enhanced scroll event handler (simplified for smooth scrolling only)
   const handleScroll = (event) => {
@@ -221,8 +252,15 @@ const StudentDashboard = ({ navigation }) => {
         return;
       }
 
+      // Get effective tenant ID
+      const effectiveTenantId = getEffectiveTenantId();
+      if (!effectiveTenantId) {
+        console.log('Student Dashboard - No tenant context available for assignments refresh');
+        return;
+      }
+
       // Validate tenant access before proceeding
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      const tenantValidation = await validateTenantAccess(user.id, effectiveTenantId);
       if (!tenantValidation.isValid) {
         console.error('❌ Student dashboard tenant validation failed:', tenantValidation.error);
         return; // Silent return for better UX
@@ -232,7 +270,7 @@ const StudentDashboard = ({ navigation }) => {
       const { data: studentData, error: studentError } = await supabase
         .from(TABLES.STUDENTS)
         .select('id, class_id, tenant_id')
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', effectiveTenantId)
         .eq('id', user.linked_student_id)
         .single();
 
@@ -245,7 +283,7 @@ const StudentDashboard = ({ navigation }) => {
       const studentValidation = validateDataTenancy([{ 
         id: studentData.id, 
         tenant_id: studentData.tenant_id 
-      }], tenantId, 'StudentDashboard-FetchAssignments');
+      }], effectiveTenantId, 'StudentDashboard-FetchAssignments');
       
       if (!studentValidation) {
         console.error('❌ Student data validation failed: Student data does not belong to tenant', tenantId);
@@ -480,12 +518,23 @@ const StudentDashboard = ({ navigation }) => {
       setLoading(true);
       setError(null);
 
+      // Initialize tenant context if needed
+      const effectiveTenantId = await initializeTenantContext();
+      
+      if (!effectiveTenantId) {
+        console.error('❌ Student dashboard: No tenant context available after initialization');
+        setError('No tenant context available. Please contact administrator.');
+        setLoading(false);
+        return;
+      }
+
       // Validate tenant access before proceeding
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      const tenantValidation = await validateTenantAccess(user.id, effectiveTenantId);
       if (!tenantValidation.isValid) {
         console.error('❌ Student dashboard tenant validation failed:', tenantValidation.error);
         Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
         setError(tenantValidation.error);
+        setLoading(false);
         return;
       }
 
@@ -502,7 +551,7 @@ const StudentDashboard = ({ navigation }) => {
           parents:parent_id(name, phone, email),
           tenant_id
         `)
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', effectiveTenantId)
         .eq('id', user.linked_student_id)
         .single();
 
@@ -510,7 +559,7 @@ const StudentDashboard = ({ navigation }) => {
       const { data: studentUserData, error: studentUserError } = await supabase
         .from(TABLES.USERS)
         .select('id, email, phone, profile_url, full_name, tenant_id')
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', effectiveTenantId)
         .eq('linked_student_id', user.linked_student_id)
         .maybeSingle();
 
@@ -522,11 +571,12 @@ const StudentDashboard = ({ navigation }) => {
       const studentValidation = validateDataTenancy([{ 
         id: studentData.id, 
         tenant_id: studentData.tenant_id 
-      }], tenantId, 'StudentDashboard');
+      }], effectiveTenantId, 'StudentDashboard');
       
       if (!studentValidation) {
-        console.error('❌ Student profile data validation failed: Student data does not belong to tenant', tenantId);
+        console.error('❌ Student profile data validation failed: Student data does not belong to tenant', effectiveTenantId);
         Alert.alert('Data Error', TENANT_ERROR_MESSAGES.WRONG_TENANT_DATA);
+        setLoading(false);
         return;
       }
 
@@ -551,7 +601,7 @@ const StudentDashboard = ({ navigation }) => {
         const { data: upcomingEventsData, error: eventsError } = await supabase
           .from('events')
           .select('*, tenant_id')
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', effectiveTenantId)
           .eq('status', 'Active')
           .gte('event_date', today)
           .order('event_date', { ascending: true });
@@ -589,7 +639,7 @@ const StudentDashboard = ({ navigation }) => {
         const { data: allAttendanceData, error: attendanceError } = await supabase
           .from(TABLES.STUDENT_ATTENDANCE)
           .select('*, tenant_id')
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', effectiveTenantId)
           .eq('student_id', studentData.id)
           .order('date', { ascending: false });
 
@@ -631,7 +681,7 @@ const StudentDashboard = ({ navigation }) => {
             exams(name, start_date),
             tenant_id
           `)
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', effectiveTenantId)
           .eq('student_id', studentData.id)
           .order('created_at', { ascending: false })
           .limit(10);
@@ -701,7 +751,7 @@ const StudentDashboard = ({ navigation }) => {
             classes(class_name, section),
             tenant_id
           `)
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', effectiveTenantId)
           .eq('class_id', studentData.class_id)
           .eq('day', today)
           .order('start_time', { ascending: true });
@@ -742,7 +792,7 @@ const StudentDashboard = ({ navigation }) => {
           .from(TABLES.ASSIGNMENTS)
           .select('*')
           .eq('class_id', studentData.class_id)
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', effectiveTenantId)
           .order('due_date', { ascending: true });
 
         if (assignmentsError && assignmentsError.code !== '42P01') {
@@ -756,7 +806,7 @@ const StudentDashboard = ({ navigation }) => {
           .from(TABLES.HOMEWORKS)
           .select('*')
           .or(`class_id.eq.${studentData.class_id},assigned_students.cs.{${studentData.id}}`)
-          .eq('tenant_id', tenantId)
+          .eq('tenant_id', effectiveTenantId)
           .order('due_date', { ascending: true });
 
         if (homeworksError && homeworksError.code !== '42P01') {
@@ -770,7 +820,7 @@ const StudentDashboard = ({ navigation }) => {
           .from('assignment_submissions')
           .select('*')
           .eq('student_id', studentData.id)
-          .eq('tenant_id', tenantId);
+          .eq('tenant_id', effectiveTenantId);
 
         if (submissionsError && submissionsError.code !== '42P01') {
           console.log('Dashboard - Submissions error:', submissionsError);
