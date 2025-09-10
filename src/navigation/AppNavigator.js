@@ -102,6 +102,7 @@ import StudentQRPayment from '../screens/student/StudentQRPayment';
 import ProfileScreen from '../screens/universal/ProfileScreen';
 import SettingsScreen from '../screens/universal/SettingsScreen';
 import NotificationSettings from '../screens/universal/NotificationSettings';
+import EduCartoonAI from '../screens/universal/EduCartoonAI';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -455,6 +456,7 @@ export default function AppNavigator() {
                 />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
                 <Stack.Screen name="NotificationSettings" component={NotificationSettings} />
+                <Stack.Screen name="EduCartoonAI" component={EduCartoonAI} />
                 <Stack.Screen name="StudentDetails" component={StudentDetails} />
                 <Stack.Screen name="StudentList" component={StudentList} />
               </>
@@ -474,6 +476,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
                 <Stack.Screen name="NotificationSettings" component={NotificationSettings} />
+                <Stack.Screen name="EduCartoonAI" component={EduCartoonAI} />
               </>
             )}
             {userType === 'parent' && (
@@ -485,6 +488,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
                 <Stack.Screen name="NotificationSettings" component={NotificationSettings} />
+                <Stack.Screen name="EduCartoonAI" component={EduCartoonAI} />
               </>
             )}
             {userType === 'student' && (
@@ -498,6 +502,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="Profile" component={ProfileScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
                 <Stack.Screen name="NotificationSettings" component={NotificationSettings} />
+                <Stack.Screen name="EduCartoonAI" component={EduCartoonAI} />
                 <Stack.Screen name="StudentDetails" component={StudentDetails} />
               </>
             )}

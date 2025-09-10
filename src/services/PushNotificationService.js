@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, TABLES } from '../utils/supabase';
@@ -53,6 +54,17 @@ class PushNotificationService {
         return false;
       }
 
+      // Check if running in Expo Go (SDK 53+)
+      const isExpoGo = Constants.appOwnership === 'expo';
+      if (isExpoGo) {
+        console.warn('❌ Push notifications not supported in Expo Go (SDK 53+)');
+        console.log('ℹ️ To enable push notifications:');
+        console.log('  1. Create a development build: npx expo run:android');
+        console.log('  2. Or use EAS Build: eas build --platform android --profile development');
+        console.log('  3. Or test on web where notifications work');
+        return false;
+      }
+
       // Get existing permission status
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
@@ -82,7 +94,7 @@ class PushNotificationService {
 
       // Get push token
       const tokenData = await Notifications.getExpoPushTokenAsync({
-        projectId: 'your-expo-project-id', // Replace with your Expo project ID
+        projectId: '4292160a-508d-4188-83e1-58927769c327', // Your actual Expo project ID
       });
       
       this.expoPushToken = tokenData.data;

@@ -616,6 +616,11 @@ const ExpenseManagement = ({ navigation }) => {
   
   // Create default categories if none exist
   const createDefaultCategories = async () => {
+    // 🚨 NOTE: These category names should be unique per tenant, not globally
+    // If you're seeing duplicate key constraint errors, the database needs this SQL fix:
+    // ALTER TABLE expense_categories DROP CONSTRAINT expense_categories_name_key;
+    // ALTER TABLE expense_categories ADD CONSTRAINT expense_categories_name_tenant_unique UNIQUE (name, tenant_id);
+    
     const defaultCategories = [
       { name: 'Staff Salaries', icon: 'people', color: '#2196F3', monthly_budget: 500000 },
       { name: 'Utilities', icon: 'flash', color: '#FF9800', monthly_budget: 50000 },
@@ -678,16 +683,40 @@ const ExpenseManagement = ({ navigation }) => {
             details: error.details
           });
           
-          // If it's a duplicate key error, try alternative names since global names are taken
+          // If it's a duplicate key error, this indicates a database schema issue
           if (error.code === '23505' && error.message.includes('unique constraint')) {
-            console.log('🔍 ExpenseManagement: Category name globally taken, trying tenant-specific alternatives:', category.name);
+            console.log('🔍 ExpenseManagement: Global unique constraint violation - database schema needs fixing:', category.name);
+            console.log('💡 ExpenseManagement: This should be fixed by updating the database constraint to be tenant-scoped');
             
-            // Generate alternative names with tenant prefix/suffix
+            // Try to fetch existing categories first - maybe they already exist for this tenant
+            try {
+              const { data: existingForTenant, error: checkError } = await supabase
+                .from('expense_categories')
+                .select('*')
+                .eq('name', category.name)
+                .eq('tenant_id', tenantId)
+                .maybeSingle();
+                
+              if (!checkError && existingForTenant) {
+                console.log('✅ ExpenseManagement: Category already exists for this tenant, using existing:', category.name);
+                const categoryWithUIFields = {
+                  ...existingForTenant,
+                  icon: category.icon,
+                  color: category.color
+                };
+                createdCategories.push(categoryWithUIFields);
+                continue;
+              }
+            } catch (checkErr) {
+              console.warn('⚠️ ExpenseManagement: Could not check for existing category:', checkErr);
+            }
+            
+            // Generate alternative names with tenant prefix/suffix as fallback
+            const tenantSuffix = tenantId?.slice(-8) || 'School';
             const alternativeNames = [
-              `${category.name} (${tenantId?.slice(-8) || 'School'})`, // Use last 8 chars of tenant ID
-              `School ${category.name}`,
-              `${category.name} - Tenant`,
-              `Custom ${category.name}`,
+              `${category.name} (${tenantSuffix})`, // Use last 8 chars of tenant ID
+              `${category.name} - ${tenantSuffix}`,
+              `My School ${category.name}`,
               `${category.name} ${Date.now().toString().slice(-4)}` // Use timestamp suffix as last resort
             ];
             
@@ -726,7 +755,8 @@ const ExpenseManagement = ({ navigation }) => {
             }
             
             if (!categoryCreated) {
-              console.warn('⚠️ ExpenseManagement: All alternative names failed, adding to failed list:', category.name);
+              console.warn('⚠️ ExpenseManagement: All alternative names failed for:', category.name);
+              console.log('💡 ExpenseManagement: Database constraint needs to be fixed to allow same names across tenants');
               failedCategories.push(category);
             }
           } else {
@@ -749,7 +779,10 @@ const ExpenseManagement = ({ navigation }) => {
         console.log('✅ ExpenseManagement: Set', createdCategories.length, 'categories in state');
         
         if (failedCategories.length > 0) {
-          console.log('⚠️ ExpenseManagement: Some categories failed to create, but proceeding with', createdCategories.length, 'successful categories');
+          console.log('⚠️ ExpenseManagement: Some categories failed to create due to global constraint:', failedCategories.map(c => c.name));
+          console.log('💡 ExpenseManagement: To fix this permanently, run this SQL on your database:');
+          console.log('   ALTER TABLE expense_categories DROP CONSTRAINT expense_categories_name_key;');
+          console.log('   ALTER TABLE expense_categories ADD CONSTRAINT expense_categories_name_tenant_unique UNIQUE (name, tenant_id);');
         }
       } else {
         // Complete fallback: use local categories for UI if all database operations fail

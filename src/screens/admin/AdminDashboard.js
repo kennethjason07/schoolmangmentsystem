@@ -124,14 +124,33 @@ const AdminDashboard = ({ navigation }) => {
         console.error('Error loading students:', studentError);
       }
 
-      // Load teachers count
-      const { data: teachersData, error: teacherError, count: teacherCount } = await supabase
-        .from('teachers')
-        .select('id', { count: 'exact' })
-        .eq('tenant_id', tenantId);
+      // Load teachers count with improved error handling
+      let teacherCount = 0;
+      try {
+        const { data: teachersData, error: teacherError, count } = await supabase
+          .from('teachers')
+          .select('id', { count: 'exact' })
+          .eq('tenant_id', tenantId);
 
-      if (teacherError) {
-        console.error('Error loading teachers:', teacherError);
+        if (teacherError) {
+          console.error('Error loading teachers:', teacherError);
+          // If RLS is blocking access due to JWT issues, set count to 0
+          if (teacherError.message?.includes('permission denied') || 
+              teacherError.message?.includes('access denied') ||
+              teacherError.message?.includes('tenant')) {
+            console.log('💡 Teacher count blocked by RLS - user may need to re-authenticate');
+            teacherCount = 0;
+          } else {
+            // For other errors, also default to 0 but log the issue
+            console.error('🔍 Unexpected teacher query error:', teacherError);
+            teacherCount = 0;
+          }
+        } else {
+          teacherCount = count || 0;
+        }
+      } catch (teacherErr) {
+        console.error('💥 Critical error loading teachers:', teacherErr);
+        teacherCount = 0;
       }
 
       // Load today's student attendance
