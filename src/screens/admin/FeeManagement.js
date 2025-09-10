@@ -93,6 +93,11 @@ const FeeManagement = () => {
   });
   const [optimizedData, setOptimizedData] = useState(null);
   const [useOptimizedQueries, setUseOptimizedQueries] = useState(true);
+  
+  
+  // UPI Payment Verification state
+  const [pendingUPIPayments, setPendingUPIPayments] = useState([]);
+  const [upiLoading, setUpiLoading] = useState(false);
 
   // Add safe date formatting function at the top
   const formatSafeDate = (dateValue) => {
@@ -953,7 +958,7 @@ const FeeManagement = () => {
   };
 
   // Handle payment
-  const handlePayment = async (studentId, feeId, amount) => {
+  const handlePayment = async (studentId, feeStructureId, amount) => {
     if (!studentId || !amount) {
       Alert.alert('Error', 'Missing required payment information');
       return;
@@ -968,71 +973,60 @@ const FeeManagement = () => {
     try {
       setPaymentLoading(true);
       
-      // First check if there's an existing record
-      const { data: existingFee, error: checkError } = await supabase
-        .from(TABLES.STUDENT_FEES)
-        .select('*')
-        .eq('student_id', studentId)
-        .eq('fee_id', feeId)
-        .eq('tenant_id', tenantId)
-        .single();
-        
-      if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is the error code for no rows returned
-        throw checkError;
-      }
-      
-      // Get the fee structure to know the total amount
+      // Get the fee structure to know the details
       const { data: feeStructure, error: feeStructureError } = await supabase
         .from(TABLES.FEE_STRUCTURE)
-        .select('amount')
-        .eq('id', feeId)
+        .select('amount, fee_component, academic_year')
+        .eq('id', feeStructureId)
         .eq('tenant_id', tenantId)
         .single();
         
       if (feeStructureError) throw feeStructureError;
       
+      // First check if there's an existing record for this student and fee component
+      const { data: existingFees, error: checkError } = await supabase
+        .from(TABLES.STUDENT_FEES)
+        .select('*')
+        .eq('student_id', studentId)
+        .eq('fee_component', feeStructure.fee_component)
+        .eq('academic_year', feeStructure.academic_year)
+        .eq('tenant_id', tenantId);
+        
+      if (checkError) {
+        throw checkError;
+      }
+      
       const totalAmount = feeStructure.amount;
       const amountPaid = parseFloat(amount);
-      let status = 'partial';
       
-      // If payment is complete
-      if (amountPaid >= totalAmount) {
+      // Calculate existing payments for this fee component
+      const existingAmountPaid = existingFees?.reduce((sum, fee) => sum + Number(fee.amount_paid || 0), 0) || 0;
+      const newTotalPaid = existingAmountPaid + amountPaid;
+      
+      let status = 'pending';
+      if (newTotalPaid >= totalAmount) {
         status = 'paid';
+      } else if (newTotalPaid > 0) {
+        status = 'partial';
       }
       
-      // If there's an existing record, update it
-      if (existingFee) {
-        const newAmountPaid = existingFee.amount_paid + amountPaid;
-        const newStatus = newAmountPaid >= totalAmount ? 'paid' : 'partial';
-        
-        const { error: updateError } = await supabase
-          .from(TABLES.STUDENT_FEES)
-          .update({
-            amount_paid: newAmountPaid,
-            payment_date: paymentDate.toISOString(),
-            status: newStatus
-          })
-          .eq('id', existingFee.id)
-          .eq('tenant_id', tenantId);
-          
-        if (updateError) throw updateError;
-      } else {
-        // Create a new payment record
-        const { error: insertError } = await supabase
-          .from(TABLES.STUDENT_FEES)
-          .insert([
-            {
-              student_id: studentId,
-              fee_id: feeId,
-              amount_paid: amountPaid,
-              payment_date: paymentDate.toISOString(),
-              status: status,
-              tenant_id: tenantId
-            }
-          ]);
+      // Always create a new payment record (this represents a payment transaction)
+      const { error: insertError } = await supabase
+        .from(TABLES.STUDENT_FEES)
+        .insert([
+          {
+            student_id: studentId,
+            fee_component: feeStructure.fee_component,
+            academic_year: feeStructure.academic_year,
+            amount_paid: amountPaid,
+            payment_date: paymentDate.toISOString().split('T')[0], // Date only
+            payment_mode: 'Cash', // Default payment mode, can be made configurable
+            tenant_id: tenantId
+            // Note: status will be automatically calculated by the database trigger we created
+          }
+        ]);
 
-        if (insertError) throw insertError;
-      }
+      if (insertError) throw insertError;
 
       // Clear cache and refresh data
       await refreshWithCacheClear();
@@ -1045,7 +1039,7 @@ const FeeManagement = () => {
 
     } catch (error) {
       console.error('Error adding payment:', error);
-      Alert.alert('Error', 'Failed to record payment');
+      Alert.alert('Error', `Failed to record payment: ${error.message}`);
     } finally {
       setPaymentLoading(false);
     }
@@ -1355,6 +1349,18 @@ const FeeManagement = () => {
                 Recent Payments
               </Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, tab === 'upi' && styles.activeTab]}
+              onPress={() => {
+                setTab('upi');
+                // Navigate to UPI Payment Verification screen
+                navigation.navigate('PendingUPIPayments');
+              }}
+            >
+              <Text style={[styles.tabText, tab === 'upi' && styles.activeTabText]}>
+                UPI Verification
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {/* Content */}
@@ -1457,6 +1463,7 @@ const FeeManagement = () => {
                     </View>
                   </View>
                 </View>
+
 
                 {/* Class-wise Payment Statistics */}
                 <View style={styles.classStatsContainer}>
@@ -2546,6 +2553,13 @@ const styles = StyleSheet.create({
         paddingBottom: 40,
       },
     }),
+  },
+  statusText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#666',
+    textAlign: 'center',
+    letterSpacing: 0.5,
   },
 });
 

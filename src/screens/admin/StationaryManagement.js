@@ -501,7 +501,44 @@ const StationaryManagement = ({ navigation }) => {
     }
   };
 
-  const generateReceiptHTML = (receipt) => {
+  // Generate receipt HTML using new web receipt generator
+  const generateReceiptHTML = async (receipt) => {
+    try {
+      // Use the new web receipt generator for demo bill format
+      const { generateWebReceiptHTML } = await import('../../utils/webReceiptGenerator');
+      
+      return await generateWebReceiptHTML({
+        schoolDetails,
+        studentData: {
+          name: receipt.student?.name || 'N/A',
+          admissionNo: receipt.student?.admission_no || 'N/A',
+          className: 'N/A' // Stationary doesn't have class context
+        },
+        feeData: {
+          component: 'Stationary Items',
+          amount: receipt.totalAmount
+        },
+        paymentData: {
+          mode: receipt.paymentMode,
+          transactionId: receipt.receiptNumbers
+        },
+        outstandingAmount: 0,
+        receiptNumber: receipt.receiptNumbers,
+        academicYear: '2024-25',
+        // Additional data for stationary receipt
+        items: receipt.items, // Pass items for detailed breakdown
+        remarks: receipt.remarks,
+        isStationaryReceipt: true // Flag to identify stationary receipts
+      });
+    } catch (error) {
+      console.error('Error generating receipt HTML with new format:', error);
+      // Fallback to old format if new generator fails
+      return generateOldReceiptHTML(receipt);
+    }
+  };
+
+  // Keep old receipt HTML as fallback
+  const generateOldReceiptHTML = (receipt) => {
     const schoolName = schoolDetails?.name || 'School Name';
     const schoolAddress = schoolDetails?.address || '';
     const schoolPhone = schoolDetails?.phone || '';

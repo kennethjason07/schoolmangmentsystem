@@ -296,6 +296,7 @@ const FeePayment = () => {
         // Check if tenant is still loading
         if (tenantLoading) {
           console.log('🔄 [TENANT-AWARE] Tenant context is loading, delaying fee data fetch...');
+          setLoading(false);
           return;
         }
         
@@ -867,16 +868,27 @@ const FeePayment = () => {
 
   // useEffect to call fetchFeeData when component mounts with tenant-aware dependencies
   useEffect(() => {
-    if (user && tenantId && !tenantLoading) {
-      console.log('🔄 [TENANT-AWARE] Tenant context loaded, initializing fee payment data...');
-      fetchFeeData();
-    } else if (tenantLoading) {
+    if (!user) {
+      console.log('🔄 [TENANT-AWARE] No authenticated user, skipping fee data fetch');
+      return;
+    }
+    
+    if (tenantLoading) {
       console.log('🔄 [TENANT-AWARE] Tenant context is loading, waiting for initialization...');
-    } else if (user && !tenantId) {
-      console.log('🔄 [TENANT-AWARE] User available but no tenant context, will try email-based resolution');
+      return;
+    }
+    
+    if (tenantId && currentTenant) {
+      console.log('🔄 [TENANT-AWARE] Tenant context loaded, initializing fee payment data...', {
+        tenantId, 
+        tenantName: currentTenant.name
+      });
+      fetchFeeData();
+    } else {
+      console.log('🔄 [TENANT-AWARE] No tenant context available, will try email-based resolution');
       fetchFeeData(); // This will trigger email-based tenant resolution
     }
-  }, [user, tenantId, tenantLoading]);
+  }, [user, tenantId, currentTenant, tenantLoading]);
 
   // Get fee statistics for current academic year
   const getFeeStatistics = async (studentId, academicYear = '2024-2025') => {
