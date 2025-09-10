@@ -10,6 +10,7 @@ import {
   TENANT_ERROR_MESSAGES 
 } from '../../utils/tenantValidation';
 import { useTenantContext } from '../../contexts/TenantContext';
+import { StudentTenantFix } from '../../utils/studentTenantFix';
 import { useFocusEffect } from '@react-navigation/native';
 import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
@@ -23,10 +24,11 @@ import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCou
 
 const StudentDashboard = ({ navigation }) => {
   const { user } = useAuth();
-  const { tenantId } = useTenantContext();
+  const { tenantId, currentTenant } = useTenantContext();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [studentProfile, setStudentProfile] = useState(null);
+  const [fallbackTenantId, setFallbackTenantId] = useState(null);
   const [summary, setSummary] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -46,6 +48,35 @@ const StudentDashboard = ({ navigation }) => {
 
   // Hook for notification count with auto-refresh
   const { unreadCount: hookUnreadCount, refresh: refreshNotificationCount } = useUnreadNotificationCount('Student');
+  
+  // Helper function to get effective tenant ID (from context or fallback)
+  const getEffectiveTenantId = () => {
+    return tenantId || fallbackTenantId;
+  };
+  
+  // Initialize fallback tenant ID if context tenant is missing
+  const initializeTenantContext = async () => {
+    if (!tenantId && user && !fallbackTenantId) {
+      console.log('🔧 StudentDashboard: Tenant context missing, attempting fallback initialization...');
+      try {
+        const tenantContext = await StudentTenantFix.getStudentTenantContext(user);
+        if (tenantContext.tenantId) {
+          console.log('✅ StudentDashboard: Fallback tenant initialized:', tenantContext.tenantId);
+          setFallbackTenantId(tenantContext.tenantId);
+          return tenantContext.tenantId;
+        } else {
+          console.error('❌ StudentDashboard: Fallback tenant initialization failed:', tenantContext.error);
+          setError(tenantContext.error);
+          return null;
+        }
+      } catch (error) {
+        console.error('💥 StudentDashboard: Error in fallback tenant initialization:', error);
+        setError('Failed to initialize tenant context. Please contact administrator.');
+        return null;
+      }
+    }
+    return tenantId;
+  };
   
   // Enhanced scroll event handler (simplified for smooth scrolling only)
   const handleScroll = (event) => {
@@ -556,6 +587,7 @@ const StudentDashboard = ({ navigation }) => {
         console.error('❌ Student dashboard tenant validation failed:', tenantValidation.error);
         Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
         setError(tenantValidation.error);
+        setLoading(false);
         return;
       }
 
@@ -597,6 +629,7 @@ const StudentDashboard = ({ navigation }) => {
       if (!studentValidation) {
         console.error('❌ Student profile data validation failed: Student data does not belong to tenant', effectiveTenantId);
         Alert.alert('Data Error', TENANT_ERROR_MESSAGES.WRONG_TENANT_DATA);
+        setLoading(false);
         return;
       }
 

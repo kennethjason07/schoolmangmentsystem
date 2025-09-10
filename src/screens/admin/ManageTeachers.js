@@ -23,11 +23,13 @@ import { useTenantContext } from '../../contexts/TenantContext';
 import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
 import { useAuth } from '../../utils/AuthContext';
 import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { AdminTenantFix } from '../../utils/adminTenantFix';
 
 // Will be fetched from Supabase
 const ManageTeachers = ({ navigation, route }) => {
   const { tenantId, currentTenant } = useTenantContext();
   const { user } = useAuth();
+  const [fallbackTenantId, setFallbackTenantId] = useState(null);
   
   // Debug tenant context
   console.log('🏢 ManageTeachers: Component initialized with:', {
@@ -49,31 +51,33 @@ const ManageTeachers = ({ navigation, route }) => {
   const [saving, setSaving] = useState(false);
   const [sections, setSections] = useState([]);
   
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(0);
-  const [totalTeachers, setTotalTeachers] = useState(0);
-  const [hasMoreTeachers, setHasMoreTeachers] = useState(true);
-  const PAGE_SIZE = 20; // Load 20 teachers at a time
+  // Helper function to get effective tenant ID (from context or fallback)
+  const getEffectiveTenantId = () => {
+    return tenantId || fallbackTenantId;
+  };
   
-  // Cache database user ID to avoid repeated lookups
-  const [dbUserId, setDbUserId] = useState(null);
-  const [actualTenantId, setActualTenantId] = useState(null);
-  
-  // Helper function to get database user ID
-  const getDbUserId = async () => {
-    if (dbUserId) {
-      return { success: true, userId: dbUserId };
+  // Initialize fallback tenant ID if context tenant is missing
+  const initializeTenantContext = async () => {
+    if (!tenantId && user && !fallbackTenantId) {
+      console.log('🔧 ManageTeachers: Tenant context missing, attempting fallback initialization...');
+      try {
+        const tenantContext = await AdminTenantFix.getAdminTenantContext(user);
+        if (tenantContext.tenantId) {
+          console.log('✅ ManageTeachers: Fallback tenant initialized:', tenantContext.tenantId);
+          setFallbackTenantId(tenantContext.tenantId);
+          return tenantContext.tenantId;
+        } else {
+          console.error('❌ ManageTeachers: Fallback tenant initialization failed:', tenantContext.error);
+          setError(tenantContext.error);
+          return null;
+        }
+      } catch (error) {
+        console.error('💥 ManageTeachers: Error in fallback tenant initialization:', error);
+        setError('Failed to initialize tenant context. Please contact administrator.');
+        return null;
+      }
     }
-    
-    const userTenantResult = await getCurrentUserTenantByEmail();
-    if (!userTenantResult.success) {
-      return { success: false, error: userTenantResult.error };
-    }
-    
-    // The result structure is { success: true, data: { userRecord, tenant, tenantId, tenantName } }
-    const userId = userTenantResult.data.userRecord.id;
-    setDbUserId(userId); // Cache for future use
-    return { success: true, userId, userRecord: userTenantResult.data.userRecord, tenant: userTenantResult.data.tenant };
+    return tenantId;
   };
   
   // Load data on component mount and when tenant changes
@@ -83,11 +87,21 @@ const ManageTeachers = ({ navigation, route }) => {
       user: user?.email || 'NULL'
     });
     
-    if (tenantId && user) {
+    const effectiveTenantId = getEffectiveTenantId();
+    if (effectiveTenantId && user) {
       console.log('🏢 ManageTeachers: Loading data with tenant and user available');
-      loadData(0, false);
+      loadData();
+    } else if (user) {
+      console.warn('🏢 ManageTeachers: User available but waiting for tenant context...');
+      // Try to initialize tenant context
+      initializeTenantContext().then((initializedTenantId) => {
+        if (initializedTenantId) {
+          console.log('🏢 ManageTeachers: Tenant context initialized, loading data...');
+          loadData();
+        }
+      });
     } else {
-      console.warn('🏢 ManageTeachers: Waiting for tenant context or user authentication...');
+      console.warn('🏢 ManageTeachers: Waiting for user authentication...');
     }
     
     // Check if we need to open edit modal from navigation
@@ -96,7 +110,7 @@ const ManageTeachers = ({ navigation, route }) => {
         openEditModal(route.params.editTeacher);
       }, 500);
     }
-  }, [route.params, tenantId, user]);
+  }, [route.params, tenantId, user, fallbackTenantId]);
 
   useEffect(() => {
     // When selected classes change, filter out subjects that are no longer valid
@@ -131,60 +145,26 @@ const ManageTeachers = ({ navigation, route }) => {
     try {
       console.log(`🏢 ManageTeachers: Loading page ${page} for tenant:`, tenantId);
       
-      // Verify tenant context
-      if (!tenantId) {
-        console.error('❌ ManageTeachers: No tenantId available from context');
-        
-        const emailTenantResult = await getCurrentUserTenantByEmail();
-        if (!emailTenantResult.success) {
-          const errorMsg = `No tenant context available: ${emailTenantResult.error}`;
-          console.error('❌ ManageTeachers:', errorMsg);
-          setError(errorMsg);
-          setLoading(false);
-          return;
-        }
-        
-        setError('Tenant context loading issue. Please refresh the page.');
+      // Initialize tenant context if needed
+      const effectiveTenantId = await initializeTenantContext();
+      
+      if (!effectiveTenantId) {
+        console.error('❌ ManageTeachers: No tenant context available after initialization');
+        setError('No tenant context available. Please contact administrator.');
         setLoading(false);
         return;
       }
       
-      // 🔍 Get database user ID and validate tenant access
-      const userIdResult = await getDbUserId();
-      if (!userIdResult.success) {
-        console.error('❌ ManageTeachers: Failed to get user ID:', userIdResult.error);
-        setError(`Unable to verify user access: ${userIdResult.error}`);
-        setLoading(false);
-        return;
-      }
-      
-      // Check for tenant mismatch - user's actual tenant vs context tenant
-      if (userIdResult.tenant && userIdResult.tenant.id !== tenantId) {
-        console.error('❌ ManageTeachers: Tenant mismatch detected:', {
-          contextTenant: tenantId,
-          userTenant: userIdResult.tenant.id,
-          contextTenantName: currentTenant?.name,
-          userTenantName: userIdResult.tenant.name
-        });
-        
-        setError(`Tenant context mismatch. You belong to "${userIdResult.tenant.name}" but the current context is "${currentTenant?.name}". Please refresh or contact support.`);
-        setLoading(false);
-        return;
-      }
-      
-      // Use the user's actual tenant ID for operations instead of context tenant ID
-      const userActualTenantId = userIdResult.tenant?.id || tenantId;
-      setActualTenantId(userActualTenantId); // Store for use in other functions
-      console.log('🏢 ManageTeachers: Using tenant ID:', userActualTenantId);
-      
-      // Validate tenant access with correct database user ID
-      const validation = await validateTenantAccess(userIdResult.userId, userActualTenantId, 'ManageTeachers');
+      // 🛑️ Validate tenant access first
+      const validation = await validateTenantAccess(user?.id, effectiveTenantId, 'ManageTeachers');
       if (!validation.isValid) {
         console.error('❌ ManageTeachers: Tenant validation failed:', validation.error);
         setError(validation.error);
         setLoading(false);
         return;
       }
+
+      console.log('🚀 ManageTeachers: Loading teachers with optimized query for tenant:', effectiveTenantId);
       
       console.log('✅ ManageTeachers: Tenant validation successful');
 
@@ -197,18 +177,35 @@ const ManageTeachers = ({ navigation, route }) => {
       
       const { data: teachersData, error: teachersError } = await supabase
         .from(TABLES.TEACHERS)
-        .select('id,name,phone,qualification,salary_amount,age,address,tenant_id,created_at,is_class_teacher')
-        .eq('tenant_id', userActualTenantId)
-        .order('name', { ascending: true })
-        .range(start, end);
+        .select('*')
+        .eq('tenant_id', effectiveTenantId)
+        .order('created_at', { ascending: false });
+      
+      console.log('🏢 ManageTeachers: Teachers query result:', {
+        success: !teachersError,
+        count: teachersData?.length || 0,
+        error: teachersError?.message || 'none'
+      });
       
       if (teachersError) {
         console.error('❌ ManageTeachers: Error loading teachers:', teachersError);
         throw new Error(`Failed to load teachers: ${teachersError.message}`);
       }
       
-      const teachers = teachersData || [];
-      console.log(`🏢 ManageTeachers: Loaded ${teachers.length} teachers for page ${page}`);
+      // 🚀 OPTIMIZED: Direct parallel queries - much faster
+      console.log('🏢 ManageTeachers: Fetching classes and subjects...');
+      const [classesResult, subjectsResult] = await Promise.all([
+        supabase
+          .from(TABLES.CLASSES)
+          .select('*')
+          .eq('tenant_id', effectiveTenantId)
+          .order('class_name'),
+        supabase
+          .from(TABLES.SUBJECTS)
+          .select('*')
+          .eq('tenant_id', effectiveTenantId)
+          .order('name')
+      ]);
       
       // Set pagination info
       setHasMoreTeachers(teachers.length === PAGE_SIZE);
@@ -267,6 +264,18 @@ const ManageTeachers = ({ navigation, route }) => {
         }
       }
       
+      // 🚀 OPTIMIZED: Set teachers immediately without complex processing
+      setTeachers(processedTeachers);
+      
+      // Simple logging
+      console.log('📋 ManageTeachers: Data loaded successfully:', {
+        teachers: processedTeachers.length,
+        classes: classesData?.length || 0,
+        subjects: subjectsData?.length || 0,
+        tenantId: effectiveTenantId
+      });
+      
+      // 📊 Performance monitoring
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
       console.log(`✅ ManageTeachers: Page ${page} loaded in ${loadTime}ms - ${teachers.length} teachers`);
@@ -319,10 +328,17 @@ const ManageTeachers = ({ navigation, route }) => {
     
     try {
       // 🚀 OPTIMIZED: Simple direct query
+      const effectiveTenantId = getEffectiveTenantId();
+      if (!effectiveTenantId) {
+        console.warn('🏢 ManageTeachers: No tenant context for loading sections');
+        setSections([]);
+        return;
+      }
+      
       const { data, error } = await supabase
         .from(TABLES.CLASSES)
         .select('section')
-        .eq('tenant_id', actualTenantId || tenantId)
+        .eq('tenant_id', effectiveTenantId)
         .in('id', classIds)
         .not('section', 'is', null);
       

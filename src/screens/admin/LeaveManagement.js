@@ -31,6 +31,7 @@ import LogViewer from '../../components/debug/LogViewer';
 import { validateTenantAccess, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { addLeaveApplication, reviewLeaveApplication, loadLeaveApplications } from '../../utils/leaveApplicationUtils';
 
 const { width } = Dimensions.get('window');
 
@@ -463,34 +464,7 @@ const LeaveManagement = ({ navigation }) => {
 
   const handleAddLeave = async () => {
     try {
-      console.log('🚀 LeaveManagement: Starting handleAddLeave...');
-      
-      // 🔍 Get tenant ID with email fallback
-      let tenantId = currentTenant?.id;
-      
-      if (!tenantId) {
-        console.log('⚠️ LeaveManagement handleAddLeave: No tenant from context, trying email lookup...');
-        
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          tenantId = emailTenant?.id;
-          console.log('📧 LeaveManagement handleAddLeave: Email-based tenant ID:', tenantId);
-        } catch (emailError) {
-          console.error('❌ LeaveManagement handleAddLeave: Email tenant lookup failed:', emailError);
-        }
-        
-        if (!tenantId) {
-          throw new Error('Unable to determine tenant context for adding leave');
-        }
-      }
-      
-      // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'LeaveManagement - handleAddLeave');
-      if (!validation.isValid) {
-        Alert.alert('Access Denied', validation.error);
-        return;
-      }
-
+      // Basic form validation
       if (!newLeaveForm.teacher_id || !newLeaveForm.reason.trim()) {
         Alert.alert('Error', 'Please fill in all required fields');
         return;
@@ -501,113 +475,48 @@ const LeaveManagement = ({ navigation }) => {
         return;
       }
 
-      // Check authentication using AuthContext
+      // Check authentication
       if (!isAuthenticated || !user) {
         Alert.alert('Authentication Error', 'You must be logged in to add leave applications.');
         navigation.navigate('Login');
         return;
       }
       
-      if (userType !== 'Admin') {
-        Alert.alert('Authorization Error', 'Only administrators can add leave applications.');
+      // Check user type (more flexible)
+      const normalizedUserType = userType?.toLowerCase();
+      if (normalizedUserType !== 'admin') {
+        console.log('⚠️ LeaveManagement: Access denied for userType:', userType, 'normalized:', normalizedUserType);
+        Alert.alert('Authorization Error', 'Only administrators can add leave applications through this interface.');
         return;
       }
       
-      console.log('Using authenticated user from context:', user.id);
-
-      // Ensure user exists in the users table
-      let userId = user.id;
-      try {
-        // Check if user exists in users table with tenant filter
-        const { data: existingUser, error: userCheckError } = await supabase
-          .from('users')
-          .select('id')
-          .eq('id', user.id)
-          .single();
-
-        if (userCheckError && userCheckError.code === 'PGRST116') {
-          // User doesn't exist, create it
-          console.log('Creating user record in users table...');
-          
-          // First, get the Admin role ID
-          const { data: adminRole, error: roleError } = await supabase
-            .from('roles')
-            .select('id')
-            .eq('role_name', 'Admin')
-            .single();
-          
-          let adminRoleId;
-          if (roleError) {
-            console.error('Error getting admin role:', roleError);
-            // Fallback to role ID 1 (typically Admin)
-            adminRoleId = 1;
-          } else {
-            adminRoleId = adminRole.id;
-          }
-          
-          const { error: createUserError } = await supabase
-            .from('users')
-            .insert({
-              id: user.id,
-              email: user.email,
-              full_name: user.full_name || user.email,
-              role_id: adminRoleId, // Use role_id instead of role
-              created_at: new Date().toISOString()
-            });
-          
-          if (createUserError) {
-            console.error('Error creating user:', createUserError);
-            // If we can't create the user, we'll have to work around it
-            userId = null;
-          } else {
-            console.log('User record created successfully');
-          }
-        } else if (userCheckError) {
-          console.error('Error checking user existence:', userCheckError);
-          userId = null;
-        }
-      } catch (userError) {
-        console.error('Error handling user record:', userError);
-        userId = null;
-      }
-
-      // Use already validated tenantId from context
-      if (!tenantId) {
-        console.error('No tenant_id available during leave insertion');
-        Alert.alert('Error', 'User tenant information not found');
-        return;
-      }
-
-      const leaveData = {
+      // Prepare leave form data for the utility
+      const leaveFormData = {
         teacher_id: newLeaveForm.teacher_id,
         leave_type: newLeaveForm.leave_type,
         start_date: format(newLeaveForm.start_date, 'yyyy-MM-dd'),
         end_date: format(newLeaveForm.end_date, 'yyyy-MM-dd'),
         reason: newLeaveForm.reason.trim(),
-        applied_by: userId,
         replacement_teacher_id: newLeaveForm.replacement_teacher_id || null,
-        replacement_notes: newLeaveForm.replacement_notes.trim() || null,
-        status: 'Approved', // Admin added leaves are auto-approved
-        reviewed_by: userId,
-        reviewed_at: new Date().toISOString(),
-        admin_remarks: `Added by admin on behalf of teacher (Admin ID: ${user.id})`,
-        tenant_id: tenantId, // Include tenant_id for RLS compliance
+        replacement_notes: newLeaveForm.replacement_notes?.trim() || null
       };
-
-      // 🛡️ Insert leave application with tenant validation
-      const { error } = await supabase
-        .from('leave_applications')
-        .insert([leaveData]);
-
-      if (error) throw error;
-
+      
+      // Use the utility to add leave application
+      const result = await addLeaveApplication(leaveFormData, user, currentTenant);
+      
+      if (!result.success) {
+        Alert.alert('Error', result.error);
+        return;
+      }
+      
       Alert.alert('Success', 'Leave application added successfully');
       setShowAddLeaveModal(false);
       resetAddLeaveForm();
       await loadLeaveApplications();
+      
     } catch (error) {
       console.error('Error adding leave:', error);
-      Alert.alert('Error', 'Failed to add leave application');
+      Alert.alert('Error', 'Failed to add leave application: ' + (error.message || 'Unknown error'));
     }
   };
 
@@ -653,7 +562,10 @@ const LeaveManagement = ({ navigation }) => {
         return;
       }
       
-      if (userType && userType.toLowerCase() !== 'admin') {
+      // More flexible user type checking for leave review
+      const normalizedUserType = userType?.toLowerCase();
+      if (normalizedUserType !== 'admin') {
+        console.log('⚠️ LeaveManagement Review: Access denied for userType:', userType, 'normalized:', normalizedUserType);
         Alert.alert('Authorization Error', 'Only administrators can review leave applications.');
         return;
       }

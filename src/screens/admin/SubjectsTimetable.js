@@ -8,6 +8,8 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { AdminTenantFix } from '../../utils/adminTenantFix';
+import { useAuth } from '../../utils/AuthContext';
 
 
 // Helper to calculate duration in minutes
@@ -42,6 +44,8 @@ function formatTime(t) {
 const SubjectsTimetable = ({ route }) => {
   const { classId } = route?.params || {};
   const { currentTenant } = useTenantContext();
+  const { user } = useAuth();
+  const [fallbackTenantId, setFallbackTenantId] = useState(null);
   
   // 🔍 DEBUG: Log tenant info on component load
   console.log('🏢 SubjectsTimetable - Tenant Debug:', {
@@ -73,6 +77,36 @@ const SubjectsTimetable = ({ route }) => {
   const [copiedSourceDay, setCopiedSourceDay] = useState('');
   const [screenData, setScreenData] = useState(Dimensions.get('window'));
   const [subjectModalError, setSubjectModalError] = useState(null);
+  const [refreshCounter, setRefreshCounter] = useState(0);
+
+  // Helper function to get effective tenant ID (from context or fallback)
+  const getEffectiveTenantId = () => {
+    return currentTenant?.id || fallbackTenantId;
+  };
+  
+  // Initialize fallback tenant ID if context tenant is missing
+  const initializeTenantContext = async () => {
+    if (!currentTenant?.id && user && !fallbackTenantId) {
+      console.log('🔧 SubjectsTimetable: Tenant context missing, attempting fallback initialization...');
+      try {
+        const tenantContext = await AdminTenantFix.getAdminTenantContext(user);
+        if (tenantContext.tenantId) {
+          console.log('✅ SubjectsTimetable: Fallback tenant initialized:', tenantContext.tenantId);
+          setFallbackTenantId(tenantContext.tenantId);
+          return tenantContext.tenantId;
+        } else {
+          console.error('❌ SubjectsTimetable: Fallback tenant initialization failed:', tenantContext.error);
+          setError(tenantContext.error);
+          return null;
+        }
+      } catch (error) {
+        console.error('💥 SubjectsTimetable: Error in fallback tenant initialization:', error);
+        setError('Failed to initialize tenant context. Please contact administrator.');
+        return null;
+      }
+    }
+    return currentTenant?.id;
+  };
 
   // Add screen dimension change listener
   useEffect(() => {
@@ -118,24 +152,11 @@ const SubjectsTimetable = ({ route }) => {
           throw new Error('Loading timeout - please check your connection');
         }, 10000);
         
-        // 🔍 Validate tenant context with email fallback
-        let tenantId = currentTenant?.id;
-        console.log('📋 SubjectsTimetable: Current tenant ID:', tenantId);
+        // 🔍 Initialize tenant context if needed
+        const tenantId = await initializeTenantContext();
         
         if (!tenantId) {
-          console.log('⚠️ SubjectsTimetable: No tenant from context, trying email lookup...');
-          
-          try {
-            const emailTenant = await getCurrentUserTenantByEmail();
-            tenantId = emailTenant?.id;
-            console.log('📧 SubjectsTimetable: Email-based tenant ID:', tenantId);
-          } catch (emailError) {
-            console.error('❌ SubjectsTimetable: Email tenant lookup failed:', emailError);
-          }
-          
-          if (!tenantId) {
-            throw new Error('Unable to determine tenant context. Please contact support.');
-          }
+          throw new Error('No tenant context available. Please contact administrator.');
         }
         
         console.log('🚀 SubjectsTimetable.fetchData: Starting with tenant_id:', tenantId);
@@ -264,6 +285,10 @@ const SubjectsTimetable = ({ route }) => {
 
           setTimetables(prev => ({ ...prev, [defaultClassId]: grouped }));
           console.log(`📅 Timetable loaded: ${timetableData?.length || 0} entries in ${Date.now() - timetableStart}ms`);
+          console.log('🔎 Timetable data summary by day:', Object.entries(grouped).map(([day, periods]) => `${day}: ${periods.length} periods`).join(', '));
+          
+          // Force UI refresh after loading timetable
+          setRefreshCounter(prev => prev + 1);
         } else {
           console.log('ℹ️ No default class selected, skipping timetable fetch');
         }
@@ -286,25 +311,12 @@ const SubjectsTimetable = ({ route }) => {
 
   // 🚀 Optimized timetable fetching for class selection changes
   const fetchTimetableForClass = async (classId) => {
-    // 🔍 Validate tenant context with email fallback
-    let operationTenantId = currentTenant?.id;
-    console.log('🏷️ fetchTimetableForClass: Current tenant ID:', operationTenantId);
+    // 🔍 Get effective tenant ID
+    const operationTenantId = await initializeTenantContext();
     
     if (!operationTenantId) {
-      console.log('⚠️ fetchTimetableForClass: No tenant from context, trying email lookup...');
-      
-      try {
-        const emailTenant = await getCurrentUserTenantByEmail();
-        operationTenantId = emailTenant?.id;
-        console.log('📧 fetchTimetableForClass: Email-based tenant ID:', operationTenantId);
-      } catch (emailError) {
-        console.error('❌ fetchTimetableForClass: Email tenant lookup failed:', emailError);
-      }
-      
-      if (!operationTenantId) {
-        console.error('❌ fetchTimetableForClass: No tenant_id available');
-        return;
-      }
+      console.error('❌ fetchTimetableForClass: No tenant context available');
+      return;
     }
     
     console.log('🔍 fetchTimetableForClass - using tenantId:', operationTenantId, 'for classId:', classId);
@@ -398,7 +410,16 @@ const SubjectsTimetable = ({ route }) => {
           // Continue without sorting if there's an error
         }
 
-        setTimetables(prev => ({ ...prev, [classId]: grouped }));
+        setTimetables(prev => {
+          const newState = { ...prev, [classId]: grouped };
+          console.log('🔄 fetchTimetableForClass: Updated timetables state for class:', classId);
+          console.log('🔄 fetchTimetableForClass: Current timetables keys:', Object.keys(newState));
+          console.log('🔄 fetchTimetableForClass: New grouped data summary:', Object.entries(grouped).map(([day, periods]) => `${day}: ${periods.length}`).join(', '));
+          return newState;
+        });
+        
+        // Force UI refresh to ensure pickers show updated data
+        setRefreshCounter(prev => prev + 1);
         
         const fetchTime = Date.now() - fetchStart;
         console.log(`📅 Timetable updated for class ${classId}: ${timetableData?.length || 0} entries in ${fetchTime}ms`);
@@ -798,26 +819,13 @@ const SubjectsTimetable = ({ route }) => {
       setLoading(true);
       console.log('💾 SubjectsTimetable.handleSavePeriod: Starting save operation...');
       
-      // 🔍 Validate tenant context with email fallback
-      let operationTenantId = currentTenant?.id;
-      console.log('🏷️ handleSavePeriod: Current tenant ID:', operationTenantId);
+      // 🔍 Get effective tenant ID
+      const operationTenantId = await initializeTenantContext();
       
       if (!operationTenantId) {
-        console.log('⚠️ handleSavePeriod: No tenant from context, trying email lookup...');
-        
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          operationTenantId = emailTenant?.id;
-          console.log('📧 handleSavePeriod: Email-based tenant ID:', operationTenantId);
-        } catch (emailError) {
-          console.error('❌ handleSavePeriod: Email tenant lookup failed:', emailError);
-        }
-        
-        if (!operationTenantId) {
-          Alert.alert('Error', 'Unable to determine tenant context. Please try logging out and back in.');
-          setLoading(false);
-          return;
-        }
+        Alert.alert('Error', 'No tenant context available. Please contact administrator.');
+        setLoading(false);
+        return;
       }
 
       // Validate that a subject is selected (current schema only supports subjects, not breaks)
@@ -874,7 +882,17 @@ const SubjectsTimetable = ({ route }) => {
         tenant_id: operationTenantId // 🏷️ Ensure tenant context is included
       };
       
-      console.log('💾 handleSavePeriod: Timetable data prepared:', { ...timetableData, tenant_id: '[REDACTED]' });
+      console.log('💾 handleSavePeriod: Timetable data prepared:', {
+        ...timetableData,
+        tenant_id: '[REDACTED]',
+        debug_info: {
+          selectedClass,
+          periodModal_day: periodModal.day,
+          classId,
+          subjectCount: subjects.length,
+          teacherCount: teachers.length
+        }
+      });
 
       if (periodModal.period) {
         // 🔄 Edit existing period with enhanced tenant validation
@@ -898,25 +916,35 @@ const SubjectsTimetable = ({ route }) => {
         
         console.log('✅ handleSavePeriod: Period updated successfully');
 
-        // Update local state
+        // Immediately update local state for quick UI feedback
+        const subject = subjects.find(s => s.id === data[0].subject_id);
+        const updatedPeriod = {
+          id: data[0].id,
+          type: 'subject',
+          subjectId: data[0].subject_id,
+          subject: { id: data[0].subject_id, name: subject?.name || 'Unknown Subject' },
+          startTime: data[0].start_time,
+          endTime: data[0].end_time,
+          label: subject?.name || 'Unknown Subject'
+        };
+        
+        console.log('🔄 handleSavePeriod: Updating existing period in UI:', updatedPeriod);
+        
         setTimetables(prev => {
           const classTT = { ...prev[selectedClass] };
           const dayTT = classTT[periodModal.day] ? [...classTT[periodModal.day]] : [];
           const idx = dayTT.findIndex(p => p.id === periodModal.period.id);
+          console.log('🔄 handleSavePeriod: Found period at index:', idx, 'in', dayTT.length, 'periods');
           if (idx >= 0) {
-            // Find subject name for display
-            const subject = subjects.find(s => s.id === data[0].subject_id);
-            dayTT[idx] = {
-              id: data[0].id,
-              type: 'subject',
-              subjectId: data[0].subject_id,
-              subject: { id: data[0].subject_id, name: subject?.name || 'Unknown Subject' },
-              startTime: data[0].start_time,
-              endTime: data[0].end_time,
-              label: subject?.name || 'Unknown Subject'
-            };
+            dayTT[idx] = updatedPeriod;
+            console.log('🔄 handleSavePeriod: Updated period at index', idx);
+          } else {
+            console.warn('⚠️ handleSavePeriod: Could not find period to update, adding as new');
+            dayTT.push(updatedPeriod);
+            dayTT.sort((a, b) => a.startTime.localeCompare(b.startTime));
           }
           classTT[periodModal.day] = dayTT;
+          console.log('🔄 handleSavePeriod: Updated day timetable for', periodModal.day, ':', dayTT.length, 'periods');
           return { ...prev, [selectedClass]: classTT };
         });
       } else {
@@ -939,32 +967,73 @@ const SubjectsTimetable = ({ route }) => {
         
         console.log('✅ handleSavePeriod: Period created successfully');
 
-        // Update local state
+        // Immediately update local state for quick UI feedback
+        const subject = subjects.find(s => s.id === data[0].subject_id);
+        const newPeriod = {
+          id: data[0].id,
+          type: 'subject',
+          subjectId: data[0].subject_id,
+          subject: { id: data[0].subject_id, name: subject?.name || 'Unknown Subject' },
+          startTime: data[0].start_time,
+          endTime: data[0].end_time,
+          label: subject?.name || 'Unknown Subject'
+        };
+        
+        console.log('🔄 handleSavePeriod: Adding new period to UI:', newPeriod);
+        
         setTimetables(prev => {
           const classTT = { ...prev[selectedClass] };
           const dayTT = classTT[periodModal.day] ? [...classTT[periodModal.day]] : [];
-          // Find subject name for display
-          const subject = subjects.find(s => s.id === data[0].subject_id);
-          dayTT.push({
-            id: data[0].id,
-            type: 'subject',
-            subjectId: data[0].subject_id,
-            subject: { id: data[0].subject_id, name: subject?.name || 'Unknown Subject' },
-            startTime: data[0].start_time,
-            endTime: data[0].end_time,
-            label: subject?.name || 'Unknown Subject'
-          });
+          dayTT.push(newPeriod);
           // Sort by start time
           dayTT.sort((a, b) => a.startTime.localeCompare(b.startTime));
           classTT[periodModal.day] = dayTT;
+          console.log('🔄 handleSavePeriod: Updated day timetable for', periodModal.day, ':', dayTT.length, 'periods');
           return { ...prev, [selectedClass]: classTT };
         });
       }
 
-      setPeriodModal({ visible: false, day: '', period: null });
       const operationType = periodModal.period ? 'updated' : 'added';
       console.log(`✅ handleSavePeriod: Period ${operationType} successfully`);
-      Alert.alert('Success', `Period ${operationType} successfully`);
+      
+      // 🔄 Log final state to verify the update worked
+      console.log('🔄 handleSavePeriod: Verifying final timetable state...');
+      console.log('🔄 handleSavePeriod: selectedClass:', selectedClass);
+      console.log('🔄 handleSavePeriod: periodModal.day:', periodModal.day);
+      console.log('🔄 handleSavePeriod: selectedDay (current UI day):', selectedDay);
+      
+      setTimetables(prev => {
+        console.log('🔄 handleSavePeriod: All timetable keys:', Object.keys(prev));
+        const currentState = prev[selectedClass] || {};
+        console.log('🔄 handleSavePeriod: Days in current class:', Object.keys(currentState));
+        const dayPeriods = currentState[periodModal.day] || [];
+        console.log('🔄 handleSavePeriod: Current state for', periodModal.day, ':', dayPeriods.length, 'periods');
+        console.log('🔄 handleSavePeriod: Period details:', dayPeriods.map(p => ({ 
+          id: p.id, 
+          label: p.label || p.subject?.name, 
+          startTime: p.startTime 
+        })));
+        
+        // Also log what the UI should be seeing
+        if (selectedDay === periodModal.day) {
+          console.log('🔄 handleSavePeriod: UI should show these periods (selectedDay matches):', dayPeriods.length);
+        } else {
+          console.log('🔄 handleSavePeriod: UI is showing different day. UI day:', selectedDay, 'Updated day:', periodModal.day);
+          const uiDayPeriods = currentState[selectedDay] || [];
+          console.log('🔄 handleSavePeriod: UI day periods:', uiDayPeriods.length);
+        }
+        
+        return prev; // Return without changes, just for logging
+      });
+      
+      // Force UI refresh by incrementing refresh counter
+      setRefreshCounter(prev => prev + 1);
+      
+      // Close modal and show success message with a small delay to ensure UI updates
+      setTimeout(() => {
+        setPeriodModal({ visible: false, day: '', period: null });
+        Alert.alert('Success', `Period ${operationType} successfully`);
+      }, 200);
       
     } catch (error) {
       console.error('❌ handleSavePeriod: Error saving period:', error);
@@ -1019,14 +1088,9 @@ const SubjectsTimetable = ({ route }) => {
           
           console.log('✅ handleDeletePeriod: Period deleted successfully');
 
-          // Update local state
-          setTimetables(prev => {
-            const classTT = { ...prev[selectedClass] };
-            const dayTT = classTT[day] ? [...classTT[day]] : [];
-            classTT[day] = dayTT.filter(p => p.id !== id);
-            console.log(`🔄 Updated timetable state for ${day}: ${classTT[day].length} periods remaining`);
-            return { ...prev, [selectedClass]: classTT };
-          });
+          // 🔄 Refresh timetable data from database to ensure consistency
+          console.log('🔄 handleDeletePeriod: Refreshing timetable data to ensure consistency...');
+          await fetchTimetableForClass(selectedClass);
 
           Alert.alert('Success', 'Period deleted successfully');
         } catch (error) {
@@ -1186,28 +1250,19 @@ const SubjectsTimetable = ({ route }) => {
     }
 
     try {
-      // 🔍 Validate tenant context with email fallback
-      let operationTenantId = currentTenant?.id;
-      console.log('🏷️ handleSubjectChange: Current tenant ID:', operationTenantId);
+      setLoading(true);
+      console.log('🔄 handleSubjectChange: Starting subject assignment for', { day, slot: slot.number, subjectId });
+      
+      // 🔍 Get effective tenant ID
+      const operationTenantId = await initializeTenantContext();
       
       if (!operationTenantId) {
-        console.log('⚠️ handleSubjectChange: No tenant from context, trying email lookup...');
-        
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          operationTenantId = emailTenant?.id;
-          console.log('📧 handleSubjectChange: Email-based tenant ID:', operationTenantId);
-        } catch (emailError) {
-          console.error('❌ handleSubjectChange: Email tenant lookup failed:', emailError);
-        }
-        
-        if (!operationTenantId) {
-          Alert.alert('Error', 'Unable to determine tenant context. Please try logging out and back in.');
-          return;
-        }
+        Alert.alert('Error', 'No tenant context available. Please contact administrator.');
+        return;
       }
       
-      // Get teacher for the selected subject
+      // Get teacher for the selected subject with tenant filtering
+      console.log('👨‍🏫 handleSubjectChange: Finding teacher for subject:', subjectId);
       let teacherId = null;
       const { data: teacherSubject, error: teacherError } = await supabase
         .from('teacher_subjects')
@@ -1216,8 +1271,11 @@ const SubjectsTimetable = ({ route }) => {
         .eq('tenant_id', operationTenantId)
         .single();
 
-      if (!teacherError && teacherSubject) {
-        teacherId = teacherSubject.teacher_id;
+      if (teacherError) {
+        console.log('⚠️ No teacher assigned to this subject yet:', teacherError.message);
+      } else {
+        teacherId = teacherSubject?.teacher_id;
+        console.log('✅ Found teacher ID:', teacherId, 'for subject:', subjectId);
       }
 
       // If no teacher is assigned to the subject, show error and return
@@ -1238,23 +1296,28 @@ const SubjectsTimetable = ({ route }) => {
         class_id: selectedClass,
         subject_id: subjectId,
         teacher_id: teacherId,
-        day_of_week: day, // Use day name directly (Monday, Tuesday, etc.) - matches database constraint
+        day_of_week: day, // Use day name directly (Monday, Tuesday, etc.)
         period_number: slot.number,
         start_time: slot.startTime,
         end_time: slot.endTime,
         academic_year: academicYear,
-        tenant_id: operationTenantId,
+        tenant_id: operationTenantId
       };
+      
+      console.log('💾 handleSubjectChange: Timetable data prepared:', {
+        ...timetableData,
+        tenant_id: '[REDACTED]'
+      });
 
-      // Check if period already exists for this slot (by start time)
+      // Check if period already exists for this slot (by start time and by slot number)
       const existingPeriodByTime = timetables[selectedClass]?.[day]?.find(
         p => p.startTime === slot.startTime
       );
 
-      // Also check if there's already a period for this exact slot (class, day, period_number)
+      // Also check database for existing period
       const { data: existingPeriodBySlot, error: checkError } = await supabase
         .from(TABLES.TIMETABLE)
-        .select('id')
+        .select('id, subject_id, subjects(id, name)')
         .eq('class_id', selectedClass)
         .eq('day_of_week', day)
         .eq('period_number', slot.number)
@@ -1262,60 +1325,152 @@ const SubjectsTimetable = ({ route }) => {
         .maybeSingle();
 
       if (checkError && checkError.code !== 'PGRST116') {
-        console.error('Error checking existing period:', checkError);
+        console.error('❌ Error checking existing period:', checkError);
         throw checkError;
       }
 
-      // Determine which period to update
-      const existingPeriod = existingPeriodByTime || (existingPeriodBySlot ? {
-        id: existingPeriodBySlot.id,
-        startTime: slot.startTime
-      } : null);
-
+      let dbResult;
+      const existingPeriod = existingPeriodByTime || existingPeriodBySlot;
+      
       if (existingPeriod) {
         // Update existing period
-        const { data, error } = await dbHelpers.updateTimetableEntry(existingPeriod.id, timetableData);
-        if (error) throw error;
+        console.log('🔄 handleSubjectChange: Updating existing period:', existingPeriod.id || 'local-only');
+        
+        const updateId = existingPeriod.id || existingPeriodBySlot?.id;
+        if (updateId) {
+          const { data, error } = await supabase
+            .from(TABLES.TIMETABLE)
+            .update(timetableData)
+            .eq('id', updateId)
+            .eq('tenant_id', operationTenantId)
+            .select('*, subjects(id, name)')
+            .single();
+        
+          if (error) {
+            console.error('❌ handleSubjectChange: Update error:', error);
+            throw error;
+          }
+          dbResult = data;
+        } else {
+          throw new Error('Could not find period ID to update');
+        }
       } else {
-        // Create new period - use upsert to handle conflicts
+        // Create new period using upsert to handle any conflicts
+        console.log('➕ handleSubjectChange: Creating new period');
+        
         const { data, error } = await supabase
           .from(TABLES.TIMETABLE)
           .upsert([timetableData], {
-            onConflict: 'class_id,day_of_week,period_number'
+            onConflict: 'class_id,day_of_week,period_number,tenant_id'
           })
-          .select(`
-            *,
-            subjects(id, name),
-            classes(id, class_name, section)
-          `);
+          .select('*, subjects(id, name)');
         
-        if (error) throw error;
+        if (error) {
+          console.error('❌ handleSubjectChange: Insert error:', error);
+          throw error;
+        }
+        
+        if (!data || data.length === 0) {
+          throw new Error('Failed to create period. Please try again.');
+        }
+        
+        dbResult = data[0];
       }
+      
+      console.log('✅ handleSubjectChange: Database operation successful');
 
-      // Refresh timetable data
-      await fetchTimetableForClass(selectedClass);
+      // Update local state immediately for better UX
+      const subject = subjects.find(s => s.id === dbResult.subject_id) || dbResult.subjects;
+      const updatedPeriod = {
+        id: dbResult.id,
+        type: 'subject',
+        subjectId: dbResult.subject_id,
+        subject: subject,
+        startTime: dbResult.start_time,
+        endTime: dbResult.end_time,
+        label: subject?.name || 'Unknown Subject'
+      };
+      
+      console.log('🔄 handleSubjectChange: Updating local state for', day, 'with period:', updatedPeriod.label);
+      
+      setTimetables(prev => {
+        const classTT = { ...prev[selectedClass] } || {};
+        const dayTT = classTT[day] ? [...classTT[day]] : [];
+        
+        // Remove any existing period for this time slot
+        const filteredDayTT = dayTT.filter(p => p.startTime !== slot.startTime);
+        
+        // Add the updated period
+        filteredDayTT.push(updatedPeriod);
+        
+        // Sort by start time
+        filteredDayTT.sort((a, b) => a.startTime.localeCompare(b.startTime));
+        
+        classTT[day] = filteredDayTT;
+        console.log('🔄 handleSubjectChange: Local state updated for', day, ':', filteredDayTT.length, 'periods');
+        
+        return { ...prev, [selectedClass]: classTT };
+      });
+      
+      // Force UI refresh
+      setRefreshCounter(prev => prev + 1);
+      
+      console.log('✅ handleSubjectChange: Subject assignment completed successfully');
+      
     } catch (error) {
-      console.error('Error updating period:', error);
+      console.error('❌ handleSubjectChange: Error updating period:', error);
       Alert.alert('Error', 'Failed to update period: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
     }
   };
 
   // Handler to remove a period
   const removePeriod = async (day, periodId) => {
     try {
-      const { error } = await dbHelpers.deleteTimetableEntry(periodId);
-      if (error) throw error;
+      setLoading(true);
+      console.log('🗑️ removePeriod: Starting delete operation for period:', periodId, 'on', day);
+      
+      // 🔍 Get effective tenant ID
+      const operationTenantId = await initializeTenantContext();
+      
+      if (!operationTenantId) {
+        Alert.alert('Error', 'No tenant context available. Please contact administrator.');
+        return;
+      }
+      
+      // Delete with tenant validation
+      const { error } = await supabase
+        .from(TABLES.TIMETABLE)
+        .delete()
+        .eq('id', periodId)
+        .eq('tenant_id', operationTenantId);
+      
+      if (error) {
+        console.error('❌ removePeriod: Delete error:', error);
+        throw error;
+      }
+      
+      console.log('✅ removePeriod: Period deleted successfully');
 
-      // Update local state
+      // Update local state immediately
       setTimetables(prev => {
         const classTT = { ...prev[selectedClass] };
         const dayTT = classTT[day] ? [...classTT[day]] : [];
-        classTT[day] = dayTT.filter(p => p.id !== periodId);
+        const updatedDayTT = dayTT.filter(p => p.id !== periodId);
+        classTT[day] = updatedDayTT;
+        console.log('🔄 removePeriod: Updated local state for', day, ':', updatedDayTT.length, 'periods remaining');
         return { ...prev, [selectedClass]: classTT };
       });
+      
+      // Force UI refresh
+      setRefreshCounter(prev => prev + 1);
+      
     } catch (error) {
-      console.error('Error removing period:', error);
-      Alert.alert('Error', 'Failed to remove period');
+      console.error('❌ removePeriod: Error removing period:', error);
+      Alert.alert('Error', 'Failed to remove period: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1359,15 +1514,23 @@ const SubjectsTimetable = ({ route }) => {
     );
   };
 
-  // Handler to save the timetable (refresh data)
+  // Handler to save the timetable (refresh data to ensure consistency)
   const saveDayTimetable = async () => {
     try {
       setLoading(true);
+      console.log('💾 saveDayTimetable: Refreshing timetable data to ensure consistency...');
+      
+      // Refresh timetable data from database
       await fetchTimetableForClass(selectedClass);
-      Alert.alert('Success', 'Timetable saved successfully');
+      
+      // Force UI refresh
+      setRefreshCounter(prev => prev + 1);
+      
+      console.log('✅ saveDayTimetable: Timetable data refreshed successfully');
+      Alert.alert('Success', 'Timetable refreshed successfully! All changes are now synchronized.');
     } catch (error) {
-      console.error('Error saving timetable:', error);
-      Alert.alert('Error', 'Failed to save timetable');
+      console.error('❌ saveDayTimetable: Error refreshing timetable:', error);
+      Alert.alert('Error', 'Failed to refresh timetable: ' + (error.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
@@ -1939,7 +2102,7 @@ const SubjectsTimetable = ({ route }) => {
                 p => p.startTime === slot.startTime
               );
               return (
-                <View key={index} style={styles.periodSlot}>
+                <View key={`${index}-${refreshCounter}`} style={styles.periodSlot}>
                   <View style={styles.periodTimeSlot}>
                     <Text style={styles.periodNumber}>Period {slot.number}</Text>
                     <Text style={styles.periodTime}>
@@ -1950,10 +2113,13 @@ const SubjectsTimetable = ({ route }) => {
                   <View style={styles.subjectSelector}>
                     <View style={styles.subjectPickerWrapper}>
                       <Picker
-                        key={`${selectedDay}-${slot.startTime}-${existingPeriod?.subjectId || 'empty'}`}
+                        key={`${selectedDay}-${slot.startTime}-${existingPeriod?.subjectId || 'empty'}-${refreshCounter}`}
                         selectedValue={existingPeriod?.subjectId || ''}
                         style={styles.subjectPicker}
-                        onValueChange={(subjectId) => handleSubjectChange(selectedDay, slot, subjectId)}
+                        onValueChange={(subjectId) => {
+                          console.log('🔄 Picker onChange:', { selectedDay, slotTime: slot.startTime, subjectId, existingPeriod: existingPeriod?.label });
+                          handleSubjectChange(selectedDay, slot, subjectId);
+                        }}
                       >
                         <Picker.Item label="Select Subject" value="" />
                         {getClassSubjects().map(subject => (
