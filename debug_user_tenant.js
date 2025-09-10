@@ -6,7 +6,8 @@ const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function debugUserTenant() {
-  console.log('🔍 Debugging tenant assignment for kenj7214@gmail.com');
+  const emailToCheck = 'prakash01033@gmail.com'; // Changed to the problematic user
+  console.log(`🔍 Debugging tenant assignment for ${emailToCheck}`);
   console.log('Timestamp:', new Date().toISOString());
   
   try {
@@ -18,7 +19,7 @@ async function debugUserTenant() {
       return;
     }
     
-    const authUser = authUsers.users.find(u => u.email === 'kenj7214@gmail.com');
+    const authUser = authUsers.users.find(u => u.email === emailToCheck);
     if (!authUser) {
       console.error('❌ User not found in auth users');
       return;
@@ -35,7 +36,7 @@ async function debugUserTenant() {
     const { data: dbUsers, error: dbError } = await supabase
       .from('users')
       .select('*')
-      .ilike('email', 'kenj7214@gmail.com');
+      .ilike('email', emailToCheck);
     
     if (dbError) {
       console.error('❌ Error querying users table:', dbError);
@@ -130,7 +131,7 @@ async function debugUserTenant() {
     const { data: lookupResult, error: lookupError } = await supabase
       .from('users')
       .select('id, email, tenant_id, full_name, role_id, created_at')
-      .ilike('email', 'kenj7214@gmail.com')
+      .ilike('email', emailToCheck)
       .maybeSingle();
     
     if (lookupError) {
