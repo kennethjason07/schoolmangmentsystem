@@ -14,7 +14,8 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import Header from '../../components/Header';
 import { useAuth } from '../../utils/AuthContext';
-import pushNotificationService from '../../services/PushNotificationService';
+import { supabase } from '../../utils/supabase';
+import pushNotificationService from '../../services/PushNotificationServiceFixed';
 
 /**
  * NotificationSettings - Comprehensive settings screen for push notifications

@@ -31,6 +31,7 @@ import { useAuth } from '../../utils/AuthContext';
 import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
 import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificationCount';
+import useNavigateWithStatePreservation from '../../components/ui/SafeNavigate';
 
 const { width } = Dimensions.get('window');
 
@@ -91,6 +92,9 @@ const AdminDashboard = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [schoolDetails, setSchoolDetails] = useState(null);
+
+  // Safe navigation hook to prevent state loss
+  const navigateSafely = useNavigateWithStatePreservation();
 
   // Component rendered
 
@@ -1149,7 +1153,7 @@ const AdminDashboard = ({ navigation }) => {
         title="Admin Dashboard" 
         showNotifications={true}
         unreadCount={unreadCount}
-        onNotificationsPress={() => navigation.navigate('AdminNotifications')}
+        onNotificationsPress={() => navigateSafely('AdminNotifications')}
       />
 
       <ScrollView
@@ -1194,7 +1198,7 @@ const AdminDashboard = ({ navigation }) => {
               </View>
             ) : (
               <NoSchoolDetailsState
-                onActionPress={() => navigation.navigate('SchoolDetails')}
+                onActionPress={() => navigateSafely('SchoolDetails')}
               />
             )}
             
@@ -1219,7 +1223,7 @@ const AdminDashboard = ({ navigation }) => {
               icon={stats[0].icon}
               color={stats[0].color}
               subtitle={stats[0].subtitle}
-              onPress={() => navigation.navigate('Students')}
+              onPress={() => navigateSafely('Students')}
             />
           )}
           {stats[1] && (
@@ -1229,7 +1233,7 @@ const AdminDashboard = ({ navigation }) => {
               icon={stats[1].icon}
               color={stats[1].color}
               subtitle={stats[1].subtitle}
-              onPress={() => navigation.navigate('Teachers')}
+              onPress={() => navigateSafely('Teachers')}
             />
           )}
           {stats[2] && (
@@ -1239,7 +1243,7 @@ const AdminDashboard = ({ navigation }) => {
               icon={stats[2].icon}
               color={stats[2].color}
               subtitle={stats[2].subtitle}
-              onPress={() => navigation.navigate('AttendanceReport')}
+              onPress={() => navigateSafely('AttendanceReport')}
             />
           )}
           {stats[3] && (
@@ -1249,7 +1253,7 @@ const AdminDashboard = ({ navigation }) => {
               icon={stats[3].icon}
               color={stats[3].color}
               subtitle={stats[3].subtitle}
-              onPress={() => navigation.navigate('FeeManagement')}
+              onPress={() => navigateSafely('FeeManagement')}
             />
           )}
         </View>
@@ -1266,7 +1270,7 @@ const AdminDashboard = ({ navigation }) => {
                   if (action.action) {
                     action.action(); // Call custom action function
                   } else {
-                    navigation.navigate(action.screen); // Navigate to screen
+                    navigateSafely(action.screen); // Navigate to screen
                   }
                 }}
               >
