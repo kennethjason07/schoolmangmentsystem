@@ -19,17 +19,22 @@ import Header from '../../components/Header';
 import { supabase } from '../../utils/supabase';
 import ReportCardModal from '../../components/ReportCardModal';
 
-const { width, height } = Dimensions.get('window');
-const isTablet = width >= 768;
 const isWeb = Platform.OS === 'web';
-const getResponsiveWidth = () => {
-  if (isWeb && width > 1200) return Math.min(width * 0.8, 1200);
-  if (isTablet) return width * 0.9;
-  return width;
-};
-const responsiveWidth = getResponsiveWidth();
 
 const ReportCardGeneration = ({ navigation }) => {
+  // Dynamic responsive state that updates on resize
+  const [dimensions, setDimensions] = useState(() => {
+    const { width, height } = Dimensions.get('window');
+    return { width, height };
+  });
+  
+  const isTablet = dimensions.width >= 768;
+  const getResponsiveWidth = () => {
+    if (isWeb && dimensions.width > 1200) return Math.min(dimensions.width * 0.8, 1200);
+    if (isTablet) return dimensions.width * 0.9;
+    return dimensions.width;
+  };
+  const responsiveWidth = getResponsiveWidth();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [classes, setClasses] = useState([]);
@@ -40,6 +45,17 @@ const ReportCardGeneration = ({ navigation }) => {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [reportCardVisible, setReportCardVisible] = useState(false);
   const [generatingPDF, setGeneratingPDF] = useState(false);
+  const [studentsScrollY, setStudentsScrollY] = useState(0);
+
+  // Listen for dimension changes on web
+  useEffect(() => {
+    if (isWeb) {
+      const subscription = Dimensions.addEventListener('change', ({ window }) => {
+        setDimensions({ width: window.width, height: window.height });
+      });
+      return () => subscription?.remove();
+    }
+  }, []);
 
   useEffect(() => {
     loadInitialData();
@@ -207,202 +223,28 @@ const ReportCardGeneration = ({ navigation }) => {
     </TouchableOpacity>
   );
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <Header title="Report Card Generation" showBack={true} />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1976d2" />
-          <Text style={styles.loadingText}>Loading data...</Text>
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.container}>
-      <Header title="Report Card Generation" showBack={true} />
-      
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={[styles.contentContainer, isWeb && styles.webContentContainer]}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        showsVerticalScrollIndicator={false}
-        bounces={Platform.OS === 'ios'}
-        alwaysBounceVertical={false}
-      >
-        {/* Filters Section */}
-        <View style={styles.filtersSection}>
-          <Text style={styles.sectionTitle}>Select Filters</Text>
-          
-          {/* Class Selection */}
-          <View style={styles.filterContainer}>
-            <Text style={styles.filterLabel}>Class & Section</Text>
-            <View style={styles.pickerContainer}>
-              <Picker
-                selectedValue={selectedClass}
-                style={styles.picker}
-                onValueChange={(value) => {
-                  setSelectedClass(value);
-                  setSelectedExam('');
-                  setStudents([]);
-                }}
-              >
-                <Picker.Item label="Select Class" value="" />
-                {classes.map(cls => (
-                  <Picker.Item
-                    key={cls.id}
-                    label={getClassDisplay(cls)}
-                    value={cls.id}
-                  />
-                ))}
-              </Picker>
-            </View>
-          </View>
-
-          {/* Exam Selection */}
-          <View style={styles.filterContainer}>
-            <Text style={styles.filterLabel}>
-              Exam {selectedClass && getFilteredExams().length > 0 && (
-                <Text style={styles.filterCount}>({getFilteredExams().length} available)</Text>
-              )}
-            </Text>
-            <View style={[styles.pickerContainer, !selectedClass && styles.pickerDisabled]}>
-              <Picker
-                selectedValue={selectedExam}
-                style={styles.picker}
-                onValueChange={setSelectedExam}
-                enabled={!!selectedClass}
-              >
-                <Picker.Item 
-                  label={!selectedClass ? "Select a class first" : "Select Exam"} 
-                  value="" 
-                />
-                {getFilteredExams().map(exam => (
-                  <Picker.Item
-                    key={exam.id}
-                    label={`${exam.name} (${exam.classes?.class_name || 'Unknown Class'})`}
-                    value={exam.id}
-                  />
-                ))}
-              </Picker>
-            </View>
-            {selectedClass && getFilteredExams().length === 0 && (
-              <Text style={styles.noExamsText}>
-                ⚠️ No exams found for this class. Please create an exam first.
-              </Text>
-            )}
-          </View>
-        </View>
-
-        {/* Summary Section */}
-        {selectedClass && selectedExam && (
-          <View style={styles.summarySection}>
-            <View style={styles.summaryHeader}>
-              <Ionicons name="analytics" size={20} color="#1976d2" />
-              <Text style={styles.summaryTitle}>Summary</Text>
-            </View>
-            <View style={styles.summaryCards}>
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryValue}>{students.length}</Text>
-                <Text style={styles.summaryLabel}>Total Students</Text>
-              </View>
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryValue}>{getSelectedClassDisplay()}</Text>
-                <Text style={styles.summaryLabel}>Selected Class</Text>
-              </View>
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryValue}>{getSelectedExamDisplay()}</Text>
-                <Text style={styles.summaryLabel}>Selected Exam</Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* Students List */}
-        {selectedClass && selectedExam && (
-          <View style={styles.studentsSection}>
-            <View style={styles.studentsHeader}>
-              <Ionicons name="people" size={20} color="#1976d2" />
-              <Text style={styles.studentsHeaderTitle}>Students ({students.length})</Text>
-            </View>
-            
-            {students.length === 0 ? (
-              <View style={styles.noDataContainer}>
-                <Ionicons name="people-outline" size={48} color="#ccc" />
-                <Text style={styles.noDataText}>No students found</Text>
-                <Text style={styles.noDataSubtext}>
-                  No students are enrolled in the selected class
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.studentsList}>
-                {isTablet || isWeb ? (
-                  <FlatList
-                    data={students}
-                    renderItem={({ item }) => renderStudent(item)}
-                    keyExtractor={(item) => item.id.toString()}
-                    numColumns={isWeb && width > 1200 ? 3 : isTablet ? 2 : 1}
-                    columnWrapperStyle={isTablet || isWeb ? styles.studentRow : null}
-                    scrollEnabled={false}
-                    contentContainerStyle={styles.studentsGrid}
-                  />
-                ) : (
-                  students.map(renderStudent)
-                )}
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Help Section */}
-        {!selectedClass || !selectedExam ? (
-          <View style={styles.helpSection}>
-            <View style={styles.helpCard}>
-              <Ionicons name="information-circle" size={24} color="#2196F3" />
-              <Text style={styles.helpTitle}>How to Generate Report Cards</Text>
-              <Text style={styles.helpText}>
-                1. Select a class and section from the dropdown{'\n'}
-                2. Choose an exam for which you want to generate report cards{'\n'}
-                3. Click on any student to view their detailed report card{'\n'}
-                4. Use the download button to save the report card as PDF
-              </Text>
-            </View>
-          </View>
-        ) : null}
-      </ScrollView>
-
-      {/* Report Card Modal */}
-      {selectedStudent && (
-        <ReportCardModal
-          visible={reportCardVisible}
-          student={selectedStudent}
-          examId={selectedExam}
-          onClose={closeReportCard}
-        />
-      )}
-    </View>
-  );
-};
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f7fa',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: isWeb ? Math.max(16, (width - responsiveWidth) / 2) : 16,
-  },
-  contentContainer: {
-    paddingBottom: 20,
-  },
-  webContentContainer: {
-    alignSelf: 'center',
-    width: responsiveWidth,
-  },
+  // Create styles as a function to use current dimensions
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: '#f5f7fa',
+    },
+    content: {
+      flex: 1,
+      paddingHorizontal: isWeb ? Math.max(16, (dimensions.width - responsiveWidth) / 2) : 16,
+    },
+    contentContainer: {
+      paddingBottom: 20,
+      ...(isWeb && {
+        flexGrow: 1,
+        minHeight: dimensions.height - 100, // Account for header
+      }),
+    },
+    webContentContainer: {
+      alignSelf: 'center',
+      width: responsiveWidth,
+      flexGrow: 1,
+    },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -518,7 +360,12 @@ const styles = StyleSheet.create({
   studentsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 16,
+  },
+  studentsHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   studentsHeaderTitle: {
     fontSize: 18,
@@ -526,8 +373,35 @@ const styles = StyleSheet.create({
     color: '#333',
     marginLeft: 8,
   },
+  scrollIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f8ff',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e3f2fd',
+  },
+  scrollIndicatorText: {
+    fontSize: 11,
+    color: '#666',
+    marginLeft: 4,
+    fontStyle: 'italic',
+  },
+  scrollIndicatorTextActive: {
+    color: '#1976d2',
+    fontWeight: '500',
+  },
   studentsList: {
     gap: 12,
+  },
+  studentsScrollContainer: {
+    maxHeight: isWeb ? 600 : isTablet ? 500 : 400,
+    marginTop: 8,
+  },
+  studentsScrollContent: {
+    paddingBottom: 16,
   },
   studentCard: {
     flexDirection: 'row',
@@ -624,13 +498,273 @@ const styles = StyleSheet.create({
   },
   studentsGrid: {
     gap: 12,
+    ...(isTablet && {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'space-between',
+    }),
+  },
+  studentCardContainer: {
+    width: '100%',
+  },
+  studentCardLeft: {
+    ...(isTablet && {
+      width: '48%',
+      marginBottom: 12,
+    }),
+  },
+  studentCardRight: {
+    ...(isTablet && {
+      width: '48%',
+      marginBottom: 12,
+    }),
+  },
+  studentsGridWeb: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 16,
+    justifyContent: 'flex-start',
+  },
+  studentCardWeb: {
+    width: 'calc(33.333% - 12px)',
+    minWidth: 300,
+    maxWidth: 400,
   },
   studentCardTablet: {
-    flex: isWeb && width > 1200 ? 0.32 : isTablet ? 0.48 : 1,
-    marginHorizontal: isWeb && width > 1200 ? 4 : isTablet ? 4 : 0,
+    flex: 0.48,
+    marginHorizontal: 4,
     marginBottom: 8,
     minHeight: 120,
-  },
-});
+    },
+  });
+
+  // Return the JSX here since styles are now created inside
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <Header title="Report Card Generation" showBack={true} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#1976d2" />
+          <Text style={styles.loadingText}>Loading data...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <Header title="Report Card Generation" showBack={true} />
+      
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={[styles.contentContainer, isWeb && styles.webContentContainer]}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        showsVerticalScrollIndicator={isWeb ? true : false}
+        bounces={Platform.OS === 'ios'}
+        alwaysBounceVertical={false}
+        nestedScrollEnabled={true}
+        {...(isWeb && {
+          scrollEnabled: true,
+          keyboardShouldPersistTaps: 'handled'
+        })}
+      >
+        {/* Filters Section */}
+        <View style={styles.filtersSection}>
+          <Text style={styles.sectionTitle}>Select Filters</Text>
+          
+          {/* Class Selection */}
+          <View style={styles.filterContainer}>
+            <Text style={styles.filterLabel}>Class & Section</Text>
+            <View style={styles.pickerContainer}>
+              <Picker
+                selectedValue={selectedClass}
+                style={styles.picker}
+                onValueChange={(value) => {
+                  setSelectedClass(value);
+                  setSelectedExam('');
+                  setStudents([]);
+                }}
+              >
+                <Picker.Item label="Select Class" value="" />
+                {classes.map(cls => (
+                  <Picker.Item
+                    key={cls.id}
+                    label={getClassDisplay(cls)}
+                    value={cls.id}
+                  />
+                ))}
+              </Picker>
+            </View>
+          </View>
+
+          {/* Exam Selection */}
+          <View style={styles.filterContainer}>
+            <Text style={styles.filterLabel}>
+              Exam {selectedClass && getFilteredExams().length > 0 && (
+                <Text style={styles.filterCount}>({getFilteredExams().length} available)</Text>
+              )}
+            </Text>
+            <View style={[styles.pickerContainer, !selectedClass && styles.pickerDisabled]}>
+              <Picker
+                selectedValue={selectedExam}
+                style={styles.picker}
+                onValueChange={setSelectedExam}
+                enabled={!!selectedClass}
+              >
+                <Picker.Item 
+                  label={!selectedClass ? "Select a class first" : "Select Exam"} 
+                  value="" 
+                />
+                {getFilteredExams().map(exam => (
+                  <Picker.Item
+                    key={exam.id}
+                    label={`${exam.name} (${exam.classes?.class_name || 'Unknown Class'})`}
+                    value={exam.id}
+                  />
+                ))}
+              </Picker>
+            </View>
+            {selectedClass && getFilteredExams().length === 0 && (
+              <Text style={styles.noExamsText}>
+                ⚠️ No exams found for this class. Please create an exam first.
+              </Text>
+            )}
+          </View>
+        </View>
+
+        {/* Summary Section */}
+        {selectedClass && selectedExam && (
+          <View style={styles.summarySection}>
+            <View style={styles.summaryHeader}>
+              <Ionicons name="analytics" size={20} color="#1976d2" />
+              <Text style={styles.summaryTitle}>Summary</Text>
+            </View>
+            <View style={styles.summaryCards}>
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryValue}>{students.length}</Text>
+                <Text style={styles.summaryLabel}>Total Students</Text>
+              </View>
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryValue}>{getSelectedClassDisplay()}</Text>
+                <Text style={styles.summaryLabel}>Selected Class</Text>
+              </View>
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryValue}>{getSelectedExamDisplay()}</Text>
+                <Text style={styles.summaryLabel}>Selected Exam</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Students List */}
+        {selectedClass && selectedExam && (
+          <View style={styles.studentsSection}>
+            <View style={styles.studentsHeader}>
+              <View style={styles.studentsHeaderLeft}>
+                <Ionicons name="people" size={20} color="#1976d2" />
+                <Text style={styles.studentsHeaderTitle}>Students ({students.length})</Text>
+              </View>
+              {students.length > (isWeb ? 8 : isTablet ? 6 : 4) && (
+                <View style={styles.scrollIndicator}>
+                  <Ionicons 
+                    name={studentsScrollY > 50 ? "arrow-up" : "arrow-down"} 
+                    size={16} 
+                    color={studentsScrollY > 0 ? "#1976d2" : "#666"} 
+                  />
+                  <Text style={[
+                    styles.scrollIndicatorText,
+                    studentsScrollY > 0 && styles.scrollIndicatorTextActive
+                  ]}>
+                    {studentsScrollY > 50 ? "Scroll to top" : "Scroll for more"}
+                  </Text>
+                </View>
+              )}
+            </View>
+            
+            {students.length === 0 ? (
+              <View style={styles.noDataContainer}>
+                <Ionicons name="people-outline" size={48} color="#ccc" />
+                <Text style={styles.noDataText}>No students found</Text>
+                <Text style={styles.noDataSubtext}>
+                  No students are enrolled in the selected class
+                </Text>
+              </View>
+            ) : (
+              <ScrollView 
+                style={styles.studentsScrollContainer}
+                contentContainerStyle={styles.studentsScrollContent}
+                showsVerticalScrollIndicator={true}
+                nestedScrollEnabled={true}
+                bounces={Platform.OS === 'ios'}
+                onScroll={(event) => {
+                  setStudentsScrollY(event.nativeEvent.contentOffset.y);
+                }}
+                scrollEventThrottle={16}
+              >
+                <View style={styles.studentsList}>
+                  {isWeb ? (
+                    // Use simple map rendering for web to avoid scroll conflicts
+                    <View style={[styles.studentsGrid, dimensions.width > 1200 && styles.studentsGridWeb]}>
+                      {students.map((student, index) => (
+                        <View key={student.id} style={dimensions.width > 1200 ? styles.studentCardWeb : null}>
+                          {renderStudent(student)}
+                        </View>
+                      ))}
+                    </View>
+                  ) : isTablet ? (
+                    // Enable scrolling for tablet FlatList when inside ScrollView
+                    <View style={styles.studentsGrid}>
+                      {students.map((student, index) => (
+                        <View 
+                          key={student.id} 
+                          style={[
+                            styles.studentCardContainer,
+                            index % 2 === 0 ? styles.studentCardLeft : styles.studentCardRight
+                          ]}
+                        >
+                          {renderStudent(student)}
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    students.map(renderStudent)
+                  )}
+                </View>
+              </ScrollView>
+            )}
+          </View>
+        )}
+
+        {/* Help Section */}
+        {!selectedClass || !selectedExam ? (
+          <View style={styles.helpSection}>
+            <View style={styles.helpCard}>
+              <Ionicons name="information-circle" size={24} color="#2196F3" />
+              <Text style={styles.helpTitle}>How to Generate Report Cards</Text>
+              <Text style={styles.helpText}>
+                1. Select a class and section from the dropdown{'\n'}
+                2. Choose an exam for which you want to generate report cards{'\n'}
+                3. Click on any student to view their detailed report card{'\n'}
+                4. Use the download button to save the report card as PDF
+              </Text>
+            </View>
+          </View>
+        ) : null}
+      </ScrollView>
+
+      {/* Report Card Modal */}
+      {selectedStudent && (
+        <ReportCardModal
+          visible={reportCardVisible}
+          student={selectedStudent}
+          examId={selectedExam}
+          onClose={closeReportCard}
+        />
+      )}
+    </View>
+  );
+};
 
 export default ReportCardGeneration;
