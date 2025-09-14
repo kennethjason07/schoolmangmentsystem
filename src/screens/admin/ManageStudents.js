@@ -21,6 +21,7 @@ import { Picker } from '@react-native-picker/picker';
 import { useNavigation } from '@react-navigation/native';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import ResponsiveCalendar from '../../components/ResponsiveCalendar';
 import * as Print from 'expo-print';
 import { formatDate } from '../../utils/helpers';
 import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
@@ -47,6 +48,8 @@ const ManageStudents = () => {
   // Date picker states
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [datePickerField, setDatePickerField] = useState('');
+  // Responsive calendar states
+  const [showResponsiveCalendar, setShowResponsiveCalendar] = useState(false);
 
   // Form state for adding/editing students
   const [form, setForm] = useState({
@@ -628,28 +631,50 @@ const ManageStudents = () => {
 
   const openDatePicker = (field) => {
     setDatePickerField(field);
-    setShowDatePicker(true);
+    if (Platform.OS === 'web') {
+      setShowResponsiveCalendar(true);
+    } else {
+      setShowDatePicker(true);
+    }
   };
 
   const handleSubmit = async () => {
+    console.log('🚀 ManageStudents: handleSubmit called');
+    console.log('📝 ManageStudents: Form data at submit:', form);
+    console.log('🌐 ManageStudents: Platform:', Platform.OS);
+    
     try {
+      console.log('✅ ManageStudents: Starting form validation...');
+      
       // Validate required fields
       if (!form.admission_no || !form.name || !form.dob || !form.gender || !form.academic_year) {
+        console.error('❌ ManageStudents: Validation failed - missing required fields');
+        console.error('❌ Missing fields check:', {
+          admission_no: !!form.admission_no,
+          name: !!form.name,
+          dob: !!form.dob,
+          gender: !!form.gender,
+          academic_year: !!form.academic_year
+        });
         Alert.alert('Error', 'Please fill in all required fields (Admission No, Name, DOB, Gender, Academic Year)');
         return;
       }
 
       // Validate parent details - at least one parent name is required
       if (!form.father_name && !form.mother_name) {
+        console.error('❌ ManageStudents: Validation failed - no parent names provided');
         Alert.alert('Error', 'Please provide at least father name or mother name');
         return;
       }
 
       if (!form.parent_phone) {
+        console.error('❌ ManageStudents: Validation failed - no parent phone provided');
         Alert.alert('Error', 'Parent/Guardian phone number is required');
         return;
       }
-
+      
+      console.log('✅ ManageStudents: All validations passed!');
+      console.log('🔄 ManageStudents: Setting loading state to true...');
       setLoading(true);
 
       // Get current tenant for proper tenant assignment
@@ -720,15 +745,28 @@ const ManageStudents = () => {
       console.log('🏢 ManageStudents: Confirming tenant_id in insert data:', studentInsertData.tenant_id);
 
       // Create the student record
+      console.log('🚀 ManageStudents: About to insert student into database...');
+      console.log('📊 ManageStudents: Using table:', TABLES.STUDENTS);
+      console.log('🌐 ManageStudents: Platform check:', Platform.OS);
+      console.log('📝 ManageStudents: Final insert data:', JSON.stringify(studentInsertData, null, 2));
+      
       const { data: studentResult, error: studentError } = await supabase
         .from(TABLES.STUDENTS)
         .insert(studentInsertData)
         .select('id')
         .single();
+        
+      console.log('📊 ManageStudents: Database insert result:', { data: studentResult, error: studentError });
 
       if (studentError) {
         setLoading(false);
         console.error('❌ ManageStudents: Database error adding student:', studentError);
+        console.error('❌ ManageStudents: Error details:', {
+          code: studentError.code,
+          message: studentError.message,
+          details: studentError.details,
+          hint: studentError.hint
+        });
         
         // Handle specific constraint violations with user-friendly messages
         if (studentError.code === '23505' && studentError.message.includes('students_admission_no_key')) {
@@ -820,13 +858,29 @@ const ManageStudents = () => {
         }
       }
 
-      Alert.alert('Success', 'Student and parent details added successfully');
+      console.log('✅ ManageStudents: Student and parents created successfully!');
+      Alert.alert(
+        'Success! 🎉',
+        `Student "${form.name}" has been successfully added with admission number ${form.admission_no}.`,
+        [{ text: 'Great!', style: 'default' }]
+      );
+      
+      console.log('🔄 ManageStudents: Refreshing student data...');
       await loadAllData();
       resetForm();
       setModalVisible(false);
+      console.log('✅ ManageStudents: Process completed successfully!');
+      
     } catch (error) {
-      Alert.alert('Error', 'Failed to add student: ' + error.message);
+      console.error('❌ ManageStudents: Unexpected error in handleSubmit:', error);
+      console.error('❌ ManageStudents: Error stack:', error.stack);
+      
+      Alert.alert(
+        'Error',
+        `Failed to add student: ${error.message}\n\nPlease try again or contact support if the problem persists.`
+      );
     } finally {
+      console.log('🔄 ManageStudents: Setting loading to false...');
       setLoading(false);
     }
   };
@@ -1628,15 +1682,43 @@ const ManageStudents = () => {
               />
 
               <Text style={styles.inputLabel}>Date of Birth *</Text>
-              <TouchableOpacity
-                style={styles.dateInput}
-                onPress={() => openDatePicker('dob')}
-              >
-                <Text style={form.dob ? styles.dateText : styles.datePlaceholder}>
-                  {form.dob ? formatDateForDisplay(form.dob) : 'Select Date of Birth'}
-                </Text>
-                <Ionicons name="calendar-outline" size={20} color="#666" />
-              </TouchableOpacity>
+              {Platform.OS === 'web' ? (
+                <>
+                  <TouchableOpacity
+                    style={styles.dateInput}
+                    onPress={() => setShowResponsiveCalendar(true)}
+                  >
+                    <Text style={form.dob ? styles.dateText : styles.datePlaceholder}>
+                      {form.dob ? formatDateForDisplay(form.dob) : 'Select Date of Birth'}
+                    </Text>
+                    <Ionicons name="calendar-outline" size={20} color="#666" />
+                  </TouchableOpacity>
+                  
+                  <ResponsiveCalendar
+                    value={form.dob}
+                    onDateChange={(date) => {
+                      const formattedDate = date.toISOString().split('T')[0];
+                      handleFormChange('dob', formattedDate);
+                      setShowResponsiveCalendar(false);
+                    }}
+                    minimumDate={new Date(new Date().getFullYear() - 25, 0, 1)} // 25 years ago
+                    maximumDate={new Date()} // Today
+                    placeholder="Select Date of Birth"
+                    visible={showResponsiveCalendar}
+                    onClose={() => setShowResponsiveCalendar(false)}
+                  />
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={styles.dateInput}
+                  onPress={() => openDatePicker('dob')}
+                >
+                  <Text style={form.dob ? styles.dateText : styles.datePlaceholder}>
+                    {form.dob ? formatDateForDisplay(form.dob) : 'Select Date of Birth'}
+                  </Text>
+                  <Ionicons name="calendar-outline" size={20} color="#666" />
+                </TouchableOpacity>
+              )}
 
               <Text style={styles.inputLabel}>Gender *</Text>
               <View style={styles.pickerContainer}>
@@ -1884,12 +1966,36 @@ const ManageStudents = () => {
 
             <View style={styles.modalActions}>
               <TouchableOpacity
-                style={styles.modalButton}
-                onPress={editModalVisible ? handleEditSave : handleSubmit}
+                style={[styles.modalButton, loading && styles.modalButtonLoading]}
+                onPress={() => {
+                  if (loading) {
+                    console.log('⚠️ ManageStudents: Button pressed but already loading, ignoring...');
+                    return;
+                  }
+                  console.log('🔄 ManageStudents: Submit button pressed!', Platform.OS);
+                  console.log('🔄 ManageStudents: Modal state - editModalVisible:', editModalVisible);
+                  if (editModalVisible) {
+                    console.log('🔄 ManageStudents: Calling handleEditSave...');
+                    handleEditSave();
+                  } else {
+                    console.log('🔄 ManageStudents: Calling handleSubmit...');
+                    handleSubmit();
+                  }
+                }}
+                disabled={loading}
               >
-                <Text style={styles.modalButtonText}>
-                  {editModalVisible ? 'Update' : 'Add'}
-                </Text>
+                {loading ? (
+                  <View style={styles.loadingButtonContent}>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={[styles.modalButtonText, { marginLeft: 8 }]}>
+                      {editModalVisible ? 'Updating...' : 'Adding...'}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.modalButtonText}>
+                    {editModalVisible ? 'Update' : 'Add'}
+                  </Text>
+                )}
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, { backgroundColor: '#aaa' }]}
@@ -1901,6 +2007,22 @@ const ManageStudents = () => {
               >
                 <Text style={styles.modalButtonText}>Cancel</Text>
               </TouchableOpacity>
+              
+              {/* Debug Test Button - Remove after testing */}
+              {Platform.OS === 'web' && (
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: '#FF9500', marginTop: 8 }]}
+                  onPress={() => {
+                    console.log('🧪 ManageStudents: DEBUG TEST BUTTON pressed!');
+                    console.log('🧪 Platform:', Platform.OS);
+                    console.log('🧪 Current form state:', form);
+                    console.log('🧪 Loading state:', loading);
+                    Alert.alert('Debug Test', `Platform: ${Platform.OS}\nForm valid: ${!!form.admission_no && !!form.name}\nLoading: ${loading}`);
+                  }}
+                >
+                  <Text style={styles.modalButtonText}>🧪 Debug Test</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
@@ -2542,9 +2664,16 @@ const styles = StyleSheet.create({
   },
   modalButtonText: {
     color: '#fff',
-    fontWeight: '600',
     fontSize: 16,
-    textAlign: 'center',
+    fontWeight: 'bold',
+  },
+  modalButtonLoading: {
+    opacity: 0.7,
+  },
+  loadingButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   // Profile Modal Styles
   profileSection: {
@@ -3107,8 +3236,29 @@ const styles = StyleSheet.create({
   },
   // Text area style for multiline inputs
   textArea: {
-    height: 80,
+    minHeight: 80,
     textAlignVertical: 'top',
+  },
+  // Date picker styles
+  dateInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+    minHeight: 48,
+  },
+  dateText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  datePlaceholder: {
+    fontSize: 16,
+    color: '#999',
   },
 });
 

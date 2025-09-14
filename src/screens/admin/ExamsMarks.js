@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Alert, Modal, TextInput, ScrollView, Platform, ActivityIndicator, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -9,6 +9,9 @@ import { supabase, getUserTenantId } from '../../utils/supabase';
 import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
 import { useTenant } from '../../contexts/TenantContext';
 import { useAuth } from '../../utils/AuthContext';
+import { quickTenantCheck, createTenantMonitor, runTenantDataDiagnostics } from '../../utils/tenantDataDiagnostic';
+import { TenantLoadingFallback } from '../../components/TenantErrorBoundary';
+import { loadExamsMarksDataProgressive, clearDataCache, logQueryPerformance, loadMoreStudents } from '../../utils/optimizedDataLoader';
 // Helper functions for date formatting
 const formatDate = (dateString) => {
   if (!dateString) return '';
@@ -69,6 +72,15 @@ const ExamsMarks = () => {
   const navigation = useNavigation();
   const { tenantId } = useTenant();
   const { user } = useAuth();
+  
+  // 🔍 Debugging and monitoring
+  const tenantMonitorRef = useRef(null);
+  const [debugInfo, setDebugInfo] = useState({
+    tenantCheckCount: 0,
+    lastTenantCheck: null,
+    tenantLoadAttempts: 0,
+    errors: []
+  });
 
   // Core data states
   const [exams, setExams] = useState([]);
@@ -82,6 +94,11 @@ const ExamsMarks = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedExam, setSelectedExam] = useState(null);
   const [selectedClass, setSelectedClass] = useState(null);
+  
+  // 🚀 Progressive loading states
+  const [loadingStage, setLoadingStage] = useState('');
+  const [hasMoreStudents, setHasMoreStudents] = useState(true);
+  const [loadingMoreStudents, setLoadingMoreStudents] = useState(false);
 
   // Modal states
   const [addExamModalVisible, setAddExamModalVisible] = useState(false);
@@ -109,165 +126,358 @@ const ExamsMarks = () => {
 
 
 
-  // Load data using schema.txt structure
+  // 🚀 OPTIMIZED DATA LOADING with progressive loading and caching
   const loadAllData = async () => {
     try {
-      // 🛡️ Ensure tenant context is available before proceeding
+      console.log('🔄 ExamsMarks.loadAllData: Starting data load process...');
+      console.log('📊 Current context state:', {
+        tenantId: tenantId || 'NOT_SET',
+        userId: user?.id || 'NOT_SET',
+        userEmail: user?.email || 'NOT_SET',
+        timestamp: new Date().toISOString()
+      });
+      
+      // 🛡️ Enhanced tenant context validation
       if (!tenantId) {
-        console.log('⏳ ExamsMarks: Waiting for tenant context to be available...');
+        console.warn('⚠️ ExamsMarks: No tenantId in context, attempting quick tenant check...');
+        
+        // Increment debug counter
+        setDebugInfo(prev => ({
+          ...prev,
+          tenantLoadAttempts: prev.tenantLoadAttempts + 1,
+          lastTenantCheck: new Date().toISOString()
+        }));
+        
+        // Try to get tenant context directly
+        const quickCheck = await quickTenantCheck();
+        console.log('🔍 QuickTenantCheck result:', quickCheck);
+        
+        if (!quickCheck.success) {
+          const errorMsg = `Tenant context unavailable: ${quickCheck.error} (step: ${quickCheck.step})`;
+          console.error('❌ ExamsMarks: Tenant context not available:', errorMsg);
+          
+          // Store error for debugging
+          setDebugInfo(prev => ({
+            ...prev,
+            errors: [...prev.errors, { timestamp: new Date().toISOString(), error: errorMsg }]
+          }));
+          
+          // Show user-friendly error for non-auth issues
+          if (quickCheck.step !== 'auth') {
+            Alert.alert(
+              'System Error', 
+              'Unable to load tenant context. Please try logging out and back in.',
+              [
+                { text: 'Retry', onPress: () => loadAllData() },
+                { text: 'OK' }
+              ]
+            );
+          }
+          
+          setLoading(false);
+          return;
+        }
+        
+        // If quick check succeeded but we still don't have tenantId in context
+        if (quickCheck.tenantId && !tenantId) {
+          console.warn('⚠️ ExamsMarks: TenantId available but not in context. Proceeding with direct ID...');
+          // We'll use the tenantId from quickCheck.tenantId below
+        }
+      }
+      
+      setLoading(true);
+      console.log('🚀 ExamsMarks: Starting optimized progressive data loading...');
+      
+      // Get effective tenant ID (from context or quick check)
+      const effectiveTenantId = tenantId || (await quickTenantCheck()).tenantId;
+      
+      if (!effectiveTenantId) {
+        console.error('❌ ExamsMarks: No effective tenant ID available');
         setLoading(false);
         return;
       }
       
-      setLoading(true);
+      console.log('✅ ExamsMarks: Using effective tenant ID:', effectiveTenantId);
       
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ExamsMarks - loadAllData');
+      const validation = await validateTenantAccess(user?.id, effectiveTenantId, 'ExamsMarks - loadAllData');
       if (!validation.isValid) {
         console.error('❌ ExamsMarks loadAllData: Tenant validation failed:', validation.error);
         Alert.alert('Access Denied', validation.error);
         setLoading(false);
         return;
       }
-
-      // Load exams with class information using tenant-aware query
-      const { data: examsData, error: examsError } = await createTenantQuery(tenantId, 'exams')
-        .select(`
-          id, 
-          name, 
-          class_id, 
-          academic_year, 
-          start_date, 
-          end_date, 
-          remarks, 
-          max_marks,
-          tenant_id,
-          created_at,
-          classes!inner(
-            id,
-            class_name,
-            section
-          )
-        `)
-        .execute();
-
-      if (examsError) throw examsError;
-
-      // Load classes using tenant-aware query
-      const { data: classesData, error: classesError } = await createTenantQuery(tenantId, 'classes')
-        .select('id, class_name, section, academic_year, class_teacher_id, tenant_id, created_at')
-        .execute();
-
-      if (classesError) throw classesError;
-
-      // Load subjects using tenant-aware query
-      const { data: subjectsData, error: subjectsError } = await createTenantQuery(tenantId, 'subjects')
-        .select('id, name, class_id, academic_year, is_optional, tenant_id, created_at')
-        .execute();
-
-      if (subjectsError) throw subjectsError;
-
-      // Load students using tenant-aware query
-      const { data: studentsData, error: studentsError } = await createTenantQuery(tenantId, 'students')
-        .select('id, admission_no, name, roll_no, class_id, academic_year, tenant_id, created_at')
-        .execute();
-
-      if (studentsError) throw studentsError;
-
-      // Load marks using tenant-aware query
-      const { data: marksData, error: marksError } = await createTenantQuery(tenantId, 'marks')
-        .select('id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks, tenant_id, created_at')
-        .execute();
-
-      if (marksError) throw marksError;
-
-      // 🛡️ DEBUG: Log current tenant ID and sample data for debugging
-      console.log('🔍 [DEBUG] Current tenantId:', tenantId);
-      console.log('🔍 [DEBUG] Current tenantId type:', typeof tenantId);
       
-      if (examsData && examsData.length > 0) {
-        console.log('🔍 [DEBUG] First exam record:', {
-          id: examsData[0].id,
-          name: examsData[0].name,
-          tenant_id: examsData[0].tenant_id,
-          tenant_id_type: typeof examsData[0].tenant_id
-        });
-        console.log('🔍 [DEBUG] All exam tenant_ids:', examsData.map(exam => exam.tenant_id));
-        console.log('🔍 [DEBUG] Tenant ID comparison:', {
-          expected: tenantId,
-          actual: examsData[0].tenant_id,
-          areEqual: examsData[0].tenant_id === tenantId,
-          strictEqual: examsData[0].tenant_id === tenantId
-        });
-      }
+      // Use imported progressive loading function
       
-      // 🛡️ Validate all data belongs to correct tenant
-      const dataValidations = [
-        { data: examsData, name: 'ExamsMarks - Exams' },
-        { data: classesData, name: 'ExamsMarks - Classes' },
-        { data: subjectsData, name: 'ExamsMarks - Subjects' },
-        { data: studentsData, name: 'ExamsMarks - Students' },
-        { data: marksData, name: 'ExamsMarks - Marks' }
-      ];
+      const startTime = Date.now();
       
-      for (const { data, name } of dataValidations) {
-        if (data && data.length > 0) {
-          const isValid = validateDataTenancy(data, tenantId, name);
-          if (!isValid) {
-            Alert.alert('Data Security Alert', `${name.split(' - ')[1]} data validation failed. Please contact administrator.`);
-            // Reset all data on validation failure
-            setExams([]);
-            setClasses([]);
-            setSubjects([]);
-            setStudents([]);
-            setMarks([]);
-            return;
+      // Use progressive loading with callbacks for immediate UI updates
+      const result = await loadExamsMarksDataProgressive(effectiveTenantId, {
+        onCriticalDataLoaded: (data) => {
+          console.log('📊 ExamsMarks: Critical data loaded, updating UI...');
+          setLoadingStage('Loading exams and classes...');
+          setExams(data.exams || []);
+          setClasses(data.classes || []);
+          // Reduce loading state for better UX - UI can display exams and classes immediately
+          if (data.exams?.length > 0 || data.classes?.length > 0) {
+            setLoading(false); // Allow UI interaction while background loading continues
+            setLoadingStage('Loading subjects...'); // Show what's loading next
           }
+        },
+        
+        onSecondaryDataLoaded: (data) => {
+          console.log('📊 ExamsMarks: Secondary data loaded, updating subjects...');
+          setLoadingStage('Loading students and marks...');
+          setSubjects(data.subjects || []);
+        },
+        
+        onHeavyDataLoaded: (data) => {
+          console.log('📊 ExamsMarks: Heavy data loaded, updating students and marks...');
+          setLoadingStage('Finalizing...');
+          setStudents(data.students || []);
+          setMarks(data.marks || []);
+          // Check if we loaded the full initial batch (500)
+          setHasMoreStudents(data.students?.length === 500);
+        },
+        
+        onComplete: (allData) => {
+          console.log('✅ ExamsMarks: All data loading complete');
+          setLoadingStage('');
+          logQueryPerformance('ExamsMarks - Complete Load', startTime, 
+            Object.values(allData).reduce((total, arr) => total + (arr?.length || 0), 0));
+        },
+        
+        onError: (error) => {
+          console.error('❌ ExamsMarks: Progressive loading failed:', error);
+          setLoadingStage('');
+          Alert.alert('Loading Error', `Failed to load some data: ${error}`);
         }
+      });
+      
+      if (result.success) {
+        // Final data validation and assignment
+        const { exams: examsData, classes: classesData, subjects: subjectsData, students: studentsData, marks: marksData } = result.data;
+        
+        // 🛡️ Final validation (data already validated in progressive loader)
+        console.log('📊 ExamsMarks: Final data loaded:', {
+          exams: examsData?.length || 0,
+          classes: classesData?.length || 0,
+          subjects: subjectsData?.length || 0,
+          students: studentsData?.length || 0,
+          marks: marksData?.length || 0
+        });
+        
+        // Set final data (some may already be set by callbacks)
+        setExams(examsData || []);
+        setClasses(classesData || []);
+        setSubjects(subjectsData || []);
+        setStudents(studentsData || []);
+        setMarks(marksData || []);
+        
+      } else {
+        console.error('❌ ExamsMarks: Progressive loading failed completely:', result.error);
+        Alert.alert('Error', 'Failed to load exam and marks data');
+        
+        // Reset data on complete failure
+        setExams([]);
+        setClasses([]);
+        setSubjects([]);
+        setStudents([]);
+        setMarks([]);
       }
-
-      // Set validated data
-      setExams(examsData || []);
-      setClasses(classesData || []);
-      setSubjects(subjectsData || []);
-      setStudents(studentsData || []);
-      setMarks(marksData || []);
 
     } catch (error) {
-      console.error('Error loading data:', error);
-      Alert.alert('Error', 'Failed to load data');
+      console.error('❌ ExamsMarks: Unexpected error in loadAllData:', error);
+      Alert.alert('Error', 'An unexpected error occurred while loading data');
+      
+      // Reset data on error
+      setExams([]);
+      setClasses([]);
+      setSubjects([]);
+      setStudents([]);
+      setMarks([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // Refresh data
+  // 🩺 Run diagnostic function
+  const handleDiagnostic = async () => {
+    try {
+      console.log('🩺 Running comprehensive diagnostic from ExamsMarks...');
+      const result = await runTenantDataDiagnostics();
+      
+      Alert.alert(
+        'Diagnostic Complete',
+        `System Health Check:\n\n` +
+        `✅ Passed: ${result.summary.passed}\n` +
+        `❌ Failed: ${result.summary.failed}\n` +
+        `⚠️ Warnings: ${result.summary.warnings}\n` +
+        `📊 Success Rate: ${Math.round((result.summary.passed / result.summary.totalTests) * 100)}%\n\n` +
+        `Check console for detailed report.`,
+        [
+          { text: 'View Errors', onPress: () => {
+            if (result.errors.length > 0) {
+              Alert.alert('Errors Found', result.errors.map(e => `• ${e.test}: ${e.message}`).join('\n'));
+            } else {
+              Alert.alert('No Errors', 'All systems are working correctly!');
+            }
+          }},
+          { text: 'OK' }
+        ]
+      );
+      
+    } catch (error) {
+      Alert.alert('Diagnostic Error', `Failed to run diagnostic: ${error.message}`);
+    }
+  };
+  
+  // 🚀 Load more students with pagination
+  const loadMoreStudents = async () => {
+    if (!tenantId || loadingMoreStudents || !hasMoreStudents) return;
+    
+    try {
+      setLoadingMoreStudents(true);
+      console.log('🔄 Loading more students...', { currentCount: students.length });
+      
+      const result = await loadMoreStudents(tenantId, students.length, 100);
+      
+      if (result.success && result.data.length > 0) {
+        setStudents(prevStudents => [...prevStudents, ...result.data]);
+        setHasMoreStudents(result.hasMore);
+        console.log('✅ Loaded additional students:', result.data.length);
+      } else {
+        setHasMoreStudents(false);
+        if (!result.success) {
+          console.warn('⚠️ Load more students failed:', result.error);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error loading more students:', error);
+      setHasMoreStudents(false);
+    } finally {
+      setLoadingMoreStudents(false);
+    }
+  };
+  
+  // Refresh data with cache clearing
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadAllData();
-    setRefreshing(false);
+    
+    try {
+      // Clear cache for fresh data
+      clearDataCache();
+      console.log('🧹 Cache cleared for fresh data reload');
+      
+      // Reset pagination state
+      setHasMoreStudents(true);
+      setLoadingStage('');
+      
+      await loadAllData();
+    } catch (error) {
+      console.error('❌ Error during refresh:', error);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
+  // 🔍 Set up tenant monitoring for debugging
+  useEffect(() => {
+    console.log('🔍 ExamsMarks: Setting up tenant monitoring...');
+    
+    // Set up tenant state monitoring
+    tenantMonitorRef.current = createTenantMonitor((currentState, previousState) => {
+      console.log('📊 ExamsMarks: Tenant state changed:', {
+        previous: previousState?.success || 'none',
+        current: currentState?.success || 'none',
+        tenantId: currentState?.tenantId || 'none'
+      });
+      
+      setDebugInfo(prev => ({
+        ...prev,
+        tenantCheckCount: prev.tenantCheckCount + 1,
+        lastTenantCheck: currentState.timestamp
+      }));
+      
+      // If tenant context becomes available and we haven't loaded data yet
+      if (currentState.success && currentState.tenantId && (!previousState?.success || exams.length === 0)) {
+        console.log('✅ ExamsMarks: Tenant context now available, triggering data load...');
+        loadAllData();
+      }
+    });
+    
+    // Cleanup monitor on unmount
+    return () => {
+      if (tenantMonitorRef.current) {
+        console.log('🔍 ExamsMarks: Cleaning up tenant monitor...');
+        tenantMonitorRef.current();
+      }
+    };
+  }, []);
+  
   // Load data when tenantId is available
   useEffect(() => {
+    console.log('🔄 ExamsMarks: useEffect triggered - tenantId change detected:', {
+      tenantId: tenantId || 'NOT_SET',
+      examsLoaded: exams.length > 0,
+      loading: loading
+    });
+    
     if (tenantId) {
       console.log('🔄 ExamsMarks: tenantId available, loading data...');
       loadAllData();
     } else {
-      console.log('⏳ ExamsMarks: Waiting for tenantId to become available...');
+      console.log('⏳ ExamsMarks: No tenantId - will wait for tenant monitor to detect availability...');
     }
   }, [tenantId]); // Add tenantId as dependency
 
-  // Add debugging for button functions
+  // Enhanced debugging for state changes
   useEffect(() => {
-    console.log('📊 ExamsMarks state:', {
+    console.log('📊 ExamsMarks state update:', {
       loading,
       examsCount: exams.length,
       classesCount: classes.length,
       studentsCount: students.length,
-      subjectsCount: subjects.length
+      subjectsCount: subjects.length,
+      tenantId: tenantId || 'NOT_SET',
+      loadingStage: loadingStage || 'none',
+      debugInfo: {
+        tenantCheckCount: debugInfo.tenantCheckCount,
+        tenantLoadAttempts: debugInfo.tenantLoadAttempts,
+        errorCount: debugInfo.errors.length,
+        lastTenantCheck: debugInfo.lastTenantCheck
+      }
     });
-  }, [loading, exams.length, classes.length, students.length, subjects.length]);
+    
+    // Log specific milestones
+    if (exams.length > 0 && !loading) {
+    console.log('✅ ExamsMarks: Data loaded successfully!');
+    }
+    if (loading && loadingStage) {
+      console.log(`🔄 ExamsMarks: ${loadingStage}`);
+    }
+  }, [loading, exams.length, classes.length, students.length, subjects.length, loadingStage, debugInfo]);
+  
+  // 🛡️ Show fallback UI for severe tenant issues (only after multiple failures)
+  if (debugInfo.errors.length > 3 && exams.length === 0 && !loading) {
+    const latestError = debugInfo.errors[debugInfo.errors.length - 1];
+    console.warn('⚠️ ExamsMarks: Showing error fallback due to repeated failures:', latestError.error);
+    
+    return (
+      <View style={{ flex: 1 }}>
+        <Header title="Exams & Marks" />
+        <TenantLoadingFallback
+          loading={false}
+          error={`System Error: ${latestError.error}`}
+          onRetry={loadAllData}
+          onDiagnostic={handleDiagnostic}
+          title="Unable to Load Exams"
+          message="There was a problem loading the exam data. This could be due to a tenant context issue or database connectivity problem."
+        />
+      </View>
+    );
+  }
 
   // Helper functions
   const getStudentsForClass = (classId) => {
@@ -810,41 +1020,173 @@ const ExamsMarks = () => {
     }
   };
 
-  // Add new student
+  // Add new student - Open modal with reset form
   const handleAddStudent = () => {
     console.log('Add Student button clicked');
+    
+    // Reset form data
     setNewStudentName('');
+    setNewStudentRollNo('');
+    setNewStudentEmail('');
+    setStudentFormErrors({});
+    setAddingStudent(false);
+    
+    // Auto-generate next roll number
+    if (selectedClassForMarks) {
+      const classStudents = students.filter(s => s.class_id === selectedClassForMarks.id);
+      const maxRollNo = Math.max(0, ...classStudents.map(s => parseInt(s.roll_no) || 0));
+      setNewStudentRollNo((maxRollNo + 1).toString());
+    }
+    
     setAddStudentModalVisible(true);
   };
 
-  // Save new student
-  const handleSaveNewStudent = () => {
+  // Validate student form
+  const validateStudentForm = () => {
+    const errors = {};
+    
+    // Required field validations
     if (!newStudentName?.trim()) {
-      Alert.alert('Error', 'Please enter a student name');
-      return;
+      errors.name = 'Student name is required';
+    } else if (newStudentName.trim().length < 2) {
+      errors.name = 'Student name must be at least 2 characters';
     }
-
-    try {
+    
+    if (!newStudentRollNo?.trim()) {
+      errors.rollNo = 'Roll number is required';
+    } else if (isNaN(parseInt(newStudentRollNo))) {
+      errors.rollNo = 'Roll number must be a valid number';
+    } else {
+      // Check for duplicate roll number in the same class
       const classStudents = students.filter(s => s.class_id === selectedClassForMarks?.id);
-      const newStudent = {
-        id: `student-${Date.now()}`,
-        name: newStudentName.trim(),
-        class_id: selectedClassForMarks?.id,
-        roll_no: classStudents.length + 1,
-        date_of_birth: null,
-        gender: null,
-        address: null,
-        phone: null,
-        email: null,
-        admission_date: new Date().toISOString().split('T')[0]
-      };
+      const isDuplicate = classStudents.some(s => s.roll_no?.toString() === newStudentRollNo.trim());
+      if (isDuplicate) {
+        errors.rollNo = `Roll number ${newStudentRollNo} already exists in this class`;
+      }
+    }
+    
+    if (!selectedClassForMarks) {
+      errors.class = 'Please select a class first';
+    }
+    
+    // Optional email validation
+    if (newStudentEmail?.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(newStudentEmail.trim())) {
+        errors.email = 'Please enter a valid email address';
+      }
+    }
+    
+    return errors;
+  };
 
-      setStudents(prev => [...prev, newStudent]);
+  // Save new student with database integration
+  const handleSaveNewStudent = async () => {
+    try {
+      console.log('🔄 Starting student creation process...');
+      setAddingStudent(true);
+      setStudentFormErrors({});
+      
+      // Validate form
+      const formErrors = validateStudentForm();
+      if (Object.keys(formErrors).length > 0) {
+        setStudentFormErrors(formErrors);
+        setAddingStudent(false);
+        
+        // Show first error in alert
+        const firstError = Object.values(formErrors)[0];
+        Alert.alert('Validation Error', firstError);
+        return;
+      }
+      
+      // Validate tenant access
+      if (!tenantId) {
+        Alert.alert('Error', 'Unable to determine tenant context. Please try signing out and back in.');
+        setAddingStudent(false);
+        return;
+      }
+      
+      const validation = await validateTenantAccess(user?.id, tenantId, 'ExamsMarks - handleSaveNewStudent');
+      if (!validation.isValid) {
+        Alert.alert('Access Denied', validation.error);
+        setAddingStudent(false);
+        return;
+      }
+      
+      // Prepare student data
+      const currentDate = new Date();
+      const studentData = {
+        name: newStudentName.trim(),
+        roll_no: newStudentRollNo.trim(),
+        class_id: selectedClassForMarks.id,
+        email: newStudentEmail?.trim() || null,
+        academic_year: '2024-25',
+        admission_date: currentDate.toISOString().split('T')[0],
+        status: 'active',
+        tenant_id: tenantId,
+        created_at: currentDate.toISOString(),
+        updated_at: currentDate.toISOString()
+      };
+      
+      console.log('🔄 Inserting student into database:', studentData);
+      
+      // Insert into database
+      const { data: insertedStudent, error: insertError } = await supabase
+        .from('students')
+        .insert([studentData])
+        .select()
+        .single();
+      
+      if (insertError) {
+        console.error('❌ Database insertion failed:', insertError);
+        
+        // Handle specific database errors
+        let errorMessage = 'Failed to add student to database';
+        if (insertError.code === '23505') {
+          errorMessage = 'A student with this roll number already exists in this class';
+        } else if (insertError.message.includes('tenant_id')) {
+          errorMessage = 'Invalid tenant context. Please try logging out and back in.';
+        }
+        
+        Alert.alert('Database Error', errorMessage);
+        setAddingStudent(false);
+        return;
+      }
+      
+      console.log('✅ Student created successfully in database:', insertedStudent);
+      
+      // Update local state
+      setStudents(prev => [...prev, insertedStudent]);
+      
+      // Close modal and reset form
       setAddStudentModalVisible(false);
       setNewStudentName('');
-      Alert.alert('Success', `Student "${newStudentName}" added successfully!`);
+      setNewStudentRollNo('');
+      setNewStudentEmail('');
+      setStudentFormErrors({});
+      
+      // Show success message
+      Alert.alert(
+        'Success! 🎉',
+        `Student "${newStudentName.trim()}" has been successfully added to ${selectedClassForMarks.class_name}.\n\nRoll Number: ${newStudentRollNo}`,
+        [
+          { text: 'Great!', style: 'default' }
+        ]
+      );
+      
+      // Refresh the exam data to ensure consistency
+      console.log('🔄 Refreshing student data after successful addition...');
+      await loadAllData();
+      
     } catch (error) {
-      Alert.alert('Error', 'Failed to add student');
+      console.error('❌ Unexpected error in handleSaveNewStudent:', error);
+      
+      Alert.alert(
+        'Error',
+        `An unexpected error occurred while adding the student: ${error.message}\n\nPlease try again or contact support if the problem persists.`
+      );
+    } finally {
+      setAddingStudent(false);
     }
   };
 
@@ -1034,6 +1376,10 @@ const ExamsMarks = () => {
   // State for add student modal
   const [addStudentModalVisible, setAddStudentModalVisible] = useState(false);
   const [newStudentName, setNewStudentName] = useState('');
+  const [newStudentRollNo, setNewStudentRollNo] = useState('');
+  const [newStudentEmail, setNewStudentEmail] = useState('');
+  const [addingStudent, setAddingStudent] = useState(false);
+  const [studentFormErrors, setStudentFormErrors] = useState({});
 
   // State for add subject modal
   const [addSubjectModalVisible, setAddSubjectModalVisible] = useState(false);
@@ -1181,24 +1527,27 @@ const ExamsMarks = () => {
     );
   };
 
-  // Clean up and simplify - remove unused functions
-
-
-
-  // ... rest of the component logic remains unchanged, but ensure no duplicate or mock data blocks exist ...
-
+  // 🛡️ Loading state
   if (loading) {
     return (
       <View style={styles.container}>
         <Header title="Exams & Marks" showBack={true} onBack={() => navigation.goBack()} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2196F3" />
-          <Text style={styles.loadingText}>Loading exams and marks...</Text>
+          <Text style={styles.loadingText}>
+            {loadingStage || 'Loading exams and marks...'}
+          </Text>
+          {loadingStage && (
+            <Text style={styles.loadingSubText}>
+              🚀 Using optimized progressive loading for better performance
+            </Text>
+          )}
         </View>
       </View>
     );
   }
 
+  // ✅ Main component render
   return (
     <View style={styles.container}>
       <Header title="Exams & Marks" showBack={true} onBack={() => navigation.goBack()} />
@@ -1754,39 +2103,64 @@ const ExamsMarks = () => {
                           </TouchableOpacity>
                         </View>
                       ) : (
-                        getStudentsForClass(selectedClassForMarks?.id).map(student => (
-                          <View key={student.id} style={styles.tableRow}>
-                            <View style={styles.studentCell}>
-                              <Text style={styles.studentName} numberOfLines={1}>{student.name}</Text>
-                              <Text style={styles.studentRollNumber}>(#{student.roll_no || student.id})</Text>
+                        <>
+                          {getStudentsForClass(selectedClassForMarks?.id).map(student => (
+                            <View key={student.id} style={styles.tableRow}>
+                              <View style={styles.studentCell}>
+                                <Text style={styles.studentName} numberOfLines={1}>{student.name}</Text>
+                                <Text style={styles.studentRollNumber}>(#{student.roll_no || student.id})</Text>
+                              </View>
+
+                              {subjects
+                                .filter(subject => subject.class_id === selectedClassForMarks?.id)
+                                .map(subject => (
+                                  <View key={subject.id} style={styles.markCell}>
+                                    <TextInput
+                                      style={styles.markInput}
+                                      placeholder="0"
+                                      value={marksForm[student.id]?.[subject.id] || ''}
+                                      onChangeText={(value) => handleMarksChange(student.id, subject.id, value)}
+                                      keyboardType="numeric"
+                                      maxLength={3}
+                                    />
+                                  </View>
+                                ))}
+
+                              <View style={styles.actionCell}>
+                                <TouchableOpacity
+                                  style={styles.reportButton}
+                                  onPress={() => handleGenerateReport(student)}
+                                >
+                                  <Ionicons name="document-text" size={16} color="#fff" />
+                                  <Text style={styles.reportButtonText}>Report</Text>
+                                </TouchableOpacity>
+                              </View>
                             </View>
-
-                            {subjects
-                              .filter(subject => subject.class_id === selectedClassForMarks?.id)
-                              .map(subject => (
-                                <View key={subject.id} style={styles.markCell}>
-                                  <TextInput
-                                    style={styles.markInput}
-                                    placeholder="0"
-                                    value={marksForm[student.id]?.[subject.id] || ''}
-                                    onChangeText={(value) => handleMarksChange(student.id, subject.id, value)}
-                                    keyboardType="numeric"
-                                    maxLength={3}
-                                  />
-                                </View>
-                              ))}
-
-                            <View style={styles.actionCell}>
-                              <TouchableOpacity
-                                style={styles.reportButton}
-                                onPress={() => handleGenerateReport(student)}
+                          ))}
+                          
+                          {/* 🚀 Load More Students Button */}
+                          {hasMoreStudents && (
+                            <View style={styles.loadMoreContainer}>
+                              <TouchableOpacity 
+                                style={styles.loadMoreButton}
+                                onPress={loadMoreStudents}
+                                disabled={loadingMoreStudents}
                               >
-                                <Ionicons name="document-text" size={16} color="#fff" />
-                                <Text style={styles.reportButtonText}>Report</Text>
+                                {loadingMoreStudents ? (
+                                  <ActivityIndicator size="small" color="#2196F3" />
+                                ) : (
+                                  <Ionicons name="arrow-down-circle" size={20} color="#2196F3" />
+                                )}
+                                <Text style={styles.loadMoreText}>
+                                  {loadingMoreStudents ? 'Loading...' : `Load More Students (${students.length} loaded)`}
+                                </Text>
                               </TouchableOpacity>
+                              <Text style={styles.loadMoreSubText}>
+                                🚀 Optimized loading for better performance
+                              </Text>
                             </View>
-                          </View>
-                        ))
+                          )}
+                        </>
                       )}
                     </ScrollView>
                   </View>
@@ -1933,41 +2307,162 @@ const ExamsMarks = () => {
         </View>
       </Modal>
 
-      {/* Add Student Modal */}
+      {/* Add Student Modal - Enhanced */}
       <Modal
         visible={addStudentModalVisible}
         animationType="slide"
         transparent={true}
+        onRequestClose={() => {
+          if (!addingStudent) {
+            setAddStudentModalVisible(false);
+          }
+        }}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.addClassModal}>
-            <Text style={styles.addClassModalTitle}>Add New Student</Text>
+          <View style={[styles.addClassModal, { maxWidth: 400, width: '90%' }]}>
+            {/* Modal Header */}
+            <View style={styles.addStudentHeader}>
+              <Ionicons name="person-add" size={24} color="#2196F3" />
+              <Text style={styles.addClassModalTitle}>Add New Student</Text>
+              {selectedClassForMarks && (
+                <Text style={styles.addStudentClassInfo}>
+                  to {selectedClassForMarks.class_name}
+                </Text>
+              )}
+            </View>
 
-            <Text style={styles.addClassLabel}>Student Name</Text>
-            <TextInput
-              style={styles.addClassInput}
-              placeholder="e.g., John Doe, Mary Smith"
-              value={newStudentName}
-              onChangeText={setNewStudentName}
-              autoFocus={true}
-            />
+            <ScrollView style={styles.addStudentScrollView} showsVerticalScrollIndicator={false}>
+              {/* Student Name Field */}
+              <View style={styles.addStudentFieldContainer}>
+                <Text style={[styles.addClassLabel, studentFormErrors.name && styles.errorLabel]}>
+                  Student Name *
+                </Text>
+                <TextInput
+                  style={[
+                    styles.addClassInput,
+                    studentFormErrors.name && styles.errorInput
+                  ]}
+                  placeholder="Enter full name (e.g., John Doe)"
+                  value={newStudentName}
+                  onChangeText={(text) => {
+                    setNewStudentName(text);
+                    if (studentFormErrors.name) {
+                      setStudentFormErrors(prev => ({ ...prev, name: null }));
+                    }
+                  }}
+                  autoFocus={true}
+                  editable={!addingStudent}
+                  maxLength={100}
+                />
+                {studentFormErrors.name && (
+                  <Text style={styles.errorText}>{studentFormErrors.name}</Text>
+                )}
+              </View>
 
+              {/* Roll Number Field */}
+              <View style={styles.addStudentFieldContainer}>
+                <Text style={[styles.addClassLabel, studentFormErrors.rollNo && styles.errorLabel]}>
+                  Roll Number *
+                </Text>
+                <TextInput
+                  style={[
+                    styles.addClassInput,
+                    studentFormErrors.rollNo && styles.errorInput
+                  ]}
+                  placeholder="Enter roll number (e.g., 1, 2, 3...)"
+                  value={newStudentRollNo}
+                  onChangeText={(text) => {
+                    setNewStudentRollNo(text);
+                    if (studentFormErrors.rollNo) {
+                      setStudentFormErrors(prev => ({ ...prev, rollNo: null }));
+                    }
+                  }}
+                  keyboardType="numeric"
+                  editable={!addingStudent}
+                  maxLength={10}
+                />
+                {studentFormErrors.rollNo && (
+                  <Text style={styles.errorText}>{studentFormErrors.rollNo}</Text>
+                )}
+              </View>
+
+              {/* Email Field (Optional) */}
+              <View style={styles.addStudentFieldContainer}>
+                <Text style={[styles.addClassLabel, studentFormErrors.email && styles.errorLabel]}>
+                  Email (Optional)
+                </Text>
+                <TextInput
+                  style={[
+                    styles.addClassInput,
+                    studentFormErrors.email && styles.errorInput
+                  ]}
+                  placeholder="Enter email address (optional)"
+                  value={newStudentEmail}
+                  onChangeText={(text) => {
+                    setNewStudentEmail(text);
+                    if (studentFormErrors.email) {
+                      setStudentFormErrors(prev => ({ ...prev, email: null }));
+                    }
+                  }}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  editable={!addingStudent}
+                  maxLength={100}
+                />
+                {studentFormErrors.email && (
+                  <Text style={styles.errorText}>{studentFormErrors.email}</Text>
+                )}
+              </View>
+
+              {/* Info Text */}
+              <View style={styles.addStudentInfoContainer}>
+                <Ionicons name="information-circle" size={16} color="#666" />
+                <Text style={styles.addStudentInfoText}>
+                  The student will be added to {selectedClassForMarks?.class_name || 'the selected class'} for the current academic year (2024-25).
+                </Text>
+              </View>
+            </ScrollView>
+
+            {/* Modal Actions */}
             <View style={styles.addClassModalButtons}>
               <TouchableOpacity
                 style={[styles.addClassModalButton, styles.cancelButton]}
                 onPress={() => {
-                  setAddStudentModalVisible(false);
-                  setNewStudentName('');
+                  if (!addingStudent) {
+                    setAddStudentModalVisible(false);
+                    setNewStudentName('');
+                    setNewStudentRollNo('');
+                    setNewStudentEmail('');
+                    setStudentFormErrors({});
+                  }
                 }}
+                disabled={addingStudent}
               >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+                <Text style={[styles.cancelButtonText, addingStudent && styles.disabledButtonText]}>
+                  Cancel
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.addClassModalButton, styles.saveButton]}
+                style={[
+                  styles.addClassModalButton, 
+                  styles.saveButton,
+                  addingStudent && styles.loadingButton
+                ]}
                 onPress={handleSaveNewStudent}
+                disabled={addingStudent}
               >
-                <Text style={styles.saveButtonText}>Add Student</Text>
+                {addingStudent ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.saveButtonText}>Adding...</Text>
+                  </View>
+                ) : (
+                  <View style={styles.saveButtonContent}>
+                    <Ionicons name="person-add" size={16} color="#fff" />
+                    <Text style={styles.saveButtonText}>Add Student</Text>
+                  </View>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -2138,6 +2633,51 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     marginTop: 12,
+  },
+  // 🚀 Progressive loading styles
+  loadingSubText: {
+    fontSize: 14,
+    color: '#888',
+    marginTop: 8,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  // 🚀 Load More Students styles
+  loadMoreContainer: {
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    backgroundColor: '#f9f9f9',
+  },
+  loadMoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  loadMoreText: {
+    fontSize: 14,
+    color: '#2196F3',
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  loadMoreSubText: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 6,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
   // Statistics Section
   statsSection: {
@@ -3695,6 +4235,81 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     textAlign: 'center',
+  },
+  
+  // Enhanced Add Student Modal Styles
+  addStudentHeader: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  addStudentClassInfo: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  addStudentScrollView: {
+    maxHeight: 300,
+    marginBottom: 20,
+  },
+  addStudentFieldContainer: {
+    marginBottom: 16,
+  },
+  addStudentInfoContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#f8f9fa',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#2196F3',
+  },
+  addStudentInfoText: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 8,
+    flex: 1,
+    lineHeight: 16,
+  },
+  
+  // Error Handling Styles
+  errorLabel: {
+    color: '#F44336',
+    fontWeight: '600',
+  },
+  errorInput: {
+    borderColor: '#F44336',
+    borderWidth: 2,
+    backgroundColor: '#ffebee',
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#F44336',
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  
+  // Loading States
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingButton: {
+    opacity: 0.7,
+  },
+  disabledButtonText: {
+    opacity: 0.5,
+  },
+  saveButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 

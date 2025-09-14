@@ -1,8 +1,24 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, Animated, RefreshControl } from 'react-native';
+import { 
+  View, 
+  Text, 
+  FlatList, 
+  ScrollView,
+  TouchableOpacity, 
+  TextInput,
+  StyleSheet, 
+  ActivityIndicator, 
+  Alert, 
+  Platform, 
+  Animated, 
+  RefreshControl,
+  Dimensions
+} from 'react-native';
 import Header from '../../components/Header';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../utils/supabase';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const StudentList = ({ route, navigation }) => {
   const { classId, className, section } = route.params || {};
@@ -11,9 +27,12 @@ const StudentList = ({ route, navigation }) => {
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredStudents, setFilteredStudents] = useState([]);
   
-  // Refs for scroll functionality
-  const flatListRef = useRef(null);
+  // Animation values
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scrollViewRef = useRef(null);
   const scrollTopOpacity = useRef(new Animated.Value(0)).current;
 
   // Move fetchStudents outside useEffect to make it reusable
@@ -54,6 +73,15 @@ const StudentList = ({ route, navigation }) => {
       }
       
       setStudents(data || []);
+      setFilteredStudents(data || []);
+      
+      // Animate content in
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+      
     } catch (err) {
       console.error('Error fetching students:', err);
       setError('Failed to load students.');
@@ -78,51 +106,88 @@ const StudentList = ({ route, navigation }) => {
     setRefreshing(false);
   };
 
-  // Scroll event handler for scroll-to-top button
+  // Search functionality
+  const handleSearch = (query) => {
+    setSearchQuery(query);
+    if (query.trim() === '') {
+      setFilteredStudents(students);
+    } else {
+      const filtered = students.filter(student => 
+        student.name.toLowerCase().includes(query.toLowerCase()) ||
+        student.roll_no?.toString().includes(query) ||
+        student.parents?.name?.toLowerCase().includes(query.toLowerCase())
+      );
+      setFilteredStudents(filtered);
+    }
+  };
+  
+  // Scroll event handler
   const handleScroll = (event) => {
     const offsetY = event.nativeEvent.contentOffset.y;
-    const shouldShow = offsetY > (Platform.OS === 'web' ? 100 : 150);
+    const shouldShow = offsetY > 150;
     
     if (shouldShow !== showScrollTop) {
       setShowScrollTop(shouldShow);
       Animated.timing(scrollTopOpacity, {
         toValue: shouldShow ? 1 : 0,
         duration: 300,
-        useNativeDriver: false,
+        useNativeDriver: Platform.OS !== 'web',
       }).start();
     }
   };
 
   // Scroll to top function
   const scrollToTop = () => {
-    if (flatListRef.current) {
-      flatListRef.current.scrollToOffset({ animated: true, offset: 0 });
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({ y: 0, animated: true });
     }
   };
 
-  const renderStudent = ({ item }) => (
+  const renderStudent = (item, index) => (
     <TouchableOpacity
-      style={styles.card}
+      key={item.id}
+      style={styles.studentCard}
       onPress={() => {
         console.log('StudentList: Navigating to StudentDetails with student:', item);
         console.log('StudentList: Student ID:', item.id);
         navigation.navigate('StudentDetails', { student: item });
       }}
     >
-      <View style={styles.avatar}>
-        <Ionicons name="person" size={28} color="#2196F3" />
+      <View style={styles.studentCardContent}>
+        <View style={styles.avatarContainer}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>
+              {item.name ? item.name.charAt(0).toUpperCase() : '?'}
+            </Text>
+          </View>
+        </View>
+        
+        <View style={styles.studentInfo}>
+          <Text style={styles.studentName}>{item.name}</Text>
+          <View style={styles.studentDetails}>
+            <View style={styles.detailRow}>
+              <Ionicons name="id-card" size={14} color="#666" />
+              <Text style={styles.detailText}>Roll No: {item.roll_no || 'N/A'}</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Ionicons name="school" size={14} color="#666" />
+              <Text style={styles.detailText}>
+                Class: {item.classes?.class_name} {item.classes?.section}
+              </Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Ionicons name="people" size={14} color="#666" />
+              <Text style={styles.detailText}>
+                Parent: {item.parents?.name || 'N/A'}
+              </Text>
+            </View>
+          </View>
+        </View>
+        
+        <View style={styles.chevronContainer}>
+          <Ionicons name="chevron-forward" size={20} color="#ccc" />
+        </View>
       </View>
-      <View style={styles.info}>
-        <Text style={styles.name}>{item.name}</Text>
-        <Text style={styles.detail}>Roll No: {item.roll_no || 'N/A'}</Text>
-        <Text style={styles.detail}>
-          Class: {item.classes?.class_name} {item.classes?.section}
-        </Text>
-        <Text style={styles.detail}>
-          Parent: {item.parents?.name || 'N/A'}
-        </Text>
-      </View>
-      <Ionicons name="chevron-forward" size={20} color="#999" />
     </TouchableOpacity>
   );
 
@@ -161,113 +226,158 @@ const StudentList = ({ route, navigation }) => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={styles.mainContainer}>
       <Header title="Students" showBack={true} />
       
-      <View style={styles.header}>
-        <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle}>Total Students: {students.length}</Text>
-          <Text style={styles.headerSubtitle}>
-            {className && section ? `Class: ${className} - Section ${section}` : `Class ID: ${classId}`}
-          </Text>
-        </View>
-      </View>
-
-      <FlatList
-        ref={flatListRef}
-        data={students}
-        renderItem={renderStudent}
-        keyExtractor={item => item.id.toString()}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={renderEmptyState}
-        showsVerticalScrollIndicator={Platform.OS === 'web'}
-        nestedScrollEnabled={true}
-        overScrollMode={Platform.OS === 'android' ? 'always' : 'never'}
-        scrollEventThrottle={Platform.OS === 'web' ? 50 : 16} // Less aggressive throttling on web
-        removeClippedSubviews={Platform.OS !== 'web'}
-        maxToRenderPerBatch={Platform.OS === 'web' ? 15 : 10} // More items per batch on web
-        windowSize={Platform.OS === 'web' ? 15 : 10} // Larger window on web
-        initialNumToRender={Platform.OS === 'web' ? 20 : 15} // More initial items on web
-        updateCellsBatchingPeriod={Platform.OS === 'web' ? 100 : 50} // Less frequent updates on web
-        onScroll={handleScroll}
-        // Web-specific optimizations
-        {...(Platform.OS === 'web' && {
-          keyboardShouldPersistTaps: 'handled',
-          maintainVisibleContentPosition: null,
-        })}
-        refreshControl={
-          <RefreshControl 
-            refreshing={refreshing} 
-            onRefresh={onRefresh}
-            colors={['#2196F3']}
-            progressBackgroundColor="#fff"
-          />
-        }
-        getItemLayout={Platform.OS === 'web' ? undefined : (data, index) => ({
-          length: 90, // Approximate item height
-          offset: 90 * index,
-          index,
-        })}
-      />
-      
-      {/* Scroll to Top Button */}
-      <Animated.View 
-        style={[
-          styles.scrollToTopButton,
-          {
-            opacity: scrollTopOpacity,
-            transform: [{
-              scale: scrollTopOpacity.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0.8, 1],
-              })
-            }]
+      {/* Main Content Container - Defines scrollable area */}
+      <View style={styles.scrollableContainer}>
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={true}
+          scrollEventThrottle={16}
+          onScroll={handleScroll}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#2196F3']}
+              progressBackgroundColor="#fff"
+            />
           }
-        ]}
-        pointerEvents={showScrollTop ? 'auto' : 'none'}
-      >
-        <TouchableOpacity
-          style={styles.scrollToTopInner}
-          onPress={scrollToTop}
-          activeOpacity={0.7}
         >
-          <Ionicons name="chevron-up" size={24} color="#fff" />
-        </TouchableOpacity>
-      </Animated.View>
+          {/* Header Statistics Card */}
+          <View style={styles.statsCard}>
+            <View style={styles.statItem}>
+              <Ionicons name="people" size={24} color="#2196F3" />
+              <View style={styles.statContent}>
+                <Text style={styles.statNumber}>{students.length}</Text>
+                <Text style={styles.statLabel}>Total Students</Text>
+              </View>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Ionicons name="school" size={24} color="#4CAF50" />
+              <View style={styles.statContent}>
+                <Text style={styles.statNumber}>{className || 'N/A'}</Text>
+                <Text style={styles.statLabel}>Class - Section {section}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Search Bar */}
+          <View style={styles.searchContainer}>
+            <View style={styles.searchInputContainer}>
+              <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search students by name, roll no, or parent..."
+                value={searchQuery}
+                onChangeText={handleSearch}
+                placeholderTextColor="#999"
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity 
+                  onPress={() => handleSearch('')}
+                  style={styles.clearButton}
+                >
+                  <Ionicons name="close-circle" size={20} color="#ccc" />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          {/* Students List */}
+          <Animated.View style={[styles.studentsContainer, { opacity: fadeAnim }]}>
+            {filteredStudents.length > 0 ? (
+              filteredStudents.map((student, index) => renderStudent(student, index))
+            ) : (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="people" size={64} color="#ccc" />
+                <Text style={styles.emptyText}>
+                  {searchQuery ? 'No students found' : 'No students in this class'}
+                </Text>
+                <Text style={styles.emptySubtext}>
+                  {searchQuery 
+                    ? 'Try adjusting your search criteria'
+                    : 'This class doesn\'t have any students yet'
+                  }
+                </Text>
+              </View>
+            )}
+          </Animated.View>
+
+          {/* Bottom spacing for better scrolling */}
+          <View style={styles.bottomSpacing} />
+        </ScrollView>
+        
+        {/* Scroll to top button - Web specific */}
+        {Platform.OS === 'web' && (
+          <Animated.View 
+            style={[
+              styles.scrollToTopButton,
+              { opacity: scrollTopOpacity }
+            ]}
+          >
+            <TouchableOpacity
+              style={styles.scrollToTopInner}
+              onPress={scrollToTop}
+            >
+              <Ionicons name="chevron-up" size={24} color="#fff" />
+            </TouchableOpacity>
+          </Animated.View>
+        )}
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  // Main container styles
+  mainContainer: {
+    flex: 1,
+    backgroundColor: '#f5f5f7',
+    ...(Platform.OS === 'web' && {
+      height: '100vh',
+      maxHeight: '100vh',
+      overflow: 'hidden',
+      position: 'relative',
+    }),
+  },
+  scrollableContainer: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: 'calc(100vh - 60px)', // Adjust based on header height
+      maxHeight: 'calc(100vh - 60px)',
+      overflow: 'hidden',
+    }),
+  },
+  scrollView: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: '100%',
+      maxHeight: '100%',
+      overflowY: 'scroll',
+      overflowX: 'hidden',
+      WebkitOverflowScrolling: 'touch',
+      scrollBehavior: 'smooth',
+      // Force scrollbar to always show
+      scrollbarWidth: 'thin',
+      scrollbarColor: '#2196F3 #f5f5f7',
+    }),
+  },
+  scrollContent: {
+    flexGrow: 1,
+    padding: 16,
+    paddingBottom: 100, // More bottom padding for scrollability
+  },
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f5f5f7',
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  headerInfo: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: '#666',
-  },
-  list: {
-    padding: 16,
-  },
+  
+  // Loading and error states
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -290,17 +400,159 @@ const styles = StyleSheet.create({
     color: '#f44336',
     textAlign: 'center',
   },
+  
+  // Statistics card
+  statsCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  statItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statContent: {
+    marginLeft: 12,
+  },
+  statNumber: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  statDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: '#e0e0e0',
+    marginHorizontal: 20,
+  },
+  
+  // Search container
+  searchContainer: {
+    marginBottom: 16,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  searchIcon: {
+    marginRight: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+    ...(Platform.OS === 'web' && {
+      outline: 'none',
+    }),
+  },
+  clearButton: {
+    padding: 4,
+  },
+  
+  // Students container
+  studentsContainer: {
+    flex: 1,
+  },
+  
+  // Student card styles
+  studentCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+    ...(Platform.OS === 'web' && {
+      cursor: 'pointer',
+      transition: 'all 0.2s ease',
+    }),
+  },
+  studentCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  avatarContainer: {
+    marginRight: 16,
+  },
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#2196F3',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  studentInfo: {
+    flex: 1,
+  },
+  studentName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  studentDetails: {
+    gap: 4,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  detailText: {
+    fontSize: 13,
+    color: '#666',
+    marginLeft: 8,
+  },
+  chevronContainer: {
+    marginLeft: 12,
+  },
+  
+  // Empty state
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 60,
+    paddingHorizontal: 20,
   },
   emptyText: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#666',
     marginTop: 16,
+    textAlign: 'center',
   },
   emptySubtext: {
     fontSize: 14,
@@ -308,66 +560,32 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
   },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 16,
-    marginBottom: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#e3f2fd',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-  },
-  info: {
-    flex: 1,
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 2,
-  },
-  detail: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 1,
+  
+  // Bottom spacing
+  bottomSpacing: {
+    height: 100, // Increased for better scrollability
   },
   
-  // Scroll to Top Button Styles
+  // Scroll to top button
   scrollToTopButton: {
     position: 'absolute',
+    bottom: 20,
     right: 20,
-    bottom: 30,
     zIndex: 1000,
   },
   scrollToTopInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: '#2196F3',
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
-    shadowRadius: 8,
-    // Enhanced visibility for web
+    shadowRadius: 4,
+    elevation: 4,
     ...(Platform.OS === 'web' && {
-      boxShadow: '0 6px 20px rgba(33, 150, 243, 0.4)',
-      border: '2px solid rgba(255, 255, 255, 0.2)',
       cursor: 'pointer',
       transition: 'all 0.2s ease',
     }),

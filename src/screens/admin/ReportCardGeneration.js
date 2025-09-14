@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   Dimensions,
   Platform,
   FlatList,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -45,7 +46,9 @@ const ReportCardGeneration = ({ navigation }) => {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [reportCardVisible, setReportCardVisible] = useState(false);
   const [generatingPDF, setGeneratingPDF] = useState(false);
-  const [studentsScrollY, setStudentsScrollY] = useState(0);
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
+  const [scrollY] = useState(new Animated.Value(0));
+  const scrollViewRef = useRef(null);
 
   // Listen for dimension changes on web
   useEffect(() => {
@@ -200,343 +203,417 @@ const ReportCardGeneration = ({ navigation }) => {
     return examData ? examData.name : 'Select Exam';
   };
 
-  const renderStudent = (student) => (
+  // Scroll management functions
+  const handleScroll = useCallback((event) => {
+    const currentScrollY = event.nativeEvent.contentOffset.y;
+    scrollY.setValue(currentScrollY);
+    setShowScrollToTop(currentScrollY > 300);
+  }, [scrollY]);
+
+  const scrollToTop = useCallback(() => {
+    scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+  }, []);
+
+  const scrollToStudents = useCallback(() => {
+    if (selectedClass && selectedExam && students.length > 0) {
+      // Approximate scroll position to students section
+      scrollViewRef.current?.scrollTo({ y: 500, animated: true });
+    }
+  }, [selectedClass, selectedExam, students.length]);
+
+  const renderStudent = useCallback(({ item: student, index }) => (
     <TouchableOpacity
-      key={student.id}
-      style={[styles.studentCard, isTablet && styles.studentCardTablet]}
+      style={[
+        styles.studentCard,
+        isTablet && styles.studentCardTablet,
+        index % 2 === 0 && isTablet ? styles.studentCardLeft : isTablet ? styles.studentCardRight : {}
+      ]}
       onPress={() => handleStudentPress(student)}
       activeOpacity={0.7}
     >
       <View style={styles.studentInfo}>
-        <Text style={styles.studentName} numberOfLines={2}>{student.name}</Text>
+        <View style={styles.studentHeader}>
+          <Text style={styles.studentName} numberOfLines={1}>{student.name}</Text>
+          <Text style={styles.rollNumber}>#{student.roll_no || 'N/A'}</Text>
+        </View>
         <Text style={styles.studentDetails} numberOfLines={1}>
-          Admission No: {student.admission_no}
+          Adm: {student.admission_no}
         </Text>
         <Text style={styles.studentDetails} numberOfLines={1}>
           Parent: {student.parents?.name || 'N/A'}
         </Text>
       </View>
       <View style={styles.viewReportButton}>
-        <Ionicons name="document-text" size={20} color="#1976d2" />
+        <Ionicons name="document-text-outline" size={18} color="#1976d2" />
         <Text style={styles.viewReportText}>View Report</Text>
       </View>
     </TouchableOpacity>
-  );
+  ), [isTablet, handleStudentPress]);
+
+  const getItemLayout = useCallback((data, index) => ({
+    length: isTablet ? 130 : 90,
+    offset: (isTablet ? 130 : 90) * index,
+    index,
+  }), [isTablet]);
+
+  const keyExtractor = useCallback((item) => item.id.toString(), []);
 
   // Create styles as a function to use current dimensions
   const styles = StyleSheet.create({
+    // 🎯 CRITICAL: Main container with fixed viewport height
     container: {
       flex: 1,
-      backgroundColor: '#f5f7fa',
-    },
-    content: {
-      flex: 1,
-      paddingHorizontal: isWeb ? Math.max(16, (dimensions.width - responsiveWidth) / 2) : 16,
-    },
-    contentContainer: {
-      paddingBottom: 20,
-      ...(isWeb && {
-        flexGrow: 1,
-        minHeight: dimensions.height - 100, // Account for header
+      backgroundColor: '#f8f9fa',
+      ...(Platform.OS === 'web' && {
+        height: '100vh',           // ✅ CRITICAL: Fixed viewport height
+        maxHeight: '100vh',        // ✅ CRITICAL: Prevent expansion
+        overflow: 'hidden',        // ✅ CRITICAL: Hide overflow on main container
+        position: 'relative',      // ✅ CRITICAL: For absolute positioning
       }),
+    },
+    
+    // 🎯 CRITICAL: Scrollable area with calculated height
+    scrollableContainer: {
+      flex: 1,
+      ...(Platform.OS === 'web' && {
+        height: 'calc(100vh - 140px)',      // ✅ CRITICAL: Account for header + filters bar
+        maxHeight: 'calc(100vh - 140px)',   // ✅ CRITICAL: Prevent expansion
+        overflow: 'hidden',                 // ✅ CRITICAL: Control overflow
+      }),
+    },
+    
+    // 🎯 CRITICAL: ScrollView with explicit overflow
+    scrollView: {
+      flex: 1,
+      ...(Platform.OS === 'web' && {
+        height: '100%',                    // ✅ CRITICAL: Full height
+        maxHeight: '100%',                 // ✅ CRITICAL: Prevent expansion
+        overflowY: 'scroll',              // ✅ CRITICAL: Enable vertical scroll
+        overflowX: 'hidden',              // ✅ CRITICAL: Disable horizontal scroll
+        WebkitOverflowScrolling: 'touch', // ✅ GOOD: Smooth iOS scrolling
+        scrollBehavior: 'smooth',         // ✅ GOOD: Smooth animations
+        scrollbarWidth: 'thin',           // ✅ GOOD: Thin scrollbars
+        scrollbarColor: '#1976d2 #f8f9fa', // ✅ GOOD: Custom scrollbar colors
+      }),
+    },
+    
+    // 🎯 CRITICAL: Content container properties
+    scrollContent: {
+      flexGrow: 1,                    // ✅ CRITICAL: Allow content to grow
+      paddingHorizontal: isWeb ? Math.max(16, (dimensions.width - responsiveWidth) / 2) : 16,
+      paddingBottom: 100,             // ✅ IMPORTANT: Extra bottom padding
+    },
+    
+    // New Compact Filters Bar Styles
+    filtersBar: {
+      backgroundColor: 'white',
+      paddingVertical: 12,
+      paddingHorizontal: isWeb ? Math.max(16, (dimensions.width - responsiveWidth) / 2) : 16,
+      borderBottomWidth: 1,
+      borderBottomColor: '#e0e4e7',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    filterRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    filterItemCompact: {
+      flex: 1,
+    },
+    compactLabel: {
+      fontSize: 12,
+      fontWeight: '500',
+      color: '#666',
+      marginBottom: 4,
+    },
+    compactPickerContainer: {
+      borderWidth: 1,
+      borderColor: '#ddd',
+      borderRadius: 6,
+      backgroundColor: '#f8f9fa',
+      minHeight: 40,
+    },
+    compactPicker: {
+      height: 40,
+      fontSize: 14,
+    },
+    quickStatsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 8,
+      paddingTop: 8,
+      borderTopWidth: 1,
+      borderTopColor: '#f0f0f0',
+    },
+    quickStat: {
+      alignItems: 'center',
+    },
+    quickStatValue: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      color: '#1976d2',
+    },
+    quickStatLabel: {
+      fontSize: 11,
+      color: '#666',
+    },
+    scrollToStudentsBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      backgroundColor: '#e3f2fd',
+      borderRadius: 16,
+    },
+    scrollToStudentsText: {
+      fontSize: 12,
+      color: '#1976d2',
+      marginLeft: 4,
+      fontWeight: '500',
+    },
+    
+    // 🎯 GOOD TO HAVE: Bottom spacing for better scroll experience
+    bottomSpacing: {
+      height: 100,                    // ✅ IMPORTANT: Extra space at bottom
+    },
+    
+    // Updated main content styles (kept for backward compatibility)
+    mainContent: {
+      flex: 1,
     },
     webContentContainer: {
       alignSelf: 'center',
       width: responsiveWidth,
-      flexGrow: 1,
     },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#666',
-  },
-  filtersSection: {
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
-    marginTop: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
+    
+    // Selection Summary Styles
+    selectionSummary: {
+      backgroundColor: 'white',
+      marginVertical: 12,
+      padding: 16,
+      borderRadius: 12,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.05,
+      shadowRadius: 4,
+      elevation: 2,
     },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 16,
-  },
-  filterContainer: {
-    marginBottom: 16,
-  },
-  filterLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#666',
-    marginBottom: 8,
-  },
-  pickerContainer: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    backgroundColor: '#f9f9f9',
-  },
-  picker: {
-    height: 50,
-  },
-  summarySection: {
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  summaryHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  summaryTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginLeft: 8,
-  },
-  summaryCards: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  summaryCard: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginHorizontal: 4,
-  },
-  summaryValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1976d2',
-    textAlign: 'center',
-  },
-  summaryLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  studentsSection: {
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  studentsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  studentsHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  studentsHeaderTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginLeft: 8,
-  },
-  scrollIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f8ff',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e3f2fd',
-  },
-  scrollIndicatorText: {
-    fontSize: 11,
-    color: '#666',
-    marginLeft: 4,
-    fontStyle: 'italic',
-  },
-  scrollIndicatorTextActive: {
-    color: '#1976d2',
-    fontWeight: '500',
-  },
-  studentsList: {
-    gap: 12,
-  },
-  studentsScrollContainer: {
-    maxHeight: isWeb ? 600 : isTablet ? 500 : 400,
-    marginTop: 8,
-  },
-  studentsScrollContent: {
-    paddingBottom: 16,
-  },
-  studentCard: {
-    flexDirection: 'row',
-    backgroundColor: '#f8f9fa',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-  },
-  studentInfo: {
-    flex: 1,
-  },
-  studentName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
-  },
-  studentDetails: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 2,
-  },
-  viewReportButton: {
-    alignItems: 'center',
-    paddingLeft: 16,
-  },
-  viewReportText: {
-    fontSize: 12,
-    color: '#1976d2',
-    marginTop: 4,
-    fontWeight: '500',
-  },
-  noDataContainer: {
-    alignItems: 'center',
-    padding: 32,
-  },
-  noDataText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#666',
-    marginTop: 12,
-  },
-  noDataSubtext: {
-    fontSize: 14,
-    color: '#999',
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  helpSection: {
-    marginBottom: 16,
-  },
-  helpCard: {
-    backgroundColor: '#e3f2fd',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  helpTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1976d2',
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  helpText: {
-    fontSize: 14,
-    color: '#1976d2',
-    textAlign: 'left',
-    lineHeight: 20,
-  },
-  filterCount: {
-    fontSize: 12,
-    color: '#4CAF50',
-    fontWeight: '500',
-  },
-  pickerDisabled: {
-    backgroundColor: '#f0f0f0',
-    borderColor: '#ccc',
-    opacity: 0.6,
-  },
-  noExamsText: {
-    fontSize: 12,
-    color: '#FF9800',
-    marginTop: 8,
-    fontStyle: 'italic',
-    textAlign: 'center',
-  },
-  // Responsive styles for tablets and large screens
-  studentRow: {
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  studentsGrid: {
-    gap: 12,
-    ...(isTablet && {
+    summaryRow: {
       flexDirection: 'row',
-      flexWrap: 'wrap',
+      gap: 24,
+    },
+    summaryItem: {
+      flex: 1,
+    },
+    summaryItemLabel: {
+      fontSize: 12,
+      color: '#666',
+      fontWeight: '500',
+      marginBottom: 2,
+    },
+    summaryItemValue: {
+      fontSize: 14,
+      color: '#333',
+      fontWeight: '600',
+    },
+    
+    // Students List Container Styles
+    studentsListContainer: {
+      backgroundColor: 'white',
+      marginVertical: 8,
+      borderRadius: 12,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.05,
+      shadowRadius: 4,
+      elevation: 2,
+      paddingVertical: 16,
+    },
+    studentsHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      marginBottom: 12,
+    },
+    studentsHeaderTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#333',
+      marginLeft: 8,
+    },
+    
+    // FlatList and Row Styles
+    flatListContent: {
+      paddingHorizontal: 16,
+    },
+    studentsRow: {
       justifyContent: 'space-between',
-    }),
-  },
-  studentCardContainer: {
-    width: '100%',
-  },
-  studentCardLeft: {
-    ...(isTablet && {
-      width: '48%',
+    },
+    itemSeparator: {
+      height: 8,
+    },
+    
+    // Updated Student Card Styles
+    studentCard: {
+      backgroundColor: '#f8f9fa',
+      borderRadius: 12,
+      padding: 16,
+      marginHorizontal: isTablet ? 4 : 0,
+      borderWidth: 1,
+      borderColor: '#e9ecef',
+      flexDirection: 'row',
+      alignItems: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.02,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    studentCardTablet: {
+      flex: 1,
+      marginHorizontal: 4,
+    },
+    studentCardLeft: {
+      marginRight: 4,
+    },
+    studentCardRight: {
+      marginLeft: 4,
+    },
+    studentInfo: {
+      flex: 1,
+    },
+    studentHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 4,
+    },
+    studentName: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#333',
+      flex: 1,
+    },
+    rollNumber: {
+      fontSize: 12,
+      fontWeight: '500',
+      color: '#1976d2',
+      backgroundColor: '#e3f2fd',
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+    },
+    studentDetails: {
+      fontSize: 12,
+      color: '#666',
+      marginBottom: 1,
+    },
+    viewReportButton: {
+      alignItems: 'center',
+      paddingLeft: 12,
+      minWidth: 70,
+    },
+    viewReportText: {
+      fontSize: 11,
+      color: '#1976d2',
+      marginTop: 2,
+      fontWeight: '500',
+      textAlign: 'center',
+    },
+    
+    // Scroll to Top Button (Web optimized)
+    scrollToTopButton: {
+      position: 'absolute',
+      bottom: 20,
+      right: 20,
+      zIndex: 1000,
+    },
+    scrollToTopButtonInner: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: '#1976d2',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.2,
+      shadowRadius: 8,
+      elevation: 8,
+      ...(Platform.OS === 'web' && {
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+      }),
+    },
+    
+    // Common Styles
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: '#f8f9fa',
+    },
+    loadingText: {
+      marginTop: 12,
+      fontSize: 16,
+      color: '#666',
+      textAlign: 'center',
+    },
+    noDataContainer: {
+      alignItems: 'center',
+      paddingVertical: 40,
+      paddingHorizontal: 20,
+    },
+    noDataText: {
+      fontSize: 16,
+      fontWeight: '500',
+      color: '#666',
+      marginTop: 12,
+      textAlign: 'center',
+    },
+    noDataSubtext: {
+      fontSize: 14,
+      color: '#999',
+      textAlign: 'center',
+      marginTop: 4,
+      lineHeight: 20,
+    },
+    helpSection: {
+      marginTop: 20,
+    },
+    helpCard: {
+      backgroundColor: '#e3f2fd',
+      padding: 20,
+      borderRadius: 12,
+      alignItems: 'center',
+    },
+    helpTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#1976d2',
+      marginTop: 8,
       marginBottom: 12,
-    }),
-  },
-  studentCardRight: {
-    ...(isTablet && {
-      width: '48%',
-      marginBottom: 12,
-    }),
-  },
-  studentsGridWeb: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 16,
-    justifyContent: 'flex-start',
-  },
-  studentCardWeb: {
-    width: 'calc(33.333% - 12px)',
-    minWidth: 300,
-    maxWidth: 400,
-  },
-  studentCardTablet: {
-    flex: 0.48,
-    marginHorizontal: 4,
-    marginBottom: 8,
-    minHeight: 120,
+    },
+    helpText: {
+      fontSize: 14,
+      color: '#1976d2',
+      textAlign: 'left',
+      lineHeight: 22,
+    },
+    pickerDisabled: {
+      backgroundColor: '#f0f0f0',
+      borderColor: '#ccc',
+      opacity: 0.6,
     },
   });
+
+  // Loading state
 
   // Return the JSX here since styles are now created inside
   if (loading) {
@@ -555,32 +632,15 @@ const ReportCardGeneration = ({ navigation }) => {
     <View style={styles.container}>
       <Header title="Report Card Generation" showBack={true} />
       
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={[styles.contentContainer, isWeb && styles.webContentContainer]}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        showsVerticalScrollIndicator={isWeb ? true : false}
-        bounces={Platform.OS === 'ios'}
-        alwaysBounceVertical={false}
-        nestedScrollEnabled={true}
-        {...(isWeb && {
-          scrollEnabled: true,
-          keyboardShouldPersistTaps: 'handled'
-        })}
-      >
-        {/* Filters Section */}
-        <View style={styles.filtersSection}>
-          <Text style={styles.sectionTitle}>Select Filters</Text>
-          
-          {/* Class Selection */}
-          <View style={styles.filterContainer}>
-            <Text style={styles.filterLabel}>Class & Section</Text>
-            <View style={styles.pickerContainer}>
+      {/* Compact Filters Bar */}
+      <View style={styles.filtersBar}>
+        <View style={styles.filterRow}>
+          <View style={styles.filterItemCompact}>
+            <Text style={styles.compactLabel}>Class:</Text>
+            <View style={styles.compactPickerContainer}>
               <Picker
                 selectedValue={selectedClass}
-                style={styles.picker}
+                style={styles.compactPicker}
                 onValueChange={(value) => {
                   setSelectedClass(value);
                   setSelectedExam('');
@@ -598,142 +658,120 @@ const ReportCardGeneration = ({ navigation }) => {
               </Picker>
             </View>
           </View>
-
-          {/* Exam Selection */}
-          <View style={styles.filterContainer}>
-            <Text style={styles.filterLabel}>
-              Exam {selectedClass && getFilteredExams().length > 0 && (
-                <Text style={styles.filterCount}>({getFilteredExams().length} available)</Text>
-              )}
-            </Text>
-            <View style={[styles.pickerContainer, !selectedClass && styles.pickerDisabled]}>
+          
+          <View style={styles.filterItemCompact}>
+            <Text style={styles.compactLabel}>Exam:</Text>
+            <View style={[styles.compactPickerContainer, !selectedClass && styles.pickerDisabled]}>
               <Picker
                 selectedValue={selectedExam}
-                style={styles.picker}
+                style={styles.compactPicker}
                 onValueChange={setSelectedExam}
                 enabled={!!selectedClass}
               >
                 <Picker.Item 
-                  label={!selectedClass ? "Select a class first" : "Select Exam"} 
+                  label={!selectedClass ? "Select class first" : "Select Exam"} 
                   value="" 
                 />
                 {getFilteredExams().map(exam => (
                   <Picker.Item
                     key={exam.id}
-                    label={`${exam.name} (${exam.classes?.class_name || 'Unknown Class'})`}
+                    label={exam.name}
                     value={exam.id}
                   />
                 ))}
               </Picker>
             </View>
-            {selectedClass && getFilteredExams().length === 0 && (
-              <Text style={styles.noExamsText}>
-                ⚠️ No exams found for this class. Please create an exam first.
-              </Text>
-            )}
           </View>
         </View>
-
-        {/* Summary Section */}
+        
         {selectedClass && selectedExam && (
-          <View style={styles.summarySection}>
-            <View style={styles.summaryHeader}>
-              <Ionicons name="analytics" size={20} color="#1976d2" />
-              <Text style={styles.summaryTitle}>Summary</Text>
+          <View style={styles.quickStatsRow}>
+            <View style={styles.quickStat}>
+              <Text style={styles.quickStatValue}>{students.length}</Text>
+              <Text style={styles.quickStatLabel}>Students</Text>
             </View>
-            <View style={styles.summaryCards}>
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryValue}>{students.length}</Text>
-                <Text style={styles.summaryLabel}>Total Students</Text>
+            <TouchableOpacity
+              style={styles.scrollToStudentsBtn}
+              onPress={scrollToStudents}
+            >
+              <Ionicons name="arrow-down" size={16} color="#1976d2" />
+              <Text style={styles.scrollToStudentsText}>View Students</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+      
+      {/* Main Content Container - Defines scrollable area */}
+      <View style={styles.scrollableContainer}>
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl 
+              refreshing={refreshing} 
+              onRefresh={onRefresh}
+              colors={['#1976d2']}
+              progressBackgroundColor="#fff"
+            />
+          }
+          showsVerticalScrollIndicator={true}
+          scrollEventThrottle={16}
+          onScroll={handleScroll}
+        >
+        {/* Selection Summary - Compact version for main content */}
+        {selectedClass && selectedExam && (
+          <View style={styles.selectionSummary}>
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryItemLabel}>Class:</Text>
+                <Text style={styles.summaryItemValue}>{getSelectedClassDisplay()}</Text>
               </View>
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryValue}>{getSelectedClassDisplay()}</Text>
-                <Text style={styles.summaryLabel}>Selected Class</Text>
-              </View>
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryValue}>{getSelectedExamDisplay()}</Text>
-                <Text style={styles.summaryLabel}>Selected Exam</Text>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryItemLabel}>Exam:</Text>
+                <Text style={styles.summaryItemValue}>{getSelectedExamDisplay()}</Text>
               </View>
             </View>
           </View>
         )}
 
-        {/* Students List */}
+        {/* Students List with FlatList */}
         {selectedClass && selectedExam && (
-          <View style={styles.studentsSection}>
+          <View style={styles.studentsListContainer}>
             <View style={styles.studentsHeader}>
-              <View style={styles.studentsHeaderLeft}>
-                <Ionicons name="people" size={20} color="#1976d2" />
-                <Text style={styles.studentsHeaderTitle}>Students ({students.length})</Text>
-              </View>
-              {students.length > (isWeb ? 8 : isTablet ? 6 : 4) && (
-                <View style={styles.scrollIndicator}>
-                  <Ionicons 
-                    name={studentsScrollY > 50 ? "arrow-up" : "arrow-down"} 
-                    size={16} 
-                    color={studentsScrollY > 0 ? "#1976d2" : "#666"} 
-                  />
-                  <Text style={[
-                    styles.scrollIndicatorText,
-                    studentsScrollY > 0 && styles.scrollIndicatorTextActive
-                  ]}>
-                    {studentsScrollY > 50 ? "Scroll to top" : "Scroll for more"}
-                  </Text>
-                </View>
-              )}
+              <Ionicons name="people" size={20} color="#1976d2" />
+              <Text style={styles.studentsHeaderTitle}>
+                Students ({students.length})
+              </Text>
             </View>
             
-            {students.length === 0 ? (
-              <View style={styles.noDataContainer}>
-                <Ionicons name="people-outline" size={48} color="#ccc" />
-                <Text style={styles.noDataText}>No students found</Text>
-                <Text style={styles.noDataSubtext}>
-                  No students are enrolled in the selected class
-                </Text>
-              </View>
-            ) : (
-              <ScrollView 
-                style={styles.studentsScrollContainer}
-                contentContainerStyle={styles.studentsScrollContent}
-                showsVerticalScrollIndicator={true}
-                nestedScrollEnabled={true}
-                bounces={Platform.OS === 'ios'}
-                onScroll={(event) => {
-                  setStudentsScrollY(event.nativeEvent.contentOffset.y);
-                }}
-                scrollEventThrottle={16}
-              >
-                <View style={styles.studentsList}>
-                  {isWeb ? (
-                    // Use simple map rendering for web to avoid scroll conflicts
-                    <View style={[styles.studentsGrid, dimensions.width > 1200 && styles.studentsGridWeb]}>
-                      {students.map((student, index) => (
-                        <View key={student.id} style={dimensions.width > 1200 ? styles.studentCardWeb : null}>
-                          {renderStudent(student)}
-                        </View>
-                      ))}
-                    </View>
-                  ) : isTablet ? (
-                    // Enable scrolling for tablet FlatList when inside ScrollView
-                    <View style={styles.studentsGrid}>
-                      {students.map((student, index) => (
-                        <View 
-                          key={student.id} 
-                          style={[
-                            styles.studentCardContainer,
-                            index % 2 === 0 ? styles.studentCardLeft : styles.studentCardRight
-                          ]}
-                        >
-                          {renderStudent(student)}
-                        </View>
-                      ))}
-                    </View>
-                  ) : (
-                    students.map(renderStudent)
-                  )}
+            <FlatList
+              data={students}
+              renderItem={renderStudent}
+              keyExtractor={keyExtractor}
+              getItemLayout={getItemLayout}
+              scrollEnabled={false}
+              showsVerticalScrollIndicator={false}
+              numColumns={isTablet ? 2 : 1}
+              key={`${isTablet}-${dimensions.width}`}
+              columnWrapperStyle={isTablet ? styles.studentsRow : null}
+              contentContainerStyle={styles.flatListContent}
+              ListEmptyComponent={
+                <View style={styles.noDataContainer}>
+                  <Ionicons name="people-outline" size={48} color="#ccc" />
+                  <Text style={styles.noDataText}>No students found</Text>
+                  <Text style={styles.noDataSubtext}>
+                    No students are enrolled in the selected class
+                  </Text>
                 </View>
-              </ScrollView>
-            )}
+              }
+              ItemSeparatorComponent={() => <View style={styles.itemSeparator} />}
+              removeClippedSubviews={true}
+              maxToRenderPerBatch={10}
+              updateCellsBatchingPeriod={50}
+              initialNumToRender={8}
+              windowSize={10}
+            />
           </View>
         )}
 
@@ -752,7 +790,33 @@ const ReportCardGeneration = ({ navigation }) => {
             </View>
           </View>
         ) : null}
-      </ScrollView>
+        
+        {/* Bottom spacing for better scrolling */}
+        <View style={styles.bottomSpacing} />
+        </ScrollView>
+      </View>
+
+      {/* Scroll to top button - Web specific */}
+      {Platform.OS === 'web' && showScrollToTop && (
+        <Animated.View style={[
+          styles.scrollToTopButton,
+          {
+            opacity: scrollY.interpolate({
+              inputRange: [300, 400],
+              outputRange: [0, 1],
+              extrapolate: 'clamp',
+            })
+          }
+        ]}>
+          <TouchableOpacity
+            style={styles.scrollToTopButtonInner}
+            onPress={scrollToTop}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="arrow-up" size={20} color="white" />
+          </TouchableOpacity>
+        </Animated.View>
+      )}
 
       {/* Report Card Modal */}
       {selectedStudent && (

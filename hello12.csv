@@ -1,0 +1,21 @@
+﻿id,admission_no,name,dob,aadhar_no,place_of_birth,nationality,gender,religion,caste,address,pin_code,blood_group,mother_tongue,identification_mark_1,identification_mark_2,academic_year,general_behaviour,remarks,roll_no,class_id,created_at,parent_id,tenant_id
+cf365034-64ff-4fcd-b992-939bf2474d0f,3001,RIYANSH,19-12-2021,,,,Male,,,"GOULI GALLI,CHOWBARA",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+90126fef-b447-4c5b-a042-31b0682136ad,3002,MOHD SHAHZAIB,02-01-2022,,,,Male,,,"A-8-147,MULTANI COLONY.",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+fda0ee8b-e930-4001-8f7f-0e01e4c712b6,3003,SHAIK ARHAN,13-10-2021,,,,Male,,,"TAM SHIKARA GALLI,PANSAL TALEEM",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+5b7345a4-3d7e-468a-adf7-a7875a757da7,3004,MOHD HAMZA ALI,26-12-2021,,,,Male,,,"9-3-155,NEAR REX HOTEL,BEHIND DCC BANK",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+f6e55ae5-6ac7-497d-99ba-d45eecc4a0e9,3005,SHIFA FATIMA,07-08-2021,,,,Female,,,"NOOR KHAN TALEEM, BIDAR",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+f71fe26a-4540-438c-b246-5510bae9dc96,3006,SHAIK RUMAISA FATIMA,07-12-2021,,,,Female,,,"H.NO. 10/03/124/4, HYDER ALI CHOWK ,BDR",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+f39ca792-889b-4bf8-8d70-bcb9f133cb60,3007,ABDUL MUQTADIR,04-05-2022,,,,Male,,,"H.NO.13-3-22, LALWADI, BDR",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+050d1770-583d-4c21-a850-f154f52ce9a5,3008,SYEDA IZZA ALISHFA,30-12-2021,,,,Female,,,"3-1-2,NEAR FATEH DARWAZA,PANSAL TALEEM",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+8754cb1e-5283-4c4e-8570-8f68a394b0ec,3009,ABDUL TAYYAB SHAH,30-12-2021,,,,Male,,,"SHAHPUR GATE,ASRA COLONY, BIDAR",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+59084367-47b7-450c-b47e-0c39439c7080,3010,SHAIK  ADIYAN,27-11-2021,,,,Male,,,"RAJA BAGH , BIDAR",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+022aabe4-9bd1-466a-93d4-fc8767e9812b,3011,SHAIK SHAIZAN,30-01-2021,,,,Male,,,"PANSAL TALEEM,TAM SHIKARI,GALLI,BIDAR",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+63613446-92c6-4d82-bdff-f2d018b1497e,3012,AYESHA MARYAM,,,,,Female,,,"MANIYAR TALEEM, BIDAR",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+d1eefe00-5d93-4639-8f65-5bdcd178da67,3013,ABUBAKAR  ALVI,,,,,Male,,,,,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+fa4be6b7-300e-4a30-b914-901a0af7a806,3014,PARVEZ ANSARI,03-02-2022,,,,Male,,,,,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+93867776-4f81-4d3c-8905-71900f81416b,3015,IRHA NAIZIL,03-04-2022,,,,Female,,,"H-NO-1-8-40, CHOWBARA ROAD, SINGAR BAGH,BDR",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+38593c25-e56f-442e-ab01-9f3933fc1f88,3016,ABDUL RAB AAHIL,26-01-2022,,,,Male,,,"H-NO-9-5-444,MAQDOOM COLONY, BIDAR",,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+843b50a5-d2b3-424a-b5d3-592628003b80,3017,SYED TALHA HUSSAIN,,,,,Male,,,,,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+16acbe84-e36d-44a2-8fe9-3e7b42f8d57c,3018,ABDUL RAFAY ZAID,19-04-2022,,,,Male,,,5-1-121 AHMED BAGH GOLE KHANA BIDAR,,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+4696bee0-dd4d-4abf-8c0d-62458346fc0d,3019,ALISHBA FATIMA,,,,,Female,,,,,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a
+07f1b22d-08f7-4256-a617-5bfd515fc773,3020,MD HUSSAIN,,,,,Male,,,,,,,,,,,,,,,,9abe534f-1a12-474c-a387-f8795ad3ab5a

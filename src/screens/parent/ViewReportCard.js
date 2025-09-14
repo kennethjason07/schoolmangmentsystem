@@ -289,6 +289,12 @@ const ViewReportCard = () => {
       setSubjects(subjectsData || []);
 
       // Get all marks for the student using tenant-aware query
+      console.log('📊 [REPORT CARD DEBUG] Fetching marks for student:', {
+        studentId: studentData.id,
+        tenantId: resolvedTenantId,
+        studentName: studentData.name
+      });
+      
       const tenantMarksQuery = createTenantQuery(resolvedTenantId, TABLES.MARKS);
       const { data: marksData, error: marksError } = await tenantMarksQuery
         .select(`
@@ -308,6 +314,12 @@ const ViewReportCard = () => {
         .eq('student_id', studentData.id)
         .order('created_at', { ascending: false })
         .execute();
+      
+      console.log('📊 [REPORT CARD DEBUG] Marks query result:', {
+        marksCount: marksData ? marksData.length : 0,
+        error: marksError,
+        sampleMark: marksData && marksData.length > 0 ? marksData[0] : 'NO MARKS'
+      });
 
       if (marksError) {
         console.error('❌ [TENANT-AWARE] Marks query error:', marksError);
@@ -325,11 +337,26 @@ const ViewReportCard = () => {
       setMarks(marksData || []);
 
       // Process report cards by exam with proper subject-wise max marks
+      console.log('📊 [REPORT CARD DEBUG] Processing report cards from marks data...', {
+        totalMarks: marksData ? marksData.length : 0
+      });
+      
       const reportCards = {};
-      if (marksData) {
-        marksData.forEach(mark => {
+      if (marksData && marksData.length > 0) {
+        marksData.forEach((mark, index) => {
+          console.log(`📊 [REPORT CARD DEBUG] Processing mark ${index + 1}:`, {
+            examId: mark.exam_id,
+            subjectId: mark.subject_id,
+            marksObtained: mark.marks_obtained,
+            maxMarks: mark.max_marks,
+            grade: mark.grade,
+            examName: mark.exams?.name,
+            subjectName: mark.subjects?.name
+          });
+          
           const examId = mark.exam_id;
           if (!reportCards[examId]) {
+            console.log('🆕 [REPORT CARD DEBUG] Creating new report card for exam:', examId);
             reportCards[examId] = {
               exam: mark.exams,
               subjects: [],
@@ -344,9 +371,16 @@ const ViewReportCard = () => {
           const marksObtained = parseFloat(mark.marks_obtained || 0);
           const maxMarks = parseFloat(subjectMaxMarks);
           
+          console.log('📊 [REPORT CARD DEBUG] Parsed values:', {
+            original_obtained: mark.marks_obtained,
+            original_max: mark.max_marks,
+            parsed_obtained: marksObtained,
+            parsed_max: maxMarks
+          });
+          
           // Validate marks data
           if (isNaN(marksObtained) || isNaN(maxMarks) || maxMarks <= 0) {
-            console.warn('Invalid marks data for subject:', mark.subjects?.name, {
+            console.warn('⚠️ [REPORT CARD DEBUG] Invalid marks data for subject:', mark.subjects?.name, {
               marks_obtained: mark.marks_obtained,
               max_marks: mark.max_marks,
               parsed_obtained: marksObtained,
@@ -355,29 +389,56 @@ const ViewReportCard = () => {
             return; // Skip this record
           }
           
-          reportCards[examId].subjects.push({
+          const subjectEntry = {
             subject: mark.subjects,
             marks_obtained: marksObtained,
             max_marks: maxMarks, // Use subject-specific max_marks
             grade: mark.grade,
             remarks: mark.remarks
-          });
+          };
+          
+          console.log('➕ [REPORT CARD DEBUG] Adding subject entry:', subjectEntry);
+          reportCards[examId].subjects.push(subjectEntry);
           
           reportCards[examId].totalMarks += marksObtained;
           reportCards[examId].totalMaxMarks += maxMarks;
+          
+          console.log('📊 [REPORT CARD DEBUG] Updated totals for exam', examId, ':', {
+            totalMarks: reportCards[examId].totalMarks,
+            totalMaxMarks: reportCards[examId].totalMaxMarks
+          });
         });
+      } else {
+        console.log('⚠️ [REPORT CARD DEBUG] No marks data found for processing');
       }
 
       // Calculate percentages with proper validation
+      console.log('📊 [REPORT CARD DEBUG] Calculating percentages for report cards...', {
+        examCount: Object.keys(reportCards).length
+      });
+      
       Object.keys(reportCards).forEach(examId => {
         const card = reportCards[examId];
+        console.log(`📊 [REPORT CARD DEBUG] Calculating percentage for exam ${examId}:`, {
+          totalMarks: card.totalMarks,
+          totalMaxMarks: card.totalMaxMarks,
+          subjectCount: card.subjects.length
+        });
+        
         if (card.totalMaxMarks > 0) {
           card.percentage = ((card.totalMarks / card.totalMaxMarks) * 100).toFixed(1);
         } else {
           card.percentage = 0;
         }
+        
+        console.log(`📊 [REPORT CARD DEBUG] Final percentage for exam ${examId}:`, card.percentage);
       });
 
+      console.log('✅ [REPORT CARD DEBUG] Final report cards data:', {
+        examCount: Object.keys(reportCards).length,
+        reportCards: reportCards
+      });
+      
       setReportCards(reportCards);
 
     } catch (err) {

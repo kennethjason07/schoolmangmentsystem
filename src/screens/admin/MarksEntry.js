@@ -168,14 +168,27 @@ const MarksEntry = () => {
   // Save all marks
   const handleBulkSaveMarks = async () => {
     try {
+      console.log('🚀 [MARKS DEBUG] Starting handleBulkSaveMarks...');
+      console.log('🚀 [MARKS DEBUG] Current state:', {
+        exam: exam ? { id: exam.id, name: exam.name, max_marks: exam.max_marks } : 'NO EXAM',
+        examClass: examClass ? { id: examClass.id, class_name: examClass.class_name } : 'NO CLASS',
+        tenantId: tenantId || 'NO TENANT',
+        userId: user?.id || 'NO USER',
+        marksFormKeys: Object.keys(marksForm),
+        marksFormSize: Object.keys(marksForm).length
+      });
+      
       // 🛡️ Validate tenant access first
       const validation = await validateTenantAccess(user?.id, tenantId, 'MarksEntry - handleBulkSaveMarks');
       if (!validation.isValid) {
+        console.error('❌ [MARKS DEBUG] Tenant validation failed:', validation.error);
         Alert.alert('Access Denied', validation.error);
         return;
       }
+      console.log('✅ [MARKS DEBUG] Tenant validation passed');
       
       if (!exam) {
+        console.error('❌ [MARKS DEBUG] No exam provided');
         Alert.alert('Error', 'Exam information is missing');
         return;
       }
@@ -190,9 +203,15 @@ const MarksEntry = () => {
       console.log('✅ [Admin MarksEntry] Using validated tenant_id for marks:', tenantId);
 
       const marksToSave = [];
+      console.log('📝 [MARKS DEBUG] Processing marks form data...', {
+        marksForm: marksForm,
+        examMaxMarks: exam.max_marks || 100
+      });
 
       Object.entries(marksForm).forEach(([studentId, subjectMarks]) => {
+        console.log('📝 [MARKS DEBUG] Processing student:', studentId, 'subjects:', subjectMarks);
         Object.entries(subjectMarks).forEach(([subjectId, marksObtained]) => {
+          console.log('📝 [MARKS DEBUG] Processing subject:', subjectId, 'marks:', marksObtained);
           if (marksObtained && !isNaN(parseFloat(marksObtained))) {
             const marksValue = parseFloat(marksObtained);
             const maxMarks = exam.max_marks || 100; // Use exam's max_marks
@@ -204,7 +223,7 @@ const MarksEntry = () => {
             else if (percentage >= 60) grade = 'C';
             else if (percentage >= 40) grade = 'D';
 
-            marksToSave.push({
+            const markRecord = {
               student_id: studentId,
               exam_id: exam.id,
               subject_id: subjectId,
@@ -213,25 +232,53 @@ const MarksEntry = () => {
               max_marks: maxMarks, // Store exam's max_marks
               remarks: exam.name || 'Exam', // Store exam name as remarks
               tenant_id: tenantId
-            });
+            };
+            
+            console.log('📝 [MARKS DEBUG] Adding mark record:', markRecord);
+            marksToSave.push(markRecord);
+          } else {
+            console.log('⚠️ [MARKS DEBUG] Skipping invalid marks:', { studentId, subjectId, marksObtained });
           }
         });
       });
 
+      console.log('💾 [MARKS DEBUG] Final marks to save:', {
+        count: marksToSave.length,
+        data: marksToSave
+      });
+      
       if (marksToSave.length > 0) {
         // Delete existing marks for this exam first with tenant validation
-        await supabase
+        console.log('🗚 [MARKS DEBUG] Deleting existing marks for exam:', exam.id, 'tenant:', tenantId);
+        const deleteResult = await supabase
           .from('marks')
           .delete()
           .eq('exam_id', exam.id)
           .eq('tenant_id', tenantId);
+        
+        console.log('🗚 [MARKS DEBUG] Delete result:', deleteResult);
+        if (deleteResult.error) {
+          console.error('❌ [MARKS DEBUG] Delete error:', deleteResult.error);
+          throw deleteResult.error;
+        }
 
         // Insert new marks
-        const { error } = await supabase
+        console.log('💾 [MARKS DEBUG] Inserting new marks:', marksToSave.length, 'records');
+        const { data: insertData, error: insertError } = await supabase
           .from('marks')
-          .insert(marksToSave);
+          .insert(marksToSave)
+          .select('*'); // Get back the inserted records
+        
+        console.log('💾 [MARKS DEBUG] Insert result:', {
+          data: insertData,
+          error: insertError,
+          recordsInserted: insertData ? insertData.length : 0
+        });
 
-        if (error) throw error;
+        if (insertError) {
+          console.error('❌ [MARKS DEBUG] Insert error:', insertError);
+          throw insertError;
+        }
 
         // Send marks notifications to parents silently in background
         try {
