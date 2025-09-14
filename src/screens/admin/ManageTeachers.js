@@ -443,21 +443,22 @@ const ManageTeachers = ({ navigation, route }) => {
   };
   const handleSave = async () => {
     console.log('🏢 ManageTeachers: Save button clicked, form data:', form);
+    const effectiveTenantId = getEffectiveTenantId();
     console.log('🏢 ManageTeachers: Saving with tenant context:', {
       tenantId: tenantId || 'NULL',
+      effectiveTenantId: effectiveTenantId || 'NULL',
       modalMode,
       userEmail: user?.email || 'NULL'
     });
     
-    // 🛑️ Validate tenant access first
-    const userIdResult = await getDbUserId();
-    if (!userIdResult.success) {
-      console.error('❌ ManageTeachers: Failed to get user ID for save:', userIdResult.error);
-      Alert.alert('Access Denied', `Unable to verify user access: ${userIdResult.error}`);
+    if (!effectiveTenantId) {
+      console.error('❌ ManageTeachers: No tenant ID available for save operation');
+      Alert.alert('Error', 'Unable to determine tenant context. Please try refreshing the page.');
       return;
     }
     
-    const validation = await validateTenantAccess(userIdResult.userId, actualTenantId || tenantId, 'ManageTeachers - Save');
+    // 🛑️ Validate tenant access first
+    const validation = await validateTenantAccess(user?.id, effectiveTenantId, 'ManageTeachers - Save');
     if (!validation.isValid) {
       console.error('❌ ManageTeachers: Save validation failed:', validation.error);
       Alert.alert('Access Denied', validation.error);
@@ -500,7 +501,7 @@ const ManageTeachers = ({ navigation, route }) => {
           qualification: form.qualification,
           salary_amount: parseFloat(form.salary) || 0,
           salary_type: 'monthly', // Default value
-          tenant_id: actualTenantId || tenantId, // Add tenant_id
+          tenant_id: effectiveTenantId, // Add tenant_id
         };
         
         const { data: newTeacher, error } = await supabase
@@ -559,12 +560,12 @@ const ManageTeachers = ({ navigation, route }) => {
       console.log('Form data:', { subjects: form.subjects, classes: form.classes, sections: form.sections });
 
       // 🛡️ Validate tenant access for assignments
-      const userIdResult = await getDbUserId();
-      if (!userIdResult.success) {
-        throw new Error(`Unable to verify user access: ${userIdResult.error}`);
+      const effectiveTenantId = getEffectiveTenantId();
+      if (!effectiveTenantId) {
+        throw new Error('No tenant context available for assignments');
       }
       
-      const validation = await validateTenantAccess(userIdResult.userId, actualTenantId || tenantId, 'ManageTeachers - Assignments');
+      const validation = await validateTenantAccess(user?.id, effectiveTenantId, 'ManageTeachers - Assignments');
       if (!validation.isValid) {
         throw new Error(`Assignment access denied: ${validation.error}`);
       }
@@ -599,7 +600,7 @@ const ManageTeachers = ({ navigation, route }) => {
       const assignments = form.subjects.map(subjectId => ({
         teacher_id: teacherId,
         subject_id: subjectId,
-        tenant_id: actualTenantId || tenantId, // Add tenant_id
+        tenant_id: effectiveTenantId, // Add tenant_id
       }));
 
       console.log('New subject assignments to insert:', assignments);
@@ -695,17 +696,17 @@ const ManageTeachers = ({ navigation, route }) => {
             setLoading(true);
             try {
               // 🛑️ Validate tenant access for deletion
-              console.log('🏢 ManageTeachers: Delete validation for tenant:', tenantId);
+              const effectiveTenantId = getEffectiveTenantId();
+              console.log('🏢 ManageTeachers: Delete validation for tenant:', effectiveTenantId);
               
-              const userIdResult = await getDbUserId();
-              if (!userIdResult.success) {
-                console.error('❌ ManageTeachers: Failed to get user ID for delete:', userIdResult.error);
-                Alert.alert('Access Denied', `Unable to verify user access: ${userIdResult.error}`);
+              if (!effectiveTenantId) {
+                console.error('❌ ManageTeachers: No tenant context for delete operation');
+                Alert.alert('Access Denied', 'Unable to determine tenant context for delete operation.');
                 setLoading(false);
                 return;
               }
               
-              const validation = await validateTenantAccess(userIdResult.userId, actualTenantId || tenantId, 'ManageTeachers - Delete');
+              const validation = await validateTenantAccess(user?.id, effectiveTenantId, 'ManageTeachers - Delete');
               if (!validation.isValid) {
                 console.error('❌ ManageTeachers: Delete validation failed:', validation.error);
                 Alert.alert('Access Denied', validation.error);
