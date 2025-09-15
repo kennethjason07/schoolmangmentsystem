@@ -256,181 +256,210 @@ const TasksManagement = ({ navigation }) => {
     );
   }
 
+  // Render web-specific scrollable content
+  const renderWebContent = () => (
+    <div
+      style={{
+        height: 'calc(100vh - 80px)',
+        overflow: 'auto',
+        overflowY: 'scroll',
+        paddingBottom: '100px',
+        WebkitOverflowScrolling: 'touch',
+        scrollBehavior: 'smooth'
+      }}
+    >
+      {renderContent()}
+    </div>
+  );
+
+  // Render mobile-specific ScrollView content
+  const renderMobileContent = () => (
+    <ScrollView
+      style={styles.content}
+      contentContainerStyle={styles.scrollContent}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }
+    >
+      {renderContent()}
+    </ScrollView>
+  );
+
+  // Render shared content that works for both platforms
+  const renderContent = () => (
+    <>
+      {/* Header Actions */}
+      <View style={styles.headerActions}>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => openModal()}
+        >
+          <Ionicons name="add" size={20} color="#fff" />
+          <Text style={styles.addButtonText}>Add Task</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Search and Filters */}
+      <View style={styles.filtersContainer}>
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={20} color="#666" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search tasks, teachers..."
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+        </View>
+
+        <View style={styles.filterRow}>
+          <View style={styles.filterItem}>
+            <Text style={styles.filterLabel}>Status:</Text>
+            <View style={styles.pickerContainer}>
+              <Picker
+                selectedValue={filterStatus}
+                onValueChange={setFilterStatus}
+                style={styles.picker}
+              >
+                <Picker.Item label="All" value="All" />
+                <Picker.Item label="Pending" value="Pending" />
+                <Picker.Item label="In Progress" value="In Progress" />
+                <Picker.Item label="Completed" value="Completed" />
+              </Picker>
+            </View>
+          </View>
+
+          <View style={styles.filterItem}>
+            <Text style={styles.filterLabel}>Priority:</Text>
+            <View style={styles.pickerContainer}>
+              <Picker
+                selectedValue={filterPriority}
+                onValueChange={setFilterPriority}
+                style={styles.picker}
+              >
+                <Picker.Item label="All" value="All" />
+                <Picker.Item label="High" value="High" />
+                <Picker.Item label="Medium" value="Medium" />
+                <Picker.Item label="Low" value="Low" />
+              </Picker>
+            </View>
+          </View>
+        </View>
+      </View>
+
+      {/* Tasks Summary */}
+      <View style={styles.summaryContainer}>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryNumber}>{tasks.length}</Text>
+          <Text style={styles.summaryLabel}>Total Tasks</Text>
+        </View>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryNumber}>
+            {tasks.filter(t => t.status === 'Pending').length}
+          </Text>
+          <Text style={styles.summaryLabel}>Pending</Text>
+        </View>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryNumber}>
+            {tasks.filter(t => t.status === 'In Progress').length}
+          </Text>
+          <Text style={styles.summaryLabel}>In Progress</Text>
+        </View>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryNumber}>
+            {tasks.filter(t => t.status === 'Completed').length}
+          </Text>
+          <Text style={styles.summaryLabel}>Completed</Text>
+        </View>
+      </View>
+
+      {/* Tasks Table */}
+      <View style={styles.tableContainer}>
+        <Text style={styles.tableTitle}>Tasks Overview ({filteredTasks.length})</Text>
+
+        {/* Table Header */}
+        <View style={styles.tableHeader}>
+          <Text style={[styles.tableHeaderText, styles.titleColumn, { textAlign: 'left' }]}>Task Title</Text>
+          <Text style={[styles.tableHeaderText, styles.teacherColumn]}>Teacher</Text>
+          <Text style={[styles.tableHeaderText, styles.priorityColumn]}>Priority</Text>
+          <Text style={[styles.tableHeaderText, styles.statusColumn]}>Status</Text>
+          <Text style={[styles.tableHeaderText, styles.dueDateColumn]}>Due Date</Text>
+          <Text style={[styles.tableHeaderText, styles.actionsColumn]}>Actions</Text>
+        </View>
+
+        {/* Table Rows */}
+        {filteredTasks.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <MaterialIcons name="assignment" size={48} color="#ccc" />
+            <Text style={styles.emptyText}>No tasks found</Text>
+            <Text style={styles.emptySubtext}>
+              {searchQuery || filterStatus !== 'All' || filterPriority !== 'All'
+                ? 'Try adjusting your search or filters'
+                : 'Create your first task to get started'
+              }
+            </Text>
+          </View>
+        ) : (
+          filteredTasks.map((task, index) => (
+            <View key={task.id} style={[styles.tableRow, index % 2 === 0 && styles.evenRow]}>
+              <View style={styles.titleColumn}>
+                <Text style={styles.taskTitle} numberOfLines={2}>{task.title}</Text>
+                {task.description && (
+                  <Text style={styles.taskDescription} numberOfLines={1}>
+                    {task.description}
+                  </Text>
+                )}
+              </View>
+
+              <View style={styles.teacherColumn}>
+                <Text style={styles.teacherName}>
+                  {getTeacherName(task.assigned_teacher_ids)}
+                </Text>
+              </View>
+
+              <View style={styles.priorityColumn}>
+                <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(task.priority) }]}>
+                  <Text style={styles.priorityText}>{task.priority}</Text>
+                </View>
+              </View>
+
+              <View style={styles.statusColumn}>
+                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(task.status) }]}>
+                  <Text style={styles.statusText}>{task.status}</Text>
+                </View>
+              </View>
+
+              <View style={styles.dueDateColumn}>
+                <Text style={styles.dueDateText}>
+                  {task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No date'}
+                </Text>
+              </View>
+
+              <View style={styles.actionsColumn}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => openModal(task)}
+                >
+                  <Ionicons name="create" size={16} color="#2196F3" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => handleDelete(task.id)}
+                >
+                  <Ionicons name="trash" size={16} color="#F44336" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))
+        )}
+      </View>
+    </>
+  );
+
   return (
     <View style={styles.container}>
       <Header title="Tasks Management" showBack={true} />
 
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        {/* Header Actions */}
-        <View style={styles.headerActions}>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => openModal()}
-          >
-            <Ionicons name="add" size={20} color="#fff" />
-            <Text style={styles.addButtonText}>Add Task</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Search and Filters */}
-        <View style={styles.filtersContainer}>
-          <View style={styles.searchContainer}>
-            <Ionicons name="search" size={20} color="#666" />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search tasks, teachers..."
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-          </View>
-
-          <View style={styles.filterRow}>
-            <View style={styles.filterItem}>
-              <Text style={styles.filterLabel}>Status:</Text>
-              <View style={styles.pickerContainer}>
-                <Picker
-                  selectedValue={filterStatus}
-                  onValueChange={setFilterStatus}
-                  style={styles.picker}
-                >
-                  <Picker.Item label="All" value="All" />
-                  <Picker.Item label="Pending" value="Pending" />
-                  <Picker.Item label="In Progress" value="In Progress" />
-                  <Picker.Item label="Completed" value="Completed" />
-                </Picker>
-              </View>
-            </View>
-
-            <View style={styles.filterItem}>
-              <Text style={styles.filterLabel}>Priority:</Text>
-              <View style={styles.pickerContainer}>
-                <Picker
-                  selectedValue={filterPriority}
-                  onValueChange={setFilterPriority}
-                  style={styles.picker}
-                >
-                  <Picker.Item label="All" value="All" />
-                  <Picker.Item label="High" value="High" />
-                  <Picker.Item label="Medium" value="Medium" />
-                  <Picker.Item label="Low" value="Low" />
-                </Picker>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* Tasks Summary */}
-        <View style={styles.summaryContainer}>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryNumber}>{tasks.length}</Text>
-            <Text style={styles.summaryLabel}>Total Tasks</Text>
-          </View>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryNumber}>
-              {tasks.filter(t => t.status === 'Pending').length}
-            </Text>
-            <Text style={styles.summaryLabel}>Pending</Text>
-          </View>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryNumber}>
-              {tasks.filter(t => t.status === 'In Progress').length}
-            </Text>
-            <Text style={styles.summaryLabel}>In Progress</Text>
-          </View>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryNumber}>
-              {tasks.filter(t => t.status === 'Completed').length}
-            </Text>
-            <Text style={styles.summaryLabel}>Completed</Text>
-          </View>
-        </View>
-
-        {/* Tasks Table */}
-        <View style={styles.tableContainer}>
-          <Text style={styles.tableTitle}>Tasks Overview ({filteredTasks.length})</Text>
-
-          {/* Table Header */}
-          <View style={styles.tableHeader}>
-            <Text style={[styles.tableHeaderText, styles.titleColumn, { textAlign: 'left' }]}>Task Title</Text>
-            <Text style={[styles.tableHeaderText, styles.teacherColumn]}>Teacher</Text>
-            <Text style={[styles.tableHeaderText, styles.priorityColumn]}>Priority</Text>
-            <Text style={[styles.tableHeaderText, styles.statusColumn]}>Status</Text>
-            <Text style={[styles.tableHeaderText, styles.dueDateColumn]}>Due Date</Text>
-            <Text style={[styles.tableHeaderText, styles.actionsColumn]}>Actions</Text>
-          </View>
-
-          {/* Table Rows */}
-          {filteredTasks.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <MaterialIcons name="assignment" size={48} color="#ccc" />
-              <Text style={styles.emptyText}>No tasks found</Text>
-              <Text style={styles.emptySubtext}>
-                {searchQuery || filterStatus !== 'All' || filterPriority !== 'All'
-                  ? 'Try adjusting your search or filters'
-                  : 'Create your first task to get started'
-                }
-              </Text>
-            </View>
-          ) : (
-            filteredTasks.map((task, index) => (
-              <View key={task.id} style={[styles.tableRow, index % 2 === 0 && styles.evenRow]}>
-                <View style={styles.titleColumn}>
-                  <Text style={styles.taskTitle} numberOfLines={2}>{task.title}</Text>
-                  {task.description && (
-                    <Text style={styles.taskDescription} numberOfLines={1}>
-                      {task.description}
-                    </Text>
-                  )}
-                </View>
-
-                <View style={styles.teacherColumn}>
-                  <Text style={styles.teacherName}>
-                    {getTeacherName(task.assigned_teacher_ids)}
-                  </Text>
-                </View>
-
-                <View style={styles.priorityColumn}>
-                  <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(task.priority) }]}>
-                    <Text style={styles.priorityText}>{task.priority}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.statusColumn}>
-                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(task.status) }]}>
-                    <Text style={styles.statusText}>{task.status}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.dueDateColumn}>
-                  <Text style={styles.dueDateText}>
-                    {task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No date'}
-                  </Text>
-                </View>
-
-                <View style={styles.actionsColumn}>
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={() => openModal(task)}
-                  >
-                    <Ionicons name="create" size={16} color="#2196F3" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={() => handleDelete(task.id)}
-                  >
-                    <Ionicons name="trash" size={16} color="#F44336" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))
-          )}
-        </View>
-      </ScrollView>
+      {Platform.OS === 'web' ? renderWebContent() : renderMobileContent()}
 
       {/* Add/Edit Task Modal */}
       <Modal
@@ -564,9 +593,30 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    ...(Platform.OS === 'web' && {
+      height: '100vh',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+    }),
   },
   content: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      overflow: 'auto',
+      overflowY: 'scroll',
+      maxHeight: 'calc(100vh - 60px)', // Account for header
+      scrollBehavior: 'smooth',
+      WebkitOverflowScrolling: 'touch',
+    }),
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: Platform.OS === 'web' ? 80 : 30,
+    ...(Platform.OS === 'web' && {
+      minHeight: 'calc(100vh - 120px)',
+      paddingBottom: 80,
+    }),
   },
   loadingContainer: {
     flex: 1,
@@ -682,6 +732,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+    ...(Platform.OS === 'web' && {
+      marginBottom: 80,
+    }),
   },
   tableTitle: {
     fontSize: 18,

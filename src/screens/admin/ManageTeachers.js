@@ -11,8 +11,8 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
-  RefreshControl,
-  Image
+  Image,
+  RefreshControl
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -48,7 +48,6 @@ const ManageTeachers = ({ navigation, route }) => {
   const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [modalMode, setModalMode] = useState('add'); // 'add' or 'edit'
   const [selectedTeacher, setSelectedTeacher] = useState(null);
@@ -56,6 +55,10 @@ const ManageTeachers = ({ navigation, route }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [sections, setSections] = useState([]);
+  const [totalTeachers, setTotalTeachers] = useState(0);
+  const [hasMoreTeachers, setHasMoreTeachers] = useState(false);
+  const [preventAutoRefresh, setPreventAutoRefresh] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(0);
@@ -227,26 +230,11 @@ const ManageTeachers = ({ navigation, route }) => {
     }
   };
 
-  // Handle pull-to-refresh
-  const onRefresh = async () => {
-    setRefreshing(true);
-    try {
-      setCurrentPage(0);
-      await loadData(0, true); // Reset to first page
-    } catch (error) {
-      console.error('Error during refresh:', error);
-      Alert.alert('Error', 'Failed to refresh data. Please try again.');
-    } finally {
-      setRefreshing(false);
-    }
-  };
   
-  // Handle load more teachers (pagination)
+  // Handle load more teachers (simple version without pagination)
   const loadMoreTeachers = async () => {
-    if (hasMoreTeachers && !loading) {
-      console.log(`🏢 ManageTeachers: Loading more teachers, page ${currentPage + 1}`);
-      await loadData(currentPage + 1, false);
-    }
+    // Disabled pagination for now - we load all teachers at once
+    console.log('🏢 ManageTeachers: Load more called but pagination disabled');
   };
 
   const loadSections = async (classId) => {
@@ -489,9 +477,6 @@ const ManageTeachers = ({ navigation, route }) => {
         // Handle subject and class assignments
         await handleSubjectClassAssignments(newTeacher.id);
         
-        // Reload data to get updated list
-        await loadData(0, true);
-        
         Alert.alert('Success', 'Teacher added successfully.');
       } else if (modalMode === 'edit' && selectedTeacher) {
         // Update teacher in Supabase
@@ -514,8 +499,6 @@ const ManageTeachers = ({ navigation, route }) => {
         // Handle subject and class assignments
         await handleSubjectClassAssignments(selectedTeacher.id);
         
-        // Reload data to get updated list
-        await loadData(0, true);
         Alert.alert('Success', 'Changes saved.');
       }
       closeModal();
@@ -813,9 +796,253 @@ const ManageTeachers = ({ navigation, route }) => {
             }
           } 
         }
-      ]
-    );
+        console.log('✓ Deleted teacher homework records');
+      } catch (homeworkErr) {
+        console.log('ℹ Homeworks table not found, skipping...', homeworkErr.message);
+      }
+
+      // 5. Delete tasks assigned to teacher
+      console.log('🚨 DEBUG: Step 5 - Deleting teacher tasks...');
+      try {
+        const { data: tasksDeleteData, error: tasksError } = await supabase
+          .from(TABLES.TASKS)
+          .delete()
+          .eq('assigned_to', teacher.id)
+          .select();
+        console.log('🚨 DEBUG: Tasks deletion result:', {
+          data: tasksDeleteData,
+          error: tasksError,
+          deletedRows: tasksDeleteData?.length || 0
+        });
+        if (tasksError && !tasksError.message.includes('does not exist')) {
+          console.warn('⚠️ WARNING: Error deleting teacher tasks:', tasksError);
+        }
+        console.log('✓ Deleted teacher tasks');
+      } catch (tasksErr) {
+        console.log('ℹ Tasks table reference to teacher not found, skipping...', tasksErr.message);
+      }
+
+      // 6. Delete timetable entries (CRITICAL: Must delete, not update to NULL)
+      console.log('🚨 DEBUG: Step 6 - Deleting timetable entries...');
+      try {
+        const { data: timetableDeleteData, error: timetableError } = await supabase
+          .from(TABLES.TIMETABLE)
+          .delete()
+          .eq('teacher_id', teacher.id)
+          .select();
+        console.log('🚨 DEBUG: Timetable deletion result:', {
+          data: timetableDeleteData,
+          error: timetableError,
+          deletedRows: timetableDeleteData?.length || 0
+        });
+        if (timetableError) {
+          console.error('❌ ERROR: Timetable entries deletion failed:', timetableError);
+          throw new Error(`Failed to delete timetable entries: ${timetableError.message}`);
+        }
+        console.log('✓ Deleted timetable entries');
+      } catch (timetableErr) {
+        console.error('❌ ERROR: Exception during timetable deletion:', timetableErr);
+        throw new Error(`Failed to delete timetable entries: ${timetableErr.message}`);
+      }
+
+      // 6.1. Handle leave applications where teacher is primary teacher
+      console.log('🚨 DEBUG: Step 6.1 - Deleting leave applications as primary teacher...');
+      try {
+        const { data: leaveDeleteData, error: leaveError } = await supabase
+          .from(TABLES.LEAVE_APPLICATIONS)
+          .delete()
+          .eq('teacher_id', teacher.id)
+          .select();
+        console.log('🚨 DEBUG: Leave applications deletion result (primary):', {
+          data: leaveDeleteData,
+          error: leaveError,
+          deletedRows: leaveDeleteData?.length || 0
+        });
+        if (leaveError) {
+          console.error('❌ ERROR: Leave applications deletion failed (primary):', leaveError);
+          throw new Error(`Failed to delete leave applications: ${leaveError.message}`);
+        }
+        console.log('✓ Deleted leave applications as primary teacher');
+      } catch (leaveErr) {
+        console.error('❌ ERROR: Exception during leave applications deletion (primary):', leaveErr);
+        throw new Error(`Failed to delete leave applications: ${leaveErr.message}`);
+      }
+
+      // 6.2. Update leave applications where teacher is replacement teacher (set to NULL)
+      console.log('🚨 DEBUG: Step 6.2 - Updating leave applications as replacement teacher...');
+      try {
+        const { data: replacementUpdateData, error: replacementError } = await supabase
+          .from(TABLES.LEAVE_APPLICATIONS)
+          .update({ replacement_teacher_id: null })
+          .eq('replacement_teacher_id', teacher.id)
+          .select();
+        console.log('🚨 DEBUG: Leave applications update result (replacement):', {
+          data: replacementUpdateData,
+          error: replacementError,
+          updatedRows: replacementUpdateData?.length || 0
+        });
+        if (replacementError) {
+          console.error('❌ ERROR: Leave applications update failed (replacement):', replacementError);
+          throw new Error(`Failed to update replacement teacher in leave applications: ${replacementError.message}`);
+        }
+        console.log('✓ Updated leave applications replacement teacher to NULL');
+      } catch (replacementErr) {
+        console.error('❌ ERROR: Exception during leave applications update (replacement):', replacementErr);
+        throw new Error(`Failed to update replacement teacher in leave applications: ${replacementErr.message}`);
+      }
+
+      // 7. Update or delete any user accounts linked to this teacher
+      console.log('🚨 DEBUG: Step 7 - Unlinking user accounts...');
+      try {
+        const { data: userUpdateData, error: userError } = await supabase
+          .from(TABLES.USERS)
+          .update({ linked_teacher_id: null })
+          .eq('linked_teacher_id', teacher.id)
+          .select();
+        console.log('🚨 DEBUG: User unlinking result:', {
+          data: userUpdateData,
+          error: userError,
+          affectedRows: userUpdateData?.length || 0
+        });
+        if (userError && !userError.message.includes('does not exist')) {
+          console.warn('⚠️ WARNING: Error unlinking teacher from user accounts:', userError);
+        }
+        console.log('✓ Unlinked teacher from user accounts');
+      } catch (userErr) {
+        console.log('ℹ User accounts not linked to teacher, skipping...', userErr.message);
+      }
+
+      // 8. CRITICAL: Finally, delete the teacher record
+      console.log('🚨 DEBUG: Step 8 - DELETING MAIN TEACHER RECORD...');
+      console.log('🚨 DEBUG: About to delete teacher with ID:', teacher.id, 'from table:', TABLES.TEACHERS);
+      
+      // First, let's verify the teacher exists before deletion
+      const { data: verifyTeacher, error: verifyError } = await supabase
+        .from(TABLES.TEACHERS)
+        .select('id, name, tenant_id')
+        .eq('id', teacher.id)
+        .single();
+      
+      console.log('🚨 DEBUG: Teacher verification before deletion:', {
+        found: !!verifyTeacher,
+        teacher: verifyTeacher,
+        error: verifyError
+      });
+      
+      if (verifyError && verifyError.code !== 'PGRST116') { // PGRST116 is "not found"
+        console.error('❌ ERROR: Could not verify teacher exists:', verifyError);
+        throw new Error(`Could not verify teacher exists: ${verifyError.message}`);
+      }
+      
+      if (!verifyTeacher) {
+        console.warn('⚠️ WARNING: Teacher not found in database, may already be deleted');
+        Alert.alert('Notice', 'Teacher may have already been deleted.');
+        // Still update local state
+        setTeachers(prev => prev.filter(t => t.id !== teacher.id));
+        setTotalTeachers(prev => Math.max(0, prev - 1));
+        return;
+      }
+      
+      // Now perform the actual deletion
+      const { data: deleteData, error: deleteError } = await supabase
+        .from(TABLES.TEACHERS)
+        .delete()
+        .eq('id', teacher.id)
+        .select();
+
+      console.log('🚨 DEBUG: MAIN TEACHER DELETION RESULT:', {
+        data: deleteData,
+        error: deleteError,
+        deletedRows: deleteData?.length || 0,
+        deletedTeacher: deleteData?.[0] || null
+      });
+
+      if (deleteError) {
+        console.error('❌ CRITICAL ERROR: Teacher record deletion failed:', deleteError);
+        console.error('❌ Full error details:', JSON.stringify(deleteError, null, 2));
+        throw new Error(`Failed to delete teacher: ${deleteError.message}`);
+      }
+
+      if (!deleteData || deleteData.length === 0) {
+        console.error('❌ CRITICAL ERROR: No rows were deleted from teachers table!');
+        console.error('❌ This suggests the teacher ID may not match any records');
+        throw new Error('No teacher record was found to delete. The teacher may not exist in the database.');
+      }
+
+      console.log('✅ SUCCESS: Teacher record deleted from database');
+      console.log('✅ Deleted teacher data:', deleteData[0]);
+
+      // Prevent any auto-refresh after deletion
+      setPreventAutoRefresh(true);
+      
+      // Update local state immediately
+      console.log('🚨 DEBUG: Updating local state...');
+      setTeachers(prev => {
+        const filtered = prev.filter(t => t.id !== teacher.id);
+        console.log('🚨 DEBUG: Local state update - before:', prev.length, 'after:', filtered.length);
+        return filtered;
+      });
+      setTotalTeachers(prev => {
+        const newCount = Math.max(0, prev - 1);
+        console.log('🚨 DEBUG: Total teachers updated - before:', prev, 'after:', newCount);
+        return newCount;
+      });
+
+      // Show success message with teacher name (same behavior on web and mobile)
+      Alert.alert('Success', `Successfully deleted teacher: ${teacher.name}`);
+      console.log(`✅ Teacher deletion completed successfully: ${teacher.name}`);
+      
+      // Reset prevent flag after a delay to allow normal operations later
+      setTimeout(() => {
+        setPreventAutoRefresh(false);
+        console.log('🔄 ManageTeachers: Auto-refresh re-enabled');
+      }, 2000);
+
+    } catch (err) {
+      console.error('❌ Error deleting teacher:', err);
+      if (Platform.OS === 'web') {
+        // Basic web fallback
+        console.error(`Could not delete ${teacher.name}: ${err.message}`);
+      } else {
+        Alert.alert(
+          'Deletion Failed', 
+          `Could not delete ${teacher.name}: ${err.message}\n\nPlease check if this teacher has dependencies that need to be removed first.`
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const handleDelete = async (teacher) => {
+    // Show confirmation dialog before deletion
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(
+        `Are you sure you want to delete teacher "${teacher.name}"?\n\n` +
+        `This will permanently remove the teacher and all their assignments, ` +
+        `attendance records, and associated data. This action cannot be undone.`
+      );
+      if (confirmed) {
+        await performDeleteTeacher(teacher);
+      }
+    } else {
+      Alert.alert(
+        'Delete Teacher',
+        `Are you sure you want to delete teacher "${teacher.name}"?\n\n` +
+        `This will permanently remove the teacher and all their assignments, ` +
+        `attendance records, and associated data. This action cannot be undone.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: () => performDeleteTeacher(teacher)
+          }
+        ]
+      );
+    }
+  };
+
 
   // Enhanced filtering and sorting - simplified for performance
   const filteredTeachers = teachers
@@ -954,7 +1181,7 @@ const ManageTeachers = ({ navigation, route }) => {
       <View style={[styles.container, styles.centerContent]}>
         <Header title="Manage Teachers" showBack={true} />
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => loadData(0, true)}>
+        <TouchableOpacity style={styles.retryButton} onPress={() => loadData()}>
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
       </View>
@@ -1043,17 +1270,24 @@ const ManageTeachers = ({ navigation, route }) => {
         renderItem={renderTeacherItem}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        onEndReached={loadMoreTeachers}
+        onEndReachedThreshold={0.3}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={['#4CAF50']}
+            colors={["#4CAF50", "#2196F3"]}
             tintColor="#4CAF50"
           />
         }
-        onEndReached={loadMoreTeachers}
-        onEndReachedThreshold={0.3}
+        {...Platform.select({
+          web: {
+            scrollBehavior: 'smooth',
+            nestedScrollEnabled: true,
+            overScrollMode: 'always',
+          },
+        })}
         ListFooterComponent={
           hasMoreTeachers && !searchQuery ? (
             <View style={styles.loadingMoreContainer}>
@@ -1401,6 +1635,7 @@ const ManageTeachers = ({ navigation, route }) => {
           </View>
         </View>
       </Modal>
+
     </View>
   );
 };
@@ -1498,6 +1733,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        overflow: 'hidden',
+      },
+    }),
   },
   header: {
     flexDirection: 'row',
@@ -2136,6 +2377,7 @@ const styles = StyleSheet.create({
     color: '#999',
     fontStyle: 'italic',
   },
+<<<<<<< HEAD
   // 🚀 Enhanced: Tenant Banner Styles
   tenantBanner: {
     backgroundColor: '#E8F5E8',
@@ -2162,6 +2404,107 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
   },
+=======
+  // Delete Confirmation Modal Styles for Web
+  deleteModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  deleteModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    minWidth: 320,
+    maxWidth: 400,
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+  },
+  deleteModalHeader: {
+    alignItems: 'center',
+    paddingTop: 24,
+    paddingHorizontal: 24,
+    paddingBottom: 16,
+  },
+  deleteModalIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#ffebee',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  deleteModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333',
+    textAlign: 'center',
+  },
+  deleteModalBody: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+  },
+  deleteModalMessage: {
+    fontSize: 16,
+    color: '#555',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 12,
+  },
+  deleteModalTeacherName: {
+    fontWeight: '600',
+    color: '#333',
+  },
+  deleteModalWarning: {
+    fontSize: 14,
+    color: '#777',
+    textAlign: 'center',
+    lineHeight: 20,
+    fontStyle: 'italic',
+  },
+  deleteModalActions: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  deleteModalCancelButton: {
+    flex: 1,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRightWidth: 1,
+    borderRightColor: '#f0f0f0',
+  },
+  deleteModalCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  deleteModalDeleteButton: {
+    flex: 1,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    backgroundColor: '#f44336',
+    borderBottomRightRadius: 16,
+  },
+  deleteModalDeleteIcon: {
+    marginRight: 6,
+  },
+  deleteModalDeleteText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+>>>>>>> origin/hanoken
 });
 
 export default ManageTeachers;

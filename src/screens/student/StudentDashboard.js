@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Alert, Animated, RefreshControl, Image, FlatList, Modal, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
@@ -19,7 +19,7 @@ import LogoDisplay from '../../components/LogoDisplay';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
 import NotificationPopup from '../../components/NotificationPopup';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
-import { calculateStudentFees, getFeeStatusText, getFeeStatusColor } from '../../utils/feeCalculation';
+
 import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCount';
 
 const StudentDashboard = ({ navigation }) => {
@@ -37,7 +37,7 @@ const StudentDashboard = ({ navigation }) => {
   const [attendance, setAttendance] = useState([]);
   const [marks, setMarks] = useState([]);
   const [fees, setFees] = useState([]);
-  const [feeSummary, setFeeSummary] = useState(null);
+  const [feeStructure, setFeeStructure] = useState(null);
   const [todayClasses, setTodayClasses] = useState([]);
   const [recentActivities, setRecentActivities] = useState([]);
   const [assignments, setAssignments] = useState([]);
@@ -552,6 +552,9 @@ const StudentDashboard = ({ navigation }) => {
   // Fetch all dashboard data
   const fetchDashboardData = async () => {
     try {
+      console.log('🚀 StudentDashboard - Starting data fetch...');
+      console.log('🚀 User data:', { id: user?.id, email: user?.email, linked_student_id: user?.linked_student_id });
+      
       setLoading(true);
       setError(null);
 
@@ -772,24 +775,109 @@ const StudentDashboard = ({ navigation }) => {
         setMarks([]);
       }
 
-      // Get fee information using corrected calculation utility
+      // Get fee information using student_fee_summary view (same as Fee Payment screen)
       try {
-        console.log('Dashboard - Using corrected fee calculation for student:', studentData.id, 'class:', studentData.class_id);
+        console.log('StudentDashboard - Loading fee data from student_fee_summary view...');
         
-        const feeSummary = await calculateStudentFees(studentData.id, studentData.class_id);
-        
-        if (feeSummary) {
-          console.log('Dashboard - Fee calculation successful:', feeSummary);
-          setFeeSummary(feeSummary);
-          setFees(feeSummary.allFees || []);
+        const { data: feeData, error: feeError } = await supabase
+          .from('student_fee_summary')
+          .select('*')
+          .eq('student_id', user.linked_student_id)
+          .single();
+
+        if (feeError) {
+          console.error('StudentDashboard - Error loading fee data:', feeError);
+          // Check if student has no fee data vs actual error
+          if (feeError.code === 'PGRST116') {
+            console.log('StudentDashboard - No fee data found for student, showing empty state');
+            setFeeStructure({
+              studentName: studentData.name,
+              class: `${studentData.classes?.class_name || 'N/A'} ${studentData.classes?.section || ''}`.trim(),
+              academicYear: studentData.academic_year || '2024-2025',
+              totalDue: 0,
+              totalPaid: 0,
+              outstanding: 0,
+              fees: [],
+              metadata: { source: 'no-fee-data' }
+            });
+            setFees([]);
+          } else {
+            throw feeError;
+          }
         } else {
-          console.log('Dashboard - Fee calculation failed or returned null');
-          setFeeSummary(null);
-          setFees([]);
+          console.log('StudentDashboard - Fee data loaded from view:', feeData);
+
+          // Transform fee components from JSON to array format (same as Fee Payment screen)
+          const transformedFees = (feeData.fee_components || []).map((component, index) => {
+            // Determine category based on fee component name
+            let category = 'general';
+            if (component.fee_component) {
+              const componentName = component.fee_component.toLowerCase();
+              if (componentName.includes('tuition') || componentName.includes('academic')) {
+                category = 'tuition';
+              } else if (componentName.includes('book') || componentName.includes('library')) {
+                category = 'books';
+              } else if (componentName.includes('transport') || componentName.includes('bus')) {
+                category = 'transport';
+              } else if (componentName.includes('exam') || componentName.includes('test')) {
+                category = 'examination';
+              } else if (componentName.includes('activity') || componentName.includes('sport')) {
+                category = 'activities';
+              } else if (componentName.includes('facility') || componentName.includes('lab')) {
+                category = 'facilities';
+              }
+            }
+
+            return {
+              id: `fee-${component.fee_component}-${index}`,
+              name: component.fee_component,
+              totalAmount: Number(component.base_amount) || 0,
+              discountAmount: Number(component.discount_amount) || 0,
+              amount: Number(component.final_amount) || 0,
+              dueDate: component.due_date || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
+              status: component.status || 'unpaid',
+              paidAmount: Number(component.paid_amount) || 0,
+              remainingAmount: Number(component.outstanding_amount) || 0,
+              description: component.has_discount ? 
+                `${component.fee_component} - Base: ₹${component.base_amount}, Discount: ₹${component.discount_amount}` :
+                `${component.fee_component} - Standard Fee`,
+              category: category,
+              academicYear: feeData.academic_year,
+              hasDiscount: component.has_discount,
+              discountType: component.discount_type,
+              paymentCount: component.payment_count || 0,
+              lastPaymentDate: component.last_payment_date
+            };
+          });
+
+          // Set fee structure using data from student_fee_summary view (SAME AS FEE PAYMENT SCREEN)
+          setFeeStructure({
+            studentName: feeData.student_name,
+            class: `${feeData.class_name || 'N/A'} ${feeData.section || ''}`.trim(),
+            academicYear: feeData.academic_year || '2024-2025',
+            admissionNo: feeData.admission_no,
+            rollNo: feeData.roll_no,
+            // Fee totals from view
+            totalBaseFees: Number(feeData.total_base_fees) || 0,
+            totalDiscounts: Number(feeData.total_discounts) || 0,
+            totalDue: Number(feeData.total_final_fees) || 0,
+            totalPaid: Number(feeData.total_paid) || 0,
+            outstanding: Number(feeData.total_outstanding) || 0, // THIS IS THE CORRECT VALUE!
+            fees: transformedFees,
+            // Status and metadata
+            overallStatus: feeData.overall_status,
+            hasDiscounts: feeData.has_any_discounts,
+            totalFeeComponents: feeData.total_fee_components || 0,
+            calculatedAt: feeData.calculated_at,
+            metadata: { source: 'student_fee_summary_view', tenantId: feeData.tenant_id }
+          });
+          
+          setFees(transformedFees);
+          console.log('StudentDashboard - Fee structure set with outstanding:', feeData.total_outstanding);
         }
       } catch (err) {
-        console.log('Dashboard - Fee calculation error:', err);
-        setFeeSummary(null);
+        console.error('StudentDashboard - Fee calculation error:', err);
+        setFeeStructure(null);
         setFees([]);
       }
 
@@ -910,8 +998,13 @@ const StudentDashboard = ({ navigation }) => {
   };
 
   useEffect(() => {
+    console.log('🚀 StudentDashboard useEffect triggered');
+    console.log('🚀 User state:', user);
     if (user) {
-    fetchDashboardData();
+      console.log('🚀 User found, starting dashboard data fetch...');
+      fetchDashboardData();
+    } else {
+      console.log('⚠️ No user found, waiting...');
     }
   }, [user]);
 
@@ -948,18 +1041,31 @@ const StudentDashboard = ({ navigation }) => {
     },
   ];
 
-  // Get fee status using the corrected logic from feeSummary
+  // Get fee status using feeStructure (same as Fee Payment screen)
   const getFeeStatus = () => {
-    if (!feeSummary || feeSummary.totalDue === 0) {
+    if (!feeStructure) {
+      return 'Loading...';
+    }
+    
+    if (feeStructure.totalDue === 0) {
       return 'No fees';
     }
     
-    return getFeeStatusText(feeSummary);
+    // Use the outstanding amount directly from the view (same as Fee Payment screen)
+    return `₹${feeStructure.outstanding.toLocaleString()}`;
   };
 
   // Get fee status color for UI
   const getFeeStatusColorForUI = () => {
-    return getFeeStatusColor(feeSummary);
+    if (!feeStructure || feeStructure.totalDue === 0) {
+      return '#4CAF50'; // Green for no fees or paid
+    }
+    
+    if (feeStructure.outstanding > 0) {
+      return '#F44336'; // Red for outstanding
+    }
+    
+    return '#4CAF50'; // Green for paid
   };
 
   // Get average marks
@@ -1007,7 +1113,29 @@ const StudentDashboard = ({ navigation }) => {
       value: getFeeStatus(),
       icon: 'card',
       color: getFeeStatusColorForUI(),
-      subtitle: feeSummary && feeSummary.totalOutstanding > 0 ? 'Pending fees' : 'All paid',
+      subtitle: (() => {
+        if (!feeStructure) return 'Loading fee data...';
+        if (feeStructure.totalDue === 0) return 'No fees assigned';
+        
+        // Use the same format as Fee Payment screen
+        const totalPaid = feeStructure.totalPaid || 0;
+        const totalOutstanding = feeStructure.outstanding || 0;
+        const totalDiscounts = feeStructure.totalDiscounts || 0;
+        
+        if (totalOutstanding > 0) {
+          if (totalDiscounts > 0) {
+            return `₹${totalPaid.toLocaleString()} paid, ₹${totalOutstanding.toLocaleString()} pending (saved ₹${totalDiscounts.toLocaleString()})`;
+          } else {
+            return `₹${totalPaid.toLocaleString()} paid, ₹${totalOutstanding.toLocaleString()} pending`;
+          }
+        }
+        
+        if (totalDiscounts > 0) {
+          return `All fees paid (saved ₹${totalDiscounts.toLocaleString()})`;
+        }
+        
+        return `All fees paid (₹${totalPaid.toLocaleString()})`;
+      })(),
       onPress: () => handleCardNavigation('fees')
     },
     {
@@ -1031,6 +1159,7 @@ const StudentDashboard = ({ navigation }) => {
   ];
 
   if (loading) {
+    console.log('🔄 StudentDashboard - Showing loading state');
     return (
     <View style={styles.container}>
         <Header
@@ -1049,6 +1178,7 @@ const StudentDashboard = ({ navigation }) => {
   }
 
   if (error) {
+    console.log('❌ StudentDashboard - Showing error state:', error);
     return (
       <View style={styles.container}>
         <Header title="Student Dashboard" showBack={false} showNotifications={true} unreadCount={unreadCount} />
@@ -1072,49 +1202,6 @@ const StudentDashboard = ({ navigation }) => {
       />
 
       <View style={styles.scrollWrapper}>
-        {/* Quick Navigation Bar */}
-        <View style={styles.quickNavBar}>
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.quickNavContent}
-            bounces={false}
-          >
-            <TouchableOpacity 
-              style={styles.quickNavButton}
-              onPress={() => scrollToSection(0)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="home" size={16} color="#1976d2" />
-              <Text style={styles.quickNavText}>Overview</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.quickNavButton}
-              onPress={() => scrollToSection(400)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="person" size={16} color="#4CAF50" />
-              <Text style={styles.quickNavText}>Profile</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.quickNavButton}
-              onPress={() => scrollToSection(600)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="analytics" size={16} color="#FF9800" />
-              <Text style={styles.quickNavText}>Stats</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.quickNavButton}
-              onPress={() => scrollToSection(1200)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="library" size={16} color="#9C27B0" />
-              <Text style={styles.quickNavText}>Activities</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-        
         <ScrollView 
           ref={scrollViewRef}
           style={styles.scrollContainer}
@@ -1236,26 +1323,6 @@ const StudentDashboard = ({ navigation }) => {
             ))}
           </View>
         </View>
-
-        {/* Fee Information */}
-        {studentProfile && (
-          <View style={styles.section}>
-            <View style={styles.sectionTitleContainer}>
-              <View style={styles.sectionIcon}>
-                <Ionicons name="card" size={20} color="#4CAF50" />
-              </View>
-              <Text style={styles.sectionTitle}>Fee Information</Text>
-              <TouchableOpacity onPress={() => handleCardNavigation('fees')}>
-                <Text style={styles.viewAllText}>View Details</Text>
-              </TouchableOpacity>
-            </View>
-            <StudentFeeCard 
-              studentId={studentProfile.id}
-              compact={false}
-              style={{ marginBottom: 0 }}
-            />
-          </View>
-        )}
 
         {/* Quick Actions */}
         <View style={styles.section}>

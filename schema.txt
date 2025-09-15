@@ -34,10 +34,10 @@ CREATE TABLE public.assignments (
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   tenant_id uuid NOT NULL,
   CONSTRAINT assignments_pkey PRIMARY KEY (id),
-  CONSTRAINT assignments_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
-  CONSTRAINT assignments_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
   CONSTRAINT assignments_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
-  CONSTRAINT assignments_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES public.teachers(id)
+  CONSTRAINT assignments_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
+  CONSTRAINT assignments_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES public.teachers(id),
+  CONSTRAINT assignments_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
 CREATE TABLE public.classes (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -48,8 +48,8 @@ CREATE TABLE public.classes (
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   tenant_id uuid NOT NULL,
   CONSTRAINT classes_pkey PRIMARY KEY (id),
-  CONSTRAINT classes_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
-  CONSTRAINT classes_class_teacher_id_fkey FOREIGN KEY (class_teacher_id) REFERENCES public.teachers(id)
+  CONSTRAINT classes_class_teacher_id_fkey FOREIGN KEY (class_teacher_id) REFERENCES public.teachers(id),
+  CONSTRAINT classes_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
 CREATE TABLE public.events (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -72,8 +72,8 @@ CREATE TABLE public.events (
   created_by uuid,
   tenant_id uuid NOT NULL,
   CONSTRAINT events_pkey PRIMARY KEY (id),
-  CONSTRAINT events_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id),
-  CONSTRAINT events_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
+  CONSTRAINT events_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT events_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id)
 );
 CREATE TABLE public.exams (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -112,9 +112,9 @@ CREATE TABLE public.fee_structure (
   tenant_id uuid NOT NULL,
   discount_applied numeric DEFAULT 0,
   CONSTRAINT fee_structure_pkey PRIMARY KEY (id),
-  CONSTRAINT fee_structure_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT fee_structure_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
-  CONSTRAINT fee_structure_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
+  CONSTRAINT fee_structure_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT fee_structure_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
 CREATE TABLE public.homeworks (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -131,10 +131,10 @@ CREATE TABLE public.homeworks (
   updated_at timestamp with time zone DEFAULT now(),
   tenant_id uuid NOT NULL,
   CONSTRAINT homeworks_pkey PRIMARY KEY (id),
-  CONSTRAINT homeworks_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
   CONSTRAINT homeworks_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
-  CONSTRAINT homeworks_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id),
-  CONSTRAINT homeworks_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id)
+  CONSTRAINT homeworks_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
+  CONSTRAINT homeworks_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
+  CONSTRAINT homeworks_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id)
 );
 CREATE TABLE public.leave_applications (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -158,11 +158,11 @@ CREATE TABLE public.leave_applications (
   updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   tenant_id uuid NOT NULL,
   CONSTRAINT leave_applications_pkey PRIMARY KEY (id),
-  CONSTRAINT leave_applications_applied_by_fkey FOREIGN KEY (applied_by) REFERENCES public.users(id),
-  CONSTRAINT leave_applications_replacement_teacher_id_fkey FOREIGN KEY (replacement_teacher_id) REFERENCES public.teachers(id),
   CONSTRAINT leave_applications_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT leave_applications_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id),
+  CONSTRAINT leave_applications_applied_by_fkey FOREIGN KEY (applied_by) REFERENCES public.users(id),
   CONSTRAINT leave_applications_reviewed_by_fkey FOREIGN KEY (reviewed_by) REFERENCES public.users(id),
-  CONSTRAINT leave_applications_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id)
+  CONSTRAINT leave_applications_replacement_teacher_id_fkey FOREIGN KEY (replacement_teacher_id) REFERENCES public.teachers(id)
 );
 CREATE TABLE public.marks (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -176,10 +176,10 @@ CREATE TABLE public.marks (
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   tenant_id uuid NOT NULL,
   CONSTRAINT marks_pkey PRIMARY KEY (id),
-  CONSTRAINT marks_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
-  CONSTRAINT marks_exam_id_fkey FOREIGN KEY (exam_id) REFERENCES public.exams(id),
   CONSTRAINT marks_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
-  CONSTRAINT marks_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id)
+  CONSTRAINT marks_exam_id_fkey FOREIGN KEY (exam_id) REFERENCES public.exams(id),
+  CONSTRAINT marks_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
+  CONSTRAINT marks_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
 CREATE TABLE public.messages (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -196,10 +196,10 @@ CREATE TABLE public.messages (
   file_type text,
   tenant_id uuid NOT NULL,
   CONSTRAINT messages_pkey PRIMARY KEY (id),
-  CONSTRAINT messages_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT messages_sender_id_fkey FOREIGN KEY (sender_id) REFERENCES public.users(id),
   CONSTRAINT messages_receiver_id_fkey FOREIGN KEY (receiver_id) REFERENCES public.users(id),
-  CONSTRAINT messages_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
+  CONSTRAINT messages_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT messages_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
 CREATE TABLE public.notification_recipients (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -212,9 +212,9 @@ CREATE TABLE public.notification_recipients (
   read_at timestamp without time zone,
   tenant_id uuid NOT NULL,
   CONSTRAINT notification_recipients_pkey PRIMARY KEY (id),
-  CONSTRAINT notification_recipients_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT fk_user FOREIGN KEY (recipient_id) REFERENCES public.users(id),
   CONSTRAINT fk_notification FOREIGN KEY (notification_id) REFERENCES public.notifications(id),
-  CONSTRAINT fk_user FOREIGN KEY (recipient_id) REFERENCES public.users(id)
+  CONSTRAINT notification_recipients_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
 CREATE TABLE public.notifications (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -241,8 +241,8 @@ CREATE TABLE public.parents (
   relation text CHECK (relation = ANY (ARRAY['Father'::text, 'Mother'::text, 'Guardian'::text])),
   tenant_id uuid NOT NULL,
   CONSTRAINT parents_pkey PRIMARY KEY (id),
-  CONSTRAINT parents_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
-  CONSTRAINT parents_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
+  CONSTRAINT parents_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT parents_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
 );
 CREATE TABLE public.period_settings (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -364,11 +364,11 @@ CREATE TABLE public.stationary_purchases (
   created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   created_by uuid,
   CONSTRAINT stationary_purchases_pkey PRIMARY KEY (id),
-  CONSTRAINT stationary_purchases_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
   CONSTRAINT stationary_purchases_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
-  CONSTRAINT stationary_purchases_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id),
+  CONSTRAINT stationary_purchases_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT stationary_purchases_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
   CONSTRAINT stationary_purchases_item_id_fkey FOREIGN KEY (item_id) REFERENCES public.stationary_items(id),
-  CONSTRAINT stationary_purchases_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id)
+  CONSTRAINT stationary_purchases_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id)
 );
 CREATE TABLE public.student_attendance (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -380,9 +380,9 @@ CREATE TABLE public.student_attendance (
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   tenant_id uuid NOT NULL,
   CONSTRAINT student_attendance_pkey PRIMARY KEY (id),
-  CONSTRAINT student_attendance_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT student_attendance_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
   CONSTRAINT student_attendance_marked_by_fkey FOREIGN KEY (marked_by) REFERENCES public.users(id),
+  CONSTRAINT student_attendance_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT student_attendance_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
 );
 CREATE TABLE public.student_discounts (
@@ -401,8 +401,8 @@ CREATE TABLE public.student_discounts (
   tenant_id uuid NOT NULL,
   CONSTRAINT student_discounts_pkey PRIMARY KEY (id),
   CONSTRAINT student_discounts_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
-  CONSTRAINT student_discounts_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
-  CONSTRAINT student_discounts_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
+  CONSTRAINT student_discounts_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT student_discounts_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id)
 );
 CREATE TABLE public.student_fees (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -449,9 +449,9 @@ CREATE TABLE public.students (
   parent_id uuid,
   tenant_id uuid NOT NULL,
   CONSTRAINT students_pkey PRIMARY KEY (id),
-  CONSTRAINT students_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.parents(id),
   CONSTRAINT students_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
-  CONSTRAINT students_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
+  CONSTRAINT students_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT students_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.parents(id)
 );
 CREATE TABLE public.subjects (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -491,8 +491,8 @@ CREATE TABLE public.teacher_attendance (
   tenant_id uuid NOT NULL,
   CONSTRAINT teacher_attendance_pkey PRIMARY KEY (id),
   CONSTRAINT teacher_attendance_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id),
-  CONSTRAINT teacher_attendance_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
-  CONSTRAINT teacher_attendance_marked_by_fkey FOREIGN KEY (marked_by) REFERENCES public.users(id)
+  CONSTRAINT teacher_attendance_marked_by_fkey FOREIGN KEY (marked_by) REFERENCES public.users(id),
+  CONSTRAINT teacher_attendance_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
 CREATE TABLE public.teacher_leave_balance (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -518,8 +518,8 @@ CREATE TABLE public.teacher_subjects (
   assigned_on timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   tenant_id uuid NOT NULL,
   CONSTRAINT teacher_subjects_pkey PRIMARY KEY (id),
-  CONSTRAINT teacher_subjects_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
   CONSTRAINT teacher_subjects_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id),
+  CONSTRAINT teacher_subjects_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
   CONSTRAINT teacher_subjects_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
 CREATE TABLE public.teachers (
@@ -575,10 +575,10 @@ CREATE TABLE public.timetable_entries (
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   tenant_id uuid NOT NULL,
   CONSTRAINT timetable_entries_pkey PRIMARY KEY (id),
-  CONSTRAINT timetable_entries_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT timetable_entries_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
   CONSTRAINT timetable_entries_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id),
-  CONSTRAINT timetable_entries_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id)
+  CONSTRAINT timetable_entries_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id),
+  CONSTRAINT timetable_entries_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
 CREATE TABLE public.upi_transactions (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -600,8 +600,8 @@ CREATE TABLE public.upi_transactions (
   reference_number character varying NOT NULL UNIQUE,
   CONSTRAINT upi_transactions_pkey PRIMARY KEY (id),
   CONSTRAINT upi_transactions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
-  CONSTRAINT upi_transactions_student_fee_id_fkey FOREIGN KEY (student_fee_id) REFERENCES public.student_fees(id),
   CONSTRAINT upi_transactions_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT upi_transactions_student_fee_id_fkey FOREIGN KEY (student_fee_id) REFERENCES public.student_fees(id),
   CONSTRAINT upi_transactions_admin_verified_by_fkey FOREIGN KEY (admin_verified_by) REFERENCES public.users(id)
 );
 CREATE TABLE public.users (
@@ -618,9 +618,9 @@ CREATE TABLE public.users (
   profile_url text,
   tenant_id uuid NOT NULL,
   CONSTRAINT users_pkey PRIMARY KEY (id),
-  CONSTRAINT users_linked_student_id_fkey FOREIGN KEY (linked_student_id) REFERENCES public.students(id),
-  CONSTRAINT users_linked_parent_of_fkey FOREIGN KEY (linked_parent_of) REFERENCES public.students(id),
   CONSTRAINT users_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT users_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id),
-  CONSTRAINT users_linked_teacher_id_fkey FOREIGN KEY (linked_teacher_id) REFERENCES public.teachers(id)
+  CONSTRAINT users_linked_student_id_fkey FOREIGN KEY (linked_student_id) REFERENCES public.students(id),
+  CONSTRAINT users_linked_teacher_id_fkey FOREIGN KEY (linked_teacher_id) REFERENCES public.teachers(id),
+  CONSTRAINT users_linked_parent_of_fkey FOREIGN KEY (linked_parent_of) REFERENCES public.students(id)
 );
