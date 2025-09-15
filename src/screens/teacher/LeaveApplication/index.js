@@ -10,8 +10,7 @@ import Header from '../../../components/Header';
 import { supabase, getUserTenantId } from '../../../utils/supabase';
 import { format, parseISO, isAfter, differenceInDays } from 'date-fns';
 import { createLeaveRequestNotificationForAdmins } from '../../../services/notificationService';
-import { useTenantContext } from '../../../contexts/TenantContext';
-import { getCurrentUserTenantByEmail } from '../../../utils/getTenantByEmail';
+import { useTenantAccess } from '../../../utils/tenantHelpers';
 import LeaveApplicationHeader from './components/LeaveApplicationHeader';
 import LeaveApplicationList from './components/LeaveApplicationList';
 import LeaveApplicationModal from './components/LeaveApplicationModal';
@@ -21,7 +20,14 @@ const isWeb = Platform.OS === 'web';
 const isTablet = width >= 768;
 
 const LeaveApplication = ({ navigation }) => {
-  const { currentTenant } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   
   // State management
   const [loading, setLoading] = useState(true);

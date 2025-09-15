@@ -21,7 +21,7 @@ import * as Print from 'expo-print';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
-import { useTenantContext } from '../../contexts/TenantContext';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 import { 
   validateTenantAccess, 
   createTenantQuery, 
@@ -64,13 +64,12 @@ const ViewReportCard = () => {
   // Add tenant context integration
   const { 
     tenantId, 
-    currentTenant, 
-    validateCurrentTenantAccess, 
-    executeSafeTenantQuery, 
-    loading: tenantLoading, 
-    retryTenantLoading, 
-    debugTenantLoading 
-  } = useTenantContext();
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   
   // Add debug state for tenant troubleshooting
   const [debugInfo, setDebugInfo] = useState({

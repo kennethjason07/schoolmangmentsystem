@@ -29,7 +29,7 @@ import {
   validateDataTenancy,
   TENANT_ERROR_MESSAGES 
 } from '../../utils/tenantValidation';
-import { useTenantContext } from '../../contexts/TenantContext';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 import { getCurrentMonthAttendance, calculateAttendanceStats, generateSampleAttendanceData } from '../../services/attendanceService';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
@@ -130,7 +130,14 @@ const MONTH_BG_COLORS = ['#f3f8fd', '#fdf7f3', '#f7fdf3']; // Light blue, light 
 
 const AttendanceSummary = () => {
   const { user } = useAuth();
-  const { tenantId, currentTenant, validateCurrentTenantAccess, executeSafeTenantQuery, loading: tenantLoading, retryTenantLoading, debugTenantLoading } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   
   const [selectedMonth, setSelectedMonth] = useState('all');
   const [selectedSubject, setSelectedSubject] = useState('All');

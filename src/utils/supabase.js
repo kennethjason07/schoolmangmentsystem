@@ -168,6 +168,7 @@ export const TABLES = {
   HOMEWORK: 'homeworks',
   ASSIGNMENTS: 'assignments',
   TIMETABLE: 'timetable_entries',
+  PERIOD_SETTINGS: 'period_settings',
   NOTIFICATIONS: 'notifications',
   NOTIFICATION_RECIPIENTS: 'notification_recipients',
   TASKS: 'tasks',

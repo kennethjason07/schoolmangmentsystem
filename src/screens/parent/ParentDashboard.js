@@ -26,7 +26,7 @@ import {
   validateDataTenancy,
   TENANT_ERROR_MESSAGES 
 } from '../../utils/tenantValidation';
-import { useTenantContext } from '../../contexts/TenantContext';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 import { useSelectedStudent } from '../../contexts/SelectedStudentContext';
 import { useFocusEffect } from '@react-navigation/native';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
@@ -38,7 +38,14 @@ import universalNotificationService from '../../services/UniversalNotificationSe
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
-  const { tenantId, currentTenant, validateCurrentTenantAccess, executeSafeTenantQuery, loading: tenantLoading } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   const { selectedStudent, hasMultipleStudents, availableStudents, loading: studentLoading } = useSelectedStudent();
   const [studentData, setStudentData] = useState(null);
   
@@ -48,8 +55,8 @@ const ParentDashboard = ({ navigation }) => {
   if (DEBUG_MODE) {
     console.log('🏢 [PARENT DASHBOARD TENANT DEBUG]:', {
       tenantId: tenantId || 'NO TENANT',
-      tenantName: currentTenant?.name || 'NO TENANT NAME',
-      tenantStatus: currentTenant?.status || 'UNKNOWN',
+      tenantName: tenant?.name || 'NO TENANT NAME',
+      tenantStatus: tenant?.status || 'UNKNOWN',
       tenantLoading: tenantLoading || false,
       userEmail: user?.email || 'NO USER',
       hasMultipleStudents,
@@ -74,7 +81,7 @@ const ParentDashboard = ({ navigation }) => {
       window.debugTenantContext = () => {
         console.log('🏢 [TENANT DEBUG] Current tenant context state:', {
           tenantId: tenantId || 'NOT SET',
-          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : 'NOT SET',
+          currentTenant: tenant ? { id: tenant.id, name: tenant.name } : 'NOT SET',
           tenantLoading: tenantLoading,
           user: user ? { id: user.id, email: user.email } : 'NOT SET',
           selectedStudent: selectedStudent ? { id: selectedStudent.id, name: selectedStudent.name } : 'NOT SET',
@@ -82,7 +89,7 @@ const ParentDashboard = ({ navigation }) => {
         });
         return {
           tenantId,
-          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : null,
+          currentTenant: tenant ? { id: tenant.id, name: tenant.name } : null,
           tenantLoading,
           user: user ? { id: user.id, email: user.email } : null,
           isReady: !tenantLoading && !!tenantId && !!user
@@ -182,7 +189,7 @@ const ParentDashboard = ({ navigation }) => {
           return;
         }
         console.error('❌ Parent dashboard: No tenant context available for notifications (user authenticated but no tenant)');
-        console.log('🔍 [DEBUG] Tenant context state:', { tenantId, currentTenant: !!currentTenant, tenantLoading, user: !!user });
+        console.log('🔍 [DEBUG] Tenant context state:', { tenantId, tenant: !!tenant, tenantLoading, user: !!user });
         setNotifications([]);
         return;
       }
@@ -884,9 +891,9 @@ const ParentDashboard = ({ navigation }) => {
       return;
     }
     
-    if (!tenantId || !currentTenant) {
+    if (!tenantId || !tenant) {
       console.error('❌ [TENANT-AWARE] Cannot fetch dashboard data: No tenant context');
-      console.log('🔍 [DEBUG] Tenant context state:', { tenantId, currentTenant: !!currentTenant, tenantLoading, user: !!user });
+      console.log('🔍 [DEBUG] Tenant context state:', { tenantId, tenant: !!tenant, tenantLoading, user: !!user });
       setError(TENANT_ERROR_MESSAGES.NO_TENANT);
       setLoading(false);
       return;
@@ -896,16 +903,15 @@ const ParentDashboard = ({ navigation }) => {
     setError(null);
     
     try {
-      // Validate tenant access before proceeding
-      const tenantValidation = await validateCurrentTenantAccess('Parent Dashboard Data Fetch');
-      if (!tenantValidation.isValid) {
-        console.error('❌ [TENANT-AWARE] Dashboard data fetch validation failed:', tenantValidation.error);
-        setError(tenantValidation.error);
+      // Validate tenant access
+      if (tenantError) {
+        console.error('❌ [TENANT-AWARE] Dashboard data fetch validation failed:', tenantError);
+        setError(tenantError);
         setLoading(false);
         return;
       }
       
-      console.log('✅ [TENANT-AWARE] Fetching dashboard data for student:', student.name, 'in tenant:', tenantValidation.tenant.name);
+      console.log('✅ [TENANT-AWARE] Fetching dashboard data for student:', student.name, 'in tenant:', tenant?.name);
       console.log('🔍 [TENANT-AWARE] Student profile_url from context:', student.profile_url);
       
       // Validate that student belongs to current tenant
@@ -936,9 +942,10 @@ const ParentDashboard = ({ navigation }) => {
           const today = new Date().toISOString().split('T')[0];
           console.log('🔍 [TENANT-AWARE] Today date for exam filter:', today);
           
-          // Use tenant-aware query following EMAIL_BASED_TENANT_SYSTEM.md patterns
-          const examQueryResult = await executeSafeTenantQuery(TABLES.EXAMS, {
-            select: `
+          // Use direct tenant-aware query
+          const { data: examsData, error: examsError } = await supabase
+            .from(TABLES.EXAMS)
+            .select(`
               id,
               name,
               start_date,
@@ -947,15 +954,13 @@ const ParentDashboard = ({ navigation }) => {
               class_id,
               academic_year,
               tenant_id
-            `,
-            filters: { class_id: student.class_id },
-            orderBy: { column: 'start_date', ascending: true },
-            limit: 5
-          });
+            `)
+            .eq('tenant_id', tenantId)
+            .eq('class_id', student.class_id)
+            .order('start_date', { ascending: true })
+            .limit(5);
           
-          const { data: examsData, error: examsError } = examQueryResult;
-          
-          // Additional client-side filtering for date (since executeSafeTenantQuery doesn't support gte)
+          // Filter for upcoming dates
           const filteredExamsData = examsData?.filter(exam => exam.start_date >= today) || [];
 
         console.log('📅 [TENANT-AWARE] Exams query result:', { data: filteredExamsData?.length || 0, error: examsError });
@@ -981,17 +986,16 @@ const ParentDashboard = ({ navigation }) => {
         const today = new Date().toISOString().split('T')[0];
         console.log('🔍 [TENANT-AWARE] Fetching upcoming events from date:', today);
         
-        // Use tenant-aware query for events
-        const eventsQueryResult = await executeSafeTenantQuery('events', {
-          select: '*',
-          filters: { status: 'Active' },
-          orderBy: { column: 'event_date', ascending: true },
-          limit: 10
-        });
+        // Use direct tenant-aware query for events
+        const { data: allEventsData, error: eventsError } = await supabase
+          .from('events')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'Active')
+          .order('event_date', { ascending: true })
+          .limit(10);
         
-        const { data: allEventsData, error: eventsError } = eventsQueryResult;
-        
-        // Client-side filtering for date (since executeSafeTenantQuery doesn't support gte)
+        // Filter for upcoming events
         const upcomingEventsData = allEventsData?.filter(event => event.event_date >= today) || [];
           
         console.log('📅 [TENANT-AWARE] Upcoming events found:', upcomingEventsData?.length || 0);

@@ -18,7 +18,7 @@ import {
   validateDataTenancy,
   TENANT_ERROR_MESSAGES 
 } from '../../utils/tenantValidation';
-import { useTenantContext } from '../../contexts/TenantContext';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 import { useGlobalRefresh } from '../../contexts/GlobalRefreshContext';
 
 const screenWidth = Dimensions.get('window').width;
@@ -50,7 +50,14 @@ const [teacherProfile, setTeacherProfile] = useState(null);
   const [schoolDetails, setSchoolDetails] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date()); // Add current time state
   const { user } = useAuth();
-  const { tenantId } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   
   // Global refresh hook for cross-screen refresh functionality
   const { registerRefreshCallback, triggerScreenRefresh } = useGlobalRefresh();

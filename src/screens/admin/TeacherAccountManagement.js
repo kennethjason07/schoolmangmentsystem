@@ -17,11 +17,17 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-import { useTenantContext } from '../../contexts/TenantContext';
-import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 
 const TeacherAccountManagement = ({ navigation }) => {
-  const { currentTenant } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   const [teachers, setTeachers] = useState([]);
   const [filteredTeachers, setFilteredTeachers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -40,8 +46,10 @@ const TeacherAccountManagement = ({ navigation }) => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
-    loadTeachers();
-  }, []);
+    if (isReady && tenantId) {
+      loadTeachers();
+    }
+  }, [isReady, tenantId]);
 
   // Filter teachers based on search query
   useEffect(() => {
@@ -81,23 +89,14 @@ const TeacherAccountManagement = ({ navigation }) => {
       }, 10000);
       
       // 🔍 Validate tenant context
-      let tenantId = currentTenant?.id;
       console.log('📋 TeacherAccountManagement: Current tenant ID:', tenantId);
       
-      if (!tenantId) {
-        console.log('⚠️ TeacherAccountManagement: No tenant from context, trying email lookup...');
-        
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          tenantId = emailTenant?.id;
-          console.log('📧 TeacherAccountManagement: Email-based tenant ID:', tenantId);
-        } catch (emailError) {
-          console.error('❌ TeacherAccountManagement: Email tenant lookup failed:', emailError);
-        }
-        
-        if (!tenantId) {
-          throw new Error('Unable to determine tenant context. Please contact support.');
-        }
+      if (!isReady || !tenantId) {
+        throw new Error('Tenant context not ready. Please wait and try again.');
+      }
+      
+      if (tenantError) {
+        throw new Error(tenantError.message || 'Tenant initialization error');
       }
       
       // 🏃‍♂️ Fast parallel data fetching
@@ -218,7 +217,15 @@ const TeacherAccountManagement = ({ navigation }) => {
       // Then show success alert
       Alert.alert(
         'Success',
-        `Teacher account created successfully!\n\nLogin credentials:\nEmail: ${accountForm.email}\nPassword: ${accountForm.password}\n\nThe teacher can now login immediately with these credentials.\n\nPlease share these credentials with the teacher.`,
+        `Teacher account created successfully!
+
+Login credentials:
+Email: ${accountForm.email}
+Password: ${accountForm.password}
+
+The teacher can now login immediately with these credentials.
+
+Please share these credentials with the teacher.`,
         [
           {
             text: 'OK',
@@ -323,6 +330,37 @@ const TeacherAccountManagement = ({ navigation }) => {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2196F3" />
           <Text style={styles.loadingText}>Loading teachers...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Show loading state when tenant is not ready
+  if (tenantLoading || !isReady) {
+    return (
+      <View style={styles.container}>
+        <Header title="Teacher Accounts" showBack={true} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#2196F3" />
+          <Text style={styles.loadingText}>Initializing tenant context...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Show error state if tenant failed to load
+  if (tenantError) {
+    return (
+      <View style={styles.container}>
+        <Header title="Teacher Accounts" showBack={true} />
+        <View style={styles.loadingContainer}>
+          <Text style={styles.errorText}>Tenant Error: {tenantError.message}</Text>
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={() => loadTeachers()}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -599,6 +637,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#f44336',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  retryButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    backgroundColor: '#2196F3',
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
   },
 
   // Summary Section

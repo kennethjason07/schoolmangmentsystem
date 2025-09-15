@@ -15,7 +15,7 @@ import Header from '../../components/Header';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, getUserTenantId } from '../../utils/supabase';
 import universalNotificationService from '../../services/UniversalNotificationService';
-import { useTenantContext } from '../../contexts/TenantContext';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 import {
   getResponsiveScrollProps,
   getResponsiveContentStyle,
@@ -28,7 +28,14 @@ const TeacherNotifications = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuth();
-  const { tenantId } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
 
   const getNotificationTitle = (type, message) => {
     // Extract title from message or use type-based defaults

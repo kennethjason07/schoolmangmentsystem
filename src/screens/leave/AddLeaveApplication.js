@@ -13,12 +13,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase, getUserTenantId } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
-import { useTenantContext } from '../../contexts/TenantContext';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 import { colors } from '../../../assets/colors';
 
 const AddLeaveApplication = ({ visible, onClose, onApplicationAdded }) => {
-  const { currentTenant } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   const [leaveType, setLeaveType] = useState('Sick');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -68,24 +75,17 @@ const AddLeaveApplication = ({ visible, onClose, onApplicationAdded }) => {
       setIsSubmitting(true);
       console.log('📊 AddLeaveApplication: Preparing to insert into database...');
       
-      // Get tenant ID with email fallback
-      let tenantId = currentTenant?.id || await getUserTenantId();
-      
+      // Use cached tenant ID from enhanced context
       if (!tenantId) {
-        console.log('⚠️ AddLeaveApplication: No tenant from context/getUserTenantId, trying email lookup...');
-        
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          tenantId = emailTenant?.id;
-          console.log('📧 AddLeaveApplication: Email-based tenant ID:', tenantId);
-        } catch (emailError) {
-          console.error('❌ AddLeaveApplication: Email tenant lookup failed:', emailError);
-        }
-        
-        if (!tenantId) {
-          Alert.alert('Error', 'Unable to determine tenant context. Please contact support.');
-          return;
-        }
+        console.log('⚠️ AddLeaveApplication: No tenant ID available');
+        Alert.alert('Error', 'Unable to determine tenant context. Please contact support.');
+        return;
+      }
+      
+      if (tenantError) {
+        console.error('❌ AddLeaveApplication: Tenant error:', tenantError);
+        Alert.alert('Error', 'Tenant error: ' + tenantError);
+        return;
       }
 
       // Get current user session

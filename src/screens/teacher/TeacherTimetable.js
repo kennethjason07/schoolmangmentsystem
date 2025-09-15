@@ -16,12 +16,18 @@ import { format } from 'date-fns';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
-import { useTenantContext } from '../../contexts/TenantContext';
-import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 
 const TeacherTimetable = ({ navigation }) => {
   const { user } = useAuth();
-  const { tenantId } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   
   // 🔍 DEBUG: Log tenant info on component load
   console.log('🕰️ TeacherTimetable - Tenant Debug:', {
@@ -50,9 +56,11 @@ const TeacherTimetable = ({ navigation }) => {
 
   // Load data on component mount - tenant validation happens inside loadData
   useEffect(() => {
-    console.log('🔄 TeacherTimetable: Component mounted, loading data...');
-    loadData();
-  }, []);
+    if (isReady && tenantId) {
+      console.log('🔄 TeacherTimetable: Component mounted, loading data...');
+      loadData();
+    }
+  }, [isReady, tenantId]);
 
   const loadData = async () => {
     try {
@@ -60,25 +68,16 @@ const TeacherTimetable = ({ navigation }) => {
       
       console.log('🚀 TeacherTimetable.loadData: Starting for user:', user?.email);
       
-      // Get the current tenant using the email-based lookup method
-      let currentTenantId = tenantId;
-      
-      if (!currentTenantId) {
-        console.log('⚠️ No tenant from context, trying email lookup...');
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          currentTenantId = emailTenant?.id;
-          console.log('📧 Email-based tenant ID:', currentTenantId);
-        } catch (emailError) {
-          console.error('❌ Email tenant lookup failed:', emailError);
-        }
-        
-        if (!currentTenantId) {
-          throw new Error('Unable to determine tenant context. Please contact support.');
-        }
+      // Validate tenant context
+      if (!isReady || !tenantId) {
+        throw new Error('Tenant context not ready. Please wait and try again.');
       }
       
-      console.log('✅ Using tenant_id:', currentTenantId);
+      if (tenantError) {
+        throw new Error(tenantError.message || 'Tenant initialization error');
+      }
+      
+      console.log('✅ Using tenant_id:', tenantId);
       
       // Use the robust teacher lookup from dbHelpers
       console.log('🔍 Getting teacher info using dbHelpers...');
@@ -93,7 +92,7 @@ const TeacherTimetable = ({ navigation }) => {
           .from(TABLES.USERS)
           .select('id, email, linked_teacher_id, tenant_id')
           .eq('email', user.email)
-          .eq('tenant_id', currentTenantId)
+          .eq('tenant_id', tenantId)
           .single();
         
         if (userLookupError || !userRecord?.linked_teacher_id) {
@@ -122,7 +121,7 @@ const TeacherTimetable = ({ navigation }) => {
           .from(TABLES.TEACHERS)
           .select('*')
           .eq('id', userRecord.linked_teacher_id)
-          .eq('tenant_id', currentTenantId)
+          .eq('tenant_id', tenantId)
           .single();
           
         if (fallbackTeacherError || !fallbackTeacher) {
@@ -192,7 +191,7 @@ const TeacherTimetable = ({ navigation }) => {
       console.log('🔍 Subjects:', subjectList.map(s => s.name));
       
       // Load timetable data
-      await loadTimetableData(teacherId, currentTenantId);
+      await loadTimetableData(teacherId, tenantId);
       
     } catch (error) {
       console.error('❌ Error in loadData:', error);
@@ -203,9 +202,9 @@ const TeacherTimetable = ({ navigation }) => {
     }
   };
 
-  const loadTimetableData = async (teacherId, currentTenantId) => {
+  const loadTimetableData = async (teacherId, tenantId) => {
     try {
-      console.log('🗺 Loading timetable data for teacher:', teacherId, 'tenant:', currentTenantId);
+      console.log('🗺 Loading timetable data for teacher:', teacherId, 'tenant:', tenantId);
       
       // Get current academic year
       const currentYear = new Date().getFullYear();
@@ -222,7 +221,7 @@ const TeacherTimetable = ({ navigation }) => {
           subjects(name)
         `)
         .eq('teacher_id', teacherId)
-        .eq('tenant_id', currentTenantId)
+        .eq('tenant_id', tenantId)
         .eq('academic_year', academicYear)
         .order('day_of_week')
         .order('period_number');

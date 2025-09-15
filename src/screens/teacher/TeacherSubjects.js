@@ -21,11 +21,18 @@ import {
   validateDataTenancy,
   TENANT_ERROR_MESSAGES 
 } from '../../utils/tenantValidation';
-import { useTenantContext } from '../../contexts/TenantContext';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 
 const TeacherSubjects = ({ navigation }) => {
   const { user } = useAuth();
-  const { tenantId } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   
   // 🔍 DEBUG: Log tenant info on component load
   console.log('👨‍🏫 TeacherSubjects - Tenant Debug:', {
@@ -43,18 +50,19 @@ const TeacherSubjects = ({ navigation }) => {
     classTeacherOf: 0,
   });
 
-  // 🚨 CRITICAL: Validate tenant_id before proceeding
+  // 🔨 CRITICAL: Validate tenant_id before proceeding
   useEffect(() => {
-    if (!tenantId) {
-      console.warn('⚠️ TeacherSubjects: No tenant_id available from context');
-      setError('No tenant context available. Please try logging out and back in.');
+    if (isReady && tenantId) {
+      console.log('✅ TeacherSubjects: Using tenant_id:', tenantId);
+      loadTeacherSubjects();
+    } else if (tenantError) {
+      console.error('❌ TeacherSubjects: Tenant error:', tenantError);
+      setError(tenantError.message || 'Tenant initialization error');
       setLoading(false);
-      return;
+    } else if (!isReady) {
+      console.log('⚠️ TeacherSubjects: Waiting for tenant initialization...');
     }
-    
-    console.log('✅ TeacherSubjects: Using tenant_id:', tenantId);
-    loadTeacherSubjects();
-  }, [tenantId]);
+  }, [isReady, tenantId, tenantError]);
 
   const loadTeacherSubjects = async () => {
     try {
@@ -237,7 +245,9 @@ const TeacherSubjects = ({ navigation }) => {
         // Navigate to subject details or timetable
         Alert.alert(
           'Subject Details',
-          `Subject: ${item.subjectName}\nClass: ${item.classSection}\nAcademic Year: ${item.academicYear}${item.isClassTeacher ? '\n\nYou are the class teacher for this class.' : ''}`,
+          `Subject: ${item.subjectName}
+Class: ${item.classSection}
+Academic Year: ${item.academicYear}${item.isClassTeacher ? '\n\nYou are the class teacher for this class.' : ''}`,
           [
             { text: 'OK' },
             {

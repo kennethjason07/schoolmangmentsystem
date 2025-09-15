@@ -6,7 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Alert } from 'react-native';
 import { useAuth } from '../utils/AuthContext';
-import { useTenantContext } from '../contexts/TenantContext';
+import { useTenantAccess } from '../utils/tenantHelpers';
 import { 
   validateTenantAccess, 
   createTenantQuery, 
@@ -22,7 +22,7 @@ export const useTaskManager = () => {
   const [error, setError] = useState(null);
 
   const { user } = useAuth();
-  const { tenantId } = useTenantContext();
+  const { tenantId } = useTenantAccess();
 
   // Fetch admin tasks (from public.tasks table)
   const fetchAdminTasks = useCallback(async () => {

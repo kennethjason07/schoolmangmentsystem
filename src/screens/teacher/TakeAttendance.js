@@ -8,8 +8,7 @@ import * as Print from 'expo-print';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import { createBulkAttendanceNotifications } from '../../utils/attendanceNotificationHelpers';
-import { useTenantContext } from '../../contexts/TenantContext';
-import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 
 function formatDateDMY(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') return '';
@@ -43,7 +42,14 @@ const TakeAttendance = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [clearMode, setClearMode] = useState(false); // Track if user manually cleared attendance
   const { user } = useAuth();
-  const { tenantId } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
 
   // Fetch teacher's assigned classes and students
   const fetchClassesAndStudents = async () => {
@@ -53,25 +59,16 @@ const TakeAttendance = () => {
       
       console.log('🚀 TakeAttendance.fetchClassesAndStudents: Starting for user:', user?.email);
       
-      // Get the current tenant using the email-based lookup method
-      let currentTenantId = tenantId;
-      
-      if (!currentTenantId) {
-        console.log('⚠️ No tenant from context, trying email lookup...');
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          currentTenantId = emailTenant?.id;
-          console.log('📧 Email-based tenant ID:', currentTenantId);
-        } catch (emailError) {
-          console.error('❌ Email tenant lookup failed:', emailError);
-        }
-        
-        if (!currentTenantId) {
-          throw new Error('Unable to determine tenant context. Please contact support.');
-        }
+      // Validate tenant context
+      if (!isReady || !tenantId) {
+        throw new Error('Tenant context not ready. Please wait and try again.');
       }
       
-      console.log('✅ Using tenant_id:', currentTenantId);
+      if (tenantError) {
+        throw new Error(tenantError.message || 'Tenant initialization error');
+      }
+      
+      console.log('✅ Using tenant_id:', tenantId);
       
       // Use the robust teacher lookup from dbHelpers
       console.log('🔍 Getting teacher info using dbHelpers...');
@@ -86,7 +83,7 @@ const TakeAttendance = () => {
           .from(TABLES.USERS)
           .select('id, email, linked_teacher_id, tenant_id')
           .eq('email', user.email)
-          .eq('tenant_id', currentTenantId)
+          .eq('tenant_id', tenantId)
           .single();
         
         if (userLookupError || !userRecord?.linked_teacher_id) {
@@ -100,14 +97,14 @@ const TakeAttendance = () => {
             .single();
             
           if (!crossTenantError && crossTenantUser) {
-            if (crossTenantUser.tenant_id !== currentTenantId) {
-              throw new Error(`User account exists in tenant "${crossTenantUser.tenant_id}" but current tenant is "${currentTenantId}". Please contact admin to fix tenant assignment.`);
+            if (crossTenantUser.tenant_id !== tenantId) {
+              throw new Error(`User account exists in tenant "${crossTenantUser.tenant_id}" but current tenant is "${tenantId}". Please contact admin to fix tenant assignment.`);
             } else if (!crossTenantUser.linked_teacher_id) {
               throw new Error(`User account found but not linked to a teacher profile. Please contact admin to complete account setup.`);
             }
           }
           
-          throw new Error(`User record not found for email: ${user.email} in tenant: ${currentTenantId}. Please contact admin.`);
+          throw new Error(`User record not found for email: ${user.email} in tenant: ${tenantId}. Please contact admin.`);
         }
         
         // Get teacher info using the linked teacher ID
@@ -115,7 +112,7 @@ const TakeAttendance = () => {
           .from(TABLES.TEACHERS)
           .select('*')
           .eq('id', userRecord.linked_teacher_id)
-          .eq('tenant_id', currentTenantId)
+          .eq('tenant_id', tenantId)
           .single();
           
         if (fallbackTeacherError || !fallbackTeacher) {
@@ -128,8 +125,8 @@ const TakeAttendance = () => {
         teacherData = fallbackTeacher; // Use fallback data for the rest of the function
       } else {
         // Validate teacher belongs to current tenant
-        if (teacherData.tenant_id !== currentTenantId) {
-          throw new Error(`Teacher belongs to tenant "${teacherData.tenant_id}" but current tenant is "${currentTenantId}".`);
+        if (teacherData.tenant_id !== tenantId) {
+          throw new Error(`Teacher belongs to tenant "${teacherData.tenant_id}" but current tenant is "${tenantId}".`);
         }
         
         setTeacherInfo(teacherData);
@@ -150,7 +147,7 @@ const TakeAttendance = () => {
           )
         `)
         .eq('teacher_id', teacherData.id)
-        .eq('tenant_id', currentTenantId);
+        .eq('tenant_id', tenantId);
 
       if (subjectsError) {
         console.error('❌ Error fetching assigned subjects:', subjectsError);
@@ -207,25 +204,16 @@ const TakeAttendance = () => {
       console.log('🏫 TakeAttendance.fetchStudents: Starting for class:', selectedClass);
       
       // Get current tenant ID using the same method as fetchClassesAndStudents
-      let currentTenantId = tenantId;
+      if (!isReady || !tenantId) {
+        throw new Error('Tenant context not ready. Please wait and try again.');
+      }
       
-      if (!currentTenantId) {
-        console.log('⚠️ No tenant from context in fetchStudents, trying email lookup...');
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          currentTenantId = emailTenant?.id;
-          console.log('📧 Email-based tenant ID for students:', currentTenantId);
-        } catch (emailError) {
-          console.error('❌ Email tenant lookup failed in fetchStudents:', emailError);
-        }
-        
-        if (!currentTenantId) {
-          throw new Error('Unable to determine tenant context for students. Please contact support.');
-        }
+      if (tenantError) {
+        throw new Error(tenantError.message || 'Tenant initialization error');
       }
       
       // Get students for the selected class with proper tenant filtering
-      console.log('🎫 Loading students for class:', selectedClass, 'tenant:', currentTenantId);
+      console.log('🎫 Loading students for class:', selectedClass, 'tenant:', tenantId);
       const { data: studentsData, error: studentsError } = await supabase
         .from(TABLES.STUDENTS)
         .select(`
@@ -235,7 +223,7 @@ const TakeAttendance = () => {
           classes(class_name, section)
         `)
         .eq('class_id', selectedClass)
-        .eq('tenant_id', currentTenantId)
+        .eq('tenant_id', tenantId)
         .order('admission_no');
 
       if (studentsError) {
@@ -271,19 +259,19 @@ const TakeAttendance = () => {
       console.log('🔍 [DEBUG] Student IDs:', students.map(s => s.id));
       
       // Get current tenant ID using the same method as other functions
-      let currentTenantId = tenantId;
+      let tenantId = tenantId;
       
-      if (!currentTenantId) {
+      if (!tenantId) {
         console.log('⚠️ No tenant from context in fetchExistingAttendance, trying email lookup...');
         try {
           const emailTenant = await getCurrentUserTenantByEmail();
-          currentTenantId = emailTenant?.id;
-          console.log('📧 Email-based tenant ID for attendance:', currentTenantId);
+          tenantId = emailTenant?.id;
+          console.log('📧 Email-based tenant ID for attendance:', tenantId);
         } catch (emailError) {
           console.error('❌ Email tenant lookup failed in fetchExistingAttendance:', emailError);
         }
         
-        if (!currentTenantId) {
+        if (!tenantId) {
           console.warn('❌ No tenant context available for attendance fetch, skipping silently');
           return; // Silent return for better UX
         }
@@ -295,7 +283,7 @@ const TakeAttendance = () => {
         .select('student_id, status')
         .eq('date', selectedDate)
         .eq('class_id', selectedClass)
-        .eq('tenant_id', currentTenantId);
+        .eq('tenant_id', tenantId);
 
       if (attendanceError) {
         console.error('❌ Error fetching attendance:', attendanceError);
@@ -423,26 +411,26 @@ const TakeAttendance = () => {
       }
 
       // Get current tenant ID using the same method as other functions
-      let currentTenantId = tenantId;
+      let tenantId = tenantId;
       
-      if (!currentTenantId) {
+      if (!tenantId) {
         console.log('⚠️ No tenant from context in handleMarkAttendance, trying email lookup...');
         try {
           const emailTenant = await getCurrentUserTenantByEmail();
-          currentTenantId = emailTenant?.id;
-          console.log('📧 Email-based tenant ID for attendance marking:', currentTenantId);
+          tenantId = emailTenant?.id;
+          console.log('📧 Email-based tenant ID for attendance marking:', tenantId);
         } catch (emailError) {
           console.error('❌ Email tenant lookup failed in handleMarkAttendance:', emailError);
         }
         
-        if (!currentTenantId) {
+        if (!tenantId) {
           Alert.alert('Error', 'Unable to determine tenant context for saving attendance. Please contact support.');
           return;
         }
       }
 
       // Ensure we have teacher info with tenant_id
-      if (!teacherInfo?.tenant_id || teacherInfo.tenant_id !== currentTenantId) {
+      if (!teacherInfo?.tenant_id || teacherInfo.tenant_id !== tenantId) {
         Alert.alert('Error', 'Teacher information not loaded properly or tenant mismatch. Please try again.');
         return;
       }
@@ -454,14 +442,14 @@ const TakeAttendance = () => {
         date: selectedDate,
         status: attendanceMark[student.id], // No fallback - we know it's defined
         marked_by: user.id,
-        tenant_id: currentTenantId // Use consistent tenant_id
+        tenant_id: tenantId // Use consistent tenant_id
       }));
 
       // 🔍 DEBUG: Log what we're about to submit
       console.log('🔍 [DEBUG] About to submit attendance records:');
       console.log('🔍 [DEBUG] Selected Class:', selectedClass);
       console.log('🔍 [DEBUG] Selected Date:', selectedDate);
-      console.log('🔍 [DEBUG] Tenant ID:', currentTenantId);
+      console.log('🔍 [DEBUG] Tenant ID:', tenantId);
       console.log('🔍 [DEBUG] Records to submit:', JSON.stringify(attendanceRecords, null, 2));
       console.log('🔍 [DEBUG] Current attendanceMark state:', JSON.stringify(attendanceMark, null, 2));
 
@@ -478,7 +466,7 @@ const TakeAttendance = () => {
         .delete()
         .eq('date', selectedDate)
         .eq('class_id', selectedClass)
-        .eq('tenant_id', currentTenantId)
+        .eq('tenant_id', tenantId)
         .in('student_id', studentIds);
         
       if (deleteError) {
@@ -535,19 +523,19 @@ const TakeAttendance = () => {
     
     try {
       // Get current tenant ID using the same method as other functions
-      let currentTenantId = tenantId;
+      let tenantId = tenantId;
       
-      if (!currentTenantId) {
+      if (!tenantId) {
         console.log('⚠️ No tenant from context in fetchViewAttendance, trying email lookup...');
         try {
           const emailTenant = await getCurrentUserTenantByEmail();
-          currentTenantId = emailTenant?.id;
-          console.log('📧 Email-based tenant ID for view attendance:', currentTenantId);
+          tenantId = emailTenant?.id;
+          console.log('📧 Email-based tenant ID for view attendance:', tenantId);
         } catch (emailError) {
           console.error('❌ Email tenant lookup failed in fetchViewAttendance:', emailError);
         }
         
-        if (!currentTenantId) {
+        if (!tenantId) {
           console.warn('❌ No tenant context available for view attendance, skipping silently');
           setViewAttendance([]);
           return; // Silent return for better UX
@@ -559,7 +547,7 @@ const TakeAttendance = () => {
         .from(TABLES.STUDENTS)
         .select('id, name, admission_no')
         .eq('class_id', viewClass)
-        .eq('tenant_id', currentTenantId);
+        .eq('tenant_id', tenantId);
 
       if (!viewStudents || viewStudents.length === 0) {
         setViewAttendance([]);
@@ -574,7 +562,7 @@ const TakeAttendance = () => {
           students(name, admission_no)
         `)
         .eq('date', viewDate)
-        .eq('tenant_id', currentTenantId)
+        .eq('tenant_id', tenantId)
         .in('student_id', viewStudents.map(s => s.id));
 
       if (attendanceError) throw attendanceError;

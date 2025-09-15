@@ -16,7 +16,7 @@ import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from
 import { badgeNotifier } from '../../utils/badgeNotifier';
 import { testRealtimeConnection, testUserFilteredConnection, insertTestMessage } from '../../utils/testRealtime';
 import ImageViewer from '../../components/ImageViewer';
-import { useTenantContext } from '../../contexts/TenantContext';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 import { 
   validateTenantAccess, 
   createTenantQuery, 
@@ -34,13 +34,12 @@ const ChatWithTeacher = () => {
   // Add tenant context integration
   const { 
     tenantId, 
-    currentTenant, 
-    validateCurrentTenantAccess, 
-    executeSafeTenantQuery, 
-    loading: tenantLoading, 
-    retryTenantLoading, 
-    debugTenantLoading 
-  } = useTenantContext();
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   
   const [teachers, setTeachers] = useState([]);
   const [selectedTeacher, setSelectedTeacher] = useState(null);

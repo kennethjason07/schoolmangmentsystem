@@ -30,7 +30,7 @@ import {
   validateDataTenancy,
   TENANT_ERROR_MESSAGES 
 } from '../../utils/tenantValidation';
-import { useTenantContext } from '../../contexts/TenantContext';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 import { format } from 'date-fns';
 import { getSchoolLogoBase64, getLogoHTML, getReceiptHeaderCSS } from '../../utils/logoUtils';
 import { runLogoTests } from '../../utils/logoTest';
@@ -45,13 +45,12 @@ const FeePayment = () => {
   const { user } = useAuth();
   const { 
     tenantId, 
-    currentTenant, 
-    validateCurrentTenantAccess, 
-    executeSafeTenantQuery, 
-    loading: tenantLoading, 
-    retryTenantLoading, 
-    debugTenantLoading 
-  } = useTenantContext();
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   const navigation = useNavigation();
   const [feeStructure, setFeeStructure] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);

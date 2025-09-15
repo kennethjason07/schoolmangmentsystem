@@ -20,7 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import Header from '../../components/Header';
 import { UPIDBService } from '../../services/UPIDBService';
 import { useAuth } from '../../utils/AuthContext';
-import { useTenantContext } from '../../contexts/TenantContext';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 import { formatReferenceNumberForDisplay, validateReferenceNumberFormat } from '../../utils/referenceNumberGenerator';
 
 const { width } = Dimensions.get('window');
@@ -28,7 +28,14 @@ const { width } = Dimensions.get('window');
 const PendingUPIPayments = () => {
   const navigation = useNavigation();
   const { user } = useAuth();
-  const { tenantId } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   
   // State management
   const [pendingPayments, setPendingPayments] = useState([]);

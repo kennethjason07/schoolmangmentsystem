@@ -17,26 +17,32 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
-import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { supabase, TABLES } from '../../utils/supabase';
 import { ActivityIndicator as PaperActivityIndicator } from 'react-native-paper';
-import { useTenantContext } from '../../contexts/TenantContext';
-import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
 import { useAuth } from '../../utils/AuthContext';
-import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
-import { AdminTenantFix } from '../../utils/adminTenantFix';
+import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
 
 // Will be fetched from Supabase
 const ManageTeachers = ({ navigation, route }) => {
-  const { tenantId, currentTenant } = useTenantContext();
   const { user } = useAuth();
-  const [fallbackTenantId, setFallbackTenantId] = useState(null);
   
-  // Debug tenant context
-  console.log('🏢 ManageTeachers: Component initialized with:', {
-    tenantId: tenantId || 'NULL',
-    currentTenant: currentTenant ? currentTenant.name : 'NULL',
+  // 🚀 ENHANCED: Use the new tenant access hook
+  const { 
+    getTenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
+  
+  // Debug enhanced tenant context
+  console.log('🚀 ManageTeachers: Enhanced tenant context:', {
+    isReady,
+    tenantName: tenantName || 'NULL',
+    tenantId: getTenantId() || 'NULL',
     userEmail: user?.email || 'NULL'
   });
+  
   const [subjects, setSubjects] = useState([]);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -57,56 +63,26 @@ const ManageTeachers = ({ navigation, route }) => {
   const [totalTeachers, setTotalTeachers] = useState(0);
   const PAGE_SIZE = 20;
   
-  // Helper function to get effective tenant ID (from context or fallback)
-  const getEffectiveTenantId = () => {
-    return tenantId || fallbackTenantId;
-  };
-  
-  // Initialize fallback tenant ID if context tenant is missing
-  const initializeTenantContext = async () => {
-    if (!tenantId && user && !fallbackTenantId) {
-      console.log('🔧 ManageTeachers: Tenant context missing, attempting fallback initialization...');
-      try {
-        const tenantContext = await AdminTenantFix.getAdminTenantContext(user);
-        if (tenantContext.tenantId) {
-          console.log('✅ ManageTeachers: Fallback tenant initialized:', tenantContext.tenantId);
-          setFallbackTenantId(tenantContext.tenantId);
-          return tenantContext.tenantId;
-        } else {
-          console.error('❌ ManageTeachers: Fallback tenant initialization failed:', tenantContext.error);
-          setError(tenantContext.error);
-          return null;
-        }
-      } catch (error) {
-        console.error('💥 ManageTeachers: Error in fallback tenant initialization:', error);
-        setError('Failed to initialize tenant context. Please contact administrator.');
-        return null;
-      }
-    }
-    return tenantId;
-  };
+
   
   // Load data on component mount and when tenant changes
   useEffect(() => {
-    console.log('🏢 ManageTeachers: useEffect triggered:', {
-      tenantId: tenantId || 'NULL',
+    console.log('🚀 ManageTeachers: useEffect triggered:', {
+      isReady,
+      tenantId: getTenantId() || 'NULL',
       user: user?.email || 'NULL'
     });
     
-    const effectiveTenantId = getEffectiveTenantId();
-    if (effectiveTenantId && user) {
-      console.log('🏢 ManageTeachers: Loading data with tenant and user available');
+    // Wait for tenant context to be ready
+    if (isReady && getTenantId() && user) {
+      console.log('🏢 ManageTeachers: Tenant ready, loading data...');
       loadData();
-    } else if (user) {
-      console.warn('🏢 ManageTeachers: User available but waiting for tenant context...');
-      // Try to initialize tenant context
-      initializeTenantContext().then((initializedTenantId) => {
-        if (initializedTenantId) {
-          console.log('🏢 ManageTeachers: Tenant context initialized, loading data...');
-          loadData();
-        }
-      });
-    } else {
+    } else if (tenantError) {
+      console.error('❌ ManageTeachers: Tenant error:', tenantError);
+      setError(tenantError);
+    } else if (!isReady) {
+      console.log('⏳ ManageTeachers: Waiting for tenant context to be ready...');
+    } else if (!user) {
       console.warn('🏢 ManageTeachers: Waiting for user authentication...');
     }
     
@@ -116,7 +92,7 @@ const ManageTeachers = ({ navigation, route }) => {
         openEditModal(route.params.editTeacher);
       }, 500);
     }
-  }, [route.params, tenantId, user, fallbackTenantId]);
+  }, [route.params, isReady, getTenantId(), user, tenantError]);
 
   useEffect(() => {
     // When selected classes change, filter out subjects that are no longer valid
@@ -138,7 +114,7 @@ const ManageTeachers = ({ navigation, route }) => {
 
   }, [form.classes, subjects]);
   
-  // Function to load data using optimized approach with pagination
+  // Function to load data using enhanced tenant system with pagination
   const loadData = async (page = 0, isRefresh = false) => {
     const startTime = performance.now();
     
@@ -149,43 +125,25 @@ const ManageTeachers = ({ navigation, route }) => {
     setError(null);
     
     try {
+      const tenantId = getTenantId();
       console.log(`🏢 ManageTeachers: Loading page ${page} for tenant:`, tenantId);
       
-      // Initialize tenant context if needed
-      const effectiveTenantId = await initializeTenantContext();
-      
-      if (!effectiveTenantId) {
-        console.error('❌ ManageTeachers: No tenant context available after initialization');
+      if (!tenantId) {
+        console.error('❌ ManageTeachers: No tenant ID available');
         setError('No tenant context available. Please contact administrator.');
         setLoading(false);
         return;
       }
       
-      // 🛑️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, effectiveTenantId, 'ManageTeachers');
-      if (!validation.isValid) {
-        console.error('❌ ManageTeachers: Tenant validation failed:', validation.error);
-        setError(validation.error);
-        setLoading(false);
-        return;
-      }
-
-      console.log('🚀 ManageTeachers: Loading teachers with optimized query for tenant:', effectiveTenantId);
+      console.log('🚀 ManageTeachers: Loading teachers with enhanced tenant system:', tenantId);
       
-      console.log('✅ ManageTeachers: Tenant validation successful');
-
-      // 🚀 Direct query with effective tenant ID (bypassing getTeachers for tenant consistency)
-      console.log('🏢 ManageTeachers: Querying teachers directly with effective tenant:', effectiveTenantId);
-      
-      // Direct query with pagination
-      const start = page * PAGE_SIZE;
-      const end = start + PAGE_SIZE - 1;
-      
-      const { data: teachersData, error: teachersError } = await supabase
-        .from(TABLES.TEACHERS)
-        .select('*')
-        .eq('tenant_id', effectiveTenantId)
-        .order('created_at', { ascending: false });
+      // 🚀 Use enhanced tenant database for teachers
+      const { data: teachersData, error: teachersError } = await tenantDatabase.read(
+        'teachers', 
+        {}, 
+        '*',
+        { orderBy: { column: 'created_at', ascending: false } }
+      );
       
       console.log('🏢 ManageTeachers: Teachers query result:', {
         success: !teachersError,
@@ -198,19 +156,11 @@ const ManageTeachers = ({ navigation, route }) => {
         throw new Error(`Failed to load teachers: ${teachersError.message}`);
       }
       
-      // 🚀 OPTIMIZED: Direct parallel queries - much faster
+      // 🚀 Enhanced: Direct parallel queries using tenantDatabase
       console.log('🏢 ManageTeachers: Fetching classes and subjects...');
       const [classesResult, subjectsResult] = await Promise.all([
-        supabase
-          .from(TABLES.CLASSES)
-          .select('*')
-          .eq('tenant_id', effectiveTenantId)
-          .order('class_name'),
-        supabase
-          .from(TABLES.SUBJECTS)
-          .select('*')
-          .eq('tenant_id', effectiveTenantId)
-          .order('name')
+        tenantDatabase.read('classes', {}, '*', { orderBy: { column: 'class_name', ascending: true } }),
+        tenantDatabase.read('subjects', {}, '*', { orderBy: { column: 'name', ascending: true } })
       ]);
       
       // Get classes and subjects data from the parallel queries
@@ -259,7 +209,7 @@ const ManageTeachers = ({ navigation, route }) => {
         teachers: (teachersData || []).length,
         classes: classesData?.length || 0,
         subjects: subjectsData?.length || 0,
-        tenantId: effectiveTenantId
+        tenantId
       });
       
       // 📊 Performance monitoring
@@ -300,11 +250,16 @@ const ManageTeachers = ({ navigation, route }) => {
   };
 
   const loadSections = async (classId) => {
-    const { data, error } = await dbHelpers.getSectionsByClass(classId);
+    // 🚀 Enhanced: Use enhanced tenant database
+    const { data, error } = await tenantDatabase.read(
+      'classes',
+      { id: classId },
+      'section'
+    );
     if (error) {
       return;
     }
-    setSections(data);
+    setSections(data?.map(item => ({ id: item.section, section_name: item.section })) || []);
   };
 
   const loadSectionsForClasses = async (classIds) => {
@@ -314,20 +269,21 @@ const ManageTeachers = ({ navigation, route }) => {
     }
     
     try {
-      // 🚀 OPTIMIZED: Simple direct query
-      const effectiveTenantId = getEffectiveTenantId();
-      if (!effectiveTenantId) {
+      // 🚀 Enhanced: Use getTenantId from enhanced tenant system
+      const tenantId = getTenantId();
+      if (!tenantId) {
         console.warn('🏢 ManageTeachers: No tenant context for loading sections');
         setSections([]);
         return;
       }
       
-      const { data, error } = await supabase
-        .from(TABLES.CLASSES)
-        .select('section')
-        .eq('tenant_id', effectiveTenantId)
-        .in('id', classIds)
-        .not('section', 'is', null);
+      // 🚀 Use enhanced tenant database for sections
+      const { data, error } = await tenantDatabase.read(
+        'classes',
+        { id: { in: classIds } },
+        'section',
+        { filters: { section: { not: null } } }
+      );
       
       if (error) {
         console.warn('🏢 ManageTeachers: Error loading sections:', error.message);
@@ -361,15 +317,33 @@ const ManageTeachers = ({ navigation, route }) => {
     setSelectedTeacher(teacher);
 
     try {
-      // Fetch current teacher's subject and class assignments
-      const { data: teacherSubjects, error: tsError } = await dbHelpers.getTeacherSubjects(teacher.id);
+      // 🚀 Enhanced: Fetch current teacher's subject and class assignments using tenant database
+      const { data: teacherSubjects, error: tsError } = await tenantDatabase.read(
+        'teacher_subjects',
+        { teacher_id: teacher.id },
+        `*,
+         subjects(
+           id,
+           name,
+           class_id,
+           academic_year,
+           is_optional,
+           classes(
+             class_name,
+             section
+           )
+         )`
+      );
+      
       if (tsError) throw tsError;
 
-      // Also fetch direct class teacher assignments
-      const { data: directClassAssignments, error: dcError } = await supabase
-        .from('classes')
-        .select('id')
-        .eq('class_teacher_id', teacher.id);
+      // 🚀 Enhanced: Fetch direct class teacher assignments using tenant database
+      const { data: directClassAssignments, error: dcError } = await tenantDatabase.read(
+        'classes',
+        { class_teacher_id: teacher.id },
+        'id'
+      );
+      
       if (dcError) {
         console.warn('Error loading direct class assignments:', dcError);
       }
@@ -559,23 +533,21 @@ const ManageTeachers = ({ navigation, route }) => {
       console.log('Saving assignments for teacher:', teacherId);
       console.log('Form data:', { subjects: form.subjects, classes: form.classes, sections: form.sections });
 
-      // 🛡️ Validate tenant access for assignments
-      const effectiveTenantId = getEffectiveTenantId();
-      if (!effectiveTenantId) {
+      // 🚀 Enhanced: Get tenant ID from enhanced system
+      const tenantId = getTenantId();
+      if (!tenantId) {
         throw new Error('No tenant context available for assignments');
       }
       
-      const validation = await validateTenantAccess(user?.id, effectiveTenantId, 'ManageTeachers - Assignments');
-      if (!validation.isValid) {
-        throw new Error(`Assignment access denied: ${validation.error}`);
-      }
+      console.log('🏢 ManageTeachers: Assignment validation passed');
 
       // 1. Handle subject assignments first
-      // Get all existing subject assignments for this teacher using tenant-aware query
-      const { data: existingAssignments, error: fetchError } = await createTenantQuery(tenantId, TABLES.TEACHER_SUBJECTS)
-        .select('*')
-        .eq('teacher_id', teacherId)
-        .execute();
+      // Get all existing subject assignments for this teacher using enhanced tenant database
+      const { data: existingAssignments, error: fetchError } = await tenantDatabase.read(
+        'teacher_subjects',
+        { teacher_id: teacherId },
+        '*'
+      );
       if (fetchError) {
         console.error('Failed to fetch existing assignments:', fetchError);
         throw new Error('Failed to fetch existing assignments');
@@ -585,10 +557,10 @@ const ManageTeachers = ({ navigation, route }) => {
 
       // Delete existing subject assignments
       if (existingAssignments.length > 0) {
-        const { error: deleteError } = await supabase
-          .from(TABLES.TEACHER_SUBJECTS)
-          .delete()
-          .eq('teacher_id', teacherId);
+        const { error: deleteError } = await tenantDatabase.delete(
+          'teacher_subjects',
+          { teacher_id: teacherId }
+        );
         if (deleteError) {
           console.error('Failed to delete assignments:', deleteError);
           throw new Error('Failed to update assignments');
@@ -596,21 +568,20 @@ const ManageTeachers = ({ navigation, route }) => {
         console.log('Deleted existing subject assignments');
       }
 
-      // Create new assignments for selected subjects (with tenant_id)
+      // Create new assignments for selected subjects
       const assignments = form.subjects.map(subjectId => ({
         teacher_id: teacherId,
         subject_id: subjectId,
-        tenant_id: effectiveTenantId, // Add tenant_id
       }));
 
       console.log('New subject assignments to insert:', assignments);
 
       // Insert new subject assignments if there are any
       if (assignments.length > 0) {
-        const { data: insertedData, error: insertError } = await supabase
-          .from(TABLES.TEACHER_SUBJECTS)
-          .insert(assignments)
-          .select();
+        const { data: insertedData, error: insertError } = await tenantDatabase.create(
+          'teacher_subjects',
+          assignments
+        );
         if (insertError) {
           console.error('Failed to create assignments:', insertError);
           throw new Error('Failed to create assignments');
@@ -622,19 +593,21 @@ const ManageTeachers = ({ navigation, route }) => {
 
       // 2. Handle direct class teacher assignments
       // First, remove this teacher from all existing class teacher assignments
-      const { data: currentClassTeacherAssignments } = await supabase
-        .from('classes')
-        .select('id, class_name')
-        .eq('class_teacher_id', teacherId);
+      const { data: currentClassTeacherAssignments } = await tenantDatabase.read(
+        'classes',
+        { class_teacher_id: teacherId },
+        'id, class_name'
+      );
 
       console.log('Current class teacher assignments:', currentClassTeacherAssignments);
 
       // Remove this teacher from all classes where they were class teacher
       if (currentClassTeacherAssignments && currentClassTeacherAssignments.length > 0) {
-        const { error: removeError } = await supabase
-          .from('classes')
-          .update({ class_teacher_id: null })
-          .eq('class_teacher_id', teacherId);
+        const { error: removeError } = await tenantDatabase.update(
+          'classes',
+          { class_teacher_id: teacherId },
+          { class_teacher_id: null }
+        );
         if (removeError) {
           console.error('Failed to remove from class teacher assignments:', removeError);
           console.warn('Could not remove previous class teacher assignments');
@@ -649,10 +622,11 @@ const ManageTeachers = ({ navigation, route }) => {
         
         // Update each selected class to have this teacher as class_teacher_id
         for (const classId of form.classes) {
-          const { error: assignError } = await supabase
-            .from('classes')
-            .update({ class_teacher_id: teacherId })
-            .eq('id', classId);
+          const { error: assignError } = await tenantDatabase.update(
+            'classes',
+            { id: classId },
+            { class_teacher_id: teacherId }
+          );
           
           if (assignError) {
             console.error(`Failed to assign teacher to class ${classId}:`, assignError);
@@ -664,12 +638,11 @@ const ManageTeachers = ({ navigation, route }) => {
       }
 
       // 3. Update teacher's is_class_teacher flag
-      const { error: updateTeacherError } = await supabase
-        .from(TABLES.TEACHERS)
-        .update({ 
-          is_class_teacher: form.classes.length > 0
-        })
-        .eq('id', teacherId);
+      const { error: updateTeacherError } = await tenantDatabase.update(
+        'teachers',
+        { id: teacherId },
+        { is_class_teacher: form.classes.length > 0 }
+      );
       
       if (updateTeacherError) {
         console.error('Failed to update teacher class teacher flag:', updateTeacherError);
@@ -954,7 +927,7 @@ const ManageTeachers = ({ navigation, route }) => {
   };
 
   // Render loading state
-  if (loading && teachers.length === 0) {
+  if ((loading && teachers.length === 0) || tenantLoading) {
     return (
       <View style={styles.fullScreenLoading}>
         <View style={styles.loadingContent}>
@@ -963,8 +936,13 @@ const ManageTeachers = ({ navigation, route }) => {
             <PaperActivityIndicator size="large" color="#4CAF50" style={styles.loadingSpinner} />
           </View>
           <Text style={styles.loadingTitle}>Manage Teachers</Text>
-          <Text style={styles.loadingText}>Loading teachers data...</Text>
+          <Text style={styles.loadingText}>
+            {tenantLoading ? 'Initializing tenant context...' : 'Loading teachers data...'}
+          </Text>
           <Text style={styles.loadingSubtext}>Please wait while we fetch the information</Text>
+          {tenantName && (
+            <Text style={styles.loadingTenant}>Tenant: {tenantName}</Text>
+          )}
         </View>
       </View>
     );
@@ -986,6 +964,22 @@ const ManageTeachers = ({ navigation, route }) => {
   return (
     <View style={styles.container}>
       <Header title="Manage Teachers" showBack={true} />
+      
+      {/* 🚀 Enhanced: Tenant Context Banner */}
+      {tenantName && (
+        <View style={styles.tenantBanner}>
+          <View style={styles.tenantBannerContent}>
+            <Ionicons name="business" size={16} color="#4CAF50" />
+            <Text style={styles.tenantBannerText}>
+              Managing: {tenantName}
+            </Text>
+          </View>
+          {tenantLoading && (
+            <PaperActivityIndicator size={12} color="#4CAF50" />
+          )}
+        </View>
+      )}
+      
       {loading && (
         <View style={styles.loadingOverlay}>
           <PaperActivityIndicator size="large" color="#4CAF50" />
@@ -2141,6 +2135,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999',
     fontStyle: 'italic',
+  },
+  // 🚀 Enhanced: Tenant Banner Styles
+  tenantBanner: {
+    backgroundColor: '#E8F5E8',
+    borderBottomWidth: 1,
+    borderBottomColor: '#C8E6C9',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  tenantBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tenantBannerText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2E7D32',
+    marginLeft: 8,
+  },
+  loadingTenant: {
+    fontSize: 12,
+    color: '#4CAF50',
+    fontWeight: '500',
+    marginTop: 8,
+    textAlign: 'center',
   },
 });
 

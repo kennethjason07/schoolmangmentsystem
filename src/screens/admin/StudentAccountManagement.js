@@ -18,11 +18,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-import { useTenantContext } from '../../contexts/TenantContext';
-import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 
 const StudentAccountManagement = ({ navigation }) => {
-  const { currentTenant } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState('all');
@@ -44,8 +50,10 @@ const StudentAccountManagement = ({ navigation }) => {
   });
 
   useEffect(() => {
-    loadStudents();
-  }, []);
+    if (isReady && tenantId) {
+      loadStudents();
+    }
+  }, [isReady, tenantId]);
 
   const loadStudents = async () => {
     const startTime = performance.now();
@@ -62,23 +70,14 @@ const StudentAccountManagement = ({ navigation }) => {
       }, 10000);
       
       // 🔍 Validate tenant context
-      let tenantId = currentTenant?.id;
       console.log('📋 StudentAccountManagement: Current tenant ID:', tenantId);
       
-      if (!tenantId) {
-        console.log('⚠️ StudentAccountManagement: No tenant from context, trying email lookup...');
-        
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          tenantId = emailTenant?.id;
-          console.log('📧 StudentAccountManagement: Email-based tenant ID:', tenantId);
-        } catch (emailError) {
-          console.error('❌ StudentAccountManagement: Email tenant lookup failed:', emailError);
-        }
-        
-        if (!tenantId) {
-          throw new Error('Unable to determine tenant context. Please contact support.');
-        }
+      if (!isReady || !tenantId) {
+        throw new Error('Tenant context not ready. Please wait and try again.');
+      }
+      
+      if (tenantError) {
+        throw new Error(tenantError.message || 'Tenant initialization error');
       }
       
       // Test auth connection
@@ -269,7 +268,14 @@ const StudentAccountManagement = ({ navigation }) => {
       // Then show success alert
       Alert.alert(
         'Success',
-        `✅ Login account created successfully for ${selectedStudent.name}!\n\n📧 Email: ${accountForm.email}\n🔑 Password: ${accountForm.password}\n\n✨ The student can now log in with these credentials.\n\n${verifyUser ? '✅ Account verified in database' : '⚠️ Account created but verification pending'}`,
+        `✅ Login account created successfully for ${selectedStudent.name}!
+
+📧 Email: ${accountForm.email}
+🔑 Password: ${accountForm.password}
+
+✨ The student can now log in with these credentials.
+
+${verifyUser ? '✅ Account verified in database' : '⚠️ Account created but verification pending'}`,
         [
           {
             text: 'OK',
@@ -361,6 +367,37 @@ const StudentAccountManagement = ({ navigation }) => {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2196F3" />
           <Text style={styles.loadingText}>Loading students...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Show loading state when tenant is not ready
+  if (tenantLoading || !isReady) {
+    return (
+      <View style={styles.container}>
+        <Header title="Student Account Management" showBack={true} onBack={() => navigation.goBack()} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#2196F3" />
+          <Text style={styles.loadingText}>Initializing tenant context...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Show error state if tenant failed to load
+  if (tenantError) {
+    return (
+      <View style={styles.container}>
+        <Header title="Student Account Management" showBack={true} onBack={() => navigation.goBack()} />
+        <View style={styles.loadingContainer}>
+          <Text style={styles.errorText}>Tenant Error: {tenantError.message}</Text>
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={() => loadStudents()}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -619,6 +656,23 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     color: '#666',
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#f44336',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  retryButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    backgroundColor: '#2196F3',
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
   },
   searchContainer: {
     flexDirection: 'row',

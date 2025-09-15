@@ -19,6 +19,7 @@ import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 import { format } from 'date-fns';
 import * as Animatable from 'react-native-animatable';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
@@ -27,15 +28,61 @@ import * as Print from 'expo-print';
 import { createBulkAttendanceNotifications } from '../../utils/attendanceNotificationHelpers';
 
 const AttendanceManagement = () => {
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
+  
+  // 🔍 DEBUG: Log tenant info on component load
+  console.log('🏢 AttendanceManagement - Enhanced Tenant Debug:', {
+    tenantId,
+    tenantName,
+    isReady,
+    tenantLoading
+  });
+  
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('student');
   const [classes, setClasses] = useState([]);
-
   const [teachers, setTeachers] = useState([]);
+
+  // Enhanced tenant validation
+  const validateTenantReady = () => {
+    if (tenantLoading || !isReady) {
+      console.log('🔄 [TENANT-AWARE] Tenant context not ready yet...');
+      return false;
+    }
+    
+    if (tenantError) {
+      console.error('❌ [TENANT-AWARE] Tenant error:', tenantError);
+      setError('Tenant error: ' + tenantError);
+      return false;
+    }
+    
+    if (!tenantId) {
+      console.error('❌ [TENANT-AWARE] No tenant ID available');
+      setError('No tenant access available');
+      return false;
+    }
+    
+    return true;
+  };
 
   const loadAllData = async () => {
     try {
       setLoading(true);
+      
+      // 🔍 Validate tenant context before proceeding
+      if (!validateTenantReady()) {
+        setLoading(false);
+        return;
+      }
+      
+      console.log('🚀 AttendanceManagement.loadAllData: Starting with tenant_id:', tenantId);
 
       // Load classes
       const { data: classData, error: classError } = await dbHelpers.getClasses();
@@ -46,8 +93,11 @@ const AttendanceManagement = () => {
       const { data: teachersData, error: teachersError } = await dbHelpers.getTeachers();
       if (teachersError) throw teachersError;
       setTeachers(teachersData || []);
+      
+      console.log(`✅ AttendanceManagement: Loaded ${classData?.length || 0} classes, ${teachersData?.length || 0} teachers`);
 
     } catch (error) {
+      console.error('❌ AttendanceManagement.loadAllData: Error:', error);
       Alert.alert('Error', 'Failed to load data');
     } finally {
       setLoading(false);
@@ -62,8 +112,14 @@ const AttendanceManagement = () => {
         setAttendanceMark({});
         return;
       }
+      
+      // 🔍 Validate tenant context before proceeding
+      if (!validateTenantReady()) {
+        console.error('❌ loadStudentsForClass: Tenant context not ready');
+        return;
+      }
 
-      console.log('Loading students for class:', classId);
+      console.log('📋 loadStudentsForClass - using tenantId:', tenantId, 'for classId:', classId);
       const { data: studentsData, error } = await dbHelpers.getStudentsByClass(classId);
 
       if (error) {
@@ -71,7 +127,7 @@ const AttendanceManagement = () => {
         throw error;
       }
 
-      console.log('Loaded students for class:', studentsData);
+      console.log('Loaded students for class:', studentsData?.length || 0);
       setStudentsForClass(studentsData || []);
 
     } catch (error) {
@@ -125,6 +181,12 @@ const AttendanceManagement = () => {
       Alert.alert('Error', 'Please enter an academic year');
       return;
     }
+    
+    // 🔍 Validate tenant context before proceeding
+    if (!validateTenantReady()) {
+      Alert.alert('Error', 'Tenant context not ready. Please try again.');
+      return;
+    }
 
     try {
       setAddingClass(true);
@@ -135,7 +197,8 @@ const AttendanceManagement = () => {
           {
             class_name: newClassName.trim(),
             section: newClassSection.trim(),
-            academic_year: newAcademicYear
+            academic_year: newAcademicYear,
+            tenant_id: tenantId // Explicit tenant_id for safety
           }
         ])
         .select();
@@ -159,7 +222,7 @@ const AttendanceManagement = () => {
       Alert.alert('Success', 'Class added successfully!');
 
     } catch (error) {
-      console.error('Error adding class:', error);
+      console.error('❌ Error adding class:', error);
       Alert.alert('Error', `Failed to add class: ${error.message}`);
     } finally {
       setAddingClass(false);
@@ -172,8 +235,12 @@ const AttendanceManagement = () => {
   }, [selectedClass]);
 
   useEffect(() => {
-    loadAllData();
-  }, []);
+    // Only load data when tenant is ready
+    if (isReady && tenantId && !tenantLoading) {
+      console.log('🔄 AttendanceManagement: Tenant ready, loading data...');
+      loadAllData();
+    }
+  }, [isReady, tenantId, tenantLoading]);
 
   // Helper function to validate date
   const isValidDate = (date) => {
@@ -198,12 +265,21 @@ const AttendanceManagement = () => {
   // Load existing attendance from database
   const loadExistingAttendance = async (classId, date) => {
     try {
-      // With new RLS policies, tenant filtering is automatic
+      // 🔍 Validate tenant context before proceeding
+      if (!validateTenantReady()) {
+        console.error('❌ loadExistingAttendance: Tenant context not ready');
+        return {};
+      }
+      
+      console.log('📋 loadExistingAttendance - using tenantId:', tenantId, 'for classId:', classId, 'date:', date);
+      
+      // With enhanced tenant system, tenant filtering is automatic through dbHelpers
       const { data: existingAttendance, error } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
         .select('student_id, status')
         .eq('class_id', classId)
-        .eq('date', date);
+        .eq('date', date)
+        .eq('tenant_id', tenantId); // Explicit tenant filtering for safety
 
       if (error) throw error;
 
@@ -212,10 +288,10 @@ const AttendanceManagement = () => {
         attendanceMap[record.student_id] = record.status;
       });
 
-      console.log('Loaded attendance for', date, ':', Object.keys(attendanceMap).length, 'records');
+      console.log('✅ Loaded attendance for', date, ':', Object.keys(attendanceMap).length, 'records');
       return attendanceMap;
     } catch (error) {
-      console.error('Error loading existing attendance:', error);
+      console.error('❌ Error loading existing attendance:', error);
       return {};
     }
   };
@@ -223,10 +299,19 @@ const AttendanceManagement = () => {
   // Load existing teacher attendance from database
   const loadExistingTeacherAttendance = async (date) => {
     try {
+      // 🔍 Validate tenant context before proceeding
+      if (!validateTenantReady()) {
+        console.error('❌ loadExistingTeacherAttendance: Tenant context not ready');
+        return {};
+      }
+      
+      console.log('📋 loadExistingTeacherAttendance - using tenantId:', tenantId, 'for date:', date);
+      
       const { data: existingAttendance, error } = await supabase
         .from(TABLES.TEACHER_ATTENDANCE)
         .select('teacher_id, status')
-        .eq('date', date);
+        .eq('date', date)
+        .eq('tenant_id', tenantId); // Explicit tenant filtering for safety
 
       if (error) throw error;
 
@@ -235,9 +320,10 @@ const AttendanceManagement = () => {
         attendanceMap[record.teacher_id] = record.status;
       });
 
+      console.log('✅ Loaded teacher attendance for', date, ':', Object.keys(attendanceMap).length, 'records');
       return attendanceMap;
     } catch (error) {
-      console.error('Error loading existing teacher attendance:', error);
+      console.error('❌ Error loading existing teacher attendance:', error);
       return {};
     }
   };
@@ -300,6 +386,12 @@ const AttendanceManagement = () => {
         return; // Prevent double submission
       }
       
+      // 🔍 Validate tenant context before proceeding
+      if (!validateTenantReady()) {
+        Alert.alert('Error', 'Tenant context not ready. Please try again.');
+        return;
+      }
+      
       setLoading(true);
       
       // Validate inputs before proceeding
@@ -322,12 +414,7 @@ const AttendanceManagement = () => {
       const key = `${selectedClass}|${selectedDate.toISOString().split('T')[0]}`;
       const attendanceDate = selectedDate.toISOString().split('T')[0];
 
-      console.log('Submitting attendance for:', {
-        selectedClass,
-        attendanceDate,
-        studentsCount: studentsForClass.length,
-        attendanceMarks: attendanceMark
-      });
+      console.log('💾 handleMarkAttendance - using tenantId:', tenantId, 'for classId:', selectedClass, 'date:', attendanceDate);
 
       // Get current user_id for marked_by field
       const { getCurrentUserId } = require('../../utils/supabase');
@@ -359,30 +446,25 @@ const AttendanceManagement = () => {
       }
 
       // Delete existing attendance records for this class/date
-      console.log('Deleting existing records for class:', selectedClass, 'date:', attendanceDate);
+      console.log('🗑️ Deleting existing records for class:', selectedClass, 'date:', attendanceDate);
       const { error: deleteError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
         .delete()
         .eq('class_id', selectedClass)
-        .eq('date', attendanceDate);
+        .eq('date', attendanceDate)
+        .eq('tenant_id', tenantId); // Explicit tenant filtering for safety
 
       if (deleteError) {
         console.error('Delete error:', deleteError);
         throw new Error(`Failed to delete existing records: ${deleteError.message}`);
       }
-      console.log('Successfully deleted existing records');
+      console.log('✅ Successfully deleted existing records');
 
       // Insert new attendance records for ONLY explicitly marked students
       const records = [];
       
-      // Get current user's tenant_id for RLS policy compliance
-      const { data: currentUser } = await supabase
-        .from(TABLES.USERS)
-        .select('tenant_id')
-        .eq('id', validatedUserId)
-        .single();
-      
-      const userTenantId = currentUser?.tenant_id;
+      // Use tenantId from enhanced context instead of querying again
+      const userTenantId = tenantId;
       
       // Only create records for students that have been explicitly marked
       Object.keys(attendanceMark).forEach(studentId => {
@@ -399,7 +481,7 @@ const AttendanceManagement = () => {
         }
       });
 
-      console.log('Creating records for explicitly marked students only:');
+      console.log('📝 Creating records for explicitly marked students only:');
       console.log('   - Total students in class:', studentsForClass.length);
       console.log('   - Students with explicit marks:', Object.keys(attendanceMark).length);
       console.log('   - Records to insert:', records.length);
@@ -420,10 +502,10 @@ const AttendanceManagement = () => {
         console.error('Insert error:', insertError);
         throw new Error(`Failed to insert attendance records: ${insertError.message}`);
       }
-      console.log('Successfully inserted records:', insertData);
+      console.log('✅ Successfully inserted records:', insertData?.length || 0);
 
       // Send absence notifications to parents using new system
-      console.log('Checking for absent students to notify parents...');
+      console.log('📧 Checking for absent students to notify parents...');
 
       const absentRecords = records.filter(record => record.status === 'Absent');
       console.log(`Found ${absentRecords.length} absent students`);
@@ -431,7 +513,7 @@ const AttendanceManagement = () => {
       let notificationResults = { success: false, totalRecipients: 0, results: [] };
 
       if (absentRecords.length > 0) {
-        console.log('Sending absence notifications using new system...');
+        console.log('📤 Sending absence notifications using new system...');
 
         try {
           // Use the new bulk notification system
@@ -440,9 +522,9 @@ const AttendanceManagement = () => {
             validatedUserId
           );
 
-          console.log(`Bulk notification results:`, notificationResults);
+          console.log(`📧 Bulk notification results:`, notificationResults);
         } catch (notificationError) {
-          console.error('Error sending bulk notifications:', notificationError);
+          console.error('❌ Error sending bulk notifications:', notificationError);
           notificationResults = {
             success: false,
             totalRecipients: 0,
@@ -465,11 +547,11 @@ const AttendanceManagement = () => {
       if (absentRecords.length > 0) {
         const successCount = notificationResults?.results ? notificationResults.results.filter(r => r.success).length : 0;
         const failureCount = notificationResults?.results ? notificationResults.results.filter(r => !r.success).length : 0;
-        console.log(`Notification summary: ${successCount} successful, ${failureCount} failed`);
+        console.log(`📊 Notification summary: ${successCount} successful, ${failureCount} failed`);
       }
     } catch (error) {
-      console.error('Error saving attendance:', error);
-      Alert.alert('Error', 'Failed to save attendance');
+      console.error('❌ Error saving attendance:', error);
+      Alert.alert('Error', 'Failed to save attendance: ' + (error.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
@@ -483,6 +565,12 @@ const AttendanceManagement = () => {
         return; // Prevent double submission
       }
       
+      // 🔍 Validate tenant context before proceeding
+      if (!validateTenantReady()) {
+        Alert.alert('Error', 'Tenant context not ready. Please try again.');
+        return;
+      }
+      
       setLoading(true);
       
       // Validate date before proceeding
@@ -493,6 +581,8 @@ const AttendanceManagement = () => {
       }
 
       const attendanceDate = teacherDate.toISOString().split('T')[0];
+
+      console.log('💾 handleTeacherMarkAttendance - using tenantId:', tenantId, 'for date:', attendanceDate);
 
       // Get current user_id for marked_by field
       const { getCurrentUserId } = require('../../utils/supabase');
@@ -524,29 +614,24 @@ const AttendanceManagement = () => {
       }
 
       // Delete existing teacher attendance records for this date
-      console.log('Deleting existing teacher records for date:', attendanceDate);
+      console.log('🗑️ Deleting existing teacher records for date:', attendanceDate);
       const { error: deleteError } = await supabase
         .from(TABLES.TEACHER_ATTENDANCE)
         .delete()
-        .eq('date', attendanceDate);
+        .eq('date', attendanceDate)
+        .eq('tenant_id', tenantId); // Explicit tenant filtering for safety
 
       if (deleteError) {
         console.error('Delete error:', deleteError);
         throw new Error(`Failed to delete existing teacher records: ${deleteError.message}`);
       }
-      console.log('Successfully deleted existing teacher records');
+      console.log('✅ Successfully deleted existing teacher records');
 
       // Insert new teacher attendance records for ONLY explicitly marked teachers
       const records = [];
       
-      // Get current user's tenant_id for RLS policy compliance
-      const { data: currentUser } = await supabase
-        .from(TABLES.USERS)
-        .select('tenant_id')
-        .eq('id', validatedUserId)
-        .single();
-      
-      const userTenantId = currentUser?.tenant_id;
+      // Use tenantId from enhanced context instead of querying again
+      const userTenantId = tenantId;
       
       // Only create records for teachers that have been explicitly marked
       Object.keys(teacherAttendanceMark).forEach(teacherId => {
@@ -562,7 +647,7 @@ const AttendanceManagement = () => {
         }
       });
 
-      console.log('Creating teacher records for explicitly marked teachers only:');
+      console.log('📝 Creating teacher records for explicitly marked teachers only:');
       console.log('   - Total teachers:', teachers.length);
       console.log('   - Teachers with explicit marks:', Object.keys(teacherAttendanceMark).length);
       console.log('   - Records to insert:', records.length);
@@ -583,7 +668,7 @@ const AttendanceManagement = () => {
         console.error('Teacher insert error:', insertError);
         throw new Error(`Failed to insert teacher attendance records: ${insertError.message}`);
       }
-      console.log('Successfully inserted teacher records:', insertData);
+      console.log('✅ Successfully inserted teacher records:', insertData?.length || 0);
 
       // Update local state
       const key = attendanceDate;
@@ -595,8 +680,8 @@ const AttendanceManagement = () => {
       // Show simple success message
       Alert.alert('Success', 'Teacher attendance saved successfully!');
     } catch (error) {
-      console.error('Error saving teacher attendance:', error);
-      Alert.alert('Error', 'Failed to save teacher attendance');
+      console.error('❌ Error saving teacher attendance:', error);
+      Alert.alert('Error', 'Failed to save teacher attendance: ' + (error.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }

@@ -17,13 +17,17 @@ import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { Picker } from '@react-native-picker/picker';
 import { supabase, TABLES } from '../../utils/supabase';
-import { useTenantContext } from '../../contexts/TenantContext';
-import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
-import { useAuth } from '../../utils/AuthContext';
-import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 
 const ManageClasses = ({ navigation }) => {
-  const { tenantId, currentTenant, loading: tenantLoading } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   

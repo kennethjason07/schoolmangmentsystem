@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
-import { useTenantContext } from '../../contexts/TenantContext';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 
 // NEW: Modern Filter System
@@ -32,7 +32,14 @@ const { width } = Dimensions.get('window');
 
 const LeaveManagementModern = ({ navigation, route }) => {
   console.log('🎬 [LEAVE_MGMT] Component render started');
-  const { currentTenant } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   
   // Existing state
   const [leaveApplications, setLeaveApplications] = useState([]);
@@ -335,24 +342,15 @@ const LeaveManagementModern = ({ navigation, route }) => {
         throw new Error('Loading timeout - please check your connection');
       }, 10000);
       
-      // 🔍 Validate tenant context
-      let tenantId = currentTenant?.id;
-      console.log('📋 LeaveManagementModern: Current tenant ID:', tenantId);
-      
+      // Use cached tenant ID from enhanced context
       if (!tenantId) {
-        console.log('⚠️ LeaveManagementModern: No tenant from context, trying email lookup...');
-        
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          tenantId = emailTenant?.id;
-          console.log('📧 LeaveManagementModern: Email-based tenant ID:', tenantId);
-        } catch (emailError) {
-          console.error('❌ LeaveManagementModern: Email tenant lookup failed:', emailError);
-        }
-        
-        if (!tenantId) {
-          throw new Error('Unable to determine tenant context. Please contact support.');
-        }
+        console.log('⚠️ LeaveManagementModern: No tenant ID available');
+        throw new Error('Unable to determine tenant context. Please contact support.');
+      }
+      
+      if (tenantError) {
+        console.error('❌ LeaveManagementModern: Tenant error:', tenantError);
+        throw new Error('Tenant error: ' + tenantError);
       }
       
       // Check current session first

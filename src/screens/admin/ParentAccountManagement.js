@@ -18,11 +18,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-import { useTenantContext } from '../../contexts/TenantContext';
-import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 
 const ParentAccountManagement = ({ navigation }) => {
-  const { currentTenant } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState('all');
@@ -51,11 +57,13 @@ const ParentAccountManagement = ({ navigation }) => {
   // Listen for navigation focus to refresh data when coming back from LinkExistingParent
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      loadStudents();
+      if (isReady && tenantId) {
+        loadStudents();
+      }
     });
 
     return unsubscribe;
-  }, [navigation]);
+  }, [navigation, isReady, tenantId]);
 
   const loadStudents = async () => {
     const startTime = performance.now();
@@ -72,28 +80,14 @@ const ParentAccountManagement = ({ navigation }) => {
       }, 10000);
       
       // 🔍 Validate tenant context
-      let tenantId = currentTenant?.id;
       console.log('📋 ParentAccountManagement: Current tenant ID:', tenantId);
       
-      if (!tenantId) {
-        console.log('⚠️ ParentAccountManagement: No tenant from context, trying email lookup...');
-        
-        try {
-          const emailTenantResult = await getCurrentUserTenantByEmail();
-          if (emailTenantResult.success) {
-            tenantId = emailTenantResult.data.tenantId;
-            console.log('📧 ParentAccountManagement: Email-based tenant ID:', tenantId);
-            console.log('📧 ParentAccountManagement: Email-based tenant name:', emailTenantResult.data.tenantName);
-          } else {
-            console.error('❌ ParentAccountManagement: Email tenant lookup failed:', emailTenantResult.error);
-          }
-        } catch (emailError) {
-          console.error('❌ ParentAccountManagement: Email tenant lookup failed:', emailError);
-        }
-        
-        if (!tenantId) {
-          throw new Error('Unable to determine tenant context. Please contact support.');
-        }
+      if (!isReady || !tenantId) {
+        throw new Error('Tenant context not ready. Please wait and try again.');
+      }
+      
+      if (tenantError) {
+        throw new Error(tenantError.message || 'Tenant initialization error');
       }
       
       // Test auth connection
@@ -368,7 +362,15 @@ const ParentAccountManagement = ({ navigation }) => {
       // Then show success alert
       Alert.alert(
         'Success',
-        `✅ Parent account created successfully for ${selectedStudent.name}!\n\n📧 Email: ${accountForm.email}\n🔑 Password: ${accountForm.password}\n👤 Relation: ${accountForm.relation}\n\n✨ The parent can now log in with these credentials.\n\n${fullyVerified ? '✅ Both login account and parent record verified' : userVerified ? '✅ Login account verified, ⚠️ Parent record pending' : '⚠️ Verification pending'}`,
+        `✅ Parent account created successfully for ${selectedStudent.name}!
+
+📧 Email: ${accountForm.email}
+🔑 Password: ${accountForm.password}
+👤 Relation: ${accountForm.relation}
+
+✨ The parent can now log in with these credentials.
+
+${fullyVerified ? '✅ Both login account and parent record verified' : userVerified ? '✅ Login account verified, ⚠️ Parent record pending' : '⚠️ Verification pending'}`,
         [
           {
             text: 'OK',
@@ -423,7 +425,12 @@ const ParentAccountManagement = ({ navigation }) => {
       // Show success alert
       Alert.alert(
         'Success',
-        `✅ Existing parent account successfully linked to ${linkResult.data.student.name}!\n\n📧 Parent Email: ${parentEmail}\n👤 Relation: ${relation}\n\n✨ The parent can now access ${linkResult.data.student.name}'s information from their existing account.`,
+        `✅ Existing parent account successfully linked to ${linkResult.data.student.name}!
+
+📧 Parent Email: ${parentEmail}
+👤 Relation: ${relation}
+
+✨ The parent can now access ${linkResult.data.student.name}'s information from their existing account.`,
         [
           {
             text: 'OK',

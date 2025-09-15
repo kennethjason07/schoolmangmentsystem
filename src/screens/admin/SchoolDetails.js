@@ -20,11 +20,22 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { decode as atob } from 'base-64';
 import Header from '../../components/Header';
-import { supabase, dbHelpers } from '../../utils/supabase';
+import { supabase } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
+import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
 
 const SchoolDetails = ({ navigation }) => {
   const { user } = useAuth();
+  
+  // 🚀 ENHANCED: Use the new tenant access hook
+  const { 
+    getTenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
+  
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -58,35 +69,30 @@ const SchoolDetails = ({ navigation }) => {
   });
 
   useEffect(() => {
-    loadSchoolDetails();
-    loadUpiSettings();
-  }, []);
+    // 🚀 ENHANCED: Only load data when tenant is ready
+    if (isReady) {
+      loadSchoolDetails();
+      loadUpiSettings();
+    }
+  }, [isReady]);
 
   const loadSchoolDetails = async () => {
     try {
       setLoading(true);
-      console.log('=== Loading school details ===');
-      console.log('🏢 SchoolDetails: About to call dbHelpers.getSchoolDetails()');
-      const { data, error } = await dbHelpers.getSchoolDetails();
-      console.log('🏢 SchoolDetails: getSchoolDetails result:', { data: data ? 'EXISTS' : 'NULL', error: error?.message });
-
-      console.log('School details query result:', { data, error });
-      if (data) {
-        console.log('Logo URL from database:', data.logo_url);
-        if (data.logo_url) {
-          console.log('Logo URL exists - will attempt to display image');
-          console.log('URL starts with http:', data.logo_url.startsWith('http'));
-          console.log('URL starts with file:', data.logo_url.startsWith('file:'));
-          if (data.logo_url.startsWith('file:')) {
-            console.log('🚫 Local file path detected, will show placeholder instead');
-          }
-        } else {
-          console.log('No logo URL found in database');
-        }
-      }
+      console.log('🚀 SchoolDetails: Loading school details with enhanced tenant system...');
+      
+      // 🚀 ENHANCED: Use tenant database for automatic tenant filtering
+      const { data, error } = await tenantDatabase.read('school_details', {}, '*');
+      
+      console.log('🚀 SchoolDetails: Enhanced query result:', { 
+        hasData: !!data, 
+        dataLength: data?.length, 
+        error: error?.message,
+        tenantName 
+      });
 
       if (error) {
-        console.log('Error loading school details:', error);
+        console.log('❌ Error loading school details:', error);
         // Don't show error for missing data, just use defaults
         const errorMessage = error.message || '';
         if (error.code !== 'PGRST116' && !errorMessage.includes('no rows')) {
@@ -94,12 +100,17 @@ const SchoolDetails = ({ navigation }) => {
         }
       }
 
-      if (data) {
-        setSchoolData(data);
-        console.log('School data state updated with:', data);
+      if (data && data.length > 0) {
+        // Use the first record (there should only be one per tenant)
+        const schoolData = data[0];
+        setSchoolData(schoolData);
+        console.log('✅ School data loaded successfully for tenant:', tenantName);
+        console.log('Logo URL from database:', schoolData.logo_url);
+      } else {
+        console.log('📝 No school details found for tenant:', tenantName, '- using defaults');
       }
     } catch (error) {
-      console.log('Exception loading school details:', error);
+      console.log('❌ Exception loading school details:', error);
       // Don't show error for missing data, just use defaults
     } finally {
       setLoading(false);
@@ -193,11 +204,12 @@ const SchoolDetails = ({ navigation }) => {
     try {
       setUploading(true);
       
-  console.log('=== Starting school logo upload debug ===');
+      console.log('=== Starting school logo upload debug ===');
       console.log('Current schoolData.logo_url before upload:', schoolData.logo_url);
       console.log('Image URI:', imageAsset.uri);
       console.log('Image size:', imageAsset.fileSize);
       console.log('Image type:', imageAsset.type || 'unknown');
+      console.log('🚀 Enhanced tenant context - Tenant Name:', tenantName);
 
       // Step 1: Check authentication status
       console.log('Step 1: Checking authentication...');
@@ -304,7 +316,19 @@ const SchoolDetails = ({ navigation }) => {
         const updatedSchoolData = { ...schoolData, logo_url: publicUrl };
         console.log('Updating database with:', updatedSchoolData);
         
-        const { data: saveData, error: saveError } = await dbHelpers.updateSchoolDetails(updatedSchoolData);
+        // 🚀 ENHANCED: Use tenant database for saving
+        const { data: existing } = await tenantDatabase.read('school_details');
+        
+        let saveResult;
+        if (existing && existing.length > 0) {
+          // Update existing record
+          saveResult = await tenantDatabase.update('school_details', existing[0].id, updatedSchoolData);
+        } else {
+          // Create new record
+          saveResult = await tenantDatabase.create('school_details', updatedSchoolData);
+        }
+        
+        const { data: saveData, error: saveError } = saveResult;
         
         if (saveError) {
           console.error('Failed to save logo URL to database:', saveError);
@@ -376,7 +400,11 @@ const SchoolDetails = ({ navigation }) => {
             onPress: () => {
               Alert.alert(
                 'Technical Details',
-                `Error Type: ${error.name || 'Unknown'}\n\nMessage: ${error.message || 'No message'}\n\nPlease share these details with your administrator.`,
+                `Error Type: ${error.name || 'Unknown'}
+
+Message: ${error.message || 'No message'}
+
+Please share these details with your administrator.`,
                 [{ text: 'OK', style: 'default' }]
               );
             }
@@ -388,31 +416,39 @@ const SchoolDetails = ({ navigation }) => {
     }
   };
 
-  // UPI Management Functions
+  // UPI Management Functions - Enhanced with tenant system
   const loadUpiSettings = async () => {
     try {
       setUpiLoading(true);
-      console.log('Loading UPI settings for tenant:', user?.tenant_id);
+      
+      // 🚀 ENHANCED: Use cached tenant ID
+      const tenantId = getTenantId();
+      console.log('🚀 Loading UPI settings for cached tenant:', tenantId);
+      
+      if (!tenantId) {
+        console.warn('⚠️ No tenant ID available for UPI settings');
+        return;
+      }
       
       const { data, error } = await supabase
         .from('school_upi_settings')
         .select('*')
-        .eq('tenant_id', user?.tenant_id)
+        .eq('tenant_id', tenantId)
         .eq('is_active', true)
         .order('is_primary', { ascending: false })
         .order('created_at', { ascending: false });
       
       if (error) {
-        console.error('Error loading UPI settings:', error);
+        console.error('❌ Error loading UPI settings:', error);
         if (error.code !== 'PGRST116') {
           Alert.alert('Error', 'Failed to load UPI settings: ' + error.message);
         }
       } else {
-        console.log('UPI settings loaded:', data);
+        console.log('✅ UPI settings loaded for tenant:', tenantName, '- Count:', data?.length || 0);
         setUpiSettings(data || []);
       }
     } catch (error) {
-      console.error('Exception loading UPI settings:', error);
+      console.error('❌ Exception loading UPI settings:', error);
     } finally {
       setUpiLoading(false);
     }
@@ -472,8 +508,15 @@ const SchoolDetails = ({ navigation }) => {
       
       setUpiLoading(true);
       
+      // 🚀 ENHANCED: Use cached tenant ID
+      const tenantId = getTenantId();
+      if (!tenantId) {
+        Alert.alert('Error', 'No tenant context available');
+        return;
+      }
+      
       const upiData = {
-        tenant_id: user?.tenant_id,
+        tenant_id: tenantId,
         upi_id: upiFormData.upi_id.trim(),
         upi_name: upiFormData.upi_name.trim(),
         description: upiFormData.description.trim() || null,
@@ -492,7 +535,7 @@ const SchoolDetails = ({ navigation }) => {
             updated_by: user?.id,
           })
           .eq('id', editingUpi.id)
-          .eq('tenant_id', user?.tenant_id)
+          .eq('tenant_id', tenantId)
           .select()
           .single();
       } else {
@@ -541,11 +584,18 @@ const SchoolDetails = ({ navigation }) => {
             try {
               setUpiLoading(true);
               
+              // 🚀 ENHANCED: Use cached tenant ID
+              const tenantId = getTenantId();
+              if (!tenantId) {
+                Alert.alert('Error', 'No tenant context available');
+                return;
+              }
+              
               const { error } = await supabase
                 .from('school_upi_settings')
                 .delete()
                 .eq('id', upiSetting.id)
-                .eq('tenant_id', user?.tenant_id);
+                .eq('tenant_id', tenantId);
               
               if (error) {
                 console.error('Error deleting UPI setting:', error);
@@ -577,6 +627,13 @@ const SchoolDetails = ({ navigation }) => {
     try {
       setUpiLoading(true);
       
+      // 🚀 ENHANCED: Use cached tenant ID
+      const tenantId = getTenantId();
+      if (!tenantId) {
+        Alert.alert('Error', 'No tenant context available');
+        return;
+      }
+      
       // Update without updated_by to avoid foreign key constraint issues
       const { error } = await supabase
         .from('school_upi_settings')
@@ -585,7 +642,7 @@ const SchoolDetails = ({ navigation }) => {
           updated_at: new Date().toISOString()
         })
         .eq('id', upiSetting.id)
-        .eq('tenant_id', user?.tenant_id);
+        .eq('tenant_id', tenantId);
       
       if (error) {
         console.error('Error setting primary UPI:', error);
@@ -614,20 +671,39 @@ const SchoolDetails = ({ navigation }) => {
         return;
       }
 
-      console.log('🏢 SchoolDetails: Saving school data:', schoolData);
-      console.log('🏢 SchoolDetails: About to call dbHelpers.updateSchoolDetails()');
-      const { data, error } = await dbHelpers.updateSchoolDetails(schoolData);
-      console.log('🏢 SchoolDetails: updateSchoolDetails result:', { data: data ? 'SUCCESS' : 'NULL', error: error?.message });
-
-      console.log('Save result:', { data, error });
+      console.log('🚀 SchoolDetails: Saving school data with enhanced tenant system...');
+      console.log('🚀 SchoolDetails: Tenant:', tenantName);
+      console.log('🚀 SchoolDetails: Data to save:', schoolData);
+      
+      // 🚀 ENHANCED: Check if school details record exists
+      const { data: existing } = await tenantDatabase.read('school_details');
+      
+      let result;
+      if (existing && existing.length > 0) {
+        // Update existing record
+        console.log('🚀 Updating existing school details...');
+        result = await tenantDatabase.update('school_details', existing[0].id, schoolData);
+      } else {
+        // Create new record
+        console.log('🚀 Creating new school details record...');
+        result = await tenantDatabase.create('school_details', schoolData);
+      }
+      
+      const { data, error } = result;
+      console.log('🚀 SchoolDetails: Enhanced save result:', { 
+        hasData: !!data, 
+        error: error?.message,
+        operation: existing?.length > 0 ? 'update' : 'create'
+      });
 
       if (error) {
-        console.error('Save error details:', error);
+        console.error('❌ Save error details:', error);
         throw error;
       }
 
       if (data) {
         setSchoolData(data);
+        console.log('✅ School details saved successfully for tenant:', tenantName);
       }
       
       // Show success message and navigate back to dashboard
@@ -645,7 +721,7 @@ const SchoolDetails = ({ navigation }) => {
         ]
       );
     } catch (error) {
-      console.error('Save exception:', error);
+      console.error('❌ Save exception:', error);
       // Show error message and navigate back to dashboard
       Alert.alert(
         'Error', 
@@ -665,6 +741,39 @@ const SchoolDetails = ({ navigation }) => {
     }
   };
 
+  // 🚀 ENHANCED: Show tenant loading state
+  if (tenantLoading || !isReady) {
+    return (
+      <View style={styles.container}>
+        <Header title="School Details" showBack={true} onBack={() => navigation.goBack()} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#2196F3" />
+          <Text style={styles.loadingText}>Initializing tenant data...</Text>
+        </View>
+      </View>
+    );
+  }
+  
+  // 🚀 ENHANCED: Show tenant error state
+  if (tenantError) {
+    return (
+      <View style={styles.container}>
+        <Header title="School Details" showBack={true} onBack={() => navigation.goBack()} />
+        <View style={styles.loadingContainer}>
+          <Ionicons name="warning" size={48} color="#FF9800" />
+          <Text style={styles.errorTitle}>Tenant Error</Text>
+          <Text style={styles.errorText}>{tenantError}</Text>
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.retryButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -680,6 +789,13 @@ const SchoolDetails = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <Header title="School Details" showBack={true} onBack={() => navigation.goBack()} />
+      
+      {/* 🚀 ENHANCED: Show tenant context info */}
+      <View style={styles.tenantBanner}>
+        <Ionicons name="school" size={16} color="#4CAF50" />
+        <Text style={styles.tenantBannerText}>Managing: {tenantName}</Text>
+        <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+      </View>
       
       <View style={styles.scrollWrapper}>
         <ScrollView
@@ -1136,6 +1252,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+  // 🚀 ENHANCED: Tenant banner styles
+  tenantBanner: {
+    backgroundColor: '#E8F5E8',
+    borderBottomWidth: 1,
+    borderBottomColor: '#C8E6C9',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  tenantBannerText: {
+    fontSize: 14,
+    color: '#2E7D32',
+    fontWeight: '600',
+  },
   // Enhanced scroll wrapper styles for web compatibility
   scrollWrapper: {
     flex: 1,
@@ -1165,6 +1298,33 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 16,
     color: '#666',
+  },
+  // 🚀 ENHANCED: Error state styles
+  errorTitle: {
+    marginTop: 16,
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+  },
+  errorText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  retryButton: {
+    marginTop: 20,
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   flex1: {
     flex: 1,

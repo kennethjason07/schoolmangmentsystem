@@ -19,15 +19,21 @@ import Header from '../../components/Header';
 import { supabase, getUserTenantId } from '../../utils/supabase';
 import { format, parseISO, isAfter, differenceInDays } from 'date-fns';
 import { createLeaveRequestNotificationForAdmins } from '../../services/notificationService';
-import { useTenantContext } from '../../contexts/TenantContext';
-import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 import { submitLeaveApplication, loadLeaveApplications } from '../../utils/leaveApplicationUtils';
 import { useAuth } from '../../utils/AuthContext';
 
 const { width } = Dimensions.get('window');
 
 const LeaveApplication = ({ navigation }) => {
-  const { currentTenant } = useTenantContext();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -115,7 +121,14 @@ const LeaveApplication = ({ navigation }) => {
       console.log('🚀 TeacherLeaveApplication: Starting loadMyLeaves...');
       
       // Get tenant ID with email fallback
-      let tenantId = currentTenant?.id || await getUserTenantId();
+      // Validate tenant context
+      if (!isReady || !tenantId) {
+        throw new Error('Tenant context not ready. Please wait and try again.');
+      }
+      
+      if (tenantError) {
+        throw new Error(tenantError.message || 'Tenant initialization error');
+      }
       
       if (!tenantId) {
         console.log('⚠️ TeacherLeaveApplication: No tenant from context/getUserTenantId, trying email lookup...');
@@ -208,7 +221,7 @@ const LeaveApplication = ({ navigation }) => {
       };
       
       // Use the utility to submit leave application
-      const result = await submitLeaveApplication(applicationData, user, currentTenant);
+      const result = await submitLeaveApplication(applicationData, user, { id: tenantId });
       
       if (!result.success) {
         Alert.alert('Error', result.error);

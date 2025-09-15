@@ -1,16 +1,18 @@
 /**
  * 🏢 STATIONARY TENANT HELPER
- * Email-based tenant system implementation for Stationary Management
- * Following EMAIL_BASED_TENANT_SYSTEM.md guidelines
+ * Enhanced tenant system implementation for Stationary Management
+ * Using cached tenant ID from tenantHelpers instead of email-based lookup
  */
 
 import { supabase } from './supabase';
+// 🚀 ENHANCED: Use cached tenant ID instead of email lookup
+import { getCachedTenantId, createTenantQuery } from './tenantHelpers';
 import { getCurrentUserTenantByEmail } from './getTenantByEmail';
 import { validateTenantAccess } from './tenantValidation';
 
 /**
  * Enhanced tenant-aware query builder for stationary management
- * Automatically applies tenant filtering based on current authenticated user's email
+ * Automatically applies tenant filtering based on cached tenant ID
  */
 export class StationaryTenantQuery {
   constructor(tableName) {
@@ -20,27 +22,26 @@ export class StationaryTenantQuery {
   }
 
   /**
-   * Initialize tenant context from current authenticated user
+   * Initialize tenant context from cached tenant ID
    * @returns {Promise<boolean>} True if initialization successful
    */
   async initialize() {
     try {
       console.log('🔍 StationaryTenantQuery: Initializing tenant context for table:', this.tableName);
       
-      // Get tenant information via email-based lookup
-      const tenantResult = await getCurrentUserTenantByEmail();
+      // 🚀 ENHANCED: Get tenant ID from cache instead of email lookup
+      const tenantId = getCachedTenantId();
       
-      if (!tenantResult.success) {
-        console.error('❌ StationaryTenantQuery: Failed to get tenant from email:', tenantResult.error);
-        throw new Error(`Tenant initialization failed: ${tenantResult.error}`);
+      if (!tenantId) {
+        console.error('❌ StationaryTenantQuery: No tenant ID available in cache');
+        throw new Error('Tenant context not available - user may not be assigned to a tenant');
       }
 
-      this.tenantId = tenantResult.data.tenant.id;
+      this.tenantId = tenantId;
       this.isInitialized = true;
 
       console.log('✅ StationaryTenantQuery: Tenant context initialized:', {
         tenantId: this.tenantId,
-        tenantName: tenantResult.data.tenant.name,
         tableName: this.tableName
       });
 
@@ -230,19 +231,49 @@ export const validateStationaryAdminAccess = async (user) => {
       };
     }
 
-    // Step 2: Get tenant information via email
-    const tenantResult = await getCurrentUserTenantByEmail();
+    // 🚀 ENHANCED: Use cached tenant ID instead of email lookup
+    const tenantId = getCachedTenantId();
     
-    if (!tenantResult.success) {
+    if (!tenantId) {
       return {
         valid: false,
-        error: tenantResult.error,
+        error: 'No tenant context available. Please ensure user is logged in and tenant is initialized.',
         code: 'NO_TENANT',
         recommendation: 'User may not be assigned to a tenant. Contact administrator.'
       };
     }
 
-    const { tenant, userRecord } = tenantResult.data;
+    // Get tenant information directly using cached tenant ID
+    const { data: tenant, error: tenantError } = await supabase
+      .from('tenants')
+      .select('*')
+      .eq('id', tenantId)
+      .single();
+    
+    if (tenantError) {
+      return {
+        valid: false,
+        error: `Failed to get tenant information: ${tenantError.message}`,
+        code: 'TENANT_FETCH_ERROR',
+        recommendation: 'Contact administrator.'
+      };
+    }
+
+    // Get user record
+    const { data: userRecord, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', user.id)
+      .single();
+    
+    if (userError) {
+      return {
+        valid: false,
+        error: `Failed to get user information: ${userError.message}`,
+        code: 'USER_FETCH_ERROR',
+        recommendation: 'Contact administrator.'
+      };
+    }
 
     // Step 3: Validate tenant is active
     if (tenant.status !== 'active') {
@@ -304,17 +335,16 @@ export const loadStationaryTenantData = async () => {
   try {
     console.log('📊 StationaryTenantHelper: Loading comprehensive tenant data...');
 
-    // Initialize tenant context
-    const tenantResult = await getCurrentUserTenantByEmail();
+    // 🚀 ENHANCED: Use cached tenant ID instead of email lookup
+    const tenantId = getCachedTenantId();
     
-    if (!tenantResult.success) {
-      throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+    if (!tenantId) {
+      throw new Error('No tenant context available. Please ensure user is logged in and tenant is initialized.');
     }
 
-    const tenantId = tenantResult.data.tenant.id;
-    console.log('🏢 Loading data for tenant:', tenantResult.data.tenant.name);
+    console.log('🏢 Loading data for tenant ID:', tenantId);
 
-    // Load all stationary data in parallel
+    // Load all stationary data in parallel using enhanced tenant queries
     const [
       itemsData,
       classesData,
@@ -322,36 +352,23 @@ export const loadStationaryTenantData = async () => {
       recentPurchasesData
     ] = await Promise.all([
       // Stationary items
-      supabase
-        .from('stationary_items')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .eq('is_active', true)
+      createTenantQuery('stationary_items', '*', { is_active: true })
         .order('name'),
       
       // Classes
-      supabase
-        .from('classes')
-        .select('id, class_name, section')
-        .eq('tenant_id', tenantId)
+      createTenantQuery('classes', 'id, class_name, section')
         .order('class_name'),
       
       // School details
-      supabase
-        .from('school_details')
-        .select('*')
-        .eq('tenant_id', tenantId)
+      createTenantQuery('school_details')
         .single(),
       
       // Recent purchases (last 30 days)
-      supabase
-        .from('stationary_purchases')
-        .select(`
-          *,
-          students(name, admission_no),
-          stationary_items(name, fee_amount)
-        `)
-        .eq('tenant_id', tenantId)
+      createTenantQuery('stationary_purchases', `
+        *,
+        students(name, admission_no),
+        stationary_items(name, fee_amount)
+      `)
         .gte('payment_date', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
         .order('payment_date', { ascending: false })
     ]);
@@ -371,9 +388,18 @@ export const loadStationaryTenantData = async () => {
       schoolDetails: !!schoolDetailsData.data
     });
 
+    // Get tenant information
+    const { data: tenant, error: tenantError } = await supabase
+      .from('tenants')
+      .select('*')
+      .eq('id', tenantId)
+      .single();
+    
+    if (tenantError) throw tenantError;
+
     return {
       success: true,
-      tenant: tenantResult.data.tenant,
+      tenant,
       data: {
         items: itemsData.data || [],
         classes: classesData.data || [],
@@ -400,23 +426,24 @@ export const loadStationaryTenantData = async () => {
  */
 export const getStationaryAnalytics = async (startDate, endDate) => {
   try {
-    const tenantQuery = createStationaryTenantQuery('stationary_purchases');
-    await tenantQuery.initialize();
-
-    const tenantId = tenantQuery.getTenantId();
+    // 🚀 ENHANCED: Use cached tenant ID instead of email lookup
+    const tenantId = getCachedTenantId();
     
-    // Get sales data with joins
-    const { data: salesData, error } = await supabase
-      .from('stationary_purchases')
-      .select(`
-        total_amount,
-        quantity,
-        payment_date,
-        stationary_items(name)
-      `)
-      .eq('tenant_id', tenantId)
+    if (!tenantId) {
+      throw new Error('No tenant context available. Please ensure user is logged in and tenant is initialized.');
+    }
+    
+    // Get sales data with joins using enhanced tenant query
+    const query = createTenantQuery('stationary_purchases', `
+      total_amount,
+      quantity,
+      payment_date,
+      stationary_items(name)
+    `)
       .gte('payment_date', startDate)
       .lte('payment_date', endDate);
+
+    const { data: salesData, error } = await query;
 
     if (error) throw error;
 
