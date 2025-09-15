@@ -9,7 +9,8 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
-  TextInput
+  TextInput,
+  RefreshControl
 } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { ActivityIndicator as PaperActivityIndicator } from 'react-native-paper';
@@ -41,6 +42,7 @@ const TeacherDetails = ({ route, navigation }) => {
   const [saving, setSaving] = useState(false);
   const [sections, setSections] = useState([]);
   const [classSubjectMap, setClassSubjectMap] = useState(new Map());
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadFormData = async () => {
     try {
@@ -164,70 +166,81 @@ const TeacherDetails = ({ route, navigation }) => {
     setSections(data);
   };
 
-  useEffect(() => {
-    const fetchTeacherDetails = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // Fetch teacher details (get all, then filter by id)
-        const { data: teachers, error: teacherError } = await dbHelpers.getTeachers();
-        if (teacherError) throw teacherError;
-        const t = teachers.find(t => t.id === teacher.id);
-        setTeacherData(t);
-        // Fetch teacher subjects/classes
-        const { data: teacherSubjects, error: tsError } = await dbHelpers.getTeacherSubjects(teacher.id);
-        
-        if (tsError) {
-          console.error('Error fetching teacher subjects:', tsError);
-          throw tsError;
-        }
+  // Pull-to-refresh handler
+  const onRefresh = async () => {
+    try {
+      setRefreshing(true);
+      await fetchTeacherDetails();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
-        // Fetch class teacher info
-        const { data: classTeacherData, error: ctError } = await dbHelpers.read('classes', { class_teacher_id: teacher.id });
-        if (ctError) throw ctError;
-        if (classTeacherData && classTeacherData.length > 0) {
-          setClassTeacherOf(classTeacherData[0]);
-        }
-
-        // Process teacher assignments to group subjects by class
-        const classSubjectMap = new Map(); // Map of className -> [subjects]
-        const uniqueSubjects = new Set();
-        const uniqueClasses = new Set();
-        
-        if (teacherSubjects && teacherSubjects.length > 0) {
-          teacherSubjects.forEach((ts) => {
-            // Get subject name from the subjects relation
-            if (ts.subjects?.name && ts.subjects?.classes?.class_name) {
-              const subjectName = ts.subjects.name;
-              const fullClassName = `${ts.subjects.classes.class_name}${ts.subjects.classes.section ? ' ' + ts.subjects.classes.section : ''}`;
-              
-              // Add to unique sets
-              uniqueSubjects.add(subjectName);
-              uniqueClasses.add(fullClassName);
-              
-              // Group subjects by class
-              if (!classSubjectMap.has(fullClassName)) {
-                classSubjectMap.set(fullClassName, []);
-              }
-              classSubjectMap.get(fullClassName).push(subjectName);
-            }
-          });
-        }
-
-        const subjectsArray = Array.from(uniqueSubjects);
-        const classesArray = Array.from(uniqueClasses);
-        
-        // Store the class-subject mapping for use in the UI
-        setClassSubjectMap(classSubjectMap);
-        
-        setSubjects(subjectsArray);
-        setClasses(classesArray);
-      } catch (err) {
-        setError('Failed to load teacher details.');
-      } finally {
-        setLoading(false);
+  const fetchTeacherDetails = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Fetch teacher details (get all, then filter by id)
+      const { data: teachers, error: teacherError } = await dbHelpers.getTeachers();
+      if (teacherError) throw teacherError;
+      const t = teachers.find(t => t.id === teacher.id);
+      setTeacherData(t);
+      // Fetch teacher subjects/classes
+      const { data: teacherSubjects, error: tsError } = await dbHelpers.getTeacherSubjects(teacher.id);
+      
+      if (tsError) {
+        console.error('Error fetching teacher subjects:', tsError);
+        throw tsError;
       }
-    };
+
+      // Fetch class teacher info
+      const { data: classTeacherData, error: ctError } = await dbHelpers.read('classes', { class_teacher_id: teacher.id });
+      if (ctError) throw ctError;
+      if (classTeacherData && classTeacherData.length > 0) {
+        setClassTeacherOf(classTeacherData[0]);
+      }
+
+      // Process teacher assignments to group subjects by class
+      const classSubjectMap = new Map(); // Map of className -> [subjects]
+      const uniqueSubjects = new Set();
+      const uniqueClasses = new Set();
+      
+      if (teacherSubjects && teacherSubjects.length > 0) {
+        teacherSubjects.forEach((ts) => {
+          // Get subject name from the subjects relation
+          if (ts.subjects?.name && ts.subjects?.classes?.class_name) {
+            const subjectName = ts.subjects.name;
+            const fullClassName = `${ts.subjects.classes.class_name}${ts.subjects.classes.section ? ' ' + ts.subjects.classes.section : ''}`;
+            
+            // Add to unique sets
+            uniqueSubjects.add(subjectName);
+            uniqueClasses.add(fullClassName);
+            
+            // Group subjects by class
+            if (!classSubjectMap.has(fullClassName)) {
+              classSubjectMap.set(fullClassName, []);
+            }
+            classSubjectMap.get(fullClassName).push(subjectName);
+          }
+        });
+      }
+
+      const subjectsArray = Array.from(uniqueSubjects);
+      const classesArray = Array.from(uniqueClasses);
+      
+      // Store the class-subject mapping for use in the UI
+      setClassSubjectMap(classSubjectMap);
+      
+      setSubjects(subjectsArray);
+      setClasses(classesArray);
+    } catch (err) {
+      setError('Failed to load teacher details.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchTeacherDetails();
   }, [teacher.id]);
 
@@ -272,7 +285,19 @@ const TeacherDetails = ({ route, navigation }) => {
     <View style={styles.container}>
       <Header title="Teacher Profile" showBack={true} />
 
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.scrollView} 
+        contentContainerStyle={styles.scrollContent} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#2196F3", "#4CAF50"]}
+            tintColor="#2196F3"
+          />
+        }
+      >
         {/* Profile Header Card */}
         <View style={styles.profileCard}>
           <View style={styles.avatarContainer}>
