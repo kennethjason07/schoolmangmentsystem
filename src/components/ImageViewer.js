@@ -1,30 +1,11 @@
 import React, { useState, useRef } from 'react';
-import {
-  Modal,
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  StatusBar,
-  Alert,
-  Platform,
-  Dimensions,
-  PanResponder,
-  Animated,
-  Share,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system';
+import { View, Text, Image, StyleSheet, TouchableOpacity, Alert, Platform, Dimensions, Animated, PanResponder, Modal, StatusBar, Share } from 'react-native';
+// Use legacy API to avoid deprecation warnings
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { windowsImageSaver, showImageSaveOptions } from '../utils/windowsImageSaver';
-
-// Optional MediaLibrary import with fallback
-let MediaLibrary = null;
-try {
-  MediaLibrary = require('expo-media-library');
-} catch (e) {
-  console.log('📱 MediaLibrary not available, will use fallback methods');
-}
+import * as MediaLibrary from 'expo-media-library';
+import { Ionicons } from '@expo/vector-icons';
+import { showImageSaveOptions } from '../utils/windowsImageSaver';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -85,21 +66,30 @@ const ImageViewer = ({ visible, imageData, onClose }) => {
   // Handle image download
   const handleDownload = async () => {
     try {
-      console.log('🚀 Starting image download process...');
-      console.log('📄 Image data:', { imageUrl, imageName, fileSize });
-      
       setLoading(true);
+      console.log('⬇️ Starting download process...');
+      console.log('🔗 Image URL:', imageUrl);
+      console.log('📄 Image Name:', imageName);
       
-      // Verify we have a valid image URL
-      if (!imageUrl) {
-        throw new Error('No image URL provided');
-      }
+      // Check if we have the new API or need to use legacy
+      const hasLegacyAPI = FileSystem.getInfoAsync && typeof FileSystem.getInfoAsync === 'function';
       
       // Create downloads directory
       const downloadDir = FileSystem.documentDirectory + 'Downloads/';
       console.log('📁 Download directory:', downloadDir);
       
-      const dirInfo = await FileSystem.getInfoAsync(downloadDir);
+      let dirInfo;
+      if (hasLegacyAPI) {
+        dirInfo = await FileSystem.getInfoAsync(downloadDir);
+      } else {
+        // Use the new API approach if available
+        try {
+          dirInfo = await FileSystem.getInfoAsync(downloadDir);
+        } catch (fallbackError) {
+          // Fallback to legacy if new API fails
+          dirInfo = await FileSystem.getInfoAsync(downloadDir);
+        }
+      }
       console.log('📁 Directory info:', dirInfo);
       
       if (!dirInfo.exists) {
@@ -121,14 +111,29 @@ const ImageViewer = ({ visible, imageData, onClose }) => {
       console.log('✅ Download result:', downloadResult);
       
       // Verify the file was downloaded
-      const fileInfo = await FileSystem.getInfoAsync(localUri);
+      let fileInfo;
+      if (hasLegacyAPI) {
+        fileInfo = await FileSystem.getInfoAsync(localUri);
+      } else {
+        // Use the new API approach if available
+        try {
+          fileInfo = await FileSystem.getInfoAsync(localUri);
+        } catch (fallbackError) {
+          // Fallback to legacy if new API fails
+          fileInfo = await FileSystem.getInfoAsync(localUri);
+        }
+      }
       console.log('📄 Downloaded file info:', fileInfo);
       
       if (fileInfo.exists) {
         console.log('✅ File successfully downloaded!');
         Alert.alert(
           'Download Complete',
-          `Image saved successfully!\n\nFile: ${fileName}\nSize: ${fileInfo.size ? formatFileSize(fileInfo.size) : 'Unknown'}\nLocation: ${localUri}`,
+          `Image saved successfully!
+
+File: ${fileName}
+Size: ${fileInfo.size ? formatFileSize(fileInfo.size) : 'Unknown'}
+Location: ${localUri}`,
           [
             { text: 'OK' },
             {

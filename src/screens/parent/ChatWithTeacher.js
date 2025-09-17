@@ -16,30 +16,24 @@ import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from
 import { badgeNotifier } from '../../utils/badgeNotifier';
 import { testRealtimeConnection, testUserFilteredConnection, insertTestMessage } from '../../utils/testRealtime';
 import ImageViewer from '../../components/ImageViewer';
-import { useTenantAccess } from '../../utils/tenantHelpers';
-import { 
-  validateTenantAccess, 
-  createTenantQuery, 
-  validateDataTenancy, 
-  TENANT_ERROR_MESSAGES 
-} from '../../utils/tenantValidation';
+import { useParentAuth } from '../../hooks/useParentAuth'; // Import parent auth hook
+import { getTeacherUserId } from './teacherUserIdHelper'; // Import teacher user ID helper
 
-// Debug mode constant (following EMAIL_BASED_TENANT_SYSTEM.md)
+// Debug mode constant for parent chat
 const DEBUG_MODE = __DEV__ && true; // Enable debug logging in development
 
 const ChatWithTeacher = () => {
   const { user } = useAuth();
   const { markMessagesAsRead } = useMessageStatus();
   
-  // Add tenant context integration
+  // Add parent context integration
   const { 
-    tenantId, 
-    isReady, 
-    isLoading: tenantLoading, 
-    tenant, 
-    tenantName, 
-    error: tenantError 
-  } = useTenantAccess();
+    isParent, 
+    parentStudents, 
+    directParentMode, 
+    loading: parentLoading, 
+    error: parentError 
+  } = useParentAuth(); // Use parent auth hook instead of tenant access
   
   const [teachers, setTeachers] = useState([]);
   const [selectedTeacher, setSelectedTeacher] = useState(null);
@@ -58,298 +52,75 @@ const ChatWithTeacher = () => {
   const [selectedImageData, setSelectedImageData] = useState(null);
   const flatListRef = useRef(null);
   
-  // Add debug state for tenant troubleshooting
+  // Add debug state for parent troubleshooting
   const [debugInfo, setDebugInfo] = useState({
-    tenantContext: null,
+    parentContext: null,
     teacherResolution: null,
     chatDataFetchStatus: null
   });
-  
-  // Enhanced tenant debugging following EMAIL_BASED_TENANT_SYSTEM.md
-  if (DEBUG_MODE) {
-    console.log('🏢 [CHAT TENANT DEBUG]:', {
-      tenantId: tenantId || 'NO TENANT',
-      tenantName: currentTenant?.name || 'NO TENANT NAME',
-      tenantStatus: currentTenant?.status || 'UNKNOWN',
-      tenantLoading: tenantLoading || false,
-      userEmail: user?.email || 'NO USER',
-      timestamp: new Date().toISOString()
-    });
-    
-    // Add global test functions for development debugging
-    if (typeof window !== 'undefined') {
-      window.debugChatTenantContext = () => {
-        console.log('🏢 [CHAT TENANT DEBUG] Current tenant context state:', {
-          tenantId: tenantId || 'NOT SET',
-          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : 'NOT SET',
-          tenantLoading: tenantLoading,
-          user: user ? { id: user.id, email: user.email } : 'NOT SET'
-        });
-        return {
-          tenantId,
-          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : null,
-          tenantLoading,
-          user: user ? { id: user.id, email: user.email } : null,
-          isReady: !tenantLoading && !!tenantId && !!user
-        };
-      };
-      
-      window.retryChatTenantLoading = async () => {
-        console.log('🔄 [CHAT MANUAL TENANT RETRY] Starting manual tenant retry...');
-        if (retryTenantLoading) {
-          await retryTenantLoading();
-          console.log('🔄 [CHAT MANUAL TENANT RETRY] Completed');
-        } else {
-          console.log('❌ [CHAT MANUAL TENANT RETRY] Function not available');
-        }
-      };
-      
-      window.debugChatTenantLoading = async () => {
-        console.log('📝 [CHAT DEBUG TENANT LOADING] Starting enhanced debug...');
-        if (debugTenantLoading) {
-          const result = await debugTenantLoading();
-          console.log('📝 [CHAT DEBUG TENANT LOADING] Result:', result);
-          return result;
-        } else {
-          console.log('❌ [CHAT DEBUG TENANT LOADING] Function not available');
-        }
-      };
-      
-      console.log('🧪 [CHAT DEV TOOLS] Added global functions:');
-      console.log('   • window.debugChatTenantContext() - Debug current tenant context state');
-      console.log('   • window.retryChatTenantLoading() - Manually retry tenant loading');
-      console.log('   • window.debugChatTenantLoading() - Run enhanced tenant loading debug');
-    }
-  }
 
-  // Helper function to get teacher's user ID (exact copy from student logic)
-  const getTeacherUserId = async (teacherId) => {
-    try {
-      console.log('🔍 Looking for user ID for teacher:', teacherId);
-
-      // Method 1: Try linked_teacher_id (most reliable method)
-      const { data: teacherUser, error: userError } = await supabase
-        .from(TABLES.USERS)
-        .select('id, email, full_name, role_id')
-        .eq('linked_teacher_id', teacherId)
-        .single();
-
-      if (teacherUser && !userError) {
-        console.log('✅ Found teacher user via linked_teacher_id:', teacherUser);
-        return teacherUser.id;
-      }
-
-      console.log('❌ Teacher user not found via linked_teacher_id, error:', userError);
-
-      // Method 2: Get teacher data and try to find a matching user by name
-      const { data: teacherData, error: teacherError } = await supabase
-        .from(TABLES.TEACHERS)
-        .select('name')
-        .eq('id', teacherId)
-        .single();
-
-      if (teacherError || !teacherData?.name) {
-        console.log('❌ Could not get teacher data:', teacherError);
-        throw new Error(`Teacher with ID ${teacherId} not found in teachers table`);
-      }
-
-      console.log('📝 Found teacher name:', teacherData.name);
-
-      // Try to find user by matching full name
-      const { data: userByName, error: nameError } = await supabase
-        .from(TABLES.USERS)
-        .select('id, email, full_name, linked_teacher_id')
-        .ilike('full_name', `%${teacherData.name}%`)
-        .limit(5); // Get multiple potential matches
-
-      console.log('🔎 Name search results:', userByName, 'Error:', nameError);
-
-      if (!nameError && userByName && userByName.length > 0) {
-        // Try to find the best match
-        const exactMatch = userByName.find(u => 
-          u.full_name?.toLowerCase() === teacherData.name.toLowerCase()
-        );
-        
-        if (exactMatch) {
-          console.log('✅ Found exact name match:', exactMatch);
-          return exactMatch.id;
-        }
-
-        // If no exact match, use the first result
-        const firstMatch = userByName[0];
-        console.log('⚠️ Using first partial match:', firstMatch);
-        return firstMatch.id;
-      }
-
-      // Method 3: Check if the teacherId itself exists in users table (direct check)
-      const { data: directUser, error: directError } = await supabase
-        .from(TABLES.USERS)
-        .select('id, email, full_name')
-        .eq('id', teacherId)
-        .single();
-
-      if (!directError && directUser) {
-        console.log('✅ Teacher ID exists directly in users table:', directUser);
-        return directUser.id;
-      }
-
-      console.log('❌ Direct user lookup failed:', directError);
-
-      // Method 4: Last resort - show available users for debugging
-      console.log('🚨 No user found for teacher. Showing available teacher users for debugging:');
-      const { data: allTeacherUsers } = await supabase
-        .from(TABLES.USERS)
-        .select('id, email, full_name, linked_teacher_id')
-        .not('linked_teacher_id', 'is', null)
-        .limit(10);
-      
-      console.log('Available teacher users:', allTeacherUsers);
-
-      // Throw error instead of returning teacher ID as fallback
-      throw new Error(`No user account found for teacher "${teacherData.name}" (ID: ${teacherId}). This teacher needs a user account to receive messages. Please contact the administrator to create a user account for this teacher.`);
-
-    } catch (error) {
-      console.log('💥 Error getting teacher user ID:', error);
-      throw error; // Don't swallow the error, let it bubble up
-    }
-  };
-
-  // Fetch teachers assigned to the student with tenant validation
+  // Fetch teachers assigned to the student with parent validation
   const fetchTeachersAndChats = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      console.log('🚀 === [TENANT-AWARE] STARTING TEACHER FETCH (PARENT VERSION) ===');
+      console.log('🚀 === [PARENT-AWARE] STARTING TEACHER FETCH ===');
       console.log('👤 Current user:', user);
       
-      // Enhanced tenant validation following EMAIL_BASED_TENANT_SYSTEM.md
+      // Enhanced parent validation
       
-      // Check if tenant is still loading
-      if (tenantLoading) {
-        console.log('🔄 [TENANT-AWARE] Tenant context is loading, delaying chat data fetch...');
+      // Check if parent context is still loading
+      if (parentLoading) {
+        console.log('🔄 [PARENT-AWARE] Parent context is loading, delaying chat data fetch...');
         return;
       }
       
-      // If tenant context is not loaded, try to resolve tenant directly by email
-      let resolvedTenantId = tenantId;
-      let resolvedTenant = currentTenant;
-      
-      if (!tenantId || !currentTenant) {
-        console.log('🔍 [TENANT-AWARE] Tenant context not loaded, attempting direct email-based tenant resolution...');
-        
-        if (!user || !user.email) {
-          console.error('❌ [TENANT-AWARE] Cannot resolve tenant: No authenticated user');
-          setError('Authentication required. Please log in again.');
-          setLoading(false);
-          return;
-        }
-        
-        try {
-          // Direct tenant lookup using email
-          console.log('📧 [TENANT-AWARE] Looking up tenant for email:', user.email);
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
-          const emailTenantResult = await getTenantIdByEmail(user.email);
-          
-          if (emailTenantResult.success) {
-            resolvedTenantId = emailTenantResult.data.tenant.id;
-            resolvedTenant = emailTenantResult.data.tenant;
-            console.log('✅ [TENANT-AWARE] Successfully resolved tenant via email:', {
-              tenantId: resolvedTenantId,
-              tenantName: resolvedTenant.name,
-              userEmail: user.email
-            });
-          } else {
-            console.error('❌ [TENANT-AWARE] Email-based tenant resolution failed:', emailTenantResult.error);
-            setError(emailTenantResult.error || 'Unable to determine your school. Please contact administrator.');
-            setLoading(false);
-            return;
-          }
-        } catch (emailLookupError) {
-          console.error('❌ [TENANT-AWARE] Error during email-based tenant lookup:', emailLookupError);
-          setError('Unable to load school information. Please try again.');
-          setLoading(false);
-          return;
-        }
-      }
-
-      if (DEBUG_MODE) {
-        console.log('📊 === [TENANT-AWARE] CHAT FETCH DEBUG ===');
-        console.log('🔍 Debug Mode: ENABLED');
-        console.log('🏢 Resolved Tenant:', resolvedTenant.name, '(ID:', resolvedTenantId, ')');
-        console.log('👤 Parent User ID:', user?.id);
-        console.log('⏰ Fetch Time:', new Date().toISOString());
-        console.log('📧 User Email:', user?.email);
-        
-        setDebugInfo(prev => ({
-          ...prev,
-          tenantContext: {
-            user_id: user?.id,
-            resolved_tenant_id: resolvedTenantId,
-            tenant_name: resolvedTenant.name,
-            email: user?.email,
-            fetch_time: new Date().toISOString()
-          }
-        }));
-      }
-
-      // Step 1: Get parent user data and linked student using tenant-aware query
-      const tenantUserQuery = createTenantQuery(resolvedTenantId, TABLES.USERS);
-      const { data: parentData, error: parentError } = await tenantUserQuery
-        .select(`
-          id,
-          email,
-          full_name,
-          linked_parent_of,
-          linked_student_id,
-          role_id,
-          tenant_id,
-          students!users_linked_parent_of_fkey(
-            id,
-            name,
-            class_id,
-            academic_year,
-            tenant_id,
-            classes(id, class_name, section, academic_year)
-          )
-        `)
-        .eq('id', user.id)
-        .execute()
-        .then(result => ({ data: result.data?.[0] || null, error: result.error }));
-
-      console.log('👪 [TENANT-AWARE] Parent query result:', { parentData, parentError });
-
-      if (parentError || !parentData?.linked_parent_of) {
-        throw new Error('Parent account is not linked to any student. Please contact the administrator.');
-      }
-
-      const student = parentData.students;
-      if (!student) {
-        throw new Error('Student information not found.');
-      }
-      
-      // Validate student belongs to current tenant
-      if (student.tenant_id && student.tenant_id !== resolvedTenantId) {
-        console.error('❌ [TENANT-AWARE] Student belongs to different tenant:', {
-          studentTenant: student.tenant_id,
-          currentTenant: resolvedTenantId
-        });
-        setError(TENANT_ERROR_MESSAGES.WRONG_TENANT_DATA);
+      // If parent context is not loaded or user is not a parent
+      if (!isParent) {
+        console.error('❌ [PARENT-AWARE] Cannot resolve parent: User is not a parent');
+        setError('This feature is only available for parents');
         setLoading(false);
         return;
       }
 
-      console.log('👦 [TENANT-AWARE] Student data:', student);
-      console.log('🏦 [TENANT-AWARE] Student class:', student.classes);
-      console.log('[TENANT-AWARE] Student class_id:', student.class_id);
+      // Get the first student from parent students
+      const studentData = parentStudents && parentStudents.length > 0 ? parentStudents[0] : null;
+      
+      if (!studentData) {
+        console.error('❌ [PARENT-AWARE] No student found for parent');
+        setError('No student found for this parent account');
+        setLoading(false);
+        return;
+      }
 
-      // Step 2: Get all existing messages for this parent user using tenant-aware query
-      const tenantMessagesQuery = createTenantQuery(resolvedTenantId, 'messages');
-      const { data: allMessages, error: msgError } = await tenantMessagesQuery
-        .select('id, sender_id, receiver_id, student_id, message, sent_at, is_read, message_type, file_url, file_name, file_size, file_type, tenant_id')
+      console.log('📊 === [PARENT-AWARE] CHAT FETCH DEBUG ===');
+      console.log('🔍 Debug Mode: ENABLED');
+      console.log('👤 Parent User ID:', user?.id);
+      console.log('👦 Student data:', studentData);
+      console.log('⏰ Fetch Time:', new Date().toISOString());
+      console.log('📧 User Email:', user?.email);
+      
+      setDebugInfo(prev => ({
+        ...prev,
+        parentContext: {
+          user_id: user?.id,
+          student_data: studentData,
+          email: user?.email,
+          fetch_time: new Date().toISOString()
+        }
+      }));
+
+      console.log('👦 [PARENT-AWARE] Student data:', studentData);
+      console.log('🏦 [PARENT-AWARE] Student class:', studentData.class_name, studentData.section);
+      console.log('[PARENT-AWARE] Student class_id:', studentData.class_id);
+
+      // Step 2: Get all existing messages for this parent user
+      const { data: allMessages, error: msgError } = await supabase
+        .from('messages')
+        .select('id, sender_id, receiver_id, student_id, message, sent_at, is_read, message_type, file_url, file_name, file_size, file_type')
         .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-        .order('sent_at', { ascending: true })
-        .execute();
+        .order('sent_at', { ascending: true });
 
       console.log('💬 Messages query:', { count: allMessages?.length, error: msgError });
 
@@ -372,41 +143,38 @@ const ChatWithTeacher = () => {
 
       console.log('📊 Messages grouped by teacher:', Object.keys(messagesByTeacherUserId).length);
 
-      // Step 4: Get teachers assigned to this specific class (using same logic as student)
+      // Step 4: Get teachers assigned to this specific class
       const uniqueTeachers = [];
       const seen = new Set();
-      const studentClassId = student.class_id;
+      const studentClassId = studentData.class_id;
       
       console.log('🔍 Finding teachers for class:', studentClassId);
-      console.log('🎯 Class:', student.classes?.class_name, student.classes?.section);
+      console.log('🎯 Class:', studentData.class_name, studentData.section);
       
-      // Method 1A: Get class teacher from classes table using tenant-aware query
-      console.log('[TENANT-AWARE] Fetching class teacher via classes table for class_id:', student.class_id);
-      const tenantClassesQuery = createTenantQuery(resolvedTenantId, TABLES.CLASSES);
-      const { data: classInfo, error: classInfoError } = await tenantClassesQuery
+      // Method 1: Get class teacher from classes table using proper join
+      console.log('[PARENT-AWARE] Fetching class teacher via classes table for class_id:', studentClassId);
+      const { data: classInfo, error: classInfoError } = await supabase
+        .from(TABLES.CLASSES)
         .select(`
           id,
           class_name,
           section,
           class_teacher_id,
-          tenant_id,
-          teachers!classes_class_teacher_id_fkey(
+          teachers (
             id,
             name,
             qualification,
-            phone,
-            tenant_id
+            phone
           )
         `)
-        .eq('id', student.class_id)
-        .execute()
-        .then(result => ({ data: result.data?.[0] || null, error: result.error }));
+        .eq('id', studentClassId)
+        .single();
       
-      if (!classInfoError && classInfo) {
-        console.log('Found class info:', classInfo);
+      if (!classInfoError && classInfo && classInfo.teachers) {
+        console.log('Found class info with teacher:', classInfo);
         
         // Add class teacher if available
-        if (classInfo.class_teacher_id && classInfo.teachers && classInfo.teachers.name) {
+        if (classInfo.teachers.id && classInfo.teachers.name) {
           console.log('Found class teacher from classes table:', classInfo.teachers);
           
           try {
@@ -420,8 +188,8 @@ const ChatWithTeacher = () => {
               phone: classInfo.teachers.phone,
               subject: 'Class Teacher',
               role: 'class_teacher',
-              className: `${student.classes.class_name} ${student.classes.section}`,
-              studentName: student.name,
+              className: `${studentData.class_name} ${studentData.section}`,
+              studentName: studentData.name,
               messages: messagesByTeacherUserId[teacherUserId] || [],
               lastMessageTime: messagesByTeacherUserId[teacherUserId]?.length > 0 ?
                 messagesByTeacherUserId[teacherUserId][messagesByTeacherUserId[teacherUserId].length - 1].sent_at : null,
@@ -439,8 +207,8 @@ const ChatWithTeacher = () => {
               phone: classInfo.teachers.phone,
               subject: 'Class Teacher',
               role: 'class_teacher',
-              className: `${student.classes.class_name} ${student.classes.section}`,
-              studentName: student.name,
+              className: `${studentData.class_name} ${studentData.section}`,
+              studentName: studentData.name,
               messages: [],
               lastMessageTime: null,
               canMessage: false,
@@ -451,95 +219,38 @@ const ChatWithTeacher = () => {
           }
         }
       } else {
-        console.log('Class info fetch error:', classInfoError);
+        console.log('Class info fetch error or no teacher:', classInfoError, classInfo);
       }
       
-      // Method 1B: Alternative - Get class teacher directly from teachers table using tenant-aware query
-      if (uniqueTeachers.length === 0) {
-        console.log('[TENANT-AWARE] Trying direct teacher fetch for class_id:', student.class_id);
-        const tenantTeachersQuery = createTenantQuery(resolvedTenantId, TABLES.TEACHERS);
-        const { data: directClassTeacher, error: directTeacherError } = await tenantTeachersQuery
-          .select('id, name, qualification, is_class_teacher, assigned_class_id, phone, tenant_id')
-          .eq('assigned_class_id', student.class_id)
-          .eq('is_class_teacher', true)
-          .execute();
-        
-        if (!directTeacherError && directClassTeacher && directClassTeacher.length > 0) {
-          console.log('Found class teacher directly:', directClassTeacher[0]);
-          const teacher = directClassTeacher[0];
-          if (teacher.name && !seen.has(teacher.id)) {
-            try {
-              const teacherUserId = await getTeacherUserId(teacher.id);
-              uniqueTeachers.push({
-                id: teacher.id,
-                userId: teacherUserId,
-                name: teacher.name,
-                phone: teacher.phone,
-                subject: 'Class Teacher',
-                role: 'class_teacher',
-                className: `${student.classes.class_name} ${student.classes.section}`,
-                studentName: student.name,
-                messages: messagesByTeacherUserId[teacherUserId] || [],
-                lastMessageTime: messagesByTeacherUserId[teacherUserId]?.length > 0 ?
-                  messagesByTeacherUserId[teacherUserId][messagesByTeacherUserId[teacherUserId].length - 1].sent_at : null,
-                canMessage: true
-              });
-            } catch (userIdError) {
-              console.log('❌ Could not get user ID for direct class teacher:', userIdError.message);
-                uniqueTeachers.push({
-                  id: teacher.id,
-                  userId: null,
-                  name: teacher.name + ' (No Account)',
-                  phone: teacher.phone,
-                  subject: 'Class Teacher',
-                  role: 'class_teacher',
-                  className: `${student.classes.class_name} ${student.classes.section}`,
-                  studentName: student.name,
-                  messages: [],
-                  lastMessageTime: null,
-                  canMessage: false,
-                  hasUserAccount: false
-                });
-            }
-            seen.add(teacher.id);
-          }
-        }
-      }
+      // Method 2: Get subject teachers via teacher_subjects and subjects tables
+      console.log('[PARENT-AWARE] Fetching subject teachers for class_id:', studentClassId);
       
-      // Method 2A: Get subject teachers via direct teacher_subjects query using tenant-aware queries
-      console.log('[TENANT-AWARE] Fetching subject teachers for class_id:', student.class_id);
-      
-      // First, get all subjects for this specific class using tenant-aware query
-      const tenantSubjectsQuery = createTenantQuery(resolvedTenantId, TABLES.SUBJECTS);
-      const { data: classSubjects, error: classSubjectsError } = await tenantSubjectsQuery
-        .select('id, name, class_id, academic_year, tenant_id')
-        .eq('class_id', student.class_id)
-        .execute();
+      // First, get all subjects for this specific class
+      const { data: classSubjects, error: classSubjectsError } = await supabase
+        .from(TABLES.SUBJECTS)
+        .select('id, name, class_id, academic_year')
+        .eq('class_id', studentClassId);
       
       console.log('Class subjects:', classSubjects, 'Error:', classSubjectsError);
       
       if (!classSubjectsError && classSubjects && classSubjects.length > 0) {
-        // For each subject, find the assigned teachers using tenant-aware query
+        // For each subject, find the assigned teachers
         for (const subject of classSubjects) {
-          console.log('[TENANT-AWARE] Finding teachers for subject:', subject.name, 'ID:', subject.id);
+          console.log('[PARENT-AWARE] Finding teachers for subject:', subject.name, 'ID:', subject.id);
           
-          const tenantTeacherSubjectsQuery = createTenantQuery(resolvedTenantId, TABLES.TEACHER_SUBJECTS);
-          const { data: teacherAssignments, error: teacherError } = await tenantTeacherSubjectsQuery
+          // Get teachers assigned to this subject
+          const { data: teacherAssignments, error: teacherError } = await supabase
+            .from(TABLES.TEACHER_SUBJECTS)
             .select(`
               teacher_id,
-              subject_id,
-              tenant_id,
-              teachers!inner(
+              teachers (
                 id,
                 name,
                 qualification,
-                is_class_teacher,
-                phone,
-                tenant_id
+                phone
               )
             `)
-            .eq('subject_id', subject.id)
-            .execute();
+            .eq('subject_id', subject.id);
           
           console.log('Teacher assignments for', subject.name, ':', teacherAssignments, 'Error:', teacherError);
           
@@ -561,8 +272,8 @@ const ChatWithTeacher = () => {
                     phone: assignment.teachers.phone,
                     subject: subject.name,
                     role: 'subject_teacher',
-                    className: `${student.classes.class_name} ${student.classes.section}`,
-                    studentName: student.name,
+                    className: `${studentData.class_name} ${studentData.section}`,
+                    studentName: studentData.name,
                     messages: messagesByTeacherUserId[teacherUserId] || [],
                     lastMessageTime: messagesByTeacherUserId[teacherUserId]?.length > 0 ?
                       messagesByTeacherUserId[teacherUserId][messagesByTeacherUserId[teacherUserId].length - 1].sent_at : null,
@@ -579,8 +290,8 @@ const ChatWithTeacher = () => {
                     phone: assignment.teachers.phone,
                     subject: subject.name,
                     role: 'subject_teacher',
-                    className: `${student.classes.class_name} ${student.classes.section}`,
-                    studentName: student.name,
+                    className: `${studentData.class_name} ${studentData.section}`,
+                    studentName: studentData.name,
                     messages: [],
                     lastMessageTime: null,
                     canMessage: false,
@@ -597,154 +308,26 @@ const ChatWithTeacher = () => {
         }
       }
       
-      // Method 2B: Alternative approach - use join query
-      if (uniqueTeachers.filter(t => t.role === 'subject_teacher').length === 0) {
-        console.log('No subject teachers found via Method 2A, trying join query...');
-        
-        const { data: subjectAssignments, error: subjectError } = await supabase
-          .from(TABLES.TEACHER_SUBJECTS)
-          .select(`
-            teacher_id,
-            subjects!inner(
-              id,
-              name,
-              class_id
-            ),
-            teachers!inner(
-              id,
-              name,
-              qualification
-            )
-          `)
-          .eq('subjects.class_id', student.class_id);
-        
-        console.log('Join query result:', subjectAssignments, 'Error:', subjectError);
-        
-        if (!subjectError && subjectAssignments && subjectAssignments.length > 0) {
-          for (const assignment of subjectAssignments) {
-            console.log('Processing join assignment:', assignment);
-            
-            if (assignment.teachers && 
-                assignment.teachers.id && 
-                assignment.teachers.name && 
-                !seen.has(assignment.teachers.id)) {
-              
-              try {
-                // Get teacher's user ID
-                const teacherUserId = await getTeacherUserId(assignment.teachers.id);
-                
-                uniqueTeachers.push({
-                  id: assignment.teachers.id,
-                  userId: teacherUserId,
-                  name: assignment.teachers.name,
-                  subject: assignment.subjects?.name || 'Subject Teacher',
-                  role: 'subject_teacher',
-                  className: `${student.classes.class_name} ${student.classes.section}`,
-                  studentName: student.name,
-                  messages: messagesByTeacherUserId[teacherUserId] || [],
-                  lastMessageTime: messagesByTeacherUserId[teacherUserId]?.length > 0 ?
-                    messagesByTeacherUserId[teacherUserId][messagesByTeacherUserId[teacherUserId].length - 1].sent_at : null,
-                  canMessage: true
-                });
-              } catch (userIdError) {
-                console.log('❌ Could not get user ID for join subject teacher:', userIdError.message);
-                
-                // Still add the teacher but mark as non-messageable
-                uniqueTeachers.push({
-                  id: assignment.teachers.id,
-                  userId: null,
-                  name: assignment.teachers.name + ' (No Account)',
-                  subject: assignment.subjects?.name || 'Subject Teacher',
-                  role: 'subject_teacher',
-                  className: `${student.classes.class_name} ${student.classes.section}`,
-                  studentName: student.name,
-                  messages: [],
-                  lastMessageTime: null,
-                  canMessage: false,
-                  hasUserAccount: false,
-                  error: 'This teacher does not have a user account for messaging'
-                });
-              }
-              
-              seen.add(assignment.teachers.id);
-              console.log('Added subject teacher via join:', assignment.teachers.name);
-            }
-          }
-        }
-      }
-      
-      // Method 3: If still no teachers, get all teachers assigned to this class (broader search)
-      if (uniqueTeachers.length === 0) {
-        console.log('No teachers found via specific methods, trying broader search');
-        
-        const { data: allClassTeachers, error: allTeachersError } = await supabase
-          .from(TABLES.TEACHERS)
-          .select('id, name, qualification, is_class_teacher, assigned_class_id')
-          .eq('assigned_class_id', student.class_id);
-        
-        if (!allTeachersError && allClassTeachers && allClassTeachers.length > 0) {
-          console.log('Found teachers in broader search:', allClassTeachers);
-          
-          for (const teacher of allClassTeachers) {
-            if (teacher.name && !seen.has(teacher.id)) {
-              try {
-                const teacherUserId = await getTeacherUserId(teacher.id);
-                uniqueTeachers.push({
-                  id: teacher.id,
-                  userId: teacherUserId,
-                  name: teacher.name,
-                  subject: teacher.is_class_teacher ? 'Class Teacher' : 'Subject Teacher',
-                  role: teacher.is_class_teacher ? 'class_teacher' : 'subject_teacher',
-                  className: `${student.classes.class_name} ${student.classes.section}`,
-                  studentName: student.name,
-                  messages: messagesByTeacherUserId[teacherUserId] || [],
-                  lastMessageTime: messagesByTeacherUserId[teacherUserId]?.length > 0 ?
-                    messagesByTeacherUserId[teacherUserId][messagesByTeacherUserId[teacherUserId].length - 1].sent_at : null,
-                  canMessage: true
-                });
-              } catch (userIdError) {
-                console.log('❌ Could not get user ID for broader search teacher:', userIdError.message);
-                uniqueTeachers.push({
-                  id: teacher.id,
-                  userId: null,
-                  name: teacher.name + ' (No Account)',
-                  subject: teacher.is_class_teacher ? 'Class Teacher' : 'Subject Teacher',
-                  role: teacher.is_class_teacher ? 'class_teacher' : 'subject_teacher',
-                  className: `${student.classes.class_name} ${student.classes.section}`,
-                  studentName: student.name,
-                  messages: [],
-                  lastMessageTime: null,
-                  canMessage: false,
-                  hasUserAccount: false
-                });
-              }
-              seen.add(teacher.id);
-            }
-          }
-        }
-      }
-      
       console.log('Final teachers list:', uniqueTeachers);
       
       // If STILL no teachers found, this means the database doesn't have any teachers
       if (uniqueTeachers.length === 0) {
-        console.log('No teachers found at all in the database for class', student.class_id);
+        console.log('No teachers found at all in the database for class', studentClassId);
         
-        // Get class info for debugging using tenant-aware query
-        const tenantClassesDebugQuery = createTenantQuery(resolvedTenantId, TABLES.CLASSES);
-        const { data: classDebugInfo, error: classDebugError } = await tenantClassesDebugQuery
+        // Get class info for debugging
+        const { data: classDebugInfo, error: classDebugError } = await supabase
+          .from(TABLES.CLASSES)
           .select('*')
-          .eq('id', student.class_id)
-          .execute()
-          .then(result => ({ data: result.data?.[0] || null, error: result.error }));
+          .eq('id', studentClassId)
+          .single();
         
         console.log('Student class debug info:', classDebugInfo, classDebugError);
         
-        setError(`No teachers found for your child's class. \n\nDebug Info:\nStudent Class ID: ${student.class_id}\nClass Name: ${classDebugInfo?.class_name || 'N/A'}\nSection: ${classDebugInfo?.section || 'N/A'}\nClass Teacher ID: ${classDebugInfo?.class_teacher_id || 'N/A'}\n\nPlease contact the school administrator to assign teachers.`);
+        setError(`No teachers found for your child's class. \n\nDebug Info:\nStudent Class ID: ${studentClassId}\nClass Name: ${classDebugInfo?.class_name || 'N/A'}\nSection: ${classDebugInfo?.section || 'N/A'}\nClass Teacher ID: ${classDebugInfo?.class_teacher_id || 'N/A'}\n\nPlease contact the school administrator to assign teachers.`);
         return;
       }
 
-      setTeachers(uniqueTeachers)
+      setTeachers(uniqueTeachers);
       
       // Step 5: Fetch unread counts for each teacher
       await fetchUnreadCounts(uniqueTeachers);
@@ -776,6 +359,8 @@ const ChatWithTeacher = () => {
       console.log('Error fetching unread counts:', error);
     }
   };
+
+  
 
   // Set up real-time message subscription using RealtimeMessageHandler
   const messageHandler = getGlobalMessageHandler(supabase, TABLES.MESSAGES);
@@ -868,21 +453,21 @@ const ChatWithTeacher = () => {
     };
   }, [selectedTeacher?.userId, user.id, messageHandler, markMessagesAsRead]);
 
-  // Reset teacher selection and messages on screen focus with tenant-aware initialization
+  // Reset teacher selection and messages on screen focus with parent-aware initialization
   useFocusEffect(
     React.useCallback(() => {
       setSelectedTeacher(null);
       setMessages([]);
-      if (user && tenantId && !tenantLoading) {
-        console.log('🔄 [TENANT-AWARE] Tenant context loaded, initializing chat data...');
+      if (user && !parentLoading) {
+        console.log('🔄 [PARENT-AWARE] Parent context loaded, initializing chat data...');
         fetchTeachersAndChats();
-      } else if (tenantLoading) {
-        console.log('🔄 [TENANT-AWARE] Tenant context is loading, waiting for initialization...');
-      } else if (user && !tenantId) {
-        console.log('🔄 [TENANT-AWARE] User available but no tenant context, will try email-based resolution');
-        fetchTeachersAndChats(); // This will trigger email-based tenant resolution
+      } else if (parentLoading) {
+        console.log('🔄 [PARENT-AWARE] Parent context is loading, waiting for initialization...');
+      } else if (user) {
+        console.log('🔄 [PARENT-AWARE] User available, initializing chat data...');
+        fetchTeachersAndChats();
       }
-    }, [user, tenantId, tenantLoading])
+    }, [user, parentLoading, parentStudents])
   );
 
   // Select a teacher and load chat
@@ -932,7 +517,7 @@ const ChatWithTeacher = () => {
     }
   };
 
-  // Send a message with optimistic UI using RealtimeMessageHandler and tenant validation
+  // Send a message with optimistic UI using RealtimeMessageHandler and parent validation
   const handleSend = async () => {
     if (!input.trim() || !selectedTeacher || sending) return;
     
@@ -943,27 +528,21 @@ const ChatWithTeacher = () => {
     setSending(true);
     
     try {
-      console.log('[TENANT-AWARE] Starting to send message...');
-      console.log('[TENANT-AWARE] User ID:', user.id);
-      console.log('[TENANT-AWARE] Selected Teacher:', selectedTeacher);
+      console.log('[PARENT-AWARE] Starting to send message...');
+      console.log('[PARENT-AWARE] User ID:', user.id);
+      console.log('[PARENT-AWARE] Selected Teacher:', selectedTeacher);
       
-      // Tenant validation before sending
-      const currentTenantId = tenantId || currentTenant?.id;
-      if (!currentTenantId) {
-        throw new Error('Unable to determine school context. Please try again.');
+      // Parent validation before sending
+      if (!isParent) {
+        throw new Error('Unable to determine parent context. Please try again.');
       }
 
-      // Get parent's linked student ID using tenant-aware query
-      const tenantUserQuery = createTenantQuery(currentTenantId, TABLES.USERS);
-      const { data: parentUser, error: parentError } = await tenantUserQuery
-        .select('id, linked_parent_of, tenant_id')
-        .eq('id', user.id)
-        .execute()
-        .then(result => ({ data: result.data?.[0] || null, error: result.error }));
-
-      if (parentError || !parentUser?.linked_parent_of) {
-        throw new Error('Parent data not found or no student linked');
+      // Get parent's linked student ID using parent context
+      if (!parentStudents || parentStudents.length === 0) {
+        throw new Error('No student linked to parent account');
       }
+      
+      const parentStudent = parentStudents[0]; // Get first student
 
       // Get teacher's user ID using our enhanced helper function
       const teacherUserId = selectedTeacher.userId || await getTeacherUserId(selectedTeacher.id);
@@ -972,14 +551,13 @@ const ChatWithTeacher = () => {
         throw new Error('Teacher user account not found. Please contact admin to ensure teacher has a user account.');
       }
 
-      // Prepare message data for the handler with tenant information
+      // Prepare message data for the handler
       const messageData = {
         sender_id: user.id,
         receiver_id: teacherUserId,
-        student_id: parentUser.linked_parent_of,
+        student_id: parentStudent.id,
         message: messageText,
-        message_type: 'text',
-        tenant_id: currentTenantId // Include tenant_id for proper isolation
+        message_type: 'text'
       };
       
       // Use the message handler for optimistic UI and reliable sending
@@ -1118,12 +696,12 @@ const ChatWithTeacher = () => {
         
         setMessages(prev => [...prev, tempMsg]);
         
-        // Get parent's linked student ID
-        const { data: parentUser } = await supabase
-          .from(TABLES.USERS)
-          .select('linked_parent_of')
-          .eq('id', user.id)
-          .single();
+        // Get parent's linked student ID from parent context
+        if (!parentStudents || parentStudents.length === 0) {
+          throw new Error('No student linked to parent account');
+        }
+        
+        const parentStudent = parentStudents[0]; // Get first student
 
         // Upload to chat-files bucket
         const uploadResult = await uploadChatFile(
@@ -1135,7 +713,7 @@ const ChatWithTeacher = () => {
           },
           user.id,
           selectedTeacher.userId,
-          parentUser?.linked_parent_of
+          parentStudent.id
         );
         
         if (uploadResult.success) {
@@ -1217,12 +795,12 @@ const ChatWithTeacher = () => {
         
         setMessages(prev => [...prev, tempMsg]);
         
-        // Get parent's linked student ID
-        const { data: parentUser } = await supabase
-          .from(TABLES.USERS)
-          .select('linked_parent_of')
-          .eq('id', user.id)
-          .single();
+        // Get parent's linked student ID from parent context
+        if (!parentStudents || parentStudents.length === 0) {
+          throw new Error('No student linked to parent account');
+        }
+        
+        const parentStudent = parentStudents[0]; // Get first student
 
         // Upload to chat-files bucket
         const uploadResult = await uploadChatFile(
@@ -1235,7 +813,7 @@ const ChatWithTeacher = () => {
           },
           user.id,
           selectedTeacher.userId,
-          parentUser?.linked_parent_of
+          parentStudent.id
         );
         
         if (uploadResult.success) {
@@ -1281,33 +859,25 @@ const ChatWithTeacher = () => {
   // Send file message to database
   const sendFileMessage = async (fileData) => {
     try {
-      // Get parent's linked student ID
-      const { data: parentUser, error: parentError } = await supabase
-        .from(TABLES.USERS)
-        .select('linked_parent_of')
-        .eq('id', user.id)
-        .single();
-
-      if (parentError || !parentUser?.linked_parent_of) {
-        throw new Error('Parent data not found');
+      // Get parent's linked student ID from parent context
+      if (!parentStudents || parentStudents.length === 0) {
+        throw new Error('No student linked to parent account');
       }
+      
+      const parentStudent = parentStudents[0]; // Get first student
 
       // Get teacher's user ID
-      const { data: teacherUser, error: teacherError } = await supabase
-        .from(TABLES.USERS)
-        .select('id')
-        .eq('linked_teacher_id', selectedTeacher.id)
-        .single();
+      const teacherUserId = selectedTeacher.userId || await getTeacherUserId(selectedTeacher.id);
 
-      if (teacherError || !teacherUser) {
+      if (!teacherUserId) {
         throw new Error('Teacher user account not found');
       }
 
       // Create message with file data
       const newMsg = {
         sender_id: user.id,
-        receiver_id: teacherUser.id,
-        student_id: parentUser.linked_parent_of,
+        receiver_id: teacherUserId,
+        student_id: parentStudent.id,
         message: fileData.message_type === 'image' ? '📷 Photo' : `📎 ${fileData.file_name}`,
         message_type: fileData.message_type,
         file_url: fileData.file_url,

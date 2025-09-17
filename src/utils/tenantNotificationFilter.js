@@ -242,7 +242,7 @@ export const getUserTenantFilteredNotifications = async (userId, options = {}) =
     }
 
     // Order by creation date
-    query = query.order('created_at', { ascending: false });
+    query = query.order('notifications.created_at', { ascending: false });
 
     const { data, error } = await query;
 

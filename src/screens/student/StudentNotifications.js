@@ -136,7 +136,7 @@ const StudentNotifications = ({ navigation }) => {
         `)
         .eq('recipient_id', user.id)
         .eq('recipient_type', 'Student')
-        .order('created_at', { ascending: false, foreignTable: 'notifications' })
+        .order('notifications.created_at', { ascending: false, foreignTable: 'notifications' })
         .limit(50);
       
       if (recipientError) {
@@ -275,7 +275,7 @@ const StudentNotifications = ({ navigation }) => {
         const studentSection = studentData.classes?.section || '';
         const studentFullClass = `${studentClass}${studentSection}`; // e.g., "3A"
         
-        // Look for class mentions in the message (e.g., "class 10", "10th", "class X")
+        // Look for class mentions in the message (e.g., "class 10", "class XII", etc.)
         const classPatterns = [
           /class\s+(\d+|[ivxlc]+)/gi, // "class 10", "class XII", etc.
           /grade\s+(\d+|[ivxlc]+)/gi, // "grade 10", "grade XII", etc.

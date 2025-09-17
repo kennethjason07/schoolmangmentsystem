@@ -23,16 +23,15 @@ import * as Sharing from 'expo-sharing';
 import Header from '../../components/Header';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers, isValidUUID, safeQuery } from '../../utils/supabase';
-import { 
-  validateTenantAccess, 
-  createTenantQuery, 
-  validateDataTenancy,
-  TENANT_ERROR_MESSAGES 
-} from '../../utils/tenantValidation';
-import { useTenantAccess } from '../../utils/tenantHelpers';
 import { getCurrentMonthAttendance, calculateAttendanceStats, generateSampleAttendanceData } from '../../services/attendanceService';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
+import { useParentAuth } from '../../hooks/useParentAuth';
+import { 
+  getParentStudents, 
+  getStudentForParent, 
+  getStudentAttendanceForParent
+} from '../../utils/parentAuthHelper';
 
 // Debug mode configuration
 const DEBUG_MODE = __DEV__ && true; // Enable debug logging and UI elements
@@ -131,13 +130,12 @@ const MONTH_BG_COLORS = ['#f3f8fd', '#fdf7f3', '#f7fdf3']; // Light blue, light 
 const AttendanceSummary = () => {
   const { user } = useAuth();
   const { 
-    tenantId, 
-    isReady, 
-    isLoading: tenantLoading, 
-    tenant, 
-    tenantName, 
-    error: tenantError 
-  } = useTenantAccess();
+    isParent, 
+    parentStudents, 
+    directParentMode, 
+    loading: parentLoading, 
+    error: parentError 
+  } = useParentAuth();
   
   const [selectedMonth, setSelectedMonth] = useState('all');
   const [selectedSubject, setSelectedSubject] = useState('All');
@@ -162,66 +160,9 @@ const AttendanceSummary = () => {
   // Add dashboard-style attendance state
   const [dashboardAttendance, setDashboardAttendance] = useState([]);
   
-  // Enhanced tenant debugging following EMAIL_BASED_TENANT_SYSTEM.md
-  if (DEBUG_MODE) {
-    console.log('🏢 [ATTENDANCE TENANT DEBUG]:', {
-      tenantId: tenantId || 'NO TENANT',
-      tenantName: currentTenant?.name || 'NO TENANT NAME',
-      tenantStatus: currentTenant?.status || 'UNKNOWN',
-      tenantLoading: tenantLoading || false,
-      userEmail: user?.email || 'NO USER',
-      timestamp: new Date().toISOString()
-    });
-    
-    // Add global test functions for development debugging
-    if (typeof window !== 'undefined') {
-      window.debugAttendanceTenantContext = () => {
-        console.log('🏢 [ATTENDANCE TENANT DEBUG] Current tenant context state:', {
-          tenantId: tenantId || 'NOT SET',
-          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : 'NOT SET',
-          tenantLoading: tenantLoading,
-          user: user ? { id: user.id, email: user.email } : 'NOT SET'
-        });
-        return {
-          tenantId,
-          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : null,
-          tenantLoading,
-          user: user ? { id: user.id, email: user.email } : null,
-          isReady: !tenantLoading && !!tenantId && !!user
-        };
-      };
-      
-      window.retryAttendanceTenantLoading = async () => {
-        console.log('🔄 [ATTENDANCE MANUAL TENANT RETRY] Starting manual tenant retry...');
-        if (retryTenantLoading) {
-          await retryTenantLoading();
-          console.log('🔄 [ATTENDANCE MANUAL TENANT RETRY] Completed');
-        } else {
-          console.log('❌ [ATTENDANCE MANUAL TENANT RETRY] Function not available');
-        }
-      };
-      
-      window.debugAttendanceTenantLoading = async () => {
-        console.log('📝 [ATTENDANCE DEBUG TENANT LOADING] Starting enhanced debug...');
-        if (debugTenantLoading) {
-          const result = await debugTenantLoading();
-          console.log('📝 [ATTENDANCE DEBUG TENANT LOADING] Result:', result);
-          return result;
-        } else {
-          console.log('❌ [ATTENDANCE DEBUG TENANT LOADING] Function not available');
-        }
-      };
-      
-      console.log('🧪 [ATTENDANCE DEV TOOLS] Added global functions:');
-      console.log('   • window.debugAttendanceTenantContext() - Debug current tenant context state');
-      console.log('   • window.retryAttendanceTenantLoading() - Manually retry tenant loading');
-      console.log('   • window.debugAttendanceTenantLoading() - Run enhanced tenant loading debug');
-    }
-  }
-  
   // Debug state variables
   const [debugInfo, setDebugInfo] = useState({
-    tenantContext: null,
+    parentContext: null,
     studentResolution: null,
     dataFetchStatus: null
   });
@@ -243,70 +184,40 @@ const AttendanceSummary = () => {
       setLoading(true);
       setError(null);
       
-      // Enhanced tenant validation following EMAIL_BASED_TENANT_SYSTEM.md
-      
-      // Check if tenant is still loading
-      if (tenantLoading) {
-        console.log('🔄 [TENANT-AWARE] Tenant context is loading, delaying attendance fetch...');
+      // Check if we're in direct parent mode
+      if (!directParentMode || !isParent) {
+        console.log('⚠️ [PARENT AUTH] Not in direct parent mode or user is not a parent');
+        setError('This screen is only available for parents.');
+        setLoading(false);
         return;
       }
       
-      // If tenant context is not loaded, try to resolve tenant directly by email
-      let resolvedTenantId = tenantId;
-      let resolvedTenant = currentTenant;
-      
-      if (!tenantId || !currentTenant) {
-        console.log('🔍 [TENANT-AWARE] Tenant context not loaded, attempting direct email-based tenant resolution...');
-        
-        if (!user || !user.email) {
-          console.error('❌ [TENANT-AWARE] Cannot resolve tenant: No authenticated user');
-          setError('Authentication required. Please log in again.');
-          setLoading(false);
-          return;
-        }
-        
-        try {
-          // Direct tenant lookup using email
-          console.log('📧 [TENANT-AWARE] Looking up tenant for email:', user.email);
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
-          const emailTenantResult = await getTenantIdByEmail(user.email);
-          
-          if (emailTenantResult.success) {
-            resolvedTenantId = emailTenantResult.data.tenant.id;
-            resolvedTenant = emailTenantResult.data.tenant;
-            console.log('✅ [TENANT-AWARE] Successfully resolved tenant via email:', {
-              tenantId: resolvedTenantId,
-              tenantName: resolvedTenant.name,
-              userEmail: user.email
-            });
-          } else {
-            console.error('❌ [TENANT-AWARE] Email-based tenant resolution failed:', emailTenantResult.error);
-            setError(emailTenantResult.error || 'Unable to determine your school. Please contact administrator.');
-            setLoading(false);
-            return;
-          }
-        } catch (emailLookupError) {
-          console.error('❌ [TENANT-AWARE] Error during email-based tenant lookup:', emailLookupError);
-          setError('Unable to load school information. Please try again.');
-          setLoading(false);
-          return;
-        }
+      // Get the first (primary) student for the parent
+      if (!parentStudents || parentStudents.length === 0) {
+        console.log('❌ [PARENT AUTH] No students found for parent');
+        setError('No students linked to this parent account. Please contact school administration.');
+        setLoading(false);
+        return;
       }
-
+      
+      const student = parentStudents[0]; // Use the first student
+      console.log('🎯 [PARENT AUTH] Using student:', student.name, '(ID:', student.id, ')');
+      
       if (DEBUG_MODE) {
-        console.log('📊 === [TENANT-AWARE] ATTENDANCE SUMMARY DEBUG ===');
+        console.log('📊 === [PARENT AUTH] ATTENDANCE SUMMARY DEBUG ===');
         console.log('🔍 Debug Mode: ENABLED');
-        console.log('🏢 Resolved Tenant:', resolvedTenant.name, '(ID:', resolvedTenantId, ')');
+        console.log('👨‍👩‍👧 Parent Mode:', directParentMode);
         console.log('👤 Parent User ID:', user?.id);
+        console.log('📚 Student:', student.name, '(ID:', student.id, ')');
         console.log('⏰ Fetch Time:', new Date().toISOString());
         console.log('📧 User Email:', user?.email);
         
         setDebugInfo(prev => ({
           ...prev,
-          tenantContext: {
+          parentContext: {
             user_id: user?.id,
-            resolved_tenant_id: resolvedTenantId,
-            tenant_name: resolvedTenant.name,
+            student_id: student.id,
+            student_name: student.name,
             email: user?.email,
             fetch_time: new Date().toISOString()
           }
@@ -320,591 +231,183 @@ const AttendanceSummary = () => {
         throw new Error('No user logged in');
       }
 
-      // Use multiple strategies to get student data
-      let studentDetails = null;
-      let parentError = null;
+      // Set student data
+      setStudentData(student);
 
-      if (DEBUG_MODE) {
-        console.log('🔄 Starting student data resolution for attendance...');
-        console.log('📊 Resolution strategies available:', {
-          strategy1: 'linked_parent_of field',
-          strategy2: 'linked_student_id field',
-          strategy3: 'parents table lookup by email'
-        });
-      }
-
-      try {
-        // Strategy 1: Check if user has linked_parent_of field directly
-        if (DEBUG_MODE) {
-          console.log('🔍 [STRATEGY 1] Getting user data to check linked_parent_of field');
-        }
-        console.log('🔍 [STRATEGY 1] Getting user data to check linked_parent_of field');
-        // Use tenant-aware query for user lookup
-        const tenantUserQuery = createTenantQuery(resolvedTenantId, TABLES.USERS);
-        const { data: userData, error: userError } = await tenantUserQuery
-          .select('id, email, full_name, linked_parent_of, linked_student_id, role_id')
-          .eq('id', user.id)
-          .execute()
-          .then(result => ({ data: result.data?.[0] || null, error: result.error }));
-        
-        console.log('🔍 [USER DATA] User data result:', { userData, userError });
-        
-        if (!userError && userData) {
-          // Check if this user is linked as a parent
-          if (userData.linked_parent_of) {
-            console.log('🔍 [PARENT LINK] User is linked as parent of student ID:', userData.linked_parent_of);
-            
-            // Use tenant-aware query for student lookup
-            const tenantStudentQuery = createTenantQuery(resolvedTenantId, TABLES.STUDENTS);
-            const { data: studentData, error: studentError } = await tenantStudentQuery
-              .select(`
-                id,
-                name,
-                admission_no,
-                roll_no,
-                dob,
-                gender,
-                address,
-                class_id,
-                classes(id, class_name, section)
-              `)
-              .eq('id', userData.linked_parent_of)
-              .execute()
-              .then(result => ({ data: result.data?.[0] || null, error: result.error }));
-              
-            console.log('🔍 [STUDENT QUERY] Student query result:', { studentData, studentError });
-              
-            if (!studentError && studentData) {
-              studentDetails = studentData;
-              if (DEBUG_MODE) {
-                console.log('✅ [STRATEGY 1 SUCCESS] Found student via linked_parent_of:', {
-                  student_id: studentDetails.id,
-                  student_name: studentDetails.name,
-                  class_id: studentDetails.class_id
-                });
-                setDebugInfo(prev => ({
-                  ...prev,
-                  studentResolution: {
-                    method: 'linked_parent_of',
-                    student_id: studentDetails.id,
-                    student_name: studentDetails.name,
-                    class_id: studentDetails.class_id,
-                    success: true
-                  }
-                }));
-              }
-              console.log('✅ [STUDENT FOUND] Found student via linked_parent_of:', studentDetails.name);
-              console.log('✅ [STUDENT FOUND] Student ID:', studentDetails.id);
-              console.log('✅ [STUDENT FOUND] Class ID:', studentDetails.class_id);
-            } else {
-              console.log('❌ [STUDENT ERROR] Failed to fetch student data:', studentError);
-            }
-          }
-          
-          // Strategy 1B: Check if this user is linked as a student
-          if (!studentDetails && userData.linked_student_id) {
-            console.log('🔍 [STUDENT LINK] User is linked as student ID:', userData.linked_student_id);
-            
-            // Use tenant-aware query for student lookup (linked_student_id)
-            const tenantStudentQuery2 = createTenantQuery(resolvedTenantId, TABLES.STUDENTS);
-            const { data: studentData, error: studentError } = await tenantStudentQuery2
-              .select(`
-                id,
-                name,
-                admission_no,
-                roll_no,
-                dob,
-                gender,
-                address,
-                class_id,
-                classes(id, class_name, section)
-              `)
-              .eq('id', userData.linked_student_id)
-              .execute()
-              .then(result => ({ data: result.data?.[0] || null, error: result.error }));
-              
-            console.log('🔍 [STUDENT QUERY] Student query result:', { studentData, studentError });
-              
-            if (!studentError && studentData) {
-              studentDetails = studentData;
-              console.log('✅ [STUDENT FOUND] Found student via linked_student_id:', studentDetails.name);
-              console.log('✅ [STUDENT FOUND] Student ID:', studentDetails.id);
-              console.log('✅ [STUDENT FOUND] Class ID:', studentDetails.class_id);
-            } else {
-              console.log('❌ [STUDENT ERROR] Failed to fetch student data:', studentError);
-            }
-          }
-        } else {
-          console.log('❌ [USER ERROR] Failed to fetch user data:', userError);
-          parentError = userError;
-        }
-      } catch (err) {
-        console.error('AttendanceSummary - Error in user/student lookup:', err);
-        parentError = err;
-      }
-
-      // Strategy 2: Check parents table for this user's email
-      if (!studentDetails) {
-        try {
-          console.log('🔍 [STRATEGY 2] Checking parents table for user email:', user.email);
-          // Use tenant-aware query for parents lookup
-          const tenantParentsQuery = createTenantQuery(resolvedTenantId, TABLES.PARENTS);
-          const { data: parentRecords, error: parentsError } = await tenantParentsQuery
-            .select(`
-              id,
-              student_id,
-              name,
-              relation,
-              students(
-                id,
-                name,
-                admission_no,
-                roll_no,
-                dob,
-                gender,
-                address,
-                class_id,
-                classes(id, class_name, section)
-              )
-            `)
-            .eq('email', user.email)
-            .execute()
-            .then(result => ({ data: result.data || [], error: result.error }));
-            
-          console.log('🔍 [PARENTS QUERY] Parents query result:', { parentRecords, parentsError });
-          
-          if (!parentsError && parentRecords && parentRecords.length > 0) {
-            const parentRecord = parentRecords[0]; // Take the first one if multiple
-            if (parentRecord.students) {
-              studentDetails = parentRecord.students;
-              console.log('✅ [STUDENT FOUND] Found student via parents table:', studentDetails.name);
-              console.log('✅ [STUDENT FOUND] Student ID:', studentDetails.id);
-              console.log('✅ [STUDENT FOUND] Class ID:', studentDetails.class_id);
-            }
-          } else {
-            console.log('❌ [PARENTS ERROR] No parent record found for email:', user.email);
-          }
-        } catch (err) {
-          console.log('❌ [PARENTS LOOKUP] Parents table lookup failed:', err);
-        }
-      }
+      // Fetch attendance data using parent auth helper
+      const attendanceResult = await getStudentAttendanceForParent(user.id, student.id);
       
-      // Log final student details status
-      if (studentDetails) {
-        if (DEBUG_MODE) {
-          console.log('✅ Student resolution completed successfully!');
-          console.log('📚 Starting attendance data fetch for student:', {
-            student_id: studentDetails.id,
-            student_name: studentDetails.name,
-            class_id: studentDetails.class_id
-          });
-          setDebugInfo(prev => ({
-            ...prev,
-            dataFetchStatus: {
-              started_at: new Date().toISOString(),
-              student_resolved: true,
-              attendance_fetch: 'starting',
-              records_processed: 0
-            }
-          }));
-        }
-        
-        console.log('🎯 [FINAL STUDENT] Using REAL student data:', {
-          id: studentDetails.id,
-          name: studentDetails.name,
-          admission_no: studentDetails.admission_no,
-          class_id: studentDetails.class_id,
-          isRealData: !studentDetails.id.startsWith('00000000')
-        });
-      } else {
-        console.log('⚠️ [NO STUDENT] No student data found anywhere!');
-        console.log('🔍 [DEBUG] No student data found via any lookup strategy');
-        
-        // No student data found - set error and return
-        console.log('❌ [NO DATA] No student data found. Cannot proceed without proper parent-student linkage.');
-        setError('No student linked to this parent account. Please contact school administration.');
+      if (!attendanceResult.success) {
+        console.log('❌ [PARENT AUTH] Failed to fetch attendance:', attendanceResult.error);
+        setError(attendanceResult.error);
         setLoading(false);
         return;
       }
 
-      setStudentData(studentDetails);
+      console.log('✅ [PARENT AUTH] Successfully fetched attendance records:', attendanceResult.attendance.length);
 
-      // Fetch ALL attendance records for this student from student_attendance table
-      const currentDate = new Date();
-      const year = currentDate.getFullYear();
-      const month = currentDate.getMonth() + 1; // getMonth() returns 0-11, so add 1
+      // Process attendance data into calendar format - Skip Sundays entirely
+      const processedAttendanceData = {};
+      const monthlyStats = {};
 
-        // Only proceed with real student data - no fallback to sample data
-          console.log('✅ [REAL DATA] Student ID appears to be real. Proceeding with database query.');
-          console.log('✅ [REAL DATA] Real Student ID:', studentDetails.id);
+      (attendanceResult.attendance || []).forEach((record, index) => {
+        console.log(`🔄 [PROCESSING] Record ${index + 1}/${attendanceResult.attendance.length}:`, {
+          date: record.date,
+          status: record.status,
+          student_id: record.student_id
+        });
         
-          // Now fetch attendance data with multiple fallback strategies
-          try {
-            console.log('🔍 [ATTENDANCE FETCH] Starting attendance fetch for student:', studentDetails.id);
-            console.log('🔍 [ATTENDANCE FETCH] Student details:', {
-              id: studentDetails.id,
-              name: studentDetails.name,
-              class_id: studentDetails.class_id,
-              admission_no: studentDetails.admission_no
-            });
-            
-            let allAttendanceData = null;
-            let attendanceError = null;
-            
-            // Strategy 1: Use student_attendance table as per schema
-            try {
-              console.log('🔍 [TENANT-AWARE] Strategy 1: Using tenant-aware student_attendance table query');
+        // Safety check for valid date format
+        if (!record.date || typeof record.date !== 'string') {
+          console.warn('❌ Invalid date format in attendance record:', record.date);
+          return;
+        }
+        
+        try {
+          const recordDate = new Date(record.date + 'T00:00:00'); // Add time to avoid timezone issues
+          const dayOfWeek = recordDate.getDay(); // 0 = Sunday, 6 = Saturday
+          const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek];
           
-          // Use tenant-aware query for attendance lookup
-          const tenantAttendanceQuery = createTenantQuery(resolvedTenantId, 'student_attendance');
-          const { data, error } = await tenantAttendanceQuery
-            .select(`
-              id,
-              student_id,
-              class_id,
-              date,
-              status,
-              marked_by,
-              created_at
-            `)
-            .eq('student_id', studentDetails.id)
-            .order('date', { ascending: false })
-            .execute();
-            
-        console.log('🔍 [ATTENDANCE FETCH] Strategy 1 - Raw response:', {
-            data: data,
-            error: error,
-            dataLength: data ? data.length : 0
-          });
+          console.log(`📅 [DATE ANALYSIS] ${record.date} is a ${dayName} (dayOfWeek: ${dayOfWeek})`);
           
-          // Add detailed logging of fetched data
-          if (data && data.length > 0) {
-            console.log('📋 [DETAILED DATA] Raw attendance records:', JSON.stringify(data, null, 2));
-            console.log('📋 [DATA STRUCTURE] First record structure:', {
-              id: data[0].id,
-              student_id: data[0].student_id,
-              class_id: data[0].class_id,
-              date: data[0].date,
-              status: data[0].status,
-              marked_by: data[0].marked_by,
-              created_at: data[0].created_at
-            });
+          // Skip Sundays completely - they shouldn't be in attendance records
+          if (dayOfWeek === 0) {
+            console.warn(`⚠️ Sunday attendance record found (${record.date}). This should not exist in the database.`);
+            return; // Skip Sundays entirely
           }
-            
-          if (!error) {
-            allAttendanceData = data;
-            console.log('✅ [ATTENDANCE FETCH] Strategy 1 SUCCESS - Found', data?.length || 0, 'records');
-            if (data && data.length > 0) {
-              console.log('📊 [ATTENDANCE FETCH] Sample records:', data.slice(0, 3));
-              console.log('📊 [ATTENDANCE FETCH] Date range:', {
-                earliest: data[data.length - 1]?.date,
-                latest: data[0]?.date
-              });
-            }
-          } else {
-            console.log('❌ [ATTENDANCE FETCH] Strategy 1 ERROR:', error);
-            attendanceError = error;
+
+          const monthKey = format(recordDate, 'yyyy-MM');
+          const dateKey = record.date;
+          
+          console.log(`🗂️ [GROUPING] Adding to monthKey: ${monthKey}, dateKey: ${dateKey}`);
+          
+          // Initialize month data if not exists
+          if (!processedAttendanceData[monthKey]) {
+            processedAttendanceData[monthKey] = {};
+            console.log(`📁 [NEW MONTH] Created new month data for ${monthKey}`);
+          }
+          if (!monthlyStats[monthKey]) {
+            monthlyStats[monthKey] = { present: 0, absent: 0, total: 0 };
+            console.log(`📊 [NEW STATS] Created new stats for ${monthKey}`);
+          }
+          
+          // Store attendance record - status from schema is 'Present' or 'Absent' (capitalized)
+          const processedRecord = {
+            status: record.status.toLowerCase(), // Convert to lowercase for UI consistency
+            time: record.created_at ? format(new Date(record.created_at), 'HH:mm') : 'N/A',
+            marked_by: record.marked_by,
+            record_id: record.id
+          };
+          
+          processedAttendanceData[monthKey][dateKey] = processedRecord;
+          console.log(`✅ [STORED] Record stored:`, {
+            monthKey,
+            dateKey,
+            originalStatus: record.status,
+            processedStatus: processedRecord.status,
+            time: processedRecord.time
+          });
+
+          // Update monthly stats (excluding Sundays) - check capitalized status as per schema
+          monthlyStats[monthKey].total++;
+          if (record.status === 'Present') {
+            monthlyStats[monthKey].present++;
+            console.log(`📈 [STATS] Incremented present count for ${monthKey}:`, monthlyStats[monthKey]);
+          } else if (record.status === 'Absent') {
+            monthlyStats[monthKey].absent++;
+            console.log(`📉 [STATS] Incremented absent count for ${monthKey}:`, monthlyStats[monthKey]);
           }
         } catch (err) {
-          console.log('❌ [ATTENDANCE FETCH] Strategy 1 EXCEPTION:', err);
-          attendanceError = err;
+          console.warn('❌ Error processing attendance record:', record.date, err);
         }
-        
-        // Strategy 2: Try 'student_attendance' directly
-        if (!allAttendanceData) {
-          try {
-            const { data, error } = await supabase
-              .from('student_attendance')
-              .select(`
-                id,
-                student_id,
-                class_id,
-                date,
-                status,
-                marked_by,
-                created_at
-              `)
-              .eq('student_id', studentDetails.id)
-              .order('date', { ascending: false });
-              
-            if (!error) {
-              allAttendanceData = data;
-              console.log('AttendanceSummary - Found attendance via student_attendance');
-            } else {
-              attendanceError = error;
-            }
-          } catch (err) {
-            console.log('AttendanceSummary - student_attendance failed:', err);
-            attendanceError = err;
-          }
-        }
-        
-        // Strategy 3: Skip public.student_attendance (causes double public prefix)
-        // This strategy is removed to avoid the 'public.public.student_attendance' error
-        
-        // Strategy 4: Try alternative table names
-        if (!allAttendanceData) {
-          const alternativeNames = ['attendance', 'student_attendances', 'attendance_records'];
-          
-          for (const tableName of alternativeNames) {
-            try {
-              const { data, error } = await supabase
-                .from(tableName)
-                .select(`
-                  id,
-                  student_id,
-                  class_id,
-                  date,
-                  status,
-                  marked_by,
-                  created_at
-                `)
-                .eq('student_id', studentDetails.id)
-                .order('date', { ascending: false });
-                
-              if (!error && data) {
-                allAttendanceData = data;
-                console.log(`AttendanceSummary - Found attendance via ${tableName}`);
-                break;
-              }
-            } catch (err) {
-              console.log(`AttendanceSummary - ${tableName} failed:`, err);
-            }
-          }
-        }
+      });
 
-        if (attendanceError) throw attendanceError;
+      // Calculate percentages for each month
+      Object.keys(monthlyStats).forEach(monthKey => {
+        const stats = monthlyStats[monthKey];
+        stats.percentage = stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0;
+      });
 
-        console.log('=== FETCHED ATTENDANCE DATA FROM student_attendance TABLE ===');
-        console.log('Total records found:', allAttendanceData?.length || 0);
-        console.log('Sample records:', allAttendanceData?.slice(0, 3));
-        
-        // Log each record in detail with attendance status analysis
-        if (allAttendanceData && allAttendanceData.length > 0) {
-          console.log('📊 [ALL RECORDS] Complete attendance data:');
-          console.log('=' .repeat(80));
-          
-          allAttendanceData.forEach((record, index) => {
-            const recordDate = new Date(record.date + 'T00:00:00');
-            const dayOfWeek = recordDate.getDay(); // 0=Sunday, 6=Saturday
-            const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek];
-            const markedTime = record.created_at ? new Date(record.created_at).toLocaleTimeString() : 'Not recorded';
-            const isPresent = record.status === 'Present';
-            const isAbsent = record.status === 'Absent';
-            
-            // Basic record info
-            console.log(`\n📝 [RECORD ${index + 1}/${allAttendanceData.length}] Attendance Details:`);
-            console.log(`   📅 Date: ${record.date} (${dayName})`);
-            console.log(`   👨‍🎓 Student ID: ${record.student_id}`);
-            console.log(`   🏫 Class ID: ${record.class_id}`);
-            console.log(`   🆔 Record ID: ${record.id}`);
-            
-            // Attendance status with detailed analysis
-            if (isPresent) {
-              console.log(`   ✅ STATUS: PRESENT`);
-              console.log(`   🟢 [PRESENT DETAILS]:`);
-              console.log(`      ⏰ Marked at: ${markedTime}`);
-              console.log(`      👤 Marked by: ${record.marked_by || 'System'}`);
-              console.log(`      📊 Status Code: ${record.status}`);
-              console.log(`      🎯 Attendance Result: Student was IN SCHOOL`);
-            } else if (isAbsent) {
-              console.log(`   ❌ STATUS: ABSENT`);
-              console.log(`   🔴 [ABSENT DETAILS]:`);
-              console.log(`      ⏰ Marked at: ${markedTime}`);
-              console.log(`      👤 Marked by: ${record.marked_by || 'System'}`);
-              console.log(`      📊 Status Code: ${record.status}`);
-              console.log(`      🚫 Attendance Result: Student was NOT IN SCHOOL`);
-            } else {
-              console.log(`   ⚠️ STATUS: UNKNOWN (${record.status})`);
-              console.log(`   🟡 [UNKNOWN DETAILS]:`);
-              console.log(`      ⏰ Marked at: ${markedTime}`);
-              console.log(`      👤 Marked by: ${record.marked_by || 'System'}`);
-              console.log(`      📊 Status Code: ${record.status}`);
-              console.log(`      ❓ Attendance Result: UNCLEAR STATUS`);
-            }
-            
-            // Day analysis
-            console.log(`   📆 Day Analysis:`);
-            console.log(`      🗓️ Day of Week: ${dayName} (${dayOfWeek})`);
-            console.log(`      🏫 School Day: ${dayOfWeek === 0 ? 'NO (Sunday - Holiday)' : dayOfWeek === 6 ? 'YES (Saturday)' : 'YES (Weekday)'}`);
-            
-            // Record timestamp analysis
-            if (record.created_at) {
-              const createdDate = new Date(record.created_at);
-              const timeDiff = new Date() - createdDate;
-              const daysAgo = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
-              console.log(`   ⏱️ Record Age: ${daysAgo} days ago`);
-              console.log(`   📝 Created: ${createdDate.toLocaleString()}`);
-            }
-            
-            console.log(`   ${'─'.repeat(60)}`);
-          });
-          
-          // Summary statistics
-          const totalRecords = allAttendanceData.length;
-          const presentCount = allAttendanceData.filter(r => r.status === 'Present').length;
-          const absentCount = allAttendanceData.filter(r => r.status === 'Absent').length;
-          const unknownCount = totalRecords - presentCount - absentCount;
-          const attendancePercentage = totalRecords > 0 ? Math.round((presentCount / totalRecords) * 100) : 0;
-          
-          console.log(`\n📈 [ATTENDANCE SUMMARY]:`);
-          console.log(`   📊 Total Records: ${totalRecords}`);
-          console.log(`   ✅ Present Days: ${presentCount}`);
-          console.log(`   ❌ Absent Days: ${absentCount}`);
-          console.log(`   ⚠️ Unknown Status: ${unknownCount}`);
-          console.log(`   📈 Attendance Percentage: ${attendancePercentage}%`);
-          console.log(`   🎯 Attendance Grade: ${attendancePercentage >= 90 ? 'Excellent' : attendancePercentage >= 75 ? 'Good' : attendancePercentage >= 60 ? 'Average' : 'Needs Improvement'}`);
-          
-          console.log('=' .repeat(80));
-        }
-
-        // Process attendance data into calendar format - Skip Sundays entirely
-        const processedAttendanceData = {};
-        const monthlyStats = {};
-
-        (allAttendanceData || []).forEach((record, index) => {
-          console.log(`🔄 [PROCESSING] Record ${index + 1}/${allAttendanceData.length}:`, {
-            date: record.date,
-            status: record.status,
-            student_id: record.student_id
-          });
-          
-          // Safety check for valid date format
-          if (!record.date || typeof record.date !== 'string') {
-            console.warn('❌ Invalid date format in attendance record:', record.date);
-            return;
-          }
-          
-          try {
-            const recordDate = new Date(record.date + 'T00:00:00'); // Add time to avoid timezone issues
-            const dayOfWeek = recordDate.getDay(); // 0 = Sunday, 6 = Saturday
-            const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek];
-            
-            console.log(`📅 [DATE ANALYSIS] ${record.date} is a ${dayName} (dayOfWeek: ${dayOfWeek})`);
-            
-            // Skip Sundays completely - they shouldn't be in attendance records
-            if (dayOfWeek === 0) {
-              console.warn(`⚠️ Sunday attendance record found (${record.date}). This should not exist in the database.`);
-              return; // Skip Sundays entirely
-            }
-
-            const monthKey = format(recordDate, 'yyyy-MM');
-            const dateKey = record.date;
-            
-            console.log(`🗂️ [GROUPING] Adding to monthKey: ${monthKey}, dateKey: ${dateKey}`);
-            
-            // Initialize month data if not exists
-            if (!processedAttendanceData[monthKey]) {
-              processedAttendanceData[monthKey] = {};
-              console.log(`📁 [NEW MONTH] Created new month data for ${monthKey}`);
-            }
-            if (!monthlyStats[monthKey]) {
-              monthlyStats[monthKey] = { present: 0, absent: 0, total: 0 };
-              console.log(`📊 [NEW STATS] Created new stats for ${monthKey}`);
-            }
-            
-            // Store attendance record - status from schema is 'Present' or 'Absent' (capitalized)
-            const processedRecord = {
-              status: record.status.toLowerCase(), // Convert to lowercase for UI consistency
-              time: record.created_at ? format(new Date(record.created_at), 'HH:mm') : 'N/A',
-              marked_by: record.marked_by,
-              record_id: record.id
-            };
-            
-            processedAttendanceData[monthKey][dateKey] = processedRecord;
-            console.log(`✅ [STORED] Record stored:`, {
-              monthKey,
-              dateKey,
-              originalStatus: record.status,
-              processedStatus: processedRecord.status,
-              time: processedRecord.time
-            });
-
-            // Update monthly stats (excluding Sundays) - check capitalized status as per schema
-            monthlyStats[monthKey].total++;
-            if (record.status === 'Present') {
-              monthlyStats[monthKey].present++;
-              console.log(`📈 [STATS] Incremented present count for ${monthKey}:`, monthlyStats[monthKey]);
-            } else if (record.status === 'Absent') {
-              monthlyStats[monthKey].absent++;
-              console.log(`📉 [STATS] Incremented absent count for ${monthKey}:`, monthlyStats[monthKey]);
-            }
-          } catch (err) {
-            console.warn('❌ Error processing attendance record:', record.date, err);
-          }
-        });
-
-        // Calculate percentages for each month
-        Object.keys(monthlyStats).forEach(monthKey => {
-          const stats = monthlyStats[monthKey];
-          stats.percentage = stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0;
-        });
-
-        console.log('=== PROCESSED ATTENDANCE DATA ===');
-        console.log('Months with data:', Object.keys(processedAttendanceData));
-        console.log('Monthly stats:', monthlyStats);
-        
-        const currentMonthKey = format(currentDate, 'yyyy-MM');
-        console.log(`📅 [CURRENT MONTH] Looking for data in month: ${currentMonthKey}`);
-        console.log('Current month data sample:', processedAttendanceData[currentMonthKey]);
-        
-        // Log detailed breakdown of processed data
-        Object.keys(processedAttendanceData).forEach(monthKey => {
-          const monthData = processedAttendanceData[monthKey];
-          const dateKeys = Object.keys(monthData);
-          console.log(`📊 [MONTH DETAIL] ${monthKey}:`, {
-            totalDays: dateKeys.length,
-            dates: dateKeys.sort(),
-            stats: monthlyStats[monthKey]
-          });
-          
-          // Show first few records for this month
-          dateKeys.slice(0, 3).forEach(dateKey => {
-            console.log(`  📝 [SAMPLE] ${dateKey}:`, monthData[dateKey]);
-          });
+      console.log('=== PROCESSED ATTENDANCE DATA ===');
+      console.log('Months with data:', Object.keys(processedAttendanceData));
+      console.log('Monthly stats:', monthlyStats);
+      
+      const currentDate = new Date();
+      const currentMonthKey = format(currentDate, 'yyyy-MM');
+      console.log(`📅 [CURRENT MONTH] Looking for data in month: ${currentMonthKey}`);
+      console.log('Current month data sample:', processedAttendanceData[currentMonthKey]);
+      
+      // Log detailed breakdown of processed data
+      Object.keys(processedAttendanceData).forEach(monthKey => {
+        const monthData = processedAttendanceData[monthKey];
+        const dateKeys = Object.keys(monthData);
+        console.log(`📊 [MONTH DETAIL] ${monthKey}:`, {
+          totalDays: dateKeys.length,
+          dates: dateKeys.sort(),
+          stats: monthlyStats[monthKey]
         });
         
-        console.log('=================================');
+        // Show first few records for this month
+        dateKeys.slice(0, 3).forEach(dateKey => {
+          console.log(`  📝 [SAMPLE] ${dateKey}:`, monthData[dateKey]);
+        });
+      });
+      
+      console.log('=================================');
 
-        // Set processed data
-        setAttendanceData(processedAttendanceData);
+      // Set processed data
+      setAttendanceData(processedAttendanceData);
+      
+      // Set current month records for dashboard display (excluding Sundays)
+      const dashboardMonthKey = format(currentDate, 'yyyy-MM');
+      const currentMonthRecords = (attendanceResult.attendance || []).filter(record => {
+        if (!record.date) return false;
         
-            // Set current month records for dashboard display (excluding Sundays)
-            const dashboardMonthKey = format(currentDate, 'yyyy-MM');
-            const currentMonthRecords = (allAttendanceData || []).filter(record => {
-              if (!record.date) return false;
-              
-              try {
-                const recordDate = new Date(record.date + 'T00:00:00');
-                const dayOfWeek = recordDate.getDay();
-                
-                // Skip Sundays
-                if (dayOfWeek === 0) return false;
-                
-                const recordMonthKey = format(recordDate, 'yyyy-MM');
-                return recordMonthKey === currentMonthKey;
-              } catch (err) {
-                return false;
-              }
-            });
+        try {
+          const recordDate = new Date(record.date + 'T00:00:00');
+          const dayOfWeek = recordDate.getDay();
+          
+          // Skip Sundays
+          if (dayOfWeek === 0) return false;
+          
+          const recordMonthKey = format(recordDate, 'yyyy-MM');
+          return recordMonthKey === currentMonthKey;
+        } catch (err) {
+          return false;
+        }
+      });
 
-            setDashboardAttendance(currentMonthRecords || []);
-
-          } catch (err) {
-            console.error('AttendanceSummary - Error fetching attendance data:', err);
-            setDashboardAttendance([]);
-            setAttendanceData({});
-            setError('Failed to fetch attendance data. Please try again.');
-          }
+      setDashboardAttendance(currentMonthRecords || []);
 
     } catch (err) {
       console.error('AttendanceSummary - Error fetching attendance data:', err);
       setError('Failed to load attendance data. Please check your connection and try again.');
+      setDashboardAttendance([]);
+      setAttendanceData({});
     } finally {
       setLoading(false);
     }
   };
 
+  // Fetch data on component mount with parent auth
+  useEffect(() => {
+    // Wait for both authentication and parent loading to complete
+    if (!user || parentLoading) {
+      console.log('🔄 [PARENT AUTH] Waiting for auth and parent loading to complete...');
+      return;
+    }
+    
+    // Check if user is a parent
+    if (!isParent) {
+      console.log('⚠️ [PARENT AUTH] User is not a parent, redirecting...');
+      setError('This screen is only available for parents.');
+      setLoading(false);
+      return;
+    }
+    
+    fetchAttendanceData();
+  }, [user, parentLoading, isParent, directParentMode]);
+  
   // Fetch dashboard-style attendance data using proper schema
   const fetchDashboardAttendanceData = async (studentId) => {
     try {
@@ -1197,21 +700,24 @@ const AttendanceSummary = () => {
 
   // Remove Saturday attendance generation - only show real data
 
-  // Fetch data on component mount with tenant-aware loading
+  // Fetch data on component mount with parent auth
   useEffect(() => {
-    // Wait for both authentication and tenant loading to complete
-    if (!user || tenantLoading) {
-      console.log('🔄 [TENANT-AWARE] Waiting for auth and tenant loading to complete...');
+    // Wait for both authentication and parent loading to complete
+    if (!user || parentLoading) {
+      console.log('🔄 [PARENT AUTH] Waiting for auth and parent loading to complete...');
       return;
     }
     
-    // Enhanced tenant-aware loading check
-    if (!tenantId && !currentTenant) {
-      console.log('🔄 [TENANT-AWARE] useEffect: Tenant not ready yet, will attempt direct resolution in fetchAttendanceData');
+    // Check if user is a parent
+    if (!isParent) {
+      console.log('⚠️ [PARENT AUTH] User is not a parent, redirecting...');
+      setError('This screen is only available for parents.');
+      setLoading(false);
+      return;
     }
     
     fetchAttendanceData();
-  }, [user, tenantLoading, tenantId, currentTenant]);
+  }, [user, parentLoading, isParent, directParentMode]);
   
   // Set up real-time subscription when student data is available
   useEffect(() => {
@@ -1755,7 +1261,7 @@ const AttendanceSummary = () => {
   // Since we're showing single month, no need to group by month
   // Just create a single array with all days of the current month
 
-  if (loading || tenantLoading) {
+  if (loading || parentLoading) {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.container}>
@@ -1763,20 +1269,20 @@ const AttendanceSummary = () => {
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#1976d2" />
             <Text style={styles.loadingText}>
-              {tenantLoading ? 'Loading tenant context...' : 'Loading attendance data...'}
+              {parentLoading ? 'Loading parent context...' : 'Loading attendance data...'}
             </Text>
             {DEBUG_MODE && (
               <View style={styles.debugContainer}>
-                <Text style={styles.debugLabel}>TENANT DEBUG INFO:</Text>
-                <Text style={styles.debugText}>Tenant Loading: {tenantLoading ? 'Yes' : 'No'}</Text>
+                <Text style={styles.debugLabel}>PARENT AUTH DEBUG INFO:</Text>
+                <Text style={styles.debugText}>Parent Loading: {parentLoading ? 'Yes' : 'No'}</Text>
                 <Text style={styles.debugText}>Auth Loading: {loading ? 'Yes' : 'No'}</Text>
-                <Text style={styles.debugText}>Tenant ID: {tenantId || 'Not Set'}</Text>
-                <Text style={styles.debugText}>Tenant Name: {currentTenant?.name || 'Not Set'}</Text>
+                <Text style={styles.debugText}>Is Parent: {isParent ? 'Yes' : 'No'}</Text>
+                <Text style={styles.debugText}>Direct Parent Mode: {directParentMode ? 'Yes' : 'No'}</Text>
                 <Text style={styles.debugText}>User: {user?.email || 'Not Set'}</Text>
-                {tenantLoading && (
-                  <Text style={styles.debugText}>Status: Resolving school context...</Text>
+                {parentLoading && (
+                  <Text style={styles.debugText}>Status: Resolving parent context...</Text>
                 )}
-                {!tenantLoading && loading && (
+                {!parentLoading && loading && (
                   <Text style={styles.debugText}>Status: Fetching attendance data...</Text>
                 )}
               </View>
@@ -1799,12 +1305,12 @@ const AttendanceSummary = () => {
             </TouchableOpacity>
             {DEBUG_MODE && (
               <View style={styles.debugContainer}>
-                <Text style={styles.debugLabel}>TENANT DEBUG INFO:</Text>
-                <Text style={styles.debugText}>Tenant Loading: {tenantLoading ? 'Yes' : 'No'}</Text>
-                <Text style={styles.debugText}>Tenant ID: {tenantId || 'Not Set'}</Text>
-                <Text style={styles.debugText}>Tenant Name: {currentTenant?.name || 'Not Set'}</Text>
+                <Text style={styles.debugLabel}>PARENT AUTH DEBUG INFO:</Text>
+                <Text style={styles.debugText}>Parent Loading: {parentLoading ? 'Yes' : 'No'}</Text>
+                <Text style={styles.debugText}>Is Parent: {isParent ? 'Yes' : 'No'}</Text>
+                <Text style={styles.debugText}>Direct Parent Mode: {directParentMode ? 'Yes' : 'No'}</Text>
                 <Text style={styles.debugText}>User: {user?.email || 'Not Set'}</Text>
-                <Text style={styles.debugText}>Error Type: {error?.includes('tenant') ? 'Tenant-related' : 'Other'}</Text>
+                <Text style={styles.debugText}>Error Type: {error?.includes('parent') ? 'Parent-related' : 'Other'}</Text>
               </View>
             )}
           </View>

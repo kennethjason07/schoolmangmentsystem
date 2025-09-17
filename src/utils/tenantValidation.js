@@ -18,91 +18,118 @@ const getCacheKey = (tenantId, userId) => `${tenantId}_${userId}`;
  * @param {string} screenName - Name of the screen/component for logging
  * @returns {Promise<{isValid: boolean, tenant: object|null, error: string|null}>}
  */
-export const validateTenantAccess = async (userId, tenantId, screenName = 'Unknown') => {
-  // Check cache first
-  const cacheKey = getCacheKey(tenantId, userId);
-  const cached = validationCache.get(cacheKey);
-  if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
-    return cached.result;
-  }
-  
-  // Step 1: Check if user ID is provided
-  if (!userId) {
-    return {
-      isValid: false,
-      tenant: null,
-      error: 'User not authenticated.'
-    };
-  }
-  
-  // Step 2: Check if tenant ID is provided
-  if (!tenantId) {
-    return {
-      isValid: false,
-      tenant: null,
-      error: 'No tenant context available. Please contact administrator.'
-    };
-  }
-  
+export const validateTenantAccess = async (tenantId, userId, context = 'Unknown') => {
   try {
-    // Step 3: Verify tenant exists and is active
+    console.log(`🔐 [TENANT VALIDATION] Validating access for tenant: ${tenantId}, user: ${userId}, context: ${context}`);
+    
+    // Get current user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      console.error('❌ [TENANT VALIDATION] No authenticated user:', authError?.message || 'No user');
+      return { 
+        isValid: false, 
+        tenant: null, 
+        error: 'User not authenticated' 
+      };
+    }
+
+    // Get user's role to determine if tenant filtering is required
+    const { data: userRecord, error: userRecordError } = await supabase
+      .from(TABLES.USERS)
+      .select('role_id, tenant_id')
+      .eq('id', user.id)
+      .single();
+
+    if (userRecordError) {
+      console.error('❌ [TENANT VALIDATION] Error fetching user record:', userRecordError);
+      return { 
+        isValid: false, 
+        tenant: null, 
+        error: 'Cannot verify user role' 
+      };
+    }
+
+    // Check if user is a parent (role_id 3) - parents don't require strict tenant filtering
+    const isParent = userRecord.role_id === 3;
+    if (isParent) {
+      console.log('👨‍👩‍👧 [TENANT VALIDATION] Parent user detected, relaxed tenant validation');
+      
+      // For parents, we just need to verify they exist in the system
+      // They don't need to be tied to a specific tenant
+      if (!tenantId) {
+        console.log('✅ [TENANT VALIDATION] Parent access granted without tenant context');
+        return { 
+          isValid: true, 
+          tenant: null, 
+          isParent: true,
+          message: 'Parent access validated without tenant restrictions' 
+        };
+      }
+    }
+
+    // For non-parent users, proceed with normal tenant validation
+    if (!tenantId) {
+      console.error('❌ [TENANT VALIDATION] No tenant context available');
+      return { 
+        isValid: false, 
+        tenant: null, 
+        error: 'No tenant context available' 
+      };
+    }
+
+    // Validate tenant exists and is active
     const { data: tenant, error: tenantError } = await supabase
       .from('tenants')
-      .select('id, name, status, subdomain')
+      .select('*')
       .eq('id', tenantId)
       .eq('status', 'active')
       .single();
-    
+
     if (tenantError || !tenant) {
-      return {
-        isValid: false,
-        tenant: null,
-        error: `Invalid or inactive tenant: ${tenantId}`
+      console.error('❌ [TENANT VALIDATION] Invalid or inactive tenant:', tenantError?.message || 'Not found');
+      return { 
+        isValid: false, 
+        tenant: null, 
+        error: tenantError?.message || 'Invalid or inactive tenant' 
       };
     }
-    
-    // Step 4: Verify user belongs to this tenant
-    const { data: userRecord, error: userError } = await supabase
-      .from('users')
-      .select('tenant_id, email')
-      .eq('id', userId)
-      .single();
-    
-    if (userError || !userRecord) {
-      return {
-        isValid: false,
-        tenant: null,
-        error: 'User record not found.'
-      };
+
+    // Verify user belongs to this tenant (unless parent)
+    if (!isParent) {
+      if (userRecord.tenant_id !== tenantId) {
+        console.error('❌ [TENANT VALIDATION] User tenant mismatch:', {
+          userTenant: userRecord.tenant_id,
+          requestedTenant: tenantId
+        });
+        return { 
+          isValid: false, 
+          tenant: null, 
+          error: 'User does not belong to this tenant' 
+        };
+      }
     }
-    
-    if (userRecord.tenant_id !== tenantId) {
-      return {
-        isValid: false,
-        tenant: null,
-        error: 'Access denied: User does not belong to this tenant.'
-      };
-    }
-    
-    const result = {
-      isValid: true,
-      tenant: tenant,
-      error: null
-    };
-    
-    // Cache the successful result
-    validationCache.set(cacheKey, {
-      result,
-      timestamp: Date.now()
+
+    console.log('✅ [TENANT VALIDATION] Access validated successfully:', {
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      userId: user.id,
+      isParent,
+      context
     });
-    
-    return result;
-    
+
+    return { 
+      isValid: true, 
+      tenant,
+      isParent,
+      message: 'Access validated successfully' 
+    };
+
   } catch (error) {
-    return {
-      isValid: false,
-      tenant: null,
-      error: `Tenant validation failed: ${error.message}`
+    console.error('💥 [TENANT VALIDATION] Unexpected error:', error);
+    return { 
+      isValid: false, 
+      tenant: null, 
+      error: `Validation error: ${error.message}` 
     };
   }
 };

@@ -1,5 +1,6 @@
 import { Alert, Linking, Platform } from 'react-native';
-import * as FileSystem from 'expo-file-system';
+// Use legacy API to avoid deprecation warnings
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { getFileIcon } from './chatFileUpload';
 import { windowsImageSaver, showImageSaveOptions } from './windowsImageSaver';

@@ -19,18 +19,24 @@ import { useFocusEffect } from '@react-navigation/native';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
-import { useTenant } from '../../contexts/TenantContext';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { formatToLocalTime } from '../../utils/timeUtils';
 import { getParentNotifications, markNotificationAsRead } from '../../utils/gradeNotificationHelpers';
 import universalNotificationService from '../../services/UniversalNotificationService';
-import { validateTenantAccess, createTenantQuery, validateDataTenancy } from '../../utils/tenantValidation';
+import { useParentAuth } from '../../hooks/useParentAuth'; // Import parent auth hook
 
 const { width } = Dimensions.get('window');
 
 const Notifications = ({ navigation }) => {
   const { user } = useAuth();
-  const { currentTenant } = useTenant();
+  const { 
+    isParent, 
+    parentStudents, 
+    directParentMode, 
+    loading: parentLoading, 
+    error: parentError 
+  } = useParentAuth(); // Use parent auth hook instead of tenant context
+  
   const [notifications, setNotifications] = useState([]);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -39,16 +45,9 @@ const Notifications = ({ navigation }) => {
 
   // Pull-to-refresh functionality
   const { refreshing, onRefresh } = usePullToRefresh(async () => {
-    // Validate tenant access before refresh
-    if (!currentTenant?.id || !user?.id) {
-      console.error('❌ [PARENT_NOTIFICATIONS] Cannot refresh - missing tenant or user context');
-      return;
-    }
-    
-    const validation = await validateTenantAccess(currentTenant.id, user.id, 'ParentNotifications-Refresh');
-    if (!validation.isValid) {
-      console.error('❌ [PARENT_NOTIFICATIONS] Refresh failed - tenant validation failed:', validation.error);
-      Alert.alert('Error', validation.error);
+    // Validate parent access before refresh
+    if (!isParent) {
+      console.error('❌ [PARENT_NOTIFICATIONS] Cannot refresh - user is not a parent');
       return;
     }
     
@@ -62,22 +61,30 @@ const Notifications = ({ navigation }) => {
     setError(null);
     
     try {
-      // 🛡️ STEP 1: Validate tenant access
-      console.log('🛡️ [PARENT_NOTIFICATIONS] Validating tenant access...');
-      const tenantId = currentTenant?.id;
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ParentNotifications');
+      // 🛡️ STEP 1: Validate parent access
+      console.log('🛡️ [PARENT_NOTIFICATIONS] Validating parent access...');
       
-      if (!validation.isValid) {
-        console.error('❌ [PARENT_NOTIFICATIONS] Tenant validation failed:', validation.error);
-        setError(validation.error);
+      if (!isParent) {
+        console.error('❌ [PARENT_NOTIFICATIONS] Parent validation failed: User is not a parent');
+        setError('This feature is only available for parents');
         return;
       }
       
-      console.log('🔍 [NOTIFICATIONS] Fetching notifications for parent:', user.id, 'in tenant:', tenantId);
+      // Get the first student from parent students
+      const studentData = parentStudents && parentStudents.length > 0 ? parentStudents[0] : null;
+      
+      if (!studentData) {
+        console.error('❌ [PARENT_NOTIFICATIONS] No student found for parent');
+        setError('No student found for this parent account');
+        return;
+      }
+      
+      console.log('🔍 [NOTIFICATIONS] Fetching notifications for parent:', user.id, 'student:', studentData.id);
 
-      // Get notifications with recipients for this parent ONLY using tenant-aware query
+      // Get notifications with recipients for this parent ONLY using direct parent access
       // Include created_at from notifications for proper ordering
-      const notificationRecipientsQuery = createTenantQuery(tenantId, TABLES.NOTIFICATION_RECIPIENTS)
+      const { data: notificationsData, error: notificationsError } = await supabase
+        .from('notification_recipients')
         .select(`
           id,
           is_read,
@@ -90,39 +97,20 @@ const Notifications = ({ navigation }) => {
             type,
             created_at,
             sent_by,
-            sent_at,
-            tenant_id
+            sent_at
           )
         `)
         .eq('recipient_type', 'Parent')
         .eq('recipient_id', user.id)
         .order('sent_at', { ascending: false })
         .limit(100);
-      
-      const { data: notificationsData, error: notificationsError } = await notificationRecipientsQuery.execute();
 
       if (notificationsError) {
         console.error('❌ [NOTIFICATIONS] Error fetching notifications:', notificationsError);
         throw notificationsError;
       }
-      
-      // 🛡️ STEP 2: Validate all returned data belongs to the correct tenant
-      if (notificationsData && notificationsData.length > 0) {
-        const recipientsValid = validateDataTenancy(notificationsData, tenantId, 'NotificationRecipients');
-        
-        // Also validate the nested notifications data
-        const nestedNotifications = notificationsData.map(rec => rec.notifications).filter(Boolean);
-        const notificationsValid = validateDataTenancy(nestedNotifications, tenantId, 'NestedNotifications');
-        
-        if (!recipientsValid || !notificationsValid) {
-          console.error('❌ [NOTIFICATIONS] Data validation failed - tenant mismatch detected');
-          setError('Data validation failed. Please try refreshing.');
-          return;
-        }
-      }
 
-      console.log(`✅ [NOTIFICATIONS] Found ${notificationsData?.length || 0} notifications for parent ${user.id} in tenant ${tenantId}`);
-      console.log('🔍 [NOTIFICATIONS] Notification details:', notificationsData);
+      console.log(`✅ [NOTIFICATIONS] Found ${notificationsData?.length || 0} notifications for parent ${user.id}`);
 
       // Transform the data to match the expected format
       const allTransformedNotifications = (notificationsData || []).map(notificationRecord => {
@@ -198,7 +186,7 @@ const Notifications = ({ navigation }) => {
         return {
           id: notification.id,
           uniqueKey: `notif-${notification.id}-rec-${notificationRecord.id}-${Date.now()}`, // Absolutely unique keys with timestamp
-          title: title,
+          title: title, // Add title field back since it's used in the UI
           message: message,
           sender: notification.sent_by || 'School Admin',
           type: notification.type || 'general',
@@ -225,12 +213,12 @@ const Notifications = ({ navigation }) => {
         // Create multiple deduplication keys
         const notificationIdKey = `notif_${notification.id}`;
         const messageKey = `msg_${notification.message.substring(0, 100)}`; // Use first 100 chars of message
-        const contentKey = `content_${notification.title}_${notification.message.substring(0, 50)}_${notification.timestamp.split('T')[0]}`;
+        const contentKey = `content_${notification.type}_${notification.message.substring(0, 50)}_${notification.timestamp.split('T')[0]}`;
         
         console.log(`🔍 [NOTIFICATIONS] Processing notification ${index + 1}:`, {
           id: notification.id,
           recipientId: notification.recipientId,
-          title: notification.title,
+          type: notification.type,
           messagePreview: notification.message.substring(0, 50) + '...'
         });
         
@@ -282,7 +270,7 @@ const Notifications = ({ navigation }) => {
         const duplicatedNotifications = allTransformedNotifications.filter(n => !finalIds.has(n.id));
         console.log('🗑️ [NOTIFICATIONS] Duplicates that were removed:', duplicatedNotifications.map(n => ({
           id: n.id,
-          title: n.title,
+          type: n.type,
           messagePreview: n.message.substring(0, 30) + '...'
         })));
       } else {
@@ -310,18 +298,18 @@ const Notifications = ({ navigation }) => {
   };
 
   useEffect(() => {
-    if (user && currentTenant?.id) {
+    if (user && isParent && !parentLoading) {
       fetchNotifications();
     }
-  }, [user, currentTenant]);
+  }, [user, isParent, parentLoading]);
 
   // Refresh notifications when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      if (user && currentTenant?.id) {
+      if (user && isParent && !parentLoading) {
         fetchNotifications();
       }
-    }, [user, currentTenant])
+    }, [user, isParent, parentLoading])
   );
 
   const filteredNotifications = notifications.filter(n => {
@@ -337,18 +325,16 @@ const Notifications = ({ navigation }) => {
 
   const markAsRead = async (id) => {
     try {
-      // 🛡️ Validate tenant access before marking as read
-      console.log('🛡️ [PARENT_NOTIFICATIONS] Validating tenant access for mark as read...');
-      const tenantId = currentTenant?.id;
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ParentNotifications-MarkRead');
+      // 🛡️ Validate parent access before marking as read
+      console.log('🛡️ [PARENT_NOTIFICATIONS] Validating parent access for mark as read...');
       
-      if (!validation.isValid) {
-        console.error('❌ [PARENT_NOTIFICATIONS] Mark as read failed - tenant validation failed:', validation.error);
-        Alert.alert('Error', validation.error);
+      if (!isParent) {
+        console.error('❌ [PARENT_NOTIFICATIONS] Mark as read failed - user is not a parent');
+        Alert.alert('Error', 'This feature is only available for parents');
         return;
       }
       
-      console.log('🔄 Marking notification as read:', id, 'in tenant:', tenantId);
+      console.log('🔄 Marking notification as read:', id);
       
       // Find the notification to get its recipient record
       const notification = notifications.find(n => n.id === id);
@@ -356,10 +342,7 @@ const Notifications = ({ navigation }) => {
       if (notification?.recipientId) {
         console.log('📝 Updating recipient record:', notification.recipientId);
         
-        // Update existing recipient record with read timestamp using tenant-aware query
-        const updateQuery = createTenantQuery(tenantId, 'notification_recipients')
-          .eq('id', notification.recipientId);
-        
+        // Update existing recipient record
         const { data: updateData, error: updateError } = await supabase
           .from('notification_recipients')
           .update({ 
@@ -367,7 +350,6 @@ const Notifications = ({ navigation }) => {
             read_at: new Date().toISOString()
           })
           .eq('id', notification.recipientId)
-          .eq('tenant_id', tenantId)
           .select();
         
         if (updateError) {
@@ -392,27 +374,25 @@ const Notifications = ({ navigation }) => {
       } else {
         console.log('=== CREATING NEW RECIPIENT RECORD ===');
         
-        // Check if record already exists using tenant-aware query
-        const existingRecordQuery = createTenantQuery(tenantId, 'notification_recipients')
+        // Check if record already exists
+        const { data: existingRecord, error: checkError } = await supabase
+          .from('notification_recipients')
           .select('*')
           .eq('notification_id', id)
           .eq('recipient_id', user.id)
           .single();
-        
-        const { data: existingRecord, error: checkError } = await existingRecordQuery.execute();
 
         console.log('Existing record check:', existingRecord);
         console.log('Check error:', checkError);
 
         if (existingRecord) {
-          // Update the existing record with tenant validation
+          // Update the existing record
           const { data: updateData, error: updateError } = await supabase
             .from('notification_recipients')
             .update({ 
               is_read: true
             })
             .eq('id', existingRecord.id)
-            .eq('tenant_id', tenantId)
             .select();
 
           console.log('Update existing result:', updateData);
@@ -422,12 +402,11 @@ const Notifications = ({ navigation }) => {
         } else {
           console.log('=== ANALYZING EXISTING DATA TO UNDERSTAND CONSTRAINTS ===');
           
-          // First, let's see what values already exist in the database for this tenant
-          const existingRecipientsQuery = createTenantQuery(tenantId, 'notification_recipients')
+          // First, let's see what values already exist in the database
+          const { data: existingRecipients, error: analyzeError } = await supabase
+            .from('notification_recipients')
             .select('recipient_type, delivery_status')
             .limit(10);
-          
-          const { data: existingRecipients, error: analyzeError } = await existingRecipientsQuery.execute();
           
           console.log('Existing recipient records for analysis:', existingRecipients);
           console.log('Analysis error:', analyzeError);
@@ -495,7 +474,6 @@ const Notifications = ({ navigation }) => {
               recipient_id: user.id,
               recipient_type: 'Parent', // Match schema constraint: 'Student' or 'Parent' (capitalized)
               delivery_status: 'Sent', // Valid values: 'Pending', 'Sent', 'Failed' (capitalized)
-              tenant_id: tenantId, // Add tenant_id for proper isolation
               is_read: false // Start as unread, then update
             };
             
@@ -513,14 +491,13 @@ const Notifications = ({ navigation }) => {
             } else {
               console.log('✅ Created minimal record, now updating to read status...');
               
-              // Update the newly created record to mark as read with tenant validation
+              // Update the newly created record to mark as read
               const { error: updateError } = await supabase
                 .from('notification_recipients')
                 .update({ 
                   is_read: true
                 })
-                .eq('id', insertData[0].id)
-                .eq('tenant_id', tenantId);
+                .eq('id', insertData[0].id);
               
               if (updateError) {
                 console.error('Failed to update to read status:', updateError);
@@ -560,18 +537,16 @@ const Notifications = ({ navigation }) => {
 
   const markAsUnread = async (id) => {
     try {
-      // 🛡️ Validate tenant access before marking as unread
-      console.log('🛡️ [PARENT_NOTIFICATIONS] Validating tenant access for mark as unread...');
-      const tenantId = currentTenant?.id;
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ParentNotifications-MarkUnread');
+      // 🛡️ Validate parent access before marking as unread
+      console.log('🛡️ [PARENT_NOTIFICATIONS] Validating parent access for mark as unread...');
       
-      if (!validation.isValid) {
-        console.error('❌ [PARENT_NOTIFICATIONS] Mark as unread failed - tenant validation failed:', validation.error);
-        Alert.alert('Error', validation.error);
+      if (!isParent) {
+        console.error('❌ [PARENT_NOTIFICATIONS] Mark as unread failed - user is not a parent');
+        Alert.alert('Error', 'This feature is only available for parents');
         return;
       }
       
-      console.log('Marking notification as unread:', { id, userId: user.id, tenantId });
+      console.log('Marking notification as unread:', { id, userId: user.id });
       
       // Find the notification to get its recipient record
       const notification = notifications.find(n => n.id === id);
@@ -579,7 +554,7 @@ const Notifications = ({ navigation }) => {
       
       if (notification?.recipientId) {
         console.log('Updating existing recipient record to unread:', notification.recipientId);
-        // Update existing recipient record with tenant validation
+        // Update existing recipient record
         const { data: updateData, error: updateError } = await supabase
           .from('notification_recipients')
           .update({ 
@@ -587,7 +562,6 @@ const Notifications = ({ navigation }) => {
             read_at: null
           })
           .eq('id', notification.recipientId)
-          .eq('tenant_id', tenantId)
           .select();
 
         console.log('Unread update result:', { updateData, updateError });
@@ -640,7 +614,7 @@ const Notifications = ({ navigation }) => {
   const renderNotification = ({ item }) => (
     <View style={[styles.card, item.isRead ? styles.cardRead : styles.cardUnread]}>
       <View style={styles.cardHeader}>
-        <Text style={[styles.title, item.isRead && { color: '#888' }]}>{item.title}</Text>
+        <Text style={[styles.title, item.isRead && { color: '#888' }]}>{item.type}</Text>
         <Text style={styles.date}>{formatDate(item.timestamp)}</Text>
       </View>
       <Text style={styles.message}>{item.message}</Text>
@@ -665,7 +639,7 @@ const Notifications = ({ navigation }) => {
     { key: 'important', label: 'Important' },
   ];
 
-  if (loading) {
+  if (loading || parentLoading) {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.container}>
@@ -687,7 +661,10 @@ const Notifications = ({ navigation }) => {
           <View style={styles.errorContainer}>
             <Ionicons name="alert-circle" size={48} color="#F44336" />
             <Text style={styles.errorText}>Failed to load notifications</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={() => window.location.reload()}>
+            <TouchableOpacity style={styles.retryButton} onPress={() => {
+              setError(null);
+              fetchNotifications();
+            }}>
               <Text style={styles.retryButtonText}>Retry</Text>
             </TouchableOpacity>
           </View>
@@ -972,4 +949,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default Notifications; 
+export default Notifications;

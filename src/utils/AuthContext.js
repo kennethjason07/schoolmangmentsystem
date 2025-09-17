@@ -128,10 +128,19 @@ export const AuthProvider = ({ children }) => {
             } catch (navError) {
               console.error('Navigation service error:', navError);
               // Enhanced web fallback
-              if (Platform.OS === 'web' && typeof window !== 'undefined') {
+              if (Platform.OS === 'web' && typeof window !== 'undefined' && window && window.location) {
                 console.log('🧭 [AuthContext] Using window.location fallback for SIGNED_OUT');
                 window.location.href = '/';
+              } else {
+                console.error('❌ [AuthContext] window.location is not available for navigation');
               }
+            }
+          } else if (event === 'INITIAL_SESSION') {
+            console.log('🔊 Handling auth state change for INITIAL_SESSION');
+            // This is the initial check - if no session, that's fine
+            if (!currentSession?.user) {
+              console.log('No initial session found - this is normal for login screen');
+              setLoading(false);
             }
           }
         } catch (error) {
@@ -150,9 +159,11 @@ export const AuthProvider = ({ children }) => {
           } catch (navError) {
             console.error('Navigation service error:', navError);
             // Enhanced web fallback
-            if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            if (Platform.OS === 'web' && typeof window !== 'undefined' && window && window.location) {
               console.log('🧭 [AuthContext] Using window.location fallback for error case');
               window.location.href = '/';
+            } else {
+              console.error('❌ [AuthContext] window.location is not available for navigation');
             }
           }
         }
@@ -443,10 +454,12 @@ export const AuthProvider = ({ children }) => {
         .select('*')
         .eq('email', email);
       
-      // If tenant specified, filter by tenant
+      // If tenant specified, filter by tenant - BUT NOT FOR PARENTS
       if (targetTenantId) {
-        userQuery = userQuery.eq('tenant_id', targetTenantId);
+        // Check if this is a parent login (role will be determined later)
+        // For now, we'll add tenant filter for non-parent roles
         console.log('🏢 Added tenant filter:', targetTenantId);
+        userQuery = userQuery.eq('tenant_id', targetTenantId);
       }
       
       console.log('📡 Executing exact match query...');
@@ -467,9 +480,12 @@ export const AuthProvider = ({ children }) => {
           .select('*')
           .ilike('email', email);
         
+        // If tenant specified, filter by tenant - BUT NOT FOR PARENTS
         if (targetTenantId) {
-          userQuery = userQuery.eq('tenant_id', targetTenantId);
+          // Check if this is a parent login (role will be determined later)
+          // For now, we'll add tenant filter for non-parent roles
           console.log('🏢 Added tenant filter to case-insensitive query:', targetTenantId);
+          userQuery = userQuery.eq('tenant_id', targetTenantId);
         }
         
         console.log('📡 Executing case-insensitive query...');
@@ -536,8 +552,14 @@ export const AuthProvider = ({ children }) => {
       
       console.log('Role validation:', { actualRole: actualRoleName, expectedRole, selectedRole });
       
+      // Special handling for parents - they don't need to be filtered by tenant_id
+      const isParentLogin = selectedRole.toLowerCase() === 'parent' || 
+                           (actualRoleName && actualRoleName.toLowerCase() === 'parent');
+      
       // Only validate role if we have both values (case-insensitive comparison)
-      if (actualRoleName && expectedRole && actualRoleName.toLowerCase() !== expectedRole.toLowerCase()) {
+      // Skip role validation for parents since they might not have tenant_id
+      if (!isParentLogin && actualRoleName && expectedRole && 
+          actualRoleName.toLowerCase() !== expectedRole.toLowerCase()) {
         console.log('Role mismatch:', actualRoleName, 'vs expected:', expectedRole);
         return { data: null, error: { message: `Invalid role for this user. User has role: ${actualRoleName}, but trying to sign in as: ${expectedRole}` } };
       }
@@ -565,10 +587,12 @@ export const AuthProvider = ({ children }) => {
       console.log('👤 About to set user:', userData);
       console.log('🎭 About to set userType:', actualRoleName ? actualRoleName.toLowerCase() : 'user');
       
-      // Set tenant context in SupabaseService
-      if (userData.tenant_id) {
+      // Set tenant context in SupabaseService - but not for parents
+      if (userData.tenant_id && !isParentLogin) {
         console.log('🏢 Setting tenant context during signIn:', userData.tenant_id);
         supabaseService.setTenantContext(userData.tenant_id);
+      } else if (isParentLogin) {
+        console.log('👨‍👩‍👧 Parent login detected - not setting tenant context');
       }
       
       setUser(userData);
@@ -822,29 +846,7 @@ export const AuthProvider = ({ children }) => {
         setUserType(null);
         
         // Enhanced navigation for web
-        if (Platform.OS === 'web') {
-          try {
-            navigationService.reset({
-              index: 0,
-              routes: [{ name: 'Login' }],
-            });
-          } catch (navError) {
-            console.error('Navigation service error:', navError);
-            // Last resort for web: use window.location
-            if (typeof window !== 'undefined') {
-              window.location.href = '/';
-            }
-          }
-        } else {
-          try {
-            navigationService.reset({
-              index: 0,
-              routes: [{ name: 'Login' }],
-            });
-          } catch (navError) {
-            console.error('Navigation service error:', navError);
-          }
-        }
+        handleWebNavigation();
         return { error: null };
       }
       
@@ -862,35 +864,15 @@ export const AuthProvider = ({ children }) => {
       
       if (signOutError) {
         // If error is about missing session, treat it as success
-        if (signOutError.message?.includes('Auth session missing') || signOutError.name === 'AuthSessionMissingError') {
-          console.log('Session already missing, cleaning up local state');
+        if (signOutError.message?.includes('Auth session missing') || 
+            signOutError.message?.includes('Invalid Refresh Token') ||
+            signOutError.name === 'AuthSessionMissingError') {
+          console.log('Session already missing or invalid refresh token, cleaning up local state');
           setUser(null);
           setUserType(null);
           
           // Enhanced navigation for web
-          if (Platform.OS === 'web') {
-            try {
-              navigationService.reset({
-                index: 0,
-                routes: [{ name: 'Login' }],
-              });
-            } catch (navError) {
-              console.error('Navigation service error:', navError);
-              // Last resort for web: use window.location
-              if (typeof window !== 'undefined') {
-                window.location.href = '/';
-              }
-            }
-          } else {
-            try {
-              navigationService.reset({
-                index: 0,
-                routes: [{ name: 'Login' }],
-              });
-            } catch (navError) {
-              console.error('Navigation service error:', navError);
-            }
-          }
+          handleWebNavigation();
           return { error: null };
         }
         // For other errors, continue with cleanup
@@ -902,64 +884,22 @@ export const AuthProvider = ({ children }) => {
       setUserType(null);
       
       // Enhanced navigation for web
-      if (Platform.OS === 'web') {
-        try {
-          navigationService.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          });
-        } catch (navError) {
-          console.error('Navigation service error:', navError);
-          // Last resort for web: use window.location
-          if (typeof window !== 'undefined') {
-            window.location.href = '/';
-          }
-        }
-      } else {
-        try {
-          navigationService.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          });
-        } catch (navError) {
-          console.error('Navigation service error:', navError);
-        }
-      }
+      handleWebNavigation();
       
       return { error: null };
     } catch (error) {
       console.error('Sign out error:', error);
       
-      // If it's a session missing error, clear local state and treat as success
-      if (error.message?.includes('Auth session missing') || error.name === 'AuthSessionMissingError') {
-        console.log('Caught AuthSessionMissingError, cleaning up local state');
+      // If it's a session missing error or refresh token error, clear local state and treat as success
+      if (error.message?.includes('Auth session missing') || 
+          error.message?.includes('Invalid Refresh Token') ||
+          error.name === 'AuthSessionMissingError') {
+        console.log('Caught AuthSessionMissingError or Invalid Refresh Token, cleaning up local state');
         setUser(null);
         setUserType(null);
         
         // Enhanced navigation for web
-        if (Platform.OS === 'web') {
-          try {
-            navigationService.reset({
-              index: 0,
-              routes: [{ name: 'Login' }],
-            });
-          } catch (navError) {
-            console.error('Navigation service error:', navError);
-            // Last resort for web: use window.location
-            if (typeof window !== 'undefined') {
-              window.location.href = '/';
-            }
-          }
-        } else {
-          try {
-            navigationService.reset({
-              index: 0,
-              routes: [{ name: 'Login' }],
-            });
-          } catch (navError) {
-            console.error('Navigation service error:', navError);
-          }
-        }
+        handleWebNavigation();
         return { error: null };
       }
       
@@ -968,33 +908,44 @@ export const AuthProvider = ({ children }) => {
       setUserType(null);
       
       // Enhanced navigation for web
-      if (Platform.OS === 'web') {
-        try {
-          navigationService.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          });
-        } catch (navError) {
-          console.error('Navigation service error:', navError);
-          // Last resort for web: use window.location
-          if (typeof window !== 'undefined') {
-            window.location.href = '/';
-          }
-        }
-      } else {
-        try {
-          navigationService.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          });
-        } catch (navError) {
-          console.error('Navigation service error:', navError);
-        }
-      }
+      handleWebNavigation();
       
       return { error };
     } finally {
       setLoading(false);
+    }
+  };
+
+  /**
+   * Handle web navigation with proper error checking
+   */
+  const handleWebNavigation = () => {
+    if (Platform.OS === 'web') {
+      try {
+        navigationService.reset({
+          index: 0,
+          routes: [{ name: 'Login' }],
+        });
+      } catch (navError) {
+        console.error('Navigation service error:', navError);
+        // Last resort for web: use window.location with proper checks
+        if (typeof window !== 'undefined' && window && typeof window.location !== 'undefined' && window.location) {
+          try {
+            window.location.href = '/';
+          } catch (locationError) {
+            console.error('❌ [AuthContext] Error setting window.location.href:', locationError);
+          }
+        }
+      }
+    } else {
+      try {
+        navigationService.reset({
+          index: 0,
+          routes: [{ name: 'Login' }],
+        });
+      } catch (navError) {
+        console.error('Navigation service error:', navError);
+      }
     }
   };
 

@@ -43,7 +43,7 @@ async function fixNotificationTenantIds() {
     // Get all notifications that need fixing
     const { data: notifications, error: notificationsError } = await supabase
       .from('notifications')
-      .select('id, title, tenant_id');
+      .select('id, type, tenant_id');
     
     if (notificationsError) {
       console.error('Error fetching notifications:', notificationsError);
@@ -61,7 +61,7 @@ async function fixNotificationTenantIds() {
 
     console.log(`Found ${notificationsToFix.length} notifications that need fixing:`);
     notificationsToFix.forEach(n => {
-      console.log(`- "${n.title}": current tenant_id = ${n.tenant_id}`);
+      console.log(`- "${n.type || 'Notification'}": current tenant_id = ${n.tenant_id}`);
     });
     console.log('');
 
@@ -82,7 +82,7 @@ async function fixNotificationTenantIds() {
 
     updateResults.forEach((result, index) => {
       if (result.error) {
-        console.error(`Error updating notification "${notificationsToFix[index].title}":`, result.error);
+        console.error(`Error updating notification "${notificationsToFix[index].type || 'Notification'}":`, result.error);
         errorCount++;
       } else {
         successCount++;

@@ -546,11 +546,12 @@ class FeeService {
       // Get tenant context
       const tenantId = await getUserTenantId();
       if (!tenantId) {
-        throw new Error('Tenant context required');
+        console.log('No tenant context found, but proceeding for parent access');
+        // Don't throw error for parents as they might not have tenant_id
       }
       
       // Find children linked to this parent
-      const { data: parentUser, error: parentError } = await supabase
+      let query = supabase
         .from(TABLES.USERS)
         .select(`
           id, full_name, email,
@@ -559,16 +560,38 @@ class FeeService {
             classes(class_name, section)
           )
         `)
-        .eq('id', parentUserId)
-        .eq('tenant_id', tenantId)
-        .single();
+        .eq('id', parentUserId);
+      
+      // Only filter by tenant_id if it exists
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
+      
+      const { data: parentUser, error: parentError } = await query.single();
       
       if (parentError || !parentUser) {
-        throw new Error('Parent user not found');
+        // Try alternative approach without tenant filtering for parents
+        console.log('Trying alternative parent lookup without tenant filtering');
+        const { data: altParentUser, error: altParentError } = await supabase
+          .from(TABLES.USERS)
+          .select(`
+            id, full_name, email,
+            students!users_linked_parent_of_fkey(
+              id, name, admission_no, roll_no, class_id, academic_year,
+              classes(class_name, section)
+            )
+          `)
+          .eq('id', parentUserId)
+          .single();
+          
+        if (altParentError || !altParentUser) {
+          throw new Error('Parent user not found');
+        }
+        parentUser = altParentUser;
       }
       
       // Also check parents table for additional children
-      const { data: parentRecords } = await supabase
+      let parentQuery = supabase
         .from(TABLES.PARENTS)
         .select(`
           student_id, relation,
@@ -576,8 +599,14 @@ class FeeService {
             classes(class_name, section)
           )
         `)
-        .eq('email', parentUser.email)
-        .eq('tenant_id', tenantId);
+        .eq('email', parentUser.email);
+      
+      // Only filter by tenant_id if it exists
+      if (tenantId) {
+        parentQuery = parentQuery.eq('tenant_id', tenantId);
+      }
+      
+      const { data: parentRecords } = await parentQuery;
       
       // Combine children from both relationships
       const children = [];

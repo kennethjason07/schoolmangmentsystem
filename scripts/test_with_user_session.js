@@ -59,11 +59,122 @@ async function testWithUserLogin() {
     console.log('\\n🔍 Testing with authenticated user...');
     await testNotificationAccess(supabase, true, userData);
     
-  } catch (error) {\r\n    console.error('💥 Error in login test:', error);\r\n  }\r\n}\r\n\r\nasync function testNotificationAccess(supabase, isAuthenticated, userData = null) {\r\n  try {\r\n    console.log('\\n--- Notification Access Test ---');\r\n    console.log('Authenticated:', isAuthenticated);\r\n    if (userData) {\r\n      console.log('User tenant_id:', userData.tenant_id);\r\n      console.log('User role_id:', userData.role_id);\r\n    }\r\n    \r\n    // Test 1: Count notifications\r\n    const { count: totalCount, error: countError } = await supabase\r\n      .from('notifications')\r\n      .select('*', { count: 'exact', head: true });\r\n    \r\n    console.log('\\nCount query:');\r\n    console.log('  - Total count:', totalCount);\r\n    console.log('  - Error:', countError?.message || 'None');\r\n    console.log('  - Error code:', countError?.code || 'None');\r\n    \r\n    // Test 2: Select all notifications\r\n    const { data: allNotifications, error: allError } = await supabase\r\n      .from('notifications')\r\n      .select('id, type, message, tenant_id, delivery_status, created_at');\r\n    \r\n    console.log('\\nSelect all query:');\r\n    console.log('  - Found:', allNotifications?.length || 0);\r\n    console.log('  - Error:', allError?.message || 'None');\r\n    console.log('  - Error code:', allError?.code || 'None');\r\n    \r\n    if (allNotifications && allNotifications.length > 0) {\r\n      console.log('  - Sample notifications:');\r\n      allNotifications.slice(0, 3).forEach(n => {\r\n        console.log(`    * ID: ${n.id}`);\r\n        console.log(`      Type: ${n.type}`);\r\n        console.log(`      Tenant: ${n.tenant_id}`);\r\n        console.log(`      Status: ${n.delivery_status}`);\r\n        console.log(`      Message: \"${n.message?.substring(0, 40)}...\"`);\r\n        console.log(`      Matches target tenant: ${n.tenant_id === knownTenantId}`);\r\n      });\r\n    }\r\n    \r\n    // Test 3: Select with tenant filter\r\n    const { data: tenantFiltered, error: tenantError } = await supabase\r\n      .from('notifications')\r\n      .select('id, type, message, tenant_id, delivery_status')\r\n      .eq('tenant_id', knownTenantId);\r\n    \r\n    console.log('\\nTenant filtered query:');\r\n    console.log('  - Found with tenant filter:', tenantFiltered?.length || 0);\r\n    console.log('  - Error:', tenantError?.message || 'None');\r\n    console.log('  - Error code:', tenantError?.code || 'None');\r\n    \r\n    // Test 4: Test notification_recipients table\r\n    const { data: recipients, error: recipientsError } = await supabase\r\n      .from('notification_recipients')\r\n      .select('id, notification_id, recipient_type, tenant_id')\r\n      .eq('tenant_id', knownTenantId);\r\n    \r\n    console.log('\\nNotification recipients query:');\r\n    console.log('  - Recipients found:', recipients?.length || 0);\r\n    console.log('  - Error:', recipientsError?.message || 'None');\r\n    console.log('  - Error code:', recipientsError?.code || 'None');\r\n    \r\n    // Test 5: Try the exact query from NotificationManagement.js\r\n    console.log('\\nTesting exact query from NotificationManagement.js:');\r\n    const { data: exactQuery, error: exactError } = await supabase\r\n      .from('notifications')\r\n      .select(`\r\n        *,\r\n        notification_recipients(\r\n          id,\r\n          recipient_id,\r\n          recipient_type,\r\n          delivery_status,\r\n          sent_at,\r\n          tenant_id\r\n        ),\r\n        users!sent_by(\r\n          id,\r\n          full_name,\r\n          role_id\r\n        )\r\n      `)\r\n      .eq('tenant_id', knownTenantId)\r\n      .order('created_at', { ascending: false });\r\n    \r\n    console.log('  - Exact query result:', exactQuery?.length || 0);\r\n    console.log('  - Error:', exactError?.message || 'None');\r\n    console.log('  - Error code:', exactError?.code || 'None');\r\n    \r\n    if (exactError) {\r\n      console.log('  - Error details:', exactError.details || 'None');\r\n      console.log('  - Error hint:', exactError.hint || 'None');\r\n    }\r\n    \r\n  } catch (error) {\r\n    console.error('💥 Error in access test:', error);\r\n  }\r\n}\r\n\r\n// Check if password provided via environment variable\r\nconst envPassword = process.env.SUPABASE_USER_PASSWORD;\r\nif (envPassword) {\r\n  testPassword = envPassword;\r\n  testWithUserLogin();\r\n} else {\r\n  console.log('📝 To test with user login, provide password:');\r\n  console.log('   SUPABASE_USER_PASSWORD=your_password node scripts/test_with_user_session.js');\r\n  console.log('\\n🔍 Testing without authentication instead...\\n');\r\n  \r\n  const supabase = createClient(supabaseUrl, supabaseAnonKey);\r\n  testNotificationAccess(supabase, false);\r\n}\r\n"}}
-</function_results>
-
-Now let's run the comprehensive debug to see exactly what's happening:
-
-<function_calls>
-<invoke name="run_command">
-<parameter name="command">node scripts/comprehensive_notification_debug.js
+  } catch (error) {\r
+    console.error('💥 Error in login test:', error);\r
+  }\r
+}\r
+\r
+async function testNotificationAccess(supabase, isAuthenticated, userData = null) {\r
+  try {\r
+    console.log('\n--- Notification Access Test ---');\r
+    console.log('Authenticated:', isAuthenticated);\r
+    if (userData) {\r
+      console.log('User tenant_id:', userData.tenant_id);\r
+      console.log('User role_id:', userData.role_id);\r
+    }\r
+    \r
+    // Test 1: Count notifications\r
+    const { count: totalCount, error: countError } = await supabase\r
+      .from('notifications')\r
+      .select('*', { count: 'exact', head: true });\r
+    \r
+    console.log('\nCount query:');\r
+    console.log('  - Total count:', totalCount);\r
+    console.log('  - Error:', countError?.message || 'None');\r
+    console.log('  - Error code:', countError?.code || 'None');\r
+    \r
+    // Test 2: Select all notifications\r
+    const { data: allNotifications, error: allError } = await supabase\r
+      .from('notifications')\r
+      .select('id, type, message, tenant_id, delivery_status, created_at');\r
+    \r
+    console.log('\nSelect all query:');\r
+    console.log('  - Found:', allNotifications?.length || 0);\r
+    console.log('  - Error:', allError?.message || 'None');\r
+    console.log('  - Error code:', allError?.code || 'None');\r
+    \r
+    if (allNotifications && allNotifications.length > 0) {\r
+      console.log('  - Sample notifications:');\r
+      allNotifications.slice(0, 3).forEach(n => {\r
+        console.log(`    * ID: ${n.id}`);\r
+        console.log(`      Type: ${n.type}`);\r
+        console.log(`      Tenant: ${n.tenant_id}`);\r
+        console.log(`      Status: ${n.delivery_status}`);\r
+        console.log(`      Message: \"${n.message?.substring(0, 40)}...\"`);\r
+        console.log(`      Matches target tenant: ${n.tenant_id === knownTenantId}`);\r
+      });\r
+    }\r
+    \r
+    // Test 3: Select with tenant filter\r
+    const { data: tenantFiltered, error: tenantError } = await supabase\r
+      .from('notifications')\r
+      .select('id, type, message, tenant_id, delivery_status')\r
+      .eq('tenant_id', knownTenantId);\r
+    \r
+    console.log('\nTenant filtered query:');\r
+    console.log('  - Found with tenant filter:', tenantFiltered?.length || 0);\r
+    console.log('  - Error:', tenantError?.message || 'None');\r
+    console.log('  - Error code:', tenantError?.code || 'None');\r
+    \r
+    // Test 4: Test notification_recipients table\r
+    const { data: recipients, error: recipientsError } = await supabase\r
+      .from('notification_recipients')\r
+      .select('id, notification_id, recipient_type, tenant_id')\r
+      .eq('tenant_id', knownTenantId);\r
+    \r
+    console.log('\nNotification recipients query:');\r
+    console.log('  - Recipients found:', recipients?.length || 0);\r
+    console.log('  - Error:', recipientsError?.message || 'None');\r
+    console.log('  - Error code:', recipientsError?.code || 'None');\r
+    \r
+    // Test 5: Try the exact query from NotificationManagement.js\r
+    console.log('\nTesting exact query from NotificationManagement.js:');\r
+    const { data: exactQuery, error: exactError } = await supabase\r
+      .from('notifications')\r
+      .select(`\r
+        *,\r
+        notification_recipients(\r
+          id,\r
+          recipient_id,\r
+          recipient_type,\r
+          delivery_status,\r
+          sent_at,\r
+          tenant_id\r
+        ),\r
+        users!sent_by(\r
+          id,\r
+          full_name,\r
+          role_id\r
+        )\r
+      `)\r
+      .eq('tenant_id', knownTenantId)\r
+      .order('created_at', { ascending: false });\r
+    \r
+    console.log('  - Exact query result:', exactQuery?.length || 0);\r
+    console.log('  - Error:', exactError?.message || 'None');\r
+    console.log('  - Error code:', exactError?.code || 'None');\r
+    \r
+    if (exactError) {\r
+      console.log('  - Error details:', exactError.details || 'None');\r
+      console.log('  - Error hint:', exactError.hint || 'None');\r
+    }\r
+    \r
+  } catch (error) {\r
+    console.error('💥 Error in access test:', error);\r
+  }\r
+}\r
+\r
+// Check if password provided via environment variable\r
+const envPassword = process.env.SUPABASE_USER_PASSWORD;\r
+if (envPassword) {\r
+  testPassword = envPassword;\r
+  testWithUserLogin();\r
+} else {\r
+  console.log('📝 To test with user login, provide password:');\r
+  console.log('   SUPABASE_USER_PASSWORD=your_password node scripts/test_with_user_session.js');\r
+  console.log('\n🔍 Testing without authentication instead...\n');\r
+  \r
+  const supabase = createClient(supabaseUrl, supabaseAnonKey);\r
+  testNotificationAccess(supabase, false);\r
+}\r
+"}}

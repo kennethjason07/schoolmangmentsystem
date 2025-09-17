@@ -16,6 +16,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../utils/AuthContext';
 import { supabase, TABLES, getUserTenantId } from '../utils/supabase';
 import { useUnreadNotificationCount } from '../hooks/useUnreadNotificationCount';
+import { useParentAuth } from '../hooks/useParentAuth';
+import { getStudentNotificationsForParent } from '../utils/parentAuthHelper';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -27,6 +29,7 @@ const NotificationPopup = ({
   iconColor = '#333'
 }) => {
   const { user } = useAuth();
+  const { isParent, parentStudents, directParentMode, loading: parentLoading } = useParentAuth();
   const [modalVisible, setModalVisible] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -42,8 +45,8 @@ const NotificationPopup = ({
 
   // Fetch notifications data
   const fetchNotifications = useCallback(async (showLoading = true) => {
-    if (!user?.linked_student_id && userType === 'Student') {
-      console.log('No linked student ID available');
+    if (!user) {
+      console.log('No user available');
       return;
     }
 
@@ -51,6 +54,30 @@ const NotificationPopup = ({
     setError(null);
 
     try {
+      // Check if user is a parent and use direct parent authentication
+      if (userType === 'Parent' && isParent && parentStudents.length > 0) {
+        console.log('📬 [POPUP] Using direct parent authentication for notifications');
+        
+        const studentData = parentStudents[0]; // Get first student
+        const result = await getStudentNotificationsForParent(user.id, studentData.id);
+        
+        if (result.success) {
+          console.log(`✅ [POPUP] Successfully loaded ${result.notifications.length} parent notifications`);
+          setNotifications(result.notifications || []);
+        } else {
+          console.error('❌ [POPUP] Failed to load parent notifications:', result.error);
+          setError('Failed to load notifications');
+          setNotifications([]);
+        }
+        return;
+      }
+      
+      // For non-parent users or fallback, use tenant-based approach
+      if (!user?.linked_student_id && userType === 'Student') {
+        console.log('No linked student ID available');
+        return;
+      }
+
       const tenantId = await getUserTenantId();
       if (!tenantId) {
         throw new Error('No tenant ID available');
@@ -91,11 +118,51 @@ const NotificationPopup = ({
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user, userType]);
+  }, [user, userType, isParent, parentStudents]);
 
   // Mark notification as read
   const markAsRead = async (notificationId) => {
     try {
+      // For parent users using direct parent authentication
+      if (userType === 'Parent' && isParent && parentStudents.length > 0) {
+        console.log('📬 [POPUP] Marking parent notification as read:', notificationId);
+        
+        // Find the notification in the current list to get recipient ID
+        const notification = notifications.find(n => n.id === notificationId);
+        if (!notification || !notification.recipientId) {
+          console.warn('Could not find recipient ID for notification:', notificationId);
+          return;
+        }
+        
+        // Update notification_recipients table
+        const { error } = await supabase
+          .from('notification_recipients')
+          .update({ 
+            is_read: true,
+            read_at: new Date().toISOString()
+          })
+          .eq('id', notification.recipientId);
+
+        if (error) {
+          console.error('Mark as read error (parent):', error);
+          return;
+        }
+        
+        // Update local state
+        setNotifications(prev => 
+          prev.map(notif => 
+            notif.id === notificationId 
+              ? { ...notif, isRead: true, read_at: new Date().toISOString() }
+              : notif
+          )
+        );
+        
+        console.log('✅ [POPUP] Parent notification marked as read');
+        refreshNotificationCount();
+        return;
+      }
+      
+      // For non-parent users, use the old system
       const tenantId = await getUserTenantId();
       if (!tenantId) return;
 
@@ -172,8 +239,9 @@ const NotificationPopup = ({
 
   // Handle notification item press
   const handleNotificationPress = (notification) => {
-    // Mark as read if unread
-    if (!notification.is_read) {
+    // Mark as read if unread (check both property names for compatibility)
+    const isUnread = !(notification.is_read || notification.isRead);
+    if (isUnread) {
       markAsRead(notification.id);
     }
 
@@ -278,16 +346,20 @@ const NotificationPopup = ({
   };
 
   // Render notification item
-  const renderNotificationItem = ({ item, index }) => (
-    <TouchableOpacity
-      style={[
-        styles.notificationItem,
-        !item.is_read && styles.unreadNotification,
-        index === notifications.length - 1 && styles.lastNotificationItem
-      ]}
-      onPress={() => handleNotificationPress(item)}
-      activeOpacity={0.7}
-    >
+  const renderNotificationItem = ({ item, index }) => {
+    // Check both property names for read status compatibility
+    const isRead = item.is_read || item.isRead;
+    
+    return (
+      <TouchableOpacity
+        style={[
+          styles.notificationItem,
+          !isRead && styles.unreadNotification,
+          index === notifications.length - 1 && styles.lastNotificationItem
+        ]}
+        onPress={() => handleNotificationPress(item)}
+        activeOpacity={0.7}
+      >
       <View style={styles.notificationContent}>
         <View style={[
           styles.notificationIcon,
@@ -308,11 +380,11 @@ const NotificationPopup = ({
             {item.message}
           </Text>
           <Text style={styles.notificationTime}>
-            {formatNotificationDate(item.created_at)}
+            {formatNotificationDate(item.created_at || item.timestamp)}
           </Text>
         </View>
         
-        {!item.is_read && <View style={styles.unreadDot} />}
+        {!isRead && <View style={styles.unreadDot} />}
       </View>
     </TouchableOpacity>
   );

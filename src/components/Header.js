@@ -94,26 +94,19 @@ const Header = ({ title, showBack = false, showProfile = true, showNotifications
         ) : (
           <>
             {showNotifications && (
-              <TouchableOpacity 
-                onPress={onNotificationsPress || (() => navigation.navigate(getNotificationScreen()))}
-                style={styles.notificationButton}
-                activeOpacity={0.7}
-              >
-                <Ionicons 
-                  name="notifications" 
-                  size={24} 
-                  color="#333"
-                />
-                {/* Use WebOptimizedNotificationBadge for web, UniversalNotificationBadge for mobile */}
-                {Platform.OS === 'web' ? (
-                  <WebOptimizedNotificationBadge 
-                    userType={userType}
-                    showZero={false}
-                  />
-                ) : (
-                  <UniversalNotificationBadge />
-                )}
-              </TouchableOpacity>
+              <NotificationPopup 
+                userType={userType === 'Parent' ? 'Parent' : userType || 'Student'}
+                onNotificationPress={(notification) => {
+                  // Handle notification press - optionally navigate to specific screen
+                  console.log('Notification clicked:', notification);
+                  if (onNotificationsPress) {
+                    onNotificationsPress(notification);
+                  }
+                }}
+                customStyle={styles.notificationButton}
+                iconSize={24}
+                iconColor="#333"
+              />
             )}
             {showProfile && authUser && userType && (
               <TouchableOpacity 
