@@ -2,12 +2,12 @@
  * ExamsMarks - Enhanced Tenant System Implementation
  * 
  * This component has been migrated to use the Enhanced Tenant System:
- * - Uses useTenant hook for tenant context
+ * - Uses useTenantAccess hook for tenant context
  * - Leverages tenantDatabase helpers for automatic tenant filtering
- * - Implements simplified tenant validation with checkTenantReady()
+ * - Implements robust tenant validation with validateTenantReadiness()
  * - All database operations are tenant-scoped automatically
  * - Removed complex email-based tenant validation logic
- * - Uses initializeTenantHelpers for cache management
+ * - Uses getCachedTenantId for fast tenant ID access
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Alert, Modal, TextInput, ScrollView, Platform, ActivityIndicator, RefreshControl } from 'react-native';
@@ -17,8 +17,7 @@ import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import { supabase, TABLES } from '../../utils/supabase';
-import { useTenant } from '../../contexts/TenantContext';
-import { tenantDatabase, getCachedTenantId, initializeTenantHelpers } from '../../utils/tenantHelpers';
+import { useTenantAccess, tenantDatabase, createTenantQuery, getCachedTenantId } from '../../utils/tenantHelpers';
 import { useAuth } from '../../utils/AuthContext';
 import { useFocusEffect } from '@react-navigation/native';
 // Helper functions for date formatting
@@ -80,36 +79,45 @@ const getGradeColor = (grade) => {
 const ExamsMarks = () => {
   const navigation = useNavigation();
   const { user } = useAuth();
-  const { 
-    tenantId, 
-    isReady, 
-    loading: tenantLoading, 
-    currentTenant: tenant, 
-    tenantName, 
-    error: tenantError,
-    initializeTenant: initializeTenantContext
-  } = useTenant();
+  const tenantAccess = useTenantAccess();
   
-  // Enhanced tenant system - simplified validation
-  const checkTenantReady = () => {
-    return isReady && !tenantLoading && !tenantError && tenantId;
-  };
-  
-  // Enhanced tenant system handles initialization automatically
-  React.useEffect(() => {
-    if (tenantId && isReady) {
-      console.log('🚀 ExamsMarks: Enhanced tenant system ready with ID:', tenantId);
-      // Initialize tenant helpers to ensure cache is set
-      initializeTenantHelpers(tenantId);
-    } else {
-      console.log('⚠️ ExamsMarks: Waiting for tenant context to be ready:', {
-        tenantId: tenantId || 'NULL',
-        isReady,
-        tenantLoading,
-        tenantError: tenantError?.message || 'none'
-      });
+  // Helper function to validate tenant readiness and get effective tenant ID
+  const validateTenantReadiness = useCallback(async () => {
+    console.log('🔍 [ExamsMarks] validateTenantReadiness - Starting validation');
+    console.log('🔍 [ExamsMarks] User state:', { 
+      id: user?.id, 
+      email: user?.email 
+    });
+    console.log('🔍 [ExamsMarks] Tenant access state:', { 
+      isReady: tenantAccess.isReady,
+      isLoading: tenantAccess.isLoading,
+      currentTenant: tenantAccess.currentTenant?.id
+    });
+    
+    // Wait for tenant system to be ready
+    if (!tenantAccess.isReady || tenantAccess.isLoading) {
+      console.log('⏳ [ExamsMarks] Tenant system not ready, waiting...');
+      return { success: false, reason: 'TENANT_NOT_READY' };
     }
-  }, [tenantId, isReady, tenantLoading, tenantError]);
+    
+    // Get effective tenant ID
+    const effectiveTenantId = await getCachedTenantId();
+    if (!effectiveTenantId) {
+      console.log('❌ [ExamsMarks] No effective tenant ID available');
+      return { success: false, reason: 'NO_TENANT_ID' };
+    }
+    
+    console.log('✅ [ExamsMarks] Tenant validation successful:', {
+      effectiveTenantId,
+      currentTenant: tenantAccess.currentTenant?.id
+    });
+    
+    return { 
+      success: true, 
+      effectiveTenantId,
+      tenantContext: tenantAccess.currentTenant
+    };
+  }, [user?.id, user?.email, tenantAccess.isReady, tenantAccess.isLoading, tenantAccess.currentTenant?.id]);
 
   // Core data states
   const [exams, setExams] = useState([]);
@@ -151,15 +159,36 @@ const ExamsMarks = () => {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [datePickerType, setDatePickerType] = useState('start'); // 'start' or 'end'
 
+  // Additional modal states that were scattered throughout the file
+  const [selectedClassesForMarks, setSelectedClassesForMarks] = useState([]);
+  const [addClassModalVisible, setAddClassModalVisible] = useState(false);
+  const [newClassName, setNewClassName] = useState('');
+  const [addStudentModalVisible, setAddStudentModalVisible] = useState(false);
+  const [newStudentName, setNewStudentName] = useState('');
+  const [newStudentRollNo, setNewStudentRollNo] = useState('');
+  const [newStudentEmail, setNewStudentEmail] = useState('');
+  const [addingStudent, setAddingStudent] = useState(false);
+  const [studentFormErrors, setStudentFormErrors] = useState({});
+  const [addSubjectModalVisible, setAddSubjectModalVisible] = useState(false);
+  const [newSubjectName, setNewSubjectName] = useState('');
 
-
-
-
-  const loadAllData = async () => {
-    if (!checkTenantReady()) {
-      console.log('⚠️ ExamsMarks: Cannot load data - tenant not ready');
-      return;
+  const loadAllData = useCallback(async () => {
+    console.log('🚀 [ExamsMarks] loadAllData - Starting with enhanced tenant validation');
+    
+    // Validate tenant readiness
+    const tenantValidation = await validateTenantReadiness();
+    if (!tenantValidation.success) {
+      console.log('⚠️ [ExamsMarks] Tenant not ready:', tenantValidation.reason);
+      if (tenantValidation.reason === 'TENANT_NOT_READY') {
+        // Don't throw error, just wait for tenant to be ready
+        setLoading(false);
+        return;
+      }
+      throw new Error('Tenant validation failed: ' + tenantValidation.reason);
     }
+    
+    const { effectiveTenantId } = tenantValidation;
+    console.log('✅ [ExamsMarks] Using effective tenant ID:', effectiveTenantId);
     
     console.log('🔄 ExamsMarks: Loading data with enhanced tenant system...');
     setLoading(true);
@@ -179,10 +208,26 @@ const ExamsMarks = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [loadExams, loadClasses, loadSubjects, loadStudents, loadMarks, validateTenantReadiness]);
 
-  const loadExams = async () => {
+  const loadExams = useCallback(async () => {
     try {
+      console.log('🚀 [ExamsMarks] loadExams - Starting with enhanced tenant validation');
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [ExamsMarks] Tenant not ready for exams fetch:', tenantValidation.reason);
+        if (tenantValidation.reason === 'TENANT_NOT_READY') {
+          setExams([]);
+          return;
+        }
+        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [ExamsMarks] Using effective tenant ID for exams:', effectiveTenantId);
+      
       console.log('🔍 Loading exams via enhanced tenant database');
       const { data: examsData, error } = await tenantDatabase.read('exams', {}, '*');
       
@@ -194,10 +239,26 @@ const ExamsMarks = () => {
       console.error('❌ Error loading exams:', error);
       setExams([]);
     }
-  };
+  }, [validateTenantReadiness]);
 
-  const loadClasses = async () => {
+  const loadClasses = useCallback(async () => {
     try {
+      console.log('🚀 [ExamsMarks] loadClasses - Starting with enhanced tenant validation');
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [ExamsMarks] Tenant not ready for classes fetch:', tenantValidation.reason);
+        if (tenantValidation.reason === 'TENANT_NOT_READY') {
+          setClasses([]);
+          return;
+        }
+        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [ExamsMarks] Using effective tenant ID for classes:', effectiveTenantId);
+      
       console.log('🔍 Loading classes via enhanced tenant database');
       const { data: classesData, error } = await tenantDatabase.read('classes', {}, '*');
       
@@ -209,9 +270,9 @@ const ExamsMarks = () => {
       console.error('❌ Error loading classes:', error);
       setClasses([]);
     }
-  };
+  }, [validateTenantReadiness]);
 
-  const loadSubjects = async () => {
+  const loadSubjects = useCallback(async () => {
     try {
       console.log('🔍 Loading subjects via enhanced tenant database');
       const { data: subjectsData, error } = await tenantDatabase.read('subjects', {}, '*');
@@ -224,9 +285,9 @@ const ExamsMarks = () => {
       console.error('❌ Error loading subjects:', error);
       setSubjects([]);
     }
-  };
+  }, []);
 
-  const loadStudents = async () => {
+  const loadStudents = useCallback(async () => {
     try {
       console.log('🔍 Loading students via enhanced tenant database');
       const { data: studentsData, error } = await tenantDatabase.read('students', {}, '*');
@@ -240,9 +301,9 @@ const ExamsMarks = () => {
       console.error('❌ Error loading students:', error);
       setStudents([]);
     }
-  };
+  }, []);
 
-  const loadMarks = async () => {
+  const loadMarks = useCallback(async () => {
     try {
       console.log('🔍 Loading marks via enhanced tenant database');
       const { data: marksData, error } = await tenantDatabase.read('marks', {}, '*');
@@ -255,7 +316,7 @@ const ExamsMarks = () => {
       console.error('❌ Error loading marks:', error);
       setMarks([]);
     }
-  };
+  }, []);
 
   // 🩺 Run diagnostic function
   const handleDiagnostic = async () => {
@@ -298,29 +359,31 @@ const ExamsMarks = () => {
   // Load data when enhanced tenant system is ready
   useFocusEffect(
     useCallback(() => {
-      if (checkTenantReady()) {
-        console.log('🚀 ExamsMarks: Enhanced tenant system ready, loading data...');
-        // Ensure tenant helpers are initialized
-        initializeTenantHelpers(tenantId);
-        loadAllData();
+      async function fetchData() {
+        if (tenantAccess.isReady && !tenantAccess.isLoading) {
+          console.log('🚀 ExamsMarks: Enhanced tenant system ready, loading data...');
+          await loadAllData();
+        }
       }
-    }, [tenantId, isReady, tenantLoading, tenantError])
+      
+      fetchData();
+    }, [tenantAccess.isReady, tenantAccess.isLoading, loadAllData])
   );
   
   // Handle tenant errors
-  if (tenantError) {
+  if (tenantAccess.error) {
     return (
       <View style={styles.container}>
         <Header title="Exams & Marks" navigation={navigation} showBack={true} />
         <View style={styles.loading}>
-          <Text style={styles.loadingText}>Access Error: {tenantError}</Text>
+          <Text style={styles.loadingText}>Access Error: {tenantAccess.error}</Text>
         </View>
       </View>
     );
   }
 
   // Show loading state
-  if (tenantLoading || loading) {
+  if (tenantAccess.isLoading || loading) {
     return (
       <View style={styles.container}>
         <Header title="Exams & Marks" navigation={navigation} showBack={true} />
@@ -349,10 +412,16 @@ const ExamsMarks = () => {
     try {
       console.log('📝 handleAddExam called with form:', examForm);
       
-      if (!checkTenantReady()) {
-        Alert.alert('Error', 'Tenant system not ready. Please try again.');
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [ExamsMarks] Tenant not ready for exam creation:', tenantValidation.reason);
+        Alert.alert('Error', 'System not ready. Please try again.');
         return;
       }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [ExamsMarks] Using effective tenant ID for exam creation:', effectiveTenantId);
       
       // Validate required fields
       if (!examForm.name || !examForm.name.trim()) {
@@ -374,15 +443,8 @@ const ExamsMarks = () => {
         Alert.alert('Validation Error', 'Please select an end date');
         return;
       }
-
-      // Use already validated tenantId from context
-      if (!tenantId) {
-        console.error('❌ No tenant_id available for exam creation');
-        Alert.alert('Error', 'Unable to determine tenant context. Please try signing out and back in.');
-        return;
-      }
       
-      console.log('📝 Using validated tenant_id for exam creation:', tenantId);
+      console.log('📝 Using validated tenant_id for exam creation:', effectiveTenantId);
 
       // Create exam records for each selected class
       const examRecords = examForm.selected_classes.map(classId => ({
@@ -393,7 +455,7 @@ const ExamsMarks = () => {
         end_date: examForm.end_date,
         remarks: examForm.description?.trim() || null,
         max_marks: parseInt(examForm.max_marks) || 100,
-        tenant_id: tenantId
+        tenant_id: effectiveTenantId
       }));
 
       console.log('🔧 Inserting exam records with Enhanced Tenant System:', examRecords);
@@ -446,24 +508,23 @@ const ExamsMarks = () => {
   // Edit exam (using schema: exams table)
   const handleEditExam = async () => {
     try {
-      if (!checkTenantReady()) {
-        Alert.alert('Error', 'Tenant system not ready. Please try again.');
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [ExamsMarks] Tenant not ready for exam edit:', tenantValidation.reason);
+        Alert.alert('Error', 'System not ready. Please try again.');
         return;
       }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [ExamsMarks] Using effective tenant ID for exam edit:', effectiveTenantId);
       
       if (!selectedExam || !examForm.name || !examForm.start_date || examForm.selected_classes.length === 0) {
         Alert.alert('Error', 'Please fill in all required fields and select at least one class');
         return;
       }
-
-      // Use already validated tenantId from context
-      if (!tenantId) {
-        console.error('❌ No tenant_id available for exam edit');
-        Alert.alert('Error', 'Unable to determine tenant context. Please try signing out and back in.');
-        return;
-      }
       
-      console.log('🔧 Using validated tenant_id for exam edit:', tenantId);
+      console.log('🔧 Using validated tenant_id for exam edit:', effectiveTenantId);
 
       // First, delete the existing exam record with Enhanced Tenant System
       const { error: deleteError } = await tenantDatabase.delete('exams', selectedExam.id);
@@ -524,23 +585,24 @@ const ExamsMarks = () => {
             try {
               console.log('🔄 Starting exam deletion process for:', exam.id);
               
-              // 🛡️ Validate tenant access first
-              const validation = await validateTenantAccess(user?.id, tenantId, 'ExamsMarks - handleDeleteExam');
-              if (!validation.isValid) {
-                console.error('❌ Tenant validation failed:', validation.error);
-                Alert.alert('Access Denied', validation.error);
+              // Validate tenant readiness
+              const tenantValidation = await validateTenantReadiness();
+              if (!tenantValidation.success) {
+                console.log('⚠️ [ExamsMarks] Tenant not ready for exam deletion:', tenantValidation.reason);
+                Alert.alert('Error', 'System not ready. Please try again.');
                 return;
               }
               
-              console.log('✅ Tenant validation passed, proceeding with deletion');
+              const { effectiveTenantId } = tenantValidation;
+              console.log('✅ [ExamsMarks] Using effective tenant ID for exam deletion:', effectiveTenantId);
 
               // Step 1: Delete associated marks first
               console.log('🔄 Deleting marks for exam ID:', exam.id);
-              const { error: marksError } = await supabase
-                .from('marks')
+              const marksQuery = createTenantQuery(effectiveTenantId, 'marks', '*')
                 .delete()
-                .eq('exam_id', exam.id)
-                .eq('tenant_id', tenantId);
+                .eq('exam_id', exam.id);
+
+              const { error: marksError } = await marksQuery;
 
               if (marksError) {
                 console.error('❌ Error deleting marks:', marksError);
@@ -550,11 +612,11 @@ const ExamsMarks = () => {
 
               // Step 2: Delete the exam
               console.log('🔄 Deleting exam with ID:', exam.id);
-              const { error: examError } = await supabase
-                .from('exams')
+              const examQuery = createTenantQuery(effectiveTenantId, 'exams', '*')
                 .delete()
-                .eq('id', exam.id)
-                .eq('tenant_id', tenantId);
+                .eq('id', exam.id);
+
+              const { error: examError } = await examQuery;
 
               if (examError) {
                 console.error('❌ Error deleting exam:', examError);
@@ -603,26 +665,21 @@ const ExamsMarks = () => {
   // Save marks (schema.txt: marks table)
   const handleBulkSaveMarks = async () => {
     try {
-      // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ExamsMarks - handleBulkSaveMarks');
-      if (!validation.isValid) {
-        Alert.alert('Access Denied', validation.error);
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [ExamsMarks] Tenant not ready for marks saving:', tenantValidation.reason);
+        Alert.alert('Error', 'System not ready. Please try again.');
         return;
       }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [ExamsMarks] Using effective tenant ID for marks saving:', effectiveTenantId);
       
       if (!selectedExam) {
         Alert.alert('Error', 'Please select an exam');
         return;
       }
-
-      // Use already validated tenantId from context
-      if (!tenantId) {
-        console.error('❌ [ExamsMarks] No tenant_id available for marks saving');
-        Alert.alert('Error', 'Unable to determine tenant information. Please try again.');
-        return;
-      }
-      
-      console.log('✅ [ExamsMarks] Using validated tenant_id for marks:', tenantId);
 
       const marksToSave = [];
       const examMaxMarks = selectedExam?.max_marks || 100;
@@ -660,7 +717,7 @@ const ExamsMarks = () => {
               grade: grade,
               max_marks: maxMarks,
               remarks: null,
-              tenant_id: tenantId
+              tenant_id: effectiveTenantId
             });
           }
         });
@@ -677,13 +734,36 @@ const ExamsMarks = () => {
       }
 
       if (marksToSave.length > 0) {
-        const { error } = await supabase
-          .from('marks')
-          .insert(marksToSave);
-
-        if (error) throw error;
-
-        Alert.alert('Success', `Saved marks for ${marksToSave.length} entries`);
+        // Process each mark individually using tenantDatabase.create()
+        let successCount = 0;
+        const errors = [];
+        
+        for (const markData of marksToSave) {
+          try {
+            // Remove tenant_id as it's handled automatically by tenantDatabase.create()
+            const { tenant_id, ...markWithoutTenantId } = markData;
+            const { error } = await tenantDatabase.create('marks', markWithoutTenantId);
+            
+            if (error) {
+              errors.push(`${markData.student_id}-${markData.subject_id}: ${error.message}`);
+            } else {
+              successCount++;
+            }
+          } catch (error) {
+            errors.push(`${markData.student_id}-${markData.subject_id}: ${error.message}`);
+          }
+        }
+        
+        if (errors.length > 0) {
+          console.error('Some marks failed to save:', errors);
+          Alert.alert(
+            'Partial Success',
+            `Saved ${successCount} marks successfully.\n${errors.length} failed:\n${errors.slice(0, 3).join('\n')}${errors.length > 3 ? '\n...' : ''}`
+          );
+        } else {
+          Alert.alert('Success', `Saved marks for ${successCount} entries`);
+        }
+        
         setMarksModalVisible(false);
         setMarksForm({});
         loadAllData();
@@ -948,19 +1028,17 @@ const ExamsMarks = () => {
         return;
       }
       
-      // Validate tenant access
-      if (!tenantId) {
-        Alert.alert('Error', 'Unable to determine tenant context. Please try signing out and back in.');
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [ExamsMarks] Tenant not ready for student creation:', tenantValidation.reason);
+        Alert.alert('Error', 'System not ready. Please try again.');
         setAddingStudent(false);
         return;
       }
       
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ExamsMarks - handleSaveNewStudent');
-      if (!validation.isValid) {
-        Alert.alert('Access Denied', validation.error);
-        setAddingStudent(false);
-        return;
-      }
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [ExamsMarks] Using effective tenant ID for student creation:', effectiveTenantId);
       
       // Prepare student data
       const currentDate = new Date();
@@ -972,19 +1050,17 @@ const ExamsMarks = () => {
         academic_year: '2024-25',
         admission_date: currentDate.toISOString().split('T')[0],
         status: 'active',
-        tenant_id: tenantId,
+        tenant_id: effectiveTenantId,
         created_at: currentDate.toISOString(),
         updated_at: currentDate.toISOString()
       };
       
       console.log('🔄 Inserting student into database:', studentData);
       
-      // Insert into database
-      const { data: insertedStudent, error: insertError } = await supabase
-        .from('students')
-        .insert([studentData])
-        .select()
-        .single();
+      // Insert into database using enhanced tenant system
+      // Remove tenant_id as it's handled automatically by tenantDatabase.create()
+      const { tenant_id, ...studentDataWithoutTenantId } = studentData;
+      const { data: insertedStudent, error: insertError } = await tenantDatabase.create('students', studentDataWithoutTenantId);
       
       if (insertError) {
         console.error('❌ Database insertion failed:', insertError);
@@ -1193,9 +1269,6 @@ const ExamsMarks = () => {
     setAllReportCardsModalVisible(true);
   };
 
-  // State for selected classes for marks entry
-  const [selectedClassesForMarks, setSelectedClassesForMarks] = useState([]);
-
   // Add class to marks entry
   const handleAddClassToMarks = () => {
     const availableClasses = classes.filter(c =>
@@ -1217,22 +1290,6 @@ const ExamsMarks = () => {
   const handleRemoveClassFromMarks = (classId) => {
     setSelectedClassesForMarks(prev => prev.filter(c => c.id !== classId));
   };
-
-  // State for add class modal
-  const [addClassModalVisible, setAddClassModalVisible] = useState(false);
-  const [newClassName, setNewClassName] = useState('');
-
-  // State for add student modal
-  const [addStudentModalVisible, setAddStudentModalVisible] = useState(false);
-  const [newStudentName, setNewStudentName] = useState('');
-  const [newStudentRollNo, setNewStudentRollNo] = useState('');
-  const [newStudentEmail, setNewStudentEmail] = useState('');
-  const [addingStudent, setAddingStudent] = useState(false);
-  const [studentFormErrors, setStudentFormErrors] = useState({});
-
-  // State for add subject modal
-  const [addSubjectModalVisible, setAddSubjectModalVisible] = useState(false);
-  const [newSubjectName, setNewSubjectName] = useState('');
 
   // Add new class
   const handleAddClass = () => {
