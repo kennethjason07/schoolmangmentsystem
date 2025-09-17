@@ -1,6 +1,6 @@
 import { supabase, TABLES } from '../utils/supabase';
 import { createTenantQuery } from '../utils/tenantValidation';
-import { getCurrentUserTenantByEmail } from '../utils/getTenantByEmail';
+import { getCachedTenantId } from '../utils/tenantHelpers';
 
 /**
  * Universal Notification Service
@@ -105,16 +105,17 @@ export class UniversalNotificationService {
     try {
       if (!userId) return 0;
 
-      // Get tenant context for filtering
+      // 🚀 ENHANCED: Get tenant context using cached tenant ID (much faster and more reliable)
       let tenantId = null;
       try {
-        const tenantResult = await getCurrentUserTenantByEmail();
-        if (tenantResult.success && tenantResult.data?.tenant?.id) {
-          tenantId = tenantResult.data.tenant.id;
-          console.log(`🏢 [UniversalNotificationService] Using tenant filter for messages: ${tenantId}`);
+        tenantId = getCachedTenantId();
+        if (tenantId) {
+          console.log(`🏢 [UniversalNotificationService] Using cached tenant filter for messages: ${tenantId}`);
+        } else {
+          console.warn('⚠️ [UniversalNotificationService] No cached tenant ID available for messages - tenant context may not be initialized yet');
         }
       } catch (tenantError) {
-        console.warn('⚠️ [UniversalNotificationService] Could not get tenant context for messages:', tenantError);
+        console.warn('⚠️ [UniversalNotificationService] Could not get cached tenant context for messages:', tenantError);
       }
 
       // Query with tenant filtering
@@ -164,16 +165,17 @@ export class UniversalNotificationService {
 
       const recipientType = this.getUserTypeForDB(userType);
 
-      // Get tenant context for filtering
+      // 🚀 ENHANCED: Get tenant context using cached tenant ID (much faster and more reliable)
       let tenantId = null;
       try {
-        const tenantResult = await getCurrentUserTenantByEmail();
-        if (tenantResult.success && tenantResult.data?.tenant?.id) {
-          tenantId = tenantResult.data.tenant.id;
-          console.log(`🏢 [UniversalNotificationService] Using tenant filter: ${tenantId}`);
+        tenantId = getCachedTenantId();
+        if (tenantId) {
+          console.log(`🏢 [UniversalNotificationService] Using cached tenant filter: ${tenantId}`);
+        } else {
+          console.warn('⚠️ [UniversalNotificationService] No cached tenant ID available - tenant context may not be initialized yet');
         }
       } catch (tenantError) {
-        console.warn('⚠️ [UniversalNotificationService] Could not get tenant context:', tenantError);
+        console.warn('⚠️ [UniversalNotificationService] Could not get cached tenant context:', tenantError);
       }
 
       // Query with tenant filtering - join with notifications table to access tenant_id
@@ -283,6 +285,14 @@ export class UniversalNotificationService {
       const cached = this.cache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
         return cached.data;
+      }
+
+      // 🚀 ENHANCED: Check if tenant context is ready
+      const tenantId = getCachedTenantId();
+      if (!tenantId) {
+        console.warn('⚠️ [UniversalNotificationService] Tenant context not ready - returning zero counts');
+        // Return zero counts but don't cache this result
+        return { messageCount: 0, notificationCount: 0, totalCount: 0 };
       }
 
       // Fetch both counts in parallel

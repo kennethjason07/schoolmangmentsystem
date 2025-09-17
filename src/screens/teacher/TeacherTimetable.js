@@ -16,12 +16,19 @@ import { format } from 'date-fns';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
-import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
+// 🚀 ENHANCED TENANT SYSTEM IMPORTS
+import { 
+  useTenantAccess, 
+  tenantDatabase, 
+  createTenantQuery,
+  getCachedTenantId 
+} from '../../utils/tenantHelpers';
 
 const TeacherTimetable = ({ navigation }) => {
   const { user } = useAuth();
+  // 🚀 ENHANCED TENANT SYSTEM - Use reliable cached tenant access
   const { 
-    tenantId, 
+    getTenantId, 
     isReady, 
     isLoading: tenantLoading, 
     tenant, 
@@ -29,11 +36,19 @@ const TeacherTimetable = ({ navigation }) => {
     error: tenantError 
   } = useTenantAccess();
   
-  // 🔍 DEBUG: Log tenant info on component load
-  console.log('🕰️ TeacherTimetable - Tenant Debug:', {
-    tenantId,
-    userId: user?.id
-  });
+  // 🚀 ENHANCED TENANT SYSTEM - Tenant validation helper
+  const validateTenantAccess = () => {
+    if (!isReady) {
+      return { valid: false, error: 'Tenant context not ready' };
+    }
+    
+    const tenantId = getCachedTenantId();
+    if (!tenantId) {
+      return { valid: false, error: 'No tenant ID available' };
+    }
+    
+    return { valid: true, tenantId };
+  };
   const [timetables, setTimetables] = useState({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -54,90 +69,56 @@ const TeacherTimetable = ({ navigation }) => {
     }
   }, []);
 
-  // 🚀 Enhanced tenant system - load data when ready
+  // 🚀 ENHANCED: Load data when tenant is ready
   useEffect(() => {
-    if (isReady && !tenantLoading && !tenantError) {
-      console.log('🔄 TeacherTimetable: Component mounted, loading data with enhanced tenant system...');
+    if (isReady && user?.id) {
+      console.log('🚀 Enhanced: Tenant and user ready, loading timetable data...');
       loadData();
     }
-  }, [isReady, tenantId, tenantLoading, tenantError]);
+  }, [isReady, user?.id]);
 
+  // 🚀 ENHANCED: Fetch all timetable data with enhanced tenant system
   const loadData = async () => {
     try {
       setLoading(true);
       
-      console.log('🚀 TeacherTimetable.loadData: Starting with enhanced tenant system for user:', user?.email);
-      
-      // 🚀 Enhanced tenant system validation
-      if (!isReady || tenantLoading) {
-        console.log('⚠️ TeacherTimetable: Tenant context not ready, waiting...');
+      // 🚀 ENHANCED: Validate tenant access using new helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.error('❌ Enhanced tenant validation failed:', validation.error);
+        Alert.alert('Access Denied', validation.error);
         setLoading(false);
         return;
       }
       
-      if (tenantError) {
-        throw new Error(tenantError);
-      }
+      const tenantId = validation.tenantId;
+      console.log('🚀 Enhanced tenant system: Using cached tenant ID:', tenantId);
       
-      console.log('✅ Using enhanced tenant system, tenant_id:', tenantId || 'Parent/No Tenant Required');
-      
-      // Use the robust teacher lookup from dbHelpers
+      // 🚀 ENHANCED: Get teacher info using dbHelpers with enhanced validation
       console.log('🔍 Getting teacher info using dbHelpers...');
       const { data: teacherData, error: teacherError } = await dbHelpers.getTeacherByUserId(user.id);
       
       if (teacherError || !teacherData) {
-        console.error('❌ Teacher lookup failed:', teacherError);
-        
-        // 🚀 Enhanced tenant system fallback using tenantDatabase
-        console.log('🔄 Trying fallback: user lookup by email using enhanced system...');
-        const { data: userRecords, error: userLookupError } = await tenantDatabase.read(
-          'users',
-          { email: user.email },
-          'id, email, linked_teacher_id, tenant_id'
-        );
-        
-        const userRecord = userRecords?.[0]; // Get first match
-        
-        if (userLookupError || !userRecord?.linked_teacher_id) {
-          console.error('❌ Fallback user lookup failed:', userLookupError);
-          
-          // 🚀 Enhanced fallback with better error messaging
-          console.log('🔍 Enhanced system fallback: checking user account setup...');
-          
-          throw new Error(`User record not found for email: ${user.email} in current tenant. Please contact admin to complete account setup.`);
-        }
-        
-        // 🚀 Get teacher info using enhanced tenant system
-        const { data: fallbackTeacher, error: fallbackTeacherError } = await tenantDatabase.readOne(
-          'teachers',
-          userRecord.linked_teacher_id,
-          '*'
-        );
-          
-        if (fallbackTeacherError || !fallbackTeacher) {
-          throw new Error('Teacher profile not found or does not belong to current tenant.');
-        }
-        
-        // Use fallback teacher data
-        setTeacherInfo(fallbackTeacher);
-        console.log('✅ Fallback teacher lookup successful:', fallbackTeacher.name);
-      } else {
-        // 🚀 Enhanced tenant system automatically validates tenant ownership
-        // No manual validation needed - system ensures data integrity
-        setTeacherInfo(teacherData);
-        console.log('✅ Enhanced system teacher lookup successful:', teacherData.name);
+        throw new Error('Teacher profile not found. Please contact administrator.');
       }
       
-      const teacherId = teacherData?.id || teacherInfo?.id;
-      if (!teacherId) {
-        throw new Error('Teacher ID could not be determined');
+      // 🚀 ENHANCED: Teacher data validation (enhanced tenant system handles automatic validation)
+      if (teacherData && teacherData.tenant_id && teacherData.tenant_id !== tenantId) {
+        console.error('❌ Teacher data validation failed: tenant mismatch');
+        Alert.alert('Data Error', 'Teacher data belongs to different tenant');
+        setLoading(false);
+        return;
       }
       
-      // 🚀 Enhanced tenant database for assigned subjects and classes
-      console.log('📚 Loading teacher subjects and classes using enhanced system...');
+      const teacher = teacherData;
+      setTeacherInfo(teacher);
+      console.log('✅ Enhanced: Teacher lookup successful:', teacher.name);
+      
+      // 🚀 ENHANCED: Get assigned subjects and classes using enhanced tenant system
+      console.log('📚 Loading teacher subjects and classes...');
       const { data: assignedSubjects, error: subjectsError } = await tenantDatabase.read(
-        'teacher_subjects',
-        { teacher_id: teacherId },
+        TABLES.TEACHER_SUBJECTS,
+        { teacher_id: teacher.id },
         `
           *,
           subjects(
@@ -177,8 +158,8 @@ const TeacherTimetable = ({ navigation }) => {
       console.log('🔍 Classes:', uniqueClasses.map(c => `${c.class_name} ${c.section}`));
       console.log('🔍 Subjects:', subjectList.map(s => s.name));
       
-      // 🚀 Load timetable data using enhanced system
-      await loadTimetableData(teacherId);
+      // 🚀 ENHANCED: Load timetable data using enhanced tenant system
+      await loadTimetableData(teacher.id, tenantId);
       
     } catch (error) {
       console.error('❌ Error in loadData:', error);
@@ -189,9 +170,10 @@ const TeacherTimetable = ({ navigation }) => {
     }
   };
 
-  const loadTimetableData = async (teacherId) => {
+  // 🚀 ENHANCED: Load timetable data with enhanced tenant system
+  const loadTimetableData = async (teacherId, tenantId) => {
     try {
-      console.log('🗺 Loading timetable data using enhanced tenant system for teacher:', teacherId);
+      console.log('🗺 Enhanced: Loading timetable data for teacher:', teacherId, 'tenant:', tenantId);
       
       // Get current academic year
       const currentYear = new Date().getFullYear();
@@ -199,19 +181,22 @@ const TeacherTimetable = ({ navigation }) => {
       
       console.log('🎓 Using academic year:', academicYear);
       
-      // 🚀 Enhanced tenant database for timetable entries
-      const { data: timetableData, error: timetableError } = await tenantDatabase.read(
-        'timetable',
-        { 
-          teacher_id: teacherId,
-          academic_year: academicYear 
-        },
+      // 🚀 ENHANCED: Fetch timetable entries using createTenantQuery for complex operations
+      const { data: timetableData, error: timetableError } = await createTenantQuery(
+        tenantId,
+        TABLES.TIMETABLE,
         `
           *,
           classes(class_name, section),
           subjects(name)
-        `
-      );
+        `,
+        { 
+          teacher_id: teacherId,
+          academic_year: academicYear 
+        }
+      )
+        .order('day_of_week')
+        .order('period_number');
       
       console.log('📅 Timetable entries found:', timetableData?.length, 'for teacher:', teacherId);
 
@@ -290,13 +275,34 @@ const TeacherTimetable = ({ navigation }) => {
 
 
 
-  if (loading) {
+  // 🚀 ENHANCED: Show loading if tenant is loading OR data is loading
+  if (loading || tenantLoading || !isReady) {
     return (
       <View style={styles.container}>
         <Header title="My Timetable" showBack={true} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1976d2" />
-          <Text style={styles.loadingText}>Loading your timetable...</Text>
+          <Text style={styles.loadingText}>
+            {tenantLoading || !isReady ? 'Initializing tenant access...' : 'Loading your timetable...'}
+          </Text>
+          {tenantName && (
+            <Text style={styles.tenantText}>Tenant: {tenantName}</Text>
+          )}
+        </View>
+      </View>
+    );
+  }
+  
+  // 🚀 ENHANCED: Show error if there's a data error OR tenant error
+  if (tenantError) {
+    return (
+      <View style={styles.container}>
+        <Header title="My Timetable" showBack={true} />
+        <View style={styles.loadingContainer}>
+          <Text style={styles.errorText}>Access Error: {tenantError}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={loadData}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -687,6 +693,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6c757d',
     fontWeight: '500',
+  },
+  // 🚀 ENHANCED TENANT SYSTEM STYLES
+  tenantText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#1976d2',
+    fontWeight: '500',
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#d32f2f',
+    textAlign: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 20,
+  },
+  retryButton: {
+    backgroundColor: '#1976d2',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
 });
 

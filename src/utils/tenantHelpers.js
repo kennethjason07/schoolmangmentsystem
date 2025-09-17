@@ -70,13 +70,41 @@ export const clearCachedTenantId = () => {
 };
 
 /**
- * 🚀 Enhanced database query helper with cached tenant ID
+ * 🚀 Enhanced database query helper with tenant ID parameter
+ * @param {string} tenantId - Tenant ID to filter by
  * @param {string} table - Table name
  * @param {string} selectClause - Select clause (default: '*')
  * @param {Object} filters - Additional filters
  * @returns {Object} Query builder with tenant filter applied
  */
-export const createTenantQuery = (table, selectClause = '*', filters = {}) => {
+export const createTenantQuery = (tenantId, table, selectClause = '*', filters = {}) => {
+  if (!tenantId) {
+    throw new Error('No tenant ID provided. Please ensure tenant is initialized.');
+  }
+
+  console.log(`🔍 Creating tenant query for '${table}' with tenant_id: ${tenantId}`);
+  
+  let query = supabase
+    .from(table)
+    .select(selectClause)
+    .eq('tenant_id', tenantId);
+
+  // Apply additional filters
+  Object.entries(filters).forEach(([key, value]) => {
+    query = query.eq(key, value);
+  });
+
+  return query;
+};
+
+/**
+ * 🚀 Alternative query helper that uses cached tenant ID (for backward compatibility)
+ * @param {string} table - Table name
+ * @param {string} selectClause - Select clause (default: '*')
+ * @param {Object} filters - Additional filters
+ * @returns {Object} Query builder with tenant filter applied
+ */
+export const createCachedTenantQuery = (table, selectClause = '*', filters = {}) => {
   const tenantId = getCachedTenantId();
   
   // Check if current user is a parent - parents don't require tenant filtering
@@ -84,6 +112,11 @@ export const createTenantQuery = (table, selectClause = '*', filters = {}) => {
   // or check the user's role in a more robust way
   
   console.log(`🔍 Creating tenant query for '${table}' with tenant_id: ${tenantId || 'NOT REQUIRED FOR PARENTS'}`);
+  if (!tenantId) {
+    throw new Error('No tenant context available. Please ensure user is logged in and tenant is initialized.');
+  }
+
+  console.log(`🔍 Creating cached tenant query for '${table}' with tenant_id: ${tenantId}`);
   
   let query = supabase
     .from(table)
@@ -156,7 +189,12 @@ export const tenantDatabase = {
    * Read records with automatic tenant filtering (if tenantId available)
    */
   async read(table, filters = {}, selectClause = '*') {
-    const query = createTenantQuery(table, selectClause, filters);
+    const tenantId = getCachedTenantId();
+    if (!tenantId) {
+      throw new Error('No tenant context for read operation');
+    }
+    
+    const query = createTenantQuery(tenantId, table, selectClause, filters);
     
     console.log(`📖 Reading from '${table}' with tenant filter`);
     

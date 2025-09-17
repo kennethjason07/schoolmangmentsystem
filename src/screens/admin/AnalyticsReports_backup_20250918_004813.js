@@ -1,0 +1,970 @@
+/**
+ * AnalyticsReports - Enhanced Tenant System Implementation
+ * 
+ * MIGRATED: Updated to use Enhanced Tenant System
+ * - Replaced getCurrentUserTenantByEmail() with useTenantAccess hook
+ * - All database queries now use tenantDatabase helpers
+ * - Added proper tenant loading states and error handling
+ * - Improved performance with cached tenant ID
+ * 
+ * Updated: 2025-09-17 19:15
+ */
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Dimensions,
+  Alert,
+  RefreshControl,
+  Platform,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { ActivityIndicator as PaperActivityIndicator } from 'react-native-paper';
+import Header from '../../components/Header';
+import { TABLES } from '../../utils/supabase';
+import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
+import { useTenantAccess, tenantDatabase, getCachedTenantId, createTenantQuery } from '../../utils/tenantHelpers';
+import { useAuth } from '../../utils/AuthContext';
+
+const { width: screenWidth } = Dimensions.get('window');
+
+const AnalyticsReports = ({ navigation }) => {
+  // Enhanced Tenant System context
+  const { user } = useAuth();
+  const { 
+    getTenantId,
+    tenantId,
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError
+  } = useTenantAccess();
+  
+  // Enhanced tenant system - simplified validation
+  const validateTenantAccess = () => {
+    if (!isReady) {
+      return { valid: false, error: 'Tenant context not ready' };
+    }
+    
+    const cachedTenantId = getCachedTenantId();
+    if (!cachedTenantId) {
+      return { valid: false, error: 'No tenant ID available' };
+    }
+    
+    return { valid: true, tenantId: cachedTenantId };
+  };
+  
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
+  const [selectedPeriod, setSelectedPeriod] = useState('thisMonth');
+
+  // Analytics Data State
+  const [overviewStats, setOverviewStats] = useState({});
+  const [attendanceData, setAttendanceData] = useState({});
+  const [academicData, setAcademicData] = useState({});
+  const [financialData, setFinancialData] = useState({});
+  const [teacherData, setTeacherData] = useState({});
+  const [studentData, setStudentData] = useState({});
+
+  // Helper function to get date range based on selected period
+  const getDateRange = () => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    switch (selectedPeriod) {
+      case 'today':
+        return {
+          start: startOfToday,
+          end: now,
+          label: 'Today'
+        };
+      case 'thisWeek':
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - now.getDay());
+        return {
+          start: startOfWeek,
+          end: now,
+          label: 'This Week'
+        };
+      case 'thisMonth':
+        return {
+          start: new Date(now.getFullYear(), now.getMonth(), 1),
+          end: now,
+          label: 'This Month'
+        };
+      case 'thisYear':
+        return {
+          start: new Date(now.getFullYear(), 0, 1),
+          end: now,
+          label: 'This Year'
+        };
+      default:
+        return {
+          start: new Date(now.getFullYear(), now.getMonth(), 1),
+          end: now,
+          label: 'This Month'
+        };
+    }
+  };
+
+  // Helper function to format numbers (for non-currency values)
+  const formatNumber = (num) => {
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
+    return num.toString();
+  };
+
+  // Helper function to format currency amounts
+  const formatCurrency = (amount) => {
+    const num = parseFloat(amount) || 0;
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(num);
+  };
+
+  // Load overview statistics
+  const loadOverviewStats = async () => {
+    const validation = validateTenantAccess();
+    if (!validation.valid) {
+      console.error('❌ AnalyticsReports: Tenant validation failed:', validation.error);
+      setError(validation.error);
+      return;
+    }
+    
+    try {
+      const dateRange = getDateRange();
+      
+      console.log('🏢 Loading analytics overview for tenant:', tenantName, 'ID:', validation.tenantId);
+
+      // Load basic counts with Enhanced Tenant System
+      const [studentsResult, teachersResult, classesResult, subjectsResult] = await Promise.all([
+        tenantDatabase.read(TABLES.STUDENTS, {}, 'id, created_at, class_id'),
+        tenantDatabase.read(TABLES.TEACHERS, {}, 'id, created_at, salary_amount'),
+        tenantDatabase.read(TABLES.CLASSES, {}, 'id, class_name, section'),
+        tenantDatabase.read(TABLES.SUBJECTS, {}, 'id, name, class_id')
+      ]);
+
+      const students = studentsResult.data || [];
+      const teachers = teachersResult.data || [];
+      const classes = classesResult.data || [];
+      const subjects = subjectsResult.data || [];
+
+      // Calculate total salary expense
+      const totalSalaryExpense = teachers.reduce((sum, teacher) =>
+        sum + (parseFloat(teacher.salary_amount) || 0), 0
+      );
+
+      setOverviewStats({
+        totalStudents: students.length,
+        totalTeachers: teachers.length,
+        totalClasses: classes.length,
+        totalSubjects: subjects.length,
+        totalSalaryExpense,
+        avgStudentsPerClass: classes.length > 0 ? Math.round(students.length / classes.length) : 0,
+        avgSubjectsPerClass: classes.length > 0 ? Math.round(subjects.length / classes.length) : 0
+      });
+
+    } catch (error) {
+      console.error('Error loading overview stats:', error);
+    }
+  };
+
+  // Load attendance analytics
+  const loadAttendanceData = async () => {
+    const validation = validateTenantAccess();
+    if (!validation.valid) {
+      console.error('❌ AnalyticsReports: Tenant validation failed for attendance:', validation.error);
+      return;
+    }
+    
+    try {
+      const dateRange = getDateRange();
+      
+      console.log('📈 Loading attendance analytics for tenant:', validation.tenantId);
+
+      // Load student attendance with Enhanced Tenant System
+      const studentAttendanceQuery = createTenantQuery(
+        TABLES.STUDENT_ATTENDANCE,
+        `
+          *,
+          students(name, class_id),
+          classes(class_name, section)
+        `
+      )
+        .gte('date', dateRange.start.toISOString().split('T')[0])
+        .lte('date', dateRange.end.toISOString().split('T')[0]);
+      
+      const { data: studentAttendance } = await studentAttendanceQuery;
+
+      // Load teacher attendance with Enhanced Tenant System
+      const teacherAttendanceQuery = createTenantQuery(
+        TABLES.TEACHER_ATTENDANCE,
+        `
+          *,
+          teachers(name)
+        `
+      )
+        .gte('date', dateRange.start.toISOString().split('T')[0])
+        .lte('date', dateRange.end.toISOString().split('T')[0]);
+        
+      const { data: teacherAttendance } = await teacherAttendanceQuery;
+
+      // Calculate attendance statistics
+      const studentPresentCount = studentAttendance?.filter(a => a.status === 'Present').length || 0;
+      const studentTotalCount = studentAttendance?.length || 0;
+      const studentAttendanceRate = studentTotalCount > 0 ? (studentPresentCount / studentTotalCount * 100) : 0;
+
+      const teacherPresentCount = teacherAttendance?.filter(a => a.status === 'Present').length || 0;
+      const teacherTotalCount = teacherAttendance?.length || 0;
+      const teacherAttendanceRate = teacherTotalCount > 0 ? (teacherPresentCount / teacherTotalCount * 100) : 0;
+
+      // Group by class for student attendance
+      const attendanceByClass = {};
+      studentAttendance?.forEach(record => {
+        const className = record.classes?.class_name + ' ' + record.classes?.section;
+        if (!attendanceByClass[className]) {
+          attendanceByClass[className] = { present: 0, total: 0 };
+        }
+        attendanceByClass[className].total++;
+        if (record.status === 'Present') {
+          attendanceByClass[className].present++;
+        }
+      });
+
+      setAttendanceData({
+        studentAttendanceRate: Math.round(studentAttendanceRate),
+        teacherAttendanceRate: Math.round(teacherAttendanceRate),
+        studentPresentCount,
+        studentTotalCount,
+        teacherPresentCount,
+        teacherTotalCount,
+        attendanceByClass,
+        dailyAttendance: studentAttendance || []
+      });
+
+    } catch (error) {
+      console.error('Error loading attendance data:', error);
+    }
+  };
+
+  // Load academic performance data
+  const loadAcademicData = async () => {
+    const validation = validateTenantAccess();
+    if (!validation.valid) {
+      console.error('❌ AnalyticsReports: Tenant validation failed for academic data:', validation.error);
+      return;
+    }
+    
+    try {
+      const dateRange = getDateRange();
+      
+      console.log('🏭 Loading academic analytics for tenant:', validation.tenantId);
+
+      // Load marks data with Enhanced Tenant System
+      const { data: marks } = await tenantDatabase.read(
+        TABLES.MARKS,
+        {},
+        `
+          *,
+          students(name, class_id),
+          subjects(name, class_id),
+          exams(name, class_id)
+        `
+      );
+
+      // Load exams data with Enhanced Tenant System
+      const examsQuery = createTenantQuery(
+        TABLES.EXAMS,
+        `
+          *,
+          classes(class_name, section)
+        `
+      )
+        .gte('start_date', dateRange.start.toISOString().split('T')[0])
+        .lte('end_date', dateRange.end.toISOString().split('T')[0]);
+      
+      const { data: exams } = await examsQuery;
+
+      // Load assignments data with Enhanced Tenant System
+      const assignmentsQuery = createTenantQuery(
+        TABLES.ASSIGNMENTS,
+        `
+          *,
+          classes(class_name, section),
+          subjects(name),
+          teachers(name)
+        `
+      )
+        .gte('assigned_date', dateRange.start.toISOString().split('T')[0])
+        .lte('due_date', dateRange.end.toISOString().split('T')[0]);
+      
+      const { data: assignments } = await assignmentsQuery;
+
+      // Calculate academic statistics
+      const totalMarks = marks?.reduce((sum, mark) => sum + (parseFloat(mark.marks_obtained) || 0), 0) || 0;
+      const totalMaxMarks = marks?.reduce((sum, mark) => sum + (parseFloat(mark.max_marks) || 0), 0) || 0;
+      const averagePercentage = totalMaxMarks > 0 ? (totalMarks / totalMaxMarks * 100) : 0;
+
+      // Group marks by subject
+      const subjectPerformance = {};
+      marks?.forEach(mark => {
+        const subjectName = mark.subjects?.name;
+        if (subjectName) {
+          if (!subjectPerformance[subjectName]) {
+            subjectPerformance[subjectName] = { totalMarks: 0, maxMarks: 0, count: 0 };
+          }
+          subjectPerformance[subjectName].totalMarks += parseFloat(mark.marks_obtained) || 0;
+          subjectPerformance[subjectName].maxMarks += parseFloat(mark.max_marks) || 0;
+          subjectPerformance[subjectName].count++;
+        }
+      });
+
+      // Calculate grade distribution
+      const gradeDistribution = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+      marks?.forEach(mark => {
+        const percentage = mark.max_marks > 0 ? (mark.marks_obtained / mark.max_marks * 100) : 0;
+        if (percentage >= 90) gradeDistribution.A++;
+        else if (percentage >= 80) gradeDistribution.B++;
+        else if (percentage >= 70) gradeDistribution.C++;
+        else if (percentage >= 60) gradeDistribution.D++;
+        else gradeDistribution.F++;
+      });
+
+      setAcademicData({
+        totalExams: exams?.length || 0,
+        totalAssignments: assignments?.length || 0,
+        totalMarksRecords: marks?.length || 0,
+        averagePercentage: Math.round(averagePercentage),
+        subjectPerformance,
+        gradeDistribution,
+        recentExams: exams?.slice(0, 5) || [],
+        recentAssignments: assignments?.slice(0, 5) || []
+      });
+
+    } catch (error) {
+      console.error('Error loading academic data:', error);
+    }
+  };
+
+  // Load financial data
+  const loadFinancialData = async () => {
+    const validation = validateTenantAccess();
+    if (!validation.valid) {
+      console.error('❌ AnalyticsReports: Tenant validation failed for financial data:', validation.error);
+      return;
+    }
+    
+    try {
+      const dateRange = getDateRange();
+      
+      console.log('💰 Loading financial analytics for tenant:', validation.tenantId);
+
+      // Load fee payments for the selected period with Enhanced Tenant System
+      const feePaymentsQuery = createTenantQuery(
+        TABLES.STUDENT_FEES,
+        `
+          *,
+          students(name, class_id)
+        `
+      )
+        .gte('payment_date', dateRange.start.toISOString().split('T')[0])
+        .lte('payment_date', dateRange.end.toISOString().split('T')[0]);
+      
+      const { data: feePayments } = await feePaymentsQuery;
+
+      // Load all student fees to calculate total expected vs total collected with Enhanced Tenant System
+      const { data: allStudentFees } = await tenantDatabase.read(
+        TABLES.STUDENT_FEES,
+        {},
+        `
+          *,
+          fee_structure(amount)
+        `
+      );
+
+      // Calculate financial statistics
+      const totalCollected = feePayments?.reduce((sum, payment) =>
+        sum + (parseFloat(payment.amount_paid) || 0), 0
+      ) || 0;
+
+      // Calculate overall collection efficiency (total collected across all time vs total expected)
+      const totalEverCollected = allStudentFees?.reduce((sum, payment) =>
+        sum + (parseFloat(payment.amount_paid) || 0), 0
+      ) || 0;
+      
+      const totalExpectedFromFees = allStudentFees?.reduce((sum, payment) => {
+        const feeAmount = payment.fee_structure?.amount || 0;
+        return sum + parseFloat(feeAmount);
+      }, 0) || 0;
+
+      // Collection rate based on overall school performance
+      const collectionRate = totalExpectedFromFees > 0 ? (totalEverCollected / totalExpectedFromFees * 100) : 0;
+
+      // Group by payment mode
+      const paymentModeDistribution = {};
+      feePayments?.forEach(payment => {
+        const mode = payment.payment_mode || 'Unknown';
+        paymentModeDistribution[mode] = (paymentModeDistribution[mode] || 0) + parseFloat(payment.amount_paid || 0);
+      });
+
+      // Group by fee component
+      const feeComponentDistribution = {};
+      feePayments?.forEach(payment => {
+        const component = payment.fee_component || 'Unknown';
+        feeComponentDistribution[component] = (feeComponentDistribution[component] || 0) + parseFloat(payment.amount_paid || 0);
+      });
+
+      setFinancialData({
+        totalCollected,
+        totalExpected: totalExpectedFromFees,
+        collectionRate: Math.round(collectionRate),
+        totalPayments: feePayments?.length || 0,
+        paymentModeDistribution,
+        feeComponentDistribution,
+        recentPayments: feePayments?.slice(0, 10) || []
+      });
+
+    } catch (error) {
+      console.error('Error loading financial data:', error);
+    }
+  };
+
+  // Main data loading function
+  const loadAllData = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
+    setError(null);
+
+    try {
+      await Promise.all([
+        loadOverviewStats(),
+        loadAttendanceData(),
+        loadAcademicData(),
+        loadFinancialData()
+      ]);
+    } catch (error) {
+      console.error('Error loading analytics data:', error);
+      setError('Failed to load analytics data. Please try again.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Refresh data
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadAllData(false);
+  };
+
+  // Load data when tenant is ready
+  useEffect(() => {
+    if (isReady && !tenantError) {
+      console.log('🚀 AnalyticsReports: Tenant ready, loading analytics data for:', tenantName);
+      loadAllData();
+    }
+  }, [isReady, tenantError, selectedPeriod]);
+  
+  // Handle tenant initialization
+  useEffect(() => {
+    if (tenantError) {
+      console.error('❌ AnalyticsReports: Tenant error:', tenantError);
+      setError(`Tenant access error: ${tenantError}`);
+    }
+  }, [tenantError]);
+
+  // Period selector options
+  const periodOptions = [
+    { key: 'today', label: 'Today' },
+    { key: 'thisWeek', label: 'This Week' },
+    { key: 'thisMonth', label: 'This Month' },
+    { key: 'thisYear', label: 'This Year' }
+  ];
+
+  // Enhanced Tenant System loading state
+  if (!isReady || tenantLoading || tenantError || !tenantId) {
+    return (
+      <View style={styles.container}>
+        <Header title="Analytics & Reports" showBack={true} />
+        <View style={styles.loadingContainer}>
+          <PaperActivityIndicator size="large" color="#2196F3" />
+          <Text style={styles.loadingText}>
+            {tenantError ? 'Tenant system error. Please try again.' : 'Initializing tenant access...'}
+          </Text>
+          {tenantName && <Text style={styles.tenantInfo}>Tenant: {tenantName}</Text>}
+        </View>
+      </View>
+    );
+  }
+
+  // Data loading state
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <Header title="Analytics & Reports" showBack={true} />
+        <View style={styles.loadingContainer}>
+          <PaperActivityIndicator size="large" color="#2196F3" />
+          <Text style={styles.loadingText}>Loading analytics data...</Text>
+          <Text style={styles.tenantInfo}>Tenant: {tenantName}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Header title="Analytics & Reports" showBack={true} />
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle-outline" size={64} color="#f44336" />
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => loadAllData()}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // Main render
+  return (
+    <View style={styles.container}>
+      <Header title="Analytics & Reports" showBack={true} />
+
+      {/* Period Selector */}
+      <View style={styles.periodSelector}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {periodOptions.map((option) => (
+            <TouchableOpacity
+              key={option.key}
+              style={[
+                styles.periodButton,
+                selectedPeriod === option.key && styles.periodButtonActive
+              ]}
+              onPress={() => setSelectedPeriod(option.key)}
+            >
+              <Text style={[
+                styles.periodButtonText,
+                selectedPeriod === option.key && styles.periodButtonTextActive
+              ]}>
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        keyboardShouldPersistTaps="handled"
+        bounces={Platform.OS !== 'web'}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
+        {/* Overview Stats */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Overview</Text>
+          <View style={styles.statsGrid}>
+            <View style={styles.statCard}>
+              <View style={[styles.statIcon, { backgroundColor: '#2196F3' }]}>
+                <Ionicons name="people" size={24} color="#fff" />
+              </View>
+              <Text style={styles.statValue}>{overviewStats.totalStudents || 0}</Text>
+              <Text style={styles.statLabel}>Total Students</Text>
+            </View>
+            <View style={styles.statCard}>
+              <View style={[styles.statIcon, { backgroundColor: '#4CAF50' }]}>
+                <Ionicons name="person" size={24} color="#fff" />
+              </View>
+              <Text style={styles.statValue}>{overviewStats.totalTeachers || 0}</Text>
+              <Text style={styles.statLabel}>Total Teachers</Text>
+            </View>
+            <View style={styles.statCard}>
+              <View style={[styles.statIcon, { backgroundColor: '#FF9800' }]}>
+                <Ionicons name="school" size={24} color="#fff" />
+              </View>
+              <Text style={styles.statValue}>{overviewStats.totalClasses || 0}</Text>
+              <Text style={styles.statLabel}>Total Classes</Text>
+            </View>
+            <View style={styles.statCard}>
+              <View style={[styles.statIcon, { backgroundColor: '#9C27B0' }]}>
+                <Ionicons name="book" size={24} color="#fff" />
+              </View>
+              <Text style={styles.statValue}>{overviewStats.totalSubjects || 0}</Text>
+              <Text style={styles.statLabel}>Total Subjects</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Financial Analytics */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Financial Overview</Text>
+          <View style={styles.financialStats}>
+            <View style={styles.financialCard}>
+              <Text style={styles.financialAmount}>{formatCurrency(financialData.totalCollected || 0)}</Text>
+              <Text style={styles.financialLabel}>Total Collected</Text>
+              <Text style={styles.financialSubtext}>{financialData.collectionRate || 0}% collection rate</Text>
+            </View>
+            <View style={styles.financialCard}>
+              <Text style={styles.financialAmount}>{formatCurrency(overviewStats.totalSalaryExpense || 0)}</Text>
+              <Text style={styles.financialLabel}>Monthly Salary Expense</Text>
+              <Text style={styles.financialSubtext}>Teacher salaries</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Quick Reports */}
+        <View style={[styles.section, styles.quickReportsSection]}>
+          <Text style={styles.sectionTitle}>Quick Reports</Text>
+          <View style={styles.reportsList}>
+            <TouchableOpacity
+              style={styles.reportItem}
+              onPress={() => navigation.navigate('AttendanceReport')}
+            >
+              <View style={[styles.reportIcon, { backgroundColor: '#4CAF50' }]}>
+                <Ionicons name="checkmark-circle" size={24} color="#fff" />
+              </View>
+              <View style={styles.reportContent}>
+                <Text style={styles.reportTitle}>Attendance Report</Text>
+                <Text style={styles.reportSubtitle}>
+                  Student: {attendanceData.studentAttendanceRate || 0}% • Teacher: {attendanceData.teacherAttendanceRate || 0}%
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#666" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.reportItem}
+              onPress={() => navigation.navigate('AcademicPerformance')}
+            >
+              <View style={[styles.reportIcon, { backgroundColor: '#2196F3' }]}>
+                <Ionicons name="school" size={24} color="#fff" />
+              </View>
+              <View style={styles.reportContent}>
+                <Text style={styles.reportTitle}>Academic Performance</Text>
+                <Text style={styles.reportSubtitle}>
+                  {academicData.totalExams || 0} exams • {academicData.averagePercentage || 0}% avg score
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#666" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.reportItem}
+              onPress={() => navigation.navigate('FeeCollection')}
+            >
+              <View style={[styles.reportIcon, { backgroundColor: '#9C27B0' }]}>
+                <Ionicons name="card" size={24} color="#fff" />
+              </View>
+              <View style={styles.reportContent}>
+                <Text style={styles.reportTitle}>Fee Collection</Text>
+                <Text style={styles.reportSubtitle}>
+                  {formatCurrency(financialData.totalCollected || 0)} collected • {financialData.collectionRate || 0}% rate
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#666" />
+            </TouchableOpacity>
+
+          </View>
+        </View>
+      </ScrollView>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  scrollView: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      maxHeight: '100vh',
+      overflowY: 'auto',
+    }),
+  },
+  scrollContent: {
+    paddingBottom: 20,
+    ...(Platform.OS === 'web' && {
+      minHeight: '100%',
+    }),
+  },
+  // Period Selector
+  periodSelector: {
+    backgroundColor: '#fff',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  periodButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    marginRight: 12,
+    borderRadius: 20,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  periodButtonActive: {
+    backgroundColor: '#2196F3',
+    borderColor: '#2196F3',
+  },
+  periodButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666',
+  },
+  periodButtonTextActive: {
+    color: '#fff',
+  },
+  // Sections
+  section: {
+    backgroundColor: '#fff',
+    marginTop: 8,
+    padding: 20,
+    marginHorizontal: 16,
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333',
+    marginBottom: 16,
+  },
+  // Stats Grid
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  statCard: {
+    width: '48%',
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  statIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#333',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+  },
+  // Attendance
+  attendanceContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  attendanceCard: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  attendanceTitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
+  },
+  attendancePercentage: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#4CAF50',
+    marginBottom: 4,
+  },
+  attendanceSubtitle: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+  },
+  // Academic
+  academicStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 20,
+  },
+  academicStatItem: {
+    alignItems: 'center',
+  },
+  academicStatValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#2196F3',
+    marginBottom: 4,
+  },
+  academicStatLabel: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+  },
+  // Financial
+  financialStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  financialCard: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 12,
+    marginHorizontal: 4,
+  },
+  financialAmount: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#9C27B0',
+    marginBottom: 4,
+  },
+  financialLabel: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 4,
+  },
+  financialSubtext: {
+    fontSize: 12,
+    color: '#666',
+  },
+  // Quick Reports Section
+  quickReportsSection: {
+    marginBottom: 30,
+    paddingBottom: 30,
+  },
+  // Reports
+  reportsList: {
+    marginTop: 8,
+  },
+  reportItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  reportIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  reportContent: {
+    flex: 1,
+  },
+  reportTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  reportSubtitle: {
+    fontSize: 14,
+    color: '#666',
+  },
+  // Charts
+  chartContainer: {
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 16,
+  },
+  chartTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  chart: {
+    borderRadius: 16,
+  },
+  // Loading & Error States
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  tenantInfo: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#2196F3',
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#f44336',
+    textAlign: 'center',
+    marginTop: 16,
+    marginBottom: 24,
+    lineHeight: 24,
+  },
+  retryButton: {
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});
+
+export default AnalyticsReports;

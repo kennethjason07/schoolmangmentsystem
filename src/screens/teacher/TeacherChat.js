@@ -8,6 +8,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { useTenantAccess, tenantDatabase, createTenantQuery, getCachedTenantId } from '../../utils/tenantHelpers';
 import { useMessageStatus } from '../../utils/useMessageStatus';
 import { formatToLocalTime, debugTimestamp } from '../../utils/timeUtils';
 import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from '../../utils/chatFileUpload';
@@ -26,6 +27,7 @@ const DEBUG_MODE = __DEV__ && true; // Enable debug logging and UI elements
 
 const TeacherChat = () => {
   const { user } = useAuth();
+  const tenantAccess = useTenantAccess();
   const { markMessagesAsRead } = useMessageStatus();
   const [activeTab, setActiveTab] = useState('parents'); // 'parents' or 'students'
   const [parents, setParents] = useState([]);
@@ -54,6 +56,44 @@ const TeacherChat = () => {
     teacherResolution: null,
     dataFetchStatus: null
   });
+
+  // Helper function to validate tenant readiness and get effective tenant ID
+  const validateTenantReadiness = async () => {
+    console.log('🔍 [TeacherChat] validateTenantReadiness - Starting validation');
+    console.log('🔍 [TeacherChat] User state:', { 
+      id: user?.id, 
+      email: user?.email 
+    });
+    console.log('🔍 [TeacherChat] Tenant access state:', { 
+      isReady: tenantAccess.isReady,
+      isLoading: tenantAccess.isLoading,
+      currentTenant: tenantAccess.currentTenant?.id
+    });
+    
+    // Wait for tenant system to be ready
+    if (!tenantAccess.isReady || tenantAccess.isLoading) {
+      console.log('⏳ [TeacherChat] Tenant system not ready, waiting...');
+      return { success: false, reason: 'TENANT_NOT_READY' };
+    }
+    
+    // Get effective tenant ID
+    const effectiveTenantId = await getCachedTenantId();
+    if (!effectiveTenantId) {
+      console.log('❌ [TeacherChat] No effective tenant ID available');
+      return { success: false, reason: 'NO_TENANT_ID' };
+    }
+    
+    console.log('✅ [TeacherChat] Tenant validation successful:', {
+      effectiveTenantId,
+      currentTenant: tenantAccess.currentTenant?.id
+    });
+    
+    return { 
+      success: true, 
+      effectiveTenantId,
+      tenantContext: tenantAccess.currentTenant
+    };
+  };
 
   // Keyboard visibility listeners
   useEffect(() => {
@@ -224,14 +264,33 @@ const TeacherChat = () => {
     try {
       if (!user?.id) return;
       
-      console.log('🔄 TeacherChat: Fetching unread counts for teacher:', user.id);
+      console.log('🚀 [TeacherChat] fetchUnreadCounts - Starting with enhanced tenant validation');
       
-      // Get all unread messages for current user
-      const { data: unreadMessages, error } = await supabase
-        .from(TABLES.MESSAGES)
-        .select('sender_id')
-        .eq('receiver_id', user.id)
-        .eq('is_read', false);
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [TeacherChat] Tenant not ready for unread counts fetch:', tenantValidation.reason);
+        if (tenantValidation.reason === 'TENANT_NOT_READY') {
+          // Don't throw error, just use empty counts
+          setUnreadCounts({});
+          return;
+        }
+        console.error('❌ [TeacherChat] Tenant validation failed for unread counts:', tenantValidation.reason);
+        return;
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [TeacherChat] Using effective tenant ID for unread counts:', effectiveTenantId);
+      
+      // Get all unread messages for current user with tenant awareness
+      const unreadQuery = createTenantQuery(
+        effectiveTenantId,
+        TABLES.MESSAGES,
+        'sender_id'
+      ).eq('receiver_id', user.id)
+       .eq('is_read', false);
+      
+      const { data: unreadMessages, error } = await unreadQuery;
       
       if (error && error.code !== '42P01') {
         console.log('❌ TeacherChat: Error fetching unread messages:', error);
@@ -266,31 +325,52 @@ const TeacherChat = () => {
       console.log('🔍 Debug Mode: ENABLED');
       console.log('👨‍🏫 Teacher User ID:', user?.id);
       console.log('⏰ Fetch Time:', new Date().toISOString());
-      console.log('🏢 User Tenant Info:', {
-        tenant_id: user?.tenant_id,
-        email_domain: user?.email?.split('@')[1],
-        linked_teacher_id: user?.linked_teacher_id
+      console.log('🏢 Enhanced Tenant Info:', {
+        isReady: tenantAccess.isReady,
+        isLoading: tenantAccess.isLoading,
+        currentTenant: tenantAccess.currentTenant?.id,
+        tenantName: tenantAccess.currentTenant?.name
       });
       
       setDebugInfo(prev => ({
         ...prev,
         tenantContext: {
           user_id: user?.id,
-          tenant_id: user?.tenant_id,
-          email_domain: user?.email?.split('@')[1],
-          linked_teacher_id: user?.linked_teacher_id,
+          is_ready: tenantAccess.isReady,
+          is_loading: tenantAccess.isLoading,
+          current_tenant: tenantAccess.currentTenant?.id,
+          tenant_name: tenantAccess.currentTenant?.name,
           fetch_time: new Date().toISOString()
         }
       }));
     }
     
     try {
+      console.log('🚀 [TeacherChat] fetchData - Starting with enhanced tenant validation');
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [TeacherChat] Tenant not ready:', tenantValidation.reason);
+        if (tenantValidation.reason === 'TENANT_NOT_READY') {
+          // Don't throw error, just wait for tenant to be ready
+          setLoading(false);
+          setTenantLoading(false);
+          return;
+        }
+        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [TeacherChat] Using effective tenant ID:', effectiveTenantId);
+      
       if (DEBUG_MODE) {
-        console.log('🔄 Starting data fetch for teacher chat...');
+        console.log('🔄 Starting enhanced tenant-aware data fetch for teacher chat...');
         setDebugInfo(prev => ({
           ...prev,
           dataFetchStatus: {
             started_at: new Date().toISOString(),
+            effective_tenant_id: effectiveTenantId,
             parents_fetch: 'starting',
             students_fetch: 'starting',
             unread_counts_fetch: 'starting'
@@ -326,25 +406,47 @@ const TeacherChat = () => {
     }
   };
 
-  // Fetch parents of students assigned to the teacher - SUPER OPTIMIZED
+  // Fetch parents of students assigned to the teacher - ENHANCED TENANT VERSION
   const fetchParents = async () => {
     try {
-      if (DEBUG_MODE) {
-        console.log('👨‍👩‍👧 Starting parent data fetch for teacher chat...');
+      console.log('🚀 [TeacherChat] fetchParents - Starting with enhanced tenant validation');
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [TeacherChat] Tenant not ready for parents fetch:', tenantValidation.reason);
+        if (tenantValidation.reason === 'TENANT_NOT_READY') {
+          // Don't throw error, just use empty array
+          setParents([]);
+          return;
+        }
+        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
       }
       
-      // Get teacher info from users table
-      const { data: userInfo, error: userError } = await supabase
-        .from(TABLES.USERS)
-        .select('linked_teacher_id')
-        .eq('id', user.id)
-        .single();
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [TeacherChat] Using effective tenant ID for parents:', effectiveTenantId);
+      
+      if (DEBUG_MODE) {
+        console.log('👨‍👩‍👧 Starting enhanced parent data fetch for teacher chat...');
+      }
+      
+      // Get teacher info from users table using tenant-aware query
+      const userInfoQuery = createTenantQuery(
+        effectiveTenantId,
+        TABLES.USERS,
+        'linked_teacher_id'
+      ).eq('id', user.id);
+      
+      const { data: userInfo, error: userError } = await userInfoQuery;
 
       if (DEBUG_MODE) {
         console.log('👨‍🏫 Teacher lookup result:', { userInfo, userError });
       }
 
-      if (userError || !userInfo?.linked_teacher_id) {
+      // Handle array response from createTenantQuery
+      const userRecord = Array.isArray(userInfo) ? userInfo[0] : userInfo;
+      
+      if (userError || !userRecord?.linked_teacher_id) {
         if (DEBUG_MODE) {
           console.error('❌ Teacher information not found:', userError);
           setDebugInfo(prev => ({
@@ -359,7 +461,7 @@ const TeacherChat = () => {
         throw new Error('Teacher information not found. Please contact administrator.');
       }
 
-      const teacherId = userInfo.linked_teacher_id;
+      const teacherId = userRecord.linked_teacher_id;
       
       if (DEBUG_MODE) {
         console.log('✅ Teacher ID resolved:', teacherId);
@@ -375,12 +477,13 @@ const TeacherChat = () => {
       const uniqueParents = [];
       const seen = new Set();
 
-      // OPTIMIZED: Execute both queries in parallel for maximum speed
+      // OPTIMIZED: Execute enhanced tenant-aware queries in parallel for maximum speed
       const [classStudentResult, subjectStudentResult, allParentUsersResult] = await Promise.all([
-        // Query 1: Get class teacher students
-        supabase
-          .from(TABLES.STUDENTS)
-          .select(`
+        // Query 1: Get class teacher students with tenant awareness
+        createTenantQuery(
+          effectiveTenantId,
+          TABLES.STUDENTS,
+          `
             id,
             name,
             roll_no,
@@ -391,13 +494,14 @@ const TeacherChat = () => {
               section,
               class_teacher_id
             )
-          `)
-          .eq('classes.class_teacher_id', teacherId),
+          `
+        ).eq('classes.class_teacher_id', teacherId),
           
-        // Query 2: Get subject teaching students
-        supabase
-          .from(TABLES.TEACHER_SUBJECTS)
-          .select(`
+        // Query 2: Get subject teaching students with tenant awareness
+        createTenantQuery(
+          effectiveTenantId,
+          TABLES.TEACHER_SUBJECTS,
+          `
             subjects!inner (
               id,
               name,
@@ -412,14 +516,15 @@ const TeacherChat = () => {
                 )
               )
             )
-          `)
-          .eq('teacher_id', teacherId),
+          `
+        ).eq('teacher_id', teacherId),
           
-        // Query 3: Get ALL parent user accounts in one query
-        supabase
-          .from(TABLES.USERS)
-          .select('id, email, full_name, linked_parent_of')
-          .not('linked_parent_of', 'is', null)
+        // Query 3: Get ALL parent user accounts with tenant awareness
+        createTenantQuery(
+          effectiveTenantId,
+          TABLES.USERS,
+          'id, email, full_name, linked_parent_of'
+        ).not('linked_parent_of', 'is', null)
       ]);
 
       // Build parent-user mapping for instant lookups
@@ -521,31 +626,54 @@ const TeacherChat = () => {
     }
   };
 
-  // Fetch students assigned to the teacher - SUPER OPTIMIZED
+  // Fetch students assigned to the teacher - ENHANCED TENANT VERSION
   const fetchStudents = async () => {
     try {
-      // Get teacher info from users table
-      const { data: userInfo, error: userError } = await supabase
-        .from(TABLES.USERS)
-        .select('linked_teacher_id')
-        .eq('id', user.id)
-        .single();
+      console.log('🚀 [TeacherChat] fetchStudents - Starting with enhanced tenant validation');
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [TeacherChat] Tenant not ready for students fetch:', tenantValidation.reason);
+        if (tenantValidation.reason === 'TENANT_NOT_READY') {
+          // Don't throw error, just use empty array
+          setStudents([]);
+          return;
+        }
+        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [TeacherChat] Using effective tenant ID for students:', effectiveTenantId);
+      
+      // Get teacher info from users table using tenant-aware query
+      const userInfoQuery = createTenantQuery(
+        effectiveTenantId,
+        TABLES.USERS,
+        'linked_teacher_id'
+      ).eq('id', user.id);
+      
+      const { data: userInfo, error: userError } = await userInfoQuery;
 
-      if (userError || !userInfo?.linked_teacher_id) {
+      // Handle array response from createTenantQuery
+      const userRecord = Array.isArray(userInfo) ? userInfo[0] : userInfo;
+      
+      if (userError || !userRecord?.linked_teacher_id) {
         throw new Error('Teacher information not found. Please contact administrator.');
       }
 
-      const teacherId = userInfo.linked_teacher_id;
+      const teacherId = userRecord.linked_teacher_id;
       const uniqueStudents = [];
       const seen = new Set();
       const studentUserMap = new Map(); // Cache for student user accounts
 
-      // SUPER OPTIMIZATION 1: Single query to get ALL students and user accounts at once
+      // SUPER OPTIMIZATION 1: Tenant-aware queries to get ALL students and user accounts at once
       const [classStudentResult, subjectStudentResult, allStudentUsersResult] = await Promise.all([
-        // Get class students
-        supabase
-          .from(TABLES.STUDENTS)
-          .select(`
+        // Get class students with tenant awareness
+        createTenantQuery(
+          effectiveTenantId,
+          TABLES.STUDENTS,
+          `
             id,
             name,
             roll_no,
@@ -556,13 +684,14 @@ const TeacherChat = () => {
               section,
               class_teacher_id
             )
-          `)
-          .eq('classes.class_teacher_id', teacherId),
+          `
+        ).eq('classes.class_teacher_id', teacherId),
           
-        // Get subject students
-        supabase
-          .from(TABLES.TEACHER_SUBJECTS)
-          .select(`
+        // Get subject students with tenant awareness
+        createTenantQuery(
+          effectiveTenantId,
+          TABLES.TEACHER_SUBJECTS,
+          `
             subjects!inner (
               id,
               name,
@@ -577,14 +706,15 @@ const TeacherChat = () => {
                 )
               )
             )
-          `)
-          .eq('teacher_id', teacherId),
+          `
+        ).eq('teacher_id', teacherId),
           
-        // Get ALL student user accounts in one query
-        supabase
-          .from(TABLES.USERS)
-          .select('id, email, full_name, linked_student_id')
-          .not('linked_student_id', 'is', null)
+        // Get ALL student user accounts with tenant awareness
+        createTenantQuery(
+          effectiveTenantId,
+          TABLES.USERS,
+          'id, email, full_name, linked_student_id'
+        ).not('linked_student_id', 'is', null)
       ]);
 
       // Build student-user mapping for instant lookups
@@ -663,12 +793,29 @@ const TeacherChat = () => {
   // Fetch chat messages for selected contact (parent or student)
   const fetchMessages = async (contact) => {
     try {
+      console.log('🚀 [TeacherChat] fetchMessages - Starting with enhanced tenant validation');
+      
       // Don't set loading if this is a refresh call (contact is already selected)
       if (!selectedContact) {
         setLoading(true);
         setSelectedContact(contact);
       }
       setError(null);
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [TeacherChat] Tenant not ready for messages fetch:', tenantValidation.reason);
+        if (tenantValidation.reason === 'TENANT_NOT_READY') {
+          // Don't throw error, just use empty array
+          setMessages([]);
+          return;
+        }
+        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [TeacherChat] Using effective tenant ID for messages:', effectiveTenantId);
 
       // Get the contact's user ID
       const contactUserId = contact.userId || contact.id;
@@ -679,29 +826,29 @@ const TeacherChat = () => {
         let msgs = null;
         let msgError = null;
         
-        // Method 1: OR query (preferred)
-        const query1 = await supabase
-          .from(TABLES.MESSAGES)
-          .select('*')
-          .or(`(sender_id.eq.${user.id},receiver_id.eq.${contactUserId}),(sender_id.eq.${contactUserId},receiver_id.eq.${user.id})`)
-          .order('sent_at', { ascending: true });
+        // Method 1: Tenant-aware OR query (preferred)
+        const query1 = await createTenantQuery(
+          effectiveTenantId,
+          TABLES.MESSAGES
+        ).or(`(sender_id.eq.${user.id},receiver_id.eq.${contactUserId}),(sender_id.eq.${contactUserId},receiver_id.eq.${user.id})`)
+         .order('sent_at', { ascending: true });
           
         if (!query1.error) {
           msgs = query1.data;
         } else {
           
-          // Method 2: Two separate queries and combine
+          // Method 2: Two separate tenant-aware queries and combine
           const [sentMsgs, receivedMsgs] = await Promise.all([
-            supabase
-              .from(TABLES.MESSAGES)
-              .select('*')
-              .eq('sender_id', user.id)
-              .eq('receiver_id', contactUserId),
-            supabase
-              .from(TABLES.MESSAGES)
-              .select('*')
-              .eq('sender_id', contactUserId)
-              .eq('receiver_id', user.id)
+            createTenantQuery(
+              effectiveTenantId,
+              TABLES.MESSAGES
+            ).eq('sender_id', user.id)
+             .eq('receiver_id', contactUserId),
+            createTenantQuery(
+              effectiveTenantId,
+              TABLES.MESSAGES
+            ).eq('sender_id', contactUserId)
+             .eq('receiver_id', user.id)
           ]);
           
           if (!sentMsgs.error && !receivedMsgs.error) {
@@ -921,13 +1068,26 @@ const TeacherChat = () => {
           style: 'destructive',
           onPress: async () => {
             try {
+              console.log('🚀 [TeacherChat] handleDeleteMessage - Starting with enhanced tenant validation');
               setDeletingMessageId(messageId);
+              
+              // Validate tenant readiness
+              const tenantValidation = await validateTenantReadiness();
+              if (!tenantValidation.success) {
+                console.log('⚠️ [TeacherChat] Tenant not ready for message deletion:', tenantValidation.reason);
+                Alert.alert('Error', 'System not ready. Please try again.');
+                return;
+              }
+              
+              const { effectiveTenantId } = tenantValidation;
+              console.log('✅ [TeacherChat] Using effective tenant ID for message deletion:', effectiveTenantId);
               
               const { error: deleteError } = await supabase
                 .from(TABLES.MESSAGES)
                 .delete()
                 .eq('id', messageId)
-                .eq('sender_id', user.id); // Only allow deleting own messages
+                .eq('sender_id', user.id) // Only allow deleting own messages
+                .eq('tenant_id', effectiveTenantId); // Add tenant filtering
               
               if (deleteError) {
                 Alert.alert('Error', 'Failed to delete message');
@@ -1010,10 +1170,26 @@ const TeacherChat = () => {
         );
         
         if (uploadResult.success) {
-          // Save to database
+          // Save to database with tenant awareness
+          console.log('🚀 [TeacherChat] Saving photo message to database with enhanced tenant validation');
+          
+          // Validate tenant readiness
+          const tenantValidation = await validateTenantReadiness();
+          if (!tenantValidation.success) {
+            throw new Error('Tenant validation failed for photo message: ' + tenantValidation.reason);
+          }
+          
+          const { effectiveTenantId } = tenantValidation;
+          
+          // Add tenant ID to message data
+          const messageDataWithTenant = {
+            ...uploadResult.messageData,
+            tenant_id: effectiveTenantId
+          };
+          
           const { data: insertedMsg, error: sendError } = await supabase
             .from('messages')
-            .insert(uploadResult.messageData)
+            .insert(messageDataWithTenant)
             .select();
             
           if (!sendError && insertedMsg?.[0]) {
@@ -1106,10 +1282,26 @@ const TeacherChat = () => {
         );
         
         if (uploadResult.success) {
-          // Save to database
+          // Save to database with tenant awareness
+          console.log('🚀 [TeacherChat] Saving document message to database with enhanced tenant validation');
+          
+          // Validate tenant readiness
+          const tenantValidation = await validateTenantReadiness();
+          if (!tenantValidation.success) {
+            throw new Error('Tenant validation failed for document message: ' + tenantValidation.reason);
+          }
+          
+          const { effectiveTenantId } = tenantValidation;
+          
+          // Add tenant ID to message data
+          const messageDataWithTenant = {
+            ...uploadResult.messageData,
+            tenant_id: effectiveTenantId
+          };
+          
           const { data: insertedMsg, error: sendError } = await supabase
             .from('messages')
-            .insert(uploadResult.messageData)
+            .insert(messageDataWithTenant)
             .select();
             
           if (!sendError && insertedMsg?.[0]) {

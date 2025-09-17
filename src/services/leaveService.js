@@ -1,5 +1,6 @@
-import { supabase, dbHelpers, getUserTenantId, TABLES, tenantHelpers } from '../utils/supabase';
-import { getCurrentUserTenantByEmail } from '../utils/getTenantByEmail';
+// 🚀 ENHANCED: Updated imports for enhanced tenant system
+import { supabase, TABLES } from '../utils/supabase';
+import { tenantDatabase, createTenantQuery, getCachedTenantId } from '../utils/tenantHelpers';
 import { format } from 'date-fns';
 
 /**
@@ -9,58 +10,74 @@ import { format } from 'date-fns';
  */
 
 class LeaveService {
+  // 🚀 ENHANCED: Tenant validation helper for service methods
+  async validateTenantReadiness() {
+    try {
+      const tenantId = getCachedTenantId();
+      
+      if (!tenantId) {
+        console.error('❌ LeaveService: Cached tenant ID not available');
+        return {
+          isValid: false,
+          error: 'Tenant system not ready. Please try again in a moment.'
+        };
+      }
+      
+      console.log('✅ LeaveService: Tenant validation successful:', tenantId);
+      return {
+        isValid: true,
+        tenantId
+      };
+    } catch (error) {
+      console.error('❌ LeaveService: Tenant validation error:', error);
+      return {
+        isValid: false,
+        error: 'Tenant validation failed. Please contact support.'
+      };
+    }
+  }
+
   /**
    * Submit a new leave application
    * @param {Object} leaveData - Leave application data
    * @returns {Object} Response with success status and data
    */
+  // 🚀 ENHANCED: Use tenant validation and tenantDatabase helper
   async submitLeaveApplication(leaveData) {
     const startTime = performance.now();
     
     try {
-      console.log('🚀 LeaveService: Starting submitLeaveApplication...');
+      console.log('🚀 Enhanced LeaveService: Starting submitLeaveApplication...');
       
-      // Get tenant ID with email fallback
-      let tenantId = await getUserTenantId();
-      
-      if (!tenantId) {
-        console.log('⚠️ LeaveService: No tenant from getUserTenantId, trying email lookup...');
-        
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          tenantId = emailTenant?.id;
-          console.log('📧 LeaveService: Email-based tenant ID:', tenantId);
-        } catch (emailError) {
-          console.error('❌ LeaveService: Email tenant lookup failed:', emailError);
-        }
-        
-        if (!tenantId) {
-          throw new Error('Tenant context required for leave application. Please contact support.');
-        }
+      // ✨ Validate tenant readiness
+      const { isValid, tenantId, error: validationError } = await this.validateTenantReadiness();
+      if (!isValid) {
+        return {
+          success: false,
+          error: validationError,
+          message: 'Failed to submit leave application'
+        };
       }
 
-      // Add tenant_id to the leave data
-      const leaveWithTenant = {
-        ...leaveData,
-        tenant_id: tenantId
-      };
+      // 🚀 ENHANCED: Use tenantDatabase.create for automatic tenant isolation
+      console.log('💾 Enhanced LeaveService: Creating leave application via tenantDatabase...');
+      const { data, error } = await tenantDatabase.create(
+        TABLES.LEAVE_APPLICATIONS,
+        leaveData
+      );
 
-      const { data, error } = await supabase
-        .from(TABLES.LEAVE_APPLICATIONS)
-        .insert([leaveWithTenant])
-        .select(`
-          *,
-          teacher:teachers!leave_applications_teacher_id_fkey(id, name),
-          applied_by_user:users!leave_applications_applied_by_fkey(id, full_name)
-        `)
-        .single();
-
-      if (error) throw error;
+      if (error) {
+        throw new Error(`Failed to create leave application record: ${error.message}`);
+      }
+      
+      if (!data) {
+        throw new Error('Failed to create leave application record');
+      }
       
       // 📊 Performance monitoring
       const endTime = performance.now();
       const submitTime = Math.round(endTime - startTime);
-      console.log(`✅ LeaveService: Leave submitted in ${submitTime}ms`);
+      console.log(`✅ Enhanced LeaveService: Leave submitted in ${submitTime}ms`);
 
       return {
         success: true,
@@ -68,7 +85,7 @@ class LeaveService {
         message: 'Leave application submitted successfully'
       };
     } catch (error) {
-      console.error('❌ LeaveService: Error submitting leave application:', error.message);
+      console.error('❌ Enhanced LeaveService: Error submitting leave application:', error.message);
       return {
         success: false,
         error: error.message,
@@ -82,41 +99,33 @@ class LeaveService {
    * @param {Object} filters - Filter criteria
    * @returns {Object} Response with leave applications
    */
+  // 🚀 ENHANCED: Use tenant validation and createTenantQuery helper
   async getLeaveApplications(filters = {}) {
     const startTime = performance.now();
     
     try {
-      console.log('🚀 LeaveService: Starting getLeaveApplications...');
+      console.log('🚀 Enhanced LeaveService: Starting getLeaveApplications...');
       
-      // Get tenant ID with email fallback
-      let tenantId = await getUserTenantId();
-      
-      if (!tenantId) {
-        console.log('⚠️ LeaveService: No tenant from getUserTenantId, trying email lookup...');
-        
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          tenantId = emailTenant?.id;
-          console.log('📧 LeaveService: Email-based tenant ID:', tenantId);
-        } catch (emailError) {
-          console.error('❌ LeaveService: Email tenant lookup failed:', emailError);
-        }
-        
-        if (!tenantId) {
-          throw new Error('Tenant context required to fetch leave applications. Please contact support.');
-        }
+      // ✨ Validate tenant readiness
+      const { isValid, tenantId, error: validationError } = await this.validateTenantReadiness();
+      if (!isValid) {
+        return {
+          success: false,
+          error: validationError,
+          message: 'Failed to fetch leave applications'
+        };
       }
 
-      let query = supabase
-        .from(TABLES.LEAVE_APPLICATIONS)
-        .select(`
-          *,
-          teacher:teachers!leave_applications_teacher_id_fkey(id, name),
-          applied_by_user:users!leave_applications_applied_by_fkey(id, full_name),
-          reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name),
-          replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
-        `)
-        .eq('tenant_id', tenantId); // Add tenant filtering
+      // 🚀 ENHANCED: Use createTenantQuery for automatic tenant filtering
+      console.log('📊 Enhanced LeaveService: Creating tenant-aware query...');
+      let query = createTenantQuery(tenantId, TABLES.LEAVE_APPLICATIONS, `
+        *,
+        teacher:teachers!leave_applications_teacher_id_fkey(id, name),
+        applied_by_user:users!leave_applications_applied_by_fkey(id, full_name),
+        reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name),
+        replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
+      `);
+        // Note: tenant_id filtering is handled automatically by createTenantQuery
 
       // Apply filters
       if (filters.teacher_id) {
@@ -150,7 +159,7 @@ class LeaveService {
       // 📊 Performance monitoring
       const endTime = performance.now();
       const fetchTime = Math.round(endTime - startTime);
-      console.log(`✅ LeaveService: Leave applications fetched in ${fetchTime}ms`);
+      console.log(`✅ Enhanced LeaveService: Leave applications fetched in ${fetchTime}ms`);
 
       return {
         success: true,
@@ -158,7 +167,7 @@ class LeaveService {
         message: 'Leave applications retrieved successfully'
       };
     } catch (error) {
-      console.error('❌ LeaveService: Error fetching leave applications:', error.message);
+      console.error('❌ Enhanced LeaveService: Error fetching leave applications:', error.message);
       return {
         success: false,
         error: error.message,
@@ -173,12 +182,25 @@ class LeaveService {
    * @param {Object} updateData - Update data including status and admin remarks
    * @returns {Object} Response with success status
    */
+  // 🚀 ENHANCED: Use tenant validation and tenantDatabase helper
   async updateLeaveStatus(applicationId, updateData) {
     try {
+      console.log('🚀 Enhanced LeaveService: Starting updateLeaveStatus...');
+      
       // Get current user for reviewed_by field
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         throw new Error('User not authenticated');
+      }
+      
+      // ✨ Validate tenant readiness
+      const { isValid, tenantId, error: validationError } = await this.validateTenantReadiness();
+      if (!isValid) {
+        return {
+          success: false,
+          error: validationError,
+          message: 'Failed to update leave application status'
+        };
       }
 
       const updatePayload = {
@@ -188,25 +210,23 @@ class LeaveService {
         updated_at: new Date().toISOString()
       };
 
-      // Ensure we only update within the current tenant
-      const tenantId = await getUserTenantId();
-      if (!tenantId) {
-        throw new Error('Tenant context required to update leave application');
-      }
-
-      const { data, error } = await supabase
-        .from(TABLES.LEAVE_APPLICATIONS)
-        .update(updatePayload)
-        .eq('id', applicationId)
-        .eq('tenant_id', tenantId)
-        .select(`
+      // 🚀 ENHANCED: Use tenantDatabase.update for automatic tenant isolation
+      console.log('💾 Enhanced LeaveService: Updating via tenantDatabase...');
+      const data = await tenantDatabase.update(
+        TABLES.LEAVE_APPLICATIONS,
+        updatePayload,
+        { id: applicationId },
+        tenantId,
+        `
           *,
           teacher:teachers!leave_applications_teacher_id_fkey(id, name),
           reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name)
-        `)
-        .single();
+        `
+      );
 
-      if (error) throw error;
+      if (!data) {
+        throw new Error('Failed to update leave application status');
+      }
 
       return {
         success: true,

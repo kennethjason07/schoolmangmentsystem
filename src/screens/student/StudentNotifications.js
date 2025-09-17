@@ -5,12 +5,11 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { 
-  validateTenantAccess, 
-  createTenantQuery, 
-  validateDataTenancy,
-  TENANT_ERROR_MESSAGES 
-} from '../../utils/tenantValidation';
-import { useTenantContext } from '../../contexts/TenantContext';
+  useTenantAccess,
+  tenantDatabase,
+  createTenantQuery,
+  getCachedTenantId
+} from '../../utils/tenantHelpers';
 import Header from '../../components/Header';
 import universalNotificationService from '../../services/UniversalNotificationService';
 import { webScrollViewStyles, getWebScrollProps, webContainerStyle, injectScrollbarStyles } from '../../styles/webScrollFix';
@@ -24,7 +23,9 @@ const FILTERS = [
 
 const StudentNotifications = ({ navigation }) => {
   const { user } = useAuth();
-  const { tenantId } = useTenantContext();
+  // 🚀 ENHANCED: Use enhanced tenant system
+  const { tenantId, isReady, error: tenantError } = useTenantAccess();
+  
   const [notifications, setNotifications] = useState([]);
   const flatListRef = useRef(null);
   const [filter, setFilter] = useState('all');
@@ -32,6 +33,15 @@ const StudentNotifications = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+
+  // 🚀 ENHANCED: Tenant validation helper
+  const validateTenant = async () => {
+    const cachedTenantId = await getCachedTenantId();
+    if (!cachedTenantId) {
+      throw new Error('Tenant context not available');
+    }
+    return { valid: true, tenantId: cachedTenantId };
+  };
 
   // Initialize web scroll styles on mount
   useEffect(() => {

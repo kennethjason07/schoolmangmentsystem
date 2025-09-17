@@ -7,12 +7,11 @@ import * as Sharing from 'expo-sharing';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { 
-  validateTenantAccess, 
-  createTenantQuery, 
-  validateDataTenancy,
-  TENANT_ERROR_MESSAGES 
-} from '../../utils/tenantValidation';
-import { useTenantContext } from '../../contexts/TenantContext';
+  useTenantAccess,
+  tenantDatabase,
+  createTenantQuery,
+  getCachedTenantId
+} from '../../utils/tenantHelpers';
 import Header from '../../components/Header';
 
 // Helper function to get grade color
@@ -39,6 +38,8 @@ const getLetterGrade = (percentage) => {
 
 export default function StudentMarks({ navigation }) {
   const { user } = useAuth();
+  // 🚀 ENHANCED: Use enhanced tenant system
+  const { tenantId, isReady, error: tenantError } = useTenantAccess();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [marksData, setMarksData] = useState([]);
@@ -48,32 +49,63 @@ export default function StudentMarks({ navigation }) {
   const [studentInfo, setStudentInfo] = useState(null);
   const [schoolDetails, setSchoolDetails] = useState(null);
 
+  // 🚀 ENHANCED: Tenant validation helper
+  const validateTenant = async () => {
+    const cachedTenantId = await getCachedTenantId();
+    if (!cachedTenantId) {
+      throw new Error('Tenant context not available');
+    }
+    return { valid: true, tenantId: cachedTenantId };
+  };
+
+  // 🚀 ENHANCED: Wait for both user and tenant readiness
   useEffect(() => {
-    if (user) {
+    console.log('🚀 Enhanced StudentMarks useEffect triggered');
+    console.log('🚀 User state:', user);
+    console.log('🚀 Tenant ready:', isReady);
+    if (user && isReady) {
+      console.log('🚀 User and tenant ready, starting enhanced marks data fetch...');
       fetchMarksData();
       fetchSchoolDetails();
+    } else {
+      console.log('⚠️ Waiting for user and tenant context...');
     }
-  }, [user]);
+  }, [user, isReady]);
 
   const fetchSchoolDetails = async () => {
     try {
-      const { data, error } = await supabase
-        .from(TABLES.SCHOOL_DETAILS)
-        .select('*')
-        .single();
+      // 🚀 ENHANCED: Use tenant validation and helpers
+      const { valid, tenantId: effectiveTenantId } = await validateTenant();
+      if (!valid) {
+        console.error('❌ Tenant validation failed for school details');
+        return;
+      }
+
+      const schoolQuery = await tenantDatabase.read({
+        table: TABLES.SCHOOL_DETAILS,
+        select: '*',
+        single: true,
+        tenantId: effectiveTenantId
+      });
       
-      if (error) throw error;
-      setSchoolDetails(data);
+      if (schoolQuery.data && !schoolQuery.error) {
+        setSchoolDetails(schoolQuery.data);
+        console.log('✅ Enhanced tenant-aware school details loaded');
+      }
     } catch (err) {
       console.error('Error fetching school details:', err);
       // Don't set error state here to avoid blocking marks display
     }
   };
 
-  // Set up real-time subscriptions for marks updates
+  // 🚀 ENHANCED: Set up real-time subscriptions with tenant readiness
   useEffect(() => {
-    if (!user) return;
+    if (!user || !isReady) {
+      console.log('⚠️ Real-time subscriptions waiting for user and tenant readiness');
+      return;
+    }
 
+    console.log('🚀 Setting up enhanced tenant-aware real-time subscriptions');
     const subscriptions = [];
 
     // Subscribe to marks changes
@@ -84,7 +116,7 @@ export default function StudentMarks({ navigation }) {
         schema: 'public',
         table: TABLES.MARKS
       }, (payload) => {
-        console.log('Marks change detected:', payload);
+        console.log('🚀 Marks change detected:', payload);
         // Refresh data when marks are updated
         fetchMarksData();
       })
@@ -100,7 +132,7 @@ export default function StudentMarks({ navigation }) {
         schema: 'public',
         table: TABLES.EXAMS
       }, (payload) => {
-        console.log('Exams change detected:', payload);
+        console.log('🚀 Exams change detected:', payload);
         // Refresh data when exams are updated
         fetchMarksData();
       })
@@ -114,23 +146,47 @@ export default function StudentMarks({ navigation }) {
         supabase.removeChannel(subscription);
       });
     };
-  }, [user]);
+  }, [user, isReady]);
 
   const fetchMarksData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      console.log('=== FETCHING MARKS DATA ===');
+      console.log('🚀 === ENHANCED MARKS DATA FETCH ===');
       console.log('User ID:', user.id);
 
-      // Get student data
-      const { data: studentUserData, error: studentError } = await dbHelpers.getStudentByUserId(user.id);
-      if (studentError || !studentUserData) {
-        throw new Error('Student data not found');
+      // 🚀 ENHANCED: Validate tenant access
+      const { valid, tenantId: effectiveTenantId } = await validateTenant();
+      if (!valid) {
+        console.error('❌ Tenant validation failed');
+        setError('Tenant context not available');
+        return;
       }
 
-      const student = studentUserData.students;
+      console.log('🚀 Using effective tenant ID:', effectiveTenantId);
+
+      // Get student data using enhanced tenant query via users table
+      const userQuery = createTenantQuery(effectiveTenantId, TABLES.USERS)
+        .select(`
+          id,
+          email,
+          linked_student_id,
+          students!users_linked_student_id_fkey(
+            *,
+            classes(class_name, section)
+          )
+        `)
+        .eq('email', user.email)
+        .single();
+
+      const { data: userData, error: userError } = await userQuery;
+      if (userError || !userData || !userData.linked_student_id) {
+        console.error('Student data error:', userError);
+        throw new Error('Student data not found or user not linked to student');
+      }
+
+      const student = userData.students;
       if (!student) {
         throw new Error('Student profile not found');
       }
@@ -146,11 +202,10 @@ export default function StudentMarks({ navigation }) {
         gender: student.gender || 'N/A',
         address: student.address || 'N/A'
       });
-      console.log('Student data:', { id: student.id, class_id: student.class_id });
+      console.log('🚀 Enhanced tenant-aware student data:', { id: student.id, class_id: student.class_id });
 
-      // Get marks data with correct field names
-      const { data: marks, error: marksError } = await supabase
-        .from(TABLES.MARKS)
+      // Get marks data using enhanced tenant query
+      const marksQuery = createTenantQuery(effectiveTenantId, TABLES.MARKS)
         .select(`
           *,
           exams(
@@ -169,6 +224,8 @@ export default function StudentMarks({ navigation }) {
         `)
         .eq('student_id', student.id)
         .order('created_at', { ascending: false });
+
+      const { data: marks, error: marksError } = await marksQuery;
 
       console.log('Marks query result:', { marks, marksError });
 
@@ -260,11 +317,10 @@ export default function StudentMarks({ navigation }) {
 
       setMarksData(processedMarks);
 
-      // Get upcoming exams for this student's class
+      // Get upcoming exams using enhanced tenant system
       try {
         const today = new Date().toISOString().split('T')[0];
-        const { data: upcomingExams, error: examsError } = await supabase
-          .from(TABLES.EXAMS)
+        const examsQuery = createTenantQuery(effectiveTenantId, TABLES.EXAMS)
           .select(`
             id,
             name,
@@ -279,6 +335,8 @@ export default function StudentMarks({ navigation }) {
           .order('start_date', { ascending: true })
           .limit(5);
 
+        const { data: upcomingExams, error: examsError } = await examsQuery;
+
         if (!examsError && upcomingExams) {
           console.log('Upcoming exams:', upcomingExams);
         }
@@ -286,16 +344,17 @@ export default function StudentMarks({ navigation }) {
         console.log('Upcoming exams fetch error:', examsErr);
       }
 
-      // Get class averages for comparison - fixed query
+      // Get class averages for comparison using enhanced tenant system
       try {
-        const { data: classMarks, error: classMarksError } = await supabase
-          .from(TABLES.MARKS)
+        const classMarksQuery = createTenantQuery(effectiveTenantId, TABLES.MARKS)
           .select(`
             marks_obtained,
             max_marks,
             subject_id,
             exam_id
           `);
+
+        const { data: classMarks, error: classMarksError } = await classMarksQuery;
 
         if (!classMarksError && classMarks && classMarks.length > 0) {
           console.log('Class marks for comparison:', classMarks.length, 'records');
@@ -827,7 +886,11 @@ export default function StudentMarks({ navigation }) {
     }
   };
 
-  if (loading) {
+  // 🚀 ENHANCED: Show tenant loading states
+  if (!isReady || loading) {
+    const loadingText = !isReady ? 'Initializing secure tenant context...' : 'Loading marks data...';
+    const subText = !isReady ? 'Setting up secure access to your academic records' : 'Please wait while we fetch your marks';
+    
     return (
       <View style={styles.container}>
         <Header 
@@ -837,15 +900,20 @@ export default function StudentMarks({ navigation }) {
           studentInfo={studentInfo}
           onRefresh={() => refreshData(true)}
         />
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={[styles.loadingContainer, { padding: 20 }]}>
           <ActivityIndicator size="large" color="#9C27B0" />
-          <Text style={styles.loadingText}>Loading marks...</Text>
+          <Text style={styles.loadingText}>{loadingText}</Text>
+          <Text style={styles.loadingSubText}>{subText}</Text>
         </View>
       </View>
     );
   }
 
-  if (error) {
+  // 🚀 ENHANCED: Show enhanced error states with tenant context
+  if (error || tenantError) {
+    const errorMessage = tenantError || error;
+    const isTenantError = !!tenantError;
+    
     return (
       <View style={styles.container}>
         <Header 
@@ -855,10 +923,20 @@ export default function StudentMarks({ navigation }) {
           studentInfo={studentInfo}
           onRefresh={() => refreshData(true)}
         />
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={[styles.errorContainer, { padding: 20 }]}>
           <Ionicons name="alert-circle" size={48} color="#F44336" />
-          <Text style={styles.errorText}>Failed to load marks</Text>
+          <Text style={styles.errorTitle}>
+            {isTenantError ? 'Tenant Access Error' : 'Failed to Load Marks'}
+          </Text>
+          <Text style={styles.errorText}>{errorMessage}</Text>
+          {isTenantError && (
+            <View style={styles.tenantErrorInfo}>
+              <Text style={styles.tenantErrorText}>Tenant ID: {tenantId || 'Not available'}</Text>
+              <Text style={styles.tenantErrorText}>Status: {isReady ? 'Ready' : 'Not Ready'}</Text>
+            </View>
+          )}
           <TouchableOpacity style={styles.retryButton} onPress={fetchMarksData}>
+            <Ionicons name="refresh" size={20} color="#fff" style={{ marginRight: 8 }} />
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -1257,22 +1335,72 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     marginTop: 4,
   },
+  // 🚀 ENHANCED: Loading and error state styles
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   loadingText: {
-    fontSize: 16,
+    fontSize: 18,
+    color: '#9C27B0',
+    marginTop: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  loadingSubText: {
+    fontSize: 14,
     color: '#666',
-    marginTop: 12,
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorTitle: {
+    fontSize: 20,
+    color: '#F44336',
+    fontWeight: 'bold',
+    marginTop: 16,
+    textAlign: 'center',
   },
   errorText: {
     fontSize: 16,
-    color: '#F44336',
+    color: '#666',
     textAlign: 'center',
+    marginTop: 8,
     marginBottom: 20,
+    paddingHorizontal: 20,
+  },
+  tenantErrorInfo: {
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+  },
+  tenantErrorText: {
+    fontSize: 14,
+    color: '#495057',
+    textAlign: 'center',
+    marginVertical: 2,
   },
   retryButton: {
     backgroundColor: '#9C27B0',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
   },
   retryButtonText: {
     color: '#fff',

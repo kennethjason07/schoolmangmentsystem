@@ -136,6 +136,7 @@ const ParentViewHomework = ({ navigation }) => {
     };
   }, [authLoading, parentLoading, isParent, parentError, user, selectedStudent, parentStudents]);
 
+  // 🚀 ENHANCED: Updated fetchHomework to use enhanced tenant system
   const fetchHomework = async () => {
     try {
       setLoading(true);
