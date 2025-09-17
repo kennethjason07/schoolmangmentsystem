@@ -31,6 +31,7 @@ import { calculateStudentFees } from '../../utils/feeCalculation';
 import FeeService from '../../services/FeeService';
 import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
 import { useAuth } from '../../utils/AuthContext';
+import { FeeManagementOptimizer, loadFeeDataInBackground } from '../../utils/feeManagementOptimizations';
 import { 
   getOptimizedFeeManagementData, 
   calculateOptimizedClassPaymentStats, 
@@ -38,6 +39,11 @@ import {
   getOrganizedFeeStructures,
   clearFeeCache 
 } from '../../utils/optimizedFeeHelpers';
+import { 
+  sortFeeStructuresByClass, 
+  sortClassStatsByClass,
+  sortClassesNaturally
+} from '../../utils/classSortingUtils';
 
 const FeeManagement = () => {
   const navigation = useNavigation();
@@ -93,11 +99,14 @@ const FeeManagement = () => {
   });
   const [optimizedData, setOptimizedData] = useState(null);
   const [useOptimizedQueries, setUseOptimizedQueries] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState({ step: 0, message: '' });
   
   
   // UPI Payment Verification state
   const [pendingUPIPayments, setPendingUPIPayments] = useState([]);
   const [upiLoading, setUpiLoading] = useState(false);
+  
+  
 
   // Add safe date formatting function at the top
   const formatSafeDate = (dateValue) => {
@@ -720,41 +729,81 @@ const FeeManagement = () => {
       setLoading(true);
       setRefreshing(true);
 
-      if (useOptimizedQueries) {
-        // Use optimized helper functions
-        const processedData = await getOptimizedFeeManagementData(tenantId, user);
-        setOptimizedData(processedData);
-        
-        // Set organized data for UI compatibility
-        setClasses(Array.from(processedData.classesMap.values()));
-        setFeeStructures(getOrganizedFeeStructures(processedData));
-        setStudents(Array.from(processedData.studentsMap.values()).map(student => ({
-          ...student,
-          full_name: student.name
-        })));
-        setPayments(getRecentPayments(processedData, 50));
-        
-        // Calculate statistics using optimized methods
-        const statsResult = await calculateOptimizedClassPaymentStats(processedData);
-        setClassPaymentStats(statsResult.classStats);
-        setPaymentSummary(statsResult.summary);
-        
-        // Calculate basic fee stats
-        const totalDue = statsResult.summary.totalDue;
-        const totalPaid = statsResult.summary.totalCollected;
-        const pendingStudents = statsResult.classStats.reduce((sum, cls) => sum + cls.studentsWithoutPayments, 0);
-        setFeeStats({ totalDue, totalPaid, pendingStudents });
-      } else {
-        // Fallback to original method if optimized queries fail
-        await loadAllDataOriginal();
+      // Use new optimized loader with progress
+      console.log('🚀 FeeManagement: Using optimized data loader');
+      setLoadingProgress({ step: 1, message: 'Initializing...' });
+      
+      const optimizedData = await loadFeeDataInBackground(tenantId, user, (progress) => {
+        setLoadingProgress(progress);
+      });
+      
+      // Set all data from optimized loader
+      console.log('🏗️ Setting optimized data:', {
+        classes: optimizedData.classes?.length || 0,
+        feeStructures: optimizedData.feeStructures?.length || 0,
+        students: optimizedData.students?.length || 0,
+        payments: optimizedData.payments?.length || 0,
+        classStats: optimizedData.classStats?.length || 0
+      });
+      
+      console.log('📋 Fee structures being set:', optimizedData.feeStructures);
+      
+      setClasses(optimizedData.classes);
+      setFeeStructures(optimizedData.feeStructures);
+      setStudents(optimizedData.students.map(student => ({
+        ...student,
+        full_name: student.name
+      })));
+      setPayments(optimizedData.payments);
+      setClassPaymentStats(optimizedData.classStats);
+      setPaymentSummary(optimizedData.summary);
+      
+      // Calculate basic fee stats
+      const totalDue = optimizedData.summary.totalDue;
+      const totalPaid = optimizedData.summary.totalCollected;
+      const pendingStudents = optimizedData.classStats.reduce((sum, cls) => sum + cls.studentsWithoutPayments, 0);
+      setFeeStats({ totalDue, totalPaid, pendingStudents });
+      
+      console.log('✅ FeeManagement: Optimized data loaded successfully');
+      
+      // If no fee structures found, do a direct database check
+      if (optimizedData.feeStructures.length === 0) {
+        console.log('🔍 No fee structures found, checking database directly...');
+        try {
+          const { data: directCheck, error: directError } = await supabase
+            .from(TABLES.FEE_STRUCTURE)
+            .select('id, class_id, fee_component, amount')
+            .eq('tenant_id', tenantId)
+            .limit(10);
+          
+          if (directError) {
+            console.error('❌ Direct database check failed:', directError);
+          } else {
+            console.log('📊 Direct database check results:', {
+              found: directCheck?.length || 0,
+              sample: directCheck?.[0] || null
+            });
+            
+            if (directCheck && directCheck.length > 0) {
+              console.warn('⚠️ Fee structures exist in database but not loaded by query!');
+            } else {
+              console.log('📝 No fee structures exist in database for this tenant.');
+            }
+          }
+        } catch (directCheckError) {
+          console.error('❌ Error during direct database check:', directCheckError);
+        }
       }
+      
 
     } catch (error) {
-      if (useOptimizedQueries) {
-        setUseOptimizedQueries(false);
-        return loadAllData(); // Retry with original method
-      } else {
-        Alert.alert('Error', `Failed to load fee data: ${error.message}`);
+      console.error('❌ FeeManagement: Optimized loading failed, trying fallback:', error);
+      try {
+        // Fallback to original method
+        await loadAllDataOriginal();
+      } catch (fallbackError) {
+        console.error('❌ FeeManagement: Fallback also failed:', fallbackError);
+        Alert.alert('Error', `Failed to load fee data: ${fallbackError.message}`);
       }
     } finally {
       setLoading(false);
@@ -822,9 +871,11 @@ const FeeManagement = () => {
       });
     });
     
-    // Convert grouped object to array
+    // Convert grouped object to array and sort by class order
     const processedFeeStructures = Object.values(groupedByClass);
-    setFeeStructures(processedFeeStructures);
+    const sortedFeeStructures = sortFeeStructuresByClass(processedFeeStructures);
+    console.log('📋 Fallback method - sorted fee structures:', sortedFeeStructures.map(f => f.name));
+    setFeeStructures(sortedFeeStructures);
 
     // Process students data - optimized mapping
     const mappedStudents = (studentsData || []).map(student => ({
@@ -856,6 +907,7 @@ const FeeManagement = () => {
     // Calculate class-wise payment statistics (now optimized)
     await calculateClassPaymentStats();
   };
+  
 
   // Handle fee operations (add/edit)
   const handleFeeOperation = async (operation, feeData) => {
@@ -1320,6 +1372,22 @@ const FeeManagement = () => {
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1976d2" />
+          {loadingProgress.step > 0 && (
+            <View style={styles.progressContainer}>
+              <Text style={styles.progressText}>{loadingProgress.message}</Text>
+              <View style={styles.progressBar}>
+                <View 
+                  style={[
+                    styles.progressFill, 
+                    { width: `${(loadingProgress.step / 4) * 100}%` }
+                  ]} 
+                />
+              </View>
+              <Text style={styles.progressStepText}>
+                Step {loadingProgress.step} of 4
+              </Text>
+            </View>
+          )}
         </View>
       ) : (
         <View style={styles.mainContainer}>
@@ -1383,56 +1451,72 @@ const FeeManagement = () => {
             >
               {tab === 'structure' && (
               <View style={styles.structureContent}>
-                {feeStructures.map((classData) => (
-                  <View key={classData.classId} style={styles.classCard}>
-                    {/* Class Header */}
-                    <View style={styles.classHeader}>
-                      <Text style={styles.className}>{classData.name}</Text>
-                    </View>
-
-                    {/* Fee Items */}
-                    {classData.fees && classData.fees.map((fee, index) => (
-                      <TouchableOpacity 
-                        key={index} 
-                        style={styles.feeItemCard}
-                        onPress={() => openFeeModal(classData.classId, fee)}
-                        activeOpacity={0.7}
-                      >
-                        <View style={styles.feeItemContent}>
-                          <View style={styles.feeItemLeft}>
-                            <Text style={styles.feeItemTitle}>
-                              {fee.type || fee.fee_component || 'Unknown Fee'}
-                            </Text>
-                            <View style={styles.feeAmountContainer}>
-                              <Text style={styles.feeBaseAmount}>Base: {formatSafeCurrency(fee.amount)}</Text>
-                              {/* TODO: Show discounted amount if different */}
-                            </View>
-                            <Text style={styles.feeItemDescription}>
-                              {fee.description || fee.fee_component || 'No description'}
-                            </Text>
-                            <View style={styles.feeItemDate}>
-                              <Ionicons name="calendar-outline" size={14} color="#1976d2" />
-                              <Text style={styles.feeItemDateText}>
-                                Due: {formatSafeDate(fee.due_date)}
-                              </Text>
-                            </View>
-                          </View>
-                          <View style={styles.feeItemActions}>
-                            <TouchableOpacity 
-                              style={styles.feeActionButton}
-                              onPress={(e) => {
-                                e.stopPropagation();
-                                handleDeleteFee(fee);
-                              }}
-                            >
-                              <Ionicons name="trash-outline" size={18} color="#FF6B6B" />
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      </TouchableOpacity>
-                    ))}
+                {feeStructures.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <Ionicons name="school-outline" size={48} color="#ccc" />
+                    <Text style={styles.noDataText}>No fee structures found</Text>
+                    <Text style={styles.emptySubtext}>
+                      Use the + button below to create fee structures for your classes
+                    </Text>
                   </View>
-                ))}
+                ) : (
+                  feeStructures.map((classData) => (
+                    <View key={classData.classId} style={styles.classCard}>
+                      {/* Class Header */}
+                      <View style={styles.classHeader}>
+                        <Text style={styles.className}>{classData.name}</Text>
+                      </View>
+
+                      {/* Fee Items */}
+                      {classData.fees && classData.fees.length > 0 ? (
+                        classData.fees.map((fee, index) => (
+                          <TouchableOpacity 
+                            key={fee.id || `fee-${classData.classId}-${index}`} 
+                            style={styles.feeItemCard}
+                            onPress={() => openFeeModal(classData.classId, fee)}
+                            activeOpacity={0.7}
+                          >
+                            <View style={styles.feeItemContent}>
+                              <View style={styles.feeItemLeft}>
+                                <Text style={styles.feeItemTitle}>
+                                  {fee.type || fee.fee_component || 'Unknown Fee'}
+                                </Text>
+                                <View style={styles.feeAmountContainer}>
+                                  <Text style={styles.feeBaseAmount}>Base: {formatSafeCurrency(fee.amount)}</Text>
+                                  {/* TODO: Show discounted amount if different */}
+                                </View>
+                                <Text style={styles.feeItemDescription}>
+                                  {fee.description || fee.fee_component || 'No description'}
+                                </Text>
+                                <View style={styles.feeItemDate}>
+                                  <Ionicons name="calendar-outline" size={14} color="#1976d2" />
+                                  <Text style={styles.feeItemDateText}>
+                                    Due: {formatSafeDate(fee.due_date)}
+                                  </Text>
+                                </View>
+                              </View>
+                              <View style={styles.feeItemActions}>
+                                <TouchableOpacity 
+                                  style={styles.feeActionButton}
+                                  onPress={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteFee(fee);
+                                  }}
+                                >
+                                  <Ionicons name="trash-outline" size={18} color="#FF6B6B" />
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          </TouchableOpacity>
+                        ))
+                      ) : (
+                        <View style={styles.emptyFeesContainer}>
+                          <Text style={styles.emptyFeesText}>No fees configured for this class</Text>
+                        </View>
+                      )}
+                    </View>
+                  ))
+                )}
                 {/* Add bottom padding to ensure last card is fully visible */}
                 <View style={styles.bottomSpacer} />
               </View>
@@ -1471,7 +1555,7 @@ const FeeManagement = () => {
                   {classPaymentStats.length === 0 ? (
                     <Text style={styles.noDataText}>No payment data available</Text>
                   ) : (
-                    classPaymentStats.map((classData, index) => (
+                    sortClassStatsByClass(classPaymentStats).map((classData, index) => (
                       <TouchableOpacity
                         key={classData.classId}
                         style={styles.classStatCard}
@@ -1535,7 +1619,7 @@ const FeeManagement = () => {
                 <View style={styles.recentPaymentsContainer}>
                   <Text style={styles.sectionTitle}>Recent Payments</Text>
                   {payments.slice(0, 20).map((item, index) => (
-                    <View key={item.id} style={styles.paymentItem}>
+                    <View key={item.id || `payment-${index}`} style={styles.paymentItem}>
                       <View style={styles.paymentItemLeft}>
                         <Text style={styles.paymentStudentName}>{item.students?.full_name || 'Unknown Student'}</Text>
                         <Text style={styles.paymentFeeType}>{item.fee_structure?.fee_component || item.fee_component || 'Unknown Fee'}</Text>
@@ -1922,6 +2006,37 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
+  },
+  progressContainer: {
+    marginTop: 20,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 300,
+  },
+  progressText: {
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  progressBar: {
+    width: '100%',
+    height: 4,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#1976d2',
+    borderRadius: 2,
+  },
+  progressStepText: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
   },
   tabContainer: {
     flexDirection: 'row',
@@ -2312,6 +2427,29 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  noDataText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 8,
+    fontWeight: '500',
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
+  emptyFeesContainer: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  emptyFeesText: {
+    fontSize: 14,
+    color: '#999',
     fontStyle: 'italic',
   },
   // Missing styles for reports tab

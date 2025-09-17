@@ -21,6 +21,7 @@ const LogoDisplay = ({ logoUrl, onImageError, size = 60 }) => {
       return false;
     }
     
+    
     // Must be a valid HTTP/HTTPS URL
     return url.startsWith('http://') || url.startsWith('https://');
   };
@@ -41,11 +42,13 @@ const LogoDisplay = ({ logoUrl, onImageError, size = 60 }) => {
       source={{ uri: logoUrl }} 
       style={[styles.schoolLogo, { width: size, height: size, borderRadius: size / 2 }]}
       onError={(error) => {
-        console.log('🗓️ Logo image loading error:', error.nativeEvent?.error || error);
-        console.log('🗓️ Image URL:', logoUrl);
+        // Extract error message safely to avoid cyclical JSON structure
+        const errorMsg = error.nativeEvent?.error || 'Image loading failed';
+        console.log('🗺️ Logo image loading error:', errorMsg);
+        console.log('🗺️ Image URL:', logoUrl);
         setImageError(true);
         if (onImageError) {
-          onImageError(error);
+          onImageError({ message: errorMsg, url: logoUrl });
         }
       }}
       onLoad={() => {

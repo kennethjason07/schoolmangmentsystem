@@ -39,9 +39,25 @@ export const generateWebReceiptHTML = async (receiptData) => {
       academicYear = '2024-25'
     } = receiptData;
 
-    // Get school logo
-    const logoBase64 = schoolDetails?.logo_url ? await getSchoolLogoBase64(schoolDetails.logo_url) : null;
-    const logoHTML = logoBase64 ? getLogoHTML(logoBase64, { width: '60px', height: '60px' }) : '';
+    // Get school logo - try multiple sources
+    let logoHTML = '';
+    
+    // First try to use the directly loaded school logo URL (if available)
+    if (schoolDetails?.schoolLogo) {
+      console.log('📷 Using directly loaded school logo URL for receipt');
+      logoHTML = `<img src="${schoolDetails.schoolLogo}" alt="School Logo" style="width: 60px; height: 60px; margin: 0 auto 10px auto; border-radius: 8px; object-fit: contain; display: block;" />`;
+    } else if (schoolDetails?.logo_url) {
+      console.log('📷 Attempting to load school logo from storage for receipt');
+      try {
+        const logoBase64 = await getSchoolLogoBase64(schoolDetails.logo_url);
+        logoHTML = logoBase64 ? getLogoHTML(logoBase64, { width: '60px', height: '60px' }) : '';
+      } catch (logoError) {
+        console.warn('⚠️ Failed to load logo from storage, proceeding without logo:', logoError);
+        logoHTML = '';
+      }
+    }
+    
+    console.log('📷 Logo HTML result:', logoHTML ? 'Logo loaded successfully' : 'No logo available');
 
     // Convert amount to words
     const amountInWords = convertAmountToWords(feeData.amount);

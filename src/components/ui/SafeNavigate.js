@@ -15,20 +15,41 @@ export const useNavigateWithStatePreservation = () => {
    */
   const navigateSafely = React.useCallback((screenName, params = {}) => {
     try {
-      // First check if the screen exists in state
+      // Get the current navigation state
       const state = navigation.getState();
-      const routeExists = state.routeNames.includes(screenName);
       
-      console.log(`🧭 SafeNavigate: Navigating to ${screenName} (exists: ${routeExists})`);
+      // Function to recursively check for route in nested navigators
+      const findRouteInState = (navState, targetRoute) => {
+        if (!navState) return false;
+        
+        // Check direct routes
+        if (navState.routeNames?.includes(targetRoute)) {
+          return true;
+        }
+        
+        // Check in nested routes
+        if (navState.routes) {
+          for (const route of navState.routes) {
+            if (route.state && findRouteInState(route.state, targetRoute)) {
+              return true;
+            }
+            if (route.name === targetRoute) {
+              return true;
+            }
+          }
+        }
+        
+        return false;
+      };
       
-      if (routeExists) {
-        // Use navigation.navigate which preserves the navigation state
-        navigation.navigate(screenName, params);
-      } else {
-        console.warn(`🧭 SafeNavigate: Screen "${screenName}" not found in navigation stack`);
-        // Fallback - try anyway, just in case the state is stale
-        navigation.navigate(screenName, params);
-      }
+      const routeExists = findRouteInState(state, screenName);
+      
+      // Only log for debugging, don't show warning for nested routes
+      console.log(`🧭 SafeNavigate: Navigating to ${screenName}`);
+      
+      // Always try to navigate - React Navigation will handle invalid routes
+      navigation.navigate(screenName, params);
+      
     } catch (error) {
       console.error(`🧭 SafeNavigate: Error navigating to ${screenName}:`, error);
       // Last resort - force navigate but may reset state

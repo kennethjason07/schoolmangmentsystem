@@ -1117,24 +1117,13 @@ const StudentDashboard = ({ navigation }) => {
         if (!feeStructure) return 'Loading fee data...';
         if (feeStructure.totalDue === 0) return 'No fees assigned';
         
-        // Use the same format as Fee Payment screen
-        const totalPaid = feeStructure.totalPaid || 0;
         const totalOutstanding = feeStructure.outstanding || 0;
-        const totalDiscounts = feeStructure.totalDiscounts || 0;
         
         if (totalOutstanding > 0) {
-          if (totalDiscounts > 0) {
-            return `₹${totalPaid.toLocaleString()} paid, ₹${totalOutstanding.toLocaleString()} pending (saved ₹${totalDiscounts.toLocaleString()})`;
-          } else {
-            return `₹${totalPaid.toLocaleString()} paid, ₹${totalOutstanding.toLocaleString()} pending`;
-          }
+          return 'Outstanding amount';
         }
         
-        if (totalDiscounts > 0) {
-          return `All fees paid (saved ₹${totalDiscounts.toLocaleString()})`;
-        }
-        
-        return `All fees paid (₹${totalPaid.toLocaleString()})`;
+        return 'All fees paid';
       })(),
       onPress: () => handleCardNavigation('fees')
     },

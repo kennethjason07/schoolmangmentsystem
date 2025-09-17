@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -33,6 +33,10 @@ import { getSchoolLogoBase64, getLogoHTML, getReceiptHeaderCSS } from '../../uti
 import FeeService from '../../services/FeeService';
 import { validateFeeConsistency, syncFeeAfterPayment } from '../../services/feeSync';
 import { generateMockReferenceNumber } from '../../utils/referenceNumberGenerator';
+import { getNextReceiptNumber } from '../../utils/receiptCounter';
+import { loadLogoWithFallbacks, validateImageData } from '../../utils/robustLogoLoader';
+import { Image } from 'react-native';
+import LogoDisplay from '../../components/LogoDisplay';
 
 const { width } = Dimensions.get('window');
 
@@ -44,12 +48,15 @@ const FeePayment = () => {
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [studentData, setStudentData] = useState(null);
   const [schoolDetails, setSchoolDetails] = useState(null);
+  
+  // Ref for swipe gesture
+  const touchStartXRef = useRef(0);
   const [selectedTab, setSelectedTab] = useState('overview');
   const [selectedFee, setSelectedFee] = useState(null);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [receiptModalVisible, setReceiptModalVisible] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState(null);
-  const [paymentHistoryView, setPaymentHistoryView] = useState('history'); // 'history', 'cards', or 'status'
+  const [paymentHistoryView, setPaymentHistoryView] = useState('history'); // 'history' or 'status'
   const [paymentStatusData, setPaymentStatusData] = useState([]); // For payment status cards
 
   const [loading, setLoading] = useState(true);
@@ -71,10 +78,18 @@ const FeePayment = () => {
         }
 
         // Load school details first
-        console.log('🏫 FeePayment - Loading school details');
+        console.log('🏦 FeePayment - Loading school details');
         const { data: schoolData, error: schoolError } = await dbHelpers.getSchoolDetails();
-        console.log('🏫 FeePayment - School data loaded:', schoolData);
-        console.log('🏫 FeePayment - Logo URL:', schoolData?.logo_url);
+        console.log('🏦 FeePayment - School data loaded:', {
+          hasData: !!schoolData,
+          schoolName: schoolData?.name || 'NO NAME',
+          logoUrl: schoolData?.logo_url || 'NO LOGO URL',
+          logoUrlType: typeof schoolData?.logo_url,
+          logoUrlLength: schoolData?.logo_url?.length || 0,
+          error: schoolError?.message || 'No error',
+          allKeys: Object.keys(schoolData || {})
+        });
+        console.log('🏦 FeePayment - Raw school data:', schoolData);
         setSchoolDetails(schoolData);
 
         // Get student data directly using linked_student_id with tenant filtering
@@ -197,7 +212,7 @@ const FeePayment = () => {
           amount: Number(payment.amount_paid),
           paymentDate: payment.payment_date,
           paymentMethod: payment.payment_mode || 'Online',
-          transactionId: payment.receipt_number ? `RCP${payment.receipt_number}` : `TXN${payment.id.toString().slice(-8).toUpperCase()}`,
+          transactionId: payment.receipt_number ? payment.receipt_number.toString() : `TXN${payment.id.toString().slice(-8).toUpperCase()}`,
           status: 'completed',
           receiptUrl: null,
           remarks: payment.remarks || '',
@@ -459,7 +474,22 @@ const FeePayment = () => {
   };
 
   const handleDownloadReceipt = async (receipt) => {
-    setSelectedReceipt(receipt);
+    console.log('📧 Preparing receipt for:', receipt.feeName);
+    
+    // Generate new receipt number
+    const receiptNumber = await getNextReceiptNumber();
+    
+    // Enhance receipt with additional data
+    const enhancedReceipt = {
+      ...receipt,
+      receiptNumber: cleanReceiptNumber(receiptNumber),
+      studentName: feeStructure?.studentName || studentData?.name || 'Student Name',
+      admissionNo: studentData?.admission_no || 'N/A',
+      className: feeStructure?.class || `${studentData?.classes?.class_name || 'N/A'} ${studentData?.classes?.section || ''}`.trim(),
+      academicYear: feeStructure?.academicYear || '2024-25'
+    };
+    
+    setSelectedReceipt(enhancedReceipt);
     setReceiptModalVisible(true);
   };
 
@@ -470,19 +500,28 @@ const FeePayment = () => {
       // Generate receipt HTML (now async)
       const htmlContent = await generateReceiptHTML(selectedReceipt);
       
-      // Generate PDF
+      // Generate PDF with landscape orientation
       const { uri } = await Print.printToFileAsync({
         html: htmlContent,
-        base64: false
+        base64: false,
+        orientation: Print.Orientation.landscape
       });
 
       const fileName = `Receipt_${selectedReceipt.feeName.replace(/\s+/g, '_')}.pdf`;
 
-      if (Platform.OS === 'android') {
+      // Try Android-specific download, fallback to sharing
+      if (Platform.OS === 'android' && FileSystem.StorageAccessFramework) {
         try {
           const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
           if (!permissions.granted) {
-            Alert.alert('Permission Required', 'Please grant storage permission to save the receipt.');
+            console.log('⚠️ Permission denied, falling back to sharing');
+            // Fallback to sharing instead of failing
+            await Sharing.shareAsync(uri, {
+              mimeType: 'application/pdf',
+              dialogTitle: 'Save Receipt',
+              UTI: 'com.adobe.pdf'
+            });
+            setReceiptModalVisible(false);
             return;
           }
 
@@ -502,16 +541,33 @@ const FeePayment = () => {
           Alert.alert('Receipt Downloaded', `Receipt saved as ${fileName}`);
           setReceiptModalVisible(false);
         } catch (error) {
-          console.error('Download error:', error);
-          Alert.alert('Error', 'Failed to download receipt. Please try again.');
+          console.error('Android download error, falling back to sharing:', error);
+          // Fallback to sharing if Android-specific method fails
+          try {
+            await Sharing.shareAsync(uri, {
+              mimeType: 'application/pdf',
+              dialogTitle: 'Share Receipt',
+              UTI: 'com.adobe.pdf'
+            });
+            setReceiptModalVisible(false);
+          } catch (shareError) {
+            console.error('Share error:', shareError);
+            Alert.alert('Error', 'Failed to save or share receipt. Please try again.');
+          }
         }
       } else {
-        await Sharing.shareAsync(uri, {
-          mimeType: 'application/pdf',
-          dialogTitle: 'Share Receipt',
-          UTI: 'com.adobe.pdf'
-        });
-        setReceiptModalVisible(false);
+        // Default sharing for iOS or when StorageAccessFramework is not available
+        try {
+          await Sharing.shareAsync(uri, {
+            mimeType: 'application/pdf',
+            dialogTitle: 'Share Receipt',
+            UTI: 'com.adobe.pdf'
+          });
+          setReceiptModalVisible(false);
+        } catch (shareError) {
+          console.error('Share error:', shareError);
+          Alert.alert('Error', 'Failed to share receipt. Please try again.');
+        }
       }
     } catch (error) {
       console.error('Receipt generation error:', error);
@@ -522,6 +578,38 @@ const FeePayment = () => {
   const handleCloseReceiptModal = () => {
     setReceiptModalVisible(false);
     setSelectedReceipt(null);
+  };
+
+  const handlePrintReceipt = async () => {
+    if (!selectedReceipt) return;
+
+    try {
+      // Generate receipt HTML for printing
+      const htmlContent = await generateReceiptHTML(selectedReceipt);
+      
+      // Print directly
+      await Print.printAsync({
+        html: htmlContent,
+        orientation: Print.Orientation.landscape
+      });
+      
+      console.log('✅ Print dialog opened successfully');
+      setReceiptModalVisible(false);
+    } catch (error) {
+      console.error('❌ Print error:', error);
+      Alert.alert('Print Error', 'Failed to print receipt. Please try again.');
+    }
+  };
+
+  // Clean receipt number by removing RCP prefix if present
+  const cleanReceiptNumber = (receiptNumber) => {
+    if (!receiptNumber) return 'N/A';
+    const str = receiptNumber.toString();
+    // Remove RCP prefix if it exists
+    if (str.startsWith('RCP')) {
+      return str.substring(3);
+    }
+    return str;
   };
 
   // Format date from yyyy-mm-dd to dd-mm-yyyy
@@ -553,239 +641,450 @@ const FeePayment = () => {
     return await getSchoolLogoBase64(logoUrl);
   };
 
-  // Generate receipt HTML using the original format
+  // Import the unified receipt template
+  const { generateUnifiedReceiptHTML } = require('../../utils/unifiedReceiptTemplate');
+
+  // Generate receipt HTML using unified template
   const generateReceiptHTML = async (receipt) => {
     try {
-      // Use the new web receipt generator for demo bill format
-      const { generateFeeReceiptHTML } = await import('../../utils/webReceiptGenerator');
+      console.log('📧 Student - Generating unified receipt HTML...');
       
-      return await generateFeeReceiptHTML({
-        schoolDetails,
-        studentName: feeStructure?.studentName || 'Student Name',
-        admissionNo: feeStructure?.admissionNo || 'N/A',
-        className: feeStructure?.class || 'Class',
-        feeComponent: receipt.feeName,
-        amount: receipt.amount,
-        paymentMethod: receipt.paymentMethod,
-        transactionId: receipt.transactionId,
-        referenceNumber: receipt.transactionId, // Use transaction ID as reference
-        outstandingAmount: 0, // Calculate if needed
-        academicYear: '2024-25'
+      // DIRECT LOGO TEST - Let's try to load the logo directly first
+      console.log('🧪 DIRECT LOGO TEST - Starting logo loading test...');
+      if (schoolDetails?.logo_url) {
+        console.log('🧪 Testing logo URL directly:', schoolDetails.logo_url);
+        try {
+          const directTestResponse = await fetch(schoolDetails.logo_url, { method: 'HEAD' });
+          console.log('🧪 Direct URL test result:', {
+            ok: directTestResponse.ok,
+            status: directTestResponse.status,
+            url: schoolDetails.logo_url
+          });
+        } catch (directTestError) {
+          console.log('🧪 Direct URL test failed:', directTestError.message);
+        }
+      } else {
+        console.log('🧪 No logo URL in school details!');
+      }
+      
+      // Convert student receipt data format to match unified template expectations
+      const unifiedReceiptData = {
+        student_name: receipt.studentName,
+        student_admission_no: receipt.admissionNo,
+        class_name: receipt.className,
+        fee_component: receipt.feeName,
+        payment_date_formatted: formatDateForReceipt(receipt.paymentDate),
+        receipt_no: cleanReceiptNumber(receipt.receiptNumber),
+        payment_mode: receipt.paymentMethod,
+        amount_paid: receipt.amount
+      };
+      
+      // Use the unified receipt template with no preloaded logo (let it handle loading)
+      console.log('📷 Student - Using unified template without preloaded logo');
+      console.log('🏫 Student - School details being passed to template:', {
+        hasSchoolDetails: !!schoolDetails,
+        schoolName: schoolDetails?.name,
+        logoUrl: schoolDetails?.logo_url,
+        logoUrlType: typeof schoolDetails?.logo_url,
+        logoUrlLength: schoolDetails?.logo_url?.length || 0
       });
+      const htmlContent = await generateUnifiedReceiptHTML(unifiedReceiptData, schoolDetails, null);
+      
+      console.log('✅ Student - Unified receipt HTML generated successfully');
+      return htmlContent;
     } catch (error) {
-      console.error('Error generating receipt HTML with new format:', error);
-      // Fallback to old format if new generator fails
-      return generateOldReceiptHTML(receipt);
+      console.error('❌ Student - Error generating unified receipt:', error);
+      console.log('🔄 Student - Trying simple receipt with direct logo URL...');
+      // Try simple receipt first, then complex fallback
+      try {
+        return await generateSimpleReceiptHTML(receipt);
+      } catch (simpleError) {
+        console.error('❌ Simple receipt also failed:', simpleError);
+        return await generateFallbackReceiptHTML(receipt);
+      }
     }
   };
 
-  // Keep old receipt HTML as fallback
-  const generateOldReceiptHTML = async (receipt) => {
+  // Simple receipt generator with direct logo URL usage
+  const generateSimpleReceiptHTML = async (receipt) => {
     try {
-      // Get school logo using standardized utility
-      const logoBase64 = schoolDetails?.logo_url ? await getSchoolLogoBase64(schoolDetails.logo_url) : null;
-      const logoHTML = getLogoHTML(logoBase64, { width: '80px', height: '80px' });
-
+      console.log('📧 Student - Generating SIMPLE receipt HTML...');
+      
+      // Use logo URL directly from school details (no complex loading)
+      let logoHTML = '';
+      if (schoolDetails?.logo_url) {
+        console.log('🖼️ Using direct logo URL:', schoolDetails.logo_url);
+        
+        // Try to load as base64 first for better compatibility
+        try {
+          console.log('🔄 Attempting to convert logo to base64 for receipt...');
+          const logoBase64 = await getSchoolLogoBase64(schoolDetails.logo_url);
+          if (logoBase64) {
+            console.log('✅ Successfully got base64 logo for receipt, size:', logoBase64.length);
+            logoHTML = `<img src="${logoBase64}" style="width: 80px; height: 80px; object-fit: contain; border-radius: 8px;" alt="School Logo" />`;
+          } else {
+            console.log('🔄 Base64 conversion failed, using direct URL');
+            logoHTML = `<img src="${schoolDetails.logo_url}" style="width: 80px; height: 80px; object-fit: contain; border-radius: 8px;" alt="School Logo" onerror="this.style.display='none'" />`;
+          }
+        } catch (base64Error) {
+          console.log('❌ Base64 conversion error, using direct URL:', base64Error.message);
+          logoHTML = `<img src="${schoolDetails.logo_url}" style="width: 80px; height: 80px; object-fit: contain; border-radius: 8px;" alt="School Logo" onerror="this.style.display='none'" />`;
+        }
+      } else {
+        console.log('🏠 No logo URL, using school icon fallback');
+        logoHTML = `<div style="width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; font-size: 40px; background: #f5f5f5; border: 2px dashed #ccc; border-radius: 8px;">🏦</div>`;
+      }
+      
+      const schoolName = schoolDetails?.name || 'School Name';
+      const schoolAddress = schoolDetails?.address || 'School Address';
+      
       return `
         <!DOCTYPE html>
         <html>
           <head>
             <meta charset="utf-8">
-            <title>Fee Receipt</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Fee Receipt - ${cleanReceiptNumber(receipt.receiptNumber)}</title>
             <style>
-              body {
-                font-family: Arial, sans-serif;
-                margin: 0;
-                padding: 20px;
-                color: #333;
-                background-color: #fff;
-              }
-              ${getReceiptHeaderCSS()}
-              .receipt-info {
-                background-color: #f8f9fa;
-                padding: 15px;
-                border-radius: 8px;
-                margin-bottom: 20px;
-                border: 1px solid #e0e0e0;
-              }
-              .info-row {
-                display: flex;
-                justify-content: space-between;
-                margin-bottom: 8px;
-                padding: 4px 0;
-              }
-              .info-row:last-child {
-                margin-bottom: 0;
-              }
-              .amount-section {
-                text-align: center;
-                margin: 25px 0;
-                padding: 20px;
-                background-color: #e3f2fd;
-                border-radius: 8px;
-                border: 2px solid #2196F3;
-              }
-              .amount {
-                font-size: 28px;
-                font-weight: bold;
-                color: #2196F3;
-                margin-bottom: 8px;
-              }
-              .amount-label {
-                font-size: 14px;
-                color: #666;
-                font-weight: 500;
-              }
-              .footer {
-                margin-top: 30px;
-                text-align: center;
-                font-size: 12px;
-                color: #666;
-                border-top: 1px solid #e0e0e0;
-                padding-top: 15px;
-              }
-              .footer p {
-                margin: 5px 0;
-              }
+              @page { size: A4 landscape; margin: 15mm; }
+              body { font-family: Arial, sans-serif; margin: 0; padding: 20px; color: #333; }
+              .receipt-container { max-width: 100%; border: 2px solid #000; padding: 20px; }
+              .header { display: flex; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #000; }
+              .logo { margin-right: 20px; }
+              .school-info { flex-grow: 1; text-align: center; }
+              .school-name { font-size: 24px; font-weight: bold; margin: 0 0 5px 0; }
+              .school-address { font-size: 14px; color: #666; margin: 0; }
+              .title { text-align: center; font-size: 28px; font-weight: bold; margin: 20px 0; text-decoration: underline; }
+              .details { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin: 20px 0; }
+              .detail-item { display: flex; justify-content: space-between; margin: 8px 0; padding: 5px 0; border-bottom: 1px dotted #ccc; }
+              .amount-section { text-align: center; margin: 30px 0; padding: 15px; background: #f9f9f9; border: 1px solid #ddd; }
+              .amount { font-size: 32px; font-weight: bold; color: #2196F3; }
             </style>
           </head>
           <body>
-            <div class="receipt-header">
-              ${logoHTML}
-              <div class="school-name">${schoolDetails?.name || 'School Management System'}</div>
-              ${schoolDetails?.address ? `<div class="school-info">${schoolDetails.address}</div>` : ''}
-              ${schoolDetails?.phone ? `<div class="school-info">Phone: ${schoolDetails.phone}</div>` : ''}
-              ${schoolDetails?.email ? `<div class="school-info">Email: ${schoolDetails.email}</div>` : ''}
-              <div class="receipt-title">FEE PAYMENT RECEIPT</div>
-            </div>
-
-            <div class="receipt-info">
-              <div class="info-row">
-                <span><strong>Student Name:</strong> ${feeStructure?.studentName || 'Student Name'}</span>
-                <span><strong>Class:</strong> ${feeStructure?.class || 'Class'}</span>
+            <div class="receipt-container">
+              <div class="header">
+                <div class="logo">${logoHTML}</div>
+                <div class="school-info">
+                  <div class="school-name">${schoolName}</div>
+                  <div class="school-address">${schoolAddress}</div>
+                </div>
               </div>
-              <div class="info-row">
-                <span><strong>Fee Type:</strong> ${receipt.feeName}</span>
-                <span><strong>Payment Date:</strong> ${formatDateForReceipt(receipt.paymentDate)}</span>
+              
+              <div class="title">FEE RECEIPT</div>
+              
+              <div class="details">
+                <div class="left-column">
+                  <div class="detail-item"><span>Receipt No:</span><span>${cleanReceiptNumber(receipt.receiptNumber)}</span></div>
+                  <div class="detail-item"><span>Student Name:</span><span>${receipt.studentName}</span></div>
+                  <div class="detail-item"><span>Class:</span><span>${receipt.className}</span></div>
+                </div>
+                <div class="right-column">
+                  <div class="detail-item"><span>Payment Date:</span><span>${formatDateForReceipt(receipt.paymentDate)}</span></div>
+                  <div class="detail-item"><span>Payment Mode:</span><span>${receipt.paymentMethod}</span></div>
+                  <div class="detail-item"><span>Fee Type:</span><span>${receipt.feeName}</span></div>
+                </div>
               </div>
-              <div class="info-row">
-                <span><strong>Transaction ID:</strong> ${receipt.transactionId}</span>
-                <span><strong>Payment Method:</strong> ${receipt.paymentMethod}</span>
+              
+              <div class="amount-section">
+                <div>Amount Paid</div>
+                <div class="amount">₹${receipt.amount}</div>
               </div>
-            </div>
-
-            <div class="amount-section">
-              <div class="amount">₹${receipt.amount}</div>
-              <div class="amount-label">Amount Paid</div>
-            </div>
-
-            <div class="footer">
-              <p>This is a computer generated receipt. No signature required.</p>
-              <p>Thank you for your payment!</p>
+              
+              <div style="margin-top: 40px; text-align: center; font-size: 12px; color: #666;">
+                This is a computer-generated receipt.
+              </div>
             </div>
           </body>
         </html>
       `;
     } catch (error) {
-      console.error('Error generating receipt HTML with logo:', error);
-      // Fallback to basic HTML without logo
-      const schoolName = schoolDetails?.name || 'School Name';
+      console.error('❌ Error generating simple receipt:', error);
+      throw error;
+    }
+  };
+
+  // Fallback receipt generator (keeping the old logic as backup)
+  const generateFallbackReceiptHTML = async (receipt) => {
+    try {
+      console.log('📧 Student - Generating fallback receipt HTML...');
+      
+      // Load logo using robust loading system
+      const logoData = await loadLogoWithFallbacks(schoolDetails?.logo_url);
+      const isValidLogo = validateImageData(logoData);
+      
+      console.log('🇫️ Logo loading result:', { 
+        hasLogo: !!logoData, 
+        isValid: isValidLogo, 
+        logoSize: logoData?.length || 0 
+      });
+      
+      const logoHTML = isValidLogo 
+        ? `<img src="${logoData}" style="width: 80px; height: 80px; object-fit: contain;" />` 
+        : `<div style="width: 80px; height: 80px; border: 2px solid #ccc; display: flex; align-items: center; justify-content: center; background: #f9f9f9; color: #666; font-size: 12px;">LOGO</div>`;
+      
       return `
         <!DOCTYPE html>
         <html>
           <head>
             <meta charset="utf-8">
-            <title>Fee Receipt</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Fee Receipt - ${cleanReceiptNumber(receipt.receiptNumber)}</title>
             <style>
+              @page {
+                size: A4 landscape;
+                margin: 15mm;
+              }
+              
               body {
-                font-family: Arial, sans-serif;
+                font-family: 'Arial', sans-serif;
                 margin: 0;
-                padding: 20px;
+                padding: 0;
                 color: #333;
+                line-height: 1.4;
+                background: #fff;
               }
-              .header {
-                text-align: center;
-                border-bottom: 2px solid #2196F3;
-                padding-bottom: 20px;
-                margin-bottom: 30px;
+              
+              .receipt-container {
+                max-width: 100%;
+                margin: 0 auto;
+                background: white;
+                border: 2px solid #333;
+                padding: 20px;
               }
-              .school-name {
+              
+              .receipt-header {
+                display: flex;
+                align-items: center;
+                justify-content: flex-start;
+                margin-bottom: 20px;
+                padding-bottom: 15px;
+                border-bottom: 1px solid #ddd;
+              }
+              
+              .receipt-logo {
+                margin-right: 20px;
+                flex-shrink: 0;
+              }
+              
+              .receipt-school-info {
+                flex-grow: 1;
+              }
+              
+              .receipt-school-name {
                 font-size: 24px;
                 font-weight: bold;
                 color: #2196F3;
+                margin: 0;
                 margin-bottom: 5px;
               }
+              
+              .receipt-school-address {
+                font-size: 14px;
+                color: #666;
+                margin: 0;
+              }
+              
               .receipt-title {
-                font-size: 20px;
+                text-align: center;
+                font-size: 28px;
                 font-weight: bold;
-                margin-bottom: 10px;
+                color: #333;
+                margin: 20px 0;
+                letter-spacing: 2px;
               }
-              .receipt-info {
-                background-color: #f8f9fa;
-                padding: 15px;
-                border-radius: 8px;
-                margin-bottom: 20px;
+              
+              .receipt-separator {
+                height: 2px;
+                background: #333;
+                margin: 20px 0;
               }
-              .info-row {
+              
+              .receipt-content {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 40px;
+                margin: 30px 0;
+              }
+              
+              .receipt-column {
+                display: flex;
+                flex-direction: column;
+                gap: 15px;
+              }
+              
+              .receipt-row {
                 display: flex;
                 justify-content: space-between;
-                margin-bottom: 5px;
+                align-items: center;
+                padding: 8px 0;
+                border-bottom: 1px dotted #ccc;
               }
-              .amount-section {
+              
+              .receipt-label {
+                font-weight: 600;
+                color: #555;
+                font-size: 14px;
+                min-width: 120px;
+              }
+              
+              .receipt-value {
+                font-weight: 500;
+                color: #333;
+                font-size: 14px;
+                text-align: right;
+              }
+              
+              .receipt-amount-section {
                 text-align: center;
-                margin: 20px 0;
+                margin: 30px 0;
                 padding: 20px;
-                background-color: #e3f2fd;
-                border-radius: 8px;
+                background: #f8f9fa;
+                border: 2px dashed #2196F3;
               }
-              .amount {
-                font-size: 24px;
+              
+              .receipt-amount-label {
+                font-size: 16px;
+                color: #666;
+                margin-bottom: 10px;
+                font-weight: 500;
+              }
+              
+              .receipt-amount {
+                font-size: 32px;
                 font-weight: bold;
                 color: #2196F3;
+                margin: 0;
               }
-              .footer {
-                margin-top: 30px;
-                text-align: center;
-                font-size: 12px;
-                color: #666;
+              
+              @media print {
+                .receipt-container {
+                  border: 2px solid #333;
+                  box-shadow: none;
+                }
+                
+                body {
+                  -webkit-print-color-adjust: exact;
+                  print-color-adjust: exact;
+                }
               }
+            </style>
+          </head>
+          <body>
+            <div class="receipt-container">
+              <!-- Header -->
+              <div class="receipt-header">
+                <div class="receipt-logo">
+                  ${logoHTML}
+                </div>
+                <div class="receipt-school-info">
+                  <h1 class="receipt-school-name">${schoolDetails?.name || 'School Name'}</h1>
+                  <p class="receipt-school-address">${schoolDetails?.address || 'School Address'}</p>
+                </div>
+              </div>
+              
+              <!-- Title -->
+              <h2 class="receipt-title">FEE RECEIPT</h2>
+              
+              <!-- Separator -->
+              <div class="receipt-separator"></div>
+              
+              <!-- Content Grid -->
+              <div class="receipt-content">
+                <!-- Left Column -->
+                <div class="receipt-column">
+                  <div class="receipt-row">
+                    <span class="receipt-label">Student Name:</span>
+                    <span class="receipt-value">${receipt.studentName}</span>
+                  </div>
+                  <div class="receipt-row">
+                    <span class="receipt-label">Admission No:</span>
+                    <span class="receipt-value">${receipt.admissionNo}</span>
+                  </div>
+                  <div class="receipt-row">
+                    <span class="receipt-label">Class:</span>
+                    <span class="receipt-value">${receipt.className}</span>
+                  </div>
+                </div>
+                
+                <!-- Right Column -->
+                <div class="receipt-column">
+                  <div class="receipt-row">
+                    <span class="receipt-label">Fee Type:</span>
+                    <span class="receipt-value">${receipt.feeName}</span>
+                  </div>
+                  <div class="receipt-row">
+                    <span class="receipt-label">Date:</span>
+                    <span class="receipt-value">${formatDateForReceipt(receipt.paymentDate)}</span>
+                  </div>
+                  <div class="receipt-row">
+                    <span class="receipt-label">Receipt No:</span>
+                    <span class="receipt-value">${receipt.receiptNumber}</span>
+                  </div>
+                  <div class="receipt-row">
+                    <span class="receipt-label">Payment Mode:</span>
+                    <span class="receipt-value">${receipt.paymentMethod}</span>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Amount Section -->
+              <div class="receipt-amount-section">
+                <p class="receipt-amount-label">Amount Paid</p>
+                <h3 class="receipt-amount">₹${receipt.amount?.toLocaleString()}</h3>
+              </div>
+            </div>
+          </body>
+        </html>
+      `;
+    } catch (error) {
+      console.error('❌ Error generating fallback receipt HTML:', error);
+      // Simple fallback if everything fails
+      return `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Receipt - ${receipt.receiptNumber || 'N/A'}</title>
+            <style>
+              @page { size: A4 landscape; margin: 20mm; }
+              body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
+              .header { text-align: center; margin-bottom: 30px; }
+              .school-name { font-size: 24px; font-weight: bold; color: #000; }
+              .receipt-title { font-size: 20px; margin: 20px 0; text-decoration: underline; }
+              .content { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin: 20px 0; }
+              .row { margin: 10px 0; }
+              .label { font-weight: bold; }
+              .amount { text-align: center; font-size: 24px; font-weight: bold; color: #000; margin: 30px 0; border: 2px solid #000; padding: 15px; }
             </style>
           </head>
           <body>
             <div class="header">
-              <div class="school-name">${schoolName}</div>
-              <div class="receipt-title">Fee Receipt</div>
+              <div class="school-name">${schoolDetails?.name || 'School Name'}</div>
+              <div class="school-address">${schoolDetails?.address || 'School Address'}</div>
+              <div class="receipt-title">FEE RECEIPT</div>
             </div>
-
-            <div class="receipt-info">
-              <div class="info-row">
-                <span><strong>Student Name:</strong> ${feeStructure?.studentName || 'Student Name'}</span>
-                <span><strong>Class:</strong> ${feeStructure?.class || 'Class'}</span>
+            <div class="content">
+              <div>
+                <div class="row"><span class="label">Student Name:</span> ${receipt.studentName || 'N/A'}</div>
+                <div class="row"><span class="label">Admission No:</span> ${receipt.admissionNo || 'N/A'}</div>
+                <div class="row"><span class="label">Class:</span> ${receipt.className || 'N/A'}</div>
               </div>
-              <div class="info-row">
-                <span><strong>Fee Type:</strong> ${receipt.feeName}</span>
-                <span><strong>Payment Date:</strong> ${formatDateForReceipt(receipt.paymentDate)}</span>
-              </div>
-              <div class="info-row">
-                <span><strong>Transaction ID:</strong> ${receipt.transactionId}</span>
-                <span><strong>Payment Method:</strong> ${receipt.paymentMethod}</span>
+              <div>
+                <div class="row"><span class="label">Fee Type:</span> ${receipt.feeName || 'N/A'}</div>
+                <div class="row"><span class="label">Date:</span> ${formatDateForReceipt(receipt.paymentDate) || 'N/A'}</div>
+                <div class="row"><span class="label">Receipt No:</span> ${receipt.receiptNumber || 'N/A'}</div>
+                <div class="row"><span class="label">Payment Mode:</span> ${receipt.paymentMethod || 'N/A'}</div>
               </div>
             </div>
-
-            <div class="amount-section">
-              <div class="amount">₹${receipt.amount}</div>
-              <div>Amount Paid</div>
-            </div>
-
-            <div class="footer">
-              <p>This is a computer generated receipt. No signature required.</p>
-              <p>Thank you for your payment!</p>
-            </div>
+            <div class="amount">Amount Paid: ₹${receipt.amount?.toLocaleString() || '0.00'}</div>
           </body>
         </html>
       `;
     }
   };
+
+  // Note: Old generateOldReceiptHTML function removed - now using unified template
 
   // Get payment methods available (QR Code only for students)
   const getPaymentMethods = () => {
@@ -861,75 +1160,6 @@ const FeePayment = () => {
     </View>
   );
 
-  const renderPaymentStatusCard = ({ item }) => {
-    // Generate a strong reference number for each payment
-    const referenceNumber = generateMockReferenceNumber(item.feeName);
-    
-    return (
-      <View style={styles.paymentStatusCard}>
-        <View style={styles.cardHeader}>
-          <View style={styles.cardHeaderLeft}>
-            <View style={[styles.statusIndicator, { backgroundColor: getStatusColor(item.status) }]} />
-            <View>
-              <Text style={styles.cardFeeType}>{item.feeName}</Text>
-              <Text style={styles.cardReferenceNumber}>Ref: {referenceNumber}</Text>
-            </View>
-          </View>
-          <Text style={styles.cardAmount}>₹{item.amount}</Text>
-        </View>
-        
-        <View style={styles.cardBody}>
-          <View style={styles.cardRow}>
-            <View style={styles.cardField}>
-              <Text style={styles.cardLabel}>Status</Text>
-              <View style={[styles.statusChip, { backgroundColor: getStatusColor(item.status) }]}>
-                <Text style={styles.statusChipText}>{getStatusText(item.status)}</Text>
-              </View>
-            </View>
-            <View style={styles.cardField}>
-              <Text style={styles.cardLabel}>Date</Text>
-              <Text style={styles.cardValue}>{formatDateForReceipt(item.paymentDate)}</Text>
-            </View>
-          </View>
-          
-          <View style={styles.cardRow}>
-            <View style={styles.cardField}>
-              <Text style={styles.cardLabel}>Method</Text>
-              <Text style={styles.cardValue}>{item.paymentMethod}</Text>
-            </View>
-            <View style={styles.cardField}>
-              <Text style={styles.cardLabel}>Transaction ID</Text>
-              <Text style={styles.cardValue}>{item.transactionId}</Text>
-            </View>
-          </View>
-        </View>
-        
-        <View style={styles.cardFooter}>
-          <TouchableOpacity 
-            style={styles.cardActionButton}
-            onPress={() => handleDownloadReceipt(item)}
-          >
-            <Ionicons name="download-outline" size={16} color="#2196F3" />
-            <Text style={styles.cardActionText}>Download Receipt</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.cardActionButton}
-            onPress={() => {
-              // Copy reference number to clipboard
-              // This could be implemented with expo-clipboard if needed
-              Alert.alert('Reference Number', referenceNumber, [
-                { text: 'OK', style: 'default' }
-              ]);
-            }}
-          >
-            <Ionicons name="copy-outline" size={16} color="#666" />
-            <Text style={[styles.cardActionText, { color: '#666' }]}>Copy Ref</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
 
   // New render function for payment status items
   const renderPaymentStatusItem = ({ item }) => {
@@ -982,28 +1212,6 @@ const FeePayment = () => {
             <Text style={styles.statusValue}>{item.remarks}</Text>
           </View>
         </View>
-        
-        {item.status === 'approved' && (
-          <TouchableOpacity 
-            style={styles.statusDownloadButton}
-            onPress={() => {
-              // Create a receipt-like object for approved payments
-              const receiptData = {
-                id: item.id,
-                feeName: item.feeName,
-                amount: item.amount,
-                paymentDate: item.approvedDate,
-                transactionId: item.referenceNumber,
-                paymentMethod: 'QR Code',
-                status: 'completed'
-              };
-              handleDownloadReceipt(receiptData);
-            }}
-          >
-            <Ionicons name="download" size={16} color="#4CAF50" />
-            <Text style={styles.statusDownloadText}>Download Receipt</Text>
-          </TouchableOpacity>
-        )}
       </View>
     );
   };
@@ -1115,7 +1323,7 @@ const FeePayment = () => {
           />
         ) : (
           <View style={styles.scrollContainer}>
-            {/* Payment History Toggle Control - 3 OPTIONS */}
+            {/* Payment History Toggle Control - 2 OPTIONS */}
             <View style={styles.historyToggleContainer}>
               <TouchableOpacity 
                 style={[styles.toggleButton, paymentHistoryView === 'history' && styles.activeToggleButton]}
@@ -1126,16 +1334,6 @@ const FeePayment = () => {
               >
                 <Ionicons name="list-outline" size={16} color={paymentHistoryView === 'history' ? '#fff' : '#666'} />
                 <Text style={[styles.toggleButtonText, paymentHistoryView === 'history' && styles.activeToggleButtonText]}>History</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.toggleButton, paymentHistoryView === 'cards' && styles.activeToggleButton]}
-                onPress={() => {
-                  console.log('🔄 Cards toggle pressed');
-                  setPaymentHistoryView('cards');
-                }}
-              >
-                <Ionicons name="card-outline" size={16} color={paymentHistoryView === 'cards' ? '#fff' : '#666'} />
-                <Text style={[styles.toggleButtonText, paymentHistoryView === 'cards' && styles.activeToggleButtonText]}>Cards</Text>
               </TouchableOpacity>
               <TouchableOpacity 
                 style={[styles.toggleButton, paymentHistoryView === 'status' && styles.activeToggleButton]}
@@ -1149,7 +1347,7 @@ const FeePayment = () => {
               </TouchableOpacity>
             </View>
 
-            {/* Content based on payment history view - 3 OPTIONS */}
+            {/* Content based on payment history view - 2 OPTIONS */}
             {paymentHistoryView === 'history' ? (
               <FlatList
                 data={paymentHistory}
@@ -1170,29 +1368,6 @@ const FeePayment = () => {
                     <Ionicons name="receipt-outline" size={48} color="#ccc" />
                     <Text style={styles.emptyText}>No payment history</Text>
                     <Text style={styles.emptySubtext}>Payment history will appear here once payments are made.</Text>
-                  </View>
-                }
-              />
-            ) : paymentHistoryView === 'cards' ? (
-              <FlatList
-                data={paymentHistory}
-                renderItem={renderPaymentStatusCard}
-                keyExtractor={(item) => item.id}
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.historyList}
-                refreshControl={
-                  <RefreshControl
-                    refreshing={refreshing}
-                    onRefresh={onRefresh}
-                    colors={['#2196F3']}
-                    progressBackgroundColor="#fff"
-                  />
-                }
-                ListEmptyComponent={
-                  <View style={styles.emptyContainer}>
-                    <Ionicons name="card-outline" size={48} color="#ccc" />
-                    <Text style={styles.emptyText}>No payment records</Text>
-                    <Text style={styles.emptySubtext}>Payment status cards will appear here once payments are made.</Text>
                   </View>
                 }
               />
@@ -1287,88 +1462,130 @@ const FeePayment = () => {
         </View>
       </Modal>
 
-      {/* Receipt Preview Modal */}
+      {/* Receipt Preview Modal - Landscape Layout */}
       <Modal
         visible={receiptModalVisible}
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         onRequestClose={handleCloseReceiptModal}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Receipt Preview</Text>
-              <TouchableOpacity onPress={handleCloseReceiptModal}>
-                <Ionicons name="close" size={24} color="#666" />
-              </TouchableOpacity>
-            </View>
+        <View 
+          style={styles.receiptModalOverlay}
+          onTouchStart={(e) => {
+            touchStartXRef.current = e.nativeEvent.pageX;
+          }}
+          onTouchEnd={(e) => {
+            const touchEndX = e.nativeEvent.pageX;
+            const swipeDistance = touchEndX - touchStartXRef.current;
+            
+            // If swipe right distance is more than 100px, close modal
+            if (swipeDistance > 100) {
+              handleCloseReceiptModal();
+            }
+          }}
+        >
+          <View style={styles.receiptModalContainer}>
+            {/* Close Button */}
+            <TouchableOpacity 
+              style={styles.receiptCloseButton} 
+              onPress={handleCloseReceiptModal}
+            >
+              <Ionicons name="close" size={24} color="#666" />
+            </TouchableOpacity>
             
             {selectedReceipt && (
-              <ScrollView style={styles.receiptPreviewContent}>
-                <View style={styles.receiptPreview}>
-                  <View style={styles.receiptHeader}>
-                    <Text style={styles.receiptSchoolName}>{schoolDetails?.name || 'School Name'}</Text>
-                    <Text style={styles.receiptTitle}>Fee Receipt</Text>
-                  </View>
-
-                  <View style={styles.receiptInfo}>
-                    <View style={styles.receiptInfoRow}>
-                      <Text style={styles.receiptInfoLabel}>Student Name:</Text>
-                      <Text style={styles.receiptInfoValue}>{feeStructure?.studentName}</Text>
+              <ScrollView 
+                style={styles.receiptScrollView}
+                contentContainerStyle={styles.receiptScrollContent}
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={styles.receiptDocument}>
+                  {/* Header with Logo and School Name */}
+                  <View style={styles.receiptDocumentHeader}>
+                    <View style={styles.receiptLogoContainer}>
+                      {/* Dynamic Logo Loading */}
+                      <LogoDisplay 
+                        logoUrl={schoolDetails?.logo_url}
+                        size={60}
+                        style={styles.receiptLogo}
+                        fallbackIcon="school-outline"
+                      />
                     </View>
-                    <View style={styles.receiptInfoRow}>
-                      <Text style={styles.receiptInfoLabel}>Class:</Text>
-                      <Text style={styles.receiptInfoValue}>{feeStructure?.class}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRow}>
-                      <Text style={styles.receiptInfoLabel}>Fee Type:</Text>
-                      <Text style={styles.receiptInfoValue}>{selectedReceipt.feeName}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRow}>
-                      <Text style={styles.receiptInfoLabel}>Payment Date:</Text>
-                      <Text style={styles.receiptInfoValue}>{formatDateForReceipt(selectedReceipt.paymentDate)}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRow}>
-                      <Text style={styles.receiptInfoLabel}>Transaction ID:</Text>
-                      <Text style={styles.receiptInfoValue}>{selectedReceipt.transactionId}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRow}>
-                      <Text style={styles.receiptInfoLabel}>Payment Method:</Text>
-                      <Text style={styles.receiptInfoValue}>{selectedReceipt.paymentMethod}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRow}>
-                      <Text style={styles.receiptInfoLabel}>Status:</Text>
-                      <View style={styles.receiptStatusRow}>
-                        <Text style={styles.receiptInfoValue}>Completed</Text>
-                        <View style={styles.statusBadge}>
-                          <Text style={styles.statusBadgeText}>PAID</Text>
-                        </View>
-                      </View>
+                    <View style={styles.receiptSchoolInfo}>
+                      <Text style={styles.receiptSchoolNameNew}>{schoolDetails?.name || 'School Name'}</Text>
+                      <Text style={styles.receiptSchoolAddress}>{schoolDetails?.address || 'School Address'}</Text>
                     </View>
                   </View>
 
-                  <View style={styles.receiptAmountSection}>
-                    <Text style={styles.receiptAmount}>₹{selectedReceipt.amount}</Text>
-                    <Text style={styles.receiptAmountLabel}>Amount Paid</Text>
+                  {/* Receipt Title */}
+                  <Text style={styles.receiptDocumentTitle}>FEE RECEIPT</Text>
+                  
+                  {/* Separator Line */}
+                  <View style={styles.receiptSeparatorLine} />
+
+                  {/* Receipt Content - Single Column */}
+                  <View style={styles.receiptContentSingle}>
+                    <View style={styles.receiptInfoRowNew}>
+                      <Text style={styles.receiptInfoLabelNew}>Student Name:</Text>
+                      <Text style={styles.receiptInfoValueNew}>{selectedReceipt.studentName}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRowNew}>
+                      <Text style={styles.receiptInfoLabelNew}>Admission No:</Text>
+                      <Text style={styles.receiptInfoValueNew}>{selectedReceipt.admissionNo}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRowNew}>
+                      <Text style={styles.receiptInfoLabelNew}>Class:</Text>
+                      <Text style={styles.receiptInfoValueNew}>{selectedReceipt.className}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRowNew}>
+                      <Text style={styles.receiptInfoLabelNew}>Fee Type:</Text>
+                      <Text style={styles.receiptInfoValueNew}>{selectedReceipt.feeName}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRowNew}>
+                      <Text style={styles.receiptInfoLabelNew}>Date:</Text>
+                      <Text style={styles.receiptInfoValueNew}>{formatDateForReceipt(selectedReceipt.paymentDate)}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRowNew}>
+                      <Text style={styles.receiptInfoLabelNew}>Receipt No:</Text>
+                      <Text style={styles.receiptInfoValueNew}>{cleanReceiptNumber(selectedReceipt.receiptNumber)}</Text>
+                    </View>
+                    <View style={styles.receiptInfoRowNew}>
+                      <Text style={styles.receiptInfoLabelNew}>Payment Mode:</Text>
+                      <Text style={styles.receiptInfoValueNew}>{selectedReceipt.paymentMethod}</Text>
+                    </View>
                   </View>
 
-                  <View style={styles.receiptFooter}>
-                    <Text style={styles.receiptFooterText}>This is a computer generated receipt.</Text>
-                    <Text style={styles.receiptFooterText}>No signature required.</Text>
-                    <Text style={styles.receiptFooterText}>Thank you for your payment!</Text>
+                  {/* Separator Line Above Amount */}
+                  <View style={styles.receiptAmountSeparatorLine} />
+                  
+                  {/* Amount Section */}
+                  <View style={styles.receiptAmountSectionNew}>
+                    <Text style={styles.receiptAmountLabelNew}>Amount Paid:</Text>
+                    <Text style={styles.receiptAmountNew}>₹{selectedReceipt.amount?.toLocaleString()}</Text>
                   </View>
                 </View>
               </ScrollView>
             )}
 
-            {/* Receipt Modal Footer */}
-            <View style={styles.receiptModalFooter}>
-              <TouchableOpacity style={styles.cancelReceiptButton} onPress={handleCloseReceiptModal}>
-                <Text style={styles.cancelReceiptButtonText}>Cancel</Text>
+            {/* Action Buttons */}
+            <View style={styles.receiptActionButtons}>
+              <TouchableOpacity 
+                style={styles.receiptPrintButton} 
+                onPress={() => {
+                  console.log('🖨️ Print receipt');
+                  handlePrintReceipt();
+                }}
+              >
+                <Ionicons name="print" size={20} color="#fff" />
+                <Text style={styles.receiptPrintButtonText}>Print</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.downloadReceiptButton} onPress={handleConfirmDownload}>
+              
+              <TouchableOpacity 
+                style={styles.receiptDownloadButton} 
+                onPress={handleConfirmDownload}
+              >
                 <Ionicons name="download" size={20} color="#fff" />
-                <Text style={styles.downloadReceiptButtonText}>Download PDF</Text>
+                <Text style={styles.receiptDownloadButtonText}>Download</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2139,6 +2356,243 @@ const styles = StyleSheet.create({
     color: '#2196F3',
     marginLeft: 4,
     fontWeight: '500',
+  },
+  
+  // New Fullscreen Receipt Modal Styles
+  receiptModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  receiptModalContainer: {
+    backgroundColor: '#fff',
+    width: '100%',
+    height: '100%',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+  },
+  receiptCloseButton: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    zIndex: 10,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 25,
+    width: 50,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+  },
+  receiptScrollView: {
+    flex: 1,
+    paddingHorizontal: 10,
+  },
+  receiptScrollContent: {
+    padding: 20,
+    paddingTop: 60, // Account for close button
+    paddingBottom: 100, // Account for action buttons
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '100%',
+  },
+  receiptDocument: {
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#333',
+    borderRadius: 8,
+    padding: 24,
+    minHeight: 500,
+    width: '100%',
+    maxWidth: 800,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  receiptDocumentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
+  },
+  receiptLogoContainer: {
+    marginRight: 20,
+    width: 80,
+    height: 80,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  receiptLogoPlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#ddd',
+  },
+  receiptLogo: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+  },
+  receiptSchoolInfo: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  receiptSchoolNameNew: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2196F3',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  receiptSchoolAddress: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 16,
+    textAlign: 'center',
+  },
+  receiptDocumentTitle: {
+    textAlign: 'center',
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    letterSpacing: 1,
+    marginVertical: 16,
+  },
+  receiptSeparatorLine: {
+    height: 2,
+    backgroundColor: '#333',
+    marginVertical: 20,
+  },
+  receiptContentGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 24,
+  },
+  receiptLeftColumn: {
+    flex: 1,
+    marginRight: 20,
+  },
+  receiptRightColumn: {
+    flex: 1,
+    marginLeft: 20,
+  },
+  receiptContentSingle: {
+    marginVertical: 16,
+  },
+  receiptInfoRowNew: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+    marginBottom: 2,
+  },
+  receiptInfoLabelNew: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#555',
+    minWidth: 80,
+  },
+  receiptInfoValueNew: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+    flex: 1,
+    textAlign: 'right',
+  },
+  receiptAmountSeparatorLine: {
+    height: 2,
+    backgroundColor: '#333',
+    marginVertical: 20,
+  },
+  receiptAmountSectionNew: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 20,
+    paddingVertical: 12,
+  },
+  receiptAmountLabelNew: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+  },
+  receiptAmountNew: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  receiptActionButtons: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    backgroundColor: '#fafafa',
+  },
+  receiptPrintButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4CAF50',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    minWidth: 120,
+  },
+  receiptPrintButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  receiptDownloadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2196F3',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    minWidth: 120,
+  },
+  receiptDownloadButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
   },
 });
 
