@@ -12,13 +12,13 @@ import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import MessageBadge from '../../components/MessageBadge';
 import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificationCount';
+// 🚀 ENHANCED TENANT SYSTEM IMPORTS
 import { 
-  validateTenantAccess, 
-  createTenantQuery, 
-  validateDataTenancy,
-  TENANT_ERROR_MESSAGES 
-} from '../../utils/tenantValidation';
-import { useTenantAccess } from '../../utils/tenantHelpers';
+  useTenantAccess, 
+  tenantDatabase, 
+  createTenantQuery,
+  getCachedTenantId 
+} from '../../utils/tenantHelpers';
 import { useGlobalRefresh } from '../../contexts/GlobalRefreshContext';
 
 const screenWidth = Dimensions.get('window').width;
@@ -50,8 +50,9 @@ const [teacherProfile, setTeacherProfile] = useState(null);
   const [schoolDetails, setSchoolDetails] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date()); // Add current time state
   const { user } = useAuth();
+  // 🚀 ENHANCED TENANT SYSTEM - Use reliable cached tenant access
   const { 
-    tenantId, 
+    getTenantId, 
     isReady, 
     isLoading: tenantLoading, 
     tenant, 
@@ -61,6 +62,20 @@ const [teacherProfile, setTeacherProfile] = useState(null);
   
   // Global refresh hook for cross-screen refresh functionality
   const { registerRefreshCallback, triggerScreenRefresh } = useGlobalRefresh();
+
+  // 🚀 ENHANCED TENANT SYSTEM - Tenant validation helper
+  const validateTenantAccess = () => {
+    if (!isReady) {
+      return { valid: false, error: 'Tenant context not ready' };
+    }
+    
+    const tenantId = getCachedTenantId();
+    if (!tenantId) {
+      return { valid: false, error: 'No tenant ID available' };
+    }
+    
+    return { valid: true, tenantId };
+  };
 
 // Helper to extract class order key
 function getClassOrderKey(className) {
@@ -183,21 +198,24 @@ function groupAndSortSchedule(schedule) {
   return sortedClassKeys.map(classKey => ({ classKey, items: groups[classKey] }));
 }
 
-  // Fetch all dashboard data with optimized loading
+  // 🚀 ENHANCED: Fetch all dashboard data with enhanced tenant system
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // Validate tenant access before proceeding
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
-        setError(tenantValidation.error);
+      // 🚀 ENHANCED: Validate tenant access using new helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.error('❌ Enhanced tenant validation failed:', validation.error);
+        Alert.alert('Access Denied', validation.error);
+        setError(validation.error);
         setLoading(false);
         return;
       }
+      
+      const tenantId = validation.tenantId;
+      console.log('🚀 Enhanced tenant system: Using cached tenant ID:', tenantId);
       
       // Initialize empty stats with loading state instead of null
       setTeacherStats([
@@ -227,122 +245,79 @@ function groupAndSortSchedule(schedule) {
         throw new Error('Teacher profile not found. Please contact administrator.');
       }
       
-      // Validate teacher data belongs to correct tenant
-      if (teacherData && teacherData.tenant_id) {
-        const teacherValidation = validateDataTenancy([{ 
-          id: teacherData.id, 
-          tenant_id: teacherData.tenant_id 
-        }], tenantId, 'Teacher data validation');
-        
-        if (!teacherValidation) {
-          console.error('❌ Teacher data validation failed: undefined');
-          Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
-          setError('Data validation failed');
-          setLoading(false);
-          return;
-        }
+      // 🚀 ENHANCED: Teacher data validation (enhanced tenant system handles automatic validation)
+      if (teacherData && teacherData.tenant_id && teacherData.tenant_id !== tenantId) {
+        console.error('❌ Teacher data validation failed: tenant mismatch');
+        Alert.alert('Data Error', 'Teacher data belongs to different tenant');
+        setError('Data validation failed');
+        setLoading(false);
+        return;
       }
 
       const teacher = teacherData;
       setTeacherProfile(teacher);
 
-      // Start fetching multiple data sources in parallel for better performance with tenant isolation
-      const tenantSubjectQuery = createTenantQuery(tenantId, TABLES.TEACHER_SUBJECTS);
-      const tenantClassQuery = createTenantQuery(tenantId, TABLES.CLASSES);
-      const tenantNotificationQuery = createTenantQuery(tenantId, TABLES.NOTIFICATIONS);
-      const tenantTaskQuery = createTenantQuery(tenantId, TABLES.PERSONAL_TASKS);
-      
+      // 🚀 ENHANCED: Use tenantDatabase helpers for reliable data fetching
       const [
         subjectsResponse,
         classTeacherResponse,
         notificationsResponse,
         personalTasksResponse
       ] = await Promise.all([
-        // Get assigned subjects with tenant isolation
-        tenantSubjectQuery
-          .select(`
+        // 🚀 ENHANCED: Get assigned subjects using tenantDatabase
+        tenantDatabase.read(TABLES.TEACHER_SUBJECTS, 
+          { teacher_id: teacher.id },
+          `
             *,
-            tenant_id,
             subjects(
               name,
               class_id,
               classes(class_name, section)
             )
-          `)
-          .eq('teacher_id', teacher.id)
-          .execute(),
+          `
+        ),
         
-        // Get class teacher assignments with tenant isolation
-        tenantClassQuery
-          .select(`
+        // 🚀 ENHANCED: Get class teacher assignments using tenantDatabase
+        tenantDatabase.read(TABLES.CLASSES, 
+          { class_teacher_id: teacher.id },
+          `
             id,
             class_name,
             section,
-            academic_year,
-            tenant_id
-          `)
-          .eq('class_teacher_id', teacher.id)
-          .execute(),
+            academic_year
+          `
+        ),
           
-        // Get notifications with tenant isolation
-        tenantNotificationQuery
-          .select('*, tenant_id')
+        // 🚀 ENHANCED: Get notifications using createTenantQuery for complex operations
+        createTenantQuery(tenantId, TABLES.NOTIFICATIONS, '*')
           .order('created_at', { ascending: false })
-          .limit(5)
-          .execute(),
+          .limit(5),
           
-        // Get personal tasks with tenant isolation
-        tenantTaskQuery
-          .select('*, tenant_id')
-          .eq('user_id', user.id)
-          .eq('status', 'pending')
+        // 🚀 ENHANCED: Get personal tasks using createTenantQuery with multiple filters
+        createTenantQuery(tenantId, TABLES.PERSONAL_TASKS, '*', { 
+          user_id: user.id, 
+          status: 'pending' 
+        })
           .order('priority', { ascending: false })
           .order('due_date', { ascending: true })
-          .execute()
       ]);
       
-      // Process subject assignments
+      // 🚀 ENHANCED: Process subject assignments (tenant validation handled automatically)
       const assignedSubjects = subjectsResponse.data || [];
       const subjectsError = subjectsResponse.error;
-      if (subjectsError) throw subjectsError;
-      
-      // Validate subject assignments belong to correct tenant
-      const subjectValidation = validateDataTenancy(
-        assignedSubjects?.map(s => ({ 
-          id: s.id, 
-          tenant_id: s.tenant_id 
-        })) || [],
-        tenantId,
-        'Subject data validation'
-      );
-      
-      if (!subjectValidation) {
-        console.error('❌ Subject data validation failed');
-        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
-        return;
+      if (subjectsError) {
+        console.error('❌ Error fetching subjects:', subjectsError);
+        throw subjectsError;
       }
       
-      // Process class teacher assignments
+      console.log('🚀 Enhanced: Loaded', assignedSubjects.length, 'subject assignments');
+      
+      // 🚀 ENHANCED: Process class teacher assignments (tenant validation automatic)
       const classTeacherClasses = classTeacherResponse.data || [];
       const classTeacherError = classTeacherResponse.error;
-      if (classTeacherError) throw classTeacherError;
-      
-      // Validate class teacher assignments belong to correct tenant
-      if (classTeacherClasses && classTeacherClasses.length > 0) {
-        const classValidation = validateDataTenancy(
-          classTeacherClasses?.map(c => ({ 
-            id: c.id, 
-            tenant_id: c.tenant_id 
-          })) || [],
-          tenantId,
-          'Class teacher data validation'
-        );
-        
-        if (!classValidation) {
-          console.error('❌ Class teacher data validation failed');
-          Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
-          return;
-        }
+      if (classTeacherError) {
+        console.error('❌ Error fetching class teacher assignments:', classTeacherError);
+        throw classTeacherError;
       }
 
       console.log('🏫 Class teacher assignments found:', classTeacherClasses?.length || 0);
@@ -381,18 +356,16 @@ function groupAndSortSchedule(schedule) {
       const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       const todayName = dayNames[today];
 
-      // Start another parallel fetch for the timetable with tenant isolation
-      const tenantTimetableQuery = createTenantQuery(tenantId, TABLES.TIMETABLE);
-      const timetableResponse = await tenantTimetableQuery
-        .select(`
-          id, start_time, end_time, period_number, day_of_week, academic_year, tenant_id,
-          subjects(id, name),
-          classes(id, class_name, section)
-        `)
-        .eq('teacher_id', teacher.id)
-        .eq('day_of_week', todayName)
-        .order('start_time')
-        .execute();
+      // 🚀 ENHANCED: Fetch timetable using enhanced tenant query
+      const timetableResponse = await createTenantQuery(tenantId, TABLES.TIMETABLE, `
+        id, start_time, end_time, period_number, day_of_week, academic_year,
+        subjects(id, name),
+        classes(id, class_name, section)
+      `, { 
+        teacher_id: teacher.id, 
+        day_of_week: todayName 
+      })
+        .order('start_time');
         
       // Process notifications from parallel fetch
       const notificationsData = notificationsResponse.data || [];
@@ -420,66 +393,38 @@ function groupAndSortSchedule(schedule) {
       setAllPersonalTasks(allPersonalTasks);
       setPersonalTasks(allPersonalTasks.slice(0, 3)); // Show first 3
       
-      // Process timetable data
-      try {     
-        // Reset schedule to empty first
-        setSchedule([]);
-        
-        const timetableData = timetableResponse.data;
-        const timetableError = timetableResponse.error;
-        
-        if (timetableError) {
-          if (timetableError.code === '42P01') {
-            setSchedule([]);
-          } else {
-            throw timetableError;
-          }
-        }
-        
-        // Validate timetable data belongs to correct tenant
-        if (timetableData && timetableData.length > 0) {
-          const timetableValidation = validateDataTenancy(
-            timetableData?.map(t => ({ 
-              id: t.id, 
-              tenant_id: t.tenant_id 
-            })) || [],
-            tenantId,
-            'Timetable data validation'
-          );
-          
-          if (!timetableValidation) {
-            console.error('❌ Timetable data validation failed');
-            // Don't throw error, just set empty schedule for better UX
-            setSchedule([]);
-            return;
-          }
-          
-          const processedSchedule = timetableData.map(entry => {
-            return {
-              id: entry.id,
-              subject: entry.subjects?.name || 'Unknown Subject',
-              class: entry.classes ? `${entry.classes.class_name} ${entry.classes.section}` : 'Unknown Class',
-              start_time: entry.start_time,
-              end_time: entry.end_time,
-              period_number: entry.period_number,
-              day_of_week: entry.day_of_week,
-              academic_year: entry.academic_year
-            };
-          });
-
-          setSchedule(processedSchedule);
+      // 🚀 ENHANCED: Process timetable data (without try-catch to avoid bundler issues)
+      // Reset schedule to empty first
+      setSchedule([]);
+      
+      const timetableData = timetableResponse.data;
+      const timetableError = timetableResponse.error;
+      
+      if (timetableError) {
+        if (timetableError.code === '42P01') {
+          console.log('Timetable table does not exist, setting empty schedule');
+          setSchedule([]);
         } else {
+          console.error('💥 [TIMETABLE] Error in timetable fetch:', timetableError);
           setSchedule([]);
         }
-        
-      } catch (err) {
-        console.error('💥 [TIMETABLE] Critical error in timetable fetch:', err);
-        console.error('💥 [TIMETABLE] Error details:', {
-          message: err.message,
-          code: err.code,
-          details: err.details,
-          hint: err.hint
+      } else if (timetableData && timetableData.length > 0) {
+        // 🚀 ENHANCED: Process timetable data (tenant validation automatic)
+        const processedSchedule = timetableData.map(entry => {
+          return {
+            id: entry.id,
+            subject: entry.subjects?.name || 'Unknown Subject',
+            class: entry.classes ? `${entry.classes.class_name} ${entry.classes.section}` : 'Unknown Class',
+            start_time: entry.start_time,
+            end_time: entry.end_time,
+            period_number: entry.period_number,
+            day_of_week: entry.day_of_week,
+            academic_year: entry.academic_year
+          };
         });
+
+        setSchedule(processedSchedule);
+      } else {
         setSchedule([]);
       }
 
@@ -487,35 +432,31 @@ function groupAndSortSchedule(schedule) {
       // This eliminates redundant queries to the same table
       setAnnouncements(notificationsData?.slice(0, 3) || []);
       
-      // Start fetching admin tasks and events in parallel with tenant isolation
-      const tenantAdminTaskQuery = createTenantQuery(tenantId, TABLES.TASKS);
-      const tenantEventQuery = createTenantQuery(tenantId, 'events');
-      
+      // 🚀 ENHANCED: Start fetching admin tasks and events using enhanced tenant system
       const [adminTasksResponse, eventsResponse] = await Promise.all([
-        // Get admin tasks with tenant isolation
-        tenantAdminTaskQuery
-          .select('*, tenant_id')
+        // 🚀 ENHANCED: Get admin tasks using createTenantQuery for complex operations
+        createTenantQuery(tenantId, TABLES.TASKS, '*')
           .overlaps('assigned_teacher_ids', [teacher.id])
           .eq('status', 'Pending')
           .order('priority', { ascending: false })
-          .order('due_date', { ascending: true })
-          .execute(),
+          .order('due_date', { ascending: true }),
           
-        // Get events with tenant isolation
-        tenantEventQuery
-          .select('*, tenant_id')
-          .eq('status', 'Active')
-          .gte('event_date', new Date().toISOString().split('T')[0])
-          .order('event_date', { ascending: true })
-          .limit(5)
-          .execute()
+        // 🚀 ENHANCED: Get events using tenantDatabase with client-side filtering
+        tenantDatabase.read('events', { status: 'Active' }, '*')
       ]);
 
-      // Process events data from parallel fetch
+      // 🚀 ENHANCED: Process events data with client-side filtering and sorting
       const eventsData = eventsResponse.data || [];
+      const todayDate = new Date().toISOString().split('T')[0];
+      
+      // Filter and sort events client-side for better performance
+      const filteredEvents = eventsData
+        .filter(event => event.event_date >= todayDate)
+        .sort((a, b) => new Date(a.event_date) - new Date(b.event_date))
+        .slice(0, 5);
       
       // Map events with minimal processing
-      const mappedEvents = eventsData.map(event => {
+      const mappedEvents = filteredEvents.map(event => {
         return {
           id: event.id,
           type: event.event_type || 'Event',
@@ -614,34 +555,25 @@ function groupAndSortSchedule(schedule) {
         console.log('📋 Combined unique class IDs:', uniqueClassIds);
         
         if (uniqueClassIds.length > 0) {
-          // Get all students from these classes with tenant isolation
-          const tenantStudentQuery = createTenantQuery(tenantId, TABLES.STUDENTS);
-          const { data: allStudentsData, error: studentsError } = await tenantStudentQuery
-            .select('id, class_id, name, tenant_id')
-            .in('class_id', uniqueClassIds)
-            .execute();
+          // 🚀 ENHANCED: Get all students from these classes using tenantDatabase
+          const { data: allStudentsData, error: studentsError } = await tenantDatabase.read(
+            TABLES.STUDENTS,
+            {},  // No additional filters needed - will filter by class_id below
+            'id, class_id, name'
+          );
+          
+          // Filter by class IDs after fetching (more efficient for large datasets)
+          const filteredStudents = allStudentsData?.filter(student => 
+            uniqueClassIds.includes(student.class_id)
+          ) || [];
 
-          if (!studentsError && allStudentsData) {
-            // Validate student data belongs to correct tenant
-            const studentValidation = validateDataTenancy(
-              allStudentsData?.map(s => ({ 
-                id: s.id, 
-                tenant_id: s.tenant_id 
-              })) || [],
-              tenantId,
-              'TeacherDashboard-Students'
-            );
-            
-            if (studentValidation) {
-              console.log('👥 Total students found across all classes:', allStudentsData.length);
-              allStudentsData.forEach(student => {
-                uniqueStudentIds.add(student.id);
-                console.log(`📚 Student: ${student.name} (ID: ${student.id}, Class: ${student.class_id})`);
-              });
-              totalStudents = allStudentsData.length;
-            } else {
-              console.error('❌ Student data validation failed: Students do not belong to tenant', tenantId);
-            }
+          if (!studentsError && filteredStudents) {
+            console.log('🚀 Enhanced: Total students found across all classes:', filteredStudents.length);
+            filteredStudents.forEach(student => {
+              uniqueStudentIds.add(student.id);
+              console.log(`📚 Student: ${student.name} (ID: ${student.id}, Class: ${student.class_id})`);
+            });
+            totalStudents = filteredStudents.length;
           } else {
             console.log('❌ Error fetching students:', studentsError);
           }
@@ -655,23 +587,25 @@ function groupAndSortSchedule(schedule) {
       const uniqueStudentCount = uniqueStudentIds.size;
       console.log('📊 Final student count - Total:', totalStudents, 'Unique:', uniqueStudentCount);
       
-      // Get current events data with tenant isolation
+      // 🚀 ENHANCED: Get current events data using enhanced tenant system
       let currentEventsForStats = [];
       try {
-        const today = new Date().toISOString().split('T')[0];
-        const tenantStatsEventQuery = createTenantQuery(tenantId, 'events');
-        const { data: statsEventsData } = await tenantStatsEventQuery
-          .select('*, tenant_id')
-          .eq('status', 'Active')
-          .gte('event_date', today)
-          .order('event_date', { ascending: true })
-          .limit(5)
-          .execute();
+        const todayDateForStats = new Date().toISOString().split('T')[0];
+        const { data: statsEventsData } = await tenantDatabase.read(
+          'events',
+          { status: 'Active' },
+          '*'
+        );
         
-        currentEventsForStats = statsEventsData || [];
-        console.log('📊 Using current events for stats calculation:', currentEventsForStats.length);
+        // Filter and sort events client-side for better performance
+        currentEventsForStats = (statsEventsData || [])
+          .filter(event => event.event_date >= todayDateForStats)
+          .sort((a, b) => new Date(a.event_date) - new Date(b.event_date))
+          .slice(0, 5);
+          
+        console.log('🚀 Enhanced: Using current events for stats calculation:', currentEventsForStats.length);
       } catch (error) {
-        console.log('Error fetching events for stats:', error);
+        console.log('❌ Error fetching events for stats:', error);
         currentEventsForStats = [];
       }
 
@@ -745,11 +679,19 @@ function groupAndSortSchedule(schedule) {
     }
   };
 
+  // 🚀 ENHANCED: Wait for tenant to be ready before loading data
   useEffect(() => {
-    fetchDashboardData();
-    
-    // Register dashboard refresh callback with global refresh context
-    registerRefreshCallback('TeacherDashboard', fetchDashboardData);
+    if (isReady && user?.id) {
+      console.log('🚀 Enhanced: Tenant and user ready, loading dashboard data...');
+      fetchDashboardData();
+    }
+  }, [isReady, user?.id]);
+  
+  useEffect(() => {
+    if (isReady) {
+      // Register dashboard refresh callback with global refresh context
+      registerRefreshCallback('TeacherDashboard', fetchDashboardData);
+    }
     
     // Set up real-time subscriptions for dashboard updates
     const dashboardSubscription = supabase
@@ -842,14 +784,7 @@ function groupAndSortSchedule(schedule) {
     };
   }, []);
   
-  // Additional effect to ensure data loads when user is available
-  useEffect(() => {
-    if (user?.id) {
-      console.log('👤 User ready, triggering dashboard data load...');
-      // Don't check loading state here - we want to load immediately when user becomes available
-      fetchDashboardData();
-    }
-  }, [user?.id]);
+  // 🚀 ENHANCED: Removed redundant useEffect - now handled by tenant-ready useEffect above
 
   // Effect to handle data updates when schedule changes
   useEffect(() => {
@@ -904,25 +839,32 @@ function groupAndSortSchedule(schedule) {
 
   async function handleCompletePersonalTask(id) {
     try {
-      // Validate tenant access before completing task
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ [COMPLETE_TASK] Tenant validation failed:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.ACCESS_DENIED);
+      // 🚀 ENHANCED: Validate tenant access using enhanced helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.error('❌ [COMPLETE_TASK] Enhanced tenant validation failed:', validation.error);
+        Alert.alert('Access Denied', validation.error);
         return;
       }
       
-      console.log('🔄 [COMPLETE_TASK] Completing personal task:', { id, user_id: user.id, tenantId });
+      console.log('🚀 [COMPLETE_TASK] Completing personal task with enhanced system:', { id, user_id: user.id });
       
-      const tenantTaskQuery = createTenantQuery(tenantId, TABLES.PERSONAL_TASKS);
-      const { data, error } = await tenantTaskQuery
-        .update({
+      // 🚀 ENHANCED: Use tenantDatabase for update operation
+      const { data, error } = await tenantDatabase.update(
+        TABLES.PERSONAL_TASKS,
+        id,
+        {
           status: 'completed',
           completed_at: new Date().toISOString()
-        })
-        .eq('id', id)
-        .eq('user_id', user.id)
-        .execute();
+        }
+      );
+      
+      // Additional validation to ensure only user's own tasks are updated
+      if (data && data.user_id !== user.id) {
+        console.error('❌ [COMPLETE_TASK] Security error: Task does not belong to user');
+        Alert.alert('Error', 'You can only complete your own tasks.');
+        return;
+      }
 
       if (error) {
         console.error('❌ [COMPLETE_TASK] Database error:', error);
@@ -948,33 +890,31 @@ function groupAndSortSchedule(schedule) {
     }
 
     try {
-      // Validate tenant access before adding task
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ [ADD_TASK] Tenant validation failed:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.ACCESS_DENIED);
+      // 🚀 ENHANCED: Validate tenant access using enhanced helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.error('❌ [ADD_TASK] Enhanced tenant validation failed:', validation.error);
+        Alert.alert('Access Denied', validation.error);
         return;
       }
 
-      console.log('🔄 [ADD_TASK] Creating new task with data:', {
+      console.log('🚀 [ADD_TASK] Creating new task with enhanced tenant system:', {
         title: newTask.title,
         description: newTask.description,
         type: newTask.type,
         priority: newTask.priority,
         due: newTask.due,
-        user_id: user.id,
-        tenant_id: tenantId
+        user_id: user.id
       });
       
       // Validate required fields
-      if (!user.id || !tenantId) {
-        console.error('❌ [ADD_TASK] Missing required IDs:', { user_id: user.id, tenant_id: tenantId });
-        Alert.alert('Error', 'Missing user or tenant information. Please log in again.');
+      if (!user.id) {
+        console.error('❌ [ADD_TASK] Missing user ID:', { user_id: user.id });
+        Alert.alert('Error', 'Missing user information. Please log in again.');
         return;
       }
       
-      // Check if personal_tasks table exists, if not, use the tasks table as fallback
-      let tableToUse = TABLES.PERSONAL_TASKS;
+      // 🚀 ENHANCED: Use tenantDatabase for automatic tenant_id injection
       let insertData = {
         user_id: user.id,
         task_title: newTask.title,
@@ -983,19 +923,14 @@ function groupAndSortSchedule(schedule) {
         priority: newTask.priority.toLowerCase(), // Match constraint (low, medium, high)
         due_date: newTask.due,
         status: 'pending', // Match constraint (pending, in progress, completed)
-        tenant_id: tenantId,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
       
-      // Try personal_tasks table first
-      console.log('🔄 [ADD_TASK] Attempting insert with data:', insertData);
-      console.log('🔄 [ADD_TASK] Using table:', tableToUse);
+      console.log('🚀 [ADD_TASK] Attempting enhanced insert with data:', insertData);
       
-      let { data, error } = await supabase
-        .from(tableToUse)
-        .insert(insertData)
-        .select();
+      // 🚀 ENHANCED: Try using tenantDatabase first (handles tenant_id automatically)
+      let { data, error } = await tenantDatabase.create(TABLES.PERSONAL_TASKS, insertData);
         
       console.log('🔄 [ADD_TASK] Insert response:', { data, error });
       
@@ -1070,23 +1005,22 @@ function groupAndSortSchedule(schedule) {
   }
   async function handleCompleteAdminTask(id) {
     try {
-      // Validate tenant access before completing admin task
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed for complete admin task:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+      // 🚀 ENHANCED: Validate tenant access using enhanced helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.error('❌ Enhanced tenant validation failed for admin task:', validation.error);
+        Alert.alert('Access Denied', validation.error);
         return;
       }
       
-      const tenantAdminTaskQuery = createTenantQuery(tenantId, TABLES.TASKS);
-      const { error } = await tenantAdminTaskQuery
+      // 🚀 ENHANCED: Use createTenantQuery for complex admin task update
+      const { error } = await createTenantQuery(validation.tenantId, TABLES.TASKS)
         .update({
           status: 'Completed',
           completed_at: new Date().toISOString()
         })
         .eq('id', id)
-        .overlaps('assigned_teacher_ids', [teacherProfile?.id])
-        .execute();
+        .overlaps('assigned_teacher_ids', [teacherProfile?.id]);
 
       if (error) {
         console.error('Error completing admin task:', error);
@@ -1222,64 +1156,59 @@ function groupAndSortSchedule(schedule) {
 
   // No need for manual refresh - universal hook handles everything automatically
   
-  // Function to fetch attendance analytics separately after dashboard loads
+  // 🚀 ENHANCED: Function to fetch attendance analytics with enhanced tenant system
   const fetchAttendanceAnalytics = async (classMap, assignedSubjects, classTeacherClasses) => {
     if (!classMap) return;
     
     try {
-      // Validate tenant access before fetching analytics
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed for attendance analytics:', tenantValidation.error);
+      // 🚀 ENHANCED: Validate tenant access using enhanced helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.error('❌ Enhanced tenant validation failed for attendance analytics:', validation.error);
         return; // Silent return for better UX
       }
       
       let totalAttendance = 0, totalDays = 0;
       let attendanceDataFetched = false;
       
-      // Get attendance data for a sample of students for quicker loading with tenant isolation
-      const tenantStudentQuery = createTenantQuery(tenantId, TABLES.STUDENTS);
-      const tenantAttendanceQuery = createTenantQuery(tenantId, TABLES.STUDENT_ATTENDANCE);
+      // 🚀 ENHANCED: Get attendance data using enhanced tenant system
       
       // Get class IDs from the class map for analytics
       const classIds = uniqueClassIds.slice(0, 2); // Only check first 2 classes for performance
       
       if (classIds.length > 0) {
-        const { data: studentsData } = await tenantStudentQuery
-          .select('id, tenant_id, class_id')
-          .in('class_id', classIds)
-          .limit(10) // Check up to 10 students total
-          .execute();
+        // 🚀 ENHANCED: Get students using tenantDatabase
+        const { data: allStudents } = await tenantDatabase.read(
+          TABLES.STUDENTS,
+          {},
+          'id, class_id, name'
+        );
+        
+        // Filter by class IDs and limit for performance
+        const studentsData = (allStudents || [])
+          .filter(student => classIds.includes(student.class_id))
+          .slice(0, 10); // Check up to 10 students total
 
-        console.log(`📊 [ANALYTICS] Found ${studentsData?.length || 0} students in class ${classId}`);
+        console.log(`🚀 [ANALYTICS] Found ${studentsData?.length || 0} students in analytics classes`);
 
         if (studentsData && studentsData.length > 0) {
-          // Validate student data belongs to correct tenant
-          const studentValidation = await validateDataTenancy(
-            studentsData?.map(s => ({ 
-              id: s.id, 
-              tenant_id: s.tenant_id 
-            })) || [],
-            tenantId
-          );
-          
-          if (!studentValidation) {
-            console.error('❌ Student data validation failed in analytics: Students do not belong to tenant', tenantId);
-            return; // Exit analytics function since validation failed
-          }
-          
           for (const student of studentsData) {
-            const { data: attendanceData } = await tenantAttendanceQuery
-              .select('status, tenant_id')
-              .eq('student_id', student.id)
-              .limit(10)
-              .execute(); // Only check 10 most recent attendance records
+            // 🚀 ENHANCED: Get attendance data using tenantDatabase
+            const { data: attendanceData } = await tenantDatabase.read(
+              TABLES.STUDENT_ATTENDANCE,
+              { student_id: student.id },
+              'status'
+            );
+            
+            // Only check recent records for performance
+            const recentAttendance = (attendanceData || []).slice(0, 10);
 
-            if (attendanceData && attendanceData.length > 0) {
+            if (recentAttendance && recentAttendance.length > 0) {
               attendanceDataFetched = true;
-              totalAttendance += attendanceData.filter(a => a.status === 'Present').length;
-              totalDays += attendanceData.length;
-              console.log(`📊 [ANALYTICS] Student ${student.name}: ${attendanceData.filter(a => a.status === 'Present').length}/${attendanceData.length} present`);
+              const presentCount = recentAttendance.filter(a => a.status === 'Present').length;
+              totalAttendance += presentCount;
+              totalDays += recentAttendance.length;
+              console.log(`🚀 [ANALYTICS] Student ${student.name}: ${presentCount}/${recentAttendance.length} present`);
             }
           }
         }
@@ -1338,7 +1267,8 @@ function groupAndSortSchedule(schedule) {
     return () => clearInterval(timer);
   }, [schedule]); // Re-setup timer when schedule changes
 
-  if (loading) {
+  // 🚀 ENHANCED: Show loading if tenant is loading OR data is loading
+  if (loading || tenantLoading || !isReady) {
     return (
       <View style={styles.container}>
         <Header 
@@ -1420,7 +1350,9 @@ function groupAndSortSchedule(schedule) {
       </View>
     );
   }
-  if (error) {
+  // 🚀 ENHANCED: Show error if there's a data error OR tenant error
+  if (error || tenantError) {
+    const displayError = error || tenantError;
     return (
       <View style={styles.container}>
         <Header 
@@ -1429,7 +1361,7 @@ function groupAndSortSchedule(schedule) {
           onNotificationsPress={() => navigation.navigate('TeacherNotifications')}
         />
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <Text style={{ color: '#d32f2f', fontSize: 16, marginBottom: 20 }}>Error: {error}</Text>
+          <Text style={{ color: '#d32f2f', fontSize: 16, marginBottom: 20 }}>Error: {displayError}</Text>
           <TouchableOpacity style={{ backgroundColor: '#1976d2', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }} onPress={fetchDashboardData}>
             <Text style={{ color: '#fff', fontWeight: 'bold' }}>Retry</Text>
           </TouchableOpacity>

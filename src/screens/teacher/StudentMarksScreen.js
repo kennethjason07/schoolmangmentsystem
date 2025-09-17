@@ -18,6 +18,12 @@ import { supabase, TABLES } from '../../utils/supabase';
 import { format } from 'date-fns';
 import { CrossPlatformBarChart } from '../../components/CrossPlatformChart';
 import { Ionicons } from '@expo/vector-icons';
+// 🚀 ENHANCED TENANT SYSTEM IMPORTS
+import { 
+  useTenantAccess, 
+  createTenantQuery,
+  getCachedTenantId 
+} from '../../utils/tenantHelpers';
 
 const StudentMarksScreen = ({ navigation, route }) => {
   const { student } = route.params;
@@ -27,21 +33,56 @@ const StudentMarksScreen = ({ navigation, route }) => {
   const [selectedExam, setSelectedExam] = useState(null);
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  
+  // 🚀 ENHANCED TENANT SYSTEM - Use reliable cached tenant access
+  const { 
+    getTenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
+  
+  // 🚀 ENHANCED TENANT SYSTEM - Tenant validation helper
+  const validateTenantAccess = () => {
+    if (!isReady) {
+      return { valid: false, error: 'Tenant context not ready' };
+    }
+    
+    const tenantId = getCachedTenantId();
+    if (!tenantId) {
+      return { valid: false, error: 'No tenant ID available' };
+    }
+    
+    return { valid: true, tenantId };
+  };
 
-  // Load marks data
+  // 🚀 ENHANCED: Load marks data with enhanced tenant system
   const loadMarksData = async () => {
     try {
       setLoading(true);
       
-      // Get marks for the student with subject and exam information
-      const { data: marksData, error: marksError } = await supabase
-        .from(TABLES.MARKS)
-        .select(`
+      // 🚀 ENHANCED: Validate tenant access using new helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.error('❌ Enhanced tenant validation failed:', validation.error);
+        throw new Error(validation.error);
+      }
+      
+      const tenantId = validation.tenantId;
+      console.log('🚀 Enhanced tenant system: Loading marks for student', student.id, 'in tenant:', tenantId);
+      
+      // 🚀 ENHANCED: Get marks using createTenantQuery with automatic tenant filtering
+      const { data: marksData, error: marksError } = await createTenantQuery(
+        TABLES.MARKS,
+        `
           *,
           subjects(name),
           exams(name, start_date, end_date)
-        `)
-        .eq('student_id', student.id)
+        `,
+        { student_id: student.id }
+      )
         .order('created_at', { ascending: false });
 
       if (marksError) throw marksError;
@@ -82,10 +123,16 @@ const StudentMarksScreen = ({ navigation, route }) => {
     }
   };
 
-  // Subscribe to real-time updates
+  // 🚀 ENHANCED: Subscribe to real-time updates with tenant readiness check
   useEffect(() => {
-    loadMarksData();
-
+    if (isReady) {
+      loadMarksData();
+    }
+  }, [isReady]);
+  
+  useEffect(() => {
+    if (!isReady) return;
+    
     const subscription = supabase
       .channel('marks-updates')
       .on('postgres_changes', {
@@ -100,7 +147,7 @@ const StudentMarksScreen = ({ navigation, route }) => {
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, [isReady]);
 
   // Get exam totals
   const getExamTotals = (exam, data) => {
@@ -122,6 +169,43 @@ const StudentMarksScreen = ({ navigation, route }) => {
     setSelectedSubject(subject);
   };
 
+  // 🚀 ENHANCED: Show tenant loading states
+  if (tenantLoading) {
+    return (
+      <View style={styles.container}>
+        <Header title={`${student.name}'s Marks`} showBack={true} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#1976d2" />
+          <Text style={styles.loadingText}>Initializing tenant context...</Text>
+          <Text style={styles.loadingSubtext}>Setting up secure access</Text>
+        </View>
+      </View>
+    );
+  }
+  
+  // 🚀 ENHANCED: Show tenant errors with enhanced messages
+  if (tenantError) {
+    return (
+      <View style={styles.container}>
+        <Header title={`${student.name}'s Marks`} showBack={true} />
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorTitle}>Tenant Access Error</Text>
+          <Text style={styles.errorText}>{tenantError}</Text>
+          <Text style={styles.errorSubtext}>Please check your connection and try again.</Text>
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={() => {
+              // Refresh the page to retry tenant initialization
+              loadMarksData();
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Header title={`${student.name}'s Marks`} showBack={true} />
@@ -129,6 +213,9 @@ const StudentMarksScreen = ({ navigation, route }) => {
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1976d2" />
+          {tenantName && (
+            <Text style={styles.loadingSubtext}>📚 {tenantName}</Text>
+          )}
         </View>
       ) : (
         examMarks.length === 0 ? (
@@ -453,6 +540,61 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 16,
+    color: '#1976d2',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  loadingSubtext: {
+    marginTop: 8,
+    color: '#666',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#d32f2f',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorText: {
+    color: '#d32f2f',
+    fontSize: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorSubtext: {
+    color: '#666',
+    fontSize: 14,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#1976d2',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   scrollContent: {
     padding: 16,

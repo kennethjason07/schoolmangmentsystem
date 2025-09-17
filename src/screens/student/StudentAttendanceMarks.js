@@ -8,12 +8,11 @@ import { LineChart } from 'react-native-chart-kit';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { 
-  validateTenantAccess, 
-  createTenantQuery, 
-  validateDataTenancy,
-  TENANT_ERROR_MESSAGES 
-} from '../../utils/tenantValidation';
-import { useTenantContext } from '../../contexts/TenantContext';
+  useTenantAccess,
+  tenantDatabase,
+  createTenantQuery,
+  getCachedTenantId
+} from '../../utils/tenantHelpers';
 import Header from '../../components/Header';
 
 // Generate months dynamically up to current month only (same as parent)
@@ -203,8 +202,17 @@ const validateAndSanitizeData = (data, type) => {
 
 export default function StudentAttendanceMarks({ route, navigation }) {
   const { user } = useAuth();
-  const { tenantId } = useTenantContext();
-  // Default to attendance tab, but can be overridden by route params
+  // 🚀 ENHANCED: Use enhanced tenant system
+  const { tenantId, isReady, error: tenantError } = useTenantAccess();
+  
+  // 🚀 ENHANCED: Tenant validation helper
+  const validateTenant = async () => {
+    const cachedTenantId = await getCachedTenantId();
+    if (!cachedTenantId) {
+      throw new Error('Tenant context not available');
+    }
+    return { valid: true, tenantId: cachedTenantId };
+  };
 
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthValue());
   const [fadeAnim] = useState(new Animated.Value(1));
@@ -245,36 +253,55 @@ export default function StudentAttendanceMarks({ route, navigation }) {
     await fetchStudentData();
   });
 
-  // Fetch attendance data from Supabase
+  // 🚀 ENHANCED: Fetch attendance data with tenant validation
   const fetchStudentData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Get student id from user context
+      console.log('🚀 === ENHANCED ATTENDANCE DATA FETCH ===');
+      
+      // 🚀 ENHANCED: Validate tenant access
+      const { valid, tenantId: effectiveTenantId } = await validateTenant();
+      if (!valid) {
+        console.error('❌ Tenant validation failed');
+        setError('Tenant context not available');
+        return;
+      }
+
+      console.log('🚀 Using effective tenant ID:', effectiveTenantId);
+
       if (!user?.id) {
         throw new Error('User not authenticated');
       }
 
-      // Get student data using the helper function
-      const { data: studentUserData, error: studentError } = await dbHelpers.getStudentByUserId(user.id);
-      if (studentError) {
-        console.error('Student fetch error:', studentError);
-        throw new Error(`Failed to fetch student data: ${studentError.message}`);
+      // Get student data using enhanced tenant query via users table
+      const userQuery = createTenantQuery(effectiveTenantId, TABLES.USERS)
+        .select(`
+          id,
+          email,
+          linked_student_id,
+          students!users_linked_student_id_fkey(
+            *,
+            classes(class_name, section)
+          )
+        `)
+        .eq('email', user.email)
+        .single();
+
+      const { data: userData, error: userError } = await userQuery;
+      if (userError || !userData || !userData.linked_student_id) {
+        console.error('Student data error:', userError);
+        throw new Error(`Failed to fetch student data: ${userError?.message || 'Student not found or user not linked to student'}`);
       }
 
-      if (!studentUserData) {
-        throw new Error('Student data not found. Please contact administrator.');
-      }
-
-      // Get student details from the linked student
-      const student = studentUserData.students;
+      const student = userData.students;
       if (!student) {
-        throw new Error('Student profile not found. Please contact administrator.');
+        throw new Error('Student profile not found');
       }
 
       const studentId = student.id;
-      console.log('Fetching data for student:', studentId, student.name);
+      console.log('🚀 Enhanced tenant-aware student data:', { id: studentId, name: student.name });
 
       setStudentInfo({
         name: student.name || 'Unknown Student',
@@ -288,10 +315,9 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         address: student.address || 'N/A'
       });
 
-      // Get parent information for the student
+      // Get parent information using enhanced tenant system
       try {
-        const { data: parentInfo, error: parentError } = await supabase
-          .from(TABLES.PARENTS)
+        const parentQuery = createTenantQuery(effectiveTenantId, TABLES.PARENTS)
           .select(`
             id,
             name,
@@ -301,6 +327,8 @@ export default function StudentAttendanceMarks({ route, navigation }) {
           `)
           .eq('student_id', studentId);
 
+        const { data: parentInfo, error: parentError } = await parentQuery;
+
         if (!parentError && parentInfo && parentInfo.length > 0) {
           console.log('Parent information:', parentInfo);
           // Store parent info if needed for display
@@ -309,9 +337,8 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         console.log('Parent info fetch error:', parentErr);
       }
 
-      // Get attendance records with additional details
-      const { data: attendance, error: attendanceError } = await supabase
-        .from(TABLES.STUDENT_ATTENDANCE)
+      // Get attendance records using enhanced tenant system
+      const attendanceQuery = createTenantQuery(effectiveTenantId, TABLES.STUDENT_ATTENDANCE)
         .select(`
           *,
           classes(
@@ -325,6 +352,8 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         `)
         .eq('student_id', studentId)
         .order('date', { ascending: false });
+
+      const { data: attendance, error: attendanceError } = await attendanceQuery;
 
       if (attendanceError) {
         console.error('Attendance error:', attendanceError);
@@ -420,10 +449,9 @@ export default function StudentAttendanceMarks({ route, navigation }) {
 
 
 
-      // Get subjects for this student's class
+      // Get subjects using enhanced tenant system
       try {
-        const { data: subjects, error: subjectsError } = await supabase
-          .from(TABLES.SUBJECTS)
+        const subjectsQuery = createTenantQuery(effectiveTenantId, TABLES.SUBJECTS)
           .select(`
             id,
             name,
@@ -431,6 +459,8 @@ export default function StudentAttendanceMarks({ route, navigation }) {
             class_id
           `)
           .eq('class_id', student.class_id);
+
+        const { data: subjects, error: subjectsError } = await subjectsQuery;
 
         if (!subjectsError && subjects) {
           setClassSubjects(subjects);
@@ -440,13 +470,16 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         console.log('Subjects fetch error:', subjectsErr);
       }
 
-      // Get school details
+      // Get school details using enhanced tenant system
       try {
-        const { data: schoolDetails, error: schoolError } = await supabase
-          .from(TABLES.SCHOOL_DETAILS)
-          .select('*')
-          .limit(1)
-          .single();
+        const schoolQuery = await tenantDatabase.read({
+          table: TABLES.SCHOOL_DETAILS,
+          select: '*',
+          single: true,
+          tenantId: effectiveTenantId
+        });
+
+        const { data: schoolDetails, error: schoolError } = { data: schoolQuery.data, error: schoolQuery.error };
 
         if (!schoolError && schoolDetails) {
           setSchoolInfo({
@@ -465,10 +498,9 @@ export default function StudentAttendanceMarks({ route, navigation }) {
 
 
 
-      // Get student's assignments for this class
+      // Get student's assignments using enhanced tenant system
       try {
-        const { data: assignments, error: assignmentsError } = await supabase
-          .from(TABLES.ASSIGNMENTS)
+        const assignmentsQuery = createTenantQuery(effectiveTenantId, TABLES.ASSIGNMENTS)
           .select(`
             id,
             title,
@@ -482,6 +514,8 @@ export default function StudentAttendanceMarks({ route, navigation }) {
           .gte('due_date', new Date().toISOString().split('T')[0])
           .order('due_date', { ascending: true })
           .limit(5);
+
+        const { data: assignments, error: assignmentsError } = await assignmentsQuery;
 
         if (!assignmentsError && assignments) {
           console.log('Recent assignments:', assignments);
@@ -498,8 +532,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         const currentYear = new Date().getFullYear();
         const academicYear = `${currentYear}-${currentYear + 1}`;
 
-        const { data: feeStatus, error: feeError } = await supabase
-          .from(TABLES.STUDENT_FEES)
+        const feeQuery = createTenantQuery(effectiveTenantId, TABLES.STUDENT_FEES)
           .select(`
             id,
             fee_component,
@@ -511,6 +544,8 @@ export default function StudentAttendanceMarks({ route, navigation }) {
           .eq('student_id', studentId)
           .eq('academic_year', academicYear)
           .order('payment_date', { ascending: false });
+
+        const { data: feeStatus, error: feeError } = await feeQuery;
 
         if (!feeError && feeStatus) {
           console.log('Fee status:', feeStatus);
@@ -527,8 +562,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         const today = new Date();
         const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
 
-        const { data: todayTimetable, error: timetableError } = await supabase
-          .from(TABLES.TIMETABLE)
+        const timetableQuery = createTenantQuery(effectiveTenantId, TABLES.TIMETABLE)
           .select(`
             id,
             period_number,
@@ -540,6 +574,8 @@ export default function StudentAttendanceMarks({ route, navigation }) {
           .eq('class_id', student.class_id)
           .eq('day_of_week', dayOfWeek)
           .order('period_number', { ascending: true });
+
+        const { data: todayTimetable, error: timetableError } = await timetableQuery;
 
         if (!timetableError && todayTimetable) {
           console.log('Today\'s timetable:', todayTimetable);
@@ -655,17 +691,34 @@ export default function StudentAttendanceMarks({ route, navigation }) {
     ]).start();
   };
 
+  // 🚀 ENHANCED: Wait for both user and tenant readiness
   useEffect(() => {
-    fetchStudentData();
+    console.log('🚀 Enhanced StudentAttendanceMarks useEffect triggered');
+    console.log('🚀 User state:', user);
+    console.log('🚀 Tenant ready:', isReady);
+    if (user && isReady) {
+      console.log('🚀 User and tenant ready, starting enhanced attendance data fetch...');
+      fetchStudentData();
+      
+      // Animate stats cards on load
+      Animated.timing(statsAnimValue, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      console.log('⚠️ Waiting for user and tenant context...');
+    }
+  }, [user, isReady]);
 
-    // Animate stats cards on load
-    Animated.timing(statsAnimValue, {
-      toValue: 1,
-      duration: 800,
-      useNativeDriver: true,
-    }).start();
+  // 🚀 ENHANCED: Set up real-time subscriptions with tenant readiness
+  useEffect(() => {
+    if (!user || !isReady) {
+      console.log('⚠️ Real-time subscriptions waiting for user and tenant readiness');
+      return;
+    }
 
-    // Enhanced real-time subscriptions with better error handling
+    console.log('🚀 Setting up enhanced tenant-aware real-time subscriptions');
     const subscriptions = [];
 
     try {
@@ -676,13 +729,11 @@ export default function StudentAttendanceMarks({ route, navigation }) {
           schema: 'public',
           table: TABLES.STUDENT_ATTENDANCE
         }, (payload) => {
-          console.log('Attendance change detected:', payload);
+          console.log('🚀 Attendance change detected:', payload);
           refreshData(false);
         })
         .subscribe();
       subscriptions.push(attendanceSub);
-
-
 
       const notificationsSub = supabase
         .channel('student-attendance-notifications')
@@ -691,7 +742,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
           schema: 'public',
           table: TABLES.NOTIFICATIONS
         }, (payload) => {
-          console.log('Notifications change detected:', payload);
+          console.log('🚀 Notifications change detected:', payload);
           // Only refresh if it's relevant to this student
           refreshData(false);
         })
@@ -705,13 +756,13 @@ export default function StudentAttendanceMarks({ route, navigation }) {
     return () => {
       subscriptions.forEach(sub => {
         try {
-          sub.unsubscribe();
+          supabase.removeChannel(sub);
         } catch (error) {
-          console.error('Error unsubscribing:', error);
+          console.error('Error removing channel:', error);
         }
       });
     };
-  }, []);
+  }, [user, isReady]);
 
   // SIMPLE ATTENDANCE CALCULATION - GUARANTEED TO WORK
   const [year, month] = selectedMonth.split('-').map(Number);
@@ -808,16 +859,33 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         studentInfo={studentInfo}
         onRefresh={() => refreshData(true)}
       />
-      {loading ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' }}>
+      {/* 🚀 ENHANCED: Show tenant loading states */}
+      {(!isReady || loading) ? (
+        <View style={[styles.loadingContainer, { backgroundColor: '#f5f5f5' }]}>
           <ActivityIndicator size="large" color="#1976d2" />
-          <Text style={{ marginTop: 10, color: '#555' }}>Loading data...</Text>
+          <Text style={styles.loadingText}>
+            {!isReady ? 'Initializing secure tenant context...' : 'Loading attendance data...'}
+          </Text>
+          <Text style={styles.loadingSubText}>
+            {!isReady ? 'Setting up secure access to your attendance records' : 'Please wait while we fetch your attendance data'}
+          </Text>
         </View>
-      ) : error ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' }}>
-          <Text style={{ fontSize: 18, color: '#F44336', textAlign: 'center', padding: 20 }}>{error}</Text>
-          <TouchableOpacity onPress={fetchStudentData} style={{ backgroundColor: '#1976d2', borderRadius: 8, paddingVertical: 12, paddingHorizontal: 24, marginTop: 20 }}>
-            <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>Retry</Text>
+      ) : (error || tenantError) ? (
+        <View style={[styles.errorContainer, { backgroundColor: '#f5f5f5' }]}>
+          <Ionicons name="alert-circle" size={48} color="#F44336" />
+          <Text style={styles.errorTitle}>
+            {tenantError ? 'Tenant Access Error' : 'Failed to Load Attendance'}
+          </Text>
+          <Text style={styles.errorText}>{tenantError || error}</Text>
+          {tenantError && (
+            <View style={styles.tenantErrorInfo}>
+              <Text style={styles.tenantErrorText}>Tenant ID: {tenantId || 'Not available'}</Text>
+              <Text style={styles.tenantErrorText}>Status: {isReady ? 'Ready' : 'Not Ready'}</Text>
+            </View>
+          )}
+          <TouchableOpacity onPress={fetchStudentData} style={styles.retryButton}>
+            <Ionicons name="refresh" size={20} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -2373,5 +2441,80 @@ const styles = StyleSheet.create({
   },
   monthPickerItemLast: {
     marginBottom: 10,
+  },
+
+  // 🚀 ENHANCED: Loading and error state styles
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    fontSize: 18,
+    color: '#1976d2',
+    marginTop: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  loadingSubText: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorTitle: {
+    fontSize: 20,
+    color: '#F44336',
+    fontWeight: 'bold',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 20,
+    paddingHorizontal: 20,
+  },
+  tenantErrorInfo: {
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+  },
+  tenantErrorText: {
+    fontSize: 14,
+    color: '#495057',
+    textAlign: 'center',
+    marginVertical: 2,
+  },
+  retryButton: {
+    backgroundColor: '#1976d2',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

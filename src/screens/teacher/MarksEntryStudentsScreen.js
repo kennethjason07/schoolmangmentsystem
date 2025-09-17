@@ -4,6 +4,13 @@ import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+// 🚀 ENHANCED TENANT SYSTEM IMPORTS
+import { 
+  useTenantAccess, 
+  tenantDatabase, 
+  createTenantQuery,
+  getCachedTenantId 
+} from '../../utils/tenantHelpers';
 
 export default function MarksEntryStudentsScreen({ navigation, route }) {
   const { subject, subjectId } = route.params;
@@ -18,6 +25,31 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
   const [progress, setProgress] = useState({ filled: 0, total: 0 });
   
   const { user } = useAuth();
+  
+  // 🚀 ENHANCED TENANT SYSTEM - Use reliable cached tenant access
+  const { 
+    getTenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
+  
+  // 🚀 ENHANCED TENANT SYSTEM - Tenant validation helper
+  const validateTenantAccess = () => {
+    if (!isReady) {
+      return { valid: false, error: 'Tenant context not ready' };
+    }
+    
+    const tenantId = getCachedTenantId();
+    if (!tenantId) {
+      return { valid: false, error: 'No tenant ID available' };
+    }
+    
+    return { valid: true, tenantId };
+  };
+  
   const headerScrollRef = useRef();
   const bodyScrollRef = useRef();
   const inputRefs = useRef({});
@@ -27,26 +59,45 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
   const STUDENT_NAME_WIDTH = 160;
   const SUBJECT_CELL_WIDTH = 90;
 
-  // Fetch students and subjects data
+  // 🚀 ENHANCED: Fetch students and subjects data with enhanced tenant system
   const fetchData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Get teacher info using the helper function
+      // 🚀 ENHANCED: Validate tenant access using new helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.error('❌ Enhanced tenant validation failed:', validation.error);
+        throw new Error(validation.error);
+      }
+      
+      const tenantId = validation.tenantId;
+      console.log('🚀 Enhanced tenant system: Using cached tenant ID:', tenantId);
+
+      // 🚀 ENHANCED: Get teacher info using dbHelpers with enhanced validation
       const { data: teacherData, error: teacherError } = await dbHelpers.getTeacherByUserId(user.id);
 
       if (teacherError || !teacherData) throw new Error('Teacher not found');
+      
+      // 🚀 ENHANCED: Teacher data validation (enhanced tenant system handles automatic validation)
+      if (teacherData && teacherData.tenant_id && teacherData.tenant_id !== tenantId) {
+        console.error('❌ Teacher data validation failed: tenant mismatch');
+        throw new Error('Teacher data belongs to different tenant');
+      }
+      
+      console.log('✅ Enhanced: Teacher lookup successful:', teacherData.name);
 
-      // Get classes and sections where teacher teaches subjects
-      const { data: teacherAssignments, error: assignmentsError } = await supabase
-        .from(TABLES.TEACHER_SUBJECTS)
-        .select(`
+      // 🚀 ENHANCED: Get classes and sections using enhanced tenant system
+      const { data: teacherAssignments, error: assignmentsError } = await tenantDatabase.read(
+        TABLES.TEACHER_SUBJECTS,
+        { teacher_id: teacherData.id },
+        `
           *,
           classes(id, class_name, section),
           subjects(id, name)
-        `)
-        .eq('teacher_id', teacherData.id);
+        `
+      );
 
       if (assignmentsError) throw assignmentsError;
 
@@ -72,17 +123,18 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
       const classIds = Array.from(uniqueClasses.keys());
       const allSubjects = Array.from(uniqueSubjects.values());
       
-      // Get all students from assigned classes
-      const { data: studentsData, error: studentsError } = await supabase
-        .from(TABLES.STUDENTS)
-        .select(`
+      // 🚀 ENHANCED: Get all students from assigned classes using createTenantQuery
+      const { data: studentsData, error: studentsError } = await createTenantQuery(
+        TABLES.STUDENTS,
+        `
           id,
           name,
           roll_no,
           admission_no,
           classes(class_name, section)
-        `)
-        .in('class_id', classIds)
+        `,
+        { class_id: { in: classIds } }
+      )
         .order('roll_no');
 
       if (studentsError) throw studentsError;
@@ -98,12 +150,21 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
     }
   };
 
-  // Fetch existing marks for all subjects - Fixed with better error handling
+  // 🚀 ENHANCED: Fetch existing marks with enhanced tenant system
   const fetchExistingMarks = async () => {
     if (students.length === 0 || subjects.length === 0) return;
 
     try {
-      console.log('Fetching existing marks for students:', students.length, 'subjects:', subjects.length);
+      console.log('🚀 Enhanced: Fetching existing marks for students:', students.length, 'subjects:', subjects.length);
+      
+      // 🚀 ENHANCED: Validate tenant access using new helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.warn('⚠️ Enhanced tenant validation failed in fetchExistingMarks, skipping silently for UX');
+        setMarks({});
+        updateProgress({});
+        return;
+      }
       
       // Validate student and subject IDs to prevent 400 errors
       const validStudentIds = students
@@ -135,11 +196,15 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
       
       for (const studentBatch of studentBatches) {
         try {
-          const { data: batchMarks, error: batchError } = await supabase
-            .from(TABLES.MARKS)
-            .select('student_id, subject_id, marks_obtained, max_marks, grade, created_at')
-            .in('subject_id', validSubjectIds)
-            .in('student_id', studentBatch)
+          // 🚀 ENHANCED: Use createTenantQuery for automatic tenant filtering
+          const { data: batchMarks, error: batchError } = await createTenantQuery(
+            TABLES.MARKS,
+            'student_id, subject_id, marks_obtained, max_marks, grade, created_at',
+            { 
+              subject_id: { in: validSubjectIds },
+              student_id: { in: studentBatch }
+            }
+          )
             .order('created_at', { ascending: false });
           
           if (batchError) {
@@ -235,8 +300,10 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (isReady) {
+      fetchData();
+    }
+  }, [isReady]);
 
   useEffect(() => {
     if (students.length > 0 && subjects.length > 0) {
@@ -247,18 +314,15 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
   // Enhanced save function
   const saveMarks = async (currentMarks = marks, showAlert = true) => {
     try {
-      // Get current user's tenant_id for RLS policy compliance
-      const { data: currentUser } = await supabase
-        .from(TABLES.USERS)
-        .select('tenant_id')
-        .eq('id', user.id)
-        .single();
-      
-      const userTenantId = currentUser?.tenant_id;
-      
-      if (!userTenantId) {
-        throw new Error('User tenant information not found');
+      // 🚀 ENHANCED: Validate tenant access using new helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.error('❌ Enhanced tenant validation failed in saveMarks:', validation.error);
+        throw new Error('Unable to determine tenant context for saving marks. Please contact support.');
       }
+      
+      const tenantId = validation.tenantId;
+      console.log('🚀 Enhanced tenant system: Using cached tenant ID for saving marks:', tenantId);
       
       const marksToSave = [];
       
@@ -274,7 +338,7 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
               marks_obtained: markValue,
               max_marks: 100,
               exam_id: null,
-              tenant_id: userTenantId
+              tenant_id: tenantId // 🚀 ENHANCED: Use cached tenant ID
             });
           }
         }
@@ -472,6 +536,20 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
   );
   
 
+  // 🚀 ENHANCED: Show tenant loading states
+  if (tenantLoading) {
+    return (
+      <View style={styles.container}>
+        <Header title="Enter Marks" showBack={true} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#1976d2" />
+          <Text style={styles.loadingText}>Initializing tenant context...</Text>
+          <Text style={styles.loadingSubtext}>Setting up secure access</Text>
+        </View>
+      </View>
+    );
+  }
+  
   if (loading) {
     return (
       <View style={styles.container}>
@@ -479,6 +557,32 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1976d2" />
           <Text style={styles.loadingText}>Loading spreadsheet...</Text>
+          {tenantName && (
+            <Text style={styles.loadingSubtext}>📚 {tenantName}</Text>
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  // 🚀 ENHANCED: Show tenant errors with enhanced messages
+  if (tenantError) {
+    return (
+      <View style={styles.container}>
+        <Header title="Enter Marks" showBack={true} />
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorTitle}>Tenant Access Error</Text>
+          <Text style={styles.errorText}>{tenantError}</Text>
+          <Text style={styles.errorSubtext}>Please check your connection and try again.</Text>
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={() => {
+              // Refresh the page to retry tenant initialization
+              fetchData();
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -489,7 +593,11 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
       <View style={styles.container}>
         <Header title="Enter Marks" showBack={true} />
         <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Error: {error}</Text>
+          <Text style={styles.errorTitle}>Loading Error</Text>
+          <Text style={styles.errorText}>{error}</Text>
+          {tenantName && (
+            <Text style={styles.errorSubtext}>📚 {tenantName}</Text>
+          )}
           <TouchableOpacity style={styles.retryButton} onPress={fetchData}>
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
@@ -865,7 +973,14 @@ const styles = StyleSheet.create({
     marginTop: 16,
     color: '#1976d2',
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  loadingSubtext: {
+    marginTop: 8,
+    color: '#666',
+    fontSize: 14,
+    textAlign: 'center',
   },
   errorContainer: {
     flex: 1,
@@ -874,12 +989,25 @@ const styles = StyleSheet.create({
     padding: 32,
     backgroundColor: '#f8f9fa',
   },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#d32f2f',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
   errorText: {
     color: '#d32f2f',
     fontSize: 16,
-    marginBottom: 24,
+    marginBottom: 8,
     textAlign: 'center',
     lineHeight: 24,
+  },
+  errorSubtext: {
+    color: '#666',
+    fontSize: 14,
+    marginBottom: 20,
+    textAlign: 'center',
   },
   retryButton: {
     backgroundColor: '#1976d2',

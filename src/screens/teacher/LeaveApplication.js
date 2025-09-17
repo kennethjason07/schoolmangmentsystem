@@ -16,12 +16,24 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import Header from '../../components/Header';
-import { supabase, getUserTenantId } from '../../utils/supabase';
+import { supabase } from '../../utils/supabase';
 import { format, parseISO, isAfter, differenceInDays } from 'date-fns';
 import { createLeaveRequestNotificationForAdmins } from '../../services/notificationService';
-import { useTenantAccess } from '../../utils/tenantHelpers';
+import { 
+  useTenantAccess, 
+  tenantDatabase, 
+  createTenantQuery, 
+  getCachedTenantId 
+} from '../../utils/tenantHelpers';
 import { submitLeaveApplication, loadLeaveApplications } from '../../utils/leaveApplicationUtils';
 import { useAuth } from '../../utils/AuthContext';
+
+// Table names for enhanced tenant system
+const TABLES = {
+  USERS: 'users',
+  TEACHERS: 'teachers',
+  LEAVE_APPLICATIONS: 'leave_applications'
+};
 
 const { width } = Dimensions.get('window');
 
@@ -60,16 +72,27 @@ const LeaveApplication = ({ navigation }) => {
     'Paternity Leave', 'Emergency Leave', 'Personal Leave', 'Medical Leave', 'Other'
   ];
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  // Enhanced tenant validation helper
+  const validateTenant = async () => {
+    const cachedTenantId = await getCachedTenantId();
+    if (!cachedTenantId) {
+      throw new Error('Tenant context not available. Please refresh and try again.');
+    }
+    return { valid: true, tenantId: cachedTenantId };
+  };
 
   useEffect(() => {
-    // Reload leave applications when teacherProfile changes
-    if (teacherProfile?.linked_teacher_id) {
+    if (user && isReady) {
+      loadData();
+    }
+  }, [user, isReady]);
+
+  useEffect(() => {
+    // Reload leave applications when teacherProfile changes and tenant is ready
+    if (teacherProfile?.linked_teacher_id && isReady) {
       loadMyLeaves();
     }
-  }, [teacherProfile]);
+  }, [teacherProfile, isReady]);
 
   const loadData = async () => {
     try {
@@ -86,11 +109,23 @@ const LeaveApplication = ({ navigation }) => {
 
   const loadTeacherProfile = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('User not authenticated');
+      console.log('🚀 Enhanced tenant system: Starting loadTeacherProfile...');
+      
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
 
-      const { data, error } = await supabase
-        .from('users')
+      // Validate tenant context
+      const tenantValidation = await validateTenant();
+      if (!tenantValidation.valid) {
+        throw new Error('Tenant validation failed');
+      }
+
+      const effectiveTenantId = tenantValidation.tenantId;
+      console.log('📊 Enhanced tenant system: Using tenant ID:', effectiveTenantId);
+
+      // Use enhanced tenant query for user profile
+      const userQuery = createTenantQuery(effectiveTenantId, TABLES.USERS)
         .select(`
           id,
           full_name,
@@ -100,14 +135,21 @@ const LeaveApplication = ({ navigation }) => {
         .eq('id', user.id)
         .single();
 
-      if (error) throw error;
+      const { data, error } = await userQuery;
+      if (error) {
+        console.error('❌ Enhanced tenant system: Error loading teacher profile:', error);
+        throw error;
+      }
+      
       if (!data.linked_teacher_id) {
         throw new Error('User is not linked to a teacher profile');
       }
 
       setTeacherProfile(data);
+      console.log('✅ Enhanced tenant system: Teacher profile loaded successfully');
+      
     } catch (error) {
-      console.error('Error loading teacher profile:', error);
+      console.error('❌ Enhanced tenant system: Error in loadTeacherProfile:', error);
       Alert.alert('Error', 'Failed to load teacher profile. Please contact admin.');
     }
   };
@@ -116,39 +158,24 @@ const LeaveApplication = ({ navigation }) => {
     const startTime = performance.now();
     
     try {
-      if (!teacherProfile?.linked_teacher_id) return;
-      
-      console.log('🚀 TeacherLeaveApplication: Starting loadMyLeaves...');
-      
-      // Get tenant ID with email fallback
-      // Validate tenant context
-      if (!isReady || !tenantId) {
-        throw new Error('Tenant context not ready. Please wait and try again.');
+      if (!teacherProfile?.linked_teacher_id) {
+        console.log('⚠️ Enhanced tenant system: No teacher profile available for leaves loading');
+        return;
       }
       
-      if (tenantError) {
-        throw new Error(tenantError.message || 'Tenant initialization error');
-      }
+      console.log('🚀 Enhanced tenant system: Starting loadMyLeaves...');
       
-      if (!tenantId) {
-        console.log('⚠️ TeacherLeaveApplication: No tenant from context/getUserTenantId, trying email lookup...');
-        
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          tenantId = emailTenant?.id;
-          console.log('📧 TeacherLeaveApplication: Email-based tenant ID:', tenantId);
-        } catch (emailError) {
-          console.error('❌ TeacherLeaveApplication: Email tenant lookup failed:', emailError);
-        }
-        
-        if (!tenantId) {
-          console.error('No tenant_id found for user in teacher leaves fetch');
-          return;
-        }
+      // Validate tenant context using enhanced system
+      const tenantValidation = await validateTenant();
+      if (!tenantValidation.valid) {
+        throw new Error('Tenant validation failed for leave applications');
       }
 
-      const { data, error } = await supabase
-        .from('leave_applications')
+      const effectiveTenantId = tenantValidation.tenantId;
+      console.log('📊 Enhanced tenant system: Loading leaves with tenant ID:', effectiveTenantId);
+
+      // Use enhanced tenant query for leave applications
+      const leavesQuery = createTenantQuery(effectiveTenantId, TABLES.LEAVE_APPLICATIONS)
         .select(`
           *,
           applied_by_user:users!leave_applications_applied_by_fkey(id, full_name),
@@ -156,20 +183,24 @@ const LeaveApplication = ({ navigation }) => {
           replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
         `)
         .eq('teacher_id', teacherProfile.linked_teacher_id)
-        .eq('tenant_id', tenantId)
         .order('applied_date', { ascending: false });
 
-      if (error) throw error;
+      const { data, error } = await leavesQuery;
+      if (error) {
+        console.error('❌ Enhanced tenant system: Error in leave applications query:', error);
+        throw error;
+      }
       
       setMyLeaves(data || []);
       
       // 📊 Performance monitoring
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
-      console.log(`✅ TeacherLeaveApplication: My leaves loaded in ${loadTime}ms`);
+      console.log(`✅ Enhanced tenant system: My leaves loaded in ${loadTime}ms (${(data || []).length} applications)`);
       
     } catch (error) {
-      console.error('❌ TeacherLeaveApplication: Error loading my leaves:', error.message);
+      console.error('❌ Enhanced tenant system: Error loading my leaves:', error.message);
+      // Don't show alert for this error as it might be called multiple times
     }
   };
 
@@ -205,11 +236,20 @@ const LeaveApplication = ({ navigation }) => {
   const submitApplication = async (totalDays) => {
     try {
       setSubmitting(true);
-      console.log('🚀 TeacherLeaveApplication: Starting submitApplication...');
+      console.log('🚀 Enhanced tenant system: Starting submitApplication...');
 
       if (!user) {
         throw new Error('User not authenticated');
       }
+
+      // Validate tenant context
+      const tenantValidation = await validateTenant();
+      if (!tenantValidation.valid) {
+        throw new Error('Tenant validation failed for leave submission');
+      }
+
+      const effectiveTenantId = tenantValidation.tenantId;
+      console.log('📊 Enhanced tenant system: Submitting leave with tenant ID:', effectiveTenantId);
 
       // Prepare application data for the utility
       const applicationData = {
@@ -220,13 +260,16 @@ const LeaveApplication = ({ navigation }) => {
         attachment_url: applicationForm.attachment_url
       };
       
-      // Use the utility to submit leave application
-      const result = await submitLeaveApplication(applicationData, user, { id: tenantId });
+      // Use the utility to submit leave application with enhanced tenant system
+      const result = await submitLeaveApplication(applicationData, user, { id: effectiveTenantId });
       
       if (!result.success) {
+        console.error('❌ Enhanced tenant system: Leave submission failed:', result.error);
         Alert.alert('Error', result.error);
         return;
       }
+      
+      console.log('✅ Enhanced tenant system: Leave application submitted successfully');
 
       // Create notification for admins about the new leave request
       try {
@@ -363,13 +406,66 @@ const LeaveApplication = ({ navigation }) => {
     );
   };
 
-  if (loading) {
+  // Enhanced loading state with tenant context
+  if (!isReady || (loading && !refreshing)) {
+    const loadingText = !isReady ? 
+      'Initializing secure tenant context...' : 
+      'Loading leave application data...';
+    const subText = !isReady ? 
+      'Setting up secure access to your leave applications' : 
+      'Please wait while we fetch your leave history';
+      
     return (
       <View style={styles.container}>
         <Header title="Leave Application" showBack={true} navigation={navigation} />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2196F3" />
-          <Text style={styles.loadingText}>Loading leave data...</Text>
+        <View style={styles.enhancedLoadingContainer}>
+          <View style={styles.loadingIconContainer}>
+            <Ionicons name="shield-checkmark" size={48} color="#2196F3" />
+            <ActivityIndicator size="large" color="#2196F3" style={styles.spinner} />
+          </View>
+          <Text style={styles.enhancedLoadingText}>{loadingText}</Text>
+          <Text style={styles.enhancedLoadingSubtext}>{subText}</Text>
+          {!isReady && (
+            <View style={styles.tenantStatusContainer}>
+              <Text style={styles.tenantStatusText}>
+                Tenant Status: {tenantError ? 'Error' : 'Initializing...'}
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  // Enhanced error state with tenant context
+  if (tenantError) {
+    return (
+      <View style={styles.container}>
+        <Header title="Leave Application" showBack={true} navigation={navigation} />
+        <View style={styles.enhancedErrorContainer}>
+          <Ionicons name="alert-circle" size={64} color="#F44336" />
+          <Text style={styles.enhancedErrorText}>Tenant Access Error</Text>
+          <Text style={styles.enhancedErrorSubtext}>
+            Unable to establish secure tenant context. This affects your ability to access leave applications.
+          </Text>
+          <View style={styles.errorDetailsContainer}>
+            <Text style={styles.errorDetailsLabel}>Error Details:</Text>
+            <Text style={styles.errorDetailsText}>{tenantError}</Text>
+            <Text style={styles.errorDetailsLabel}>Tenant ID:</Text>
+            <Text style={styles.errorDetailsText}>{tenantId || 'Not available'}</Text>
+            <Text style={styles.errorDetailsLabel}>Ready Status:</Text>
+            <Text style={styles.errorDetailsText}>{isReady ? 'Ready' : 'Not Ready'}</Text>
+          </View>
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={() => {
+              setLoading(true);
+              loadData();
+            }}
+          >
+            <Ionicons name="refresh" size={20} color="#FFFFFF" />
+            <Text style={styles.retryButtonText}>Retry Connection</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -1056,6 +1152,111 @@ const styles = StyleSheet.create({
   },
   dropdownItemLast: {
     borderBottomWidth: 0,
+  },
+  // Enhanced loading and error styles for tenant system
+  enhancedLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+    backgroundColor: '#F8F9FA',
+  },
+  loadingIconContainer: {
+    position: 'relative',
+    marginBottom: 24,
+  },
+  spinner: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+  },
+  enhancedLoadingText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2196F3',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  enhancedLoadingSubtext: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  tenantStatusContainer: {
+    backgroundColor: '#E3F2FD',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginTop: 16,
+  },
+  tenantStatusText: {
+    fontSize: 12,
+    color: '#1976D2',
+    fontWeight: '500',
+  },
+  enhancedErrorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+    backgroundColor: '#FAFAFA',
+  },
+  enhancedErrorText: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#F44336',
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  enhancedErrorSubtext: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 24,
+  },
+  errorDetailsContainer: {
+    backgroundColor: '#FFF3E0',
+    padding: 16,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9800',
+    marginBottom: 24,
+    width: '100%',
+  },
+  errorDetailsLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#E65100',
+    marginTop: 8,
+    marginBottom: 2,
+  },
+  errorDetailsText: {
+    fontSize: 14,
+    color: '#BF360C',
+    marginBottom: 4,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 25,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  retryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginLeft: 8,
   },
 });
 

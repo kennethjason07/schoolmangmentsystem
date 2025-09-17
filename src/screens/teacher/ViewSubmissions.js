@@ -3,6 +3,12 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, Modal, 
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import {
+  useTenantAccess,
+  tenantDatabase,
+  createTenantQuery,
+  getCachedTenantId
+} from '../../utils/tenantHelpers';
 import Header from '../../components/Header';
 import ImageViewerModal from '../../components/ImageViewerModal';
 import { 
@@ -52,6 +58,9 @@ const formatDate = (dateString) => {
 
 const ViewSubmissions = () => {
   const { user } = useAuth();
+  // 🚀 ENHANCED: Use enhanced tenant system
+  const { tenantId, isReady, error: tenantError } = useTenantAccess();
+  
   const [submissions, setSubmissions] = useState([]);
   const [filteredSubmissions, setFilteredSubmissions] = useState([]);
   const [selectedSubmission, setSelectedSubmission] = useState(null);
@@ -59,6 +68,15 @@ const ViewSubmissions = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [teacherData, setTeacherData] = useState(null);
+
+  // 🚀 ENHANCED: Tenant validation helper
+  const validateTenant = async () => {
+    const cachedTenantId = await getCachedTenantId();
+    if (!cachedTenantId) {
+      throw new Error('Tenant context not available');
+    }
+    return { valid: true, tenantId: cachedTenantId };
+  };
   const [filterStatus, setFilterStatus] = useState('all'); // all, submitted, graded, returned
   const [filterType, setFilterType] = useState('all'); // all, assignment, homework
   const [searchText, setSearchText] = useState('');
@@ -73,11 +91,18 @@ const ViewSubmissions = () => {
   const [selectedImage, setSelectedImage] = useState(null);
   const [isImageModalVisible, setIsImageModalVisible] = useState(false);
 
+  // 🚀 ENHANCED: Wait for both user and tenant readiness
   useEffect(() => {
-    if (user) {
+    console.log('🚀 Enhanced ViewSubmissions useEffect triggered');
+    console.log('🚀 User state:', user);
+    console.log('🚀 Tenant ready:', isReady);
+    if (user && isReady) {
+      console.log('🚀 User and tenant ready, starting enhanced submissions fetch...');
       fetchSubmissions();
+    } else {
+      console.log('⚠️ Waiting for user and tenant context...');
     }
-  }, [user]);
+  }, [user, isReady]);
 
   useEffect(() => {
     applyFilters();
@@ -88,62 +113,102 @@ const ViewSubmissions = () => {
       setLoading(true);
       setError(null);
 
-      console.log('=== FETCHING TEACHER SUBMISSIONS ===');
+      console.log('🚀 === ENHANCED TEACHER SUBMISSIONS FETCH ===');
       console.log('User ID:', user.id);
 
-      // Get teacher data
-      const { data: teacher, error: teacherError } = await dbHelpers.getTeacherByUserId(user.id);
-      if (teacherError || !teacher) {
-        throw new Error('Teacher data not found');
+      // 🚀 ENHANCED: Validate tenant access
+      const { valid, tenantId: effectiveTenantId } = await validateTenant();
+      if (!valid) {
+        console.error('❌ Tenant validation failed');
+        setError('Tenant context not available');
+        return;
       }
 
-      console.log('Teacher data:', teacher);
+      console.log('🚀 Using effective tenant ID:', effectiveTenantId);
+
+      // Get teacher data using enhanced tenant query via users table
+      const userQuery = createTenantQuery(effectiveTenantId, TABLES.USERS)
+        .select(`
+          id,
+          email,
+          linked_teacher_id,
+          teachers!users_linked_teacher_id_fkey(
+            id,
+            name,
+            qualification,
+            phone,
+            address,
+            is_class_teacher,
+            assigned_class_id
+          )
+        `)
+        .eq('email', user.email)
+        .single();
+
+      const { data: userData, error: userError } = await userQuery;
+      if (userError || !userData || !userData.linked_teacher_id) {
+        console.error('Teacher data error:', userError);
+        throw new Error('Teacher data not found or user not linked to teacher');
+      }
+
+      const teacher = userData.teachers;
+      if (!teacher) {
+        throw new Error('Teacher profile not found');
+      }
+
+      console.log('🚀 Enhanced tenant-aware teacher data:', teacher);
       setTeacherData(teacher);
 
       // Get all assignment submissions for this teacher's assignments and homework
       let allSubmissions = [];
 
-      // Method 1: Get submissions for assignments created by this teacher
+      // Method 1: Get submissions for assignments created by this teacher using enhanced tenant system
       try {
-        const { data: assignmentSubmissions, error: assignmentError } = await supabase
-          .from('assignment_submissions')
-          .select(`
-            *,
-            students!assignment_submissions_student_id_fkey(
-              id,
-              name,
-              roll_no,
-              classes(
+        // First get assignment IDs created by this teacher using enhanced tenant query
+        const teacherAssignmentsQuery = createTenantQuery(effectiveTenantId, TABLES.ASSIGNMENTS)
+          .select('id')
+          .eq('assigned_by', teacher.id);
+        
+        const { data: teacherAssignments, error: assignmentsIdError } = await teacherAssignmentsQuery;
+        const assignmentIds = teacherAssignments?.map(a => a.id) || [];
+        
+        if (assignmentsIdError) {
+          console.error('Error fetching teacher assignments:', assignmentsIdError);
+        }
+        
+        if (assignmentIds.length > 0) {
+          // Get assignment submissions using enhanced tenant query
+          const submissionsQuery = createTenantQuery(effectiveTenantId, 'assignment_submissions')
+            .select(`
+              *,
+              students!assignment_submissions_student_id_fkey(
                 id,
-                class_name,
-                section
+                name,
+                roll_no,
+                classes(
+                  id,
+                  class_name,
+                  section
+                )
               )
-            )
-          `)
-          .eq('assignment_type', 'assignment')
-          .eq('tenant_id', teacher.tenant_id)
-          .in('assignment_id', 
-            // Subquery to get assignment IDs created by this teacher
-            await supabase
-              .from(TABLES.ASSIGNMENTS)
-              .select('id')
-              .eq('assigned_by', teacher.id)
-              .eq('tenant_id', teacher.tenant_id)
-              .then(({ data }) => data?.map(a => a.id) || [])
-          )
-          .order('submitted_at', { ascending: false });
+            `)
+            .eq('assignment_type', 'assignment')
+            .in('assignment_id', assignmentIds)
+            .order('submitted_at', { ascending: false });
+
+          const { data: assignmentSubmissions, error: assignmentError } = await submissionsQuery;
 
         console.log('Assignment submissions:', assignmentSubmissions, assignmentError);
 
         if (!assignmentError && assignmentSubmissions) {
-          // Get assignment details for each submission
-          for (const submission of assignmentSubmissions) {
-            const { data: assignmentData, error: aError } = await supabase
-              .from(TABLES.ASSIGNMENTS)
-              .select('title, description, due_date, subjects(name)')
-              .eq('id', submission.assignment_id)
-              .eq('tenant_id', teacher.tenant_id)
-              .single();
+            // Get assignment details for each submission using enhanced tenant system
+            for (const submission of assignmentSubmissions) {
+              const assignmentDetailQuery = createTenantQuery(effectiveTenantId, TABLES.ASSIGNMENTS)
+                .select('title, description, due_date, subjects(name)')
+                .eq('id', submission.assignment_id)
+                .single();
+
+              const { data: assignmentData, error: aError } = await assignmentDetailQuery;
 
             if (!aError && assignmentData) {
               allSubmissions.push({
@@ -159,52 +224,61 @@ const ViewSubmissions = () => {
               });
             }
           }
+        } else {
+          console.log('No assignment submissions found or assignment IDs list is empty');
         }
+      } // Close the if (assignmentIds.length > 0) block
       } catch (err) {
         console.error('Error fetching assignment submissions:', err);
       }
 
-      // Method 2: Get submissions for homework created by this teacher
+      // Method 2: Get submissions for homework created by this teacher using enhanced tenant system
       try {
-        const { data: homeworkSubmissions, error: homeworkError } = await supabase
-          .from('assignment_submissions')
-          .select(`
-            *,
-            students!assignment_submissions_student_id_fkey(
-              id,
-              name,
-              roll_no,
-              classes(
+        // First get homework IDs created by this teacher using enhanced tenant query
+        const teacherHomeworkQuery = createTenantQuery(effectiveTenantId, TABLES.HOMEWORKS)
+          .select('id')
+          .eq('teacher_id', teacher.id);
+        
+        const { data: teacherHomeworks, error: homeworksIdError } = await teacherHomeworkQuery;
+        const homeworkIds = teacherHomeworks?.map(h => h.id) || [];
+        
+        if (homeworksIdError) {
+          console.error('Error fetching teacher homeworks:', homeworksIdError);
+        }
+        
+        if (homeworkIds.length > 0) {
+          // Get homework submissions using enhanced tenant query
+          const homeworkSubmissionsQuery = createTenantQuery(effectiveTenantId, 'assignment_submissions')
+            .select(`
+              *,
+              students!assignment_submissions_student_id_fkey(
                 id,
-                class_name,
-                section
+                name,
+                roll_no,
+                classes(
+                  id,
+                  class_name,
+                  section
+                )
               )
-            )
-          `)
-          .eq('assignment_type', 'homework')
-          .eq('tenant_id', teacher.tenant_id)
-          .in('assignment_id', 
-            // Subquery to get homework IDs created by this teacher
-            await supabase
-              .from(TABLES.HOMEWORKS)
-              .select('id')
-              .eq('teacher_id', teacher.id)
-              .eq('tenant_id', teacher.tenant_id)
-              .then(({ data }) => data?.map(h => h.id) || [])
-          )
-          .order('submitted_at', { ascending: false });
+            `)
+            .eq('assignment_type', 'homework')
+            .in('assignment_id', homeworkIds)
+            .order('submitted_at', { ascending: false });
+
+          const { data: homeworkSubmissions, error: homeworkError } = await homeworkSubmissionsQuery;
 
         console.log('Homework submissions:', homeworkSubmissions, homeworkError);
 
         if (!homeworkError && homeworkSubmissions) {
-          // Get homework details for each submission
-          for (const submission of homeworkSubmissions) {
-            const { data: homeworkData, error: hError } = await supabase
-              .from(TABLES.HOMEWORKS)
-              .select('title, description, due_date, subjects(name)')
-              .eq('id', submission.assignment_id)
-              .eq('tenant_id', teacher.tenant_id)
-              .single();
+            // Get homework details for each submission using enhanced tenant system
+            for (const submission of homeworkSubmissions) {
+              const homeworkDetailQuery = createTenantQuery(effectiveTenantId, TABLES.HOMEWORKS)
+                .select('title, description, due_date, subjects(name)')
+                .eq('id', submission.assignment_id)
+                .single();
+
+              const { data: homeworkData, error: hError } = await homeworkDetailQuery;
 
             if (!hError && homeworkData) {
               allSubmissions.push({
@@ -220,7 +294,10 @@ const ViewSubmissions = () => {
               });
             }
           }
+        } else {
+          console.log('No homework submissions found or homework IDs list is empty');
         }
+      } // Close the if (homeworkIds.length > 0) block
       } catch (err) {
         console.error('Error fetching homework submissions:', err);
       }
@@ -289,6 +366,12 @@ const ViewSubmissions = () => {
     try {
       setLoading(true);
 
+      // 🚀 ENHANCED: Validate tenant access
+      const { valid, tenantId: effectiveTenantId } = await validateTenant();
+      if (!valid) {
+        throw new Error('Tenant context not available');
+      }
+
       const updateData = {
         grade: selectedGrade,
         feedback: feedback.trim() || null,
@@ -296,12 +379,15 @@ const ViewSubmissions = () => {
         graded_at: new Date().toISOString()
       };
 
-      const { data, error } = await supabase
-        .from('assignment_submissions')
-        .update(updateData)
-        .eq('id', gradingSubmission.id)
-        .select()
-        .single();
+      // Use enhanced tenant system for updating grade
+      const updateResult = await tenantDatabase.update({
+        table: 'assignment_submissions',
+        data: updateData,
+        filters: [{ column: 'id', operator: 'eq', value: gradingSubmission.id }],
+        tenantId: effectiveTenantId
+      });
+
+      const { data, error } = { data: updateResult.data, error: updateResult.error };
 
       if (error) throw error;
 
@@ -480,22 +566,48 @@ const ViewSubmissions = () => {
     );
   };
 
-  if (loading && !refreshing) {
+  // 🚀 ENHANCED: Show tenant loading states
+  if (!isReady || (loading && !refreshing)) {
+    const loadingText = !isReady ? 'Initializing secure tenant context...' : 'Loading submissions...';
+    const subText = !isReady ? 'Setting up secure access to assignment submissions' : 'Please wait while we fetch submissions';
+    
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#1976d2" />
-        <Text style={styles.loadingText}>Loading submissions...</Text>
+      <View style={styles.container}>
+        <Header title="Assignment Submissions" showBack={true} showProfile={true} />
+        <View style={[styles.loadingContainer, { padding: 20 }]}>
+          <ActivityIndicator size="large" color="#1976d2" />
+          <Text style={styles.loadingText}>{loadingText}</Text>
+          <Text style={styles.loadingSubText}>{subText}</Text>
+        </View>
       </View>
     );
   }
 
-  if (error) {
+  // 🚀 ENHANCED: Show enhanced error states with tenant context
+  if (error || tenantError) {
+    const errorMessage = tenantError || error;
+    const isTenantError = !!tenantError;
+    
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={styles.errorText}>Error: {error}</Text>
-        <TouchableOpacity onPress={fetchSubmissions} style={styles.retryButton}>
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
+      <View style={styles.container}>
+        <Header title="Assignment Submissions" showBack={true} showProfile={true} />
+        <View style={[styles.errorContainer, { padding: 20 }]}>
+          <Ionicons name="alert-circle" size={48} color="#F44336" />
+          <Text style={styles.errorTitle}>
+            {isTenantError ? 'Tenant Access Error' : 'Failed to Load Submissions'}
+          </Text>
+          <Text style={styles.errorText}>{errorMessage}</Text>
+          {isTenantError && (
+            <View style={styles.tenantErrorInfo}>
+              <Text style={styles.tenantErrorText}>Tenant ID: {tenantId || 'Not available'}</Text>
+              <Text style={styles.tenantErrorText}>Status: {isReady ? 'Ready' : 'Not Ready'}</Text>
+            </View>
+          )}
+          <TouchableOpacity style={styles.retryButton} onPress={fetchSubmissions}>
+            <Ionicons name="refresh" size={20} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -1014,22 +1126,72 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
+  // 🚀 ENHANCED: Loading and error state styles
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   loadingText: {
-    marginTop: 12,
-    fontSize: 16,
+    fontSize: 18,
+    color: '#1976d2',
+    marginTop: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  loadingSubText: {
+    fontSize: 14,
     color: '#666',
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorTitle: {
+    fontSize: 20,
+    color: '#F44336',
+    fontWeight: 'bold',
+    marginTop: 16,
+    textAlign: 'center',
   },
   errorText: {
     fontSize: 16,
-    color: '#d32f2f',
+    color: '#666',
     textAlign: 'center',
+    marginTop: 8,
     marginBottom: 20,
+    paddingHorizontal: 20,
+  },
+  tenantErrorInfo: {
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+  },
+  tenantErrorText: {
+    fontSize: 14,
+    color: '#495057',
+    textAlign: 'center',
+    marginVertical: 2,
   },
   retryButton: {
     backgroundColor: '#1976d2',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
     borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
   },
   retryButtonText: {
     color: '#fff',

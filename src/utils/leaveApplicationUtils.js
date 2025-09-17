@@ -1,5 +1,6 @@
-import { supabase, getUserTenantId } from './supabase';
-import { getCurrentUserTenantByEmail } from './getTenantByEmail';
+// 🚀 ENHANCED: Updated imports for enhanced tenant system
+import { supabase } from './supabase';
+import { tenantDatabase, createTenantQuery, getCachedTenantId, useTenantAccess } from './tenantHelpers';
 import { validateTenantAccess } from './tenantValidation';
 
 /**
@@ -8,39 +9,23 @@ import { validateTenantAccess } from './tenantValidation';
  */
 
 /**
- * Get effective tenant ID with fallback methods
+ * 🚀 ENHANCED: Get effective tenant ID using cached tenant system
  */
-export const getEffectiveTenantId = async (currentTenant, user) => {
+export const getEffectiveTenantId = async () => {
   try {
-    console.log('🔍 LeaveUtils: Getting effective tenant ID...');
+    console.log('🔍 Enhanced LeaveUtils: Getting effective tenant ID...');
     
-    // Try current tenant from context first
-    let tenantId = currentTenant?.id;
-    
-    if (!tenantId) {
-      console.log('⚠️ LeaveUtils: No tenant from context, trying getUserTenantId...');
-      tenantId = await getUserTenantId();
-    }
+    const tenantId = getCachedTenantId();
     
     if (!tenantId) {
-      console.log('⚠️ LeaveUtils: No tenant from getUserTenantId, trying email lookup...');
-      try {
-        const emailTenant = await getCurrentUserTenantByEmail();
-        tenantId = emailTenant?.id;
-        console.log('📧 LeaveUtils: Email-based tenant ID:', tenantId);
-      } catch (emailError) {
-        console.error('❌ LeaveUtils: Email tenant lookup failed:', emailError);
-      }
+      console.error('❌ Enhanced LeaveUtils: Cached tenant ID not available');
+      throw new Error('Tenant system not ready. Please try again in a moment.');
     }
     
-    if (!tenantId) {
-      throw new Error('Unable to determine tenant context. Please contact administrator.');
-    }
-    
-    console.log('✅ LeaveUtils: Effective tenant ID:', tenantId);
+    console.log('✅ Enhanced LeaveUtils: Effective tenant ID:', tenantId);
     return tenantId;
   } catch (error) {
-    console.error('❌ LeaveUtils: Error getting effective tenant ID:', error);
+    console.error('❌ Enhanced LeaveUtils: Error getting effective tenant ID:', error);
     throw error;
   }
 };
@@ -139,23 +124,22 @@ export const ensureUserRecord = async (user, tenantId) => {
 };
 
 /**
- * Submit leave application (for teachers)
+ * 🚀 ENHANCED: Submit leave application (for teachers)
  */
-export const submitLeaveApplication = async (applicationData, user, currentTenant) => {
+export const submitLeaveApplication = async (applicationData, user) => {
   const startTime = performance.now();
   
   try {
-    console.log('🚀 LeaveUtils: Starting leave application submission...');
+    console.log('🚀 Enhanced LeaveUtils: Starting leave application submission...');
     
-    // Get effective tenant ID
-    const tenantId = await getEffectiveTenantId(currentTenant, user);
+    // ✨ Get cached tenant ID
+    const tenantId = await getEffectiveTenantId();
     
-    // Validate access
-    const accessValidation = await validateLeaveAccess(user, tenantId, 'submit leave application');
-    if (!accessValidation.isValid) {
+    // Basic user validation (tenant validation handled by tenantDatabase helpers)
+    if (!user || !user.id) {
       return {
         success: false,
-        error: accessValidation.error
+        error: 'User authentication required. Please log in.'
       };
     }
     
@@ -186,7 +170,7 @@ export const submitLeaveApplication = async (applicationData, user, currentTenan
       };
     }
     
-    // Prepare leave data
+    // Prepare leave data (tenant_id will be added automatically by tenantDatabase)
     const leaveData = {
       teacher_id: teacherId,
       leave_type: applicationData.leave_type,
@@ -195,29 +179,102 @@ export const submitLeaveApplication = async (applicationData, user, currentTenan
       reason: applicationData.reason.trim(),
       applied_by: user.id,
       attachment_url: applicationData.attachment_url || null,
-      tenant_id: tenantId,
       status: 'Pending',
       applied_date: new Date().toISOString().split('T')[0]
     };
     
-    console.log('💾 LeaveUtils: Inserting leave application...');
+    console.log('💾 Enhanced LeaveUtils: Creating leave application via tenantDatabase...');
     
-    // Insert leave application
-    const { data, error } = await supabase
-      .from('leave_applications')
-      .insert([leaveData])
-      .select();
+    // 🚀 ENHANCED: Use tenantDatabase.create for automatic tenant isolation
+    const { data, error } = await tenantDatabase.create(
+      'leave_applications',
+      leaveData
+    );
     
     if (error) {
-      console.error('❌ LeaveUtils: Insert error:', error);
+      console.error('❌ Enhanced LeaveUtils: Error creating leave application:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to submit leave application. Please try again.'
+      };
+    }
+    
+    if (!data) {
+      return {
+        success: false,
+        error: 'Failed to submit leave application. Please try again.'
+      };
+    }
+    
+    const submitTime = Math.round(performance.now() - startTime);
+    console.log(`✅ Enhanced LeaveUtils: Leave application submitted successfully in ${submitTime}ms`);
+    
+    return {
+      success: true,
+      data
+    };
+    
+  } catch (error) {
+    console.error('❌ Enhanced LeaveUtils: Error submitting leave application:', error);
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred.'
+    };
+  }
+};
+
+/**
+ * 🚀 ENHANCED: Load leave applications with proper tenant filtering
+ */
+export const loadLeaveApplications = async (user, filters = {}) => {
+  const startTime = performance.now();
+  
+  try {
+    console.log('🚀 Enhanced LeaveUtils: Loading leave applications...');
+    
+    // ✨ Get cached tenant ID
+    const tenantId = await getEffectiveTenantId();
+    
+    // Basic user validation
+    if (!user || !user.id) {
+      return {
+        success: false,
+        error: 'User authentication required. Please log in.'
+      };
+    }
+    
+    console.log('📊 Enhanced LeaveUtils: Querying leave applications...');
+    
+    // 🚀 ENHANCED: Use createTenantQuery for automatic tenant filtering
+    let query = createTenantQuery(tenantId, 'leave_applications', `
+      *,
+      teacher:teachers!leave_applications_teacher_id_fkey(id, name),
+      applied_by_user:users!leave_applications_applied_by_fkey(id, full_name),
+      reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name),
+      replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
+    `);
+    
+    // Apply filters if provided
+    if (filters.teacherId) {
+      query = query.eq('teacher_id', filters.teacherId);
+    }
+    
+    if (filters.status && filters.status !== 'All') {
+      query = query.eq('status', filters.status);
+    }
+    
+    // Order by most recent first
+    query = query.order('applied_date', { ascending: false });
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error('❌ Enhanced LeaveUtils: Query error:', error);
       
-      // Provide user-friendly error messages
-      let userMessage = 'Failed to submit leave application.';
+      let userMessage = 'Failed to load leave applications.';
       
       if (error.code === '42501') {
-        userMessage = 'Permission denied. Please contact administrator.';
-      } else if (error.code === '23503') {
-        userMessage = 'Invalid teacher or user reference. Please contact administrator.';
+        userMessage = 'Permission denied. Please check your access rights.';
       } else if (error.message) {
         userMessage = error.message;
       }
@@ -228,16 +285,16 @@ export const submitLeaveApplication = async (applicationData, user, currentTenan
       };
     }
     
-    const submitTime = Math.round(performance.now() - startTime);
-    console.log(`✅ LeaveUtils: Leave application submitted successfully in ${submitTime}ms`);
+    const loadTime = Math.round(performance.now() - startTime);
+    console.log(`✅ Enhanced LeaveUtils: Loaded ${data?.length || 0} leave applications in ${loadTime}ms`);
     
     return {
       success: true,
-      data: data[0]
+      data: data || []
     };
     
   } catch (error) {
-    console.error('❌ LeaveUtils: Error submitting leave application:', error);
+    console.error('❌ Enhanced LeaveUtils: Error loading leave applications:', error);
     return {
       success: false,
       error: error.message || 'An unexpected error occurred.'
@@ -245,15 +302,13 @@ export const submitLeaveApplication = async (applicationData, user, currentTenan
   }
 };
 
-/**
- * Add leave application (for admins)
- */
-export const addLeaveApplication = async (leaveFormData, user, currentTenant) => {
+// Legacy function - keeping for backward compatibility but with updated signature
+export const addLeaveApplication = async (leaveFormData, user) => {
   try {
-    console.log('🚀 LeaveUtils: Starting admin add leave application...');
+    console.log('🚀 Enhanced LeaveUtils: Starting admin add leave application...');
     
-    // Get effective tenant ID
-    const tenantId = await getEffectiveTenantId(currentTenant, user);
+    // ✨ Get cached tenant ID
+    const tenantId = await getEffectiveTenantId();
     
     // Validate access (more permissive for admins)
     const accessValidation = await validateLeaveAccess(user, tenantId, 'add leave application');
@@ -331,12 +386,12 @@ export const addLeaveApplication = async (leaveFormData, user, currentTenant) =>
 /**
  * Review leave application (for admins)
  */
-export const reviewLeaveApplication = async (applicationId, reviewData, user, currentTenant) => {
+export const reviewLeaveApplication = async (applicationId, reviewData, user) => {
   try {
     console.log('🚀 LeaveUtils: Starting leave review...');
     
     // Get effective tenant ID
-    const tenantId = await getEffectiveTenantId(currentTenant, user);
+    const tenantId = await getEffectiveTenantId();
     
     // Validate access
     const accessValidation = await validateLeaveAccess(user, tenantId, 'review leave application');
@@ -401,94 +456,15 @@ export const reviewLeaveApplication = async (applicationId, reviewData, user, cu
   }
 };
 
-/**
- * Load leave applications with proper tenant filtering
- */
-export const loadLeaveApplications = async (user, currentTenant, filters = {}) => {
-  const startTime = performance.now();
-  
-  try {
-    console.log('🚀 LeaveUtils: Loading leave applications...');
-    
-    // Get effective tenant ID
-    const tenantId = await getEffectiveTenantId(currentTenant, user);
-    
-    // Validate access
-    const accessValidation = await validateLeaveAccess(user, tenantId, 'load leave applications');
-    if (!accessValidation.isValid) {
-      return {
-        success: false,
-        error: accessValidation.error
-      };
-    }
-    
-    console.log('📊 LeaveUtils: Querying leave applications...');
-    
-    let query = supabase
-      .from('leave_applications')
-      .select(`
-        *,
-        teacher:teachers!leave_applications_teacher_id_fkey(id, name),
-        applied_by_user:users!leave_applications_applied_by_fkey(id, full_name),
-        reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name),
-        replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
-      `)
-      .eq('tenant_id', tenantId);
-    
-    // Apply filters if provided
-    if (filters.teacherId) {
-      query = query.eq('teacher_id', filters.teacherId);
-    }
-    
-    if (filters.status && filters.status !== 'All') {
-      query = query.eq('status', filters.status);
-    }
-    
-    // Order by most recent first
-    query = query.order('applied_date', { ascending: false });
-    
-    const { data, error } = await query;
-    
-    if (error) {
-      console.error('❌ LeaveUtils: Query error:', error);
-      
-      let userMessage = 'Failed to load leave applications.';
-      
-      if (error.code === '42501') {
-        userMessage = 'Permission denied. Please check your access rights.';
-      } else if (error.message) {
-        userMessage = error.message;
-      }
-      
-      return {
-        success: false,
-        error: userMessage
-      };
-    }
-    
-    const loadTime = Math.round(performance.now() - startTime);
-    console.log(`✅ LeaveUtils: Loaded ${data?.length || 0} leave applications in ${loadTime}ms`);
-    
-    return {
-      success: true,
-      data: data || []
-    };
-    
-  } catch (error) {
-    console.error('❌ LeaveUtils: Error loading leave applications:', error);
-    return {
-      success: false,
-      error: error.message || 'An unexpected error occurred.'
-    };
-  }
-};
 
+// 🚀 ENHANCED: Updated exports for enhanced tenant system
 export default {
   getEffectiveTenantId,
+  submitLeaveApplication,
+  loadLeaveApplications,
+  addLeaveApplication, // Legacy compatibility
+  // Legacy functions (kept for backward compatibility but may need updates)
   validateLeaveAccess,
   ensureUserRecord,
-  submitLeaveApplication,
-  addLeaveApplication,
-  reviewLeaveApplication,
-  loadLeaveApplications
+  reviewLeaveApplication
 };

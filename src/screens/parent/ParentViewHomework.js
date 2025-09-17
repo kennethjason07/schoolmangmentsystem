@@ -2,14 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, Modal, Pressable, Linking, Platform, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
-import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-import { 
-  validateTenantAccess, 
-  createTenantQuery, 
-  validateDataTenancy,
-  TENANT_ERROR_MESSAGES 
-} from '../../utils/tenantValidation';
-import { useTenantAccess } from '../../utils/tenantHelpers';
+// 🚀 ENHANCED: Updated imports for enhanced tenant system
+import { supabase, TABLES } from '../../utils/supabase';
+import {
+  useTenantAccess,
+  tenantDatabase,
+  createTenantQuery,
+  getCachedTenantId
+} from '../../utils/tenantHelpers';
 import Header from '../../components/Header';
 import ImageViewerModal from '../../components/ImageViewerModal';
 import { useSelectedStudent } from '../../contexts/SelectedStudentContext';
@@ -91,6 +91,40 @@ const ParentViewHomework = ({ navigation }) => {
     error: tenantError 
   } = useTenantAccess();
   const { selectedStudent } = useSelectedStudent();
+  
+  // 🚀 ENHANCED: Tenant validation helper
+  const validateTenantReadiness = async () => {
+    try {
+      if (!user || !isReady) {
+        console.error('❌ ParentViewHomework: User or tenant not ready');
+        return {
+          isValid: false,
+          error: 'System is loading. Please wait a moment.'
+        };
+      }
+      
+      const cachedTenantId = getCachedTenantId();
+      if (!cachedTenantId) {
+        console.error('❌ ParentViewHomework: Cached tenant ID not available');
+        return {
+          isValid: false,
+          error: 'Tenant system not ready. Please try again in a moment.'
+        };
+      }
+      
+      console.log('✅ ParentViewHomework: Tenant validation successful:', cachedTenantId);
+      return {
+        isValid: true,
+        tenantId: cachedTenantId
+      };
+    } catch (error) {
+      console.error('❌ ParentViewHomework: Tenant validation error:', error);
+      return {
+        isValid: false,
+        error: 'System error. Please contact support.'
+      };
+    }
+  };
   
   // Enhanced tenant debugging following EMAIL_BASED_TENANT_SYSTEM.md
   const DEBUG_MODE = process.env.NODE_ENV === 'development';
@@ -203,27 +237,24 @@ const ParentViewHomework = ({ navigation }) => {
     };
   }, [authLoading, tenantLoading, isReady, tenantId, tenantError, user, selectedStudent]);
 
+  // 🚀 ENHANCED: Updated fetchHomework to use enhanced tenant system
   const fetchHomework = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // Check for tenant error
-      if (tenantError) {
-        console.error('❌ [TENANT-AWARE] Homework fetch failed due to tenant error:', tenantError);
-        setError('Failed to load tenant information');
+      console.log('🚀 Enhanced [PARENT-HOMEWORK] Starting homework fetch...');
+      
+      // ✨ Validate tenant readiness
+      const { isValid, tenantId: effectiveTenantId, error: validationError } = await validateTenantReadiness();
+      if (!isValid) {
+        console.error('❌ Enhanced [PARENT-HOMEWORK] Tenant validation failed:', validationError);
+        setError(validationError);
         setLoading(false);
         return;
       }
       
-      if (!tenantId) {
-        console.error('❌ [TENANT-AWARE] Cannot fetch homework: No tenant context');
-        setError('No tenant access available');
-        setLoading(false);
-        return;
-      }
-      
-      console.log('✅ [TENANT-AWARE] Fetching homework for tenant:', tenant?.name);
+      console.log('✅ Enhanced [PARENT-HOMEWORK] Fetching homework for tenant:', tenant?.name, 'with ID:', effectiveTenantId);
 
       // Get student data - use selected student if available, otherwise get from parent link
       let studentData = null;
@@ -275,12 +306,12 @@ const ParentViewHomework = ({ navigation }) => {
       }
       
       // Validate that student belongs to current tenant
-      if (studentData.tenant_id && studentData.tenant_id !== tenantId) {
-        console.error('❌ [TENANT-AWARE] Student belongs to different tenant:', {
+      if (studentData.tenant_id && studentData.tenant_id !== effectiveTenantId) {
+        console.error('❌ Enhanced [PARENT-HOMEWORK] Student belongs to different tenant:', {
           studentTenant: studentData.tenant_id,
-          currentTenant: tenantId
+          currentTenant: effectiveTenantId
         });
-        throw new Error(TENANT_ERROR_MESSAGES.WRONG_TENANT_DATA);
+        throw new Error('Student data belongs to different organization');
       }
 
       console.log('📚 [TENANT-AWARE] Student data for homework fetch:', { id: studentData.id, class_id: studentData.class_id, name: studentData.name, tenant_id: studentData.tenant_id });
@@ -292,15 +323,13 @@ const ParentViewHomework = ({ navigation }) => {
         console.log('🔍 [TENANT-AWARE] Fetching assignments for class ID:', studentData.class_id);
         
         
-        // Use direct tenant-aware query
-        const { data: assignmentsData, error: assignmentsError } = await supabase
-          .from(TABLES.ASSIGNMENTS)
+        // 🚀 ENHANCED: Use createTenantQuery for automatic tenant filtering
+        const { data: assignmentsData, error: assignmentsError } = await createTenantQuery(effectiveTenantId, TABLES.ASSIGNMENTS)
           .select(`
             *,
             subjects(name),
             teachers(name)
           `)
-          .eq('tenant_id', tenantId)
           .eq('class_id', studentData.class_id)
           .order('due_date', { ascending: true });
 
@@ -347,20 +376,18 @@ const ParentViewHomework = ({ navigation }) => {
         console.log('🔍 [TENANT-AWARE] Fetching homeworks for class ID:', studentData.class_id, 'student ID:', studentData.id);
         
         
-        // Use direct tenant-aware query
-        const { data: homeworksData, error: homeworksError } = await supabase
-          .from(TABLES.HOMEWORKS)
+        // 🚀 ENHANCED: Use createTenantQuery for automatic tenant filtering
+        const { data: homeworksData, error: homeworksError } = await createTenantQuery(effectiveTenantId, TABLES.HOMEWORKS)
           .select(`
             *,
             subjects(name),
             teachers(name)
           `)
-          .eq('tenant_id', tenantId)
           .or(`class_id.eq.${studentData.class_id},assigned_students.cs.{${studentData.id}}`)
           .order('due_date', { ascending: true });
         
-        console.log('🔧 [TENANT-AWARE] Homework query completed:', {
-          tenantId: resolvedTenantId,
+        console.log('🔧 Enhanced [PARENT-HOMEWORK] Homework query completed:', {
+          tenantId: effectiveTenantId,
           classId: studentData.class_id,
           studentId: studentData.id,
           results: homeworksData?.length || 0,
@@ -458,9 +485,8 @@ const ParentViewHomework = ({ navigation }) => {
       try {
         console.log('🔍 [TENANT-AWARE] Fetching submissions for student ID:', studentData.id);
         
-        // Use direct tenant-aware query for submissions with resolved tenant ID
-        const tenantSubmissionQuery = createTenantQuery(resolvedTenantId, 'assignment_submissions');
-        const { data: submissionsData, error: submissionsError } = await tenantSubmissionQuery
+        // 🚀 ENHANCED: Use createTenantQuery for submissions with effective tenant ID
+        const { data: submissionsData, error: submissionsError } = await createTenantQuery(effectiveTenantId, 'assignment_submissions')
           .select('*')
           .eq('student_id', studentData.id);
 

@@ -10,6 +10,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { useTenantAccess, tenantDatabase, createTenantQuery, getCachedTenantId } from '../../utils/tenantHelpers';
 import { uploadMultipleHomeworkFiles, deleteHomeworkFile } from '../../utils/homeworkFileUpload';
 import { format } from 'date-fns';
 import ImageViewer from '../../components/ImageViewer';
@@ -37,24 +38,130 @@ const UploadHomework = () => {
   const [selectedImageData, setSelectedImageData] = useState(null);
   const [showImageViewer, setShowImageViewer] = useState(false);
   const { user } = useAuth();
+  const tenantAccess = useTenantAccess();
+  
+  // Helper function to validate tenant readiness and get effective tenant ID
+  const validateTenantReadiness = async () => {
+    console.log('🔍 [UploadHomework] validateTenantReadiness - Starting validation');
+    console.log('🔍 [UploadHomework] User state:', { 
+      id: user?.id, 
+      email: user?.email 
+    });
+    console.log('🔍 [UploadHomework] Tenant access state:', { 
+      isReady: tenantAccess.isReady,
+      isLoading: tenantAccess.isLoading,
+      currentTenant: tenantAccess.currentTenant?.id
+    });
+    
+    // Wait for tenant system to be ready
+    if (!tenantAccess.isReady || tenantAccess.isLoading) {
+      console.log('⏳ [UploadHomework] Tenant system not ready, waiting...');
+      return { success: false, reason: 'TENANT_NOT_READY' };
+    }
+    
+    // Get effective tenant ID
+    const effectiveTenantId = await getCachedTenantId();
+    if (!effectiveTenantId) {
+      console.log('❌ [UploadHomework] No effective tenant ID available');
+      return { success: false, reason: 'NO_TENANT_ID' };
+    }
+    
+    console.log('✅ [UploadHomework] Tenant validation successful:', {
+      effectiveTenantId,
+      currentTenant: tenantAccess.currentTenant?.id
+    });
+    
+    return { 
+      success: true, 
+      effectiveTenantId,
+      tenantContext: tenantAccess.currentTenant
+    };
+  };
 
   // Fetch teacher's assigned classes and subjects
   const fetchTeacherData = async () => {
     try {
       setLoading(true);
       setError(null);
+      
+      console.log('🚀 [UploadHomework] fetchTeacherData - Starting teacher data fetch');
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [UploadHomework] Tenant not ready:', tenantValidation.reason);
+        if (tenantValidation.reason === 'TENANT_NOT_READY') {
+          // Don't throw error, just wait for tenant to be ready
+          setLoading(false);
+          return;
+        }
+        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [UploadHomework] Using effective tenant ID:', effectiveTenantId);
 
-      // Get teacher info using the helper function
-      const { data: fetchedTeacherData, error: teacherError } = await dbHelpers.getTeacherByUserId(user.id);
+      // First get the user record to find linked_teacher_id
+      const userQuery = createTenantQuery(
+        effectiveTenantId,
+        TABLES.USERS,
+        `
+          id,
+          linked_teacher_id,
+          email,
+          full_name
+        `
+      ).eq('id', user.id);
+      
+      console.log('🔍 [UploadHomework] Fetching user data to get linked_teacher_id');
+      const { data: userData, error: userError } = await userQuery;
+      
+      if (userError) {
+        console.error('❌ [UploadHomework] Error fetching user data:', userError);
+        throw userError;
+      }
+      
+      if (!userData || userData.length === 0 || !userData[0].linked_teacher_id) {
+        console.error('❌ [UploadHomework] No linked teacher found for user:', user.id);
+        throw new Error('No teacher profile linked to this user');
+      }
+      
+      const linkedTeacherId = userData[0].linked_teacher_id;
+      console.log('✅ [UploadHomework] Found linked teacher ID:', linkedTeacherId);
+      
+      // Now get teacher info using the linked teacher ID
+      const teacherQuery = createTenantQuery(
+        effectiveTenantId,
+        TABLES.TEACHERS
+      ).eq('id', linkedTeacherId);
+      
+      console.log('🔍 [UploadHomework] Fetching teacher data with tenant query');
+      const { data: fetchedTeacherData, error: teacherError } = await teacherQuery;
 
-      if (teacherError || !fetchedTeacherData) throw new Error('Teacher not found');
+      if (teacherError) {
+        console.error('❌ [UploadHomework] Error fetching teacher:', teacherError);
+        throw teacherError;
+      }
+      
+      if (!fetchedTeacherData || fetchedTeacherData.length === 0) {
+        console.error('❌ [UploadHomework] No teacher found for user:', user.id);
+        throw new Error('Teacher not found');
+      }
+      
+      const teacherRecord = fetchedTeacherData[0];
+      console.log('✅ [UploadHomework] Teacher data fetched:', { 
+        id: teacherRecord.id, 
+        name: teacherRecord.name,
+        tenantId: teacherRecord.tenant_id
+      });
 
-      setTeacherData(fetchedTeacherData);
+      setTeacherData(teacherRecord);
 
-      // Get assigned classes and subjects
-      const { data: assignedData, error: assignedError } = await supabase
-        .from(TABLES.TEACHER_SUBJECTS)
-        .select(`
+      // Get assigned classes and subjects with tenant awareness
+      const assignedQuery = createTenantQuery(
+        effectiveTenantId,
+        TABLES.TEACHER_SUBJECTS,
+        `
           *,
           subjects(
             id,
@@ -62,8 +169,11 @@ const UploadHomework = () => {
             class_id,
             classes(id, class_name, section)
           )
-        `)
-        .eq('teacher_id', fetchedTeacherData.id);
+        `
+      ).eq('teacher_id', teacherRecord.id);
+      
+      console.log('🔍 [UploadHomework] Fetching assigned subjects with tenant query');
+      const { data: assignedData, error: assignedError } = await assignedQuery;
 
       if (assignedError) throw assignedError;
 
@@ -95,19 +205,27 @@ const UploadHomework = () => {
         }
       });
 
-      // Get students for each class
+      // Get students for each class with tenant awareness
       for (const [classKey, classData] of classMap) {
-        const { data: studentsData, error: studentsError } = await supabase
-          .from(TABLES.STUDENTS)
-          .select(`
+        const studentsQuery = createTenantQuery(
+          effectiveTenantId,
+          TABLES.STUDENTS,
+          `
             id,
             name,
             roll_no
-          `)
-          .eq('class_id', classData.classId)
-          .order('roll_no');
+          `
+        ).eq('class_id', classData.classId).order('roll_no');
+        
+        console.log('🔍 [UploadHomework] Fetching students for class:', classData.classId);
+        const { data: studentsData, error: studentsError } = await studentsQuery;
 
-        if (studentsError) throw studentsError;
+        if (studentsError) {
+          console.error('❌ [UploadHomework] Error fetching students:', studentsError);
+          throw studentsError;
+        }
+        
+        console.log('✅ [UploadHomework] Students fetched for class', classData.classId, ':', studentsData?.length || 0);
         classData.students = studentsData || [];
       }
 
@@ -124,29 +242,55 @@ const UploadHomework = () => {
   // Fetch homework assignments
   const fetchHomework = async () => {
     try {
-      const { data: homeworkData, error: homeworkError } = await supabase
-        .from(TABLES.HOMEWORKS)
-        .select(`
+      console.log('🔎 [UploadHomework] fetchHomework - Starting homework fetch');
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [UploadHomework] Tenant not ready for homework fetch:', tenantValidation.reason);
+        if (tenantValidation.reason === 'TENANT_NOT_READY') {
+          // Don't throw error, just use empty array
+          setHomework([]);
+          return;
+        }
+        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [UploadHomework] Using effective tenant ID for homework:', effectiveTenantId);
+      
+      const homeworkQuery = createTenantQuery(
+        effectiveTenantId,
+        TABLES.HOMEWORKS,
+        `
           *,
           classes(id, class_name, section),
           subjects(id, name)
-        `)
-        .order('created_at', { ascending: false });
+        `
+      ).order('created_at', { ascending: false });
+      
+      console.log('🔍 [UploadHomework] Fetching homework with tenant query');
+      const { data: homeworkData, error: homeworkError } = await homeworkQuery;
 
       if (homeworkError) {
         // If table doesn't exist, just set empty array
         if (homeworkError.code === '42P01') {
-          console.log('Homeworks table does not exist - using empty array');
+          console.log('⚠️ [UploadHomework] Homeworks table does not exist - using empty array');
           setHomework([]);
           return;
         }
+        console.error('❌ [UploadHomework] Error fetching homework:', homeworkError);
         throw homeworkError;
       }
-
+      
+      console.log('✅ [UploadHomework] Homework data fetched:', {
+        count: homeworkData?.length || 0,
+        tenantId: effectiveTenantId
+      });
       setHomework(homeworkData || []);
 
     } catch (err) {
-      console.error('Error fetching homework:', err);
+      console.error('❌ [UploadHomework] Error fetching homework:', err);
       setHomework([]); // Fallback to empty array
     }
   };
@@ -261,13 +405,26 @@ const UploadHomework = () => {
     }
 
     try {
+      console.log('🚀 [UploadHomework] handleSubmitHomework - Starting homework submission');
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [UploadHomework] Tenant not ready for homework submission:', tenantValidation.reason);
+        Alert.alert('Error', 'System not ready. Please try again.');
+        return;
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [UploadHomework] Using effective tenant ID for homework submission:', effectiveTenantId);
+      
       const selectedClassData = classes.find(c => c.id === selectedClass);
       if (!selectedClassData) {
         Alert.alert('Error', 'Selected class not found.');
         return;
       }
 
-      // Prepare basic homework data
+      // Prepare basic homework data with effective tenant ID
       let homeworkData = {
         title: homeworkTitle,
         description: homeworkDescription,
@@ -276,10 +433,18 @@ const UploadHomework = () => {
         class_id: selectedClassData.id,
         subject_id: selectedSubject,
         teacher_id: teacherData.id,
-        tenant_id: teacherData.tenant_id, // Add tenant_id from teacher data
+        tenant_id: effectiveTenantId, // Use effective tenant ID instead of teacher's tenant_id
         assigned_students: selectedStudents,
         files: [] // Will be updated with uploaded file information
       };
+      
+      console.log('🔍 [UploadHomework] Homework data prepared:', {
+        title: homeworkData.title,
+        tenantId: homeworkData.tenant_id,
+        classId: homeworkData.class_id,
+        subjectId: homeworkData.subject_id,
+        studentCount: selectedStudents.length
+      });
 
       // Handle file uploads if there are files
       if (uploadedFiles.length > 0) {
@@ -349,17 +514,22 @@ const UploadHomework = () => {
       let error;
 
       if (editingHomework) {
-        // Update existing homework
+        // Update existing homework with tenant awareness
+        console.log('🔄 [UploadHomework] Updating existing homework:', editingHomework.id);
         const { error: updateError } = await supabase
           .from(TABLES.HOMEWORKS)
           .update(homeworkData)
-          .eq('id', editingHomework.id);
+          .eq('id', editingHomework.id)
+          .eq('tenant_id', effectiveTenantId);
+        
         error = updateError;
       } else {
-        // Create new homework
+        // Create new homework with tenant awareness
+        console.log('➕ [UploadHomework] Creating new homework');
         const { error: insertError } = await supabase
           .from(TABLES.HOMEWORKS)
           .insert(homeworkData);
+        
         error = insertError;
       }
 
@@ -442,19 +612,39 @@ const UploadHomework = () => {
           style: 'destructive',
           onPress: async () => {
             try {
+              console.log('🗑️ [UploadHomework] handleDeleteHomework - Starting homework deletion:', homeworkId);
+              
+              // Validate tenant readiness
+              const tenantValidation = await validateTenantReadiness();
+              if (!tenantValidation.success) {
+                console.log('⚠️ [UploadHomework] Tenant not ready for homework deletion:', tenantValidation.reason);
+                Alert.alert('Error', 'System not ready. Please try again.');
+                return;
+              }
+              
+              const { effectiveTenantId } = tenantValidation;
+              console.log('✅ [UploadHomework] Using effective tenant ID for homework deletion:', effectiveTenantId);
+              
               const { error } = await supabase
                 .from(TABLES.HOMEWORKS)
                 .delete()
-                .eq('id', homeworkId);
+                .eq('id', homeworkId)
+                .eq('tenant_id', effectiveTenantId);
+              
+              console.log('🔍 [UploadHomework] Executing delete query for homework:', homeworkId);
 
-              if (error) throw error;
-
+              if (error) {
+                console.error('❌ [UploadHomework] Error deleting homework:', error);
+                throw error;
+              }
+              
+              console.log('✅ [UploadHomework] Homework deleted successfully:', homeworkId);
               Alert.alert('Success', 'Homework deleted successfully!');
               await fetchHomework();
 
             } catch (err) {
+              console.error('❌ [UploadHomework] Error deleting homework:', err);
               Alert.alert('Error', err.message);
-              console.error('Error deleting homework:', err);
             }
           }
         }

@@ -61,24 +61,21 @@ const MarksEntry = () => {
       // Load subjects for the class using tenant-aware query
       const { data: subjectsData, error: subjectsError } = await createTenantQuery(tenantId, 'subjects')
         .select('id, name, class_id, academic_year, is_optional, tenant_id, created_at')
-        .eq('class_id', examClass.id)
-        .execute();
+        .eq('class_id', examClass.id);
 
       if (subjectsError) throw subjectsError;
 
       // Load students for the class using tenant-aware query
       const { data: studentsData, error: studentsError } = await createTenantQuery(tenantId, 'students')
         .select('id, admission_no, name, roll_no, class_id, academic_year, tenant_id, created_at')
-        .eq('class_id', examClass.id)
-        .execute();
+        .eq('class_id', examClass.id);
 
       if (studentsError) throw studentsError;
 
       // Load existing marks for this exam using tenant-aware query
       const { data: marksData, error: marksError } = await createTenantQuery(tenantId, 'marks')
         .select('id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks, tenant_id, created_at')
-        .eq('exam_id', exam.id)
-        .execute();
+        .eq('exam_id', exam.id);
 
       if (marksError) throw marksError;
 

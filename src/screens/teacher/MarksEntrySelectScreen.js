@@ -4,35 +4,86 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import Header from '../../components/Header';
+// 🚀 ENHANCED TENANT SYSTEM IMPORTS
+import { 
+  useTenantAccess, 
+  tenantDatabase, 
+  getCachedTenantId 
+} from '../../utils/tenantHelpers';
 
 export default function MarksEntrySelectScreen({ navigation }) {
   const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const { user } = useAuth();
+  
+  // 🚀 ENHANCED TENANT SYSTEM - Use reliable cached tenant access
+  const { 
+    getTenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
+  
+  // 🚀 ENHANCED TENANT SYSTEM - Tenant validation helper
+  const validateTenantAccess = () => {
+    if (!isReady) {
+      return { valid: false, error: 'Tenant context not ready' };
+    }
+    
+    const tenantId = getCachedTenantId();
+    if (!tenantId) {
+      return { valid: false, error: 'No tenant ID available' };
+    }
+    
+    return { valid: true, tenantId };
+  };
 
-  // Fetch teacher's assigned subjects
+  // 🚀 ENHANCED: Fetch teacher's assigned subjects with enhanced tenant system
   const fetchTeacherSubjects = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Get teacher info using the helper function (which uses email-based lookup)
+      // 🚀 ENHANCED: Validate tenant access using new helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.error('❌ Enhanced tenant validation failed:', validation.error);
+        throw new Error(validation.error);
+      }
+      
+      const tenantId = validation.tenantId;
+      console.log('🚀 Enhanced tenant system: Using cached tenant ID:', tenantId);
+
+      // 🚀 ENHANCED: Get teacher info using dbHelpers with enhanced validation
+      console.log('🔍 Getting teacher info using dbHelpers...');
       const { data: teacherData, error: teacherError } = await dbHelpers.getTeacherByUserId(user.id);
 
       if (teacherError || !teacherData) {
         console.error('❌ Teacher not found for user:', user.id, 'Error:', teacherError);
         throw new Error('Teacher information not found for this tenant.');
       }
+      
+      // 🚀 ENHANCED: Teacher data validation (enhanced tenant system handles automatic validation)
+      if (teacherData && teacherData.tenant_id && teacherData.tenant_id !== tenantId) {
+        console.error('❌ Teacher data validation failed: tenant mismatch');
+        throw new Error('Teacher data belongs to different tenant');
+      }
+      
+      console.log('✅ Enhanced: Teacher lookup successful:', teacherData.name);
 
-      // Get assigned subjects
-      const { data: assignedSubjects, error: subjectsError } = await supabase
-        .from(TABLES.TEACHER_SUBJECTS)
-        .select(`
+      // 🚀 ENHANCED: Get assigned subjects using enhanced tenant system
+      console.log('📚 Loading teacher subjects...');
+      const { data: assignedSubjects, error: subjectsError } = await tenantDatabase.read(
+        TABLES.TEACHER_SUBJECTS,
+        { teacher_id: teacherData.id },
+        `
           *,
           subjects(name, id)
-        `)
-        .eq('teacher_id', teacherData.id);
+        `
+      );
 
       if (subjectsError) throw subjectsError;
 
@@ -61,9 +112,25 @@ export default function MarksEntrySelectScreen({ navigation }) {
   };
 
   useEffect(() => {
-    fetchTeacherSubjects();
-  }, []);
+    if (isReady) {
+      fetchTeacherSubjects();
+    }
+  }, [isReady]);
 
+  // 🚀 ENHANCED: Show tenant loading states
+  if (tenantLoading) {
+    return (
+      <View style={styles.container}>
+        <Header title="Select Subject" showBack={true} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#1976d2" />
+          <Text style={styles.loadingText}>Initializing tenant context...</Text>
+          <Text style={styles.loadingSubtext}>Setting up secure access</Text>
+        </View>
+      </View>
+    );
+  }
+  
   if (loading) {
     return (
       <View style={styles.container}>
@@ -71,6 +138,32 @@ export default function MarksEntrySelectScreen({ navigation }) {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1976d2" />
           <Text style={styles.loadingText}>Loading subjects...</Text>
+          {tenantName && (
+            <Text style={styles.loadingSubtext}>📚 {tenantName}</Text>
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  // 🚀 ENHANCED: Show tenant errors with enhanced messages
+  if (tenantError) {
+    return (
+      <View style={styles.container}>
+        <Header title="Select Subject" showBack={true} />
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorTitle}>Tenant Access Error</Text>
+          <Text style={styles.errorText}>{tenantError}</Text>
+          <Text style={styles.errorSubtext}>Please check your connection and try again.</Text>
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={() => {
+              // Refresh the page to retry tenant initialization
+              fetchTeacherSubjects();
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -81,7 +174,11 @@ export default function MarksEntrySelectScreen({ navigation }) {
       <View style={styles.container}>
         <Header title="Select Subject" showBack={true} />
         <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Error: {error}</Text>
+          <Text style={styles.errorTitle}>Loading Error</Text>
+          <Text style={styles.errorText}>{error}</Text>
+          {tenantName && (
+            <Text style={styles.errorSubtext}>📚 {tenantName}</Text>
+          )}
           <TouchableOpacity style={styles.retryButton} onPress={fetchTeacherSubjects}>
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
@@ -172,6 +269,14 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: '#1976d2',
     fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  loadingSubtext: {
+    marginTop: 8,
+    color: '#666',
+    fontSize: 14,
+    textAlign: 'center',
   },
   errorContainer: {
     flex: 1,
@@ -179,9 +284,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#d32f2f',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
   errorText: {
     color: '#d32f2f',
     fontSize: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorSubtext: {
+    color: '#666',
+    fontSize: 14,
     marginBottom: 20,
     textAlign: 'center',
   },

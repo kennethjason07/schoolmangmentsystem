@@ -7,10 +7,11 @@ import {
   Dimensions
 } from 'react-native';
 import Header from '../../../components/Header';
-import { supabase, getUserTenantId } from '../../../utils/supabase';
+// 🚀 ENHANCED: Updated imports for enhanced tenant system
+import { supabase } from '../../../utils/supabase';
 import { format, parseISO, isAfter, differenceInDays } from 'date-fns';
 import { createLeaveRequestNotificationForAdmins } from '../../../services/notificationService';
-import { useTenantAccess } from '../../../utils/tenantHelpers';
+import { useTenantAccess, tenantDatabase, createTenantQuery, getCachedTenantId } from '../../../utils/tenantHelpers';
 import LeaveApplicationHeader from './components/LeaveApplicationHeader';
 import LeaveApplicationList from './components/LeaveApplicationList';
 import LeaveApplicationModal from './components/LeaveApplicationModal';
@@ -21,13 +22,46 @@ const isTablet = width >= 768;
 
 const LeaveApplication = ({ navigation }) => {
   const { 
-    tenantId, 
+    user,
     isReady, 
     isLoading: tenantLoading, 
     tenant, 
-    tenantName, 
     error: tenantError 
   } = useTenantAccess();
+  
+  // 🚀 ENHANCED: Tenant validation helper
+  const validateTenantReadiness = async () => {
+    try {
+      if (!user || !isReady) {
+        console.error('❌ LeaveApplication: User or tenant not ready');
+        return {
+          isValid: false,
+          error: 'System is loading. Please wait a moment.'
+        };
+      }
+      
+      const tenantId = getCachedTenantId();
+      if (!tenantId) {
+        console.error('❌ LeaveApplication: Cached tenant ID not available');
+        return {
+          isValid: false,
+          error: 'Tenant system not ready. Please try again in a moment.'
+        };
+      }
+      
+      console.log('✅ LeaveApplication: Tenant validation successful:', tenantId);
+      return {
+        isValid: true,
+        tenantId
+      };
+    } catch (error) {
+      console.error('❌ LeaveApplication: Tenant validation error:', error);
+      return {
+        isValid: false,
+        error: 'System error. Please contact support.'
+      };
+    }
+  };
   
   // State management
   const [loading, setLoading] = useState(true);
@@ -146,44 +180,31 @@ const LeaveApplication = ({ navigation }) => {
     }
   };
 
+  // 🚀 ENHANCED: Updated loadMyLeaves to use enhanced tenant system
   const loadMyLeaves = async () => {
     const startTime = performance.now();
     
     try {
       if (!teacherProfile?.linked_teacher_id) return;
       
-      console.log('🚀 TeacherLeaveApplication: Starting loadMyLeaves...');
+      console.log('🚀 Enhanced TeacherLeaveApplication: Starting loadMyLeaves...');
       
-      // Get tenant ID with email fallback
-      let tenantId = currentTenant?.id || await getUserTenantId();
-      
-      if (!tenantId) {
-        console.log('⚠️ TeacherLeaveApplication: No tenant from context/getUserTenantId, trying email lookup...');
-        
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          tenantId = emailTenant?.id;
-          console.log('📧 TeacherLeaveApplication: Email-based tenant ID:', tenantId);
-        } catch (emailError) {
-          console.error('❌ TeacherLeaveApplication: Email tenant lookup failed:', emailError);
-        }
-        
-        if (!tenantId) {
-          console.error('No tenant_id found for user in teacher leaves fetch');
-          return;
-        }
+      // ✨ Validate tenant readiness
+      const { isValid, tenantId, error: validationError } = await validateTenantReadiness();
+      if (!isValid) {
+        console.error('❌ Enhanced TeacherLeaveApplication: Tenant validation failed:', validationError);
+        return;
       }
 
-      const { data, error } = await supabase
-        .from('leave_applications')
-        .select(`
-          *,
-          applied_by_user:users!leave_applications_applied_by_fkey(id, full_name),
-          reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name),
-          replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
-        `)
+      // 🚀 ENHANCED: Use createTenantQuery for automatic tenant filtering
+      console.log('📊 Enhanced TeacherLeaveApplication: Creating tenant-aware query...');
+      const { data, error } = await createTenantQuery(tenantId, 'leave_applications', `
+        *,
+        applied_by_user:users!leave_applications_applied_by_fkey(id, full_name),
+        reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name),
+        replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
+      `)
         .eq('teacher_id', teacherProfile.linked_teacher_id)
-        .eq('tenant_id', tenantId)
         .order('applied_date', { ascending: false });
 
       if (error) throw error;
@@ -193,15 +214,20 @@ const LeaveApplication = ({ navigation }) => {
       // Performance monitoring
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
-      console.log(`✅ TeacherLeaveApplication: My leaves loaded in ${loadTime}ms`);
+      console.log(`✅ Enhanced TeacherLeaveApplication: My leaves loaded in ${loadTime}ms`);
       
     } catch (error) {
-      console.error('❌ TeacherLeaveApplication: Error loading my leaves:', error.message);
+      console.error('❌ Enhanced TeacherLeaveApplication: Error loading my leaves:', error.message);
     }
   };
 
-  // Refresh handler
+  // 🚀 ENHANCED: Updated refresh handler to use tenant validation
   const onRefresh = useCallback(async () => {
+    const { isValid } = await validateTenantReadiness();
+    if (!isValid) {
+      return;
+    }
+    
     setRefreshing(true);
     await loadData();
     setRefreshing(false);
@@ -230,34 +256,21 @@ const LeaveApplication = ({ navigation }) => {
     }
   };
 
+  // 🚀 ENHANCED: Updated submitApplication to use enhanced tenant system
   const submitApplication = async (totalDays) => {
     const startTime = performance.now();
     
     try {
       setSubmitting(true);
-      console.log('🚀 TeacherLeaveApplication: Starting submitApplication...');
+      console.log('🚀 Enhanced TeacherLeaveApplication: Starting submitApplication...');
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('User not authenticated');
 
-      // Get tenant ID with email fallback
-      let tenantId = currentTenant?.id || await getUserTenantId();
-      
-      if (!tenantId) {
-        console.log('⚠️ TeacherLeaveApplication: No tenant for submit, trying email lookup...');
-        
-        try {
-          const emailTenant = await getCurrentUserTenantByEmail();
-          tenantId = emailTenant?.id;
-          console.log('📧 TeacherLeaveApplication: Email-based tenant ID for submit:', tenantId);
-        } catch (emailError) {
-          console.error('❌ TeacherLeaveApplication: Email tenant lookup failed for submit:', emailError);
-        }
-        
-        if (!tenantId) {
-          console.error('No tenant_id found for user during teacher leave insertion');
-          throw new Error('User tenant information not found. Please contact support.');
-        }
+      // ✨ Validate tenant readiness
+      const { isValid, tenantId, error: validationError } = await validateTenantReadiness();
+      if (!isValid) {
+        throw new Error(validationError);
       }
 
       const leaveData = {
@@ -268,14 +281,23 @@ const LeaveApplication = ({ navigation }) => {
         reason: applicationForm.reason.trim(),
         applied_by: user.id,
         attachment_url: applicationForm.attachment_url,
-        tenant_id: tenantId, // Include tenant_id for RLS compliance
+        // Note: tenant_id will be added automatically by tenantDatabase.create
       };
 
-      const { error } = await supabase
-        .from('leave_applications')
-        .insert([leaveData]);
-
-      if (error) throw error;
+      // 🚀 ENHANCED: Use tenantDatabase.create for automatic tenant isolation
+      console.log('💾 Enhanced TeacherLeaveApplication: Creating leave via tenantDatabase...');
+      const { data: result, error: createError } = await tenantDatabase.create(
+        'leave_applications',
+        leaveData
+      );
+      
+      if (createError) {
+        throw new Error(`Failed to create leave application record: ${createError.message}`);
+      }
+      
+      if (!result) {
+        throw new Error('Failed to create leave application record');
+      }
 
       // Create notification for admins about the new leave request
       try {

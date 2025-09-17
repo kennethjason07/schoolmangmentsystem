@@ -11,10 +11,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { supabase, getUserTenantId } from '../../utils/supabase';
+import { supabase } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
-import { useTenantAccess } from '../../utils/tenantHelpers';
-import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { 
+  useTenantAccess,
+  tenantDatabase,
+  getCachedTenantId
+} from '../../utils/tenantHelpers';
 import { colors } from '../../../assets/colors';
 
 const AddLeaveApplication = ({ visible, onClose, onApplicationAdded }) => {
@@ -33,6 +36,20 @@ const AddLeaveApplication = ({ visible, onClose, onApplicationAdded }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { user } = useAuth();
+
+  // 🚀 ENHANCED: Tenant validation helper
+  const validateTenantAccess = () => {
+    if (!isReady) {
+      return { valid: false, error: 'Tenant context not ready' };
+    }
+    
+    const cachedTenantId = getCachedTenantId();
+    if (!cachedTenantId) {
+      return { valid: false, error: 'No tenant ID available' };
+    }
+    
+    return { valid: true, tenantId: cachedTenantId };
+  };
 
   const leaveTypes = ['Sick', 'Casual', 'Emergency', 'Earned'];
 
@@ -75,18 +92,16 @@ const AddLeaveApplication = ({ visible, onClose, onApplicationAdded }) => {
       setIsSubmitting(true);
       console.log('📊 AddLeaveApplication: Preparing to insert into database...');
       
-      // Use cached tenant ID from enhanced context
-      if (!tenantId) {
-        console.log('⚠️ AddLeaveApplication: No tenant ID available');
-        Alert.alert('Error', 'Unable to determine tenant context. Please contact support.');
+      // 🚀 ENHANCED: Validate tenant access using new helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.error('❌ Enhanced tenant validation failed:', validation.error);
+        Alert.alert('Access Denied', validation.error);
         return;
       }
       
-      if (tenantError) {
-        console.error('❌ AddLeaveApplication: Tenant error:', tenantError);
-        Alert.alert('Error', 'Tenant error: ' + tenantError);
-        return;
-      }
+      const effectiveTenantId = validation.tenantId;
+      console.log('🚀 Enhanced tenant system: Using cached tenant ID:', effectiveTenantId);
 
       // Get current user session
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -101,7 +116,7 @@ const AddLeaveApplication = ({ visible, onClose, onApplicationAdded }) => {
         return;
       }
 
-      // Prepare the data for insertion
+      // Prepare the data for insertion (tenant_id will be added automatically)
       const leaveData = {
         leave_type: leaveType,
         start_date: startDate,
@@ -111,16 +126,14 @@ const AddLeaveApplication = ({ visible, onClose, onApplicationAdded }) => {
         applied_date: new Date().toISOString().split('T')[0],
         applied_by: user.id,
         teacher_id: user.linked_teacher_id || null,
-        tenant_id: tenantId // Use dynamically obtained tenant ID
+        total_days: Math.ceil((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24)) + 1,
+        academic_year: new Date().getFullYear().toString()
       };
 
-      console.log('➕ [ADD_LEAVE] Data to insert:', leaveData);
+      console.log('➥ [ADD_LEAVE] Data to insert:', leaveData);
 
-      // Insert the leave application
-      const { data: insertedData, error: insertError } = await supabase
-        .from('leave_applications')
-        .insert(leaveData)
-        .select();
+      // 🚀 ENHANCED: Insert using tenantDatabase helper
+      const { data: insertedData, error: insertError } = await tenantDatabase.create('leave_applications', leaveData);
 
       console.log('➕ [ADD_LEAVE] Insert result:', {
         data: insertedData,

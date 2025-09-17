@@ -3,9 +3,16 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+// 🚀 ENHANCED TENANT SYSTEM IMPORTS
+import { 
+  useTenantAccess, 
+  tenantDatabase, 
+  createTenantQuery,
+  getCachedTenantId 
+} from '../../utils/tenantHelpers';
+// Legacy imports - can be removed after full migration
 import { 
   validateTenantAccess, 
-  createTenantQuery, 
   validateDataTenancy,
   TENANT_ERROR_MESSAGES 
 } from '../../utils/tenantValidation';
@@ -24,11 +31,37 @@ import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCou
 
 const StudentDashboard = ({ navigation }) => {
   const { user } = useAuth();
+  // Legacy tenant context - keeping for backwards compatibility during migration
   const { tenantId, currentTenant } = useTenantContext();
+  
+  // 🚀 ENHANCED TENANT SYSTEM - Use reliable cached tenant access
+  const { 
+    getTenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
+  
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [studentProfile, setStudentProfile] = useState(null);
   const [fallbackTenantId, setFallbackTenantId] = useState(null);
+  
+  // 🚀 ENHANCED TENANT SYSTEM - Tenant validation helper
+  const validateTenantAccess = () => {
+    if (!isReady) {
+      return { valid: false, error: 'Tenant context not ready' };
+    }
+    
+    const tenantId = getCachedTenantId();
+    if (!tenantId) {
+      return { valid: false, error: 'No tenant ID available' };
+    }
+    
+    return { valid: true, tenantId };
+  };
   const [summary, setSummary] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -549,50 +582,27 @@ const StudentDashboard = ({ navigation }) => {
     await fetchDashboardData();
   });
 
-  // Fetch all dashboard data
+  // 🚀 ENHANCED: Fetch all dashboard data with enhanced tenant system
   const fetchDashboardData = async () => {
     try {
-      console.log('🚀 StudentDashboard - Starting data fetch...');
+      console.log('🚀 Enhanced StudentDashboard - Starting data fetch...');
       console.log('🚀 User data:', { id: user?.id, email: user?.email, linked_student_id: user?.linked_student_id });
       
       setLoading(true);
       setError(null);
 
-      // Check if tenant context is available, if not try to resolve it
-      let effectiveTenantId = tenantId;
-      if (!effectiveTenantId) {
-        console.log('🔍 Student Dashboard - No tenant context for main data fetch, attempting to resolve from user email...');
-        
-        try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
-          const emailTenantResult = await getTenantIdByEmail(user.email);
-          
-          if (emailTenantResult.success) {
-            effectiveTenantId = emailTenantResult.data.tenant.id;
-            console.log('✅ Student Dashboard - Successfully resolved tenant via email for main data fetch:', effectiveTenantId);
-          } else {
-            console.error('❌ Student Dashboard - Email-based tenant resolution failed for main data fetch:', emailTenantResult.error);
-            setError('Unable to determine school context. Please contact administrator.');
-            Alert.alert('Access Error', 'Unable to determine school context. Please contact administrator.');
-            return;
-          }
-        } catch (emailLookupError) {
-          console.error('❌ Student Dashboard - Error during email-based tenant lookup for main data fetch:', emailLookupError);
-          setError('Unable to determine school context. Please contact administrator.');
-          Alert.alert('Access Error', 'Unable to determine school context. Please contact administrator.');
-          return;
-        }
-      }
-
-      // Validate tenant access before proceeding (with resolved tenant ID)
-      const tenantValidation = await validateTenantAccess(user.id, effectiveTenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Student dashboard tenant validation failed:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
-        setError(tenantValidation.error);
+      // 🚀 ENHANCED: Validate tenant access using new helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.error('❌ Enhanced tenant validation failed:', validation.error);
+        setError('Unable to determine school context. Please contact administrator.');
+        Alert.alert('Access Error', 'Unable to determine school context. Please contact administrator.');
         setLoading(false);
         return;
       }
+      
+      const tenantId = validation.tenantId;
+      console.log('🚀 Enhanced tenant system: Using cached tenant ID:', tenantId);
 
       // Get school details
       const { data: schoolData } = await dbHelpers.getSchoolDetails();
@@ -881,44 +891,44 @@ const StudentDashboard = ({ navigation }) => {
         setFees([]);
       }
 
-      // Get today's classes
+      // Get today's classes using enhanced tenant system
       try {
         const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-        const { data: timetableData, error: timetableError } = await supabase
-          .from(TABLES.TIMETABLE)
+        const timetableQuery = createTenantQuery(effectiveTenantId, TABLES.TIMETABLE)
           .select(`
             *,
             subjects(name),
-            classes(class_name, section),
-            tenant_id
+            classes(class_name, section)
           `)
-          .eq('tenant_id', effectiveTenantId)
           .eq('class_id', studentData.class_id)
           .eq('day', today)
           .order('start_time', { ascending: true });
 
+        const { data: timetableData, error: timetableError } = await timetableQuery;
         if (timetableError && timetableError.code !== '42P01') {
           console.log('Timetable error:', timetableError);
         }
         setTodayClasses(timetableData || []);
+        console.log('Dashboard - Enhanced tenant-aware today\'s classes loaded:', timetableData?.length || 0);
       } catch (err) {
         console.log('Timetable fetch error:', err);
         setTodayClasses([]);
       }
 
-      // Get recent activities (assignments, announcements, etc.)
+      // Get recent activities using enhanced tenant system
       try {
-        const { data: activitiesData, error: activitiesError } = await supabase
-          .from(TABLES.NOTIFICATIONS)
+        const activitiesQuery = createTenantQuery(effectiveTenantId, TABLES.NOTIFICATIONS)
           .select('*')
           .eq('status', 'Active')
           .order('created_at', { ascending: false })
           .limit(5);
 
+        const { data: activitiesData, error: activitiesError } = await activitiesQuery;
         if (activitiesError && activitiesError.code !== '42P01') {
           console.log('Activities error:', activitiesError);
         }
         setRecentActivities(activitiesData || []);
+        console.log('Dashboard - Enhanced tenant-aware activities loaded:', activitiesData?.length || 0);
       } catch (err) {
         console.log('Activities fetch error:', err);
         setRecentActivities([]);
@@ -928,40 +938,38 @@ const StudentDashboard = ({ navigation }) => {
       try {
         let allAssignments = [];
 
-        // Get assignments from assignments table
-        const { data: assignmentsData, error: assignmentsError } = await supabase
-          .from(TABLES.ASSIGNMENTS)
+        // Get assignments from assignments table using enhanced tenant system
+        const assignmentsQuery = createTenantQuery(effectiveTenantId, TABLES.ASSIGNMENTS)
           .select('*')
           .eq('class_id', studentData.class_id)
-          .eq('tenant_id', effectiveTenantId)
           .order('due_date', { ascending: true });
 
+        const { data: assignmentsData, error: assignmentsError } = await assignmentsQuery;
         if (assignmentsError && assignmentsError.code !== '42P01') {
           console.log('Dashboard - Assignments error:', assignmentsError);
         } else if (assignmentsData) {
           allAssignments = [...allAssignments, ...assignmentsData];
         }
 
-        // Get homeworks from homeworks table
-        const { data: homeworksData, error: homeworksError } = await supabase
-          .from(TABLES.HOMEWORKS)
+        // Get homeworks from homeworks table using enhanced tenant system
+        const homeworksQuery = createTenantQuery(effectiveTenantId, TABLES.HOMEWORKS)
           .select('*')
           .or(`class_id.eq.${studentData.class_id},assigned_students.cs.{${studentData.id}}`)
-          .eq('tenant_id', effectiveTenantId)
           .order('due_date', { ascending: true });
 
+        const { data: homeworksData, error: homeworksError } = await homeworksQuery;
         if (homeworksError && homeworksError.code !== '42P01') {
           console.log('Dashboard - Homeworks error:', homeworksError);
         } else if (homeworksData) {
           allAssignments = [...allAssignments, ...homeworksData];
         }
 
-        // Get existing submissions for this student to identify pending assignments
-        const { data: submissionsData, error: submissionsError } = await supabase
-          .from('assignment_submissions')
+        // Get existing submissions for this student using enhanced tenant system
+        const submissionsQuery = createTenantQuery(effectiveTenantId, 'assignment_submissions')
           .select('*')
-          .eq('student_id', studentData.id)
-          .eq('tenant_id', effectiveTenantId);
+          .eq('student_id', studentData.id);
+
+        const { data: submissionsData, error: submissionsError } = await submissionsQuery;
 
         if (submissionsError && submissionsError.code !== '42P01') {
           console.log('Dashboard - Submissions error:', submissionsError);
@@ -981,7 +989,7 @@ const StudentDashboard = ({ navigation }) => {
           new Date(assignment.due_date) >= new Date() // Only include assignments not past due date
         );
 
-        console.log('Dashboard - Pending assignments count:', pendingAssignments.length);
+        console.log('Dashboard - Enhanced tenant-aware pending assignments count:', pendingAssignments.length);
         setAssignments(pendingAssignments);
       } catch (err) {
         console.log('Dashboard - Assignments fetch error:', err);
@@ -997,16 +1005,18 @@ const StudentDashboard = ({ navigation }) => {
     }
   };
 
+  // 🚀 ENHANCED: Wait for both user and tenant readiness
   useEffect(() => {
-    console.log('🚀 StudentDashboard useEffect triggered');
+    console.log('🚀 Enhanced StudentDashboard useEffect triggered');
     console.log('🚀 User state:', user);
-    if (user) {
-      console.log('🚀 User found, starting dashboard data fetch...');
+    console.log('🚀 Tenant ready:', isReady);
+    if (user && isReady) {
+      console.log('🚀 User and tenant ready, starting enhanced dashboard data fetch...');
       fetchDashboardData();
     } else {
-      console.log('⚠️ No user found, waiting...');
+      console.log('⚠️ Waiting for user and tenant context...');
     }
-  }, [user]);
+  }, [user, isReady]);
 
   // Use the hook's unread count instead of calculating from local state
   const unreadCount = hookUnreadCount;

@@ -14,8 +14,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
-import { useTenantAccess } from '../../utils/tenantHelpers';
-import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { 
+  useTenantAccess,
+  tenantDatabase,
+  createTenantQuery,
+  getCachedTenantId
+} from '../../utils/tenantHelpers';
 
 // NEW: Modern Filter System
 import ModernFilters from '../../components/ui/ModernFilters';
@@ -40,6 +44,22 @@ const LeaveManagementModern = ({ navigation, route }) => {
     tenantName, 
     error: tenantError 
   } = useTenantAccess();
+  
+  const { user } = useAuth();
+  
+  // 🚀 ENHANCED: Tenant validation helper
+  const validateTenantAccess = () => {
+    if (!isReady) {
+      return { valid: false, error: 'Tenant context not ready' };
+    }
+    
+    const cachedTenantId = getCachedTenantId();
+    if (!cachedTenantId) {
+      return { valid: false, error: 'No tenant ID available' };
+    }
+    
+    return { valid: true, tenantId: cachedTenantId };
+  };
   
   // Existing state
   const [leaveApplications, setLeaveApplications] = useState([]);
@@ -327,31 +347,30 @@ const LeaveManagementModern = ({ navigation, route }) => {
   // Get auth context for user info
   const { user } = useAuth();
 
-  // Load leave applications from Supabase database
+  // 🚀 ENHANCED: Load leave applications using enhanced tenant system
   const loadLeaveApplications = async () => {
     const startTime = performance.now();
     let timeoutId;
     
     try {
       setIsLoading(true);
-      console.log('🚀 LeaveManagementModern: Starting optimized data load...');
+      console.log('🚀 Enhanced LeaveManagement: Starting optimized data load...');
       
       // ⏰ Set timeout protection
       timeoutId = setTimeout(() => {
-        console.warn('⚠️ LeaveManagementModern: Load timeout (10s)');
+        console.warn('⚠️ Enhanced LeaveManagement: Load timeout (10s)');
         throw new Error('Loading timeout - please check your connection');
       }, 10000);
       
-      // Use cached tenant ID from enhanced context
-      if (!tenantId) {
-        console.log('⚠️ LeaveManagementModern: No tenant ID available');
-        throw new Error('Unable to determine tenant context. Please contact support.');
+      // 🚀 ENHANCED: Validate tenant access using new helper
+      const validation = validateTenantAccess();
+      if (!validation.valid) {
+        console.error('❌ Enhanced tenant validation failed:', validation.error);
+        throw new Error(validation.error);
       }
       
-      if (tenantError) {
-        console.error('❌ LeaveManagementModern: Tenant error:', tenantError);
-        throw new Error('Tenant error: ' + tenantError);
-      }
+      const effectiveTenantId = validation.tenantId;
+      console.log('🚀 Enhanced tenant system: Using cached tenant ID:', effectiveTenantId);
       
       // Check current session first
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -366,18 +385,19 @@ const LeaveManagementModern = ({ navigation, route }) => {
         return;
       }
       
-      console.log('📊 LeaveManagementModern: Querying leave_applications table with tenant filter...');
+      console.log('📊 Enhanced LeaveManagement: Querying leave_applications with enhanced tenant system...');
       
-      // Query leave applications from Supabase with joins to get employee names
-      const { data: applications, error } = await supabase
-        .from('leave_applications')
-        .select(`
+      // 🚀 ENHANCED: Query leave applications using createTenantQuery
+      const { data: applications, error } = await createTenantQuery(
+        effectiveTenantId,
+        'leave_applications',
+        `
           *,
           teacher:teachers!leave_applications_teacher_id_fkey(name),
-          applied_by_user:users!leave_applications_applied_by_fkey(full_name)
-        `)
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false });
+          applied_by_user:users!leave_applications_applied_by_fkey(full_name),
+          reviewed_by_user:users!leave_applications_reviewed_by_fkey(full_name)
+        `
+      ).order('created_at', { ascending: false });
       
       console.log('📊 [LEAVE_MGMT] Leave applications query result:');
       console.log('   - Applications found:', applications?.length || 0);
@@ -479,16 +499,32 @@ const LeaveManagementModern = ({ navigation, route }) => {
     }
   };
 
+  // 🚀 ENHANCED: Wait for user and tenant readiness before loading data
   useEffect(() => {
-    console.log('🚀 [LEAVE_MGMT] Component mounted, loading leave applications...');
-    loadLeaveApplications();
-  }, []);
+    console.log('🚀 Enhanced [LEAVE_MGMT] Component mounted, checking readiness...');
+    console.log('🚀 Enhanced [LEAVE_MGMT] User:', user?.email, 'Tenant ready:', isReady);
+    if (user && isReady) {
+      console.log('🚀 Enhanced [LEAVE_MGMT] User and tenant ready, loading leave applications...');
+      loadLeaveApplications();
+    } else {
+      console.log('⚠️ Enhanced [LEAVE_MGMT] Waiting for user and tenant readiness...');
+    }
+  }, [user, isReady]);
 
+  // 🚀 ENHANCED: Use tenant validation for refresh
   const onRefresh = async () => {
-    console.log('🔄 [LEAVE_MGMT] Refresh triggered by user pull-to-refresh');
+    console.log('🔄 Enhanced [LEAVE_MGMT] Refresh triggered by user pull-to-refresh');
+    
+    // Validate tenant readiness
+    const { isValid, tenantId } = await validateTenantReadiness();
+    if (!isValid) {
+      setRefreshing(false);
+      return;
+    }
+    
     setRefreshing(true);
     await loadLeaveApplications();
-    console.log('✅ [LEAVE_MGMT] Refresh completed');
+    console.log('✅ Enhanced [LEAVE_MGMT] Refresh completed');
     setRefreshing(false);
   };
 
@@ -518,31 +554,37 @@ const LeaveManagementModern = ({ navigation, route }) => {
     }
   };
 
+  // 🚀 ENHANCED: Use tenant validation and tenantDatabase for status updates
   const handleStatusUpdate = async (applicationId, newStatus) => {
     try {
-      console.log('🔄 [LEAVE_MGMT] Updating leave application status:', { applicationId, newStatus });
-      console.log('🔄 [LEAVE_MGMT] Current user:', user?.email || 'Not logged in');
+      console.log('🔄 Enhanced [LEAVE_MGMT] Updating leave application status:', { applicationId, newStatus });
+      console.log('🔄 Enhanced [LEAVE_MGMT] Current user:', user?.email || 'Not logged in');
+      
+      // ✨ Validate tenant readiness
+      const { isValid, tenantId } = await validateTenantReadiness();
+      if (!isValid) {
+        return;
+      }
       
       // Find the application being updated
       const targetApp = leaveApplications.find(app => app.id === applicationId);
-      console.log('🔄 [LEAVE_MGMT] Target application:', targetApp);
+      console.log('🔄 Enhanced [LEAVE_MGMT] Target application:', targetApp);
       
-      // Update in Supabase database
-      console.log('🔄 [LEAVE_MGMT] Sending update to Supabase...');
-      const { data: updatedData, error } = await supabase
-        .from('leave_applications')
-        .update({ status: newStatus })
-        .eq('id', applicationId)
-        .select();
+      // 🚀 ENHANCED: Update using tenant-aware helper
+      console.log('🔄 Enhanced [LEAVE_MGMT] Sending update via tenantDatabase...');
+      const updatedData = await tenantDatabase.update(
+        'leave_applications',
+        { status: newStatus },
+        { id: applicationId },
+        tenantId
+      );
       
-      console.log('📊 [LEAVE_MGMT] Update result:');
+      console.log('📊 Enhanced [LEAVE_MGMT] Update result:');
       console.log('   - Updated data:', updatedData);
-      console.log('   - Error:', error?.message || 'None');
-      console.log('   - Error code:', error?.code || 'None');
       
-      if (error) {
-        console.error('❌ [LEAVE_MGMT] Error updating leave status in database:', error);
-        Alert.alert('Update Failed', `Failed to update leave application status: ${error.message}`);
+      if (!updatedData) {
+        console.error('❌ Enhanced [LEAVE_MGMT] No data returned from update');
+        Alert.alert('Update Failed', 'Failed to update leave application status.');
         return;
       }
       
