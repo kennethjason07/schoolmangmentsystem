@@ -21,13 +21,7 @@ import * as Print from 'expo-print';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
-import { useTenantAccess } from '../../utils/tenantHelpers';
-import { 
-  validateTenantAccess, 
-  createTenantQuery, 
-  validateDataTenancy, 
-  TENANT_ERROR_MESSAGES 
-} from '../../utils/tenantValidation';
+import { useParentAuth } from '../../hooks/useParentAuth';
 
 // Debug mode constant (following EMAIL_BASED_TENANT_SYSTEM.md)
 const DEBUG_MODE = __DEV__ && true; // Enable debug logging in development
@@ -61,15 +55,14 @@ const ViewReportCard = () => {
   const [schoolDetails, setSchoolDetails] = useState(null);
   const { user } = useAuth();
   
-  // Add tenant context integration
+  // Add parent context integration
   const { 
-    tenantId, 
-    isReady, 
-    isLoading: tenantLoading, 
-    tenant, 
-    tenantName, 
-    error: tenantError 
-  } = useTenantAccess();
+    isParent, 
+    parentStudents, 
+    directParentMode, 
+    loading: parentLoading, 
+    error: parentError 
+  } = useParentAuth();
   
   // Add debug state for tenant troubleshooting
   const [debugInfo, setDebugInfo] = useState({
@@ -78,61 +71,16 @@ const ViewReportCard = () => {
     dataFetchStatus: null
   });
   
-  // Enhanced tenant debugging following EMAIL_BASED_TENANT_SYSTEM.md
+  // Parent authentication debugging
   if (DEBUG_MODE) {
-    console.log('🏢 [REPORT CARD TENANT DEBUG]:', {
-      tenantId: tenantId || 'NO TENANT',
-      tenantName: currentTenant?.name || 'NO TENANT NAME',
-      tenantStatus: currentTenant?.status || 'UNKNOWN',
-      tenantLoading: tenantLoading || false,
+    console.log('👨‍👩‍👧‍👦 [REPORT CARD PARENT DEBUG]:', {
+      isParent: isParent || false,
+      parentStudentsCount: parentStudents?.length || 0,
+      directParentMode: directParentMode || false,
+      parentLoading: parentLoading || false,
       userEmail: user?.email || 'NO USER',
       timestamp: new Date().toISOString()
     });
-    
-    // Add global test functions for development debugging
-    if (typeof window !== 'undefined') {
-      window.debugReportCardTenantContext = () => {
-        console.log('🏢 [REPORT CARD TENANT DEBUG] Current tenant context state:', {
-          tenantId: tenantId || 'NOT SET',
-          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : 'NOT SET',
-          tenantLoading: tenantLoading,
-          user: user ? { id: user.id, email: user.email } : 'NOT SET'
-        });
-        return {
-          tenantId,
-          currentTenant: currentTenant ? { id: currentTenant.id, name: currentTenant.name } : null,
-          tenantLoading,
-          user: user ? { id: user.id, email: user.email } : null,
-          isReady: !tenantLoading && !!tenantId && !!user
-        };
-      };
-      
-      window.retryReportCardTenantLoading = async () => {
-        console.log('🔄 [REPORT CARD MANUAL TENANT RETRY] Starting manual tenant retry...');
-        if (retryTenantLoading) {
-          await retryTenantLoading();
-          console.log('🔄 [REPORT CARD MANUAL TENANT RETRY] Completed');
-        } else {
-          console.log('❌ [REPORT CARD MANUAL TENANT RETRY] Function not available');
-        }
-      };
-      
-      window.debugReportCardTenantLoading = async () => {
-        console.log('📝 [REPORT CARD DEBUG TENANT LOADING] Starting enhanced debug...');
-        if (debugTenantLoading) {
-          const result = await debugTenantLoading();
-          console.log('📝 [REPORT CARD DEBUG TENANT LOADING] Result:', result);
-          return result;
-        } else {
-          console.log('❌ [REPORT CARD DEBUG TENANT LOADING] Function not available');
-        }
-      };
-      
-      console.log('🧪 [REPORT CARD DEV TOOLS] Added global functions:');
-      console.log('   • window.debugReportCardTenantContext() - Debug current tenant context state');
-      console.log('   • window.retryReportCardTenantLoading() - Manually retry tenant loading');
-      console.log('   • window.debugReportCardTenantLoading() - Run enhanced tenant loading debug');
-    }
   }
 
   // Pull-to-refresh functionality with enhanced tenant-aware reload
@@ -149,153 +97,93 @@ const ViewReportCard = () => {
       setLoading(true);
       setError(null);
       
-      // Enhanced tenant validation following EMAIL_BASED_TENANT_SYSTEM.md
-      
-      // Check if tenant is still loading
-      if (tenantLoading) {
-        console.log('🔄 [TENANT-AWARE] Tenant context is loading, delaying report card fetch...');
+      // Parent authentication validation
+      if (parentLoading) {
+        console.log('🔄 [PARENT-AWARE] Parent context is loading, delaying report card fetch...');
         return;
       }
       
-      // If tenant context is not loaded, try to resolve tenant directly by email
-      let resolvedTenantId = tenantId;
-      let resolvedTenant = currentTenant;
-      
-      if (!tenantId || !currentTenant) {
-        console.log('🔍 [TENANT-AWARE] Tenant context not loaded, attempting direct email-based tenant resolution...');
-        
-        if (!user || !user.email) {
-          console.error('❌ [TENANT-AWARE] Cannot resolve tenant: No authenticated user');
-          setError('Authentication required. Please log in again.');
-          setLoading(false);
-          return;
-        }
-        
-        try {
-          // Direct tenant lookup using email
-          console.log('📧 [TENANT-AWARE] Looking up tenant for email:', user.email);
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
-          const emailTenantResult = await getTenantIdByEmail(user.email);
-          
-          if (emailTenantResult.success) {
-            resolvedTenantId = emailTenantResult.data.tenant.id;
-            resolvedTenant = emailTenantResult.data.tenant;
-            console.log('✅ [TENANT-AWARE] Successfully resolved tenant via email:', {
-              tenantId: resolvedTenantId,
-              tenantName: resolvedTenant.name,
-              userEmail: user.email
-            });
-          } else {
-            console.error('❌ [TENANT-AWARE] Email-based tenant resolution failed:', emailTenantResult.error);
-            setError(emailTenantResult.error || 'Unable to determine your school. Please contact administrator.');
-            setLoading(false);
-            return;
-          }
-        } catch (emailLookupError) {
-          console.error('❌ [TENANT-AWARE] Error during email-based tenant lookup:', emailLookupError);
-          setError('Unable to load school information. Please try again.');
-          setLoading(false);
-          return;
-        }
+      // Check if user is a parent
+      if (!isParent || !parentStudents || parentStudents.length === 0) {
+        console.error('❌ [PARENT-AWARE] User is not a parent or has no students');
+        setError('Parent authentication required. Please log in as a parent.');
+        setLoading(false);
+        return;
       }
 
       if (DEBUG_MODE) {
-        console.log('📊 === [TENANT-AWARE] REPORT CARD DEBUG ===');
+        console.log('📊 === [PARENT-AWARE] REPORT CARD DEBUG ===');
         console.log('🔍 Debug Mode: ENABLED');
-        console.log('🏢 Resolved Tenant:', resolvedTenant.name, '(ID:', resolvedTenantId, ')');
+        console.log('👨‍👩‍👧‍👦 Parent Status:', isParent);
+        console.log('📚 Parent Students Count:', parentStudents.length);
         console.log('👤 Parent User ID:', user?.id);
         console.log('⏰ Fetch Time:', new Date().toISOString());
         console.log('📧 User Email:', user?.email);
         
         setDebugInfo(prev => ({
           ...prev,
-          tenantContext: {
+          parentContext: {
             user_id: user?.id,
-            resolved_tenant_id: resolvedTenantId,
-            tenant_name: resolvedTenant.name,
+            is_parent: isParent,
+            students_count: parentStudents.length,
             email: user?.email,
             fetch_time: new Date().toISOString()
           }
         }));
       }
       
-      // Get parent's linked student using tenant-aware query
-      const tenantUserQuery = createTenantQuery(resolvedTenantId, TABLES.USERS);
-      const { data: parentUser, error: parentError } = await tenantUserQuery
-        .select(`
-          linked_parent_of,
-          students!users_linked_parent_of_fkey(
-            id,
-            name,
-            admission_no,
-            class_id,
-            academic_year,
-            tenant_id,
-            classes(id, class_name, section, academic_year)
-          )
-        `)
-        .eq('id', user.id)
-        .execute()
-        .then(result => ({ data: result.data?.[0] || null, error: result.error }));
-
-      if (parentError || !parentUser?.linked_parent_of) {
-        throw new Error('Student data not found');
-      }
-
-      const studentData = parentUser.students;
+      // Get parent's student data using direct parent access
+      let studentData = null;
       
-      // Validate student belongs to current tenant
-      if (studentData.tenant_id && studentData.tenant_id !== resolvedTenantId) {
-        console.error('❌ [TENANT-AWARE] Student belongs to different tenant:', {
-          studentTenant: studentData.tenant_id,
-          currentTenant: resolvedTenantId
-        });
-        setError(TENANT_ERROR_MESSAGES.WRONG_TENANT_DATA);
+      // Use the first student (or implement student selection if multiple)
+      if (parentStudents.length > 0) {
+        studentData = parentStudents[0];
+        console.log('✅ [PARENT-AWARE] Found student via direct parent access:', studentData.name);
+      } else {
+        console.error('❌ [PARENT-AWARE] No students found for parent');
+        setError('No students found for this parent account.');
         setLoading(false);
         return;
       }
       
       setStudent(studentData);
 
-      // Get all exams for the student's class and academic year using tenant-aware query
-      const tenantExamsQuery = createTenantQuery(resolvedTenantId, TABLES.EXAMS);
-      const { data: examsData, error: examsError } = await tenantExamsQuery
-        .select('id, name, class_id, academic_year, start_date, end_date, remarks, max_marks, created_at, tenant_id')
+      // Get all exams for the student's class and academic year using direct query
+      const { data: examsData, error: examsError } = await supabase
+        .from(TABLES.EXAMS)
+        .select('id, name, class_id, academic_year, start_date, end_date, remarks, max_marks, created_at')
         .eq('class_id', studentData.class_id)
         .eq('academic_year', studentData.academic_year)
-        .order('start_date', { ascending: false })
-        .execute();
+        .order('start_date', { ascending: false });
 
       if (examsError) {
-        console.error('❌ [TENANT-AWARE] Exams query error:', examsError);
+        console.error('❌ [PARENT-AWARE] Exams query error:', examsError);
         throw examsError;
       }
       setExams(examsData || []);
 
-      // Get all subjects for the student's class using tenant-aware query
-      const tenantSubjectsQuery = createTenantQuery(resolvedTenantId, TABLES.SUBJECTS);
-      const { data: subjectsData, error: subjectsError } = await tenantSubjectsQuery
-        .select('id, name, class_id, academic_year, is_optional, created_at, tenant_id')
+      // Get all subjects for the student's class using direct query
+      const { data: subjectsData, error: subjectsError } = await supabase
+        .from(TABLES.SUBJECTS)
+        .select('id, name, class_id, academic_year, is_optional, created_at')
         .eq('class_id', studentData.class_id)
         .eq('academic_year', studentData.academic_year)
-        .order('name')
-        .execute();
+        .order('name');
 
       if (subjectsError) {
-        console.error('❌ [TENANT-AWARE] Subjects query error:', subjectsError);
+        console.error('❌ [PARENT-AWARE] Subjects query error:', subjectsError);
         throw subjectsError;
       }
       setSubjects(subjectsData || []);
 
-      // Get all marks for the student using tenant-aware query
+      // Get all marks for the student using direct query
       console.log('📊 [REPORT CARD DEBUG] Fetching marks for student:', {
         studentId: studentData.id,
-        tenantId: resolvedTenantId,
         studentName: studentData.name
       });
       
-      const tenantMarksQuery = createTenantQuery(resolvedTenantId, TABLES.MARKS);
-      const { data: marksData, error: marksError } = await tenantMarksQuery
+      const { data: marksData, error: marksError } = await supabase
+        .from(TABLES.MARKS)
         .select(`
           id,
           student_id,
@@ -306,13 +194,11 @@ const ViewReportCard = () => {
           max_marks,
           remarks,
           created_at,
-          tenant_id,
           exams(id, name, start_date, end_date, max_marks),
           subjects(id, name)
         `)
         .eq('student_id', studentData.id)
-        .order('created_at', { ascending: false })
-        .execute();
+        .order('created_at', { ascending: false });
       
       console.log('📊 [REPORT CARD DEBUG] Marks query result:', {
         marksCount: marksData ? marksData.length : 0,
@@ -321,16 +207,8 @@ const ViewReportCard = () => {
       });
 
       if (marksError) {
-        console.error('❌ [TENANT-AWARE] Marks query error:', marksError);
+        console.error('❌ [PARENT-AWARE] Marks query error:', marksError);
         throw marksError;
-      }
-      
-      // Validate marks data tenancy
-      if (marksData && marksData.length > 0) {
-        const invalidMarks = marksData.filter(mark => mark.tenant_id && mark.tenant_id !== resolvedTenantId);
-        if (invalidMarks.length > 0) {
-          console.warn('⚠️ [TENANT-AWARE] Found marks with wrong tenant_id:', invalidMarks.length);
-        }
       }
       
       setMarks(marksData || []);
@@ -449,56 +327,30 @@ const ViewReportCard = () => {
   };
 
   useEffect(() => {
-    if (user && tenantId && !tenantLoading) {
-      console.log('🔄 [TENANT-AWARE] Tenant context loaded, initializing report card data...');
+    if (user && !parentLoading) {
+      console.log('🔄 [PARENT-AWARE] Parent context loaded, initializing report card data...');
       fetchReportCardData();
       fetchSchoolDetails();
-    } else if (tenantLoading) {
-      console.log('🔄 [TENANT-AWARE] Tenant context is loading, waiting for initialization...');
+    } else if (parentLoading) {
+      console.log('🔄 [PARENT-AWARE] Parent context is loading, waiting for initialization...');
     }
-  }, [user, tenantId, tenantLoading]);
+  }, [user, isParent, parentStudents, parentLoading]);
 
   const fetchSchoolDetails = async () => {
     try {
-      // Only fetch school details if tenant context is available
-      if (!tenantId) {
-        console.log('🔄 [TENANT-AWARE] No tenant context available for school details');
-        return;
-      }
+      // Direct query without tenant filtering for parent mode
+      console.log('🔄 [PARENT-AWARE] Fetching school details without tenant context');
       
-      // Use tenant-aware query for school details if available
-      let schoolData = null;
-      let schoolError = null;
+      // Direct query without tenant filtering
+      const directResult = await supabase
+        .from('school_details')
+        .select('*')
+        .single();
       
-      // Try to get school details using tenant-aware query
-      try {
-        if (TABLES.SCHOOL_DETAILS) {
-          const tenantSchoolQuery = createTenantQuery(tenantId, TABLES.SCHOOL_DETAILS);
-          const result = await tenantSchoolQuery
-            .select('*')
-            .execute()
-            .then(result => ({ data: result.data?.[0] || null, error: result.error }));
-          
-          schoolData = result.data;
-          schoolError = result.error;
-        }
-      } catch (tenantQueryError) {
-        console.log('🔄 [TENANT-AWARE] Tenant query failed for school details, trying fallback:', tenantQueryError);
-        
-        // Fallback to direct query
-        const fallbackResult = await supabase
-          .from(TABLES.SCHOOL_DETAILS || 'school_details')
-          .select('*')
-          .single();
-          
-        schoolData = fallbackResult.data;
-        schoolError = fallbackResult.error;
-      }
-      
-      if (schoolError) {
-        console.log('❌ [TENANT-AWARE] School details query error:', schoolError);
+      if (directResult.error) {
+        console.log('❌ [PARENT-AWARE] School details query error:', directResult.error);
       } else {
-        setSchoolDetails(schoolData);
+        setSchoolDetails(directResult.data);
       }
     } catch (err) {
       console.error('Error fetching school details:', err);

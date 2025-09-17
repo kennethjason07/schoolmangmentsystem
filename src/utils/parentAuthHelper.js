@@ -31,7 +31,6 @@ export const getParentStudents = async (parentUserId) => {
           admission_no,
           class_id,
           academic_year,
-          profile_url,
           classes(id, class_name, section)
         )
       `)
@@ -67,7 +66,6 @@ export const getParentStudents = async (parentUserId) => {
             admission_no,
             class_id,
             academic_year,
-            profile_url,
             classes(id, class_name, section)
           ),
           parents!parent_student_relationships_parent_id_fkey(
@@ -101,7 +99,6 @@ export const getParentStudents = async (parentUserId) => {
             admission_no,
             class_id,
             academic_year,
-            profile_url,
             classes(id, class_name, section)
           )
         `)
@@ -128,19 +125,30 @@ export const getParentStudents = async (parentUserId) => {
       self.findIndex(s => s.id === student.id) === index
     );
 
-    const formattedStudents = uniqueStudents.map(student => ({
-      id: student.id,
-      name: student.name,
-      admission_no: student.admission_no,
-      class_id: student.class_id,
-      academic_year: student.academic_year,
-      profile_url: student.profile_url,
-      class_name: student.classes?.class_name,
-      section: student.classes?.section,
-      full_class_name: student.classes ? 
-        `${student.classes.class_name} ${student.classes.section}` : 
-        'Unknown Class'
-    }));
+    const formattedStudents = [];
+
+    for (const student of uniqueStudents) {
+      // Get student's profile photo from users table
+      const { data: studentUserData, error: studentUserError } = await supabase
+        .from(TABLES.USERS)
+        .select('profile_url')
+        .eq('linked_student_id', student.id)
+        .maybeSingle();
+
+      formattedStudents.push({
+        id: student.id,
+        name: student.name,
+        admission_no: student.admission_no,
+        class_id: student.class_id,
+        academic_year: student.academic_year,
+        profile_url: studentUserData?.profile_url || null,
+        class_name: student.classes?.class_name,
+        section: student.classes?.section,
+        full_class_name: student.classes ? 
+          `${student.classes.class_name} ${student.classes.section}` : 
+          'Unknown Class'
+      });
+    }
 
     console.log('🎉 [PARENT AUTH] Successfully found students:', formattedStudents.length);
     
@@ -205,12 +213,20 @@ export const getStudentForParent = async (parentUserId, studentId) => {
       };
     }
 
+    // Get student's profile photo from users table
+    const { data: studentUserData, error: studentUserError } = await supabase
+      .from(TABLES.USERS)
+      .select('profile_url')
+      .eq('linked_student_id', studentId)
+      .maybeSingle();
+
     console.log('✅ [PARENT AUTH] Successfully fetched student details for:', studentData.name);
 
     return {
       success: true,
       student: {
         ...studentData,
+        profile_url: studentUserData?.profile_url || null,
         class_name: studentData.classes?.class_name,
         section: studentData.classes?.section,
         full_class_name: studentData.classes ? 
@@ -249,15 +265,17 @@ export const getStudentNotificationsForParent = async (parentUserId, studentId) 
       .from('notification_recipients')
       .select(`
         id,
-        read_status,
+        is_read,
         created_at,
         notifications (
           id,
-          title,
           message,
           type,
           created_at,
-          sender_name
+          sent_by,
+          users!sent_by (
+            full_name
+          )
         )
       `)
       .eq('recipient_id', studentId)
@@ -274,14 +292,15 @@ export const getStudentNotificationsForParent = async (parentUserId, studentId) 
     }
 
     // Transform the data to match expected format
+    // Note: notifications table doesn't have a title column, using type as title
     const formattedNotifications = (notificationsData || []).map(item => ({
       id: item.notifications.id,
-      title: item.notifications.title,
+      title: item.notifications.type || 'Notification',
       message: item.notifications.message,
       type: item.notifications.type,
       created_at: item.notifications.created_at,
-      sender_name: item.notifications.sender_name,
-      read: item.read_status
+      sender_name: item.notifications.users?.full_name || 'System',
+      read: item.is_read
     }));
 
     console.log('📬 [PARENT AUTH] Successfully fetched notifications:', formattedNotifications.length);

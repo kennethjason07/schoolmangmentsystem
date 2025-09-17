@@ -316,15 +316,17 @@ const ParentDashboard = ({ navigation }) => {
         .from('notification_recipients')
         .select(`
           id,
-          read_status,
+          is_read,
           created_at,
           notifications (
             id,
-            title,
             message,
             type,
             created_at,
-            sender_name
+            sent_by,
+            users!sent_by (
+              full_name
+            )
           )
         `)
         .eq('recipient_id', parentData.linked_parent_of)
@@ -339,14 +341,15 @@ const ParentDashboard = ({ navigation }) => {
       }
 
       // Transform the data to match expected format
+      // Note: notifications table doesn't have a title column, using type as title
       const formattedNotifications = notificationsData.map(item => ({
         id: item.notifications.id,
-        title: item.notifications.title,
+        title: item.notifications.type || 'Notification',
         message: item.notifications.message,
         type: item.notifications.type,
         created_at: item.notifications.created_at,
-        sender_name: item.notifications.sender_name,
-        read: item.read_status
+        sender_name: item.notifications.users?.full_name || 'System',
+        read: item.is_read
       }));
 
       console.log('📬 [PARENT-NOTIFICATIONS] Successfully loaded notifications:', formattedNotifications.length);
