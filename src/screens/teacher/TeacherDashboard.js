@@ -6,6 +6,7 @@ import Header from '../../components/Header';
 import { LineChart } from 'react-native-chart-kit';
 import { Dimensions } from 'react-native';
 import StatCard from '../../components/StatCard';
+import LogoDisplay from '../../components/LogoDisplay';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import { Platform } from 'react-native';
 import { useAuth } from '../../utils/AuthContext';
@@ -1479,13 +1480,12 @@ function groupAndSortSchedule(schedule) {
             
             <View style={styles.welcomeContent}>
               <View style={styles.schoolHeader}>
-                {schoolDetails.logo_url ? (
-                  <Image source={{ uri: schoolDetails.logo_url }} style={styles.schoolLogo} />
-                ) : (
-                  <View style={styles.logoPlaceholder}>
-                    <Ionicons name="school" size={40} color="#fff" />
-                  </View>
-                )}
+                <LogoDisplay 
+                  logoUrl={schoolDetails?.logo_url} 
+                  onImageError={() => {
+                    console.log('🗓️ Teacher Dashboard - Logo image failed to load, using placeholder');
+                  }}
+                />
                 <View style={styles.schoolInfo}>
                   <Text style={styles.schoolName}>
                     {schoolDetails.name || 'Maximus School'}

@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { decode as atob } from 'base-64';
 import Header from '../../components/Header';
 import { supabase } from '../../utils/supabase';
@@ -242,8 +242,8 @@ const SchoolDetails = ({ navigation }) => {
       const fileName = `${user.id}_${timestamp}.jpg`;
       console.log('Generated filename (exact profile picture format):', fileName);
       
-      // Read the image using expo-file-system (React Native compatible)
-      console.log('Reading image via FileSystem...');
+      // Read the image using expo-file-system legacy API (React Native compatible)
+      console.log('Reading image via FileSystem legacy API...');
       const base64 = await FileSystem.readAsStringAsync(imageAsset.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
@@ -414,6 +414,49 @@ Please share these details with your administrator.`,
     } finally {
       setUploading(false);
     }
+  };
+
+  // Clear logo function
+  const clearLogo = async () => {
+    Alert.alert(
+      'Clear Logo',
+      'Are you sure you want to remove the current logo?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const updatedSchoolData = { ...schoolData, logo_url: null };
+              
+              // Use tenant database to update
+              const { data: existing } = await tenantDatabase.read('school_details');
+              
+              if (existing && existing.length > 0) {
+                const saveResult = await tenantDatabase.update('school_details', existing[0].id, updatedSchoolData);
+                const { data: saveData, error: saveError } = saveResult;
+                
+                if (saveError) {
+                  throw new Error('Failed to clear logo: ' + saveError.message);
+                }
+                
+                setSchoolData(saveData);
+                Alert.alert('Success', 'Logo cleared successfully!');
+                
+                // Reload school details to refresh UI
+                setTimeout(() => {
+                  loadSchoolDetails();
+                }, 500);
+              }
+            } catch (error) {
+              console.error('Error clearing logo:', error);
+              Alert.alert('Error', 'Failed to clear logo: ' + (error.message || error));
+            }
+          }
+        }
+      ]
+    );
   };
 
   // UPI Management Functions - Enhanced with tenant system
@@ -835,11 +878,12 @@ Please share these details with your administrator.`,
                     onError={(error) => {
                       console.error('=== IMAGE LOAD ERROR ===');
                       console.error('Failed to load image URL:', schoolData.logo_url);
+                      // Extract error message safely to avoid cyclical JSON structure
+                      const errorMsg = error.nativeEvent?.error || 'Image loading failed';
                       console.error('Image error details:', {
-                        nativeError: error.nativeEvent?.error,
-                        fullError: error,
+                        nativeError: errorMsg,
                         errorType: typeof error,
-                        errorKeys: Object.keys(error || {})
+                        url: schoolData.logo_url
                       });
                       console.error('This image will not display - placeholder should show instead');
                       
@@ -877,7 +921,16 @@ Please share these details with your administrator.`,
               )}
             </TouchableOpacity>
             {schoolData.logo_url && schoolData.logo_url.startsWith('http') && !schoolData.logo_url.startsWith('file:') && !uploading && (
-              <Text style={styles.logoHint}>Tap to change logo</Text>
+              <>
+                <Text style={styles.logoHint}>Tap to change logo</Text>
+                <TouchableOpacity 
+                  style={styles.clearLogoButton}
+                  onPress={clearLogo}
+                >
+                  <Ionicons name="trash-outline" size={16} color="#F44336" />
+                  <Text style={styles.clearLogoText}>Clear Logo</Text>
+                </TouchableOpacity>
+              </>
             )}
             
           </View>
@@ -1431,6 +1484,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     textAlign: 'center',
+  },
+  clearLogoButton: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#F44336',
+    borderRadius: 6,
+  },
+  clearLogoText: {
+    marginLeft: 6,
+    fontSize: 12,
+    color: '#F44336',
+    fontWeight: '500',
   },
   inputGroup: {
     marginBottom: 15,

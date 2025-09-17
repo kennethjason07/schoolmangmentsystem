@@ -231,9 +231,9 @@ const PendingUPIPayments = () => {
   const getStatusColor = (status) => {
     switch (status) {
       case 'PENDING_ADMIN_VERIFICATION': return '#FF9800';
-      case 'APPROVED': return '#4CAF50';
-      case 'REJECTED': return '#F44336';
-      case 'SUCCESS': return '#2196F3';
+      case 'SUCCESS': return '#4CAF50'; // This is 'Approved' in the database
+      case 'FAILED': return '#F44336';  // This is 'Rejected' in the database
+      case 'PENDING': return '#2196F3';
       default: return '#666';
     }
   };
@@ -241,9 +241,9 @@ const PendingUPIPayments = () => {
   const getStatusText = (status) => {
     switch (status) {
       case 'PENDING_ADMIN_VERIFICATION': return 'Pending';
-      case 'APPROVED': return 'Approved';
-      case 'REJECTED': return 'Rejected';
-      case 'SUCCESS': return 'Completed';
+      case 'SUCCESS': return 'Approved'; // Map SUCCESS to 'Approved' for display
+      case 'FAILED': return 'Rejected';  // Map FAILED to 'Rejected' for display
+      case 'PENDING': return 'Pending';
       default: return status;
     }
   };
@@ -262,6 +262,17 @@ const PendingUPIPayments = () => {
 
   // Filter payments based on status and search
   const filteredPayments = pendingPayments.filter(payment => {
+    // Debug: Log status comparison
+    if (filterStatus !== 'ALL') {
+      console.log('🔍 Filtering:', { 
+        filterStatus, 
+        paymentStatus: payment.status, 
+        matches: payment.status === filterStatus,
+        paymentId: payment.id,
+        studentName: payment.studentName
+      });
+    }
+    
     const matchesStatus = filterStatus === 'ALL' || payment.status === filterStatus;
     const matchesSearch = !searchQuery || 
       payment.studentName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -269,6 +280,15 @@ const PendingUPIPayments = () => {
       payment.feeComponent?.toLowerCase().includes(searchQuery.toLowerCase());
     
     return matchesStatus && matchesSearch;
+  });
+  
+  // Debug: Log filtering results
+  console.log('📊 Filter Results:', {
+    filterStatus,
+    searchQuery,
+    totalPayments: pendingPayments.length,
+    filteredCount: filteredPayments.length,
+    uniqueStatuses: [...new Set(pendingPayments.map(p => p.status))]
   });
 
   const renderPaymentItem = ({ item }) => (
@@ -349,7 +369,7 @@ const PendingUPIPayments = () => {
       </View>
       
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.statusFilters}>
-        {['ALL', 'PENDING_ADMIN_VERIFICATION', 'APPROVED', 'REJECTED'].map((status) => (
+        {['ALL', 'PENDING_ADMIN_VERIFICATION', 'SUCCESS', 'FAILED'].map((status) => (
           <TouchableOpacity
             key={status}
             style={[
@@ -364,6 +384,8 @@ const PendingUPIPayments = () => {
             ]}>
               {status === 'ALL' ? 'All' : 
                status === 'PENDING_ADMIN_VERIFICATION' ? 'Pending' :
+               status === 'SUCCESS' ? 'Approved' :
+               status === 'FAILED' ? 'Rejected' :
                status.charAt(0) + status.slice(1).toLowerCase()}
             </Text>
           </TouchableOpacity>
@@ -395,11 +417,11 @@ const PendingUPIPayments = () => {
           <Text style={styles.statLabel}>Pending</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statNumber}>{pendingPayments.filter(p => p.status === 'APPROVED').length}</Text>
+          <Text style={styles.statNumber}>{pendingPayments.filter(p => p.status === 'SUCCESS').length}</Text>
           <Text style={styles.statLabel}>Approved</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statNumber}>{pendingPayments.filter(p => p.status === 'REJECTED').length}</Text>
+          <Text style={styles.statNumber}>{pendingPayments.filter(p => p.status === 'FAILED').length}</Text>
           <Text style={styles.statLabel}>Rejected</Text>
         </View>
         <View style={styles.statCard}>
