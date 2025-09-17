@@ -526,59 +526,109 @@ const ProfileScreen = ({ navigation, route }) => {
               console.log('🌐 [ProfileScreen] Platform:', Platform.OS);
               setLoading(true);
               
-              // For web, use the most direct approach possible
               if (Platform.OS === 'web') {
-                console.log('🧭 [ProfileScreen] Web platform - using DIRECT logout approach');
+                // Enhanced web logout with multiple fallback strategies
+                console.log('🧹 [ProfileScreen] Web platform - enhanced logout');
                 
-                // Direct approach: Clear session and redirect immediately
+                // Step 1: Try to sign out from Supabase
                 try {
-                  // Clear Supabase session
-                  await supabase.auth.signOut();
+                  await signOut();
                   console.log('✅ [ProfileScreen] Supabase signOut completed');
                 } catch (signOutError) {
-                  console.error('❌ [ProfileScreen] Supabase signOut error:', signOutError);
+                  console.warn('⚠️ [ProfileScreen] Supabase signOut error (continuing anyway):', signOutError);
                 }
                 
-                // Force immediate redirect to ensure clean state
-                if (typeof window !== 'undefined') {
-                  console.log('🧭 [ProfileScreen] Forcing complete page reload to ensure clean state');
-                  window.location.reload();
-                  return;
-                }
-              } else {
-                // For mobile, use the existing approach
-                console.log('📱 [ProfileScreen] Mobile platform - using standard approach');
-                
-                // Execute signOut
-                const result = await signOut();
-                console.log('✅ [ProfileScreen] SignOut completed with result:', result);
-                
-                // Navigate to login screen
+                // Step 2: Clear all auth-related data
                 try {
+                  // Clear localStorage
+                  if (typeof localStorage !== 'undefined') {
+                    const localStorageKeys = Object.keys(localStorage);
+                    localStorageKeys.forEach(key => {
+                      if (key.includes('auth') || key.includes('supabase') || key.includes('token') || key.includes('session')) {
+                        localStorage.removeItem(key);
+                      }
+                    });
+                  }
+                  
+                  // Clear sessionStorage
+                  if (typeof sessionStorage !== 'undefined') {
+                    const sessionStorageKeys = Object.keys(sessionStorage);
+                    sessionStorageKeys.forEach(key => {
+                      if (key.includes('auth') || key.includes('supabase') || key.includes('token') || key.includes('session')) {
+                        sessionStorage.removeItem(key);
+                      }
+                    });
+                  }
+                  
+                  // Clear cookies
+                  if (typeof document !== 'undefined') {
+                    document.cookie.split(";").forEach(cookie => {
+                      const eqPos = cookie.indexOf("=");
+                      const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+                      if (name.includes('auth') || name.includes('session') || name.includes('token')) {
+                        document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+                      }
+                    });
+                  }
+                  
+                  console.log('✅ [ProfileScreen] Local auth data cleared');
+                } catch (clearError) {
+                  console.warn('⚠️ [ProfileScreen] Error clearing local auth data:', clearError);
+                }
+                
+                // Step 3: Try navigation service first
+                try {
+                  console.log('🧭 [ProfileScreen] Trying navigationService reset...');
                   navigationService.reset({
                     index: 0,
                     routes: [{ name: 'Login' }],
                   });
+                  console.log('✅ [ProfileScreen] Navigation service reset successful');
                 } catch (navError) {
-                  console.error('❌ [ProfileScreen] Navigation service error:', navError);
+                  console.warn('⚠️ [ProfileScreen] Navigation service failed:', navError);
+                  
+                  // Fallback 1: Direct window.location
+                  if (typeof window !== 'undefined') {
+                    console.log('🧭 [ProfileScreen] Using window.location.href fallback...');
+                    window.location.href = '/';
+                    return;
+                  }
                 }
+                
+                // If we get here, the navigation might have worked, but let's ensure we redirect
+                setTimeout(() => {
+                  if (typeof window !== 'undefined') {
+                    window.location.href = '/';
+                  }
+                }, 1000);
+                
+              } else {
+                // Mobile platforms - use standard logout
+                console.log('📱 [ProfileScreen] Mobile platform - standard logout');
+                await signOut();
+                navigationService.reset({
+                  index: 0,
+                  routes: [{ name: 'Login' }],
+                });
               }
+              
             } catch (error) {
               console.error('💥 [ProfileScreen] Unexpected logout error:', error);
               
-              // Show error message only for unexpected errors
-              if (!error.message?.includes('Auth session missing') && 
-                  error.name !== 'AuthSessionMissingError') {
-                Alert.alert('Error', 'Failed to logout. Please try again.');
+              // For web, force redirect even if there was an error
+              if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                console.log('💥 [ProfileScreen] Forcing redirect due to error');
+                window.location.href = '/';
+              } else {
+                // For mobile, show error but still try to navigate
+                Alert.alert('Logout Error', 'There was an issue logging out. Please try again.');
+                navigationService.reset({
+                  index: 0,
+                  routes: [{ name: 'Login' }],
+                });
               }
               
-              // Still try to redirect on web
-              if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                console.log('🧭 [ProfileScreen] Error case - forcing page reload');
-                window.location.reload();
-              }
             } finally {
-              // Don't set loading to false for web since we're redirecting
               if (Platform.OS !== 'web') {
                 setLoading(false);
               }

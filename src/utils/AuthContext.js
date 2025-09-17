@@ -119,25 +119,19 @@ export const AuthProvider = ({ children }) => {
             setUser(null);
             setUserType(null);
             isSigningInRef.current = false;
-            
-            // Simple navigation approach
+            // Navigate to login screen when signed out with enhanced web support
             try {
-              console.log('🧭 [AuthContext] Navigating to login after SIGNED_OUT event');
-              if (Platform.OS === 'web') {
-                // For web, force page reload to ensure clean state
-                if (typeof window !== 'undefined') {
-                  console.log('🧭 [AuthContext] Web platform - forcing page reload');
-                  window.location.reload();
-                }
-              } else {
-                // For mobile, use navigation service
-                navigationService.reset({
-                  index: 0,
-                  routes: [{ name: 'Login' }],
-                });
-              }
+              navigationService.reset({
+                index: 0,
+                routes: [{ name: 'Login' }],
+              });
             } catch (navError) {
               console.error('Navigation service error:', navError);
+              // Enhanced web fallback
+              if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                console.log('🧭 [AuthContext] Using window.location fallback for SIGNED_OUT');
+                window.location.href = '/';
+              }
             }
           }
         } catch (error) {
@@ -147,7 +141,7 @@ export const AuthProvider = ({ children }) => {
           setUserType(null);
           setLoading(false);
           isSigningInRef.current = false;
-          // Navigate to login screen on error
+          // Navigate to login screen on error with enhanced web support
           try {
             navigationService.reset({
               index: 0,
@@ -155,6 +149,11 @@ export const AuthProvider = ({ children }) => {
             });
           } catch (navError) {
             console.error('Navigation service error:', navError);
+            // Enhanced web fallback
+            if (Platform.OS === 'web' && typeof window !== 'undefined') {
+              console.log('🧭 [AuthContext] Using window.location fallback for error case');
+              window.location.href = '/';
+            }
           }
         }
       }
@@ -809,33 +808,190 @@ export const AuthProvider = ({ children }) => {
     try {
       setLoading(true);
       
-      console.log('🚪 [AuthContext] Starting signOut process...');
+      // Check if there's a current session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      // Simple approach: Just call Supabase signOut
-      const { error } = await supabase.auth.signOut();
+      if (sessionError) {
+        console.log('Session error during logout:', sessionError);
+      }
       
-      if (error) {
-        console.log('⚠️ [AuthContext] SignOut error:', error);
-      } else {
-        console.log('✅ [AuthContext] SignOut completed successfully');
+      if (!session) {
+        // No session exists, user is already logged out
+        console.log('No active session found, cleaning up local state');
+        setUser(null);
+        setUserType(null);
+        
+        // Enhanced navigation for web
+        if (Platform.OS === 'web') {
+          try {
+            navigationService.reset({
+              index: 0,
+              routes: [{ name: 'Login' }],
+            });
+          } catch (navError) {
+            console.error('Navigation service error:', navError);
+            // Last resort for web: use window.location
+            if (typeof window !== 'undefined') {
+              window.location.href = '/';
+            }
+          }
+        } else {
+          try {
+            navigationService.reset({
+              index: 0,
+              routes: [{ name: 'Login' }],
+            });
+          } catch (navError) {
+            console.error('Navigation service error:', navError);
+          }
+        }
+        return { error: null };
+      }
+      
+      // Attempt to sign out from Supabase with enhanced error handling
+      let signOutError = null;
+      
+      try {
+        const result = await authHelpers.signOut();
+        signOutError = result.error;
+        console.log('Sign out result:', result);
+      } catch (error) {
+        console.log('Sign out error caught:', error);
+        signOutError = error;
+      }
+      
+      if (signOutError) {
+        // If error is about missing session, treat it as success
+        if (signOutError.message?.includes('Auth session missing') || signOutError.name === 'AuthSessionMissingError') {
+          console.log('Session already missing, cleaning up local state');
+          setUser(null);
+          setUserType(null);
+          
+          // Enhanced navigation for web
+          if (Platform.OS === 'web') {
+            try {
+              navigationService.reset({
+                index: 0,
+                routes: [{ name: 'Login' }],
+              });
+            } catch (navError) {
+              console.error('Navigation service error:', navError);
+              // Last resort for web: use window.location
+              if (typeof window !== 'undefined') {
+                window.location.href = '/';
+              }
+            }
+          } else {
+            try {
+              navigationService.reset({
+                index: 0,
+                routes: [{ name: 'Login' }],
+              });
+            } catch (navError) {
+              console.error('Navigation service error:', navError);
+            }
+          }
+          return { error: null };
+        }
+        // For other errors, continue with cleanup
+        console.log('Sign out error (continuing with cleanup):', signOutError);
       }
       
       // Clear local state regardless of Supabase result
-      console.log('🧹 [AuthContext] Clearing local state');
       setUser(null);
       setUserType(null);
       
-      // For web, force a page reload to ensure clean state
+      // Enhanced navigation for web
       if (Platform.OS === 'web') {
-        console.log('🧭 [AuthContext] Web platform - forcing page reload');
-        if (typeof window !== 'undefined') {
-          window.location.reload();
+        try {
+          navigationService.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+          });
+        } catch (navError) {
+          console.error('Navigation service error:', navError);
+          // Last resort for web: use window.location
+          if (typeof window !== 'undefined') {
+            window.location.href = '/';
+          }
+        }
+      } else {
+        try {
+          navigationService.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+          });
+        } catch (navError) {
+          console.error('Navigation service error:', navError);
         }
       }
       
-      return { error };
+      return { error: null };
     } catch (error) {
-      console.error('💥 [AuthContext] Sign out error:', error);
+      console.error('Sign out error:', error);
+      
+      // If it's a session missing error, clear local state and treat as success
+      if (error.message?.includes('Auth session missing') || error.name === 'AuthSessionMissingError') {
+        console.log('Caught AuthSessionMissingError, cleaning up local state');
+        setUser(null);
+        setUserType(null);
+        
+        // Enhanced navigation for web
+        if (Platform.OS === 'web') {
+          try {
+            navigationService.reset({
+              index: 0,
+              routes: [{ name: 'Login' }],
+            });
+          } catch (navError) {
+            console.error('Navigation service error:', navError);
+            // Last resort for web: use window.location
+            if (typeof window !== 'undefined') {
+              window.location.href = '/';
+            }
+          }
+        } else {
+          try {
+            navigationService.reset({
+              index: 0,
+              routes: [{ name: 'Login' }],
+            });
+          } catch (navError) {
+            console.error('Navigation service error:', navError);
+          }
+        }
+        return { error: null };
+      }
+      
+      // For other errors, still clear local state and navigate
+      setUser(null);
+      setUserType(null);
+      
+      // Enhanced navigation for web
+      if (Platform.OS === 'web') {
+        try {
+          navigationService.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+          });
+        } catch (navError) {
+          console.error('Navigation service error:', navError);
+          // Last resort for web: use window.location
+          if (typeof window !== 'undefined') {
+            window.location.href = '/';
+          }
+        }
+      } else {
+        try {
+          navigationService.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+          });
+        } catch (navError) {
+          console.error('Navigation service error:', navError);
+        }
+      }
+      
       return { error };
     } finally {
       setLoading(false);

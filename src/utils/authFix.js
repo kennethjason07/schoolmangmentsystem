@@ -238,12 +238,26 @@ export class AuthFix {
     try {
       console.log('🔐 Attempting safe sign in...');
       
-      // Clear any existing invalid session first
-      await this.forceSignOut();
+      // Only clear session for mobile platforms
+      if (Platform.OS !== 'web') {
+        console.log('📱 Mobile platform - clearing existing session first');
+        await this.forceSignOut();
+      } else {
+        console.log('🌐 Web platform - skipping session clear to preserve storage');
+      }
       
+      console.log('🔐 Calling Supabase signInWithPassword...');
       const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password
+      });
+      
+      console.log('🔐 SignIn response received:', {
+        hasData: !!data,
+        hasUser: !!data?.user,
+        hasSession: !!data?.session,
+        userEmail: data?.user?.email || 'none',
+        error: error?.message || 'none'
       });
       
       if (error) {
@@ -253,6 +267,22 @@ export class AuthFix {
       
       console.log('✅ Sign in successful');
       console.log('User:', data.user.email);
+      
+      // For web, immediately check if session was stored
+      if (Platform.OS === 'web') {
+        console.log('🌐 Checking if session was stored immediately after signIn...');
+        
+        // Small delay to allow storage to complete
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const { data: { session: checkSession }, error: checkError } = await supabase.auth.getSession();
+        console.log('🌐 Post-signIn session check:', {
+          hasSession: !!checkSession,
+          hasUser: !!checkSession?.user,
+          sessionId: checkSession?.access_token?.substring(0, 20) + '...' || 'none',
+          error: checkError?.message || 'none'
+        });
+      }
       
       return { success: true, user: data.user, session: data.session };
       

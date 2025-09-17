@@ -6,38 +6,131 @@ import { Platform } from 'react-native';
 const supabaseUrl = 'https://dmagnsbdjsnzsddxqrwd.supabase.co';
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRtYWduc2JkanNuenNkZHhxcndkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI2NTQ2MTEsImV4cCI6MjA2ODIzMDYxMX0.VAo64FAcg1Mo4qA22FWwC7Kdq6AAiLTNeBOjFB9XTi8';
 
-// Custom storage adapter for persistent sessions
+// Enhanced storage adapter with detailed logging for debugging
 const customStorageAdapter = {
   getItem: (key) => {
-    if (Platform.OS === 'web') {
-      return globalThis?.localStorage?.getItem(key) ?? null;
+    try {
+      if (Platform.OS === 'web') {
+        // Use window.localStorage directly on web for better compatibility
+        if (typeof window !== 'undefined' && window.localStorage) {
+          const value = window.localStorage.getItem(key);
+          console.log(`📦 [Storage] GET ${key}:`, value ? 'Found' : 'Not found');
+          return value ?? null;
+        }
+        console.warn('📦 [Storage] localStorage not available');
+        return null;
+      }
+      return AsyncStorage.getItem(key);
+    } catch (error) {
+      console.error('📦 [Storage] getItem error for', key, ':', error);
+      return null;
     }
-    return AsyncStorage.getItem(key);
   },
   setItem: (key, value) => {
-    if (Platform.OS === 'web') {
-      globalThis?.localStorage?.setItem(key, value);
-      return;
+    try {
+      if (Platform.OS === 'web') {
+        // Use window.localStorage directly on web for better compatibility
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(key, value);
+          console.log(`📦 [Storage] SET ${key}:`, 'Stored successfully');
+          
+          // Verify storage worked
+          const stored = window.localStorage.getItem(key);
+          if (!stored) {
+            console.error(`📦 [Storage] VERIFICATION FAILED for ${key} - value not stored`);
+          }
+          
+          return Promise.resolve();
+        }
+        console.warn('📦 [Storage] localStorage not available for setItem');
+        return Promise.resolve();
+      }
+      return AsyncStorage.setItem(key, value);
+    } catch (error) {
+      console.error('📦 [Storage] setItem error for', key, ':', error);
+      return Promise.resolve();
     }
-    return AsyncStorage.setItem(key, value);
   },
   removeItem: (key) => {
-    if (Platform.OS === 'web') {
-      globalThis?.localStorage?.removeItem(key);
-      return;
+    try {
+      if (Platform.OS === 'web') {
+        // Use window.localStorage directly on web for better compatibility
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.removeItem(key);
+          console.log(`📦 [Storage] REMOVE ${key}:`, 'Removed successfully');
+          return Promise.resolve();
+        }
+        console.warn('📦 [Storage] localStorage not available for removeItem');
+        return Promise.resolve();
+      }
+      return AsyncStorage.removeItem(key);
+    } catch (error) {
+      console.error('📦 [Storage] removeItem error for', key, ':', error);
+      return Promise.resolve();
     }
-    return AsyncStorage.removeItem(key);
   },
 };
 
-// Create Supabase client with persistent session configuration
+// Create Supabase client with proper web storage
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: customStorageAdapter,
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: Platform.OS === 'web',
+    // Use different storage based on platform
+    ...(Platform.OS === 'web' ? {
+      // For web: use built-in web storage (don't specify custom storage)
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: true,
+      storageKey: 'sb-dmagnsbdjsnzsddxqrwd-auth-token',
+      debug: true,
+    } : {
+      // For mobile: use custom AsyncStorage adapter
+      storage: customStorageAdapter,
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: false,
+    }),
   },
+  // Add fetch options for better web compatibility
+  ...(Platform.OS === 'web' && {
+    fetch: (url, options = {}) => {
+      console.log('🌐 [Supabase] Web fetch request:', { url: url.replace(supabaseUrl, '[SUPABASE_URL]') });
+      
+      return fetch(url, {
+        ...options,
+        // Add CORS headers
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+        // Set timeout for web requests (with fallback for older browsers)
+        signal: (() => {
+          try {
+            // Modern browsers support AbortSignal.timeout
+            if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+              return AbortSignal.timeout(30000); // 30 second timeout
+            }
+          } catch (error) {
+            console.warn('AbortSignal.timeout not supported, using manual controller');
+          }
+          // Fallback for older browsers
+          const controller = new AbortController();
+          setTimeout(() => controller.abort(), 30000);
+          return controller.signal;
+        })()
+      }).catch(error => {
+        console.error('🌐 [Supabase] Web fetch error:', error);
+        
+        // Provide more specific error information
+        if (error.name === 'AbortError') {
+          throw new Error('Request timed out. Please check your internet connection.');
+        }
+        if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+          throw new Error('Network error. Please check your internet connection and firewall settings.');
+        }
+        throw error;
+      });
+    }
+  })
 });
 
 // Utility functions
