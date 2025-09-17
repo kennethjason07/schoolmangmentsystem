@@ -21,11 +21,14 @@ class NavigationService {
    * @param {Object} params - Navigation parameters
    */
   navigate(name, params = {}) {
+    console.log('🧭 [NavigationService] Navigate called:', { name, params });
     if (navigationRef.isReady()) {
+      console.log('✅ [NavigationService] Navigation ref is ready, executing navigation');
       navigationRef.navigate(name, params);
       this.setCurrentRoute(name, params);
+      console.log('✅ [NavigationService] Navigation completed successfully');
     } else {
-      console.warn('Navigation not ready');
+      console.warn('⚠️ [NavigationService] Navigation not ready, cannot navigate to:', name);
     }
   }
 
@@ -33,8 +36,13 @@ class NavigationService {
    * Go back
    */
   goBack() {
+    console.log('🧭 [NavigationService] GoBack called');
     if (navigationRef.isReady() && navigationRef.canGoBack()) {
+      console.log('✅ [NavigationService] Navigation ref is ready and can go back, executing goBack');
       navigationRef.goBack();
+      console.log('✅ [NavigationService] GoBack completed successfully');
+    } else {
+      console.log('⚠️ [NavigationService] Cannot go back, either not ready or no history');
     }
   }
 
@@ -43,18 +51,47 @@ class NavigationService {
    * @param {Object} state - Navigation state
    */
   reset(state) {
+    console.log('🧭 [NavigationService] Reset called:', state);
     if (navigationRef.isReady()) {
-      navigationRef.reset(state);
-    } else {
-      // For web, if navigation isn't ready, try direct URL navigation as fallback
-      if (typeof window !== 'undefined') {
-        const routeName = state?.routes?.[state.index || 0]?.name;
-        if (routeName === 'Login') {
-          // For login, redirect to root which should show login
-          window.location.href = '/';
+      console.log('✅ [NavigationService] Navigation ref is ready, executing reset');
+      try {
+        navigationRef.reset(state);
+        console.log('✅ [NavigationService] Reset completed successfully');
+      } catch (error) {
+        console.error('❌ [NavigationService] Error during reset:', error);
+        // If reset fails, try direct navigation as fallback
+        if (state && state.routes && state.routes[0]) {
+          const targetRoute = state.routes[0].name;
+          console.log('🧭 [NavigationService] Trying direct navigation to:', targetRoute);
+          try {
+            this.navigate(targetRoute, state.routes[0].params || {});
+          } catch (navError) {
+            console.error('❌ [NavigationService] Direct navigation also failed:', navError);
+            // Last resort for web: reload the page
+            if (typeof window !== 'undefined') {
+              console.log('🧭 [NavigationService] Using window.location fallback');
+              window.location.href = '/'; // Navigate to root
+            }
+          }
         }
       }
-      console.warn('Navigation not ready for reset');
+    } else {
+      console.warn('⚠️ [NavigationService] Navigation not ready, cannot reset');
+      // Try to navigate to target screen directly if reset fails
+      if (state && state.routes && state.routes[0]) {
+        const targetRoute = state.routes[0].name;
+        console.log('🧭 [NavigationService] Navigation not ready, trying direct navigation to:', targetRoute);
+        try {
+          this.navigate(targetRoute, state.routes[0].params || {});
+        } catch (error) {
+          console.error('❌ [NavigationService] Direct navigation failed:', error);
+          // Last resort for web: reload the page
+          if (typeof window !== 'undefined') {
+            console.log('🧭 [NavigationService] Using window.location fallback');
+            window.location.href = '/'; // Navigate to root
+          }
+        }
+      }
     }
   }
 
@@ -245,14 +282,23 @@ class NavigationService {
    * @param {Object} params - Navigation parameters
    */
   navigateWithFallback(screenName, fallbackScreen, params = {}) {
+    console.log('🧭 [NavigationService] NavigateWithFallback called:', { screenName, fallbackScreen, params });
     try {
       this.navigate(screenName, params);
     } catch (error) {
-      console.warn(`Navigation to ${screenName} failed, trying fallback:`, error);
+      console.warn(`⚠️ [NavigationService] Navigation to ${screenName} failed, trying fallback:`, error);
       try {
         this.navigate(fallbackScreen, params);
       } catch (fallbackError) {
-        console.error('Fallback navigation also failed:', fallbackError);
+        console.error('❌ [NavigationService] Fallback navigation also failed:', fallbackError);
+        // Last resort: try to reset to Login
+        if (screenName === 'Login' || fallbackScreen === 'Login') {
+          console.log('🧭 [NavigationService] Trying reset to Login as last resort');
+          this.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+          });
+        }
       }
     }
   }

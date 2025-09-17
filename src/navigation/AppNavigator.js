@@ -517,7 +517,7 @@ export default function AppNavigator() {
               </>
             )}
             
-            {/* Fallback for when userType is not properly set - navigate to profile as a safe default */}
+            {/* Fallback for when userType is not properly set */}
             {!userType && (
               <>
                 <Stack.Screen name="Profile" component={ProfileScreen} />

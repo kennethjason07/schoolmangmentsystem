@@ -119,12 +119,23 @@ export const AuthProvider = ({ children }) => {
             setUser(null);
             setUserType(null);
             isSigningInRef.current = false;
-            // Navigate to login screen when signed out
+            
+            // Simple navigation approach
             try {
-              navigationService.reset({
-                index: 0,
-                routes: [{ name: 'Login' }],
-              });
+              console.log('🧭 [AuthContext] Navigating to login after SIGNED_OUT event');
+              if (Platform.OS === 'web') {
+                // For web, force page reload to ensure clean state
+                if (typeof window !== 'undefined') {
+                  console.log('🧭 [AuthContext] Web platform - forcing page reload');
+                  window.location.reload();
+                }
+              } else {
+                // For mobile, use navigation service
+                navigationService.reset({
+                  index: 0,
+                  routes: [{ name: 'Login' }],
+                });
+              }
             } catch (navError) {
               console.error('Navigation service error:', navError);
             }
@@ -568,10 +579,6 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
       
       console.log('✅ State updated - loading set to false');
-      console.log('🎯 Final auth state after signIn:', {
-        user: !!userData,
-        userType: actualRoleName ? actualRoleName.toLowerCase() : 'user'
-      });
       
       // Clear the signing in flag after a short delay to allow auth listener to see it
       setTimeout(() => {
@@ -802,122 +809,33 @@ export const AuthProvider = ({ children }) => {
     try {
       setLoading(true);
       
-      // Check if there's a current session
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      console.log('🚪 [AuthContext] Starting signOut process...');
       
-      if (sessionError) {
-        console.log('Session error during logout:', sessionError);
-      }
+      // Simple approach: Just call Supabase signOut
+      const { error } = await supabase.auth.signOut();
       
-      if (!session) {
-        // No session exists, user is already logged out
-        console.log('No active session found, cleaning up local state');
-        setUser(null);
-        setUserType(null);
-        // Navigate to login screen
-        try {
-          navigationService.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          });
-        } catch (navError) {
-          console.error('Navigation service error:', navError);
-          // Last resort for web: reload the page
-          if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            window.location.href = '/login';
-          }
-        }
-        return { error: null };
-      }
-      
-      // Attempt to sign out from Supabase with a timeout for web
-      let signOutError = null;
-      
-      if (Platform.OS === 'web') {
-        console.log('🌐 Web platform detected, using timeout mechanism for signOut');
-        // For web, implement a timeout to prevent hanging
-        const signOutPromise = authHelpers.signOut();
-        const timeoutPromise = new Promise((resolve) => {
-          setTimeout(() => {
-            console.log('Web signOut timeout reached');
-            resolve({ error: null }); // Treat timeout as success
-          }, 3000); // 3 second timeout
-        });
-        
-        const result = await Promise.race([signOutPromise, timeoutPromise]);
-        signOutError = result.error;
+      if (error) {
+        console.log('⚠️ [AuthContext] SignOut error:', error);
       } else {
-        console.log('📱 Mobile platform detected, using normal signOut');
-        // For mobile, wait normally
-        const result = await authHelpers.signOut();
-        signOutError = result.error;
+        console.log('✅ [AuthContext] SignOut completed successfully');
       }
       
-      if (signOutError) {
-        // If error is about missing session, treat it as success
-        if (signOutError.message?.includes('Auth session missing') || signOutError.name === 'AuthSessionMissingError') {
-          console.log('Session already missing, cleaning up local state');
-          setUser(null);
-          setUserType(null);
-          // Navigate to login screen
-          try {
-            navigationService.reset({
-              index: 0,
-              routes: [{ name: 'Login' }],
-            });
-          } catch (navError) {
-            console.error('Navigation service error:', navError);
-            // Last resort for web: reload the page
-            if (Platform.OS === 'web' && typeof window !== 'undefined') {
-              window.location.href = '/login';
-            }
-          }
-          return { error: null };
-        }
-        return { error: signOutError };
-      }
-      
-      // Clear local state
+      // Clear local state regardless of Supabase result
+      console.log('🧹 [AuthContext] Clearing local state');
       setUser(null);
       setUserType(null);
-      // Navigate to login screen
-      try {
-        navigationService.reset({
-          index: 0,
-          routes: [{ name: 'Login' }],
-        });
-      } catch (navError) {
-        console.error('Navigation service error:', navError);
-        // Last resort for web: reload the page
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.location.href = '/login';
+      
+      // For web, force a page reload to ensure clean state
+      if (Platform.OS === 'web') {
+        console.log('🧭 [AuthContext] Web platform - forcing page reload');
+        if (typeof window !== 'undefined') {
+          window.location.reload();
         }
       }
-      return { error: null };
+      
+      return { error };
     } catch (error) {
-      console.error('Sign out error:', error);
-      
-      // If it's a session missing error, clear local state and treat as success
-      if (error.message?.includes('Auth session missing') || error.name === 'AuthSessionMissingError') {
-        console.log('Caught AuthSessionMissingError, cleaning up local state');
-        setUser(null);
-        setUserType(null);
-        // Navigate to login screen
-        try {
-          navigationService.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          });
-        } catch (navError) {
-          console.error('Navigation service error:', navError);
-          // Last resort for web: reload the page
-          if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            window.location.href = '/login';
-          }
-        }
-        return { error: null };
-      }
-      
+      console.error('💥 [AuthContext] Sign out error:', error);
       return { error };
     } finally {
       setLoading(false);

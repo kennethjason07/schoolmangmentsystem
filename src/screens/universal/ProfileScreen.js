@@ -522,172 +522,66 @@ const ProfileScreen = ({ navigation, route }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              console.log('🚪 Starting logout process...');
+              console.log('🚪 [ProfileScreen] Starting logout process...');
+              console.log('🌐 [ProfileScreen] Platform:', Platform.OS);
               setLoading(true);
               
-              // For web platform, add a timeout to prevent hanging
+              // For web, use the most direct approach possible
               if (Platform.OS === 'web') {
-                console.log('🌐 Web platform detected, using timeout mechanism');
+                console.log('🧭 [ProfileScreen] Web platform - using DIRECT logout approach');
                 
-                // Create a promise that resolves when signOut completes
-                const signOutPromise = signOut();
-                
-                // Create a timeout promise
-                const timeoutPromise = new Promise((resolve) => {
-                  setTimeout(() => {
-                    console.log('⏱️ Logout timeout reached, forcing navigation');
-                    // Force navigation to auth screen even if signOut hangs
-                    try {
-                      // Try navigation service first
-                      navigationService.reset({
-                        index: 0,
-                        routes: [{ name: 'Login' }],
-                      });
-                    } catch (navError) {
-                      console.error('Navigation service error:', navError);
-                      // Fallback to direct navigation
-                      try {
-                        if (navigation?.reset) {
-                          navigation.reset({
-                            index: 0,
-                            routes: [{ name: 'Login' }],
-                          });
-                        } else if (navigation?.navigate) {
-                          navigation.navigate('Login');
-                        }
-                      } catch (navError2) {
-                        console.error('Direct navigation error:', navError2);
-                        // Last resort: reload the page
-                        if (window) {
-                          window.location.href = '/login';
-                        }
-                      }
-                    }
-                    resolve({ error: null });
-                  }, 3000); // 3 second timeout for web
-                });
-                
-                // Race between signOut and timeout
-                const result = await Promise.race([signOutPromise, timeoutPromise]);
-                
-                console.log('🚪 Logout result:', result);
-                
-                if (result?.error) {
-                  // Check if it's a session missing error (which means already logged out)
-                  if (result.error.message?.includes('Auth session missing') || 
-                      result.error.name === 'AuthSessionMissingError') {
-                    console.log('✅ Session already missing during logout, proceeding...');
-                    // Don't show error, this is expected if session expired
-                  } else {
-                    console.error('❌ Logout error:', result.error);
-                    Alert.alert('Error', `Failed to logout: ${result.error.message || 'Unknown error'}`);
-                    setLoading(false);
-                    return;
-                  }
-                }
-                
-                // Ensure navigation happens after successful logout
-                console.log('✅ Logout successful, navigating to login');
+                // Direct approach: Clear session and redirect immediately
                 try {
-                  navigationService.reset({
-                    index: 0,
-                    routes: [{ name: 'Login' }],
-                  });
-                } catch (navError) {
-                  console.error('Navigation service error:', navError);
-                  // Fallback to direct navigation
-                  try {
-                    if (navigation?.reset) {
-                      navigation.reset({
-                        index: 0,
-                        routes: [{ name: 'Login' }],
-                      });
-                    } else if (navigation?.navigate) {
-                      navigation.navigate('Login');
-                    }
-                  } catch (navError2) {
-                    console.error('Direct navigation error:', navError2);
-                    // Last resort: reload the page
-                    if (window) {
-                      window.location.href = '/login';
-                    }
-                  }
+                  // Clear Supabase session
+                  await supabase.auth.signOut();
+                  console.log('✅ [ProfileScreen] Supabase signOut completed');
+                } catch (signOutError) {
+                  console.error('❌ [ProfileScreen] Supabase signOut error:', signOutError);
                 }
-              } else {
-                // For mobile platforms, wait for signOut to complete normally
-                console.log('📱 Mobile platform detected, using normal logout');
-                const result = await signOut();
                 
-                if (result?.error) {
-                  console.error('❌ Logout error:', result.error);
-                  Alert.alert('Error', `Failed to logout: ${result.error.message || 'Unknown error'}`);
-                  setLoading(false);
+                // Force immediate redirect to ensure clean state
+                if (typeof window !== 'undefined') {
+                  console.log('🧭 [ProfileScreen] Forcing complete page reload to ensure clean state');
+                  window.location.reload();
                   return;
                 }
+              } else {
+                // For mobile, use the existing approach
+                console.log('📱 [ProfileScreen] Mobile platform - using standard approach');
                 
-                // Ensure navigation happens after successful logout
-                console.log('✅ Logout successful, navigating to login');
+                // Execute signOut
+                const result = await signOut();
+                console.log('✅ [ProfileScreen] SignOut completed with result:', result);
+                
+                // Navigate to login screen
                 try {
                   navigationService.reset({
                     index: 0,
                     routes: [{ name: 'Login' }],
                   });
                 } catch (navError) {
-                  console.error('Navigation service error:', navError);
-                  // Fallback to direct navigation
-                  try {
-                    if (navigation?.reset) {
-                      navigation.reset({
-                        index: 0,
-                        routes: [{ name: 'Login' }],
-                      });
-                    } else if (navigation?.navigate) {
-                      navigation.navigate('Login');
-                    }
-                  } catch (navError2) {
-                    console.error('Direct navigation error:', navError2);
-                  }
+                  console.error('❌ [ProfileScreen] Navigation service error:', navError);
                 }
               }
-              
-              console.log('✅ Logout process completed');
-              
             } catch (error) {
-              console.error('💥 Unexpected logout error:', error);
-              // Don't show error for session missing issues which are normal
+              console.error('💥 [ProfileScreen] Unexpected logout error:', error);
+              
+              // Show error message only for unexpected errors
               if (!error.message?.includes('Auth session missing') && 
                   error.name !== 'AuthSessionMissingError') {
                 Alert.alert('Error', 'Failed to logout. Please try again.');
               }
-              // Still navigate to login screen even if there was an error
-              console.log('✅ Navigating to login despite error');
-              try {
-                navigationService.reset({
-                  index: 0,
-                  routes: [{ name: 'Login' }],
-                });
-              } catch (navError) {
-                console.error('Navigation service error:', navError);
-                // Fallback to direct navigation
-                try {
-                  if (navigation?.reset) {
-                    navigation.reset({
-                      index: 0,
-                      routes: [{ name: 'Login' }],
-                    });
-                  } else if (navigation?.navigate) {
-                    navigation.navigate('Login');
-                  }
-                } catch (navError2) {
-                  console.error('Direct navigation error:', navError2);
-                  // Last resort: reload the page
-                  if (window) {
-                    window.location.href = '/login';
-                  }
-                }
+              
+              // Still try to redirect on web
+              if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                console.log('🧭 [ProfileScreen] Error case - forcing page reload');
+                window.location.reload();
               }
             } finally {
-              setLoading(false);
+              // Don't set loading to false for web since we're redirecting
+              if (Platform.OS !== 'web') {
+                setLoading(false);
+              }
             }
           },
         },
