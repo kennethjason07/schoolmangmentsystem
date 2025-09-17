@@ -62,8 +62,21 @@ export const useUniversalNotificationCount = (options = {}) => {
     }
 
     try {
+      // 🚀 ENHANCED: Add tenant readiness check to prevent race conditions
+      // Import getCachedTenantId to check if tenant is ready
+      const { getCachedTenantId } = await import('../utils/tenantHelpers');
+      const tenantId = getCachedTenantId();
+      
+      if (!tenantId && !force) {
+        debugLog('Tenant context not ready yet, will retry when tenant is initialized');
+        // Return zero counts but don't treat as error - tenant might still be loading
+        setCounts({ messageCount: 0, notificationCount: 0, totalCount: 0 });
+        setLoading(false);
+        return;
+      }
+      
       // Use ultra-fast method that returns cached data instantly if available
-      debugLog('Fetching counts (ultra-fast) for user', { userId: user.id, userType, force });
+      debugLog('Fetching counts (ultra-fast) for user', { userId: user.id, userType, force, tenantReady: !!tenantId });
       
       setLoading(true);
       
