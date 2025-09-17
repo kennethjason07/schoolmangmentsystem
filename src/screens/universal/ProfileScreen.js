@@ -17,12 +17,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import Header from '../../components/Header';
 import { supabase, dbHelpers } from '../../utils/supabase';
 import { format } from 'date-fns';
 import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
+import { navigationService } from '../../services/NavigationService';
 
 const ProfileScreen = ({ navigation, route }) => {
   // Track if the user navigated from admin context
@@ -521,19 +521,54 @@ const ProfileScreen = ({ navigation, route }) => {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-              try {
-                console.log('🚪 Starting logout process...');
-                setLoading(true);
+            try {
+              console.log('🚪 Starting logout process...');
+              setLoading(true);
+              
+              // For web platform, add a timeout to prevent hanging
+              if (Platform.OS === 'web') {
+                console.log('🌐 Web platform detected, using timeout mechanism');
                 
-                // Add timeout for web platform to prevent hanging
-                const LOGOUT_TIMEOUT = Platform.OS === 'web' ? 5000 : 10000;
+                // Create a promise that resolves when signOut completes
+                const signOutPromise = signOut();
                 
-                const logoutPromise = signOut();
-                const timeoutPromise = new Promise((_, reject) => 
-                  setTimeout(() => reject(new Error('Logout timed out')), LOGOUT_TIMEOUT)
-                );
+                // Create a timeout promise
+                const timeoutPromise = new Promise((resolve) => {
+                  setTimeout(() => {
+                    console.log('⏱️ Logout timeout reached, forcing navigation');
+                    // Force navigation to auth screen even if signOut hangs
+                    try {
+                      // Try navigation service first
+                      navigationService.reset({
+                        index: 0,
+                        routes: [{ name: 'Login' }],
+                      });
+                    } catch (navError) {
+                      console.error('Navigation service error:', navError);
+                      // Fallback to direct navigation
+                      try {
+                        if (navigation?.reset) {
+                          navigation.reset({
+                            index: 0,
+                            routes: [{ name: 'Login' }],
+                          });
+                        } else if (navigation?.navigate) {
+                          navigation.navigate('Login');
+                        }
+                      } catch (navError2) {
+                        console.error('Direct navigation error:', navError2);
+                        // Last resort: reload the page
+                        if (window) {
+                          window.location.href = '/login';
+                        }
+                      }
+                    }
+                    resolve({ error: null });
+                  }, 3000); // 3 second timeout for web
+                });
                 
-                const result = await Promise.race([logoutPromise, timeoutPromise]);
+                // Race between signOut and timeout
+                const result = await Promise.race([signOutPromise, timeoutPromise]);
                 
                 console.log('🚪 Logout result:', result);
                 
@@ -546,53 +581,114 @@ const ProfileScreen = ({ navigation, route }) => {
                   } else {
                     console.error('❌ Logout error:', result.error);
                     Alert.alert('Error', `Failed to logout: ${result.error.message || 'Unknown error'}`);
+                    setLoading(false);
                     return;
                   }
                 }
                 
-                console.log('✅ Logout successful');
-                // AuthContext will handle navigation automatically on successful logout
+                // Ensure navigation happens after successful logout
+                console.log('✅ Logout successful, navigating to login');
+                try {
+                  navigationService.reset({
+                    index: 0,
+                    routes: [{ name: 'Login' }],
+                  });
+                } catch (navError) {
+                  console.error('Navigation service error:', navError);
+                  // Fallback to direct navigation
+                  try {
+                    if (navigation?.reset) {
+                      navigation.reset({
+                        index: 0,
+                        routes: [{ name: 'Login' }],
+                      });
+                    } else if (navigation?.navigate) {
+                      navigation.navigate('Login');
+                    }
+                  } catch (navError2) {
+                    console.error('Direct navigation error:', navError2);
+                    // Last resort: reload the page
+                    if (window) {
+                      window.location.href = '/login';
+                    }
+                  }
+                }
+              } else {
+                // For mobile platforms, wait for signOut to complete normally
+                console.log('📱 Mobile platform detected, using normal logout');
+                const result = await signOut();
                 
-              } catch (error) {
-                console.error('💥 Logout error:', error);
-                
-                // Handle timeout specifically
-                if (error.message?.includes('timed out')) {
-                  console.log('⏱️ Logout timed out, forcing local logout...');
-                  Alert.alert(
-                    'Logout', 
-                    'Logout completed (connection timeout). You will be redirected to the login screen.',
-                    [
-                      {
-                        text: 'OK',
-                        onPress: () => {
-                          // Try to navigate manually
-                          if (navigation?.reset) {
-                            navigation.reset({
-                              index: 0,
-                              routes: [{ name: 'Auth' }],
-                            });
-                          } else if (navigation?.navigate) {
-                            navigation.navigate('Auth');
-                          }
-                        }
-                      }
-                    ]
-                  );
+                if (result?.error) {
+                  console.error('❌ Logout error:', result.error);
+                  Alert.alert('Error', `Failed to logout: ${result.error.message || 'Unknown error'}`);
+                  setLoading(false);
                   return;
                 }
                 
-                // Don't show error for session missing issues
-                if (!error.message?.includes('Auth session missing') && 
-                    error.name !== 'AuthSessionMissingError') {
-                  console.error('❌ Unexpected logout error:', error);
-                  Alert.alert('Error', 'Failed to logout. Please try again.');
-                } else {
-                  console.log('✅ Session was already missing, logout completed');
+                // Ensure navigation happens after successful logout
+                console.log('✅ Logout successful, navigating to login');
+                try {
+                  navigationService.reset({
+                    index: 0,
+                    routes: [{ name: 'Login' }],
+                  });
+                } catch (navError) {
+                  console.error('Navigation service error:', navError);
+                  // Fallback to direct navigation
+                  try {
+                    if (navigation?.reset) {
+                      navigation.reset({
+                        index: 0,
+                        routes: [{ name: 'Login' }],
+                      });
+                    } else if (navigation?.navigate) {
+                      navigation.navigate('Login');
+                    }
+                  } catch (navError2) {
+                    console.error('Direct navigation error:', navError2);
+                  }
                 }
-              } finally {
-                setLoading(false);
               }
+              
+              console.log('✅ Logout process completed');
+              
+            } catch (error) {
+              console.error('💥 Unexpected logout error:', error);
+              // Don't show error for session missing issues which are normal
+              if (!error.message?.includes('Auth session missing') && 
+                  error.name !== 'AuthSessionMissingError') {
+                Alert.alert('Error', 'Failed to logout. Please try again.');
+              }
+              // Still navigate to login screen even if there was an error
+              console.log('✅ Navigating to login despite error');
+              try {
+                navigationService.reset({
+                  index: 0,
+                  routes: [{ name: 'Login' }],
+                });
+              } catch (navError) {
+                console.error('Navigation service error:', navError);
+                // Fallback to direct navigation
+                try {
+                  if (navigation?.reset) {
+                    navigation.reset({
+                      index: 0,
+                      routes: [{ name: 'Login' }],
+                    });
+                  } else if (navigation?.navigate) {
+                    navigation.navigate('Login');
+                  }
+                } catch (navError2) {
+                  console.error('Direct navigation error:', navError2);
+                  // Last resort: reload the page
+                  if (window) {
+                    window.location.href = '/login';
+                  }
+                }
+              }
+            } finally {
+              setLoading(false);
+            }
           },
         },
       ]

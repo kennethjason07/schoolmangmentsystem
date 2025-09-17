@@ -40,7 +40,8 @@ const ManageTeachers = ({ navigation, route }) => {
     isReady,
     tenantName: tenantName || 'NULL',
     tenantId: getTenantId() || 'NULL',
-    userEmail: user?.email || 'NULL'
+    userEmail: user?.email || 'NULL',
+    platform: Platform.OS
   });
   
   const [subjects, setSubjects] = useState([]);
@@ -55,8 +56,6 @@ const ManageTeachers = ({ navigation, route }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [sections, setSections] = useState([]);
-  const [totalTeachers, setTotalTeachers] = useState(0);
-  const [hasMoreTeachers, setHasMoreTeachers] = useState(false);
   const [preventAutoRefresh, setPreventAutoRefresh] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   
@@ -65,9 +64,7 @@ const ManageTeachers = ({ navigation, route }) => {
   const [hasMoreTeachers, setHasMoreTeachers] = useState(false);
   const [totalTeachers, setTotalTeachers] = useState(0);
   const PAGE_SIZE = 20;
-  
 
-  
   // Load data on component mount and when tenant changes
   useEffect(() => {
     console.log('🚀 ManageTeachers: useEffect triggered:', {
@@ -75,6 +72,8 @@ const ManageTeachers = ({ navigation, route }) => {
       tenantId: getTenantId() || 'NULL',
       user: user?.email || 'NULL'
     });
+    
+    let timeoutId;
     
     // Wait for tenant context to be ready
     if (isReady && getTenantId() && user) {
@@ -85,6 +84,14 @@ const ManageTeachers = ({ navigation, route }) => {
       setError(tenantError);
     } else if (!isReady) {
       console.log('⏳ ManageTeachers: Waiting for tenant context to be ready...');
+      // Add a timeout fallback in case tenant context never becomes ready
+      timeoutId = setTimeout(() => {
+        if (!isReady && !getTenantId()) {
+          console.warn('⚠️ ManageTeachers: Tenant context timeout - forcing load with possible limitations');
+          setError('Tenant context is taking too long to initialize. Some features may be limited.');
+          setLoading(false);
+        }
+      }, 10000); // 10 second timeout
     } else if (!user) {
       console.warn('🏢 ManageTeachers: Waiting for user authentication...');
     }
@@ -95,6 +102,13 @@ const ManageTeachers = ({ navigation, route }) => {
         openEditModal(route.params.editTeacher);
       }, 500);
     }
+    
+    // Cleanup timeout on unmount
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
   }, [route.params, isReady, getTenantId(), user, tenantError]);
 
   useEffect(() => {
@@ -119,6 +133,8 @@ const ManageTeachers = ({ navigation, route }) => {
   
   // Function to load data using enhanced tenant system with pagination
   const loadData = async (page = 0, isRefresh = false) => {
+    console.log('🚀 ManageTeachers: loadData called with params:', { page, isRefresh, platform: Platform.OS });
+    
     const startTime = performance.now();
     
     // Only show full loading for initial load or refresh
@@ -162,8 +178,14 @@ const ManageTeachers = ({ navigation, route }) => {
       // 🚀 Enhanced: Direct parallel queries using tenantDatabase
       console.log('🏢 ManageTeachers: Fetching classes and subjects...');
       const [classesResult, subjectsResult] = await Promise.all([
-        tenantDatabase.read('classes', {}, '*', { orderBy: { column: 'class_name', ascending: true } }),
-        tenantDatabase.read('subjects', {}, '*', { orderBy: { column: 'name', ascending: true } })
+        tenantDatabase.read('classes', {}, '*', { orderBy: { column: 'class_name', ascending: true } }).catch(err => {
+          console.error('❌ ManageTeachers: Error loading classes:', err);
+          return { data: null, error: err };
+        }),
+        tenantDatabase.read('subjects', {}, '*', { orderBy: { column: 'name', ascending: true } }).catch(err => {
+          console.error('❌ ManageTeachers: Error loading subjects:', err);
+          return { data: null, error: err };
+        })
       ]);
       
       // Get classes and subjects data from the parallel queries
@@ -224,7 +246,7 @@ const ManageTeachers = ({ navigation, route }) => {
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
       console.error(`❌ ManageTeachers: Error loading after ${loadTime}ms:`, err);
-      setError(err.message || 'Failed to load teachers data');
+      setError(err.message || 'Failed to load teachers data. Please try refreshing the page.');
     } finally {
       setLoading(false);
     }
@@ -235,6 +257,13 @@ const ManageTeachers = ({ navigation, route }) => {
   const loadMoreTeachers = async () => {
     // Disabled pagination for now - we load all teachers at once
     console.log('🏢 ManageTeachers: Load more called but pagination disabled');
+  };
+
+  // Add the missing onRefresh function
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadData(0, true);
+    setRefreshing(false);
   };
 
   const loadSections = async (classId) => {
@@ -405,9 +434,9 @@ const ManageTeachers = ({ navigation, route }) => {
   };
   const handleSave = async () => {
     console.log('🏢 ManageTeachers: Save button clicked, form data:', form);
-    const effectiveTenantId = getEffectiveTenantId();
+    const effectiveTenantId = getTenantId();
     console.log('🏢 ManageTeachers: Saving with tenant context:', {
-      tenantId: tenantId || 'NULL',
+      tenantId: getTenantId() || 'NULL',
       effectiveTenantId: effectiveTenantId || 'NULL',
       modalMode,
       userEmail: user?.email || 'NULL'
@@ -416,14 +445,6 @@ const ManageTeachers = ({ navigation, route }) => {
     if (!effectiveTenantId) {
       console.error('❌ ManageTeachers: No tenant ID available for save operation');
       Alert.alert('Error', 'Unable to determine tenant context. Please try refreshing the page.');
-      return;
-    }
-    
-    // 🛑️ Validate tenant access first
-    const validation = await validateTenantAccess(user?.id, effectiveTenantId, 'ManageTeachers - Save');
-    if (!validation.isValid) {
-      console.error('❌ ManageTeachers: Save validation failed:', validation.error);
-      Alert.alert('Access Denied', validation.error);
       return;
     }
     
@@ -652,20 +673,12 @@ const ManageTeachers = ({ navigation, route }) => {
             setLoading(true);
             try {
               // 🛑️ Validate tenant access for deletion
-              const effectiveTenantId = getEffectiveTenantId();
+              const effectiveTenantId = getTenantId();
               console.log('🏢 ManageTeachers: Delete validation for tenant:', effectiveTenantId);
               
               if (!effectiveTenantId) {
                 console.error('❌ ManageTeachers: No tenant context for delete operation');
                 Alert.alert('Access Denied', 'Unable to determine tenant context for delete operation.');
-                setLoading(false);
-                return;
-              }
-              
-              const validation = await validateTenantAccess(user?.id, effectiveTenantId, 'ManageTeachers - Delete');
-              if (!validation.isValid) {
-                console.error('❌ ManageTeachers: Delete validation failed:', validation.error);
-                Alert.alert('Access Denied', validation.error);
                 setLoading(false);
                 return;
               }
@@ -796,253 +809,9 @@ const ManageTeachers = ({ navigation, route }) => {
             }
           } 
         }
-        console.log('✓ Deleted teacher homework records');
-      } catch (homeworkErr) {
-        console.log('ℹ Homeworks table not found, skipping...', homeworkErr.message);
-      }
-
-      // 5. Delete tasks assigned to teacher
-      console.log('🚨 DEBUG: Step 5 - Deleting teacher tasks...');
-      try {
-        const { data: tasksDeleteData, error: tasksError } = await supabase
-          .from(TABLES.TASKS)
-          .delete()
-          .eq('assigned_to', teacher.id)
-          .select();
-        console.log('🚨 DEBUG: Tasks deletion result:', {
-          data: tasksDeleteData,
-          error: tasksError,
-          deletedRows: tasksDeleteData?.length || 0
-        });
-        if (tasksError && !tasksError.message.includes('does not exist')) {
-          console.warn('⚠️ WARNING: Error deleting teacher tasks:', tasksError);
-        }
-        console.log('✓ Deleted teacher tasks');
-      } catch (tasksErr) {
-        console.log('ℹ Tasks table reference to teacher not found, skipping...', tasksErr.message);
-      }
-
-      // 6. Delete timetable entries (CRITICAL: Must delete, not update to NULL)
-      console.log('🚨 DEBUG: Step 6 - Deleting timetable entries...');
-      try {
-        const { data: timetableDeleteData, error: timetableError } = await supabase
-          .from(TABLES.TIMETABLE)
-          .delete()
-          .eq('teacher_id', teacher.id)
-          .select();
-        console.log('🚨 DEBUG: Timetable deletion result:', {
-          data: timetableDeleteData,
-          error: timetableError,
-          deletedRows: timetableDeleteData?.length || 0
-        });
-        if (timetableError) {
-          console.error('❌ ERROR: Timetable entries deletion failed:', timetableError);
-          throw new Error(`Failed to delete timetable entries: ${timetableError.message}`);
-        }
-        console.log('✓ Deleted timetable entries');
-      } catch (timetableErr) {
-        console.error('❌ ERROR: Exception during timetable deletion:', timetableErr);
-        throw new Error(`Failed to delete timetable entries: ${timetableErr.message}`);
-      }
-
-      // 6.1. Handle leave applications where teacher is primary teacher
-      console.log('🚨 DEBUG: Step 6.1 - Deleting leave applications as primary teacher...');
-      try {
-        const { data: leaveDeleteData, error: leaveError } = await supabase
-          .from(TABLES.LEAVE_APPLICATIONS)
-          .delete()
-          .eq('teacher_id', teacher.id)
-          .select();
-        console.log('🚨 DEBUG: Leave applications deletion result (primary):', {
-          data: leaveDeleteData,
-          error: leaveError,
-          deletedRows: leaveDeleteData?.length || 0
-        });
-        if (leaveError) {
-          console.error('❌ ERROR: Leave applications deletion failed (primary):', leaveError);
-          throw new Error(`Failed to delete leave applications: ${leaveError.message}`);
-        }
-        console.log('✓ Deleted leave applications as primary teacher');
-      } catch (leaveErr) {
-        console.error('❌ ERROR: Exception during leave applications deletion (primary):', leaveErr);
-        throw new Error(`Failed to delete leave applications: ${leaveErr.message}`);
-      }
-
-      // 6.2. Update leave applications where teacher is replacement teacher (set to NULL)
-      console.log('🚨 DEBUG: Step 6.2 - Updating leave applications as replacement teacher...');
-      try {
-        const { data: replacementUpdateData, error: replacementError } = await supabase
-          .from(TABLES.LEAVE_APPLICATIONS)
-          .update({ replacement_teacher_id: null })
-          .eq('replacement_teacher_id', teacher.id)
-          .select();
-        console.log('🚨 DEBUG: Leave applications update result (replacement):', {
-          data: replacementUpdateData,
-          error: replacementError,
-          updatedRows: replacementUpdateData?.length || 0
-        });
-        if (replacementError) {
-          console.error('❌ ERROR: Leave applications update failed (replacement):', replacementError);
-          throw new Error(`Failed to update replacement teacher in leave applications: ${replacementError.message}`);
-        }
-        console.log('✓ Updated leave applications replacement teacher to NULL');
-      } catch (replacementErr) {
-        console.error('❌ ERROR: Exception during leave applications update (replacement):', replacementErr);
-        throw new Error(`Failed to update replacement teacher in leave applications: ${replacementErr.message}`);
-      }
-
-      // 7. Update or delete any user accounts linked to this teacher
-      console.log('🚨 DEBUG: Step 7 - Unlinking user accounts...');
-      try {
-        const { data: userUpdateData, error: userError } = await supabase
-          .from(TABLES.USERS)
-          .update({ linked_teacher_id: null })
-          .eq('linked_teacher_id', teacher.id)
-          .select();
-        console.log('🚨 DEBUG: User unlinking result:', {
-          data: userUpdateData,
-          error: userError,
-          affectedRows: userUpdateData?.length || 0
-        });
-        if (userError && !userError.message.includes('does not exist')) {
-          console.warn('⚠️ WARNING: Error unlinking teacher from user accounts:', userError);
-        }
-        console.log('✓ Unlinked teacher from user accounts');
-      } catch (userErr) {
-        console.log('ℹ User accounts not linked to teacher, skipping...', userErr.message);
-      }
-
-      // 8. CRITICAL: Finally, delete the teacher record
-      console.log('🚨 DEBUG: Step 8 - DELETING MAIN TEACHER RECORD...');
-      console.log('🚨 DEBUG: About to delete teacher with ID:', teacher.id, 'from table:', TABLES.TEACHERS);
-      
-      // First, let's verify the teacher exists before deletion
-      const { data: verifyTeacher, error: verifyError } = await supabase
-        .from(TABLES.TEACHERS)
-        .select('id, name, tenant_id')
-        .eq('id', teacher.id)
-        .single();
-      
-      console.log('🚨 DEBUG: Teacher verification before deletion:', {
-        found: !!verifyTeacher,
-        teacher: verifyTeacher,
-        error: verifyError
-      });
-      
-      if (verifyError && verifyError.code !== 'PGRST116') { // PGRST116 is "not found"
-        console.error('❌ ERROR: Could not verify teacher exists:', verifyError);
-        throw new Error(`Could not verify teacher exists: ${verifyError.message}`);
-      }
-      
-      if (!verifyTeacher) {
-        console.warn('⚠️ WARNING: Teacher not found in database, may already be deleted');
-        Alert.alert('Notice', 'Teacher may have already been deleted.');
-        // Still update local state
-        setTeachers(prev => prev.filter(t => t.id !== teacher.id));
-        setTotalTeachers(prev => Math.max(0, prev - 1));
-        return;
-      }
-      
-      // Now perform the actual deletion
-      const { data: deleteData, error: deleteError } = await supabase
-        .from(TABLES.TEACHERS)
-        .delete()
-        .eq('id', teacher.id)
-        .select();
-
-      console.log('🚨 DEBUG: MAIN TEACHER DELETION RESULT:', {
-        data: deleteData,
-        error: deleteError,
-        deletedRows: deleteData?.length || 0,
-        deletedTeacher: deleteData?.[0] || null
-      });
-
-      if (deleteError) {
-        console.error('❌ CRITICAL ERROR: Teacher record deletion failed:', deleteError);
-        console.error('❌ Full error details:', JSON.stringify(deleteError, null, 2));
-        throw new Error(`Failed to delete teacher: ${deleteError.message}`);
-      }
-
-      if (!deleteData || deleteData.length === 0) {
-        console.error('❌ CRITICAL ERROR: No rows were deleted from teachers table!');
-        console.error('❌ This suggests the teacher ID may not match any records');
-        throw new Error('No teacher record was found to delete. The teacher may not exist in the database.');
-      }
-
-      console.log('✅ SUCCESS: Teacher record deleted from database');
-      console.log('✅ Deleted teacher data:', deleteData[0]);
-
-      // Prevent any auto-refresh after deletion
-      setPreventAutoRefresh(true);
-      
-      // Update local state immediately
-      console.log('🚨 DEBUG: Updating local state...');
-      setTeachers(prev => {
-        const filtered = prev.filter(t => t.id !== teacher.id);
-        console.log('🚨 DEBUG: Local state update - before:', prev.length, 'after:', filtered.length);
-        return filtered;
-      });
-      setTotalTeachers(prev => {
-        const newCount = Math.max(0, prev - 1);
-        console.log('🚨 DEBUG: Total teachers updated - before:', prev, 'after:', newCount);
-        return newCount;
-      });
-
-      // Show success message with teacher name (same behavior on web and mobile)
-      Alert.alert('Success', `Successfully deleted teacher: ${teacher.name}`);
-      console.log(`✅ Teacher deletion completed successfully: ${teacher.name}`);
-      
-      // Reset prevent flag after a delay to allow normal operations later
-      setTimeout(() => {
-        setPreventAutoRefresh(false);
-        console.log('🔄 ManageTeachers: Auto-refresh re-enabled');
-      }, 2000);
-
-    } catch (err) {
-      console.error('❌ Error deleting teacher:', err);
-      if (Platform.OS === 'web') {
-        // Basic web fallback
-        console.error(`Could not delete ${teacher.name}: ${err.message}`);
-      } else {
-        Alert.alert(
-          'Deletion Failed', 
-          `Could not delete ${teacher.name}: ${err.message}\n\nPlease check if this teacher has dependencies that need to be removed first.`
-        );
-      }
-    } finally {
-      setLoading(false);
-    }
+      ]
+    );
   };
-
-  const handleDelete = async (teacher) => {
-    // Show confirmation dialog before deletion
-    if (Platform.OS === 'web') {
-      const confirmed = window.confirm(
-        `Are you sure you want to delete teacher "${teacher.name}"?\n\n` +
-        `This will permanently remove the teacher and all their assignments, ` +
-        `attendance records, and associated data. This action cannot be undone.`
-      );
-      if (confirmed) {
-        await performDeleteTeacher(teacher);
-      }
-    } else {
-      Alert.alert(
-        'Delete Teacher',
-        `Are you sure you want to delete teacher "${teacher.name}"?\n\n` +
-        `This will permanently remove the teacher and all their assignments, ` +
-        `attendance records, and associated data. This action cannot be undone.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Delete',
-            style: 'destructive',
-            onPress: () => performDeleteTeacher(teacher)
-          }
-        ]
-      );
-    }
-  };
-
 
   // Enhanced filtering and sorting - simplified for performance
   const filteredTeachers = teachers
@@ -1155,6 +924,7 @@ const ManageTeachers = ({ navigation, route }) => {
 
   // Render loading state
   if ((loading && teachers.length === 0) || tenantLoading) {
+    console.log('🔄 ManageTeachers: Rendering loading state', { loading, tenantLoading, teachersCount: teachers.length });
     return (
       <View style={styles.fullScreenLoading}>
         <View style={styles.loadingContent}>
@@ -1177,16 +947,43 @@ const ManageTeachers = ({ navigation, route }) => {
   
   // Render error state
   if (error && teachers.length === 0) {
+    console.log('❌ ManageTeachers: Rendering error state', { error, teachersCount: teachers.length });
     return (
       <View style={[styles.container, styles.centerContent]}>
         <Header title="Manage Teachers" showBack={true} />
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => loadData()}>
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => loadData()}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.retryButton, { backgroundColor: '#2196F3' }]} 
+            onPress={() => {
+              setError(null);
+              setLoading(true);
+              setTimeout(() => loadData(), 100);
+            }}
+          >
+            <Text style={styles.retryButtonText}>Force Refresh</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
+  
+  // Fallback render - if we have no teachers but no loading/error state, show empty state
+  if (!loading && !error && teachers.length === 0) {
+    console.log('ℹ️ ManageTeachers: No teachers found, showing empty state');
+  }
+  
+  console.log('✅ ManageTeachers: Rendering main component', { 
+    teachersCount: teachers.length, 
+    loading, 
+    error,
+    tenantReady: isReady,
+    tenantId: getTenantId(),
+    user: user?.email
+  });
   
   return (
     <View style={styles.container}>
@@ -1265,377 +1062,204 @@ const ManageTeachers = ({ navigation, route }) => {
           </View>
         )}
       </View>
-      <FlatList
-        data={filteredTeachers}
-        renderItem={renderTeacherItem}
-        keyExtractor={(item) => item.id.toString()}
-        contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={Platform.OS === 'web'}
-        onEndReached={loadMoreTeachers}
-        onEndReachedThreshold={0.3}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={["#4CAF50", "#2196F3"]}
-            tintColor="#4CAF50"
-          />
-        }
-        {...Platform.select({
-          web: {
-            scrollBehavior: 'smooth',
-            nestedScrollEnabled: true,
-            overScrollMode: 'always',
-          },
-        })}
-        ListFooterComponent={
-          hasMoreTeachers && !searchQuery ? (
-            <View style={styles.loadingMoreContainer}>
-              <PaperActivityIndicator size="small" color="#4CAF50" />
-              <Text style={styles.loadingMoreText}>Loading more teachers...</Text>
-            </View>
-          ) : searchQuery ? null : (
-            <View style={styles.endOfListContainer}>
-              <Text style={styles.endOfListText}>End of teachers list</Text>
-            </View>
-          )
-        }
-      />
+      
+      {/* Empty State */}
+      {teachers.length === 0 && !loading && (
+        <View style={[styles.centerContent, { flex: 1, padding: 20 }]}>
+          <Ionicons name="people-outline" size={64} color="#ccc" style={{ marginBottom: 16 }} />
+          <Text style={{ fontSize: 18, color: '#666', textAlign: 'center', marginBottom: 8 }}>
+            No teachers found
+          </Text>
+          <Text style={{ fontSize: 14, color: '#999', textAlign: 'center', marginBottom: 20 }}>
+            {searchQuery ? 'Try adjusting your search criteria' : 'Add your first teacher to get started'}
+          </Text>
+          {!searchQuery && (
+            <TouchableOpacity style={[styles.addButton, { flexDirection: 'row' }]} onPress={openAddModal}>
+              <Ionicons name="add" size={24} color="#fff" />
+              <Text style={{ color: '#fff', fontWeight: 'bold', marginLeft: 8 }}>Add Teacher</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+      
+      {/* Teachers List */}
+      {teachers.length > 0 && (
+        <FlatList
+          data={filteredTeachers}
+          renderItem={renderTeacherItem}
+          keyExtractor={(item) => item.id.toString()}
+          contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          onEndReached={loadMoreTeachers}
+          onEndReachedThreshold={0.3}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={["#4CAF50", "#2196F3"]}
+              tintColor="#4CAF50"
+            />
+          }
+          {...Platform.select({
+            web: {
+              scrollBehavior: 'smooth',
+              nestedScrollEnabled: true,
+              overScrollMode: 'always',
+            },
+          })}
+          ListFooterComponent={
+            hasMoreTeachers && !searchQuery ? (
+              <View style={styles.loadingMoreContainer}>
+                <PaperActivityIndicator size="small" color="#4CAF50" />
+                <Text style={styles.loadingMoreText}>Loading more teachers...</Text>
+              </View>
+            ) : searchQuery ? null : (
+              <View style={styles.endOfListContainer}>
+                <Text style={styles.endOfListText}>End of teachers list</Text>
+              </View>
+            )
+          }
+        />
+      )}
+      
       {/* Add/Edit Modal */}
       <Modal
-        visible={isModalVisible}
         animationType="slide"
-        transparent
+        transparent={true}
+        visible={isModalVisible}
         onRequestClose={closeModal}
       >
-        <View style={styles.modalOverlay}>
+        <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            {/* Modal Header */}
             <View style={styles.modalHeader}>
-              <View style={styles.modalTitleContainer}>
-                <Ionicons
-                  name={modalMode === 'add' ? "person-add" : "create"}
-                  size={24}
-                  color="#2196F3"
-                  style={styles.modalIcon}
-                />
-                <Text style={styles.modalTitle}>
-                  {modalMode === 'add' ? 'Add New Teacher' : 'Edit Teacher'}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={closeModal}
-                style={styles.modalCloseButton}
-              >
+              <Text style={styles.modalTitle}>{modalMode === 'add' ? 'Add Teacher' : 'Edit Teacher'}</Text>
+              <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
                 <Ionicons name="close" size={24} color="#666" />
               </TouchableOpacity>
             </View>
-
-            <ScrollView
-              style={styles.modalScrollView}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              {/* Personal Information Section */}
-              <View style={styles.formSection}>
-                <View style={styles.sectionHeader}>
-                  <Ionicons name="person-outline" size={20} color="#2196F3" />
-                  <Text style={styles.sectionTitle}>Personal Information</Text>
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Full Name *</Text>
-                  <TextInput
-                    placeholder="Enter teacher's full name"
-                    value={form.name}
-                    onChangeText={text => setForm({ ...form, name: text })}
-                    style={styles.textInput}
-                    placeholderTextColor="#999"
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Phone Number *</Text>
-                  <TextInput
-                    placeholder="Enter phone number"
-                    value={form.phone}
-                    onChangeText={text => setForm({ ...form, phone: text })}
-                    keyboardType="phone-pad"
-                    style={styles.textInput}
-                    placeholderTextColor="#999"
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Age *</Text>
-                  <TextInput
-                    placeholder="Enter age (must be > 18)"
-                    value={form.age}
-                    onChangeText={text => setForm({ ...form, age: text })}
-                    keyboardType="numeric"
-                    style={styles.textInput}
-                    placeholderTextColor="#999"
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Address</Text>
-                  <TextInput
-                    placeholder="Enter full address"
-                    value={form.address}
-                    onChangeText={text => setForm({ ...form, address: text })}
-                    style={[styles.textInput, styles.multilineInput]}
-                    placeholderTextColor="#999"
-                    multiline={true}
-                    numberOfLines={3}
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Qualification *</Text>
-                  <TextInput
-                    placeholder="e.g., B.Ed, M.A, Ph.D"
-                    value={form.qualification}
-                    onChangeText={text => setForm({ ...form, qualification: text })}
-                    style={styles.textInput}
-                    placeholderTextColor="#999"
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Monthly Salary *</Text>
-                  <View style={styles.salaryInputContainer}>
-                    <Text style={styles.currencySymbol}>₹</Text>
-                    <TextInput
-                      placeholder="Enter monthly salary"
-                      value={form.salary}
-                      onChangeText={text => setForm({ ...form, salary: text })}
-                      keyboardType="numeric"
-                      style={styles.salaryInput}
-                      placeholderTextColor="#999"
-                    />
-                  </View>
+            <ScrollView style={styles.modalForm}>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Name</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={form.name}
+                  onChangeText={text => setForm(prev => ({ ...prev, name: text }))}
+                  placeholder="Enter teacher's name"
+                />
+              </View>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Phone</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={form.phone}
+                  onChangeText={text => setForm(prev => ({ ...prev, phone: text }))}
+                  placeholder="Enter teacher's phone number"
+                  keyboardType="phone-pad"
+                />
+              </View>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Age</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={form.age}
+                  onChangeText={text => setForm(prev => ({ ...prev, age: text }))}
+                  placeholder="Enter teacher's age"
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Address</Text>
+                <TextInput
+                  style={[styles.formInput, styles.textArea]}
+                  value={form.address}
+                  onChangeText={text => setForm(prev => ({ ...prev, address: text }))}
+                  placeholder="Enter teacher's address"
+                  multiline={true}
+                  numberOfLines={3}
+                />
+              </View>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Qualification</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={form.qualification}
+                  onChangeText={text => setForm(prev => ({ ...prev, qualification: text }))}
+                  placeholder="Enter teacher's qualification"
+                />
+              </View>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Salary</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={form.salary}
+                  onChangeText={text => setForm(prev => ({ ...prev, salary: text }))}
+                  placeholder="Enter teacher's salary"
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Classes</Text>
+                <View style={styles.multiSelectContainer}>
+                  {classes.map(cls => (
+                    <TouchableOpacity
+                      key={cls.id}
+                      style={[
+                        styles.multiSelectItem,
+                        form.classes.includes(cls.id) && styles.multiSelectItemActive
+                      ]}
+                      onPress={() => setForm(prev => ({ ...prev, classes: toggleSelect(prev.classes, cls.id) }))}
+                    >
+                      <Text style={styles.multiSelectText}>{cls.class_name}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               </View>
-              {/* Class Assignment Section */}
-              <View style={styles.formSection}>
-                <View style={styles.sectionHeader}>
-                  <Ionicons name="school-outline" size={20} color="#FF9800" />
-                  <Text style={styles.sectionTitle}>Class Assignment</Text>
-                </View>
-
-                <Text style={styles.sectionDescription}>
-                  Select classes this teacher will handle
-                </Text>
-
-                <View style={styles.checkboxGrid}>
-                  {classes.length > 0 ? (
-                    classes.map(cls => (
-                      <TouchableOpacity
-                        key={cls.id}
-                        style={[
-                          styles.checkboxCard,
-                          form.classes.includes(cls.id) && styles.checkboxCardSelected
-                        ]}
-                        onPress={() => setForm({ ...form, classes: toggleSelect(form.classes, cls.id) })}
-                      >
-                        <View style={styles.checkboxCardContent}>
-                          <Ionicons
-                            name={form.classes.includes(cls.id) ? 'checkmark-circle' : 'ellipse-outline'}
-                            size={24}
-                            color={form.classes.includes(cls.id) ? '#FF9800' : '#ccc'}
-                          />
-                          <View style={styles.classCardTextContainer}>
-                            <Text style={[
-                              styles.checkboxCardText,
-                              form.classes.includes(cls.id) && styles.checkboxCardTextSelected
-                            ]}>
-                              {cls.class_name}
-                            </Text>
-                            <View style={styles.sectionBadgeContainer}>
-                              <View style={[
-                                styles.sectionBadge,
-                                form.classes.includes(cls.id) && styles.sectionBadgeSelected
-                              ]}>
-                                <Text style={[
-                                  styles.sectionBadgeText,
-                                  form.classes.includes(cls.id) && styles.sectionBadgeTextSelected
-                                ]}>
-                                  {cls.section || '?'}
-                                </Text>
-                              </View>
-                            </View>
-                          </View>
-                        </View>
-                      </TouchableOpacity>
-                    ))
-                  ) : (
-                    <View style={styles.noSelectionContainer}>
-                      <Text style={styles.noSelectionText}>
-                        No classes available. Please create classes first in Manage Classes.
-                      </Text>
-                    </View>
-                  )}
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Subjects</Text>
+                <View style={styles.multiSelectContainer}>
+                  {subjects.map(subject => (
+                    <TouchableOpacity
+                      key={subject.id}
+                      style={[
+                        styles.multiSelectItem,
+                        form.subjects.includes(subject.id) && styles.multiSelectItemActive
+                      ]}
+                      onPress={() => setForm(prev => ({ ...prev, subjects: toggleSelect(prev.subjects, subject.id) }))}
+                    >
+                      <Text style={styles.multiSelectText}>{subject.name}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               </View>
-
-              {/* Subject Assignment Section */}
-              <View style={styles.formSection}>
-                <View style={styles.sectionHeader}>
-                  <Ionicons name="book-outline" size={20} color="#4CAF50" />
-                  <Text style={styles.sectionTitle}>Subject Assignment</Text>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Sections</Text>
+                <View style={styles.multiSelectContainer}>
+                  {sections.map(section => (
+                    <TouchableOpacity
+                      key={section.id}
+                      style={[
+                        styles.multiSelectItem,
+                        form.sections[section.id] && styles.multiSelectItemActive
+                      ]}
+                      onPress={() => setForm(prev => ({ ...prev, sections: { ...prev.sections, [section.id]: !prev.sections[section.id] } }))}
+                    >
+                      <Text style={styles.multiSelectText}>{section.section_name}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-
-                <Text style={styles.sectionDescription}>
-                  Select subjects this teacher will teach (grouped by selected classes)
-                </Text>
-
-                {form.classes.length > 0 ? (
-                  form.classes.map(classId => {
-                    const selectedClass = classes.find(c => c.id === classId);
-                    const classSubjects = subjects.filter(subject => subject.class_id === classId);
-
-                    return (
-                      <View key={classId} style={styles.classSubjectsGroup}>
-                        <Text style={styles.classSubjectsTitle}>
-                          📚 {selectedClass?.class_name} - Subjects
-                        </Text>
-                        <View style={styles.checkboxGrid}>
-                          {classSubjects.length > 0 ? (
-                            classSubjects.map(subject => (
-                              <TouchableOpacity
-                                key={subject.id}
-                                style={[
-                                  styles.checkboxCard,
-                                  form.subjects.includes(subject.id) && styles.checkboxCardSelected
-                                ]}
-                                onPress={() => setForm({ ...form, subjects: toggleSelect(form.subjects, subject.id) })}
-                              >
-                                <View style={styles.checkboxCardContent}>
-                                  <Ionicons
-                                    name={form.subjects.includes(subject.id) ? 'checkmark-circle' : 'ellipse-outline'}
-                                    size={24}
-                                    color={form.subjects.includes(subject.id) ? '#4CAF50' : '#ccc'}
-                                  />
-                                  <Text style={[
-                                    styles.checkboxCardText,
-                                    form.subjects.includes(subject.id) && styles.checkboxCardTextSelected
-                                  ]}>
-                                    {subject.name}
-                                  </Text>
-                                </View>
-                              </TouchableOpacity>
-                            ))
-                          ) : (
-                            <View style={styles.noSelectionContainer}>
-                              <Text style={styles.noSelectionText}>
-                                No subjects available for {selectedClass?.class_name}. Please add subjects to this class first.
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                      </View>
-                    );
-                  })
-                ) : (
-                  <View style={styles.noSelectionContainer}>
-                    <Text style={styles.noSelectionText}>
-                      Please select classes first to see available subjects
-                    </Text>
-                  </View>
-                )}
               </View>
-
-              {/* Section Information Section */}
-              {form.classes.length > 0 && (
-                <View style={styles.formSection}>
-                  <View style={styles.sectionHeader}>
-                    <Ionicons name="layers-outline" size={20} color="#9C27B0" />
-                    <Text style={styles.sectionTitle}>Class & Section Details</Text>
-                  </View>
-
-                  <Text style={styles.sectionDescription}>
-                    Classes and their assigned sections (automatically assigned when you select a class)
-                  </Text>
-
-                  {form.classes.map(classId => {
-                    const selectedClass = classes.find(c => c.id === classId);
-                    
-                    return (
-                      <View key={classId} style={styles.classSectionInfo}>
-                        <View style={styles.classSectionHeader}>
-                          <Ionicons name="school" size={18} color="#FF9800" />
-                          <Text style={styles.classSectionName}>
-                            {selectedClass?.class_name}
-                          </Text>
-                          <View style={styles.sectionBadgeLarge}>
-                            <Text style={styles.sectionBadgeLargeText}>
-                              {selectedClass?.section || '?'}
-                            </Text>
-                          </View>
-                        </View>
-                        <View style={styles.classSectionDetails}>
-                          <Ionicons name="layers" size={16} color="#9C27B0" />
-                          <Text style={styles.classSectionText}>
-                            Section {selectedClass?.section || 'not assigned'}
-                          </Text>
-                        </View>
-                        <Text style={styles.classSectionNote}>
-                          ✓ Teacher assigned as Class Teacher for {selectedClass?.class_name} - Section {selectedClass?.section || 'N/A'}
-                        </Text>
-                      </View>
-                    );
-                  })}
-                </View>
-              )}
             </ScrollView>
-
-            {/* Modal Actions */}
             <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.cancelButton, saving && styles.cancelButtonDisabled]}
-                onPress={closeModal}
-                disabled={saving}
-              >
-                <Text style={[styles.cancelButtonText, saving && styles.cancelButtonTextDisabled]}>
-                  Cancel
-                </Text>
+              <TouchableOpacity style={styles.modalButton} onPress={closeModal}>
+                <Text style={styles.modalButtonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-                onPress={handleSave}
-                disabled={saving}
-              >
-                {saving ? (
-                  <>
-                    <PaperActivityIndicator
-                      size={20}
-                      color="#fff"
-                      style={styles.saveButtonIcon}
-                    />
-                    <Text style={styles.saveButtonText}>
-                      {modalMode === 'add' ? 'Adding...' : 'Saving...'}
-                    </Text>
-                  </>
-                ) : (
-                  <>
-                    <Ionicons
-                      name={modalMode === 'add' ? "add" : "save"}
-                      size={20}
-                      color="#fff"
-                      style={styles.saveButtonIcon}
-                    />
-                    <Text style={styles.saveButtonText}>
-                      {modalMode === 'add' ? 'Add Teacher' : 'Save Changes'}
-                    </Text>
-                  </>
-                )}
+              <TouchableOpacity style={styles.modalButton} onPress={handleSave} disabled={saving}>
+                <Text style={styles.modalButtonText}>{saving ? 'Saving...' : 'Save'}</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
-
     </View>
   );
 };
@@ -1736,7 +1360,7 @@ const styles = StyleSheet.create({
     ...Platform.select({
       web: {
         height: '100vh',
-        overflow: 'hidden',
+        overflow: 'auto',
       },
     }),
   },
@@ -1920,247 +1544,97 @@ const styles = StyleSheet.create({
     color: '#607D8B',
     marginBottom: 2,
   },
-  inputContainer: {
-    marginBottom: 12,
-  },
-  label: {
-    fontWeight: 'bold',
-    marginBottom: 4,
-    color: '#333',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 15,
-    backgroundColor: '#fafafa',
-  },
   // Modal Styles
-  modalOverlay: {
+  modalContainer: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    width: '100%',
+    backgroundColor: 'white',
+    borderRadius: 10,
+    width: '90%',
     maxWidth: 500,
-    maxHeight: '90%',
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 20,
+    maxHeight: '80%',
+    ...Platform.select({
+      web: {
+        maxHeight: '90vh',
+      },
+    }),
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 20,
-    paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  modalTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  modalIcon: {
-    marginRight: 12,
+    borderBottomColor: '#eee',
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: '700',
-    color: '#1a1a1a',
-  },
-  modalCloseButton: {
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: '#f8f9fa',
-  },
-  modalScrollView: {
-    maxHeight: '70%',
-  },
-  // Form Sections
-  formSection: {
-    padding: 20,
-    paddingTop: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f8f9fa',
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontWeight: 'bold',
     color: '#333',
-    marginLeft: 8,
   },
-  sectionDescription: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
-    lineHeight: 20,
+  closeButton: {
+    padding: 5,
   },
-  // Input Groups
-  inputGroup: {
-    marginBottom: 16,
+  modalForm: {
+    padding: 20,
   },
-  inputLabel: {
+  formGroup: {
+    marginBottom: 20,
+  },
+  formLabel: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: 'bold',
     color: '#333',
     marginBottom: 8,
   },
-  textInput: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#333',
+  formInput: {
     borderWidth: 1,
-    borderColor: '#e9ecef',
+    borderColor: '#ddd',
+    borderRadius: 5,
+    padding: 10,
+    fontSize: 16,
   },
-  multilineInput: {
-    minHeight: 80,
+  textArea: {
+    height: 80,
     textAlignVertical: 'top',
   },
-  salaryInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-    paddingHorizontal: 16,
-  },
-  currencySymbol: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-    marginRight: 8,
-  },
-  salaryInput: {
-    flex: 1,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#333',
-  },
-  // Checkbox Grid
-  checkboxGrid: {
+  multiSelectContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 10,
   },
-  checkboxCard: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: '#e9ecef',
-    minWidth: '45%',
-    flex: 1,
+  multiSelectItem: {
+    backgroundColor: '#f0f0f0',
+    padding: 10,
+    borderRadius: 5,
   },
-  checkboxCardSelected: {
-    backgroundColor: '#fff',
-    borderColor: '#2196F3',
+  multiSelectItemActive: {
+    backgroundColor: '#4CAF50',
   },
-  checkboxCardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  checkboxCardText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#666',
-    marginLeft: 12,
-    flex: 1,
-  },
-  checkboxCardTextSelected: {
+  multiSelectText: {
     color: '#333',
-    fontWeight: '600',
   },
-  // Section Assignment
-  sectionAssignmentItem: {
-    marginBottom: 16,
-  },
-  sectionAssignmentLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
-  pickerContainer: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-  },
-  picker: {
-    height: 50,
-  },
-  // Modal Actions
   modalActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    padding: 20,
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    gap: 12,
+    borderTopColor: '#eee',
   },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-  },
-  cancelButtonDisabled: {
-    backgroundColor: '#f0f0f0',
-    borderColor: '#ddd',
-    opacity: 0.6,
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-  },
-  cancelButtonTextDisabled: {
-    color: '#999',
-  },
-  saveButton: {
-    flex: 1,
+  modalButton: {
     backgroundColor: '#4CAF50',
-    borderRadius: 12,
-    paddingVertical: 14,
-    flexDirection: 'row',
+    padding: 10,
+    borderRadius: 5,
+    minWidth: 100,
     alignItems: 'center',
-    justifyContent: 'center',
   },
-  saveButtonDisabled: {
-    backgroundColor: '#A5D6A7',
-    opacity: 0.8,
-  },
-  saveButtonIcon: {
-    marginRight: 8,
-  },
-  saveButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
+  modalButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
   },
   // Enhanced Search Styles
   searchSection: {
@@ -2207,152 +1681,6 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     fontStyle: 'italic',
   },
-  // Class-grouped subjects styles
-  classSubjectsGroup: {
-    marginBottom: 20,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-  },
-  classSubjectsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2c3e50',
-    marginBottom: 12,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#dee2e6',
-  },
-  noSelectionContainer: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    padding: 20,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-    borderStyle: 'dashed',
-  },
-  noSelectionText: {
-    fontSize: 14,
-    color: '#6c757d',
-    textAlign: 'center',
-    fontStyle: 'italic',
-  },
-  // Class Section Info Styles
-  classSectionInfo: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-  },
-  classSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  classSectionName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginLeft: 8,
-  },
-  classSectionDetails: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  classSectionText: {
-    fontSize: 14,
-    color: '#9C27B0',
-    fontWeight: '500',
-    marginLeft: 6,
-  },
-  classSectionNote: {
-    fontSize: 12,
-    color: '#6c757d',
-    fontStyle: 'italic',
-    backgroundColor: '#f8f9fa',
-    padding: 8,
-    borderRadius: 6,
-    borderLeftWidth: 3,
-    borderLeftColor: '#9C27B0',
-  },
-  // Class Card Text Container Styles
-  classCardTextContainer: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  classCardSectionText: {
-    fontSize: 12,
-    color: '#9C27B0',
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  classCardSectionTextSelected: {
-    color: '#7B1FA2',
-    fontWeight: '600',
-  },
-  // Section Badge Styles
-  sectionBadgeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  sectionBadge: {
-    backgroundColor: '#E8EAF6',
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    minWidth: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#C5CAE9',
-  },
-  sectionBadgeSelected: {
-    backgroundColor: '#3F51B5',
-    borderColor: '#3F51B5',
-  },
-  sectionBadgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#5C6BC0',
-    textAlign: 'center',
-  },
-  sectionBadgeTextSelected: {
-    color: '#fff',
-  },
-  // Large Section Badge Styles (for Class & Section Details)
-  sectionBadgeLarge: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginLeft: 12,
-    minWidth: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-  },
-  sectionBadgeLargeText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#fff',
-    textAlign: 'center',
-  },
   // Pagination styles
   loadingMoreContainer: {
     flexDirection: 'row',
@@ -2377,7 +1705,6 @@ const styles = StyleSheet.create({
     color: '#999',
     fontStyle: 'italic',
   },
-<<<<<<< HEAD
   // 🚀 Enhanced: Tenant Banner Styles
   tenantBanner: {
     backgroundColor: '#E8F5E8',
@@ -2404,107 +1731,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
   },
-=======
-  // Delete Confirmation Modal Styles for Web
-  deleteModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  deleteModalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    minWidth: 320,
-    maxWidth: 400,
-    elevation: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-  },
-  deleteModalHeader: {
-    alignItems: 'center',
-    paddingTop: 24,
-    paddingHorizontal: 24,
-    paddingBottom: 16,
-  },
-  deleteModalIconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#ffebee',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  deleteModalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#333',
-    textAlign: 'center',
-  },
-  deleteModalBody: {
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-  },
-  deleteModalMessage: {
-    fontSize: 16,
-    color: '#555',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 12,
-  },
-  deleteModalTeacherName: {
-    fontWeight: '600',
-    color: '#333',
-  },
-  deleteModalWarning: {
-    fontSize: 14,
-    color: '#777',
-    textAlign: 'center',
-    lineHeight: 20,
-    fontStyle: 'italic',
-  },
-  deleteModalActions: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-  },
-  deleteModalCancelButton: {
-    flex: 1,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRightWidth: 1,
-    borderRightColor: '#f0f0f0',
-  },
-  deleteModalCancelText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-  },
-  deleteModalDeleteButton: {
-    flex: 1,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    backgroundColor: '#f44336',
-    borderBottomRightRadius: 16,
-  },
-  deleteModalDeleteIcon: {
-    marginRight: 6,
-  },
-  deleteModalDeleteText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
->>>>>>> origin/hanoken
 });
 
 export default ManageTeachers;

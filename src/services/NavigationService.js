@@ -45,6 +45,16 @@ class NavigationService {
   reset(state) {
     if (navigationRef.isReady()) {
       navigationRef.reset(state);
+    } else {
+      // For web, if navigation isn't ready, try direct URL navigation as fallback
+      if (typeof window !== 'undefined') {
+        const routeName = state?.routes?.[state.index || 0]?.name;
+        if (routeName === 'Login') {
+          // For login, redirect to root which should show login
+          window.location.href = '/';
+        }
+      }
+      console.warn('Navigation not ready for reset');
     }
   }
 

@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, authHelpers, dbHelpers } from './supabase';
 import supabaseService from '../services/SupabaseServiceFixed';
 import { AuthFix } from './authFix';
+import { navigationService } from '../services/NavigationService';
 
 const AuthContext = createContext({});
 
@@ -118,6 +119,15 @@ export const AuthProvider = ({ children }) => {
             setUser(null);
             setUserType(null);
             isSigningInRef.current = false;
+            // Navigate to login screen when signed out
+            try {
+              navigationService.reset({
+                index: 0,
+                routes: [{ name: 'Login' }],
+              });
+            } catch (navError) {
+              console.error('Navigation service error:', navError);
+            }
           }
         } catch (error) {
           console.error('Error updating Supabase context:', error);
@@ -126,6 +136,15 @@ export const AuthProvider = ({ children }) => {
           setUserType(null);
           setLoading(false);
           isSigningInRef.current = false;
+          // Navigate to login screen on error
+          try {
+            navigationService.reset({
+              index: 0,
+              routes: [{ name: 'Login' }],
+            });
+          } catch (navError) {
+            console.error('Navigation service error:', navError);
+          }
         }
       }
     );
@@ -549,6 +568,10 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
       
       console.log('✅ State updated - loading set to false');
+      console.log('🎯 Final auth state after signIn:', {
+        user: !!userData,
+        userType: actualRoleName ? actualRoleName.toLowerCase() : 'user'
+      });
       
       // Clear the signing in flag after a short delay to allow auth listener to see it
       setTimeout(() => {
@@ -791,26 +814,85 @@ export const AuthProvider = ({ children }) => {
         console.log('No active session found, cleaning up local state');
         setUser(null);
         setUserType(null);
+        // Navigate to login screen
+        try {
+          navigationService.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+          });
+        } catch (navError) {
+          console.error('Navigation service error:', navError);
+          // Last resort for web: reload the page
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            window.location.href = '/login';
+          }
+        }
         return { error: null };
       }
       
-      // Attempt to sign out from Supabase
-      const { error } = await authHelpers.signOut();
+      // Attempt to sign out from Supabase with a timeout for web
+      let signOutError = null;
       
-      if (error) {
+      if (Platform.OS === 'web') {
+        console.log('🌐 Web platform detected, using timeout mechanism for signOut');
+        // For web, implement a timeout to prevent hanging
+        const signOutPromise = authHelpers.signOut();
+        const timeoutPromise = new Promise((resolve) => {
+          setTimeout(() => {
+            console.log('Web signOut timeout reached');
+            resolve({ error: null }); // Treat timeout as success
+          }, 3000); // 3 second timeout
+        });
+        
+        const result = await Promise.race([signOutPromise, timeoutPromise]);
+        signOutError = result.error;
+      } else {
+        console.log('📱 Mobile platform detected, using normal signOut');
+        // For mobile, wait normally
+        const result = await authHelpers.signOut();
+        signOutError = result.error;
+      }
+      
+      if (signOutError) {
         // If error is about missing session, treat it as success
-        if (error.message?.includes('Auth session missing') || error.name === 'AuthSessionMissingError') {
+        if (signOutError.message?.includes('Auth session missing') || signOutError.name === 'AuthSessionMissingError') {
           console.log('Session already missing, cleaning up local state');
           setUser(null);
           setUserType(null);
+          // Navigate to login screen
+          try {
+            navigationService.reset({
+              index: 0,
+              routes: [{ name: 'Login' }],
+            });
+          } catch (navError) {
+            console.error('Navigation service error:', navError);
+            // Last resort for web: reload the page
+            if (Platform.OS === 'web' && typeof window !== 'undefined') {
+              window.location.href = '/login';
+            }
+          }
           return { error: null };
         }
-        return { error };
+        return { error: signOutError };
       }
       
       // Clear local state
       setUser(null);
       setUserType(null);
+      // Navigate to login screen
+      try {
+        navigationService.reset({
+          index: 0,
+          routes: [{ name: 'Login' }],
+        });
+      } catch (navError) {
+        console.error('Navigation service error:', navError);
+        // Last resort for web: reload the page
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.location.href = '/login';
+        }
+      }
       return { error: null };
     } catch (error) {
       console.error('Sign out error:', error);
@@ -820,6 +902,19 @@ export const AuthProvider = ({ children }) => {
         console.log('Caught AuthSessionMissingError, cleaning up local state');
         setUser(null);
         setUserType(null);
+        // Navigate to login screen
+        try {
+          navigationService.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+          });
+        } catch (navError) {
+          console.error('Navigation service error:', navError);
+          // Last resort for web: reload the page
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            window.location.href = '/login';
+          }
+        }
         return { error: null };
       }
       

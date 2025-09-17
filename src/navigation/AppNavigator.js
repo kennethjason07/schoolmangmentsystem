@@ -386,6 +386,16 @@ export default function AppNavigator() {
     willShowUserStack: !!user
   });
 
+  // Additional debugging for user and userType
+  if (user) {
+    console.log('👤 Authenticated user details:', {
+      id: user.id,
+      email: user.email,
+      role_id: user.role_id,
+      userType: userType
+    });
+  }
+
   return (
     <NavigationContainer ref={navigationRef}>
       <InAppNotificationBanner />
@@ -504,6 +514,13 @@ export default function AppNavigator() {
                 <Stack.Screen name="NotificationSettings" component={NotificationSettings} />
                 <Stack.Screen name="EduCartoonAI" component={EduCartoonAI} />
                 <Stack.Screen name="StudentDetails" component={StudentDetails} />
+              </>
+            )}
+            
+            {/* Fallback for when userType is not properly set - navigate to profile as a safe default */}
+            {!userType && (
+              <>
+                <Stack.Screen name="Profile" component={ProfileScreen} />
               </>
             )}
           </>

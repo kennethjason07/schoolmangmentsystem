@@ -129,7 +129,11 @@ const LoginScreen = ({ navigation }) => {
         console.log('⚠️ Role not found:', properRoleName);
         Alert.alert(
           'Role Not Available', 
-          `The role '${properRoleName}' is not configured in the system.\n\nAvailable roles: ${availableRoles}\n\nPlease contact the administrator to add this role.`
+          `The role '${properRoleName}' is not configured in the system.
+
+Available roles: ${availableRoles}
+
+Please contact the administrator to add this role.`
         );
         return false;
       }
@@ -167,6 +171,92 @@ const LoginScreen = ({ navigation }) => {
 
       // Navigation will be handled automatically by AuthContext based on user type
       console.log('Login successful:', data);
+      
+      // Explicitly navigate to the appropriate dashboard based on user type
+      // This ensures proper navigation even if there are timing issues with state updates
+      if (data) {
+        const userRole = data.role_id;
+        // More comprehensive role mapping that handles various role IDs
+        let roleName = 'student'; // Default fallback
+        
+        // Map role_id to role name
+        switch (userRole) {
+          case 1:
+            roleName = 'admin';
+            break;
+          case 2:
+            roleName = 'teacher';
+            break;
+          case 3:
+            roleName = 'parent';
+            break;
+          case 4:
+            roleName = 'student';
+            break;
+          default:
+            // Try to use the role name from the data if available
+            if (data.role_name) {
+              roleName = data.role_name.toLowerCase();
+            } else {
+              // Fallback based on common role ID patterns
+              if (userRole >= 5 && userRole <= 6) {
+                roleName = 'teacher';
+              } else if (userRole >= 7 && userRole <= 8) {
+                roleName = 'student';
+              } else if (userRole >= 9 && userRole <= 10) {
+                roleName = 'parent';
+              }
+              // Otherwise keep default 'student'
+            }
+        }
+        
+        console.log('Navigating to dashboard for role:', roleName, 'with role_id:', userRole);
+        
+        // Small delay to ensure state is updated before navigation
+        setTimeout(() => {
+          try {
+            // Navigate to the appropriate tab navigator based on role
+            switch (roleName) {
+              case 'admin':
+                navigation.navigate('AdminTabs');
+                break;
+              case 'teacher':
+                navigation.navigate('TeacherTabs');
+                break;
+              case 'parent':
+                // Parents might need to select a student first
+                navigation.navigate('StudentSelection');
+                break;
+              case 'student':
+                navigation.navigate('StudentTabs');
+                break;
+              default:
+                // Try to determine from the selectedRole in the login form
+                const selectedRoleLower = selectedRole.toLowerCase();
+                console.log('Using selected role for navigation:', selectedRoleLower);
+                switch (selectedRoleLower) {
+                  case 'admin':
+                    navigation.navigate('AdminTabs');
+                    break;
+                  case 'teacher':
+                    navigation.navigate('TeacherTabs');
+                    break;
+                  case 'parent':
+                    navigation.navigate('StudentSelection');
+                    break;
+                  case 'student':
+                    navigation.navigate('StudentTabs');
+                    break;
+                  default:
+                    navigation.navigate('StudentTabs'); // Default fallback
+                }
+            }
+          } catch (navError) {
+            console.error('Navigation error:', navError);
+            // If navigation fails, the AppNavigator should still handle it based on auth state
+          }
+        }, 100);
+      }
       
     } catch (error) {
       console.error('Login error:', error);
