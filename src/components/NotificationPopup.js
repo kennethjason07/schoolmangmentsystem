@@ -360,34 +360,35 @@ const NotificationPopup = ({
         onPress={() => handleNotificationPress(item)}
         activeOpacity={0.7}
       >
-      <View style={styles.notificationContent}>
-        <View style={[
-          styles.notificationIcon,
-          { backgroundColor: getNotificationColor(item.type) + '20' }
-        ]}>
-          <Ionicons 
-            name={getNotificationIcon(item.type)}
-            size={20}
-            color={getNotificationColor(item.type)}
-          />
+        <View style={styles.notificationContent}>
+          <View style={[
+            styles.notificationIcon,
+            { backgroundColor: getNotificationColor(item.type) + '20' }
+          ]}>
+            <Ionicons 
+              name={getNotificationIcon(item.type)}
+              size={20}
+              color={getNotificationColor(item.type)}
+            />
+          </View>
+          
+          <View style={styles.notificationText}>
+            <Text style={styles.notificationTitle} numberOfLines={1}>
+              {item.title}
+            </Text>
+            <Text style={styles.notificationMessage} numberOfLines={2}>
+              {item.message}
+            </Text>
+            <Text style={styles.notificationTime}>
+              {formatNotificationDate(item.created_at || item.timestamp)}
+            </Text>
+          </View>
+          
+          {!isRead && <View style={styles.unreadDot} />}
         </View>
-        
-        <View style={styles.notificationText}>
-          <Text style={styles.notificationTitle} numberOfLines={1}>
-            {item.title}
-          </Text>
-          <Text style={styles.notificationMessage} numberOfLines={2}>
-            {item.message}
-          </Text>
-          <Text style={styles.notificationTime}>
-            {formatNotificationDate(item.created_at || item.timestamp)}
-          </Text>
-        </View>
-        
-        {!isRead && <View style={styles.unreadDot} />}
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   // Render empty state
   const renderEmptyState = () => (
