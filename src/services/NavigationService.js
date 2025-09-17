@@ -53,35 +53,83 @@ class NavigationService {
       } catch (error) {
         console.error('❌ [NavigationService] Error during reset:', error);
         // If reset fails, try direct navigation as fallback
-        if (state && state.routes && state.routes[0]) {
-          const targetRoute = state.routes[0].name;
-          console.log('🧭 [NavigationService] Trying direct navigation to:', targetRoute);
-          try {
-            this.navigate(targetRoute, state.routes[0].params || {});
-          } catch (navError) {
-            console.error('❌ [NavigationService] Direct navigation also failed:', navError);
-            // Last resort for web: reload the page
-            this.handleWebNavigationFallback();
-          }
-        }
+        this.fallbackNavigation(state);
       }
     } else {
       console.warn('⚠️ [NavigationService] Navigation not ready, cannot reset');
-      // Try to navigate to target screen directly if reset fails
-      if (state && state.routes && state.routes[0]) {
-        const targetRoute = state.routes[0].name;
-        console.log('🧭 [NavigationService] Navigation not ready, trying direct navigation to:', targetRoute);
+      // Queue the navigation to try again when ready
+      this.queueNavigation(state);
+    }
+  }
+
+  /**
+   * Queue navigation for when navigation ref becomes ready
+   */
+  queueNavigation(state) {
+    const maxRetries = 50; // 5 seconds with 100ms intervals
+    let retryCount = 0;
+    
+    const attemptNavigation = () => {
+      retryCount++;
+      
+      if (navigationRef.isReady()) {
+        console.log('✅ [NavigationService] Navigation ready after', retryCount * 100, 'ms');
         try {
-          this.navigate(targetRoute, state.routes[0].params || {});
+          if (state && state.routes && state.routes.length > 0) {
+            this.navigate(state.routes[0].name, state.routes[0].params || {});
+          }
         } catch (error) {
-          console.error('❌ [NavigationService] Direct navigation failed:', error);
-          // Last resort for web: reload the page
+          console.error('❌ [NavigationService] Queued navigation failed:', error);
+          this.fallbackNavigation(state);
+        }
+      } else if (retryCount < maxRetries) {
+        setTimeout(attemptNavigation, 100);
+      } else {
+        console.warn('⚠️ [NavigationService] Navigation not ready after 5 seconds, using fallback');
+        this.fallbackNavigation(state);
+      }
+    };
+    
+    setTimeout(attemptNavigation, 100);
+  }
+
+  /**
+   * Fallback navigation when normal navigation fails
+   */
+  fallbackNavigation(state) {
+    if (state && state.routes && state.routes[0]) {
+      const targetRoute = state.routes[0].name;
+      console.log('🧭 [NavigationService] Using fallback navigation to:', targetRoute);
+      
+      // Special handling for Login screen during auth transitions
+      if (targetRoute === 'Login') {
+        console.log('🔒 [NavigationService] Login navigation requested - likely auth transition');
+        
+        // Don't navigate immediately - let the auth state update first
+        // The navigation will happen automatically when user becomes null
+        setTimeout(() => {
+          if (navigationRef.isReady()) {
+            try {
+              const currentRoute = navigationRef.getCurrentRoute();
+              console.log('🔄 [NavigationService] Current route after delay:', currentRoute?.name);
+              
+              // Only navigate if we're not already on Login screen
+              if (currentRoute?.name !== 'Login') {
+                this.navigate('Login');
+              }
+            } catch (error) {
+              console.warn('⚠️ [NavigationService] Delayed login navigation failed:', error.message);
+            }
+          }
+        }, 500); // Give auth state time to update
+      } else {
+        // For non-login navigation, use web fallback if appropriate
+        if (Platform.OS === 'web') {
           this.handleWebNavigationFallback();
+        } else {
+          console.log('🔄 [NavigationService] Will navigate when ready or on next app load');
         }
       }
-      
-      // Additional web-specific fallback
-      this.handleWebNavigationFallback();
     }
   }
 

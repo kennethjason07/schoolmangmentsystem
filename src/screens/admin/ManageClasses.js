@@ -18,6 +18,9 @@ import Header from '../../components/Header';
 import { Picker } from '@react-native-picker/picker';
 import { supabase, TABLES } from '../../utils/supabase';
 import { useTenantAccess } from '../../utils/tenantHelpers';
+import { useAuth } from '../../utils/AuthContext';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { validateTenantAccess } from '../../utils/tenantValidation';
 
 const ManageClasses = ({ navigation }) => {
   const { 
@@ -35,7 +38,7 @@ const ManageClasses = ({ navigation }) => {
   console.log('🏢 ManageClasses: Component initialized with email-based tenant system');
   console.log('🏢 ManageClasses: Initial context:', {
     tenantId: tenantId || 'NULL',
-    tenantName: currentTenant?.name || 'NULL',
+    tenantName: tenant?.name || 'NULL',
     userEmail: user?.email || 'NULL',
     tenantLoading
   });
@@ -55,15 +58,16 @@ const ManageClasses = ({ navigation }) => {
   const [selectedClassDetails, setSelectedClassDetails] = useState(null);
   const [classSubjects, setClassSubjects] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
 
   // 🔍 LOG: Tenant context changes
   useEffect(() => {
     console.log('🔄 ManageClasses: Tenant context changed');
     console.log('📍 ManageClasses: Updated tenant context:', {
       tenantId: tenantId || 'null',
-      currentTenant: currentTenant ? {
-        id: currentTenant.id,
-        name: currentTenant.name
+      currentTenant: tenant ? {
+        id: tenant.id,
+        name: tenant.name
       } : 'null',
       tenantLoading,
       userId: user?.id || 'null'

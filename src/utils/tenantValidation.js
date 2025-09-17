@@ -3,7 +3,7 @@
  * Centralized utility for strict tenant isolation across the entire application
  */
 
-import { supabase } from './supabase';
+import { supabase, TABLES } from './supabase';
 
 // Cache for tenant validation results (1 minute TTL)
 const validationCache = new Map();

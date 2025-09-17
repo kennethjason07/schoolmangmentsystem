@@ -38,6 +38,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [userType, setUserType] = useState(null); // 'admin', 'teacher', 'student', 'parent'
   const isSigningInRef = useRef(false); // Prevent auth listener interference
+  const lastErrorMessageRef = useRef(''); // Track last error to avoid spam
 
   // Web-specific debugging
   if (Platform.OS === 'web') {
@@ -71,11 +72,19 @@ export const AuthProvider = ({ children }) => {
           setUser(null);
           setUserType(null);
         } else if (sessionResult.error) {
-          console.error('❌ Session validation error:', sessionResult.error);
+          // Only log error if it's different from the last one to reduce spam
+          const errorMessage = sessionResult.error.message || 'Unknown error';
+          if (lastErrorMessageRef.current !== errorMessage) {
+            console.error('❌ Session validation error:', sessionResult.error);
+            lastErrorMessageRef.current = errorMessage;
+          }
+          
           // Check if it's a refresh token error
-          if (sessionResult.error.message?.includes('Invalid Refresh Token') || 
-              sessionResult.error.message?.includes('Refresh Token Not Found')) {
-            console.log('🔧 Detected refresh token error, clearing auth data');
+          if (errorMessage.includes('Invalid Refresh Token') || 
+              errorMessage.includes('Refresh Token Not Found')) {
+            if (lastErrorMessageRef.current !== errorMessage) {
+              console.log('🔧 Detected refresh token error, clearing auth data');
+            }
             await AuthFix.forceSignOut();
             setUser(null);
             setUserType(null);
@@ -99,6 +108,9 @@ export const AuthProvider = ({ children }) => {
     // Initialize auth state
     initializeAuth();
 
+    // State to prevent multiple signout attempts
+    let isHandlingSignOut = false;
+
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, sessionData) => {
@@ -115,26 +127,37 @@ export const AuthProvider = ({ children }) => {
           } else if (event === 'SIGNED_IN' && isSigningInRef.current) {
             console.log('⏭️ Skipping auth state handler - manual sign-in in progress');
           } else if (event === 'SIGNED_OUT') {
+            // Prevent multiple signout handling
+            if (isHandlingSignOut) {
+              console.log('⏭️ Skipping SIGNED_OUT - already handling signout');
+              return;
+            }
+            
+            isHandlingSignOut = true;
             console.log('🔊 Handling auth state change for SIGNED_OUT');
+            
+            // Clear auth state FIRST, then navigate
+            // This ensures Login screen is available in navigation
             setUser(null);
             setUserType(null);
             isSigningInRef.current = false;
-            // Navigate to login screen when signed out with enhanced web support
-            try {
-              navigationService.reset({
-                index: 0,
-                routes: [{ name: 'Login' }],
-              });
-            } catch (navError) {
-              console.error('Navigation service error:', navError);
-              // Enhanced web fallback
-              if (Platform.OS === 'web' && typeof window !== 'undefined' && window && window.location) {
-                console.log('🧭 [AuthContext] Using window.location fallback for SIGNED_OUT');
-                window.location.href = '/';
-              } else {
-                console.error('❌ [AuthContext] window.location is not available for navigation');
+            
+            // Use setTimeout to ensure state update completes before navigation
+            setTimeout(() => {
+              try {
+                navigationService.reset({
+                  index: 0,
+                  routes: [{ name: 'Login' }],
+                });
+              } catch (navError) {
+                console.warn('⚠️ Navigation service error (delayed):', navError.message);
+                // The navigation should work now that user state is cleared
               }
-            }
+              
+              // Reset the flag after navigation attempt
+              isHandlingSignOut = false;
+            }, 100); // Small delay to let React re-render with updated state
+            
           } else if (event === 'INITIAL_SESSION') {
             console.log('🔊 Handling auth state change for INITIAL_SESSION');
             // This is the initial check - if no session, that's fine
@@ -142,29 +165,37 @@ export const AuthProvider = ({ children }) => {
               console.log('No initial session found - this is normal for login screen');
               setLoading(false);
             }
+          } else if (event === 'TOKEN_REFRESHED') {
+            console.log('🔄 Token refreshed successfully');
           }
         } catch (error) {
-          console.error('Error updating Supabase context:', error);
-          // If there's an error, reset the auth state to prevent app crashes
-          setUser(null);
-          setUserType(null);
-          setLoading(false);
-          isSigningInRef.current = false;
-          // Navigate to login screen on error with enhanced web support
-          try {
-            navigationService.reset({
-              index: 0,
-              routes: [{ name: 'Login' }],
-            });
-          } catch (navError) {
-            console.error('Navigation service error:', navError);
-            // Enhanced web fallback
-            if (Platform.OS === 'web' && typeof window !== 'undefined' && window && window.location) {
-              console.log('🧭 [AuthContext] Using window.location fallback for error case');
-              window.location.href = '/';
-            } else {
-              console.error('❌ [AuthContext] window.location is not available for navigation');
+          console.error('Error in auth state change handler:', error);
+          
+          // Only reset auth state for specific auth-related errors
+          if (error.message?.includes('refresh') || 
+              error.message?.includes('token') || 
+              error.message?.includes('Invalid') ||
+              error.message?.includes('session')) {
+            console.log('🧹 Auth-specific error detected, clearing auth state');
+            setUser(null);
+            setUserType(null);
+            setLoading(false);
+            isSigningInRef.current = false;
+            
+            // Only navigate to login if we're not already handling signout
+            if (!isHandlingSignOut && event === 'SIGNED_OUT') {
+              try {
+                navigationService.reset({
+                  index: 0,
+                  routes: [{ name: 'Login' }],
+                });
+              } catch (navError) {
+                console.warn('⚠️ Navigation failed after auth error:', navError.message);
+                // Don't use window.location fallback here
+              }
             }
+          } else {
+            console.warn('⚠️ Non-auth error in auth state handler, continuing:', error.message);
           }
         }
       }

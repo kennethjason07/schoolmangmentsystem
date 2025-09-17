@@ -128,6 +128,31 @@ export const tenantDatabase = {
   },
 
   /**
+   * Create multiple records with automatic tenant_id (if available)
+   */
+  async createMany(table, dataArray) {
+    const tenantId = getCachedTenantId();
+    
+    if (!Array.isArray(dataArray)) {
+      throw new Error('createMany expects an array of data objects');
+    }
+    
+    // Add tenant_id to each record if available
+    const dataWithTenant = tenantId 
+      ? dataArray.map(record => ({ ...record, tenant_id: tenantId }))
+      : dataArray;
+    
+    console.log(`✏️ Creating ${dataArray.length} records in '${table}' with tenant_id: ${tenantId || 'NOT PROVIDED'}`);
+    
+    const { data: result, error } = await supabase
+      .from(table)
+      .insert(dataWithTenant)
+      .select();
+
+    return { data: result, error };
+  },
+
+  /**
    * Read records with automatic tenant filtering (if tenantId available)
    */
   async read(table, filters = {}, selectClause = '*') {
@@ -164,39 +189,65 @@ export const tenantDatabase = {
 
   /**
    * Update record with tenant validation (if tenantId available)
+   * Supports both ID-based and filter-based updates
    */
-  async update(table, id, updates) {
+  async update(table, idOrFilters, updates) {
     const tenantId = getCachedTenantId();
     
     console.log(`✏️ Updating record in '${table}' with tenant_id: ${tenantId || 'NOT REQUIRED'}`);
     
     let query = supabase
       .from(table)
-      .update(updates)
-      .eq('id', id);
+      .update(updates);
+    
+    // Handle different types of identifiers
+    if (typeof idOrFilters === 'string' || typeof idOrFilters === 'number') {
+      // Simple ID-based update
+      query = query.eq('id', idOrFilters);
+    } else if (typeof idOrFilters === 'object' && idOrFilters !== null) {
+      // Filter-based update
+      Object.entries(idOrFilters).forEach(([key, value]) => {
+        query = query.eq(key, value);
+      });
+    } else {
+      throw new Error('Invalid identifier: must be ID string/number or filters object');
+    }
     
     // Only apply tenant filtering if tenantId exists
     if (tenantId) {
       query = query.eq('tenant_id', tenantId);
     }
     
-    const { data, error } = await query.select().single();
+    const { data, error } = await query.select();
 
     return { data, error };
   },
 
   /**
    * Delete record with tenant validation (if tenantId available)
+   * Supports both ID-based and filter-based deletes
    */
-  async delete(table, id) {
+  async delete(table, idOrFilters) {
     const tenantId = getCachedTenantId();
     
     console.log(`🗑️ Deleting record from '${table}' with tenant_id: ${tenantId || 'NOT REQUIRED'}`);
     
     let query = supabase
       .from(table)
-      .delete()
-      .eq('id', id);
+      .delete();
+    
+    // Handle different types of identifiers
+    if (typeof idOrFilters === 'string' || typeof idOrFilters === 'number') {
+      // Simple ID-based delete
+      query = query.eq('id', idOrFilters);
+    } else if (typeof idOrFilters === 'object' && idOrFilters !== null) {
+      // Filter-based delete
+      Object.entries(idOrFilters).forEach(([key, value]) => {
+        query = query.eq(key, value);
+      });
+    } else {
+      throw new Error('Invalid identifier: must be ID string/number or filters object');
+    }
     
     // Only apply tenant filtering if tenantId exists
     if (tenantId) {

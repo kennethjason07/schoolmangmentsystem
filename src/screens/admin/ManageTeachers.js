@@ -582,7 +582,7 @@ const ManageTeachers = ({ navigation, route }) => {
 
       // Insert new subject assignments if there are any
       if (assignments.length > 0) {
-        const { data: insertedData, error: insertError } = await tenantDatabase.create(
+        const { data: insertedData, error: insertError } = await tenantDatabase.createMany(
           'teacher_subjects',
           assignments
         );
@@ -628,7 +628,7 @@ const ManageTeachers = ({ navigation, route }) => {
         for (const classId of form.classes) {
           const { error: assignError } = await tenantDatabase.update(
             'classes',
-            { id: classId },
+            classId,
             { class_teacher_id: teacherId }
           );
           
@@ -644,7 +644,7 @@ const ManageTeachers = ({ navigation, route }) => {
       // 3. Update teacher's is_class_teacher flag
       const { error: updateTeacherError } = await tenantDatabase.update(
         'teachers',
-        { id: teacherId },
+        teacherId,
         { is_class_teacher: form.classes.length > 0 }
       );
       
@@ -1124,137 +1124,334 @@ const ManageTeachers = ({ navigation, route }) => {
       
       {/* Add/Edit Modal */}
       <Modal
-        animationType="slide"
-        transparent={true}
         visible={isModalVisible}
+        animationType="slide"
+        transparent
         onRequestClose={closeModal}
       >
-        <View style={styles.modalContainer}>
+        <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
+            {/* Modal Header */}
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{modalMode === 'add' ? 'Add Teacher' : 'Edit Teacher'}</Text>
-              <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
+              <View style={styles.modalTitleContainer}>
+                <Ionicons
+                  name={modalMode === 'add' ? "person-add" : "create"}
+                  size={24}
+                  color="#2196F3"
+                  style={styles.modalIcon}
+                />
+                <Text style={styles.modalTitle}>
+                  {modalMode === 'add' ? 'Add New Teacher' : 'Edit Teacher'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={closeModal}
+                style={styles.modalCloseButton}
+              >
                 <Ionicons name="close" size={24} color="#666" />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalForm}>
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Name</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={form.name}
-                  onChangeText={text => setForm(prev => ({ ...prev, name: text }))}
-                  placeholder="Enter teacher's name"
-                />
-              </View>
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Phone</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={form.phone}
-                  onChangeText={text => setForm(prev => ({ ...prev, phone: text }))}
-                  placeholder="Enter teacher's phone number"
-                  keyboardType="phone-pad"
-                />
-              </View>
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Age</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={form.age}
-                  onChangeText={text => setForm(prev => ({ ...prev, age: text }))}
-                  placeholder="Enter teacher's age"
-                  keyboardType="numeric"
-                />
-              </View>
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Address</Text>
-                <TextInput
-                  style={[styles.formInput, styles.textArea]}
-                  value={form.address}
-                  onChangeText={text => setForm(prev => ({ ...prev, address: text }))}
-                  placeholder="Enter teacher's address"
-                  multiline={true}
-                  numberOfLines={3}
-                />
-              </View>
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Qualification</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={form.qualification}
-                  onChangeText={text => setForm(prev => ({ ...prev, qualification: text }))}
-                  placeholder="Enter teacher's qualification"
-                />
-              </View>
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Salary</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={form.salary}
-                  onChangeText={text => setForm(prev => ({ ...prev, salary: text }))}
-                  placeholder="Enter teacher's salary"
-                  keyboardType="numeric"
-                />
-              </View>
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Classes</Text>
-                <View style={styles.multiSelectContainer}>
-                  {classes.map(cls => (
-                    <TouchableOpacity
-                      key={cls.id}
-                      style={[
-                        styles.multiSelectItem,
-                        form.classes.includes(cls.id) && styles.multiSelectItemActive
-                      ]}
-                      onPress={() => setForm(prev => ({ ...prev, classes: toggleSelect(prev.classes, cls.id) }))}
-                    >
-                      <Text style={styles.multiSelectText}>{cls.class_name}</Text>
-                    </TouchableOpacity>
-                  ))}
+
+            <ScrollView
+              style={styles.modalScrollView}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Personal Information Section */}
+              <View style={styles.formSection}>
+                <View style={styles.sectionHeader}>
+                  <Ionicons name="person-outline" size={20} color="#2196F3" />
+                  <Text style={styles.sectionTitle}>Personal Information</Text>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Full Name *</Text>
+                  <TextInput
+                    placeholder="Enter teacher's full name"
+                    value={form.name}
+                    onChangeText={text => setForm({ ...form, name: text })}
+                    style={styles.textInput}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Phone Number *</Text>
+                  <TextInput
+                    placeholder="Enter phone number"
+                    value={form.phone}
+                    onChangeText={text => setForm({ ...form, phone: text })}
+                    keyboardType="phone-pad"
+                    style={styles.textInput}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Age *</Text>
+                  <TextInput
+                    placeholder="Enter age (must be > 18)"
+                    value={form.age}
+                    onChangeText={text => setForm({ ...form, age: text })}
+                    keyboardType="numeric"
+                    style={styles.textInput}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Address</Text>
+                  <TextInput
+                    placeholder="Enter full address"
+                    value={form.address}
+                    onChangeText={text => setForm({ ...form, address: text })}
+                    style={[styles.textInput, styles.multilineInput]}
+                    placeholderTextColor="#999"
+                    multiline={true}
+                    numberOfLines={3}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Qualification *</Text>
+                  <TextInput
+                    placeholder="e.g., B.Ed, M.A, Ph.D"
+                    value={form.qualification}
+                    onChangeText={text => setForm({ ...form, qualification: text })}
+                    style={styles.textInput}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Monthly Salary *</Text>
+                  <View style={styles.salaryInputContainer}>
+                    <Text style={styles.currencySymbol}>₹</Text>
+                    <TextInput
+                      placeholder="Enter monthly salary"
+                      value={form.salary}
+                      onChangeText={text => setForm({ ...form, salary: text })}
+                      keyboardType="numeric"
+                      style={styles.salaryInput}
+                      placeholderTextColor="#999"
+                    />
+                  </View>
                 </View>
               </View>
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Subjects</Text>
-                <View style={styles.multiSelectContainer}>
-                  {subjects.map(subject => (
-                    <TouchableOpacity
-                      key={subject.id}
-                      style={[
-                        styles.multiSelectItem,
-                        form.subjects.includes(subject.id) && styles.multiSelectItemActive
-                      ]}
-                      onPress={() => setForm(prev => ({ ...prev, subjects: toggleSelect(prev.subjects, subject.id) }))}
-                    >
-                      <Text style={styles.multiSelectText}>{subject.name}</Text>
-                    </TouchableOpacity>
-                  ))}
+              
+              {/* Class Assignment Section */}
+              <View style={styles.formSection}>
+                <View style={styles.sectionHeader}>
+                  <Ionicons name="school-outline" size={20} color="#FF9800" />
+                  <Text style={styles.sectionTitle}>Class Assignment</Text>
+                </View>
+
+                <Text style={styles.sectionDescription}>
+                  Select classes this teacher will handle
+                </Text>
+
+                <View style={styles.checkboxGrid}>
+                  {classes.length > 0 ? (
+                    classes.map(cls => (
+                      <TouchableOpacity
+                        key={cls.id}
+                        style={[
+                          styles.checkboxCard,
+                          form.classes.includes(cls.id) && styles.checkboxCardSelected
+                        ]}
+                        onPress={() => setForm({ ...form, classes: toggleSelect(form.classes, cls.id) })}
+                      >
+                        <View style={styles.checkboxCardContent}>
+                          <Ionicons
+                            name={form.classes.includes(cls.id) ? 'checkmark-circle' : 'ellipse-outline'}
+                            size={24}
+                            color={form.classes.includes(cls.id) ? '#FF9800' : '#ccc'}
+                          />
+                          <View style={styles.classCardTextContainer}>
+                            <Text style={[
+                              styles.checkboxCardText,
+                              form.classes.includes(cls.id) && styles.checkboxCardTextSelected
+                            ]}>
+                              {cls.class_name}
+                            </Text>
+                            <View style={styles.sectionBadgeContainer}>
+                              <View style={[
+                                styles.sectionBadge,
+                                form.classes.includes(cls.id) && styles.sectionBadgeSelected
+                              ]}>
+                                <Text style={[
+                                  styles.sectionBadgeText,
+                                  form.classes.includes(cls.id) && styles.sectionBadgeTextSelected
+                                ]}>
+                                  {cls.section || '?'}
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    ))
+                  ) : (
+                    <View style={styles.noSelectionContainer}>
+                      <Text style={styles.noSelectionText}>
+                        No classes available. Please create classes first in Manage Classes.
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Sections</Text>
-                <View style={styles.multiSelectContainer}>
-                  {sections.map(section => (
-                    <TouchableOpacity
-                      key={section.id}
-                      style={[
-                        styles.multiSelectItem,
-                        form.sections[section.id] && styles.multiSelectItemActive
-                      ]}
-                      onPress={() => setForm(prev => ({ ...prev, sections: { ...prev.sections, [section.id]: !prev.sections[section.id] } }))}
-                    >
-                      <Text style={styles.multiSelectText}>{section.section_name}</Text>
-                    </TouchableOpacity>
-                  ))}
+
+              {/* Subject Assignment Section */}
+              <View style={styles.formSection}>
+                <View style={styles.sectionHeader}>
+                  <Ionicons name="book-outline" size={20} color="#4CAF50" />
+                  <Text style={styles.sectionTitle}>Subject Assignment</Text>
                 </View>
+
+                <Text style={styles.sectionDescription}>
+                  Select subjects this teacher will teach (grouped by selected classes)
+                </Text>
+
+                {form.classes.length > 0 ? (
+                  form.classes.map(classId => {
+                    const selectedClass = classes.find(c => c.id === classId);
+                    const classSubjects = subjects.filter(subject => subject.class_id === classId);
+
+                    return (
+                      <View key={classId} style={styles.classSubjectsGroup}>
+                        <Text style={styles.classSubjectsTitle}>
+                          📚 {selectedClass?.class_name} - Subjects
+                        </Text>
+                        <View style={styles.checkboxGrid}>
+                          {classSubjects.length > 0 ? (
+                            classSubjects.map(subject => (
+                              <TouchableOpacity
+                                key={subject.id}
+                                style={[
+                                  styles.checkboxCard,
+                                  form.subjects.includes(subject.id) && styles.checkboxCardSelected
+                                ]}
+                                onPress={() => setForm({ ...form, subjects: toggleSelect(form.subjects, subject.id) })}
+                              >
+                                <View style={styles.checkboxCardContent}>
+                                  <Ionicons
+                                    name={form.subjects.includes(subject.id) ? 'checkmark-circle' : 'ellipse-outline'}
+                                    size={24}
+                                    color={form.subjects.includes(subject.id) ? '#4CAF50' : '#ccc'}
+                                  />
+                                  <Text style={[
+                                    styles.checkboxCardText,
+                                    form.subjects.includes(subject.id) && styles.checkboxCardTextSelected
+                                  ]}>
+                                    {subject.name}
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                            ))
+                          ) : (
+                            <View style={styles.noSelectionContainer}>
+                              <Text style={styles.noSelectionText}>
+                                No subjects available for {selectedClass?.class_name}. Please add subjects to this class first.
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })
+                ) : (
+                  <View style={styles.noSelectionContainer}>
+                    <Text style={styles.noSelectionText}>
+                      Please select classes first to see available subjects
+                    </Text>
+                  </View>
+                )}
               </View>
+
+              {/* Section Information Section */}
+              {form.classes.length > 0 && (
+                <View style={styles.formSection}>
+                  <View style={styles.sectionHeader}>
+                    <Ionicons name="layers-outline" size={20} color="#9C27B0" />
+                    <Text style={styles.sectionTitle}>Class & Section Details</Text>
+                  </View>
+
+                  <Text style={styles.sectionDescription}>
+                    Classes and their assigned sections (automatically assigned when you select a class)
+                  </Text>
+
+                  {form.classes.map(classId => {
+                    const selectedClass = classes.find(c => c.id === classId);
+                    
+                    return (
+                      <View key={classId} style={styles.classSectionInfo}>
+                        <View style={styles.classSectionHeader}>
+                          <Ionicons name="school" size={18} color="#FF9800" />
+                          <Text style={styles.classSectionName}>
+                            {selectedClass?.class_name}
+                          </Text>
+                          <View style={styles.sectionBadgeLarge}>
+                            <Text style={styles.sectionBadgeLargeText}>
+                              {selectedClass?.section || '?'}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.classSectionDetails}>
+                          <Ionicons name="layers" size={16} color="#9C27B0" />
+                          <Text style={styles.classSectionText}>
+                            Section {selectedClass?.section || 'not assigned'}
+                          </Text>
+                        </View>
+                        <Text style={styles.classSectionNote}>
+                          ✓ Teacher assigned as Class Teacher for {selectedClass?.class_name} - Section {selectedClass?.section || 'N/A'}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
             </ScrollView>
+
+            {/* Modal Actions */}
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalButton} onPress={closeModal}>
-                <Text style={styles.modalButtonText}>Cancel</Text>
+              <TouchableOpacity
+                style={[styles.cancelButton, saving && styles.cancelButtonDisabled]}
+                onPress={closeModal}
+                disabled={saving}
+              >
+                <Text style={[styles.cancelButtonText, saving && styles.cancelButtonTextDisabled]}>
+                  Cancel
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalButton} onPress={handleSave} disabled={saving}>
-                <Text style={styles.modalButtonText}>{saving ? 'Saving...' : 'Save'}</Text>
+              <TouchableOpacity
+                style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+                onPress={handleSave}
+                disabled={saving}
+              >
+                {saving ? (
+                  <>
+                    <PaperActivityIndicator
+                      size={20}
+                      color="#fff"
+                      style={styles.saveButtonIcon}
+                    />
+                    <Text style={styles.saveButtonText}>
+                      {modalMode === 'add' ? 'Adding...' : 'Saving...'}
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons
+                      name={modalMode === 'add' ? "add" : "save"}
+                      size={20}
+                      color="#fff"
+                      style={styles.saveButtonIcon}
+                    />
+                    <Text style={styles.saveButtonText}>
+                      {modalMode === 'add' ? 'Add Teacher' : 'Save Changes'}
+                    </Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -1545,96 +1742,347 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   // Modal Styles
-  modalContainer: {
+  modalOverlay: {
     flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    padding: 20,
   },
   modalContent: {
-    backgroundColor: 'white',
-    borderRadius: 10,
-    width: '90%',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    width: '100%',
     maxWidth: 500,
-    maxHeight: '80%',
-    ...Platform.select({
-      web: {
-        maxHeight: '90vh',
-      },
-    }),
+    maxHeight: '90%',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 20,
+    paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#f0f0f0',
+  },
+  modalTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  modalIcon: {
+    marginRight: 12,
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '700',
+    color: '#1a1a1a',
   },
-  closeButton: {
-    padding: 5,
+  modalCloseButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#f8f9fa',
   },
-  modalForm: {
+  modalScrollView: {
+    maxHeight: '70%',
+  },
+  // Form Sections
+  formSection: {
     padding: 20,
+    paddingTop: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f8f9fa',
   },
-  formGroup: {
-    marginBottom: 20,
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
   },
-  formLabel: {
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 8,
+  },
+  sectionDescription: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  // Input Groups
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
     color: '#333',
     marginBottom: 8,
   },
-  formInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 5,
-    padding: 10,
+  textInput: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     fontSize: 16,
+    color: '#333',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
   },
-  textArea: {
-    height: 80,
+  multilineInput: {
+    minHeight: 80,
     textAlignVertical: 'top',
   },
-  multiSelectContainer: {
+  salaryInputContainer: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    paddingHorizontal: 16,
   },
-  multiSelectItem: {
-    backgroundColor: '#f0f0f0',
-    padding: 10,
-    borderRadius: 5,
+  currencySymbol: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+    marginRight: 8,
   },
-  multiSelectItemActive: {
-    backgroundColor: '#4CAF50',
-  },
-  multiSelectText: {
+  salaryInput: {
+    flex: 1,
+    paddingVertical: 14,
+    fontSize: 16,
     color: '#333',
   },
+  // Checkbox Grid
+  checkboxGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  checkboxCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#e9ecef',
+    minWidth: '45%',
+    flex: 1,
+  },
+  checkboxCardSelected: {
+    backgroundColor: '#fff',
+    borderColor: '#2196F3',
+  },
+  checkboxCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  checkboxCardText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666',
+    marginLeft: 12,
+    flex: 1,
+  },
+  checkboxCardTextSelected: {
+    color: '#333',
+    fontWeight: '600',
+  },
+  // Class Card Text Container Styles
+  classCardTextContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  // Section Badge Styles
+  sectionBadgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  sectionBadge: {
+    backgroundColor: '#E8EAF6',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    minWidth: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#C5CAE9',
+  },
+  sectionBadgeSelected: {
+    backgroundColor: '#3F51B5',
+    borderColor: '#3F51B5',
+  },
+  sectionBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#5C6BC0',
+    textAlign: 'center',
+  },
+  sectionBadgeTextSelected: {
+    color: '#fff',
+  },
+  // Class-grouped subjects styles
+  classSubjectsGroup: {
+    marginBottom: 20,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  classSubjectsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#dee2e6',
+  },
+  noSelectionContainer: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    borderStyle: 'dashed',
+  },
+  noSelectionText: {
+    fontSize: 14,
+    color: '#6c757d',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  // Class Section Info Styles
+  classSectionInfo: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  classSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  classSectionName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 8,
+  },
+  classSectionDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  classSectionText: {
+    fontSize: 14,
+    color: '#9C27B0',
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+  classSectionNote: {
+    fontSize: 12,
+    color: '#6c757d',
+    fontStyle: 'italic',
+    backgroundColor: '#f8f9fa',
+    padding: 8,
+    borderRadius: 6,
+    borderLeftWidth: 3,
+    borderLeftColor: '#9C27B0',
+  },
+  // Large Section Badge Styles (for Class & Section Details)
+  sectionBadgeLarge: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginLeft: 12,
+    minWidth: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  sectionBadgeLargeText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  // Modal Actions
   modalActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: '#f0f0f0',
+    gap: 12,
   },
-  modalButton: {
-    backgroundColor: '#4CAF50',
-    padding: 10,
-    borderRadius: 5,
-    minWidth: 100,
+  cancelButton: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
   },
-  modalButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
+  cancelButtonDisabled: {
+    backgroundColor: '#f0f0f0',
+    borderColor: '#ddd',
+    opacity: 0.6,
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  cancelButtonTextDisabled: {
+    color: '#999',
+  },
+  saveButton: {
+    flex: 1,
+    backgroundColor: '#4CAF50',
+    borderRadius: 12,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveButtonDisabled: {
+    backgroundColor: '#A5D6A7',
+    opacity: 0.8,
+  },
+  saveButtonIcon: {
+    marginRight: 8,
+  },
+  saveButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
   // Enhanced Search Styles
   searchSection: {
