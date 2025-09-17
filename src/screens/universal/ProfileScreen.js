@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
+  Pressable,
   Image,
   ScrollView,
   Alert,
@@ -509,28 +510,53 @@ const ProfileScreen = ({ navigation, route }) => {
 
   // Handle logout with improved web compatibility
   const handleLogout = async () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
+    console.log('🔴 LOGOUT BUTTON CLICKED! Platform:', Platform.OS);
+    
+    // Platform-specific confirmation
+    if (Platform.OS === 'web') {
+      // Use browser's native confirm for web
+      const confirmed = window.confirm('Are you sure you want to logout?');
+      if (!confirmed) {
+        console.log('❌ Logout cancelled by user');
+        return;
+      }
+      console.log('✅ Logout confirmed by user');
+      // Proceed with logout directly for web
+      await performLogout();
+    } else {
+      // Use React Native Alert for mobile
+      Alert.alert(
+        'Logout',
+        'Are you sure you want to logout?',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Logout',
+            style: 'destructive',
+            onPress: async () => {
+              await performLogout();
+            },
+          },
+        ]
+      );
+    }
+  };
+
+  // Separate logout logic into its own function
+  const performLogout = async () => {
             try {
               console.log('🚪 [ProfileScreen] Starting logout process...');
               console.log('🌐 [ProfileScreen] Platform:', Platform.OS);
               setLoading(true);
               
               if (Platform.OS === 'web') {
-                // Enhanced web logout with multiple fallback strategies
-                console.log('🧹 [ProfileScreen] Web platform - enhanced logout');
+                // Simplified web logout
+                console.log('🧹 [ProfileScreen] Web platform - starting logout');
                 
-                // Step 1: Try to sign out from Supabase
+                // Step 1: Sign out from Supabase
                 try {
                   await signOut();
                   console.log('✅ [ProfileScreen] Supabase signOut completed');
@@ -542,31 +568,22 @@ const ProfileScreen = ({ navigation, route }) => {
                 try {
                   // Clear localStorage
                   if (typeof localStorage !== 'undefined') {
-                    const localStorageKeys = Object.keys(localStorage);
-                    localStorageKeys.forEach(key => {
+                    const keys = Object.keys(localStorage);
+                    keys.forEach(key => {
                       if (key.includes('auth') || key.includes('supabase') || key.includes('token') || key.includes('session')) {
                         localStorage.removeItem(key);
+                        console.log(`🧹 Cleared localStorage: ${key}`);
                       }
                     });
                   }
                   
                   // Clear sessionStorage
                   if (typeof sessionStorage !== 'undefined') {
-                    const sessionStorageKeys = Object.keys(sessionStorage);
-                    sessionStorageKeys.forEach(key => {
+                    const keys = Object.keys(sessionStorage);
+                    keys.forEach(key => {
                       if (key.includes('auth') || key.includes('supabase') || key.includes('token') || key.includes('session')) {
                         sessionStorage.removeItem(key);
-                      }
-                    });
-                  }
-                  
-                  // Clear cookies
-                  if (typeof document !== 'undefined') {
-                    document.cookie.split(";").forEach(cookie => {
-                      const eqPos = cookie.indexOf("=");
-                      const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
-                      if (name.includes('auth') || name.includes('session') || name.includes('token')) {
-                        document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+                        console.log(`🧹 Cleared sessionStorage: ${key}`);
                       }
                     });
                   }
@@ -576,40 +593,19 @@ const ProfileScreen = ({ navigation, route }) => {
                   console.warn('⚠️ [ProfileScreen] Error clearing local auth data:', clearError);
                 }
                 
-                // Step 3: Try navigation service first
-                try {
-                  console.log('🧭 [ProfileScreen] Trying navigationService reset...');
-                  navigationService.reset({
-                    index: 0,
-                    routes: [{ name: 'Login' }],
-                  });
-                  console.log('✅ [ProfileScreen] Navigation service reset successful');
-                } catch (navError) {
-                  console.warn('⚠️ [ProfileScreen] Navigation service failed:', navError);
-                  
-                  // Fallback 1: Direct window.location
-                  if (typeof window !== 'undefined' && window && window.location) {
-                    console.log('🧭 [ProfileScreen] Using window.location.href fallback...');
-                    window.location.href = '/';
-                    return;
-                  }
-                }
+                // Step 3: Force page reload - this will trigger auth check and show login
+                console.log('🔄 [ProfileScreen] Reloading page to complete logout...');
+                window.location.reload();
                 
-                // If we get here, the navigation might have worked, but let's ensure we redirect
-                setTimeout(() => {
-                  if (typeof window !== 'undefined' && window && window.location) {
-                    window.location.href = '/';
-                  }
-                }, 1000);
+                // No need to continue - reload will handle everything
+                return;
                 
               } else {
                 // Mobile platforms - use standard logout
                 console.log('📱 [ProfileScreen] Mobile platform - standard logout');
                 await signOut();
-                navigationService.reset({
-                  index: 0,
-                  routes: [{ name: 'Login' }],
-                });
+                // Don't manually navigate - auth context will handle navigation when user becomes null
+                console.log('✅ [ProfileScreen] Sign out completed, auth context will handle navigation');
               }
               
             } catch (error) {
@@ -620,12 +616,10 @@ const ProfileScreen = ({ navigation, route }) => {
                 console.log('💥 [ProfileScreen] Forcing redirect due to error');
                 window.location.href = '/';
               } else {
-                // For mobile, show error but still try to navigate
+                // For mobile, show error but let auth handle the navigation
                 Alert.alert('Logout Error', 'There was an issue logging out. Please try again.');
-                navigationService.reset({
-                  index: 0,
-                  routes: [{ name: 'Login' }],
-                });
+                // Don't manually navigate - if signOut was successful, auth context will handle navigation
+                console.log('⚠️ [ProfileScreen] Error during logout, but letting auth context handle navigation');
               }
               
             } finally {
@@ -633,10 +627,6 @@ const ProfileScreen = ({ navigation, route }) => {
                 setLoading(false);
               }
             }
-          },
-        },
-      ]
-    );
   };
 
   if (loading) {
@@ -775,13 +765,22 @@ const ProfileScreen = ({ navigation, route }) => {
           </View>
           {/* Logout Section */}
           <View style={styles.logoutSection}>
-            <TouchableOpacity
-              style={styles.logoutButton}
-              onPress={handleLogout}
+            <Pressable
+              style={({ pressed }) => [
+                styles.logoutButton,
+                { 
+                  opacity: pressed ? 0.7 : 1,
+                  cursor: Platform.OS === 'web' ? 'pointer' : 'default'
+                }
+              ]}
+              onPress={() => {
+                console.log('🔴 Pressable Logout button pressed!');
+                handleLogout();
+              }}
             >
               <Ionicons name="log-out-outline" size={20} color="#fff" style={styles.logoutIcon} />
               <Text style={styles.logoutButtonText}>Logout</Text>
-            </TouchableOpacity>
+            </Pressable>
           </View>
           </ScrollView>
         </KeyboardAvoidingView>

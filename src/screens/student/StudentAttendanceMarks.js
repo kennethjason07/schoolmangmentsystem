@@ -472,14 +472,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
 
       // Get school details using enhanced tenant system
       try {
-        const schoolQuery = await tenantDatabase.read({
-          table: TABLES.SCHOOL_DETAILS,
-          select: '*',
-          single: true,
-          tenantId: effectiveTenantId
-        });
-
-        const { data: schoolDetails, error: schoolError } = { data: schoolQuery.data, error: schoolQuery.error };
+        const { data: schoolDetails, error: schoolError } = await dbHelpers.getSchoolDetails();
 
         if (!schoolError && schoolDetails) {
           setSchoolInfo({

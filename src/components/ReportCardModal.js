@@ -113,18 +113,15 @@ const ReportCardModal = ({ visible, student, examId, onClose }) => {
 
   const loadSchoolDetails = async () => {
     try {
-      const { data, error } = await supabase
-        .from('school_details')
-        .select('*')
-        .limit(1);
+      const { data, error } = await dbHelpers.getSchoolDetails();
 
       if (error) {
         console.error('Error loading school details:', error);
         return; // Don't throw here, school details are optional
       }
       
-      // Set the first school details if available, otherwise null
-      setSchoolDetails(data && data.length > 0 ? data[0] : null);
+      // Set the school details directly (already a single object or null)
+      setSchoolDetails(data);
     } catch (error) {
       console.error('Error loading school details:', error);
       // Don't throw here, school details are optional

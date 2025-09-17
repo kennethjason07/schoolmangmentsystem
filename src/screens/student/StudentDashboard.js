@@ -308,7 +308,7 @@ const StudentDashboard = ({ navigation }) => {
       }
 
       // Validate tenant access before proceeding (with resolved tenant ID)
-      const tenantValidation = await validateTenantAccess(user.id, effectiveTenantId);
+      const tenantValidation = await validateTenantAccess(effectiveTenantId, user.id, 'StudentDashboard-FetchAssignments');
       if (!tenantValidation.isValid) {
         console.error('❌ Student dashboard tenant validation failed:', tenantValidation.error);
         return; // Silent return for better UX
@@ -432,7 +432,7 @@ const StudentDashboard = ({ navigation }) => {
       }
       
       // Validate tenant access before refreshing notifications (with resolved tenant ID)
-      const tenantValidation = await validateTenantAccess(user.id, effectiveTenantId);
+      const tenantValidation = await validateTenantAccess(effectiveTenantId, user.id, 'StudentDashboard-RefreshNotifications');
       if (!tenantValidation.isValid) {
         console.error('❌ Student dashboard notification validation failed:', tenantValidation.error);
         return; // Silent return for better UX
@@ -441,7 +441,7 @@ const StudentDashboard = ({ navigation }) => {
       console.log('Dashboard: Refreshing notifications for user:', user.id);
       
       // Fetch notifications with recipient info using tenant-aware query
-      const tenantNotificationQuery = createTenantQuery(supabase.from('notification_recipients'), effectiveTenantId);
+      const tenantNotificationQuery = createTenantQuery(effectiveTenantId, 'notification_recipients');
       const { data: notificationsData, error: notifError } = await tenantNotificationQuery
         .select(`
           id,
@@ -591,12 +591,38 @@ const StudentDashboard = ({ navigation }) => {
       setLoading(true);
       setError(null);
 
-      // 🚀 ENHANCED: Validate tenant access using new helper
-      const validation = validateTenantAccess();
-      if (!validation.valid) {
-        console.error('❌ Enhanced tenant validation failed:', validation.error);
-        setError('Unable to determine school context. Please contact administrator.');
-        Alert.alert('Access Error', 'Unable to determine school context. Please contact administrator.');
+      // Check if tenant context is available, if not try to resolve it
+      let effectiveTenantId = tenantId;
+      if (!effectiveTenantId) {
+        console.log('🔍 Student Dashboard - No tenant context for main data fetch, attempting to resolve from user email...');
+        
+        try {
+          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          const emailTenantResult = await getTenantIdByEmail(user.email);
+          
+          if (emailTenantResult.success) {
+            effectiveTenantId = emailTenantResult.data.tenant.id;
+            console.log('✅ Student Dashboard - Successfully resolved tenant via email for main data fetch:', effectiveTenantId);
+          } else {
+            console.error('❌ Student Dashboard - Email-based tenant resolution failed for main data fetch:', emailTenantResult.error);
+            setError('Unable to determine school context. Please contact administrator.');
+            Alert.alert('Access Error', 'Unable to determine school context. Please contact administrator.');
+            return;
+          }
+        } catch (emailLookupError) {
+          console.error('❌ Student Dashboard - Error during email-based tenant lookup for main data fetch:', emailLookupError);
+          setError('Unable to determine school context. Please contact administrator.');
+          Alert.alert('Access Error', 'Unable to determine school context. Please contact administrator.');
+          return;
+        }
+      }
+
+      // Validate tenant access before proceeding (with resolved tenant ID)
+      const tenantValidation = await validateTenantAccess(effectiveTenantId, user.id, 'StudentDashboard-MainDataFetch');
+      if (!tenantValidation.isValid) {
+        console.error('❌ Student dashboard tenant validation failed:', tenantValidation.error);
+        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+        setError(tenantValidation.error);
         setLoading(false);
         return;
       }

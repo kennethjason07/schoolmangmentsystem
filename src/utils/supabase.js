@@ -2269,14 +2269,14 @@ export const dbHelpers = {
         .from(TABLES.SCHOOL_DETAILS)
         .select('*')
         .eq('tenant_id', currentTenantId)
-        .limit(1);
+        .maybeSingle();
 
       if (error) {
         return { data: null, error };
       }
 
-      // Return the first record if exists, otherwise null
-      return { data: data && data.length > 0 ? data[0] : null, error: null };
+      // Return the data directly (already single object or null)
+      return { data, error: null };
     } catch (error) {
       return { data: null, error };
     }

@@ -74,19 +74,7 @@ export default function StudentMarks({ navigation }) {
 
   const fetchSchoolDetails = async () => {
     try {
-      // 🚀 ENHANCED: Use tenant validation and helpers
-      const { valid, tenantId: effectiveTenantId } = await validateTenant();
-      if (!valid) {
-        console.error('❌ Tenant validation failed for school details');
-        return;
-      }
-
-      const schoolQuery = await tenantDatabase.read({
-        table: TABLES.SCHOOL_DETAILS,
-        select: '*',
-        single: true,
-        tenantId: effectiveTenantId
-      });
+      const { data, error } = await dbHelpers.getSchoolDetails();
       
       if (schoolQuery.data && !schoolQuery.error) {
         setSchoolDetails(schoolQuery.data);

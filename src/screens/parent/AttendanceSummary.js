@@ -1269,24 +1269,8 @@ const AttendanceSummary = () => {
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#1976d2" />
             <Text style={styles.loadingText}>
-              {parentLoading ? 'Loading parent context...' : 'Loading attendance data...'}
+              Loading attendance data...
             </Text>
-            {DEBUG_MODE && (
-              <View style={styles.debugContainer}>
-                <Text style={styles.debugLabel}>PARENT AUTH DEBUG INFO:</Text>
-                <Text style={styles.debugText}>Parent Loading: {parentLoading ? 'Yes' : 'No'}</Text>
-                <Text style={styles.debugText}>Auth Loading: {loading ? 'Yes' : 'No'}</Text>
-                <Text style={styles.debugText}>Is Parent: {isParent ? 'Yes' : 'No'}</Text>
-                <Text style={styles.debugText}>Direct Parent Mode: {directParentMode ? 'Yes' : 'No'}</Text>
-                <Text style={styles.debugText}>User: {user?.email || 'Not Set'}</Text>
-                {parentLoading && (
-                  <Text style={styles.debugText}>Status: Resolving parent context...</Text>
-                )}
-                {!parentLoading && loading && (
-                  <Text style={styles.debugText}>Status: Fetching attendance data...</Text>
-                )}
-              </View>
-            )}
           </View>
         </View>
       </SafeAreaView>
@@ -1303,16 +1287,6 @@ const AttendanceSummary = () => {
             <TouchableOpacity style={styles.retryButton} onPress={fetchAttendanceData}>
               <Text style={styles.retryButtonText}>Retry</Text>
             </TouchableOpacity>
-            {DEBUG_MODE && (
-              <View style={styles.debugContainer}>
-                <Text style={styles.debugLabel}>PARENT AUTH DEBUG INFO:</Text>
-                <Text style={styles.debugText}>Parent Loading: {parentLoading ? 'Yes' : 'No'}</Text>
-                <Text style={styles.debugText}>Is Parent: {isParent ? 'Yes' : 'No'}</Text>
-                <Text style={styles.debugText}>Direct Parent Mode: {directParentMode ? 'Yes' : 'No'}</Text>
-                <Text style={styles.debugText}>User: {user?.email || 'Not Set'}</Text>
-                <Text style={styles.debugText}>Error Type: {error?.includes('parent') ? 'Parent-related' : 'Other'}</Text>
-              </View>
-            )}
           </View>
         </View>
       </SafeAreaView>

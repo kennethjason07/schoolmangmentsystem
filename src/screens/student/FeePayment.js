@@ -69,7 +69,7 @@ const FeePayment = () => {
       setError(null);
       try {
         // Validate tenant access before proceeding
-        const tenantValidation = await validateTenantAccess(user.id, tenantId);
+        const tenantValidation = await validateTenantAccess(tenantId, user.id);
         if (!tenantValidation.isValid) {
           console.error('❌ FeePayment tenant validation failed:', tenantValidation.error);
           Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);

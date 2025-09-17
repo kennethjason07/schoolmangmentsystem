@@ -870,130 +870,12 @@ const ParentDashboard = ({ navigation }) => {
     }
   };
 
-  // Function to refresh fees
+  // Function to refresh fees - DISABLED: Now using student_fee_summary view consistently
   const refreshFees = async () => {
-    try {
-      // Check if we should use direct parent authentication
-      if (useDirectParentAuth && selectedStudent) {
-        console.log('👨‍👩‍👧 [PARENT AUTH] Using direct parent authentication for fees');
-        // Direct parent authentication logic here
-        return;
-      }
-      
-      // Enhanced tenant validation following EMAIL_BASED_TENANT_SYSTEM.md patterns
-      
-      // Check if tenant is still loading
-      if (tenantLoading) {
-        console.log('🔄 [TENANT-AWARE] Tenant context is loading, skipping fees refresh...');
-        return;
-      }
-      
-      // For parents, we don\'t require tenant filtering
-      // Parents can access their children\'s data without tenant restrictions
-      if (!tenantId) {
-        // Check if user is authenticated first
-        if (!user) {
-          console.log('🔄 [TENANT-AWARE] User not authenticated yet, skipping fees refresh...');
-          return;
-        }
-        console.log('👨‍👩‍👧 Parent dashboard: No tenant context required for parents, proceeding with email-based lookup...');
-        
-        // Try to get tenant information using email lookup for parents
-        try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
-          const tenantResult = await getTenantIdByEmail(user.email);
-          
-          if (tenantResult.success) {
-            console.log('✅ Parent dashboard: Found tenant via email lookup:', tenantResult.data.tenant.name);
-            // We can proceed with the tenant information if needed, but parents don't require strict tenant filtering
-          } else {
-            console.log('⚠️ Parent dashboard: Could not find tenant via email lookup, but proceeding as parent access is more flexible');
-          }
-        } catch (emailLookupError) {
-          console.log('⚠️ Parent dashboard: Email lookup failed, but proceeding as parent access is more flexible');
-        }
-      } else {
-        // If tenantId is available, validate it
-        const tenantValidation = await validateTenantAccess(tenantId, user.id, 'Parent Dashboard Fees');
-        if (!tenantValidation.isValid) {
-          console.error('❌ Parent dashboard fees validation failed:', tenantValidation.error);
-          setFees([]);
-          return;
-        }
-      }
-      
-      // Fetch fees without strict tenant filtering for parents
-      console.log('📅 [PARENT-FEES] Fetching parent fees...');
-      
-      // Get parent's student data first
-      const { data: parentData, error: parentError } = await supabase
-        .from(TABLES.USERS)
-        .select(`
-          id,
-          email,
-          full_name,
-          linked_parent_of,
-          students!users_linked_parent_of_fkey(
-            id,
-            name,
-            admission_no
-          )
-        `)
-        .eq('id', user.id)
-        // Note: Not filtering by tenant_id for parents
-        .single();
-
-      if (parentError) {
-        console.error('❌ [PARENT-FEES] Error fetching parent data:', parentError);
-        setFees([]);
-        return;
-      }
-
-      if (!parentData?.linked_parent_of) {
-        console.log('⚠️ [PARENT-FEES] Parent not linked to any student');
-        setFees([]);
-        return;
-      }
-
-      // Fetch fees for the parent's student
-      const { data: feesData, error: feesError } = await supabase
-        .from('fees')
-        .select(`
-          id,
-          amount,
-          due_date,
-          status,
-          students!fees_students_fkey(
-            id,
-            name,
-            admission_no
-          )
-        `)
-        .eq('students.id', parentData.linked_parent_of)
-        .order('due_date', { ascending: false })
-        .limit(10);
-
-      if (feesError) {
-        console.error('❌ [PARENT-FEES] Error fetching fees:', feesError);
-        setFees([]);
-        return;
-      }
-
-      // Transform the data to match expected format
-      const formattedFees = feesData.map(item => ({
-        id: item.id,
-        amount: item.amount,
-        due_date: item.due_date,
-        status: item.status,
-        student_name: item.students.name,
-        student_admission_no: item.students.admission_no,
-      }));
-
-      setFees(formattedFees);
-    } catch (err) {
-      console.error('❌ [PARENT-FEES] Error refreshing fees:', err);
-      setFees([]);
-    }
+    console.log('⚠️ [LEGACY] refreshFees function disabled - now using student_fee_summary view via fetchStudentFees instead');
+    // This function is disabled to prevent conflicts with the student_fee_summary view approach
+    // All fee data loading now goes through fetchStudentFees which uses student_fee_summary view
+    return;
   };
 
   // Effect to load notifications when context becomes available
@@ -1247,169 +1129,101 @@ const ParentDashboard = ({ navigation }) => {
   }, []);
   
   const fetchStudentFees = React.useCallback(async (studentId, classId) => {
-    if (!studentId || !classId) return;
+    if (!studentId) return;
     
     try {
-      const currentYear = getCurrentAcademicYear();
-      console.log('🔄 [REAL-TIME] Fetching updated fees for student:', studentId, 'for AY:', currentYear);
+      console.log('🔄 [REAL-TIME] Fetching updated fees for student:', studentId, 'using student_fee_summary view');
       
-      // Fetch both fee structure and payments in parallel
-      const [feeResult, paymentResult] = await Promise.all([
-        supabase
-          .from('fee_structure')
-          .select(`
-            id,
-            academic_year,
-            class_id,
-            student_id,
-            fee_component,
-            amount,
-            base_amount,
-            due_date,
-            created_at,
-            classes(id, class_name, section, academic_year)
-          `)
-          .or(`class_id.eq.${classId},student_id.eq.${studentId}`)
-          .eq('academic_year', currentYear)
-          .order('due_date', { ascending: true }),
-        
-        supabase
-          .from('student_fees')
-          .select(`
-            id,
-            student_id,
-            academic_year,
-            fee_component,
-            amount_paid,
-            payment_date,
-            payment_mode,
-            receipt_number,
-            remarks,
-            created_at
-          `)
-          .eq('student_id', studentId)
-          .eq('academic_year', currentYear)
-          .order('payment_date', { ascending: false })
-      ]);
+      // 🎯 Use exact same data source as parent FeePayment for consistency (REAL-TIME)
+      const { data: feeData, error: feeError } = await supabase
+        .from('student_fee_summary')
+        .select('*')
+        .eq('student_id', studentId)
+        .single();
 
-      const feeStructureData = feeResult.data;
-      const studentPayments = paymentResult.data;
-      
-      if (!feeResult.error && !paymentResult.error) {
-        // Only process fees from database - no hardcoded data
-        let feesToProcess = feeStructureData || [];
-        console.log(`🔄 [REAL-TIME FEE CALC] Processing ${feesToProcess.length} fees from database only`);
-        
-        // Transform fee data with enhanced debugging and accuracy
-        const transformedFees = feesToProcess.map(fee => {
-          const feeComponent = fee.fee_component || fee.name || 'General Fee';
-          
-          console.log(`🔄 [REAL-TIME FEE CALC] Processing fee: "${feeComponent}" - Amount: ₹${fee.amount}`);
-          
-          let payments = [];
-          if (studentPayments?.length > 0) {
-            // Enhanced payment matching with detailed logging
-            payments = studentPayments.filter(p => {
-              const paymentComponent = (p.fee_component || '').trim();
-              const feeComponentStr = feeComponent.trim();
-              const yearMatch = p.academic_year === fee.academic_year;
-              
-              const exactMatch = paymentComponent === feeComponentStr;
-              const caseInsensitiveMatch = paymentComponent.toLowerCase() === feeComponentStr.toLowerCase();
-              const containsMatch = paymentComponent.toLowerCase().includes(feeComponentStr.toLowerCase()) || 
-                                  feeComponentStr.toLowerCase().includes(paymentComponent.toLowerCase());
-              
-              const componentMatch = exactMatch || caseInsensitiveMatch || containsMatch;
-              
-              if (componentMatch && yearMatch) {
-                console.log(`  ✅ [REAL-TIME FEE CALC] Found matching payment: ₹${p.amount_paid} for "${feeComponent}"`);
-              }
-              
-              return componentMatch && yearMatch;
-            }) || [];
-            
-            console.log(`  📋 [REAL-TIME FEE CALC] Total payments found for "${feeComponent}": ${payments.length}`);
-          } else {
-            // Use sample payments if no real payments exist
-            const samplePaymentAmount = feeComponent === 'Tuition Fee' ? 5000 : 
-                                       feeComponent === 'Library Fee' ? 2000 : 0;
-            if (samplePaymentAmount > 0) {
-              payments = [{
-                id: `sample-payment-${feeComponent}`,
-                fee_component: feeComponent,
-                amount_paid: samplePaymentAmount,
-                academic_year: fee.academic_year || '2024-2025',
-                payment_date: '2024-08-15',
-                payment_mode: 'Sample',
-                receipt_number: 1000 + Math.floor(Math.random() * 100)
-              }];
-              console.log(`  📝 [REAL-TIME FEE CALC] Using sample payment: ₹${samplePaymentAmount} for "${feeComponent}"`);
-            }
-          }
-          
-          const totalPaidAmount = payments.reduce((sum, payment) => {
-            const amount = Number(payment.amount_paid || 0);
-            console.log(`    💰 [REAL-TIME FEE CALC] Adding payment: ₹${amount}`);
-            return sum + amount;
-          }, 0);
-          
-          const feeAmount = Number(fee.amount || 0);
-          const remainingAmount = Math.max(0, feeAmount - totalPaidAmount);
-
-          let status = 'unpaid';
-          if (totalPaidAmount >= feeAmount - 0.01) {
-            status = 'paid';
-          } else if (totalPaidAmount > 0.01) {
-            status = 'partial';
-          }
-          
-          console.log(`  💸 [REAL-TIME FEE CALC] Final calculation for "${feeComponent}":`);
-          console.log(`    Fee Amount: ₹${feeAmount}`);
-          console.log(`    Total Paid: ₹${totalPaidAmount}`);
-          console.log(`    Remaining: ₹${remainingAmount}`);
-          console.log(`    Status: ${status}`);
-          
-          // Determine category
-          let category = 'general';
-          if (feeComponent) {
-            const component = feeComponent.toLowerCase();
-            if (component.includes('tuition') || component.includes('academic')) {
-              category = 'tuition';
-            } else if (component.includes('book') || component.includes('library')) {
-              category = 'books';
-            } else if (component.includes('transport') || component.includes('bus')) {
-              category = 'transport';
-            }
-          }
-          
-          return {
-            id: fee.id,
-            name: feeComponent,
-            amount: feeAmount,
-            status: status,
-            due_date: fee.due_date,
-            paidAmount: totalPaidAmount,
-            remainingAmount: remainingAmount,
-            academic_year: fee.academic_year,
-            category: category,
-            payments: payments
-          };
-        });
-        
-        console.log('✅ [REAL-TIME] Updated fees:', transformedFees.length);
-        console.log('💰 [REAL-TIME FEE UPDATE] Setting fees state with data:', transformedFees.map(f => ({ name: f.name, remaining: f.remainingAmount, status: f.status })));
-        setFees(transformedFees);
-        // Force StatCard update immediately
-        console.log('⚡ [REAL-TIME] About to force StatCard update after setting fees');
-        forceStatCardUpdate();
-        // Additional forced re-render after a short delay to ensure state propagation
-        setTimeout(() => {
-          console.log('🔄 [REAL-TIME] Secondary StatCard update (delayed)');
-          forceStatCardUpdate();
-        }, 50);
-      } else {
-        console.error('❌ [REAL-TIME] Error fetching updated fees:', feeResult.error || paymentResult.error);
+      if (feeError) {
+        console.error('Parent Dashboard Real-Time - Error loading fee data from view:', feeError);
+        if (feeError.code === 'PGRST116') {
+          console.log('Parent Dashboard Real-Time - No fee data found for student');
+          setFees([]);
+          // Clear view totals as well
+          window.parentDashboardFeeViewTotals = null;
+          return;
+        }
+        throw feeError;
       }
+
+      console.log('Parent Dashboard Real-Time - Fee data loaded from view:', feeData);
+      
+      // Store view totals globally for dashboard fee distribution summary (REAL-TIME UPDATE)
+      window.parentDashboardFeeViewTotals = {
+        total_final_fees: feeData.total_final_fees,
+        total_paid: feeData.total_paid,
+        total_outstanding: feeData.total_outstanding,
+        total_base_fees: feeData.total_base_fees,
+        total_discounts: feeData.total_discounts
+      };
+      console.log('Parent Dashboard Real-Time - Updated view totals for distribution summary:', window.parentDashboardFeeViewTotals);
+
+      // Transform fee components from JSON to array format (EXACT SAME AS PARENT FEEPAYMENT)
+      const transformedFees = (feeData.fee_components || []).map((component, index) => {
+        // Determine category based on fee component name
+        let category = 'general';
+        if (component.fee_component) {
+          const componentName = component.fee_component.toLowerCase();
+          if (componentName.includes('tuition') || componentName.includes('academic')) {
+            category = 'tuition';
+          } else if (componentName.includes('book') || componentName.includes('library')) {
+            category = 'books';
+          } else if (componentName.includes('transport') || componentName.includes('bus')) {
+            category = 'transport';
+          } else if (componentName.includes('exam') || componentName.includes('test')) {
+            category = 'examination';
+          } else if (componentName.includes('activity') || componentName.includes('sport')) {
+            category = 'activities';
+          } else if (componentName.includes('facility') || componentName.includes('lab')) {
+            category = 'facilities';
+          }
+        }
+
+        return {
+          id: `fee-${component.fee_component}-${index}`,
+          name: component.fee_component,
+          totalAmount: Number(component.base_amount) || 0,
+          discountAmount: Number(component.discount_amount) || 0,
+          amount: Number(component.final_amount) || 0,
+          dueDate: component.due_date || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
+          status: component.status || 'unpaid',
+          paidAmount: Number(component.paid_amount) || 0,
+          remainingAmount: Number(component.outstanding_amount) || 0,
+          description: component.has_discount ? 
+            `${component.fee_component} - Base: ₹${component.base_amount}, Discount: ₹${component.discount_amount}` :
+            `${component.fee_component} - Standard Fee`,
+          category: category,
+          academicYear: feeData.academic_year,
+          hasDiscount: component.has_discount,
+          discountType: component.discount_type,
+          paymentCount: component.payment_count || 0,
+          lastPaymentDate: component.last_payment_date,
+          due_date: component.due_date, // Add for compatibility
+          academic_year: feeData.academic_year // Add for compatibility
+        };
+      });
+      
+      console.log('✅ [REAL-TIME] Updated fees from view:', transformedFees.length);
+      console.log('💰 [REAL-TIME FEE UPDATE] Setting fees state with view data:', transformedFees.map(f => ({ name: f.name, remaining: f.remainingAmount, status: f.status })));
+      setFees(transformedFees);
+      
+      // Force StatCard update immediately
+      console.log('⚡ [REAL-TIME] About to force StatCard update after setting view fees');
+      forceStatCardUpdate();
+      
+      // Additional forced re-render after a short delay to ensure state propagation
+      setTimeout(() => {
+        console.log('🔄 [REAL-TIME] Secondary StatCard update (delayed)');
+        forceStatCardUpdate();
+      }, 50);
+      
     } catch (err) {
       console.error('❌ [REAL-TIME] Error in fetchStudentFees:', err);
     }
@@ -1742,7 +1556,13 @@ const ParentDashboard = ({ navigation }) => {
         setMarks([]);
       }
       
-      // Fetch fees (no tenant filtering needed)
+      // Fetch fees - DISABLED: Now using student_fee_summary view consistently
+      console.log('⚠️ [PARENT AUTH] Fee loading disabled in fetchDashboardDataWithDirectAuth - using fetchStudentFees instead');
+      // Fee loading is now handled by the main data loading and fetchStudentFees functions
+      // which use the student_fee_summary view for consistency
+      
+      /*
+      // OLD CODE DISABLED TO PREVENT CONFLICTS:
       try {
         const currentYear = getCurrentAcademicYear();
         
@@ -1880,6 +1700,10 @@ const ParentDashboard = ({ navigation }) => {
         console.warn('⚠️ [PARENT AUTH] Error fetching fees:', err);
         setFees([]);
       }
+      */ // END OF DISABLED OLD FEE LOADING CODE
+      
+      // Load fees using the correct student_fee_summary view
+      await fetchStudentFees(student.id, student.class_id);
       
       // Get school details (no filtering needed)
       try {
@@ -2328,273 +2152,10 @@ const ParentDashboard = ({ navigation }) => {
       }
 
 
-      // Get fee information from fee_structure table (aligned with FeePayment component)
-      try {
-        console.log('=== PARENT DASHBOARD FEE DATA FETCH (Selected Student) ===');
-        console.log('Student ID:', student.id);
-        console.log('Class ID:', student.class_id);
-        
-          // Fetch both fee structure and payments in parallel for better performance (matching FeePayment)
-          const [feeResult, paymentResult] = await Promise.all([
-            // Get fee structure for class and individual student fees
-            supabase
-              .from('fee_structure')
-              .select(`
-                id,
-                academic_year,
-                class_id,
-                student_id,
-                fee_component,
-                amount,
-                base_amount,
-                due_date,
-                created_at,
-                classes(id, class_name, section, academic_year)
-              `)
-              .or(`class_id.eq.${student.class_id},student_id.eq.${student.id}`)
-              .eq('academic_year', '2024-2025')
-              .order('due_date', { ascending: true }),
-            
-            // Get all payments for this student
-            supabase
-              .from('student_fees')
-              .select(`
-                id,
-                student_id,
-                academic_year,
-                fee_component,
-                amount_paid,
-                payment_date,
-                payment_mode,
-                receipt_number,
-                remarks,
-                created_at
-              `)
-              .eq('student_id', student.id)
-              .eq('academic_year', '2024-2025')
-              .order('payment_date', { ascending: false })
-          ]);
-
-          const feeStructureData = feeResult.data;
-          const feeStructureError = feeResult.error;
-          const studentPayments = paymentResult.data;
-          const paymentsError = paymentResult.error;
-
-          if (feeStructureError) {
-            console.log('ParentDashboard - Fee structure error:', feeStructureError);
-          } else {
-            console.log('ParentDashboard - Fee structure records found:', feeStructureData?.length || 0);
-          }
-          
-          if (paymentsError) {
-            console.log('ParentDashboard - Student payments error:', paymentsError);
-          } else {
-            console.log('ParentDashboard - Student payment records found:', studentPayments?.length || 0);
-          }
-        
-        // If no fee structure found, use sample data for development (same as FeePayment)
-        let feesToProcess = feeStructureData || [];
-        if (!feesToProcess || feesToProcess.length === 0) {
-          console.log('Parent Dashboard (Selected Student) - No fee structure found, using sample data for development');
-          feesToProcess = [
-            {
-              id: 'sample-fee-1',
-              fee_component: 'Tuition Fee',
-              amount: 15000,
-              due_date: '2024-12-31',
-              academic_year: '2024-2025',
-              class_id: student?.class_id,
-              created_at: '2024-08-01T00:00:00.000Z'
-            },
-            {
-              id: 'sample-fee-2', 
-              fee_component: 'Library Fee',
-              amount: 2000,
-              due_date: '2024-10-31',
-              academic_year: '2024-2025',
-              class_id: student?.class_id,
-              created_at: '2024-08-01T00:00:00.000Z'
-            },
-            {
-              id: 'sample-fee-3',
-              fee_component: 'Transport Fee', 
-              amount: 8000,
-              due_date: '2024-09-30',
-              academic_year: '2024-2025',
-              class_id: student?.class_id,
-              created_at: '2024-08-01T00:00:00.000Z'
-            }
-          ];
-        }
-        
-          // Transform fee structure data with improved matching logic (enhanced from FeePayment)
-        const transformedFees = feesToProcess.map(fee => {
-          const feeComponent = fee.fee_component || fee.name || 'General Fee';
-          
-          console.log(`\n🔍 [MAIN DASHBOARD DEBUG] Starting fee transformation for: "${feeComponent}"`);
-          console.log(`   - Fee ID: ${fee.id}`);
-          console.log(`   - Fee Amount: ₹${fee.amount}`);
-          console.log(`   - Fee Academic Year: ${fee.academic_year}`);
-          console.log(`   - Fee Due Date: ${fee.due_date}`);
-          
-          // Find payments for this fee component with improved matching logic
-          let payments = [];
-          if (studentPayments?.length > 0) {
-            console.log(`   - Available student payments to check: ${studentPayments.length}`);
-            
-            // Log all available payments for debugging
-            console.log(`   - All available payments:`);
-            studentPayments.forEach((p, idx) => {
-              console.log(`     ${idx + 1}. ID: ${p.id}, Component: "${p.fee_component}", Amount: ₹${p.amount_paid}, Year: ${p.academic_year}`);
-            });
-            
-            // Use real payments from database with flexible matching
-            payments = studentPayments.filter(p => {
-              console.log(`\n     🔍 Checking payment ID ${p.id}:`);
-              
-              // Try exact match first, then fallback to case-insensitive match
-              const paymentComponent = (p.fee_component || '').trim();
-              const feeComponentStr = feeComponent.trim();
-              const yearMatch = p.academic_year === fee.academic_year;
-              
-              console.log(`       - Payment Component: "${paymentComponent}"`);
-              console.log(`       - Fee Component: "${feeComponentStr}"`);
-              console.log(`       - Payment Year: ${p.academic_year}`);
-              console.log(`       - Fee Year: ${fee.academic_year}`);
-              console.log(`       - Year Match: ${yearMatch}`);
-              
-              // Exact match
-              const exactMatch = paymentComponent === feeComponentStr;
-              console.log(`       - Exact Match: ${exactMatch}`);
-              
-              // Case-insensitive match
-              const caseInsensitiveMatch = paymentComponent.toLowerCase() === feeComponentStr.toLowerCase();
-              console.log(`       - Case Insensitive Match: ${caseInsensitiveMatch}`);
-              
-              // Contains match for partial names
-              const containsMatch = paymentComponent.toLowerCase().includes(feeComponentStr.toLowerCase()) || 
-                                  feeComponentStr.toLowerCase().includes(paymentComponent.toLowerCase());
-              console.log(`       - Contains Match: ${containsMatch}`);
-              
-              const componentMatch = exactMatch || caseInsensitiveMatch || containsMatch;
-              console.log(`       - Overall Component Match: ${componentMatch}`);
-              
-              const finalMatch = componentMatch && yearMatch;
-              console.log(`       - Final Match Result: ${finalMatch}`);
-              
-              if (finalMatch) {
-                console.log(`       ✅ PAYMENT INCLUDED: Payment ID ${p.id} matches fee "${feeComponent}"`);
-              } else {
-                console.log(`       ❌ PAYMENT EXCLUDED: Payment ID ${p.id} does not match fee "${feeComponent}"`);
-              }
-              
-              return finalMatch;
-            }) || [];
-            
-            console.log(`   - Final matched payments count: ${payments.length}`);
-            
-            // Log payment summary for this component
-            if (payments.length > 0) {
-              console.log(`   ✅ Found ${payments.length} payments for "${feeComponent}":`);
-              payments.forEach(p => {
-                console.log(`     - Payment ID: ${p.id}, Amount: ₹${p.amount_paid}, Date: ${p.payment_date}, Component: "${p.fee_component}"`);
-              });
-            } else {
-              console.log(`   ❌ No payments found for "${feeComponent}"`);
-            }
-          } else {
-            console.log(`   ⚠️ No student payments available, using sample data`);
-            
-            // Use sample payments if no real payments exist (same as FeePayment)
-            const samplePaymentAmount = feeComponent === 'Tuition Fee' ? 5000 : 
-                                       feeComponent === 'Library Fee' ? 2000 : 0;
-            if (samplePaymentAmount > 0) {
-              payments = [{
-                id: `sample-payment-${feeComponent}`,
-                fee_component: feeComponent,
-                amount_paid: samplePaymentAmount,
-                academic_year: fee.academic_year || '2024-2025',
-                payment_date: '2024-08-15',
-                payment_mode: 'Sample',
-                receipt_number: 1000 + Math.floor(Math.random() * 100)
-              }];
-              console.log(`   📝 Created sample payment: ₹${samplePaymentAmount} for "${feeComponent}"`);
-            } else {
-              console.log(`   📝 No sample payment created for "${feeComponent}"`);
-            }
-          }
-
-          // Calculate totals with improved precision
-          const totalPaidAmount = payments.reduce((sum, payment) => {
-            const paymentAmount = Number(payment.amount_paid || 0);
-            return sum + paymentAmount;
-          }, 0);
-          
-          const feeAmount = Number(fee.amount || 0);
-          const remainingAmount = Math.max(0, feeAmount - totalPaidAmount);
-
-          // Improved status calculation with tolerance for rounding errors
-          let status = 'unpaid';
-          if (totalPaidAmount >= feeAmount - 0.01) { // Allow 1 paisa tolerance
-            status = 'paid';
-          } else if (totalPaidAmount > 0.01) { // More than 1 paisa paid
-            status = 'partial';
-          }
-          
-          // Determine category based on fee component with improved categorization
-          let category = 'general';
-          if (feeComponent) {
-            const component = feeComponent.toLowerCase();
-            if (component.includes('tuition') || component.includes('academic') || component.includes('admission')) {
-              category = 'tuition';
-            } else if (component.includes('book') || component.includes('library') || component.includes('uniform')) {
-              category = 'books';
-            } else if (component.includes('transport') || component.includes('bus') || component.includes('vehicle')) {
-              category = 'transport';
-            } else if (component.includes('exam') || component.includes('test') || component.includes('assessment')) {
-              category = 'examination';
-            } else if (component.includes('activity') || component.includes('sport') || component.includes('games') || component.includes('co-curricular')) {
-              category = 'activities';
-            } else if (component.includes('facility') || component.includes('lab') || component.includes('computer') || component.includes('maintenance')) {
-              category = 'facilities';
-            } else if (component.includes('development') || component.includes('infrastructure') || component.includes('building')) {
-              category = 'facilities';
-            }
-          }
-
-          return {
-            id: fee.id || `fee-${Date.now()}-${Math.random()}`,
-            name: feeComponent,
-            amount: feeAmount,
-            status: status,
-            due_date: fee.due_date,
-            paidAmount: totalPaidAmount,
-            remainingAmount: remainingAmount,
-            academic_year: fee.academic_year,
-            category: category,
-            description: `${feeComponent} for ${fee.academic_year || '2024-25'}`,
-            isClassFee: fee.class_id ? true : false,
-            isIndividualFee: fee.student_id ? true : false,
-            payments: payments,
-            // Additional fields for better fee tracking
-            baseAmount: fee.base_amount || feeAmount,
-            createdAt: fee.created_at
-          };
-        });
-        
-        console.log('Transformed fees for dashboard (selected student):', transformedFees.map(f => ({ 
-          name: f.name, 
-          amount: f.amount, 
-          status: f.status, 
-          due_date: f.due_date 
-        })));
-        console.log('=======================================================');
-        
-        setFees(transformedFees || []);
-      } catch (err) {
-        console.log('Fee fetch error:', err);
-        setFees([]);
-      }
+      // Fee loading is now handled by fetchStudentFees function which uses student_fee_summary view
+      // This prevents conflicts and ensures consistency with the FeePayment screen
+      console.log('🎯 [PARENT DASHBOARD] Fee loading delegated to fetchStudentFees (student_fee_summary view)');
+      // The fetchStudentFees function will be called after the main data loading completes
 
       // Get school details (independent of student)
       try {
@@ -2606,6 +2167,9 @@ const ParentDashboard = ({ navigation }) => {
         console.log('School details fetch error:', err);
         setSchoolDetails(null);
       }
+      
+      // Load fees using the correct student_fee_summary view
+      await fetchStudentFees(student.id, student.class_id);
       
     } catch (err) {
       console.error('Error fetching dashboard data for student:', err);
@@ -3350,204 +2914,87 @@ const ParentDashboard = ({ navigation }) => {
         try {
           console.log('=== PARENT DASHBOARD FEE DATA FETCH ===');
           console.log('Student ID:', studentDetails.id);
-          console.log('Class ID:', studentDetails.class_id);
+          console.log('Using student_fee_summary view for consistency with FeePayment screen');
           
-          // Fetch both fee structure and payments in parallel to avoid race conditions (matching fetchDashboardDataForStudent)
-          console.log('🔄 [MAIN DASHBOARD] Fetching fee structure and payments in parallel...');
-          
-          const [feeResult, paymentResult] = await Promise.all([
-            // Get fee structure for class and individual student fees
-            supabase
-              .from('fee_structure')
-              .select(`
-                *,
-                classes(id, class_name, section, academic_year)
-              `)
-              .or(`class_id.eq.${studentDetails.class_id},student_id.eq.${studentDetails.id}`)
-              .eq('academic_year', '2024-2025')
-              .order('due_date', { ascending: true }),
-            
-            // Get all payments for this student
-            supabase
-              .from('student_fees')
-              .select(`
-                id,
-                student_id,
-                academic_year,
-                fee_component,
-                amount_paid,
-                payment_date,
-                payment_mode,
-                receipt_number,
-                remarks,
-                created_at
-              `)
-              .eq('student_id', studentDetails.id)
-              .eq('academic_year', '2024-2025')
-              .order('payment_date', { ascending: false })
-          ]);
+          // 🎯 Use exact same data source as parent FeePayment for consistency
+          const { data: feeData, error: feeError } = await supabase
+            .from('student_fee_summary')
+            .select('*')
+            .eq('student_id', studentDetails.id)
+            .single();
 
-          const feeStructureData = feeResult.data;
-          const feeStructureError = feeResult.error;
-          const studentPayments = paymentResult.data;
-          const paymentsError = paymentResult.error;
-
-          if (feeStructureError) {
-            console.log('Fee structure error:', feeStructureError);
-          } else {
-            console.log('Fee structure records found:', feeStructureData?.length || 0);
-          }
-          
-          if (paymentsError) {
-            console.log('Student payments error:', paymentsError);
-          } else {
-            console.log('Student payment records found:', studentPayments?.length || 0);
-          }
-          
-          // Handle case where payments exist but no fee structure is found
-          let feesToProcess = feeStructureData || [];
-          console.log('🔍 [FEE STRUCTURE ANALYSIS] Fee structure records:', feesToProcess.length);
-          console.log('🔍 [FEE STRUCTURE ANALYSIS] Payment records:', studentPayments?.length || 0);
-          
-          // If no fee structure but payments exist, create fee structure from payments
-          if ((!feesToProcess || feesToProcess.length === 0) && studentPayments && studentPayments.length > 0) {
-            console.log('💡 [SMART FEE RECONSTRUCTION] No fee structure found but payments exist. Reconstructing from payments...');
-            
-            // Group payments by fee component to reconstruct fee structure
-            const paymentGroups = {};
-            studentPayments.forEach(payment => {
-              const component = payment.fee_component || 'General Fee';
-              if (!paymentGroups[component]) {
-                paymentGroups[component] = {
-                  payments: [],
-                  totalPaid: 0
-                };
-              }
-              paymentGroups[component].payments.push(payment);
-              paymentGroups[component].totalPaid += Number(payment.amount_paid || 0);
-            });
-            
-            console.log('📊 [SMART FEE RECONSTRUCTION] Payment groups found:', Object.keys(paymentGroups));
-            
-            // Create synthetic fee structure based on payments
-            feesToProcess = Object.keys(paymentGroups).map((component, index) => {
-              const group = paymentGroups[component];
-              
-              // Estimate fee amount based on payment history and typical amounts
-              let estimatedAmount = group.totalPaid;
-              
-              // Apply intelligent estimates based on fee component type
-              if (component.toLowerCase().includes('tuition')) {
-                // Tuition fees are typically larger, assume paid amount might be partial
-                estimatedAmount = Math.max(group.totalPaid, 15000);
-              } else if (component.toLowerCase().includes('transport')) {
-                // Transport fees vary, use paid amount or reasonable estimate
-                estimatedAmount = Math.max(group.totalPaid, 8000);
-              } else if (component.toLowerCase().includes('library')) {
-                // Library fees are typically smaller
-                estimatedAmount = Math.max(group.totalPaid, 2000);
-              }
-              
-              console.log(`🔧 [SMART FEE RECONSTRUCTION] Created synthetic fee for "${component}":`); 
-              console.log(`   - Estimated Amount: ₹${estimatedAmount}`);
-              console.log(`   - Total Paid: ₹${group.totalPaid}`);
-              console.log(`   - Payment Count: ${group.payments.length}`);
-              
-              return {
-                id: `reconstructed-fee-${index}`,
-                fee_component: component,
-                amount: estimatedAmount,
-                academic_year: '2024-2025',
-                due_date: '2024-12-31',
-                class_id: studentDetails.class_id,
-                created_at: new Date().toISOString(),
-                _isReconstructed: true // Flag to identify reconstructed fees
-              };
-            });
-            
-            console.log('✅ [SMART FEE RECONSTRUCTION] Successfully reconstructed', feesToProcess.length, 'fees from payment history');
-          }
-          
-          console.log('📋 [FINAL FEE PROCESSING] Total fees to process:', feesToProcess.length);
-          
-          // Transform fee structure data (same logic as FeePayment)
-          const transformedFees = feesToProcess.map(fee => {
-            const feeComponent = fee.fee_component || fee.name || 'General Fee';
-            
-            console.log(`🔄 [MAIN DASHBOARD FEE CALC] Processing fee: "${feeComponent}" - Amount: ₹${fee.amount}`);
-            
-            // Find payments for this fee component - check both real and sample payments
-            let payments = [];
-            if (studentPayments?.length > 0) {
-              // Use real payments from database with flexible matching (same as fetchDashboardDataForStudent)
-              payments = studentPayments.filter(p => {
-                const paymentComponent = (p.fee_component || '').trim();
-                const feeComponentStr = feeComponent.trim();
-                const yearMatch = p.academic_year === fee.academic_year;
-                
-                // Exact match
-                const exactMatch = paymentComponent === feeComponentStr;
-                // Case-insensitive match
-                const caseInsensitiveMatch = paymentComponent.toLowerCase() === feeComponentStr.toLowerCase();
-                // Contains match for partial names
-                const containsMatch = paymentComponent.toLowerCase().includes(feeComponentStr.toLowerCase()) || 
-                                    feeComponentStr.toLowerCase().includes(paymentComponent.toLowerCase());
-                
-                const componentMatch = exactMatch || caseInsensitiveMatch || containsMatch;
-                
-                if (componentMatch && yearMatch) {
-                  console.log(`  ✅ [MAIN DASHBOARD FEE CALC] Found matching payment: ₹${p.amount_paid} for "${feeComponent}"`);
-                }
-                
-                return componentMatch && yearMatch;
-              }) || [];
-              
-              console.log(`  📋 [MAIN DASHBOARD FEE CALC] Total payments found for "${feeComponent}": ${payments.length}`);
-            } else {
-              console.log(`  ⚠️ [MAIN DASHBOARD FEE CALC] No student payments found for fee: "${feeComponent}"`);
+          if (feeError) {
+            console.error('Parent Dashboard - Error loading fee data from view:', feeError);
+            if (feeError.code === 'PGRST116') {
+              console.log('Parent Dashboard - No fee data found for student, showing empty state');
+              setFees([]);
+              return;
             }
+            throw feeError;
+          }
 
-            const totalPaidAmount = payments.reduce((sum, payment) => {
-              const paymentAmount = Number(payment.amount_paid || 0);
-              console.log(`    💰 [MAIN DASHBOARD FEE CALC] Adding payment: ₹${paymentAmount}`);
-              return sum + paymentAmount;
-            }, 0);
-            
-            const feeAmount = Number(fee.amount || 0);
-            const remainingAmount = Math.max(0, feeAmount - totalPaidAmount);
+          console.log('Parent Dashboard - Fee data loaded from view:', feeData);
+          
+          // Store view totals globally for dashboard fee distribution summary
+          window.parentDashboardFeeViewTotals = {
+            total_final_fees: feeData.total_final_fees,
+            total_paid: feeData.total_paid,
+            total_outstanding: feeData.total_outstanding,
+            total_base_fees: feeData.total_base_fees,
+            total_discounts: feeData.total_discounts
+          };
+          console.log('Parent Dashboard - Stored view totals for distribution summary:', window.parentDashboardFeeViewTotals);
 
-            let status = 'unpaid';
-            if (totalPaidAmount >= feeAmount) {
-              status = 'paid';
-            } else if (totalPaidAmount > 0) {
-              status = 'partial';
+          // Transform fee components from JSON to array format (EXACT SAME AS PARENT FEEPAYMENT)
+          const transformedFees = (feeData.fee_components || []).map((component, index) => {
+            // Determine category based on fee component name
+            let category = 'general';
+            if (component.fee_component) {
+              const componentName = component.fee_component.toLowerCase();
+              if (componentName.includes('tuition') || componentName.includes('academic')) {
+                category = 'tuition';
+              } else if (componentName.includes('book') || componentName.includes('library')) {
+                category = 'books';
+              } else if (componentName.includes('transport') || componentName.includes('bus')) {
+                category = 'transport';
+              } else if (componentName.includes('exam') || componentName.includes('test')) {
+                category = 'examination';
+              } else if (componentName.includes('activity') || componentName.includes('sport')) {
+                category = 'activities';
+              } else if (componentName.includes('facility') || componentName.includes('lab')) {
+                category = 'facilities';
+              }
             }
-            
-            console.log(`  💸 [MAIN DASHBOARD FEE CALC] Final calculation for "${feeComponent}":`);
-            console.log(`    Fee Amount: ₹${feeAmount}`);
-            console.log(`    Total Paid: ₹${totalPaidAmount}`);
-            console.log(`    Remaining: ₹${remainingAmount}`);
-            console.log(`    Status: ${status}`);
-            console.log(`    Payments count: ${payments.length}`);
-            console.log(`    Payments details:`, payments.map(p => ({ id: p.id, amount: p.amount_paid, component: p.fee_component })));
-            console.log('  =======================================');
 
             return {
-              id: fee.id || `fee-${Date.now()}-${Math.random()}`,
-              name: feeComponent,
-              amount: feeAmount,
-              status: status,
-              due_date: fee.due_date,
-              paidAmount: totalPaidAmount,
-              remainingAmount: remainingAmount,
-              academic_year: fee.academic_year
+              id: `fee-${component.fee_component}-${index}`,
+              name: component.fee_component,
+              totalAmount: Number(component.base_amount) || 0,
+              discountAmount: Number(component.discount_amount) || 0,
+              amount: Number(component.final_amount) || 0,
+              dueDate: component.due_date || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
+              status: component.status || 'unpaid',
+              paidAmount: Number(component.paid_amount) || 0,
+              remainingAmount: Number(component.outstanding_amount) || 0,
+              description: component.has_discount ? 
+                `${component.fee_component} - Base: ₹${component.base_amount}, Discount: ₹${component.discount_amount}` :
+                `${component.fee_component} - Standard Fee`,
+              category: category,
+              academicYear: feeData.academic_year,
+              hasDiscount: component.has_discount,
+              discountType: component.discount_type,
+              paymentCount: component.payment_count || 0,
+              lastPaymentDate: component.last_payment_date,
+              due_date: component.due_date, // Add for compatibility
+              academic_year: feeData.academic_year // Add for compatibility
             };
           });
           
-          console.log('Transformed fees for dashboard:', transformedFees.map(f => ({ 
+          console.log('Parent Dashboard - Transformed fees from view:', transformedFees.map(f => ({ 
             name: f.name, 
             amount: f.amount, 
-            status: f.status, 
+            status: f.status,
+            remainingAmount: f.remainingAmount,
             due_date: f.due_date 
           })));
           console.log('=========================================');
@@ -3634,32 +3081,6 @@ const ParentDashboard = ({ navigation }) => {
     };
   }, [user?.id, refreshUniversalCounts]);
   
-  // Manual test function to verify badge notifications and debug messages
-  const testBadgeNotification = async () => {
-    console.log('🧪 MANUAL TEST: Testing universal notification system');
-    console.log('🧪 Current universal counts:', universalCounts);
-    console.log('🧪 Current bell icon count:', unreadCount);
-    console.log('🧪 Current user ID:', user?.id);
-    console.log('🧪 Local notifications array length:', notifications.length);
-    
-    // Force refresh universal counts
-    await refreshUniversalCounts();
-    
-    // Also refresh local notifications for modal display
-    await refreshNotifications();
-    
-    console.log('🧪 MANUAL TEST: Refresh completed');
-  };
-  
-  // Debug logging for notification count - comprehensive
-  console.log('=== PARENT DASHBOARD NOTIFICATION COUNT DEBUG ===');
-  console.log('Universal counts:', universalCounts);
-  console.log('Bell icon count:', unreadCount);
-  console.log('Local notifications array length:', notifications.length);
-  console.log('Local unread notifications:', notifications.filter(n => !n.is_read).length);
-  console.log('User ID:', user?.id);
-  console.log('User type: parent');
-  console.log('================================================');
 
   // Calculate attendance percentage with useMemo for better performance and updates
   const attendanceStats = React.useMemo(() => {
@@ -4362,275 +3783,8 @@ const ParentDashboard = ({ navigation }) => {
           </View>
         </View>
 
-        {/* Fee Information - Comprehensive discount-aware display */}
-        {studentData?.id && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Fee Information</Text>
-              <TouchableOpacity onPress={() => navigation.navigate('Fees')}>
-                <Text style={styles.viewAllText}>View Details</Text>
-              </TouchableOpacity>
-            </View>
-            <StudentFeeCard 
-              studentId={studentData.id} 
-              compact={false}
-            />
-          </View>
-        )}
         
-        {/* Fee Distribution Summary Cards */}
-        {fees.length > 0 && (() => {
-          console.log('=== FEE OVERVIEW DEBUG ===');
-          console.log('Current fees array:', fees.map(f => ({ 
-            id: f.id,
-            name: f.name, 
-            amount: f.amount, 
-            paidAmount: f.paidAmount,
-            remainingAmount: f.remainingAmount,
-            status: f.status
-          })));
-          
-          const totalDue = fees.reduce((sum, fee) => {
-            const amount = fee.amount || 0;
-            console.log(`Adding due amount for ${fee.name}: ₹${amount}`);
-            return sum + amount;
-          }, 0);
-          
-          const totalPaid = fees.reduce((sum, fee) => {
-            const paid = fee.paidAmount || 0;
-            console.log(`Adding paid amount for ${fee.name}: ₹${paid} (has payments: ${!!fee.payments?.length})`);
-            if (fee.payments?.length > 0) {
-              console.log(`  Payment details for ${fee.name}:`, fee.payments.map(p => ({ id: p.id, amount: p.amount_paid })));
-            }
-            return sum + paid;
-          }, 0);
-          
-          const totalOutstanding = fees.reduce((sum, fee) => sum + (fee.remainingAmount || 0), 0);
-          const paidCount = fees.filter(f => f.status === 'paid').length;
-          const partialCount = fees.filter(f => f.status === 'partial').length;
-          const unpaidCount = fees.filter(f => f.status === 'unpaid').length;
-          
-          console.log('Fee Overview Totals:', {
-            totalDue,
-            totalPaid,
-            totalOutstanding,
-            paidCount,
-            partialCount,
-            unpaidCount
-          });
-          console.log('=========================');
-          
-          return (
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Fee Overview</Text>
-                <TouchableOpacity onPress={() => navigation.navigate('Fees')}>
-                  <Text style={styles.viewAllText}>View Details</Text>
-                </TouchableOpacity>
-              </View>
-              
-              {/* Fee Distribution Cards */}
-              <View style={styles.feeDistributionContainer}>
-                <View style={[styles.feeDistributionCard, { borderLeftColor: '#2196F3' }]}>
-                  <Text style={styles.feeDistributionLabel}>Total Due</Text>
-                  <Text style={[styles.feeDistributionAmount, { color: '#2196F3' }]}>₹{totalDue.toLocaleString()}</Text>
-                  <Text style={styles.feeDistributionSubtitle}>{fees.length} components</Text>
-                </View>
-                
-                <View style={[styles.feeDistributionCard, { borderLeftColor: '#4CAF50' }]}>
-                  <Text style={styles.feeDistributionLabel}>Paid</Text>
-                  <Text style={[styles.feeDistributionAmount, { color: '#4CAF50' }]}>₹{totalPaid.toLocaleString()}</Text>
-                  <Text style={styles.feeDistributionSubtitle}>{paidCount} complete</Text>
-                </View>
-                
-                <View style={[styles.feeDistributionCard, { borderLeftColor: totalOutstanding > 0 ? '#FF5722' : '#4CAF50' }]}>
-                  <Text style={styles.feeDistributionLabel}>Outstanding</Text>
-                  <Text style={[styles.feeDistributionAmount, { color: totalOutstanding > 0 ? '#FF5722' : '#4CAF50' }]}>₹{totalOutstanding.toLocaleString()}</Text>
-                  <Text style={styles.feeDistributionSubtitle}>
-                    {unpaidCount > 0 && `${unpaidCount} unpaid`}{partialCount > 0 && ` • ${partialCount} partial`}
-                    {totalOutstanding === 0 && 'All settled'}
-                  </Text>
-                </View>
-              </View>
-              
-              {/* Fee Progress Bar */}
-              <View style={styles.feeProgressContainer}>
-                <View style={styles.feeProgressHeader}>
-                  <Text style={styles.feeProgressLabel}>Payment Progress</Text>
-                  <Text style={styles.feeProgressPercentage}>
-                    {totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0}%
-                  </Text>
-                </View>
-                <View style={styles.feeProgressBar}>
-                  <View 
-                    style={[
-                      styles.feeProgressFill,
-                      { 
-                        width: totalDue > 0 ? `${Math.round((totalPaid / totalDue) * 100)}%` : '0%',
-                        backgroundColor: totalDue > 0 && totalPaid >= totalDue ? '#4CAF50' : '#2196F3'
-                      }
-                    ]} 
-                  />
-                </View>
-              </View>
-            </View>
-          );
-        })()}
         
-        {/* Detailed Fee Structure */}
-        {fees.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Fee Structure</Text>
-              <TouchableOpacity onPress={() => navigation.navigate('Fees')}>
-                <Text style={styles.viewAllText}>Pay Now</Text>
-              </TouchableOpacity>
-            </View>
-            
-            <View style={styles.feeStructureContainer}>
-              {fees.map((fee, index) => {
-                const getStatusColor = (status) => {
-                  switch (status) {
-                    case 'paid': return '#4CAF50';
-                    case 'partial': return '#FF9800';
-                    case 'unpaid': return '#F44336';
-                    default: return '#666';
-                  }
-                };
-                
-                const getStatusIcon = (status) => {
-                  switch (status) {
-                    case 'paid': return 'checkmark-circle';
-                    case 'partial': return 'time';
-                    case 'unpaid': return 'alert-circle';
-                    default: return 'help-circle';
-                  }
-                };
-                
-                const getCategoryIcon = (category) => {
-                  switch (category) {
-                    case 'tuition': return 'school';
-                    case 'books': return 'library';
-                    case 'transport': return 'bus';
-                    case 'examination': return 'document-text';
-                    case 'activities': return 'football';
-                    case 'facilities': return 'build';
-                    default: return 'card';
-                  }
-                };
-                
-                const formatDueDate = (dueDate) => {
-                  if (!dueDate) return 'No due date';
-                  const date = new Date(dueDate);
-                  const today = new Date();
-                  const diffTime = date - today;
-                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                  
-                  if (diffDays < 0) return 'Overdue';
-                  if (diffDays === 0) return 'Due today';
-                  if (diffDays === 1) return 'Due tomorrow';
-                  return `Due in ${diffDays} days`;
-                };
-                
-                return (
-                  <View key={fee.id || index} style={styles.feeStructureCard}>
-                    <View style={styles.feeStructureHeader}>
-                      <View style={styles.feeComponentInfo}>
-                        <View style={[styles.feeCategoryIcon, { backgroundColor: getStatusColor(fee.status) }]}>
-                          <Ionicons name={getCategoryIcon(fee.category)} size={20} color="#fff" />
-                        </View>
-                        <View style={styles.feeNameContainer}>
-                          <Text style={styles.feeComponentName}>{fee.name}</Text>
-                          <Text style={styles.feeComponentCategory}>{fee.category?.toUpperCase() || 'GENERAL'}</Text>
-                        </View>
-                      </View>
-                      
-                      <View style={styles.feeStatusContainer}>
-                        <View style={[styles.feeStatusBadge, { backgroundColor: getStatusColor(fee.status) }]}>
-                          <Ionicons name={getStatusIcon(fee.status)} size={12} color="#fff" />
-                          <Text style={styles.feeStatusBadgeText}>{fee.status.toUpperCase()}</Text>
-                        </View>
-                      </View>
-                    </View>
-                    
-                    <View style={styles.feeAmountDetails}>
-                      <View style={styles.feeAmountRow}>
-                        <Text style={styles.feeAmountLabel}>Total Amount:</Text>
-                        <Text style={styles.feeAmountValue}>₹{fee.amount.toLocaleString()}</Text>
-                      </View>
-                      
-                      {fee.paidAmount > 0 && (
-                        <View style={styles.feeAmountRow}>
-                          <Text style={styles.feeAmountLabel}>Paid:</Text>
-                          <Text style={[styles.feeAmountValue, { color: '#4CAF50' }]}>₹{fee.paidAmount.toLocaleString()}</Text>
-                        </View>
-                      )}
-                      
-                      {fee.remainingAmount > 0 && (
-                        <View style={styles.feeAmountRow}>
-                          <Text style={styles.feeAmountLabel}>Remaining:</Text>
-                          <Text style={[styles.feeAmountValue, { color: '#FF5722', fontWeight: 'bold' }]}>₹{fee.remainingAmount.toLocaleString()}</Text>
-                        </View>
-                      )}
-                      
-                      {fee.discountApplied > 0 && (
-                        <View style={styles.feeAmountRow}>
-                          <Text style={styles.feeAmountLabel}>Discount:</Text>
-                          <Text style={[styles.feeAmountValue, { color: '#4CAF50' }]}>₹{fee.discountApplied.toLocaleString()}</Text>
-                        </View>
-                      )}
-                    </View>
-                    
-                    <View style={styles.feeDueDateContainer}>
-                      <Ionicons name="calendar-outline" size={16} color="#666" />
-                      <Text style={[
-                        styles.feeDueDateText,
-                        { color: fee.due_date && new Date(fee.due_date) < new Date() ? '#F44336' : '#666' }
-                      ]}>
-                        {formatDueDate(fee.due_date)}
-                      </Text>
-                    </View>
-                    
-                    {/* Payment History for this fee */}
-                    {fee.payments && fee.payments.length > 0 && (
-                      <View style={styles.feePaymentHistory}>
-                        <Text style={styles.feePaymentHistoryTitle}>Recent Payments:</Text>
-                        {fee.payments.slice(0, 2).map((payment, payIdx) => (
-                          <View key={payment.id || payIdx} style={styles.feePaymentItem}>
-                            <View style={styles.feePaymentInfo}>
-                              <Text style={styles.feePaymentAmount}>₹{Number(payment.amount_paid).toLocaleString()}</Text>
-                              <Text style={styles.feePaymentDate}>{formatDateToDDMMYYYY(payment.payment_date)}</Text>
-                            </View>
-                            <Text style={styles.feePaymentMode}>{payment.payment_mode || 'N/A'}</Text>
-                          </View>
-                        ))}
-                        {fee.payments.length > 2 && (
-                          <TouchableOpacity
-                            style={styles.viewMorePaymentsButton}
-                            onPress={() => navigation.navigate('Fees', { selectedFee: fee.id })}
-                          >
-                            <Text style={styles.viewMorePaymentsText}>View {fee.payments.length - 2} more payments</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    )}
-                    
-                    {/* Quick Action for this fee */}
-                    {fee.remainingAmount > 0 && (
-                      <TouchableOpacity
-                        style={styles.feeQuickPayButton}
-                        onPress={() => navigation.navigate('Fees', { selectedFee: fee.id, autoSelectPayment: true })}
-                      >
-                        <Ionicons name="card" size={16} color="#fff" />
-                        <Text style={styles.feeQuickPayText}>Pay ₹{fee.remainingAmount.toLocaleString()}</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-        )}
         
         {/* Recent Marks */}
         {marks.length > 0 && (
@@ -4699,26 +3853,6 @@ const ParentDashboard = ({ navigation }) => {
             keyExtractor={(item, index) => index.toString()}
             scrollEnabled={false}
           />
-        </View>
-
-        {/* Debug Section - Notification Testing */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>🔧 Debug Tools</Text>
-            <Text style={styles.viewAllText}>Testing Only</Text>
-          </View>
-          
-          {/* Debug Badge */}
-          <View style={styles.debugContainer}>
-            <Text style={styles.debugLabel}>Message Count Debug:</Text>
-            <DebugBadge />
-          </View>
-          
-          {/* Notification Tester */}
-          <View style={styles.debugContainer}>
-            <Text style={styles.debugLabel}>Notification Test Tools:</Text>
-            <NotificationTester />
-          </View>
         </View>
 
       </ScrollView>

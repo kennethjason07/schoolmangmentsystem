@@ -84,6 +84,7 @@ import Notifications from '../screens/parent/Notifications';
 import ChatWithTeacher from '../screens/parent/ChatWithTeacher';
 import StudentSelectionScreen from '../screens/parent/StudentSelectionScreen';
 import ParentViewHomework from '../screens/parent/ParentViewHomework';
+import ParentQRPayment from '../screens/parent/ParentQRPayment';
 
 
 // Student Screens
@@ -493,6 +494,7 @@ export default function AppNavigator() {
               <>
                 <Stack.Screen name="StudentSelection" component={StudentSelectionScreen} />
                 <Stack.Screen name="ParentTabs" component={ParentTabNavigator} />
+                <Stack.Screen name="ParentQRPayment" component={ParentQRPayment} />
                 <Stack.Screen name="ParentNotifications" component={Notifications} />
                 <Stack.Screen name="ParentViewHomework" component={ParentViewHomework} />
                 <Stack.Screen name="Profile" component={ProfileScreen} />
