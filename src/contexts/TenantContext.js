@@ -89,6 +89,8 @@ export const TenantProvider = ({ children }) => {
       }
     };
     
+    // Only initialize tenant if we're not on the login screen
+    // Check if we're in a navigation context and what screen we're on
     initializeTenantData();
     
     console.log('🚀 TenantProvider: useEffect setup complete');

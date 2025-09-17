@@ -19,6 +19,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase } from '../../utils/supabase';
 import * as Animatable from 'react-native-animatable';
+// 🚀 ENHANCED_TENANT_SYSTEM: Import tenant access hook and helpers
+import { useTenantAccess, initializeTenantHelpers } from '../../utils/tenantHelpers';
+import { getTenantIdByEmail } from '../../utils/getTenantByEmail';
 
 // Import VidyaSethu logo with fallback
 const VidyaSethuLogo = require('../../../assets/logo-white.png');
@@ -38,6 +41,8 @@ const LoginScreen = ({ navigation }) => {
   const [passwordError, setPasswordError] = useState('');
   const [logoError, setLogoError] = useState(false); // Try to load PNG logo first
   const { signIn } = useAuth();
+  // 🚀 ENHANCED_TENANT_SYSTEM: Use tenant access hook
+  const { isReady, isLoading: tenantLoading, error: tenantError } = useTenantAccess();
 
   const roles = [
     { key: 'admin', label: 'Admin', description: 'School Management', icon: 'school', color: '#1976d2' },
@@ -69,6 +74,42 @@ const LoginScreen = ({ navigation }) => {
     }
     setPasswordError('');
     return true;
+  };
+
+  // 🚀 ENHANCED_TENANT_SYSTEM: Validate tenant access for the user
+  const validateTenantAccess = async (userEmail) => {
+    try {
+      console.log('🚀 ENHANCED_TENANT_SYSTEM: Validating tenant access for:', userEmail);
+      
+      // Get tenant information using email lookup
+      const tenantResult = await getTenantIdByEmail(userEmail);
+      
+      if (!tenantResult.success) {
+        console.error('🚀 ENHANCED_TENANT_SYSTEM: Tenant validation failed:', tenantResult.error);
+        
+        // Show user-friendly error message
+        if (tenantResult.userFriendlyError) {
+          Alert.alert(
+            tenantResult.userFriendlyError,
+            `${tenantResult.error}\n\n${tenantResult.suggestions ? tenantResult.suggestions.join('\n') : ''}`
+          );
+        } else {
+          Alert.alert('Access Error', tenantResult.error || 'Unable to validate school access');
+        }
+        
+        return false;
+      }
+      
+      // Initialize tenant helpers with the tenant ID
+      initializeTenantHelpers(tenantResult.data.tenantId);
+      console.log('🚀 ENHANCED_TENANT_SYSTEM: Tenant helpers initialized with ID:', tenantResult.data.tenantId);
+      
+      return true;
+    } catch (error) {
+      console.error('🚀 ENHANCED_TENANT_SYSTEM: Error validating tenant access:', error);
+      Alert.alert('Error', 'Failed to validate school access. Please try again.');
+      return false;
+    }
   };
 
   // Check if database is properly setup and role exists in Supabase
@@ -129,7 +170,11 @@ const LoginScreen = ({ navigation }) => {
         console.log('⚠️ Role not found:', properRoleName);
         Alert.alert(
           'Role Not Available', 
-          `The role '${properRoleName}' is not configured in the system.\n\nAvailable roles: ${availableRoles}\n\nPlease contact the administrator to add this role.`
+          `The role '${properRoleName}' is not configured in the system.
+
+Available roles: ${availableRoles}
+
+Please contact the administrator to add this role.`
         );
         return false;
       }
@@ -158,6 +203,13 @@ const LoginScreen = ({ navigation }) => {
     setIsLoading(true);
     
     try {
+      // 🚀 ENHANCED_TENANT_SYSTEM: Validate tenant access before login
+      const hasTenantAccess = await validateTenantAccess(email);
+      if (!hasTenantAccess) {
+        console.log('🚀 ENHANCED_TENANT_SYSTEM: Tenant access validation failed');
+        return;
+      }
+      
       const { data, error } = await signIn(email, password, selectedRole);
       
       if (error) {
@@ -660,4 +712,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default LoginScreen; 
+export default LoginScreen;  

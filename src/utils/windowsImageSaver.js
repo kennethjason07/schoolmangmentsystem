@@ -10,7 +10,8 @@ let Sharing = null;
 let MediaLibrary = null;
 
 try {
-  FileSystem = require('expo-file-system');
+  // Use legacy API to avoid deprecation warnings
+  FileSystem = require('expo-file-system/legacy');
 } catch (e) {
   console.log('📱 expo-file-system not available on this platform (likely web)');
 }

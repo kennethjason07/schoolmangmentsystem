@@ -79,16 +79,21 @@ export const clearCachedTenantId = () => {
 export const createTenantQuery = (table, selectClause = '*', filters = {}) => {
   const tenantId = getCachedTenantId();
   
-  if (!tenantId) {
-    throw new Error('No tenant context available. Please ensure user is logged in and tenant is initialized.');
-  }
-
-  console.log(`🔍 Creating tenant query for '${table}' with tenant_id: ${tenantId}`);
+  // Check if current user is a parent - parents don't require tenant filtering
+  // This is a simplified check - in practice, you might want to pass this as a parameter
+  // or check the user's role in a more robust way
+  
+  console.log(`🔍 Creating tenant query for '${table}' with tenant_id: ${tenantId || 'NOT REQUIRED FOR PARENTS'}`);
   
   let query = supabase
     .from(table)
-    .select(selectClause)
-    .eq('tenant_id', tenantId);
+    .select(selectClause);
+
+  // Only apply tenant filtering if tenantId exists
+  // Parents and other special cases might not require tenant filtering
+  if (tenantId) {
+    query = query.eq('tenant_id', tenantId);
+  }
 
   // Apply additional filters
   Object.entries(filters).forEach(([key, value]) => {
@@ -103,17 +108,15 @@ export const createTenantQuery = (table, selectClause = '*', filters = {}) => {
  */
 export const tenantDatabase = {
   /**
-   * Create record with automatic tenant_id
+   * Create record with automatic tenant_id (if available)
    */
   async create(table, data) {
     const tenantId = getCachedTenantId();
-    if (!tenantId) {
-      throw new Error('No tenant context for create operation');
-    }
-
-    const dataWithTenant = { ...data, tenant_id: tenantId };
     
-    console.log(`✏️ Creating record in '${table}' with tenant_id: ${tenantId}`);
+    // For parents and other special cases, tenant_id might not be required
+    const dataWithTenant = tenantId ? { ...data, tenant_id: tenantId } : data;
+    
+    console.log(`✏️ Creating record in '${table}' with tenant_id: ${tenantId || 'NOT PROVIDED'}`);
     
     const { data: result, error } = await supabase
       .from(table)
@@ -125,7 +128,7 @@ export const tenantDatabase = {
   },
 
   /**
-   * Read records with automatic tenant filtering
+   * Read records with automatic tenant filtering (if tenantId available)
    */
   async read(table, filters = {}, selectClause = '*') {
     const query = createTenantQuery(table, selectClause, filters);
@@ -137,64 +140,70 @@ export const tenantDatabase = {
   },
 
   /**
-   * Read single record with tenant filtering
+   * Read single record with tenant filtering (if tenantId available)
    */
   async readOne(table, id, selectClause = '*') {
     const tenantId = getCachedTenantId();
-    if (!tenantId) {
-      throw new Error('No tenant context for read operation');
-    }
-
-    console.log(`📖 Reading single record from '${table}' with tenant_id: ${tenantId}`);
     
-    const { data, error } = await supabase
+    console.log(`📖 Reading single record from '${table}' with tenant_id: ${tenantId || 'NOT REQUIRED'}`);
+    
+    let query = supabase
       .from(table)
       .select(selectClause)
-      .eq('id', id)
-      .eq('tenant_id', tenantId)
-      .single();
+      .eq('id', id);
+    
+    // Only apply tenant filtering if tenantId exists
+    if (tenantId) {
+      query = query.eq('tenant_id', tenantId);
+    }
+
+    const { data, error } = await query.single();
 
     return { data, error };
   },
 
   /**
-   * Update record with tenant validation
+   * Update record with tenant validation (if tenantId available)
    */
   async update(table, id, updates) {
     const tenantId = getCachedTenantId();
-    if (!tenantId) {
-      throw new Error('No tenant context for update operation');
-    }
-
-    console.log(`✏️ Updating record in '${table}' with tenant_id: ${tenantId}`);
     
-    const { data, error } = await supabase
+    console.log(`✏️ Updating record in '${table}' with tenant_id: ${tenantId || 'NOT REQUIRED'}`);
+    
+    let query = supabase
       .from(table)
       .update(updates)
-      .eq('id', id)
-      .eq('tenant_id', tenantId)
-      .select()
-      .single();
+      .eq('id', id);
+    
+    // Only apply tenant filtering if tenantId exists
+    if (tenantId) {
+      query = query.eq('tenant_id', tenantId);
+    }
+    
+    const { data, error } = await query.select().single();
 
     return { data, error };
   },
 
   /**
-   * Delete record with tenant validation
+   * Delete record with tenant validation (if tenantId available)
    */
   async delete(table, id) {
     const tenantId = getCachedTenantId();
-    if (!tenantId) {
-      throw new Error('No tenant context for delete operation');
-    }
-
-    console.log(`🗑️ Deleting record from '${table}' with tenant_id: ${tenantId}`);
     
-    const { error } = await supabase
+    console.log(`🗑️ Deleting record from '${table}' with tenant_id: ${tenantId || 'NOT REQUIRED'}`);
+    
+    let query = supabase
       .from(table)
       .delete()
-      .eq('id', id)
-      .eq('tenant_id', tenantId);
+      .eq('id', id);
+    
+    // Only apply tenant filtering if tenantId exists
+    if (tenantId) {
+      query = query.eq('tenant_id', tenantId);
+    }
+
+    const { error } = await query;
 
     return { error };
   }

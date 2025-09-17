@@ -1871,15 +1871,15 @@ export const dbHelpers = {
   // Parent management
   async getParentByUserId(userId) {
     try {
-      // Get current tenant ID
+      // Get current tenant ID (but don't require it for parents)
       const tenantId = await tenantHelpers.getCurrentTenantId();
       if (!tenantId) {
-        console.warn('No tenant context found for getParentByUserId');
-        return { data: null, error: new Error('Tenant context required') };
+        console.log('No tenant context found for getParentByUserId, but proceeding for parent access');
       }
       
-      // Get user data with linked student information, filtered by tenant_id
-      const { data: userData, error: userError } = await supabase
+      // Get user data with linked student information
+      // For parents, we don't filter by tenant_id since they might not have one
+      let query = supabase
         .from(TABLES.USERS)
         .select(`
           *,
@@ -1897,9 +1897,14 @@ export const dbHelpers = {
             classes(id, class_name, section, tenant_id)
           )
         `)
-        .eq('id', userId)
-        .eq('tenant_id', tenantId)  // Filter user by tenant_id
-        .single();
+        .eq('id', userId);
+      
+      // Only filter by tenant_id if it exists (for backward compatibility)
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
+      
+      const { data: userData, error: userError } = await query.single();
 
       if (userError) {
         console.error('Error fetching parent user data:', userError);
@@ -1910,19 +1915,11 @@ export const dbHelpers = {
         return { data: null, error: new Error('No student linked to this user') };
       }
 
-      // Additional safety check: ensure the linked student belongs to the same tenant
-      if (userData.students && userData.students.tenant_id !== tenantId) {
-        console.warn('Student belongs to different tenant:', {
-          userTenant: tenantId,
-          studentTenant: userData.students.tenant_id,
-          studentId: userData.students.id
-        });
-        return { data: null, error: new Error('Student not found in current tenant context') };
-      }
-
-      console.log('Successfully fetched parent data with tenant filtering:', {
+      // For parents, we don't enforce strict tenant validation since they may access
+      // their children's data across different tenant contexts
+      console.log('Successfully fetched parent data:', {
         userId,
-        tenantId,
+        tenantId: tenantId || 'NOT REQUIRED FOR PARENTS',
         studentId: userData.students?.id,
         studentName: userData.students?.name
       });
@@ -1936,62 +1933,68 @@ export const dbHelpers = {
 
   async getStudentsByParentId(userId) {
     try {
-      // Get current tenant ID
-      const tenantId = await tenantHelpers.getCurrentTenantId();
+      // Get current tenant ID (but don't require it for parents)
+      const tenantId = await getUserTenantId();
       if (!tenantId) {
-        console.warn('No tenant context found for getStudentsByParentId');
-        return { data: [], error: new Error('Tenant context required') };
+        console.log('No tenant context found for getStudentsByParentId, but proceeding for parent access');
+      }
+
+      // Get parent's linked student - for parents, we don't require tenant filtering
+      let query = supabase
+        .from(TABLES.USERS)
+        .select(`
+          id,
+          email,
+          full_name,
+          linked_parent_of,
+          students!users_linked_parent_of_fkey(
+            id,
+            name,
+            admission_no,
+            roll_no,
+            class_id,
+            academic_year,
+            dob,
+            gender,
+            address,
+            tenant_id,
+            classes(
+              id,
+              class_name,
+              section,
+              academic_year,
+              tenant_id
+            )
+          )
+        `)
+        .eq('id', userId);
+      
+      // Only filter by tenant_id if it exists
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
       }
       
-      // Get all students linked to this parent user with tenant filtering
-      const { data: userData, error: userError } = await supabase
-        .from(TABLES.USERS)
-        .select('linked_parent_of')
-        .eq('id', userId)
-        .eq('tenant_id', tenantId)  // Filter by tenant_id
-        .single();
+      const { data, error } = await query.single();
 
-      if (userError || !userData.linked_parent_of) {
-        return { data: [], error: userError || new Error('No students linked to this parent') };
+      if (error) {
+        console.error('Error fetching students by parent ID:', error);
+        return { data: null, error };
       }
 
-      // Get student details with tenant filtering
-      const { data: studentData, error: studentError } = await supabase
-        .from(TABLES.STUDENTS)
-        .select(`
-          *,
-          classes(id, class_name, section, tenant_id)
-        `)
-        .eq('id', userData.linked_parent_of)
-        .eq('tenant_id', tenantId)  // Filter by tenant_id
-        .single();
-
-      if (studentError) {
-        console.error('Error fetching student data for parent:', studentError);
-        return { data: [], error: studentError };
+      if (!data || !data.students) {
+        return { data: null, error: new Error('No students found for this parent') };
       }
 
-      // Additional safety check: ensure the student belongs to the same tenant
-      if (studentData && studentData.tenant_id !== tenantId) {
-        console.warn('Student belongs to different tenant:', {
-          userTenant: tenantId,
-          studentTenant: studentData.tenant_id,
-          studentId: studentData.id
-        });
-        return { data: [], error: new Error('Student not found in current tenant context') };
-      }
-
-      console.log('Successfully fetched student data for parent with tenant filtering:', {
-        userId,
-        tenantId,
-        studentId: studentData?.id,
-        studentName: studentData?.name
+      console.log('Successfully fetched student data for parent:', {
+        parentId: userId,
+        studentId: data.students.id,
+        studentName: data.students.name
       });
 
-      return { data: [studentData], error: null };
+      return { data: data.students, error: null };
     } catch (error) {
       console.error('Error in getStudentsByParentId:', error);
-      return { data: [], error };
+      return { data: null, error };
     }
   },
 

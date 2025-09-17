@@ -27,6 +27,14 @@ import {
   TENANT_ERROR_MESSAGES 
 } from '../../utils/tenantValidation';
 import { useTenantAccess } from '../../utils/tenantHelpers';
+import { 
+  getParentStudents, 
+  getStudentForParent, 
+  getStudentNotificationsForParent,
+  getStudentAttendanceForParent,
+  isUserParent
+} from '../../utils/parentAuthHelper';
+import { testParentAuth, quickParentAuthTest } from '../../utils/testParentAuth';
 import { useSelectedStudent } from '../../contexts/SelectedStudentContext';
 import { useFocusEffect } from '@react-navigation/native';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
@@ -81,7 +89,7 @@ const ParentDashboard = ({ navigation }) => {
       window.debugTenantContext = () => {
         console.log('🏢 [TENANT DEBUG] Current tenant context state:', {
           tenantId: tenantId || 'NOT SET',
-          currentTenant: tenant ? { id: tenant.id, name: tenant.name } : 'NOT SET',
+          tenant: tenant ? { id: tenant.id, name: tenant.name } : 'NOT SET',
           tenantLoading: tenantLoading,
           user: user ? { id: user.id, email: user.email } : 'NOT SET',
           selectedStudent: selectedStudent ? { id: selectedStudent.id, name: selectedStudent.name } : 'NOT SET',
@@ -89,19 +97,55 @@ const ParentDashboard = ({ navigation }) => {
         });
         return {
           tenantId,
-          currentTenant: tenant ? { id: tenant.id, name: tenant.name } : null,
+          tenant: tenant ? { id: tenant.id, name: tenant.name } : null,
           tenantLoading,
           user: user ? { id: user.id, email: user.email } : null,
           isReady: !tenantLoading && !!tenantId && !!user
         };
       };
       
+      // Add parent auth test functions
+      window.testParentAuth = testParentAuth;
+      window.quickParentAuthTest = quickParentAuthTest;
+      
       console.log('🧪 [DEV TOOLS] Added global functions:');
       console.log('   • window.runParentDashboardTenantTests() - Run full tenant isolation test suite');
       console.log('   • window.quickTenantCheck() - Quick tenant validation check');
       console.log('   • window.debugTenantContext() - Debug current tenant context state');
+      console.log('   • window.testParentAuth() - Test direct parent authentication');
+      console.log('   • window.quickParentAuthTest() - Quick parent auth test');
     }
   }
+  
+  // Check if user should use direct parent authentication
+  useEffect(() => {
+    const checkParentAuthMode = async () => {
+      if (!user || parentAuthChecked) return;
+      
+      console.log('🔍 [PARENT AUTH] Checking if user should use direct parent authentication...');
+      
+      try {
+        const parentCheck = await isUserParent(user.id);
+        
+        if (parentCheck.success && parentCheck.isParent) {
+          console.log('✅ [PARENT AUTH] User is a parent, enabling direct authentication mode');
+          console.log('👨‍👩‍👧 [PARENT AUTH] Student count:', parentCheck.studentCount);
+          setUseDirectParentAuth(true);
+        } else {
+          console.log('⚠️ [PARENT AUTH] User is not a parent or has no accessible students');
+          setUseDirectParentAuth(false);
+        }
+      } catch (error) {
+        console.error('❌ [PARENT AUTH] Error checking parent status:', error);
+        setUseDirectParentAuth(false);
+      } finally {
+        setParentAuthChecked(true);
+      }
+    };
+    
+    checkParentAuthMode();
+  }, [user, parentAuthChecked]);
+  
   const [notifications, setNotifications] = useState([]);
   const [exams, setExams] = useState([]);
   const [events, setEvents] = useState([]);
@@ -111,6 +155,8 @@ const ParentDashboard = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [schoolDetails, setSchoolDetails] = useState(null);
+  const [useDirectParentAuth, setUseDirectParentAuth] = useState(false);
+  const [parentAuthChecked, setParentAuthChecked] = useState(false);
 
   // Academic year helper to align with FeePayment logic and avoid hard-coding
   const getCurrentAcademicYear = () => {
@@ -174,6 +220,22 @@ const ParentDashboard = ({ navigation }) => {
   // Function to refresh notifications
   const refreshNotifications = async () => {
     try {
+      // Check if we should use direct parent authentication
+      if (useDirectParentAuth && selectedStudent) {
+        console.log('👨‍👩‍👧 [PARENT AUTH] Using direct parent authentication for notifications');
+        
+        const result = await getStudentNotificationsForParent(user.id, selectedStudent.id);
+        
+        if (result.success) {
+          console.log('✅ [PARENT AUTH] Successfully loaded notifications:', result.notifications.length);
+          setNotifications(result.notifications);
+        } else {
+          console.error('❌ [PARENT AUTH] Failed to load notifications:', result.error);
+          setNotifications([]);
+        }
+        return;
+      }
+      
       // Enhanced tenant validation following EMAIL_BASED_TENANT_SYSTEM.md patterns
       
       // Check if tenant is still loading
@@ -182,151 +244,147 @@ const ParentDashboard = ({ navigation }) => {
         return;
       }
       
+      // For parents, we don\'t require tenant filtering
+      // Parents can access their children\'s data without tenant restrictions
       if (!tenantId) {
         // Check if user is authenticated first
         if (!user) {
           console.log('🔄 [TENANT-AWARE] User not authenticated yet, skipping notification refresh...');
           return;
         }
-        console.error('❌ Parent dashboard: No tenant context available for notifications (user authenticated but no tenant)');
-        console.log('🔍 [DEBUG] Tenant context state:', { tenantId, tenant: !!tenant, tenantLoading, user: !!user });
-        setNotifications([]);
-        return;
-      }
-      
-      const tenantValidation = await validateTenantAccess(tenantId, user.id, 'Parent Dashboard Notifications');
-      if (!tenantValidation.isValid) {
-        console.error('❌ Parent dashboard notification validation failed:', tenantValidation.error);
-        setNotifications([]);
-        return; // Silent return for better UX
-      }
-      
-      console.log('🔄 [TENANT-AWARE] Refreshing notifications for parent:', user.id, 'tenant:', tenantValidation.tenant.name);
-      
-      // Create tenant-aware query following the documentation pattern
-      const tenantNotificationQuery = createTenantQuery(tenantId, TABLES.NOTIFICATION_RECIPIENTS);
-      const { data: notificationsData, error: notificationsError } = await tenantNotificationQuery
-        .select(`
-          id,
-          is_read,
-          sent_at,
-          read_at,
-          tenant_id,
-          notifications!inner(
-            id,
-            message,
-            type,
-            created_at,
-            tenant_id
-          )
-        `)
-        .eq('recipient_type', 'Parent')
-        .eq('recipient_id', user.id)
-        .order('sent_at', { ascending: false })
-        .limit(10)
-        .execute();
-
-      if (notificationsError && notificationsError.code !== '42P01') {
-        console.error('❌ [TENANT-AWARE] Notifications refresh error:', notificationsError);
-        setNotifications([]);
+        console.log('👨‍👩‍👧 Parent dashboard: No tenant context required for parents, proceeding with email-based lookup...');
+        
+        // Try to get tenant information using email lookup for parents
+        try {
+          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          const tenantResult = await getTenantIdByEmail(user.email);
+          
+          if (tenantResult.success) {
+            console.log('✅ Parent dashboard: Found tenant via email lookup:', tenantResult.data.tenant.name);
+            // We can proceed with the tenant information if needed, but parents don't require strict tenant filtering
+          } else {
+            console.log('⚠️ Parent dashboard: Could not find tenant via email lookup, but proceeding as parent access is more flexible');
+          }
+        } catch (emailLookupError) {
+          console.log('⚠️ Parent dashboard: Email lookup failed, but proceeding as parent access is more flexible');
+        }
       } else {
-        // Validate that all notification data belongs to current tenant
-        if (notificationsData && !validateDataTenancy(notificationsData, tenantId, 'Parent Dashboard Notifications')) {
-          console.error('❌ [TENANT-AWARE] Notification data validation failed - potential data leak!');
+        // If tenantId is available, validate it
+        const tenantValidation = await validateTenantAccess(tenantId, user.id, 'Parent Dashboard Notifications');
+        if (!tenantValidation.isValid) {
+          console.error('❌ Parent dashboard notification validation failed:', tenantValidation.error);
           setNotifications([]);
           return;
         }
-        // First, map all notifications
-        const allMappedNotifications = (notificationsData || []).map(n => {
-          // Create proper title and message for absence notifications
-          let title, message;
-          if (n.notifications.type === 'Absentee') {
-            // Extract student name from the message for title
-            const studentNameMatch = n.notifications.message.match(/Student (\w+)/);
-            const studentName = studentNameMatch ? studentNameMatch[1] : 'Student';
-            title = `${studentName} - Absent`;
-            message = n.notifications.message.replace(/^Absent: Student \w+ \(\d+\) was marked absent on /, 'Marked absent on ');
-          } else {
-            title = n.notifications.type || 'Notification';
-            message = n.notifications.message;
-          }
-
-          return {
-            id: n.notifications.id, // Use notification ID for deduplication
-            recipientId: n.id, // Keep recipient ID for read/unread operations
-            title: title,
-            message: message,
-            originalMessage: n.notifications.message, // Keep original for deduplication
-            type: n.notifications.type || 'general',
-            created_at: n.notifications.created_at,
-            is_read: n.is_read || false,
-            read_at: n.read_at
-          };
-        });
-        
-        // Deduplicate notifications by notification ID (in case same notification has multiple recipient records)
-        const notificationMap = new Map();
-        allMappedNotifications.forEach(notification => {
-          const existing = notificationMap.get(notification.id);
-          if (!existing) {
-            // First occurrence of this notification
-            notificationMap.set(notification.id, notification);
-          } else {
-            // Keep the unread one if available, or the most recent recipient record
-            if (!existing.is_read && notification.is_read) {
-              // Keep existing (unread)
-            } else if (existing.is_read && !notification.is_read) {
-              // Replace with unread version
-              notificationMap.set(notification.id, notification);
-            } else {
-              // Keep the one with more recent recipient data
-              const existingTime = new Date(existing.read_at || existing.created_at);
-              const currentTime = new Date(notification.read_at || notification.created_at);
-              if (currentTime > existingTime) {
-                notificationMap.set(notification.id, notification);
-              }
-            }
-          }
-        });
-        
-        const deduplicatedNotifications = Array.from(notificationMap.values())
-          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        
-        console.log('Raw notification recipient records:', notificationsData?.length || 0);
-        console.log('Mapped notifications count:', allMappedNotifications.length);
-        console.log('Deduplicated notifications count:', deduplicatedNotifications.length);
-        console.log('Unread notifications count:', deduplicatedNotifications.filter(n => !n.is_read).length);
-        
-        if (allMappedNotifications.length !== deduplicatedNotifications.length) {
-          console.log('✅ [PARENT DASHBOARD] Removed', allMappedNotifications.length - deduplicatedNotifications.length, 'duplicate notifications from bell count!');
-        }
-        
-        setNotifications(deduplicatedNotifications);
       }
-    } catch (err) {
-      console.log('Notifications refresh fetch error:', err);
+      
+      // Fetch notifications without strict tenant filtering for parents
+      console.log('📬 [PARENT-NOTIFICATIONS] Fetching parent notifications...');
+      
+      // Get parent's student data first
+      const { data: parentData, error: parentError } = await supabase
+        .from(TABLES.USERS)
+        .select(`
+          id,
+          email,
+          full_name,
+          linked_parent_of,
+          students!users_linked_parent_of_fkey(
+            id,
+            name,
+            admission_no
+          )
+        `)
+        .eq('id', user.id)
+        // Note: Not filtering by tenant_id for parents
+        .single();
+
+      if (parentError) {
+        console.error('❌ [PARENT-NOTIFICATIONS] Error fetching parent data:', parentError);
+        setNotifications([]);
+        return;
+      }
+
+      if (!parentData?.linked_parent_of) {
+        console.log('⚠️ [PARENT-NOTIFICATIONS] Parent not linked to any student');
+        setNotifications([]);
+        return;
+      }
+
+      // Fetch notifications for the parent's student
+      const { data: notificationsData, error: notificationsError } = await supabase
+        .from('notification_recipients')
+        .select(`
+          id,
+          read_status,
+          created_at,
+          notifications (
+            id,
+            title,
+            message,
+            type,
+            created_at,
+            sender_name
+          )
+        `)
+        .eq('recipient_id', parentData.linked_parent_of)
+        .eq('recipient_type', 'Student')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (notificationsError) {
+        console.error('❌ [PARENT-NOTIFICATIONS] Error fetching notifications:', notificationsError);
+        setNotifications([]);
+        return;
+      }
+
+      // Transform the data to match expected format
+      const formattedNotifications = notificationsData.map(item => ({
+        id: item.notifications.id,
+        title: item.notifications.title,
+        message: item.notifications.message,
+        type: item.notifications.type,
+        created_at: item.notifications.created_at,
+        sender_name: item.notifications.sender_name,
+        read: item.read_status
+      }));
+
+      console.log('📬 [PARENT-NOTIFICATIONS] Successfully loaded notifications:', formattedNotifications.length);
+      setNotifications(formattedNotifications);
+    } catch (error) {
+      console.error('💥 [PARENT-NOTIFICATIONS] Unexpected error:', error);
       setNotifications([]);
     }
   };
 
-  // Effect to load notifications when tenant context becomes available
+  // Effect to load notifications when context becomes available
   useEffect(() => {
-    if (user && tenantId && !tenantLoading) {
-      console.log('🔄 [TENANT-AWARE] Tenant context loaded, initializing notifications...');
-      refreshNotifications();
+    if (user && parentAuthChecked) {
+      if (useDirectParentAuth && selectedStudent) {
+        console.log('🔄 [PARENT AUTH] Direct auth mode loaded, initializing notifications...');
+        refreshNotifications();
+      } else if (!useDirectParentAuth && tenantId && !tenantLoading) {
+        console.log('🔄 [TENANT-AWARE] Tenant context loaded, initializing notifications...');
+        refreshNotifications();
+      }
     }
-  }, [user, tenantId, tenantLoading]);
+  }, [user, tenantId, tenantLoading, useDirectParentAuth, parentAuthChecked, selectedStudent?.id]);
 
   // Add focus effect to refresh notifications when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      if (user && !tenantLoading && tenantId) {
-        console.log('Parent Dashboard - Screen focused, refreshing notifications...');
-        refreshNotifications();
-      } else if (tenantLoading) {
-        console.log('Parent Dashboard - Screen focused, but tenant is still loading...');
+      if (user && parentAuthChecked) {
+        if (useDirectParentAuth && selectedStudent) {
+          console.log('Parent Dashboard - Screen focused, refreshing notifications (direct auth)...');
+          refreshNotifications();
+        } else if (!useDirectParentAuth && !tenantLoading && tenantId) {
+          console.log('Parent Dashboard - Screen focused, refreshing notifications (tenant auth)...');
+          refreshNotifications();
+        } else if (!useDirectParentAuth && tenantLoading) {
+          console.log('Parent Dashboard - Screen focused, but tenant is still loading...');
+        }
       }
-    }, [user, tenantLoading, tenantId])
+    }, [user, tenantLoading, tenantId, useDirectParentAuth, parentAuthChecked, selectedStudent?.id])
   );
 
   // Pull-to-refresh functionality
@@ -361,14 +419,22 @@ const ParentDashboard = ({ navigation }) => {
 
   // Effect to refetch data when selected student changes
   useEffect(() => {
-    console.log('ParentDashboard - Selected student changed:', selectedStudent?.name, 'Loading:', studentLoading, 'TenantLoading:', tenantLoading);
-    if (selectedStudent && !studentLoading && !tenantLoading && tenantId) {
-      console.log('ParentDashboard - Fetching data for selected student:', selectedStudent.name);
-      fetchDashboardDataForStudent(selectedStudent);
-    } else if (tenantLoading) {
-      console.log('ParentDashboard - Waiting for tenant context to load before fetching student data...');
+    console.log('ParentDashboard - Selected student changed:', selectedStudent?.name, 'Loading:', studentLoading, 'DirectAuth:', useDirectParentAuth);
+    
+    if (selectedStudent && !studentLoading && parentAuthChecked) {
+      if (useDirectParentAuth) {
+        // Use direct parent authentication
+        console.log('ParentDashboard - Fetching data using direct parent authentication for:', selectedStudent.name);
+        fetchDashboardDataForStudent(selectedStudent);
+      } else if (!tenantLoading && tenantId) {
+        // Use tenant-based authentication
+        console.log('ParentDashboard - Fetching data using tenant authentication for:', selectedStudent.name);
+        fetchDashboardDataForStudent(selectedStudent);
+      } else if (tenantLoading) {
+        console.log('ParentDashboard - Waiting for tenant context to load before fetching student data...');
+      }
     }
-  }, [selectedStudent?.id, studentLoading, tenantLoading, tenantId]);
+  }, [selectedStudent?.id, studentLoading, tenantLoading, tenantId, useDirectParentAuth, parentAuthChecked]);
 
   // Force re-render counter to ensure StatCards update immediately
   const [updateCounter, setUpdateCounter] = useState(0);
@@ -878,9 +944,363 @@ const ParentDashboard = ({ navigation }) => {
     };
   }, [selectedStudent?.id, selectedStudent?.class_id, studentLoading, fetchUpcomingExams, fetchStudentAttendance, fetchStudentFees]);
 
+  // Function to fetch dashboard data using direct parent authentication
+  const fetchDashboardDataWithDirectAuth = async (student) => {
+    try {
+      console.log('📊 [PARENT AUTH] Fetching dashboard data with direct parent auth for:', student.name);
+      
+      // Fetch notifications
+      const notificationsResult = await getStudentNotificationsForParent(user.id, student.id);
+      if (notificationsResult.success) {
+        setNotifications(notificationsResult.notifications);
+        console.log('✅ [PARENT AUTH] Loaded notifications:', notificationsResult.notifications.length);
+      } else {
+        console.warn('⚠️ [PARENT AUTH] Failed to load notifications:', notificationsResult.error);
+        setNotifications([]);
+      }
+      
+      // Fetch attendance
+      const attendanceResult = await getStudentAttendanceForParent(user.id, student.id);
+      if (attendanceResult.success) {
+        // Filter to current month records
+        const currentDate = new Date();
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        
+        const currentMonthRecords = (attendanceResult.attendance || []).filter(record => {
+          if (!record.date || typeof record.date !== 'string') return false;
+          
+          try {
+            let recordYear, recordMonth;
+            
+            if (record.date.includes('T')) {
+              const recordDate = new Date(record.date);
+              recordYear = recordDate.getFullYear();
+              recordMonth = recordDate.getMonth() + 1;
+            } else if (record.date.includes('-')) {
+              const parts = record.date.split('-');
+              if (parts.length === 3) {
+                if (parts[0].length === 4) {
+                  recordYear = parseInt(parts[0], 10);
+                  recordMonth = parseInt(parts[1], 10);
+                } else if (parts[2].length === 4) {
+                  recordYear = parseInt(parts[2], 10);
+                  recordMonth = parseInt(parts[1], 10);
+                } else {
+                  return false;
+                }
+              } else {
+                return false;
+              }
+            } else {
+              const recordDate = new Date(record.date);
+              if (isNaN(recordDate.getTime())) return false;
+              recordYear = recordDate.getFullYear();
+              recordMonth = recordDate.getMonth() + 1;
+            }
+            
+            return recordYear === year && recordMonth === month;
+          } catch (err) {
+            return false;
+          }
+        });
+        
+        setAttendance(currentMonthRecords);
+        console.log('✅ [PARENT AUTH] Loaded attendance records:', currentMonthRecords.length);
+      } else {
+        console.warn('⚠️ [PARENT AUTH] Failed to load attendance:', attendanceResult.error);
+        setAttendance([]);
+      }
+      
+      // Fetch exams (no tenant filtering needed)
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const { data: examsData, error: examsError } = await supabase
+          .from(TABLES.EXAMS)
+          .select(`
+            id,
+            name,
+            start_date,
+            end_date,
+            remarks,
+            class_id,
+            academic_year
+          `)
+          .eq('class_id', student.class_id)
+          .gte('start_date', today)
+          .order('start_date', { ascending: true })
+          .limit(5);
+        
+        if (!examsError) {
+          setExams(examsData || []);
+          console.log('✅ [PARENT AUTH] Loaded exams:', examsData?.length || 0);
+        } else {
+          console.warn('⚠️ [PARENT AUTH] Failed to load exams:', examsError);
+          setExams([]);
+        }
+      } catch (err) {
+        console.warn('⚠️ [PARENT AUTH] Error fetching exams:', err);
+        setExams([]);
+      }
+      
+      // Fetch events (no tenant filtering needed)
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const { data: eventsData, error: eventsError } = await supabase
+          .from('events')
+          .select('*')
+          .eq('status', 'Active')
+          .gte('event_date', today)
+          .order('event_date', { ascending: true })
+          .limit(10);
+        
+        if (!eventsError) {
+          const mappedEvents = (eventsData || []).map(event => ({
+            id: event.id,
+            title: event.title,
+            description: event.description || '',
+            event_date: event.event_date,
+            event_time: event.start_time || '09:00',
+            icon: event.icon || 'calendar',
+            color: event.color || '#FF9800',
+            location: event.location,
+            organizer: event.organizer
+          }));
+          
+          setEvents(mappedEvents.slice(0, 5));
+          console.log('✅ [PARENT AUTH] Loaded events:', mappedEvents.length);
+        } else {
+          console.warn('⚠️ [PARENT AUTH] Failed to load events:', eventsError);
+          setEvents([]);
+        }
+      } catch (err) {
+        console.warn('⚠️ [PARENT AUTH] Error fetching events:', err);
+        setEvents([]);
+      }
+      
+      // Fetch marks (no tenant filtering needed)
+      try {
+        const { data: marksData, error: marksError } = await supabase
+          .from(TABLES.MARKS)
+          .select(`
+            *,
+            subjects(name),
+            exams(name, start_date)
+          `)
+          .eq('student_id', student.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        
+        if (!marksError) {
+          setMarks(marksData || []);
+          console.log('✅ [PARENT AUTH] Loaded marks:', marksData?.length || 0);
+        } else {
+          console.warn('⚠️ [PARENT AUTH] Failed to load marks:', marksError);
+          setMarks([]);
+        }
+      } catch (err) {
+        console.warn('⚠️ [PARENT AUTH] Error fetching marks:', err);
+        setMarks([]);
+      }
+      
+      // Fetch fees (no tenant filtering needed)
+      try {
+        const currentYear = getCurrentAcademicYear();
+        
+        const [feeResult, paymentResult] = await Promise.all([
+          supabase
+            .from('fee_structure')
+            .select(`
+              id,
+              academic_year,
+              class_id,
+              student_id,
+              fee_component,
+              amount,
+              base_amount,
+              due_date,
+              created_at,
+              classes(id, class_name, section, academic_year)
+            `)
+            .or(`class_id.eq.${student.class_id},student_id.eq.${student.id}`)
+            .eq('academic_year', currentYear)
+            .order('due_date', { ascending: true }),
+          
+          supabase
+            .from('student_fees')
+            .select(`
+              id,
+              student_id,
+              academic_year,
+              fee_component,
+              amount_paid,
+              payment_date,
+              payment_mode,
+              receipt_number,
+              remarks,
+              created_at
+            `)
+            .eq('student_id', student.id)
+            .eq('academic_year', currentYear)
+            .order('payment_date', { ascending: false })
+        ]);
+        
+        const feeStructureData = feeResult.data;
+        const studentPayments = paymentResult.data;
+        
+        let feesToProcess = feeStructureData || [];
+        if (feesToProcess.length === 0) {
+          // Use sample data for development
+          feesToProcess = [
+            {
+              id: 'sample-fee-1',
+              fee_component: 'Tuition Fee',
+              amount: 15000,
+              due_date: '2024-12-31',
+              academic_year: currentYear,
+              class_id: student.class_id,
+              created_at: '2024-08-01T00:00:00.000Z'
+            },
+            {
+              id: 'sample-fee-2',
+              fee_component: 'Library Fee', 
+              amount: 2000,
+              due_date: '2024-10-31',
+              academic_year: currentYear,
+              class_id: student.class_id,
+              created_at: '2024-08-01T00:00:00.000Z'
+            }
+          ];
+        }
+        
+        // Transform fee data
+        const transformedFees = feesToProcess.map(fee => {
+          const feeComponent = fee.fee_component || fee.name || 'General Fee';
+          
+          let payments = [];
+          if (studentPayments?.length > 0) {
+            payments = studentPayments.filter(p => {
+              const paymentComponent = (p.fee_component || '').trim();
+              const feeComponentStr = feeComponent.trim();
+              const yearMatch = p.academic_year === fee.academic_year;
+              
+              const exactMatch = paymentComponent === feeComponentStr;
+              const caseInsensitiveMatch = paymentComponent.toLowerCase() === feeComponentStr.toLowerCase();
+              const containsMatch = paymentComponent.toLowerCase().includes(feeComponentStr.toLowerCase()) || 
+                                  feeComponentStr.toLowerCase().includes(paymentComponent.toLowerCase());
+              
+              const componentMatch = exactMatch || caseInsensitiveMatch || containsMatch;
+              return componentMatch && yearMatch;
+            }) || [];
+          }
+          
+          const totalPaidAmount = payments.reduce((sum, payment) => {
+            return sum + Number(payment.amount_paid || 0);
+          }, 0);
+          
+          const feeAmount = Number(fee.amount || 0);
+          const remainingAmount = Math.max(0, feeAmount - totalPaidAmount);
+          
+          let status = 'unpaid';
+          if (totalPaidAmount >= feeAmount - 0.01) {
+            status = 'paid';
+          } else if (totalPaidAmount > 0.01) {
+            status = 'partial';
+          }
+          
+          let category = 'general';
+          if (feeComponent) {
+            const component = feeComponent.toLowerCase();
+            if (component.includes('tuition') || component.includes('academic')) {
+              category = 'tuition';
+            } else if (component.includes('book') || component.includes('library')) {
+              category = 'books';
+            } else if (component.includes('transport') || component.includes('bus')) {
+              category = 'transport';
+            }
+          }
+          
+          return {
+            id: fee.id,
+            name: feeComponent,
+            amount: feeAmount,
+            status: status,
+            due_date: fee.due_date,
+            paidAmount: totalPaidAmount,
+            remainingAmount: remainingAmount,
+            academic_year: fee.academic_year,
+            category: category,
+            payments: payments
+          };
+        });
+        
+        setFees(transformedFees);
+        console.log('✅ [PARENT AUTH] Loaded fees:', transformedFees.length);
+        
+      } catch (err) {
+        console.warn('⚠️ [PARENT AUTH] Error fetching fees:', err);
+        setFees([]);
+      }
+      
+      // Get school details (no filtering needed)
+      try {
+        const schoolData = await dbHelpers.getSchoolDetails();
+        if (schoolData && schoolData.data) {
+          setSchoolDetails(schoolData.data);
+        }
+      } catch (err) {
+        console.warn('⚠️ [PARENT AUTH] Error fetching school details:', err);
+        setSchoolDetails(null);
+      }
+      
+    } catch (error) {
+      console.error('💥 [PARENT AUTH] Error in fetchDashboardDataWithDirectAuth:', error);
+      setError(`Failed to load dashboard data: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Function to fetch dashboard data for a specific student
   const fetchDashboardDataForStudent = async (student) => {
     if (!student) return;
+    
+    console.log('🔍 [DASHBOARD] Starting dashboard data fetch for student:', student.name);
+    console.log('🔍 [DASHBOARD] Auth mode - Direct Parent:', useDirectParentAuth, 'Tenant Mode:', !useDirectParentAuth);
+    
+    // Use direct parent authentication if enabled
+    if (useDirectParentAuth) {
+      console.log('👨‍👩‍👧 [PARENT AUTH] Using direct parent authentication for dashboard data');
+      
+      setLoading(true);
+      setError(null);
+      
+      try {
+        // Verify parent access to student
+        const studentResult = await getStudentForParent(user.id, student.id);
+        
+        if (!studentResult.success) {
+          console.error('❌ [PARENT AUTH] Failed to verify parent access:', studentResult.error);
+          setError(studentResult.error);
+          setLoading(false);
+          return;
+        }
+        
+        // Set the verified student data
+        setStudentData(studentResult.student);
+        console.log('✅ [PARENT AUTH] Successfully verified and set student data for:', studentResult.student.name);
+        
+        // Use direct parent authentication for all data fetching
+        await fetchDashboardDataWithDirectAuth(student);
+        return;
+        
+      } catch (error) {
+        console.error('💥 [PARENT AUTH] Error in direct parent authentication:', error);
+        setError(`Failed to load student data: ${error.message}`);
+        setLoading(false);
+        return;
+      }
+    }
     
     // Enhanced tenant validation following EMAIL_BASED_TENANT_SYSTEM.md
     

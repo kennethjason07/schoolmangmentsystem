@@ -588,7 +588,7 @@ const ProfileScreen = ({ navigation, route }) => {
                   console.warn('⚠️ [ProfileScreen] Navigation service failed:', navError);
                   
                   // Fallback 1: Direct window.location
-                  if (typeof window !== 'undefined') {
+                  if (typeof window !== 'undefined' && window && window.location) {
                     console.log('🧭 [ProfileScreen] Using window.location.href fallback...');
                     window.location.href = '/';
                     return;
@@ -597,7 +597,7 @@ const ProfileScreen = ({ navigation, route }) => {
                 
                 // If we get here, the navigation might have worked, but let's ensure we redirect
                 setTimeout(() => {
-                  if (typeof window !== 'undefined') {
+                  if (typeof window !== 'undefined' && window && window.location) {
                     window.location.href = '/';
                   }
                 }, 1000);

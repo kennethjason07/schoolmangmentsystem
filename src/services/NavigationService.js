@@ -1,5 +1,6 @@
 import { createNavigationContainerRef } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 /**
  * Navigation Service for handling navigation from push notifications
@@ -60,10 +61,7 @@ class NavigationService {
           } catch (navError) {
             console.error('❌ [NavigationService] Direct navigation also failed:', navError);
             // Last resort for web: reload the page
-            if (typeof window !== 'undefined') {
-              console.log('🧭 [NavigationService] Using window.location fallback');
-              window.location.href = '/'; // Navigate to root
-            }
+            this.handleWebNavigationFallback();
           }
         }
       }
@@ -78,22 +76,45 @@ class NavigationService {
         } catch (error) {
           console.error('❌ [NavigationService] Direct navigation failed:', error);
           // Last resort for web: reload the page
-          if (typeof window !== 'undefined') {
-            console.log('🧭 [NavigationService] Using window.location fallback');
-            window.location.href = '/'; // Navigate to root
-          }
+          this.handleWebNavigationFallback();
         }
       }
       
       // Additional web-specific fallback
-      if (typeof window !== 'undefined') {
-        console.log('🧭 [NavigationService] Additional web fallback - forcing navigation');
-        setTimeout(() => {
-          if (typeof window !== 'undefined') {
-            window.location.href = '/';
-          }
-        }, 500);
+      this.handleWebNavigationFallback();
+    }
+  }
+
+  /**
+   * Handle web navigation fallback with proper error checking
+   */
+  handleWebNavigationFallback() {
+    if (Platform.OS === 'web') {
+      console.log('🧭 [NavigationService] Additional web fallback - forcing navigation');
+      // Check if window and window.location are properly defined
+      if (typeof window !== 'undefined' && window && typeof window.location !== 'undefined' && window.location) {
+        try {
+          window.location.href = '/'; // Navigate to root
+          return;
+        } catch (locationError) {
+          console.error('❌ [NavigationService] Error setting window.location.href:', locationError);
+        }
+      } else {
+        console.error('❌ [NavigationService] window.location is not available for navigation');
       }
+      
+      // Additional fallback using setTimeout
+      setTimeout(() => {
+        if (typeof window !== 'undefined' && window && typeof window.location !== 'undefined' && window.location) {
+          try {
+            window.location.href = '/';
+          } catch (delayedError) {
+            console.error('❌ [NavigationService] Error setting delayed window.location.href:', delayedError);
+          }
+        } else {
+          console.error('❌ [NavigationService] window.location is not available for delayed navigation');
+        }
+      }, 500);
     }
   }
 
