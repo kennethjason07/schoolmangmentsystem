@@ -1,4 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+/**
+ * ExpenseManagement - Enhanced Tenant System Implementation
+ * 
+ * This component has been migrated to use the Enhanced Tenant System:
+ * - Uses useTenant hook for tenant context
+ * - Leverages tenantDatabase helpers for automatic tenant filtering
+ * - Implements simplified tenant validation with checkTenantReady()
+ * - All database operations are tenant-scoped automatically
+ * - Removed complex email-based tenant validation logic
+ * - Uses initializeTenantHelpers for cache management
+ */
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -20,17 +31,47 @@ import Header from '../../components/Header';
 import StatCard from '../../components/StatCard';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
-import { supabase, dbHelpers } from '../../utils/supabase';
+import { supabase, TABLES } from '../../utils/supabase';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 import { useTenant } from '../../contexts/TenantContext';
-import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
+import { tenantDatabase, getCachedTenantId, initializeTenantHelpers } from '../../utils/tenantHelpers';
 import { useAuth } from '../../utils/AuthContext';
+import { useFocusEffect } from '@react-navigation/native';
 
 const { width } = Dimensions.get('window');
 
 const ExpenseManagement = ({ navigation }) => {
-  const { tenantId, tenantName, currentTenant } = useTenant();
   const { user } = useAuth();
+  const { 
+    tenantId, 
+    isReady, 
+    loading: tenantLoading, 
+    currentTenant: tenant, 
+    tenantName, 
+    error: tenantError,
+    initializeTenant: initializeTenantContext
+  } = useTenant();
+  
+  // Enhanced tenant system - simplified validation
+  const checkTenantReady = () => {
+    return isReady && !tenantLoading && !tenantError && tenantId;
+  };
+  
+  // Enhanced tenant system handles initialization automatically
+  React.useEffect(() => {
+    if (tenantId && isReady) {
+      console.log('🚀 ExpenseManagement: Enhanced tenant system ready with ID:', tenantId);
+      // Initialize tenant helpers to ensure cache is set
+      initializeTenantHelpers(tenantId);
+    } else {
+      console.log('⚠️ ExpenseManagement: Waiting for tenant context to be ready:', {
+        tenantId: tenantId || 'NULL',
+        isReady,
+        tenantLoading,
+        tenantError: tenantError?.message || 'none'
+      });
+    }
+  }, [tenantId, isReady, tenantLoading, tenantError]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
@@ -91,277 +132,217 @@ const ExpenseManagement = ({ navigation }) => {
 
 
   const loadExpenseData = async () => {
+    if (!checkTenantReady()) {
+      console.log('⚠️ ExpenseManagement: Cannot load data - tenant not ready');
+      return;
+    }
+    
+    console.log('🔄 ExpenseManagement: Loading data with enhanced tenant system...');
+    setLoading(true);
+    
     try {
-      // 🛡️ Ensure tenant context is available before proceeding
-      if (!tenantId) {
-        console.log('⏳ ExpenseManagement: Waiting for tenant context to be available...');
-        setLoading(false);
-        return;
-      }
-      
-      // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ExpenseManagement - loadExpenseData');
-      if (!validation.isValid) {
-        console.error('❌ ExpenseManagement loadExpenseData: Tenant validation failed:', validation.error);
-        Alert.alert('Access Denied', validation.error);
-        setLoading(false);
-        return;
-      }
-      
-      console.log('🔍 ExpenseManagement: Starting data load...');
-      setLoading(true);
-      
+      await Promise.all([
+        loadExpenses(),
+        loadCategories()
+      ]);
+      console.log('✅ ExpenseManagement: All data loaded successfully');
+    } catch (error) {
+      console.error('❌ ExpenseManagement: Error loading data:', error);
+      Alert.alert('Error', `Failed to load data: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadExpenses = async () => {
+    try {
       // Get date range for selected month
       const monthStart = format(startOfMonth(selectedMonth), 'yyyy-MM-dd');
       const monthEnd = format(endOfMonth(selectedMonth), 'yyyy-MM-dd');
-      console.log('📅 Date range:', { monthStart, monthEnd, selectedMonth });
+      console.log('📅 Date range:', { monthStart, monthEnd });
       
-      // Test database connection with tenant-aware query
-      console.log('🔗 Testing database connection with tenant validation...');
-      try {
-        const { data: testData, error: testError } = await createTenantQuery(tenantId, 'school_expenses')
-          .select('count')
-          .limit(1)
-          .execute();
-        console.log('🔗 Database connection test:', { testData, testError });
-        
-        if (testError) {
-          console.error('❌ Table does not exist or access denied:', testError);
-          Alert.alert('Database Error', 'The expense tables may not exist or you do not have access. Please contact administrator.');
-          return;
-        }
-      } catch (testErr) {
-        console.error('❌ Database connection failed:', testErr);
-        Alert.alert('Database Error', 'Failed to connect to expense database. Please contact administrator.');
-        return;
-      }
+      console.log('🔍 Loading monthly expenses via enhanced tenant database');
+      // Load monthly expenses with date filtering
+      const { data: monthlyExpenses, error: monthlyError } = await supabase
+        .from('school_expenses')
+        .select('*')
+        .eq('tenant_id', getCachedTenantId())
+        .gte('expense_date', monthStart)
+        .lte('expense_date', monthEnd);
       
-      // Fetch monthly expenses from database
-      console.log('📥 Fetching monthly expenses...');
-      const { data: monthlyExpenses, error: monthlyError } = await dbHelpers.getExpenses({
-        startDate: monthStart,
-        endDate: monthEnd,
-        tenantId: tenantId
-      });
-
-      console.log('📥 Monthly expenses result:', {
-        count: monthlyExpenses?.length || 0,
-        data: monthlyExpenses,
-        error: monthlyError
-      });
-
-      if (monthlyError) {
-        console.error('❌ Error fetching monthly expenses:', monthlyError);
-        Alert.alert('Error', `Failed to load expense data: ${monthlyError.message || monthlyError}`);
-        return;
-      }
-
-      // 🛡️ Validate expense data belongs to correct tenant
-      if (monthlyExpenses && monthlyExpenses.length > 0) {
-        const expensesValid = validateDataTenancy(monthlyExpenses, tenantId, 'ExpenseManagement - Monthly Expenses');
-        if (!expensesValid) {
-          Alert.alert('Data Security Alert', 'Expense data validation failed. Please contact administrator.');
-          setExpenses([]);
-          setMonthlyTotal(0);
-          return;
-        }
-      }
+      if (monthlyError) throw monthlyError;
       
-      // Set expenses from database (empty array if no data)
+      console.log('📦 Loaded monthly expenses:', monthlyExpenses?.length, 'items');
       setExpenses(monthlyExpenses || []);
-      console.log('✅ Set expenses state:', monthlyExpenses?.length || 0, 'items');
-
-      // Calculate monthly total from database data
+      
+      // Calculate monthly total
       const monthlySum = (monthlyExpenses || []).reduce((sum, expense) => sum + (expense.amount || 0), 0);
       setMonthlyTotal(monthlySum);
-      console.log('💰 Monthly total from DB:', monthlySum);
-
+      console.log('💰 Monthly total:', monthlySum);
+      
       // Get yearly expenses
       const currentYear = selectedMonth.getFullYear();
       const yearStart = `${currentYear}-01-01`;
       const yearEnd = `${currentYear}-12-31`;
       console.log('📅 Fetching yearly expenses for:', { yearStart, yearEnd });
       
-      const { data: yearlyExpenses, error: yearlyError } = await dbHelpers.getExpenses({
-        startDate: yearStart,
-        endDate: yearEnd,
-        tenantId: tenantId
-      });
-
+      console.log('🔍 Loading yearly expenses via enhanced tenant database');
+      const { data: yearlyExpenses, error: yearlyError } = await supabase
+        .from('school_expenses')
+        .select('*')
+        .eq('tenant_id', getCachedTenantId())
+        .gte('expense_date', yearStart)
+        .lte('expense_date', yearEnd);
+      
       if (yearlyError) {
         console.error('❌ Error fetching yearly expenses:', yearlyError);
         setYearlyExpenses([]);
         setYearlyTotal(0);
       } else {
-        // 🛡️ Validate yearly expense data belongs to correct tenant
-        if (yearlyExpenses && yearlyExpenses.length > 0) {
-          const yearlyExpensesValid = validateDataTenancy(yearlyExpenses, tenantId, 'ExpenseManagement - Yearly Expenses');
-          if (!yearlyExpensesValid) {
-            Alert.alert('Data Security Alert', 'Yearly expense data validation failed. Please contact administrator.');
-            setYearlyExpenses([]);
-            setYearlyTotal(0);
-            return;
-          }
-        }
-        
         const yearlySum = (yearlyExpenses || []).reduce((sum, expense) => sum + (expense.amount || 0), 0);
         setYearlyTotal(yearlySum);
         setYearlyExpenses(yearlyExpenses || []);
         console.log('📊 Yearly total:', yearlySum, 'from', yearlyExpenses?.length || 0, 'expenses');
       }
-
-      // Wait for categories to be loaded before calculating breakdown
-      if (expenseCategories.length === 0) {
-        console.log('⏳ Categories not loaded yet, skipping calculation...');
-        return;
+      
+      // Calculate category breakdown after loading expenses and categories
+      if (expenseCategories.length > 0) {
+        calculateCategoryStats(monthlyExpenses || [], yearlyExpenses || []);
       }
-
-      // Calculate category-wise breakdown for monthly data
-      console.log('📊 Calculating monthly category breakdown...');
-      const monthlyTotalForCalculation = monthlySum;
-      const categoryBreakdown = expenseCategories.map(category => {
-        const categoryExpenses = (monthlyExpenses || []).filter(exp => exp.category === category.name);
-        const categoryTotal = categoryExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
-        
-        // Use category's monthly_budget from database
-        const categoryBudget = category.monthly_budget || 0;
-        
-        console.log(`📊 Monthly Category ${category.name}:`, {
-          expenses: categoryExpenses.length,
-          total: categoryTotal,
-          budget: categoryBudget
-        });
-        
-        return {
-          name: category.name,
-          amount: categoryTotal,
-          budget: categoryBudget,
-          color: category.color,
-          icon: category.icon,
-          count: categoryExpenses.length,
-          percentage: monthlyTotalForCalculation > 0 ? ((categoryTotal / monthlyTotalForCalculation) * 100).toFixed(1) : 0,
-          budgetUsage: categoryBudget > 0 ? ((categoryTotal / categoryBudget) * 100).toFixed(1) : 0
-        };
-      });
-
-      setExpenseStats(categoryBreakdown);
-      console.log('📊 Monthly category stats set:', categoryBreakdown.length, 'categories');
-
-      // Calculate budget data for pie chart
-      const pieChartData = categoryBreakdown
-        .filter(cat => cat.amount > 0)
-        .map(cat => ({
-          name: cat.name,
-          population: cat.amount,
-          color: cat.color,
-          legendFontColor: '#333',
-          legendFontSize: 12
-        }));
-
-      setBudgetData(pieChartData);
-      console.log('📈 Pie chart data set:', pieChartData.length, 'categories with data');
       
-      // Calculate yearly category breakdown
-      console.log('📊 Calculating yearly category breakdown...');
-      const yearlyTotalForCalculation = (yearlyExpenses || []).reduce((sum, expense) => sum + (expense.amount || 0), 0);
-      
-      const yearlyCategoryBreakdown = expenseCategories.map(category => {
-        const categoryExpenses = (yearlyExpenses || []).filter(exp => exp.category === category.name);
-        const categoryTotal = categoryExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
-        
-        // Use annual budget = monthly budget * 12
-        const categoryAnnualBudget = (category.monthly_budget || 0) * 12;
-        
-        console.log(`📊 Yearly Category ${category.name}:`, {
-          expenses: categoryExpenses.length,
-          total: categoryTotal,
-          annualBudget: categoryAnnualBudget
-        });
-        
-        return {
-          name: category.name,
-          amount: categoryTotal,
-          budget: categoryAnnualBudget,
-          color: category.color,
-          icon: category.icon,
-          count: categoryExpenses.length,
-          percentage: yearlyTotalForCalculation > 0 ? ((categoryTotal / yearlyTotalForCalculation) * 100).toFixed(1) : 0,
-          budgetUsage: categoryAnnualBudget > 0 ? ((categoryTotal / categoryAnnualBudget) * 100).toFixed(1) : 0
-        };
-      });
-      
-      setYearlyExpenseStats(yearlyCategoryBreakdown);
-      console.log('📊 Yearly category stats set:', yearlyCategoryBreakdown.length, 'categories');
-      console.log('✅ Data loading completed successfully!');
-
     } catch (error) {
-      console.error('❌ Critical error loading expense data:', error);
-      Alert.alert('Error', `Failed to load expense data: ${error.message || error}`);
-    } finally {
-      setLoading(false);
-      console.log('🔄 Loading state set to false');
+      console.error('❌ Error loading expenses:', error);
+      setExpenses([]);
+      setYearlyExpenses([]);
+      setMonthlyTotal(0);
+      setYearlyTotal(0);
     }
   };
 
-  // Only load data when tenantId is available
-  useEffect(() => {
-    if (tenantId) {
-      console.log('🔄 ExpenseManagement: tenantId available, loading expense data...');
-      loadExpenseData();
-    } else {
-      console.log('⏳ ExpenseManagement: Waiting for tenantId to become available...');
-    }
-  }, [selectedMonth, tenantId]); // Add tenantId as dependency
-  
-  // Load categories when tenantId is available
-  useEffect(() => {
-    const loadCategoriesOnMount = async () => {
-      if (expenseCategories.length === 0 && tenantId) {
-        console.log('🏷️ Loading categories on mount with tenantId:', tenantId);
-        const { data: dbCategories, error: categoriesError } = await dbHelpers.getExpenseCategories(tenantId);
+  const loadCategories = async () => {
+    try {
+      console.log('🏷️ Loading expense categories via enhanced tenant database');
+      const { data: categoriesData, error } = await tenantDatabase.read('expense_categories', {}, '*');
+      
+      if (error) throw error;
+      
+      console.log('📦 Loaded categories:', categoriesData?.length, 'categories');
+      
+      if (categoriesData && categoriesData.length > 0) {
+        // Add default UI fields for categories loaded from database
+        const defaultCategoryMappings = {
+          'Staff Salaries': { icon: 'people', color: '#2196F3' },
+          'Utilities': { icon: 'flash', color: '#FF9800' },
+          'Supplies & Materials': { icon: 'library', color: '#4CAF50' },
+          'Infrastructure': { icon: 'build', color: '#9C27B0' },
+          'Transportation': { icon: 'car', color: '#F44336' },
+          'Food & Catering': { icon: 'restaurant', color: '#FF5722' },
+          'Events & Activities': { icon: 'calendar', color: '#607D8B' },
+          'Technology': { icon: 'desktop', color: '#795548' },
+          'Marketing': { icon: 'megaphone', color: '#E91E63' },
+          'Miscellaneous': { icon: 'ellipsis-horizontal', color: '#009688' }
+        };
         
-        if (categoriesError) {
-          console.error('❌ Error fetching categories on mount:', categoriesError);
-        } else if (dbCategories && dbCategories.length > 0) {
-          // Add default UI fields for categories loaded from database
-          const defaultCategoryMappings = {
-            'Staff Salaries': { icon: 'people', color: '#2196F3' },
-            'Utilities': { icon: 'flash', color: '#FF9800' },
-            'Supplies & Materials': { icon: 'library', color: '#4CAF50' },
-            'Infrastructure': { icon: 'build', color: '#9C27B0' },
-            'Transportation': { icon: 'car', color: '#F44336' },
-            'Food & Catering': { icon: 'restaurant', color: '#FF5722' },
-            'Events & Activities': { icon: 'calendar', color: '#607D8B' },
-            'Technology': { icon: 'desktop', color: '#795548' },
-            'Marketing': { icon: 'megaphone', color: '#E91E63' },
-            'Miscellaneous': { icon: 'ellipsis-horizontal', color: '#009688' }
-          };
-          
-          const categoriesWithUIFields = dbCategories.map(category => ({
-            ...category,
-            icon: category.icon || defaultCategoryMappings[category.name]?.icon || 'briefcase',
-            color: category.color || defaultCategoryMappings[category.name]?.color || '#2196F3'
-          }));
-          
-          setExpenseCategories(categoriesWithUIFields);
-          console.log('✅ Categories loaded on mount:', categoriesWithUIFields.length, 'categories');
-        } else {
-          console.log('⚠️ No categories found on mount, creating defaults...');
-          await createDefaultCategories();
-        }
+        const categoriesWithUIFields = categoriesData.map(category => ({
+          ...category,
+          icon: category.icon || defaultCategoryMappings[category.name]?.icon || 'briefcase',
+          color: category.color || defaultCategoryMappings[category.name]?.color || '#2196F3'
+        }));
+        
+        setExpenseCategories(categoriesWithUIFields);
+        console.log('✅ Categories loaded:', categoriesWithUIFields.length, 'categories');
+      } else {
+        console.log('⚠️ No categories found, creating defaults...');
+        await createDefaultCategories();
       }
-    };
+    } catch (error) {
+      console.error('❌ Error loading categories:', error);
+      setExpenseCategories([]);
+    }
+  };
+
+  const calculateCategoryStats = (monthlyExpenses, yearlyExpenses) => {
+    console.log('📊 Calculating category breakdown...');
     
-    loadCategoriesOnMount();
-  }, [tenantId]); // Run when tenantId becomes available
+    // Calculate monthly category breakdown
+    const monthlyTotalForCalculation = monthlyExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+    const categoryBreakdown = expenseCategories.map(category => {
+      const categoryExpenses = monthlyExpenses.filter(exp => exp.category === category.name);
+      const categoryTotal = categoryExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+      
+      const categoryBudget = category.monthly_budget || 0;
+      
+      return {
+        name: category.name,
+        amount: categoryTotal,
+        budget: categoryBudget,
+        color: category.color,
+        icon: category.icon,
+        count: categoryExpenses.length,
+        percentage: monthlyTotalForCalculation > 0 ? ((categoryTotal / monthlyTotalForCalculation) * 100).toFixed(1) : 0,
+        budgetUsage: categoryBudget > 0 ? ((categoryTotal / categoryBudget) * 100).toFixed(1) : 0
+      };
+    });
+
+    setExpenseStats(categoryBreakdown);
+    
+    // Calculate yearly category breakdown
+    const yearlyTotalForCalculation = yearlyExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+    const yearlyCategoryBreakdown = expenseCategories.map(category => {
+      const categoryExpenses = yearlyExpenses.filter(exp => exp.category === category.name);
+      const categoryTotal = categoryExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+      
+      const categoryAnnualBudget = (category.monthly_budget || 0) * 12;
+      
+      return {
+        name: category.name,
+        amount: categoryTotal,
+        budget: categoryAnnualBudget,
+        color: category.color,
+        icon: category.icon,
+        count: categoryExpenses.length,
+        percentage: yearlyTotalForCalculation > 0 ? ((categoryTotal / yearlyTotalForCalculation) * 100).toFixed(1) : 0,
+        budgetUsage: categoryAnnualBudget > 0 ? ((categoryTotal / categoryAnnualBudget) * 100).toFixed(1) : 0
+      };
+    });
+    
+    setYearlyExpenseStats(yearlyCategoryBreakdown);
+    
+    // Calculate budget data for pie chart
+    const pieChartData = categoryBreakdown
+      .filter(cat => cat.amount > 0)
+      .map(cat => ({
+        name: cat.name,
+        population: cat.amount,
+        color: cat.color,
+        legendFontColor: '#333',
+        legendFontSize: 12
+      }));
+
+    setBudgetData(pieChartData);
+    console.log('📈 Category breakdown calculated successfully');
+  };
+
+
+  // Load data when enhanced tenant system is ready
+  useFocusEffect(
+    useCallback(() => {
+      if (checkTenantReady()) {
+        console.log('🚀 ExpenseManagement: Enhanced tenant system ready, loading data...');
+        // Ensure tenant helpers are initialized
+        initializeTenantHelpers(tenantId);
+        loadExpenseData();
+      }
+    }, [tenantId, isReady, tenantLoading, tenantError, selectedMonth])
+  );
   
-  // Re-calculate expense stats when categories become available
+  // Recalculate category breakdown when categories or expenses change
   useEffect(() => {
     if (expenseCategories.length > 0 && (expenses.length > 0 || yearlyExpenses.length > 0)) {
-      console.log('🔄 Categories loaded, recalculating expense stats...');
-      loadExpenseData();
+      console.log('🔄 Categories and expenses available, calculating category breakdown...');
+      calculateCategoryStats(expenses, yearlyExpenses);
     }
-  }, [expenseCategories.length]); // Only when categories count changes
+  }, [expenseCategories.length, expenses.length, yearlyExpenses.length]); // Only when categories or expenses count changes
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -394,10 +375,8 @@ const ExpenseManagement = ({ navigation }) => {
   };
 
   const saveExpense = async () => {
-    // 🛡️ Validate tenant access first
-    const validation = await validateTenantAccess(user?.id, tenantId, 'ExpenseManagement - saveExpense');
-    if (!validation.isValid) {
-      Alert.alert('Access Denied', validation.error);
+    if (!checkTenantReady()) {
+      Alert.alert('Error', 'Tenant system not ready. Please try again.');
       return;
     }
 
@@ -407,7 +386,6 @@ const ExpenseManagement = ({ navigation }) => {
     }
 
     try {
-      // Remove fields that don't exist in simplified schema
       const expenseData = {
         title: expenseInput.title,
         amount: parseFloat(expenseInput.amount),
@@ -416,50 +394,22 @@ const ExpenseManagement = ({ navigation }) => {
         expense_date: expenseInput.date
       };
 
-      let expenseId = null;
-      
       if (editExpenseIndex !== null) {
-        // Update existing expense using helper function
-        expenseId = expenses[editExpenseIndex].id;
-        const { error } = await dbHelpers.updateExpense(expenseId, expenseData, tenantId);
+        // Update existing expense using Enhanced Tenant System
+        const expenseId = expenses[editExpenseIndex].id;
+        const { error } = await tenantDatabase.update('school_expenses', expenseId, expenseData);
 
         if (error) throw error;
+        console.log('✅ Expense updated successfully:', expenseId);
       } else {
-        // Create new expense using helper function
-        const { data, error } = await dbHelpers.createExpense(expenseData, tenantId);
+        // Create new expense using Enhanced Tenant System
+        const { data, error } = await tenantDatabase.create('school_expenses', expenseData);
 
         if (error) throw error;
-        expenseId = data?.id;
+        console.log('✅ Expense created successfully:', data?.id);
       }
 
-      // Verify the operation completed before refreshing
-      if (expenseId) {
-        console.log('🔄 Verifying expense operation completed for ID:', expenseId);
-        
-        // Brief delay to allow database consistency
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        try {
-          // Verify the expense exists in the database using tenant-aware query
-          const { data: verifyData, error: verifyError } = await createTenantQuery(tenantId, 'school_expenses')
-            .select('id, title, amount')
-            .eq('id', expenseId)
-            .single()
-            .execute();
-
-          if (verifyError || !verifyData) {
-            console.warn('⚠️ Expense verification failed, waiting longer...', verifyError);
-            // Wait a bit longer and try refresh anyway
-            await new Promise(resolve => setTimeout(resolve, 500));
-          } else {
-            console.log('✅ Expense operation verified successfully:', verifyData);
-          }
-        } catch (verifyErr) {
-          console.warn('⚠️ Expense verification error, continuing with refresh:', verifyErr);
-        }
-      }
-
-      // Now refresh the data
+      // Refresh the data
       await loadExpenseData();
       setIsExpenseModalVisible(false);
       Alert.alert('Success', 'Expense saved successfully!');
@@ -480,42 +430,16 @@ const ExpenseManagement = ({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              // 🛡️ Validate tenant access first
-              const validation = await validateTenantAccess(user?.id, tenantId, 'ExpenseManagement - deleteExpense');
-              if (!validation.isValid) {
-                Alert.alert('Access Denied', validation.error);
+              if (!checkTenantReady()) {
+                Alert.alert('Error', 'Tenant system not ready. Please try again.');
                 return;
               }
 
-              const { error } = await dbHelpers.deleteExpense(expenseId, tenantId);
+              const { error } = await tenantDatabase.delete('school_expenses', expenseId);
 
               if (error) throw error;
               
-              // Verify the deletion completed before refreshing
-              console.log('🔄 Verifying expense deletion for ID:', expenseId);
-              
-              // Brief delay to allow database consistency
-              await new Promise(resolve => setTimeout(resolve, 300));
-              
-              try {
-                // Verify the expense no longer exists in the database using tenant-aware query
-                const { data: verifyData, error: verifyError } = await createTenantQuery(tenantId, 'school_expenses')
-                  .select('id')
-                  .eq('id', expenseId)
-                  .single()
-                  .execute();
-
-                if (!verifyError && verifyData) {
-                  console.warn('⚠️ Expense still exists after deletion, waiting longer...');
-                  // Wait a bit longer and try refresh anyway
-                  await new Promise(resolve => setTimeout(resolve, 500));
-                } else {
-                  console.log('✅ Expense deletion verified successfully');
-                }
-              } catch (verifyErr) {
-                console.warn('⚠️ Expense deletion verification error, continuing with refresh:', verifyErr);
-              }
-              
+              console.log('✅ Expense deleted successfully:', expenseId);
               await loadExpenseData();
               Alert.alert('Success', 'Expense deleted successfully!');
             } catch (error) {
@@ -542,10 +466,8 @@ const ExpenseManagement = ({ navigation }) => {
 
   const saveBudgets = async () => {
     try {
-      // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ExpenseManagement - saveBudgets');
-      if (!validation.isValid) {
-        Alert.alert('Access Denied', validation.error);
+      if (!checkTenantReady()) {
+        Alert.alert('Error', 'Tenant system not ready. Please try again.');
         return;
       }
 
@@ -564,11 +486,18 @@ const ExpenseManagement = ({ navigation }) => {
         });
       }
       
-      // Update budgets in database using dbHelpers
+      // Update budgets in database using Enhanced Tenant System
       for (const update of budgetUpdates) {
-        const { error } = await dbHelpers.updateExpenseCategory(update.name, {
+        // Find the category ID first
+        const category = expenseCategories.find(cat => cat.name === update.name);
+        if (!category) {
+          console.error('Category not found:', update.name);
+          continue;
+        }
+
+        const { error } = await tenantDatabase.update('expense_categories', category.id, {
           monthly_budget: update.monthly_budget
-        }, tenantId);
+        });
         
         if (error) {
           console.error('Error updating budget for', update.name, error);
@@ -577,34 +506,7 @@ const ExpenseManagement = ({ navigation }) => {
         }
       }
       
-      // Verify budget updates completed before refreshing
-      console.log('🔄 Verifying budget updates completed...');
-      
-      // Brief delay to allow database consistency
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      try {
-        // Verify at least one budget update is reflected in the database
-        if (budgetUpdates.length > 0) {
-          const firstUpdate = budgetUpdates[0];
-          const { data: verifyData, error: verifyError } = await supabase
-            .from('school_expense_categories')
-            .select('name, monthly_budget')
-            .eq('name', firstUpdate.name)
-            .eq('tenant_id', tenantId)
-            .single();
-
-          if (verifyError || !verifyData || verifyData.monthly_budget !== firstUpdate.monthly_budget) {
-            console.warn('⚠️ Budget verification failed, waiting longer...', verifyError);
-            await new Promise(resolve => setTimeout(resolve, 500));
-          } else {
-            console.log('✅ Budget updates verified successfully:', verifyData);
-          }
-        }
-      } catch (verifyErr) {
-        console.warn('⚠️ Budget verification error, continuing with refresh:', verifyErr);
-      }
-      
+      console.log('✅ All budgets updated successfully');
       setIsBudgetModalVisible(false);
       await loadExpenseData(); // Refresh to show updated budgets
       Alert.alert('Success', 'Budgets updated successfully!');
@@ -638,7 +540,7 @@ const ExpenseManagement = ({ navigation }) => {
       console.log('📝 ExpenseManagement: Creating default categories for tenant:', tenantId);
       
       // First, check if any categories already exist for this tenant
-      const { data: existingCategories, error: checkError } = await dbHelpers.getExpenseCategories(tenantId);
+      const { data: existingCategories, error: checkError } = await tenantDatabase.read('expense_categories', {}, '*');
       
       if (checkError) {
         console.warn('⚠️ ExpenseManagement: Could not check existing categories:', checkError);
@@ -673,8 +575,8 @@ const ExpenseManagement = ({ navigation }) => {
           monthly_budget: category.monthly_budget
         };
         
-        console.log('➕ ExpenseManagement: Creating new category:', category.name);
-        const { data, error } = await dbHelpers.createExpenseCategory(basicCategory, tenantId);
+        console.log('➡️ ExpenseManagement: Creating new category:', category.name);
+        const { data, error } = await tenantDatabase.create('expense_categories', basicCategory);
         
         if (error) {
           console.error('❌ Error creating default category:', category.name, {
@@ -731,7 +633,7 @@ const ExpenseManagement = ({ navigation }) => {
               };
               
               try {
-                const { data: altData, error: altError } = await dbHelpers.createExpenseCategory(altCategoryData, tenantId);
+                const { data: altData, error: altError } = await tenantDatabase.create('expense_categories', altCategoryData);
                 
                 if (!altError && altData) {
                   console.log('✅ ExpenseManagement: Successfully created category with alternative name:', altName);
@@ -867,7 +769,7 @@ const ExpenseManagement = ({ navigation }) => {
       if (editCategoryIndex !== null) {
         // Update existing category
         const categoryToUpdate = expenseCategories[editCategoryIndex];
-        const { error } = await dbHelpers.updateExpenseCategory(categoryToUpdate.name, databaseCategoryData, tenantId);
+        const { error } = await tenantDatabase.update('expense_categories', categoryToUpdate.id, databaseCategoryData);
         
         if (error) {
           console.error('❌ ExpenseManagement: Error updating category:', error);
@@ -897,7 +799,7 @@ const ExpenseManagement = ({ navigation }) => {
         console.log('➕ ExpenseManagement: Creating new category:', databaseCategoryData.name);
         
         // Check if category already exists for this tenant
-        const { data: existingCategories, error: checkError } = await dbHelpers.getExpenseCategories(tenantId);
+        const { data: existingCategories, error: checkError } = await tenantDatabase.read('expense_categories', {}, '*');
         
         if (!checkError && existingCategories) {
           const existingCategory = existingCategories.find(cat => 
@@ -910,7 +812,7 @@ const ExpenseManagement = ({ navigation }) => {
           }
         }
         
-        const { data, error } = await dbHelpers.createExpenseCategory(databaseCategoryData, tenantId);
+        const { data, error } = await tenantDatabase.create('expense_categories', databaseCategoryData);
         
         if (error) {
           console.error('❌ ExpenseManagement: Error creating new category:', error);
@@ -920,7 +822,7 @@ const ExpenseManagement = ({ navigation }) => {
             // Try to fetch the existing category to see if it belongs to this tenant
             try {
               const { data: existingCat, error: fetchError } = await supabase
-                .from('school_expense_categories')
+                .from('expense_categories')
                 .select('*')
                 .eq('name', databaseCategoryData.name)
                 .eq('tenant_id', tenantId)
@@ -975,7 +877,19 @@ const ExpenseManagement = ({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await dbHelpers.deleteExpenseCategory(categoryName, tenantId);
+              if (!checkTenantReady()) {
+                Alert.alert('Error', 'Tenant system not ready. Please try again.');
+                return;
+              }
+
+              // Find the category ID first
+              const category = expenseCategories.find(cat => cat.name === categoryName);
+              if (!category) {
+                Alert.alert('Error', 'Category not found.');
+                return;
+              }
+
+              const { error } = await tenantDatabase.delete('expense_categories', category.id);
               
               if (error) throw error;
               
@@ -1004,13 +918,26 @@ const ExpenseManagement = ({ navigation }) => {
     }
   };
 
-  if (loading) {
+  // Handle tenant errors
+  if (tenantError) {
+    return (
+      <View style={styles.container}>
+        <Header title="Expense Management" navigation={navigation} showBack={true} />
+        <View style={styles.loading}>
+          <Text style={styles.loadingText}>Access Error: {tenantError}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Show loading state
+  if (tenantLoading || loading) {
     return (
       <View style={styles.container}>
         <Header title="Expense Management" navigation={navigation} showBack={true} />
         <View style={styles.loading}>
           <ActivityIndicator size="large" color="#2196F3" />
-          <Text style={styles.loadingText}>Loading expense data...</Text>
+          <Text style={styles.loadingText}>Initializing tenant access...</Text>
         </View>
       </View>
     );
@@ -1062,6 +989,9 @@ const ExpenseManagement = ({ navigation }) => {
           <Text style={styles.dateText}>
             {format(new Date(), 'EEEE, MMMM dd, yyyy')}
           </Text>
+          {tenantName && (
+            <Text style={styles.tenantText}>Current Tenant: {tenantName}</Text>
+          )}
         </View>
 
         {/* Summary Stats */}
@@ -1555,6 +1485,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#666',
     textAlign: 'center',
+  },
+  tenantText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#2196F3',
+    textAlign: 'center',
+    marginTop: 4,
   },
   statsContainer: {
     flexDirection: 'row',

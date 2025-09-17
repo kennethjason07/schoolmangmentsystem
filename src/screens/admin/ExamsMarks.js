@@ -1,17 +1,26 @@
-import React, { useState, useEffect, useRef } from 'react';
+/**
+ * ExamsMarks - Enhanced Tenant System Implementation
+ * 
+ * This component has been migrated to use the Enhanced Tenant System:
+ * - Uses useTenant hook for tenant context
+ * - Leverages tenantDatabase helpers for automatic tenant filtering
+ * - Implements simplified tenant validation with checkTenantReady()
+ * - All database operations are tenant-scoped automatically
+ * - Removed complex email-based tenant validation logic
+ * - Uses initializeTenantHelpers for cache management
+ */
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Alert, Modal, TextInput, ScrollView, Platform, ActivityIndicator, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
-import { supabase, getUserTenantId } from '../../utils/supabase';
-import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
+import { supabase, TABLES } from '../../utils/supabase';
 import { useTenant } from '../../contexts/TenantContext';
+import { tenantDatabase, getCachedTenantId, initializeTenantHelpers } from '../../utils/tenantHelpers';
 import { useAuth } from '../../utils/AuthContext';
-import { quickTenantCheck, createTenantMonitor, runTenantDataDiagnostics } from '../../utils/tenantDataDiagnostic';
-import { TenantLoadingFallback } from '../../components/TenantErrorBoundary';
-import { loadExamsMarksDataProgressive, clearDataCache, logQueryPerformance, loadMoreStudents } from '../../utils/optimizedDataLoader';
+import { useFocusEffect } from '@react-navigation/native';
 // Helper functions for date formatting
 const formatDate = (dateString) => {
   if (!dateString) return '';
@@ -70,17 +79,37 @@ const getGradeColor = (grade) => {
 
 const ExamsMarks = () => {
   const navigation = useNavigation();
-  const { tenantId } = useTenant();
   const { user } = useAuth();
+  const { 
+    tenantId, 
+    isReady, 
+    loading: tenantLoading, 
+    currentTenant: tenant, 
+    tenantName, 
+    error: tenantError,
+    initializeTenant: initializeTenantContext
+  } = useTenant();
   
-  // 🔍 Debugging and monitoring
-  const tenantMonitorRef = useRef(null);
-  const [debugInfo, setDebugInfo] = useState({
-    tenantCheckCount: 0,
-    lastTenantCheck: null,
-    tenantLoadAttempts: 0,
-    errors: []
-  });
+  // Enhanced tenant system - simplified validation
+  const checkTenantReady = () => {
+    return isReady && !tenantLoading && !tenantError && tenantId;
+  };
+  
+  // Enhanced tenant system handles initialization automatically
+  React.useEffect(() => {
+    if (tenantId && isReady) {
+      console.log('🚀 ExamsMarks: Enhanced tenant system ready with ID:', tenantId);
+      // Initialize tenant helpers to ensure cache is set
+      initializeTenantHelpers(tenantId);
+    } else {
+      console.log('⚠️ ExamsMarks: Waiting for tenant context to be ready:', {
+        tenantId: tenantId || 'NULL',
+        isReady,
+        tenantLoading,
+        tenantError: tenantError?.message || 'none'
+      });
+    }
+  }, [tenantId, isReady, tenantLoading, tenantError]);
 
   // Core data states
   const [exams, setExams] = useState([]);
@@ -126,179 +155,105 @@ const ExamsMarks = () => {
 
 
 
-  // 🚀 OPTIMIZED DATA LOADING with progressive loading and caching
   const loadAllData = async () => {
+    if (!checkTenantReady()) {
+      console.log('⚠️ ExamsMarks: Cannot load data - tenant not ready');
+      return;
+    }
+    
+    console.log('🔄 ExamsMarks: Loading data with enhanced tenant system...');
+    setLoading(true);
+    
     try {
-      console.log('🔄 ExamsMarks.loadAllData: Starting data load process...');
-      console.log('📊 Current context state:', {
-        tenantId: tenantId || 'NOT_SET',
-        userId: user?.id || 'NOT_SET',
-        userEmail: user?.email || 'NOT_SET',
-        timestamp: new Date().toISOString()
-      });
-      
-      // 🛡️ Enhanced tenant context validation
-      if (!tenantId) {
-        console.warn('⚠️ ExamsMarks: No tenantId in context, attempting quick tenant check...');
-        
-        // Increment debug counter
-        setDebugInfo(prev => ({
-          ...prev,
-          tenantLoadAttempts: prev.tenantLoadAttempts + 1,
-          lastTenantCheck: new Date().toISOString()
-        }));
-        
-        // Try to get tenant context directly
-        const quickCheck = await quickTenantCheck();
-        console.log('🔍 QuickTenantCheck result:', quickCheck);
-        
-        if (!quickCheck.success) {
-          const errorMsg = `Tenant context unavailable: ${quickCheck.error} (step: ${quickCheck.step})`;
-          console.error('❌ ExamsMarks: Tenant context not available:', errorMsg);
-          
-          // Store error for debugging
-          setDebugInfo(prev => ({
-            ...prev,
-            errors: [...prev.errors, { timestamp: new Date().toISOString(), error: errorMsg }]
-          }));
-          
-          // Show user-friendly error for non-auth issues
-          if (quickCheck.step !== 'auth') {
-            Alert.alert(
-              'System Error', 
-              'Unable to load tenant context. Please try logging out and back in.',
-              [
-                { text: 'Retry', onPress: () => loadAllData() },
-                { text: 'OK' }
-              ]
-            );
-          }
-          
-          setLoading(false);
-          return;
-        }
-        
-        // If quick check succeeded but we still don't have tenantId in context
-        if (quickCheck.tenantId && !tenantId) {
-          console.warn('⚠️ ExamsMarks: TenantId available but not in context. Proceeding with direct ID...');
-          // We'll use the tenantId from quickCheck.tenantId below
-        }
-      }
-      
-      setLoading(true);
-      console.log('🚀 ExamsMarks: Starting optimized progressive data loading...');
-      
-      // Get effective tenant ID (from context or quick check)
-      const effectiveTenantId = tenantId || (await quickTenantCheck()).tenantId;
-      
-      if (!effectiveTenantId) {
-        console.error('❌ ExamsMarks: No effective tenant ID available');
-        setLoading(false);
-        return;
-      }
-      
-      console.log('✅ ExamsMarks: Using effective tenant ID:', effectiveTenantId);
-      
-      // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, effectiveTenantId, 'ExamsMarks - loadAllData');
-      if (!validation.isValid) {
-        console.error('❌ ExamsMarks loadAllData: Tenant validation failed:', validation.error);
-        Alert.alert('Access Denied', validation.error);
-        setLoading(false);
-        return;
-      }
-      
-      // Use imported progressive loading function
-      
-      const startTime = Date.now();
-      
-      // Use progressive loading with callbacks for immediate UI updates
-      const result = await loadExamsMarksDataProgressive(effectiveTenantId, {
-        onCriticalDataLoaded: (data) => {
-          console.log('📊 ExamsMarks: Critical data loaded, updating UI...');
-          setLoadingStage('Loading exams and classes...');
-          setExams(data.exams || []);
-          setClasses(data.classes || []);
-          // Reduce loading state for better UX - UI can display exams and classes immediately
-          if (data.exams?.length > 0 || data.classes?.length > 0) {
-            setLoading(false); // Allow UI interaction while background loading continues
-            setLoadingStage('Loading subjects...'); // Show what's loading next
-          }
-        },
-        
-        onSecondaryDataLoaded: (data) => {
-          console.log('📊 ExamsMarks: Secondary data loaded, updating subjects...');
-          setLoadingStage('Loading students and marks...');
-          setSubjects(data.subjects || []);
-        },
-        
-        onHeavyDataLoaded: (data) => {
-          console.log('📊 ExamsMarks: Heavy data loaded, updating students and marks...');
-          setLoadingStage('Finalizing...');
-          setStudents(data.students || []);
-          setMarks(data.marks || []);
-          // Check if we loaded the full initial batch (500)
-          setHasMoreStudents(data.students?.length === 500);
-        },
-        
-        onComplete: (allData) => {
-          console.log('✅ ExamsMarks: All data loading complete');
-          setLoadingStage('');
-          logQueryPerformance('ExamsMarks - Complete Load', startTime, 
-            Object.values(allData).reduce((total, arr) => total + (arr?.length || 0), 0));
-        },
-        
-        onError: (error) => {
-          console.error('❌ ExamsMarks: Progressive loading failed:', error);
-          setLoadingStage('');
-          Alert.alert('Loading Error', `Failed to load some data: ${error}`);
-        }
-      });
-      
-      if (result.success) {
-        // Final data validation and assignment
-        const { exams: examsData, classes: classesData, subjects: subjectsData, students: studentsData, marks: marksData } = result.data;
-        
-        // 🛡️ Final validation (data already validated in progressive loader)
-        console.log('📊 ExamsMarks: Final data loaded:', {
-          exams: examsData?.length || 0,
-          classes: classesData?.length || 0,
-          subjects: subjectsData?.length || 0,
-          students: studentsData?.length || 0,
-          marks: marksData?.length || 0
-        });
-        
-        // Set final data (some may already be set by callbacks)
-        setExams(examsData || []);
-        setClasses(classesData || []);
-        setSubjects(subjectsData || []);
-        setStudents(studentsData || []);
-        setMarks(marksData || []);
-        
-      } else {
-        console.error('❌ ExamsMarks: Progressive loading failed completely:', result.error);
-        Alert.alert('Error', 'Failed to load exam and marks data');
-        
-        // Reset data on complete failure
-        setExams([]);
-        setClasses([]);
-        setSubjects([]);
-        setStudents([]);
-        setMarks([]);
-      }
-
+      await Promise.all([
+        loadExams(),
+        loadClasses(),
+        loadSubjects(),
+        loadStudents(),
+        loadMarks()
+      ]);
+      console.log('✅ ExamsMarks: All data loaded successfully');
     } catch (error) {
-      console.error('❌ ExamsMarks: Unexpected error in loadAllData:', error);
-      Alert.alert('Error', 'An unexpected error occurred while loading data');
-      
-      // Reset data on error
-      setExams([]);
-      setClasses([]);
-      setSubjects([]);
-      setStudents([]);
-      setMarks([]);
+      console.error('❌ ExamsMarks: Error loading data:', error);
+      Alert.alert('Error', `Failed to load data: ${error.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadExams = async () => {
+    try {
+      console.log('🔍 Loading exams via enhanced tenant database');
+      const { data: examsData, error } = await tenantDatabase.read('exams', {}, '*');
+      
+      if (error) throw error;
+      
+      console.log('📦 Loaded exams:', examsData?.length, 'items');
+      setExams(examsData || []);
+    } catch (error) {
+      console.error('❌ Error loading exams:', error);
+      setExams([]);
+    }
+  };
+
+  const loadClasses = async () => {
+    try {
+      console.log('🔍 Loading classes via enhanced tenant database');
+      const { data: classesData, error } = await tenantDatabase.read('classes', {}, '*');
+      
+      if (error) throw error;
+      
+      console.log('📦 Loaded classes:', classesData?.length, 'items');
+      setClasses(classesData || []);
+    } catch (error) {
+      console.error('❌ Error loading classes:', error);
+      setClasses([]);
+    }
+  };
+
+  const loadSubjects = async () => {
+    try {
+      console.log('🔍 Loading subjects via enhanced tenant database');
+      const { data: subjectsData, error } = await tenantDatabase.read('subjects', {}, '*');
+      
+      if (error) throw error;
+      
+      console.log('📦 Loaded subjects:', subjectsData?.length, 'items');
+      setSubjects(subjectsData || []);
+    } catch (error) {
+      console.error('❌ Error loading subjects:', error);
+      setSubjects([]);
+    }
+  };
+
+  const loadStudents = async () => {
+    try {
+      console.log('🔍 Loading students via enhanced tenant database');
+      const { data: studentsData, error } = await tenantDatabase.read('students', {}, '*');
+      
+      if (error) throw error;
+      
+      console.log('📦 Loaded students:', studentsData?.length, 'items');
+      setStudents(studentsData || []);
+      setHasMoreStudents(false); // Simplified for now
+    } catch (error) {
+      console.error('❌ Error loading students:', error);
+      setStudents([]);
+    }
+  };
+
+  const loadMarks = async () => {
+    try {
+      console.log('🔍 Loading marks via enhanced tenant database');
+      const { data: marksData, error } = await tenantDatabase.read('marks', {}, '*');
+      
+      if (error) throw error;
+      
+      console.log('📦 Loaded marks:', marksData?.length, 'items');
+      setMarks(marksData || []);
+    } catch (error) {
+      console.error('❌ Error loading marks:', error);
+      setMarks([]);
     }
   };
 
@@ -333,148 +288,47 @@ const ExamsMarks = () => {
     }
   };
   
-  // 🚀 Load more students with pagination
-  const loadMoreStudents = async () => {
-    if (!tenantId || loadingMoreStudents || !hasMoreStudents) return;
-    
-    try {
-      setLoadingMoreStudents(true);
-      console.log('🔄 Loading more students...', { currentCount: students.length });
-      
-      const result = await loadMoreStudents(tenantId, students.length, 100);
-      
-      if (result.success && result.data.length > 0) {
-        setStudents(prevStudents => [...prevStudents, ...result.data]);
-        setHasMoreStudents(result.hasMore);
-        console.log('✅ Loaded additional students:', result.data.length);
-      } else {
-        setHasMoreStudents(false);
-        if (!result.success) {
-          console.warn('⚠️ Load more students failed:', result.error);
-        }
-      }
-    } catch (error) {
-      console.error('❌ Error loading more students:', error);
-      setHasMoreStudents(false);
-    } finally {
-      setLoadingMoreStudents(false);
-    }
-  };
-  
-  // Refresh data with cache clearing
+  // Refresh data
   const onRefresh = async () => {
     setRefreshing(true);
-    
-    try {
-      // Clear cache for fresh data
-      clearDataCache();
-      console.log('🧹 Cache cleared for fresh data reload');
-      
-      // Reset pagination state
-      setHasMoreStudents(true);
-      setLoadingStage('');
-      
-      await loadAllData();
-    } catch (error) {
-      console.error('❌ Error during refresh:', error);
-    } finally {
-      setRefreshing(false);
-    }
+    await loadAllData();
+    setRefreshing(false);
   };
 
-  // 🔍 Set up tenant monitoring for debugging
-  useEffect(() => {
-    console.log('🔍 ExamsMarks: Setting up tenant monitoring...');
-    
-    // Set up tenant state monitoring
-    tenantMonitorRef.current = createTenantMonitor((currentState, previousState) => {
-      console.log('📊 ExamsMarks: Tenant state changed:', {
-        previous: previousState?.success || 'none',
-        current: currentState?.success || 'none',
-        tenantId: currentState?.tenantId || 'none'
-      });
-      
-      setDebugInfo(prev => ({
-        ...prev,
-        tenantCheckCount: prev.tenantCheckCount + 1,
-        lastTenantCheck: currentState.timestamp
-      }));
-      
-      // If tenant context becomes available and we haven't loaded data yet
-      if (currentState.success && currentState.tenantId && (!previousState?.success || exams.length === 0)) {
-        console.log('✅ ExamsMarks: Tenant context now available, triggering data load...');
+  // Load data when enhanced tenant system is ready
+  useFocusEffect(
+    useCallback(() => {
+      if (checkTenantReady()) {
+        console.log('🚀 ExamsMarks: Enhanced tenant system ready, loading data...');
+        // Ensure tenant helpers are initialized
+        initializeTenantHelpers(tenantId);
         loadAllData();
       }
-    });
-    
-    // Cleanup monitor on unmount
-    return () => {
-      if (tenantMonitorRef.current) {
-        console.log('🔍 ExamsMarks: Cleaning up tenant monitor...');
-        tenantMonitorRef.current();
-      }
-    };
-  }, []);
+    }, [tenantId, isReady, tenantLoading, tenantError])
+  );
   
-  // Load data when tenantId is available
-  useEffect(() => {
-    console.log('🔄 ExamsMarks: useEffect triggered - tenantId change detected:', {
-      tenantId: tenantId || 'NOT_SET',
-      examsLoaded: exams.length > 0,
-      loading: loading
-    });
-    
-    if (tenantId) {
-      console.log('🔄 ExamsMarks: tenantId available, loading data...');
-      loadAllData();
-    } else {
-      console.log('⏳ ExamsMarks: No tenantId - will wait for tenant monitor to detect availability...');
-    }
-  }, [tenantId]); // Add tenantId as dependency
-
-  // Enhanced debugging for state changes
-  useEffect(() => {
-    console.log('📊 ExamsMarks state update:', {
-      loading,
-      examsCount: exams.length,
-      classesCount: classes.length,
-      studentsCount: students.length,
-      subjectsCount: subjects.length,
-      tenantId: tenantId || 'NOT_SET',
-      loadingStage: loadingStage || 'none',
-      debugInfo: {
-        tenantCheckCount: debugInfo.tenantCheckCount,
-        tenantLoadAttempts: debugInfo.tenantLoadAttempts,
-        errorCount: debugInfo.errors.length,
-        lastTenantCheck: debugInfo.lastTenantCheck
-      }
-    });
-    
-    // Log specific milestones
-    if (exams.length > 0 && !loading) {
-    console.log('✅ ExamsMarks: Data loaded successfully!');
-    }
-    if (loading && loadingStage) {
-      console.log(`🔄 ExamsMarks: ${loadingStage}`);
-    }
-  }, [loading, exams.length, classes.length, students.length, subjects.length, loadingStage, debugInfo]);
-  
-  // 🛡️ Show fallback UI for severe tenant issues (only after multiple failures)
-  if (debugInfo.errors.length > 3 && exams.length === 0 && !loading) {
-    const latestError = debugInfo.errors[debugInfo.errors.length - 1];
-    console.warn('⚠️ ExamsMarks: Showing error fallback due to repeated failures:', latestError.error);
-    
+  // Handle tenant errors
+  if (tenantError) {
     return (
-      <View style={{ flex: 1 }}>
-        <Header title="Exams & Marks" />
-        <TenantLoadingFallback
-          loading={false}
-          error={`System Error: ${latestError.error}`}
-          onRetry={loadAllData}
-          onDiagnostic={handleDiagnostic}
-          title="Unable to Load Exams"
-          message="There was a problem loading the exam data. This could be due to a tenant context issue or database connectivity problem."
-        />
+      <View style={styles.container}>
+        <Header title="Exams & Marks" navigation={navigation} showBack={true} />
+        <View style={styles.loading}>
+          <Text style={styles.loadingText}>Access Error: {tenantError}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Show loading state
+  if (tenantLoading || loading) {
+    return (
+      <View style={styles.container}>
+        <Header title="Exams & Marks" navigation={navigation} showBack={true} />
+        <View style={styles.loading}>
+          <ActivityIndicator size="large" color="#2196F3" />
+          <Text style={styles.loadingText}>Initializing tenant access...</Text>
+          {loadingStage && <Text style={styles.loadingSubText}>{loadingStage}</Text>}
+        </View>
       </View>
     );
   }
@@ -495,10 +349,8 @@ const ExamsMarks = () => {
     try {
       console.log('📝 handleAddExam called with form:', examForm);
       
-      // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ExamsMarks - handleAddExam');
-      if (!validation.isValid) {
-        Alert.alert('Access Denied', validation.error);
+      if (!checkTenantReady()) {
+        Alert.alert('Error', 'Tenant system not ready. Please try again.');
         return;
       }
       
@@ -544,19 +396,24 @@ const ExamsMarks = () => {
         tenant_id: tenantId
       }));
 
-      console.log('🔧 Inserting exam records with tenant_id:', examRecords);
+      console.log('🔧 Inserting exam records with Enhanced Tenant System:', examRecords);
       
-      const { data, error } = await supabase
-        .from('exams')
-        .insert(examRecords)
-        .select();
-
-      if (error) {
-        console.error('Database error:', error);
-        throw error;
+      // Use Enhanced Tenant System for each exam record
+      const createdExams = [];
+      for (const examRecord of examRecords) {
+        // Remove tenant_id as it's handled automatically
+        const { tenant_id, ...examData } = examRecord;
+        const { data, error } = await tenantDatabase.create('exams', examData);
+        
+        if (error) {
+          console.error('Database error:', error);
+          throw error;
+        }
+        
+        if (data) createdExams.push(data);
       }
 
-      console.log('✅ Exam created successfully:', data);
+      console.log('✅ Exam created successfully:', createdExams);
 
       const classNames = examForm.selected_classes.map(classId => {
         const classItem = classes.find(c => c.id === classId);
@@ -589,10 +446,8 @@ const ExamsMarks = () => {
   // Edit exam (using schema: exams table)
   const handleEditExam = async () => {
     try {
-      // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ExamsMarks - handleEditExam');
-      if (!validation.isValid) {
-        Alert.alert('Access Denied', validation.error);
+      if (!checkTenantReady()) {
+        Alert.alert('Error', 'Tenant system not ready. Please try again.');
         return;
       }
       
@@ -610,32 +465,26 @@ const ExamsMarks = () => {
       
       console.log('🔧 Using validated tenant_id for exam edit:', tenantId);
 
-      // First, delete the existing exam record with tenant validation
-      const { error: deleteError } = await supabase
-        .from('exams')
-        .delete()
-        .eq('id', selectedExam.id)
-        .eq('tenant_id', tenantId);
+      // First, delete the existing exam record with Enhanced Tenant System
+      const { error: deleteError } = await tenantDatabase.delete('exams', selectedExam.id);
 
       if (deleteError) throw deleteError;
 
-      // Create new exam records for each selected class
-      const examRecords = examForm.selected_classes.map(classId => ({
-        name: examForm.name,
-        class_id: classId,
-        academic_year: examForm.academic_year || '2024-25',
-        start_date: examForm.start_date,
-        end_date: examForm.end_date || examForm.start_date,
-        remarks: examForm.description || null,
-        max_marks: parseInt(examForm.max_marks) || 100,
-        tenant_id: tenantId
-      }));
+      // Create new exam records for each selected class using Enhanced Tenant System
+      for (const classId of examForm.selected_classes) {
+        const examData = {
+          name: examForm.name,
+          class_id: classId,
+          academic_year: examForm.academic_year || '2024-25',
+          start_date: examForm.start_date,
+          end_date: examForm.end_date || examForm.start_date,
+          remarks: examForm.description || null,
+          max_marks: parseInt(examForm.max_marks) || 100
+        };
 
-      const { error: insertError } = await supabase
-        .from('exams')
-        .insert(examRecords);
-
-      if (insertError) throw insertError;
+        const { error: insertError } = await tenantDatabase.create('exams', examData);
+        if (insertError) throw insertError;
+      }
 
       const classNames = examForm.selected_classes.map(classId => {
         const classItem = classes.find(c => c.id === classId);
@@ -2629,10 +2478,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#f5f5f5',
   },
+  loading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    padding: 20,
+  },
   loadingText: {
     fontSize: 16,
     color: '#666',
     marginTop: 12,
+    textAlign: 'center',
   },
   // 🚀 Progressive loading styles
   loadingSubText: {
