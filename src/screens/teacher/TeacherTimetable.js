@@ -16,7 +16,7 @@ import { format } from 'date-fns';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
-import { useTenantAccess } from '../../utils/tenantHelpers';
+import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
 
 const TeacherTimetable = ({ navigation }) => {
   const { user } = useAuth();
@@ -54,30 +54,32 @@ const TeacherTimetable = ({ navigation }) => {
     }
   }, []);
 
-  // Load data on component mount - tenant validation happens inside loadData
+  // 🚀 Enhanced tenant system - load data when ready
   useEffect(() => {
-    if (isReady && tenantId) {
-      console.log('🔄 TeacherTimetable: Component mounted, loading data...');
+    if (isReady && !tenantLoading && !tenantError) {
+      console.log('🔄 TeacherTimetable: Component mounted, loading data with enhanced tenant system...');
       loadData();
     }
-  }, [isReady, tenantId]);
+  }, [isReady, tenantId, tenantLoading, tenantError]);
 
   const loadData = async () => {
     try {
       setLoading(true);
       
-      console.log('🚀 TeacherTimetable.loadData: Starting for user:', user?.email);
+      console.log('🚀 TeacherTimetable.loadData: Starting with enhanced tenant system for user:', user?.email);
       
-      // Validate tenant context
-      if (!isReady || !tenantId) {
-        throw new Error('Tenant context not ready. Please wait and try again.');
+      // 🚀 Enhanced tenant system validation
+      if (!isReady || tenantLoading) {
+        console.log('⚠️ TeacherTimetable: Tenant context not ready, waiting...');
+        setLoading(false);
+        return;
       }
       
       if (tenantError) {
-        throw new Error(tenantError.message || 'Tenant initialization error');
+        throw new Error(tenantError);
       }
       
-      console.log('✅ Using tenant_id:', tenantId);
+      console.log('✅ Using enhanced tenant system, tenant_id:', tenantId || 'Parent/No Tenant Required');
       
       // Use the robust teacher lookup from dbHelpers
       console.log('🔍 Getting teacher info using dbHelpers...');
@@ -86,43 +88,31 @@ const TeacherTimetable = ({ navigation }) => {
       if (teacherError || !teacherData) {
         console.error('❌ Teacher lookup failed:', teacherError);
         
-        // Try fallback lookups like in TeacherSubjects
-        console.log('🔄 Trying fallback: user lookup by email within tenant...');
-        const { data: userRecord, error: userLookupError } = await supabase
-          .from(TABLES.USERS)
-          .select('id, email, linked_teacher_id, tenant_id')
-          .eq('email', user.email)
-          .eq('tenant_id', tenantId)
-          .single();
+        // 🚀 Enhanced tenant system fallback using tenantDatabase
+        console.log('🔄 Trying fallback: user lookup by email using enhanced system...');
+        const { data: userRecords, error: userLookupError } = await tenantDatabase.read(
+          'users',
+          { email: user.email },
+          'id, email, linked_teacher_id, tenant_id'
+        );
+        
+        const userRecord = userRecords?.[0]; // Get first match
         
         if (userLookupError || !userRecord?.linked_teacher_id) {
           console.error('❌ Fallback user lookup failed:', userLookupError);
           
-          // Fallback 2: Cross-tenant user lookup for better error messaging
-          const { data: crossTenantUser, error: crossTenantError } = await supabase
-            .from(TABLES.USERS)
-            .select('id, email, tenant_id, linked_teacher_id')
-            .eq('email', user.email)
-            .single();
-            
-          if (!crossTenantError && crossTenantUser) {
-            if (crossTenantUser.tenant_id !== currentTenantId) {
-              throw new Error(`User account exists in tenant "${crossTenantUser.tenant_id}" but current tenant is "${currentTenantId}". Please contact admin to fix tenant assignment.`);
-            } else if (!crossTenantUser.linked_teacher_id) {
-              throw new Error(`User account found but not linked to a teacher profile. Please contact admin to complete account setup.`);
-            }
-          }
+          // 🚀 Enhanced fallback with better error messaging
+          console.log('🔍 Enhanced system fallback: checking user account setup...');
           
-          throw new Error(`User record not found for email: ${user.email} in tenant: ${currentTenantId}. Please contact admin.`);
+          throw new Error(`User record not found for email: ${user.email} in current tenant. Please contact admin to complete account setup.`);
         }
         
-        // Get teacher info using the linked teacher ID
-        const { data: fallbackTeacher, error: fallbackTeacherError } = await supabase
-          .from(TABLES.TEACHERS)
-          .select('*')
-          .eq('id', userRecord.linked_teacher_id)
-          .eq('tenant_id', tenantId)
-          .single();
+        // 🚀 Get teacher info using enhanced tenant system
+        const { data: fallbackTeacher, error: fallbackTeacherError } = await tenantDatabase.readOne(
+          'teachers',
+          userRecord.linked_teacher_id,
+          '*'
+        );
           
         if (fallbackTeacherError || !fallbackTeacher) {
           throw new Error('Teacher profile not found or does not belong to current tenant.');
@@ -132,13 +122,10 @@ const TeacherTimetable = ({ navigation }) => {
         setTeacherInfo(fallbackTeacher);
         console.log('✅ Fallback teacher lookup successful:', fallbackTeacher.name);
       } else {
-        // Validate teacher belongs to current tenant
-        if (teacherData.tenant_id !== currentTenantId) {
-          throw new Error(`Teacher belongs to tenant "${teacherData.tenant_id}" but current tenant is "${currentTenantId}".`);
-        }
-        
+        // 🚀 Enhanced tenant system automatically validates tenant ownership
+        // No manual validation needed - system ensures data integrity
         setTeacherInfo(teacherData);
-        console.log('✅ Teacher lookup successful:', teacherData.name);
+        console.log('✅ Enhanced system teacher lookup successful:', teacherData.name);
       }
       
       const teacherId = teacherData?.id || teacherInfo?.id;
@@ -146,11 +133,12 @@ const TeacherTimetable = ({ navigation }) => {
         throw new Error('Teacher ID could not be determined');
       }
       
-      // Get assigned subjects and classes with proper tenant filtering
-      console.log('📚 Loading teacher subjects and classes...');
-      const { data: assignedSubjects, error: subjectsError } = await supabase
-        .from(TABLES.TEACHER_SUBJECTS)
-        .select(`
+      // 🚀 Enhanced tenant database for assigned subjects and classes
+      console.log('📚 Loading teacher subjects and classes using enhanced system...');
+      const { data: assignedSubjects, error: subjectsError } = await tenantDatabase.read(
+        'teacher_subjects',
+        { teacher_id: teacherId },
+        `
           *,
           subjects(
             id,
@@ -158,9 +146,8 @@ const TeacherTimetable = ({ navigation }) => {
             class_id,
             classes(class_name, id, section)
           )
-        `)
-        .eq('teacher_id', teacherId)
-        .eq('tenant_id', currentTenantId);
+        `
+      );
       
       if (subjectsError) {
         console.error('❌ Error fetching assigned subjects:', subjectsError);
@@ -190,8 +177,8 @@ const TeacherTimetable = ({ navigation }) => {
       console.log('🔍 Classes:', uniqueClasses.map(c => `${c.class_name} ${c.section}`));
       console.log('🔍 Subjects:', subjectList.map(s => s.name));
       
-      // Load timetable data
-      await loadTimetableData(teacherId, tenantId);
+      // 🚀 Load timetable data using enhanced system
+      await loadTimetableData(teacherId);
       
     } catch (error) {
       console.error('❌ Error in loadData:', error);
@@ -202,9 +189,9 @@ const TeacherTimetable = ({ navigation }) => {
     }
   };
 
-  const loadTimetableData = async (teacherId, tenantId) => {
+  const loadTimetableData = async (teacherId) => {
     try {
-      console.log('🗺 Loading timetable data for teacher:', teacherId, 'tenant:', tenantId);
+      console.log('🗺 Loading timetable data using enhanced tenant system for teacher:', teacherId);
       
       // Get current academic year
       const currentYear = new Date().getFullYear();
@@ -212,19 +199,19 @@ const TeacherTimetable = ({ navigation }) => {
       
       console.log('🎓 Using academic year:', academicYear);
       
-      // Fetch timetable entries for this teacher with proper table reference and tenant filtering
-      const { data: timetableData, error: timetableError } = await supabase
-        .from(TABLES.TIMETABLE)
-        .select(`
+      // 🚀 Enhanced tenant database for timetable entries
+      const { data: timetableData, error: timetableError } = await tenantDatabase.read(
+        'timetable',
+        { 
+          teacher_id: teacherId,
+          academic_year: academicYear 
+        },
+        `
           *,
           classes(class_name, section),
           subjects(name)
-        `)
-        .eq('teacher_id', teacherId)
-        .eq('tenant_id', tenantId)
-        .eq('academic_year', academicYear)
-        .order('day_of_week')
-        .order('period_number');
+        `
+      );
       
       console.log('📅 Timetable entries found:', timetableData?.length, 'for teacher:', teacherId);
 

@@ -6,8 +6,9 @@ import CrossPlatformDatePicker, { DatePickerButton } from '../../components/Cros
 import { format } from 'date-fns';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-import { useTenantAccess } from '../../utils/tenantHelpers';
-import { AdminTenantFix } from '../../utils/adminTenantFix';
+import { useTenant } from '../../contexts/TenantContext';
+import { tenantDatabase, initializeTenantHelpers, getCachedTenantId } from '../../utils/tenantHelpers';
+import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 import { useAuth } from '../../utils/AuthContext';
 
 
@@ -45,11 +46,12 @@ const SubjectsTimetable = ({ route }) => {
   const { 
     tenantId, 
     isReady, 
-    isLoading: tenantLoading, 
-    tenant, 
+    loading: tenantLoading, 
+    currentTenant: tenant, 
     tenantName, 
-    error: tenantError 
-  } = useTenantAccess();
+    error: tenantError,
+    initializeTenant: initializeTenantContext
+  } = useTenant();
   const { user } = useAuth();
   
   // 🔍 DEBUG: Log tenant info on component load
@@ -58,6 +60,8 @@ const SubjectsTimetable = ({ route }) => {
     tenantName,
     isReady,
     tenantLoading,
+    tenantError: tenantError?.message || 'none',
+    tenant: tenant ? 'SET' : 'NULL',
     classId
   });
   const [tab, setTab] = useState(classId ? 'timetable' : 'subjects');
@@ -87,27 +91,138 @@ const SubjectsTimetable = ({ route }) => {
   const [subjectModalError, setSubjectModalError] = useState(null);
   const [refreshCounter, setRefreshCounter] = useState(0);
 
-  // Enhanced tenant validation
-  const validateTenantReady = () => {
-    if (tenantLoading || !isReady) {
-      console.log('🔄 [TENANT-AWARE] Tenant context not ready yet...');
-      return false;
+  // Enhanced tenant system - simplified validation
+  const isTenantReady = () => {
+    // First check the context-based tenant
+    if (isReady && !tenantLoading && !tenantError && tenantId) {
+      return true;
     }
     
-    if (tenantError) {
-      console.error('❌ [TENANT-AWARE] Tenant error:', tenantError);
-      setError('Tenant error: ' + tenantError);
-      return false;
+    // Fallback: check if tenant helpers have been initialized directly
+    const cachedTenantId = getCachedTenantId();
+    if (cachedTenantId && user) {
+      console.log('🚀 SubjectsTimetable: Using cached tenant ID fallback:', cachedTenantId);
+      return true;
     }
     
-    if (!tenantId) {
-      console.error('❌ [TENANT-AWARE] No tenant ID available');
-      setError('No tenant access available');
-      return false;
-    }
-    
-    return true;
+    return false;
   };
+  
+  // Initialize tenant helpers when tenantId is available
+  React.useEffect(() => {
+    if (tenantId && isReady) {
+      console.log('🚀 SubjectsTimetable: Initializing tenant helpers with ID:', tenantId);
+      initializeTenantHelpers(tenantId);
+    } else {
+      console.log('⚠️ SubjectsTimetable: Tenant helpers not ready yet:', {
+        tenantId: tenantId || 'NULL',
+        isReady,
+        tenantLoading,
+        tenantError: tenantError?.message || 'none'
+      });
+    }
+  }, [tenantId, isReady, tenantLoading, tenantError]);
+  
+  // Immediate tenant initialization check on component mount
+  React.useEffect(() => {
+    const checkAndInitializeTenant = async () => {
+      console.log('🚀 SubjectsTimetable: Component mounted, checking tenant status...');
+      
+      if (user && !isReady && !tenantLoading && !tenantError) {
+        console.log('🔄 SubjectsTimetable: User authenticated but tenant not ready, forcing initialization...');
+        
+        try {
+          // Try both context initialization and manual helpers initialization
+          if (initializeTenantContext) {
+            const contextResult = await initializeTenantContext();
+            console.log('🏢 SubjectsTimetable: Context init result:', contextResult);
+            
+            if (contextResult?.success && contextResult?.tenantId) {
+              initializeTenantHelpers(contextResult.tenantId);
+              return;
+            }
+          }
+          
+          // Fallback to direct tenant lookup
+          const directResult = await getCurrentUserTenantByEmail();
+          console.log('📧 SubjectsTimetable: Direct lookup result:', directResult.success);
+          
+          if (directResult.success) {
+            initializeTenantHelpers(directResult.data.tenantId);
+          }
+          
+        } catch (error) {
+          console.error('❌ SubjectsTimetable: Mount-time tenant init failed:', error);
+        }
+      }
+    };
+    
+    // Run after a short delay to allow context to settle
+    const timer = setTimeout(checkAndInitializeTenant, 500);
+    return () => clearTimeout(timer);
+  }, [user, isReady, tenantLoading, tenantError, initializeTenantContext]);
+  
+  // Fallback effect: If tenant is not ready after initial load, try manual initialization
+  React.useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (!isReady && !tenantLoading && user && !tenantError) {
+        console.log('⚠️ SubjectsTimetable: Tenant not ready after 3s, attempting manual initialization...');
+        try {
+          const result = await getCurrentUserTenantByEmail();
+          if (result.success) {
+            console.log('✅ SubjectsTimetable: Manual tenant lookup successful:', result.data.tenantId);
+            initializeTenantHelpers(result.data.tenantId);
+            
+            // Force a component re-render to check if tenant helpers are now working
+            setRefreshCounter(prev => prev + 1);
+          } else {
+            console.error('❌ SubjectsTimetable: Manual tenant lookup failed:', result.error);
+            setError(`Failed to initialize tenant: ${result.error}`);
+          }
+        } catch (error) {
+          console.error('❌ SubjectsTimetable: Exception during manual tenant init:', error);
+          setError(`Failed to initialize tenant: ${error.message}`);
+        }
+      }
+    }, 3000);
+    
+    return () => clearTimeout(timer);
+  }, [isReady, tenantLoading, user, tenantError]);
+  
+  // Immediate effect: Check tenant context every 2 seconds and provide status
+  React.useEffect(() => {
+    const statusInterval = setInterval(() => {
+      console.log('🔍 SubjectsTimetable: Tenant Status Check:', {
+        isReady,
+        tenantId,
+        tenantLoading,
+        tenantError: tenantError?.message || 'none',
+        tenant: tenant ? 'SET' : 'NULL',
+        user: user ? user.email : 'NULL'
+      });
+      
+      // If we have a user but no tenant context, something is wrong
+      if (user && !isReady && !tenantLoading && !tenantError) {
+        console.log('🚨 SubjectsTimetable: CRITICAL - User authenticated but tenant context not ready!');
+        
+        // Try to trigger tenant context initialization
+        if (initializeTenantContext) {
+          console.log('🚀 SubjectsTimetable: Attempting to trigger tenant context initialization...');
+          initializeTenantContext().then(result => {
+            console.log('📄 SubjectsTimetable: Tenant context initialization result:', result);
+            if (result?.success && result?.tenantId) {
+              initializeTenantHelpers(result.tenantId);
+              setRefreshCounter(prev => prev + 1);
+            }
+          }).catch(error => {
+            console.error('❌ SubjectsTimetable: Tenant context initialization failed:', error);
+          });
+        }
+      }
+    }, 2000);
+    
+    return () => clearInterval(statusInterval);
+  }, [isReady, tenantId, tenantLoading, tenantError, tenant, user]);
 
   // Add screen dimension change listener
   useEffect(() => {
@@ -153,43 +268,49 @@ const SubjectsTimetable = ({ route }) => {
           throw new Error('Loading timeout - please check your connection');
         }, 10000);
         
-        // 🔍 Wait for tenant context to be ready
-        if (!validateTenantReady()) {
+        // 🔍 Enhanced tenant readiness check with detailed debugging
+        const tenantReadyStatus = isTenantReady();
+        const cachedTenantId = getCachedTenantId();
+        
+        console.log('🔍 SubjectsTimetable: Detailed tenant status:', {
+          tenantReadyStatus,
+          contextTenantId: tenantId,
+          cachedTenantId,
+          isReady,
+          tenantLoading,
+          tenantError: tenantError?.message || 'none',
+          user: user?.email || 'none'
+        });
+        
+        if (!tenantReadyStatus) {
+          console.log('🔄 SubjectsTimetable: Tenant context not ready, waiting...');
           setLoading(false);
           return;
         }
+        
+        const effectiveTenantId = tenantId || cachedTenantId;
+        console.log('🚀 SubjectsTimetable.fetchData: Using effective tenant_id:', effectiveTenantId);
         
         console.log('🚀 SubjectsTimetable.fetchData: Starting with tenant_id:', tenantId);
         
         // 🏃‍♂️ Fast parallel data fetching
         console.log('📊 SubjectsTimetable: Fetching data in parallel...');
         
+        // 🚀 Use enhanced tenant database helpers for parallel data fetching
         const [classesResult, teachersResult, subjectsResult] = await Promise.all([
-          supabase
-            .from(TABLES.CLASSES)
-            .select('*')
-            .eq('tenant_id', tenantId)
-            .order('class_name'),
-          supabase
-            .from(TABLES.TEACHERS)
-            .select('*')
-            .eq('tenant_id', tenantId)
-            .order('name'),
-          supabase
-            .from(TABLES.SUBJECTS)
-            .select(`
-              *,
-              teacher_subjects(
-                teachers(id, name)
-              ),
-              classes(
-                id,
-                class_name,
-                section
-              )
-            `)
-            .eq('tenant_id', tenantId)
-            .order('name')
+          tenantDatabase.read('classes', {}, '*'),
+          tenantDatabase.read('teachers', {}, '*'),
+          tenantDatabase.read('subjects', {}, `
+            *,
+            teacher_subjects(
+              teachers(id, name)
+            ),
+            classes(
+              id,
+              class_name,
+              section
+            )
+          `)
         ]);
         
         if (classesResult.error) throw classesResult.error;
@@ -219,7 +340,7 @@ const SubjectsTimetable = ({ route }) => {
           const { data: periodData, error: periodError } = await supabase
             .from(TABLES.PERIOD_SETTINGS)
             .select('*')
-            .eq('tenant_id', tenantId)
+            .eq('tenant_id', effectiveTenantId)
             .single();
           
           console.log('📊 Period settings query completed:', {
@@ -253,14 +374,12 @@ const SubjectsTimetable = ({ route }) => {
           console.log('🗓️ SubjectsTimetable: Loading timetable for class:', defaultClassId);
           const timetableStart = Date.now();
           
-          const { data: timetableData, error: timetableError } = await supabase
-            .from(TABLES.TIMETABLE)
-            .select(`
-              *,
-              subjects(id, name)
-            `)
-            .eq('class_id', defaultClassId)
-            .eq('tenant_id', tenantId);
+          // 🚀 Use enhanced tenant database for timetable data
+          const { data: timetableData, error: timetableError } = await tenantDatabase.read(
+            'timetable_entries',
+            { class_id: defaultClassId },
+            `*, subjects(id, name)`
+          );
           
           if (timetableError) throw timetableError;
           
@@ -327,8 +446,8 @@ const SubjectsTimetable = ({ route }) => {
 
   // 🚀 Optimized timetable fetching for class selection changes
   const fetchTimetableForClass = async (classId) => {
-    // 🔍 Validate tenant context
-    if (!validateTenantReady()) {
+    // 🔍 Enhanced tenant system check
+    if (!isTenantReady()) {
       console.error('❌ fetchTimetableForClass: Tenant context not ready');
       return;
     }
@@ -342,11 +461,12 @@ const SubjectsTimetable = ({ route }) => {
       // Fetch timetable with strict tenant filtering (simplified query first)
       console.log('📎 fetchTimetableForClass: Attempting simplified query first...');
       
-      const { data: timetableData, error: timetableError } = await supabase
-        .from(TABLES.TIMETABLE)
-        .select('*')
-        .eq('class_id', classId)
-        .eq('tenant_id', tenantId);
+      // 🚀 Use enhanced tenant database helper
+      const { data: timetableData, error: timetableError } = await tenantDatabase.read(
+        'timetable_entries',
+        { class_id: classId },
+        '*'
+      );
       
       console.log('📄 fetchTimetableForClass: Query completed', {
         dataCount: timetableData?.length || 0,
@@ -499,8 +619,8 @@ const SubjectsTimetable = ({ route }) => {
       setLoading(true);
       console.log('💾 SubjectsTimetable.handleSaveSubject: Starting save operation...');
       
-      // 🔍 Validate tenant context
-      if (!validateTenantReady()) {
+      // 🔍 Enhanced tenant system check
+      if (!isTenantReady()) {
         setLoading(false);
         return;
       }
@@ -514,12 +634,15 @@ const SubjectsTimetable = ({ route }) => {
 
       // Check for duplicate subject in the same class (only for new subjects)
       if (!editSubject) {
-        const { data: existingSubjects, error: checkError } = await supabase
-          .from(TABLES.SUBJECTS)
-          .select('id, name')
-          .eq('class_id', subjectForm.classId)
-          .eq('tenant_id', tenantId)
-          .ilike('name', subjectForm.name.trim());
+        // 🚀 Use enhanced tenant database helper
+        const { data: existingSubjects, error: checkError } = await tenantDatabase.read(
+          'subjects',
+          { 
+            class_id: subjectForm.classId,
+            name: subjectForm.name.trim() // Note: enhanced system will handle ilike internally if needed
+          },
+          'id, name'
+        );
 
         if (checkError) {
           console.error('Error checking for duplicate subjects:', checkError);
@@ -537,13 +660,18 @@ const SubjectsTimetable = ({ route }) => {
         }
       } else {
         // For editing, check if the new name conflicts with other subjects in the same class
-        const { data: existingSubjects, error: checkError } = await supabase
-          .from(TABLES.SUBJECTS)
-          .select('id, name')
-          .eq('class_id', subjectForm.classId)
-          .eq('tenant_id', tenantId)
-          .ilike('name', subjectForm.name.trim())
-          .neq('id', editSubject.id); // Exclude the current subject being edited
+        // 🚀 Use enhanced tenant database helper for duplicate check
+        const { data: allSubjectsInClass, error: checkError } = await tenantDatabase.read(
+          'subjects',
+          { class_id: subjectForm.classId },
+          'id, name'
+        );
+        
+        // Filter out current subject and check for name conflicts
+        const existingSubjects = allSubjectsInClass?.filter(s => 
+          s.id !== editSubject.id && 
+          s.name.toLowerCase().trim() === subjectForm.name.toLowerCase().trim()
+        ) || [];
 
         if (checkError) {
           console.error('Error checking for duplicate subjects:', checkError);
@@ -570,58 +698,51 @@ const SubjectsTimetable = ({ route }) => {
         class_id: subjectForm.classId,
         academic_year: academicYear,
         is_optional: false, // Default to false, can be made configurable later
-        tenant_id: tenantId,
+        // tenant_id automatically added by enhanced tenant system
       };
 
       if (editSubject) {
-        // Update subject
-        const { data, error } = await supabase
-          .from(TABLES.SUBJECTS)
-          .update(subjectData)
-          .eq('id', editSubject.id)
-          .select();
+        // 🚀 Update subject using enhanced tenant system
+        const { data, error } = await tenantDatabase.update(
+          'subjects',
+          editSubject.id,
+          subjectData
+        );
 
         if (error) throw error;
 
         // Handle teacher assignment through junction table
         if (subjectForm.teacherId) {
-          // First, remove existing teacher assignments for this subject
-          await supabase
-            .from(TABLES.TEACHER_SUBJECTS)
-            .delete()
-            .eq('subject_id', editSubject.id)
-            .eq('tenant_id', tenantId);
+          // 🚀 Remove existing teacher assignments using enhanced tenant system
+          await tenantDatabase.delete(
+            'teacher_subjects',
+            { subject_id: editSubject.id }
+          );
 
-          // Then add the new teacher assignment
-          await supabase
-            .from(TABLES.TEACHER_SUBJECTS)
-            .insert([{
-              teacher_id: subjectForm.teacherId,
-              subject_id: editSubject.id,
-              tenant_id: tenantId,
-            }]);
+          // 🚀 Add new teacher assignment using enhanced tenant system
+          await tenantDatabase.create('teacher_subjects', {
+            teacher_id: subjectForm.teacherId,
+            subject_id: editSubject.id,
+          });
         }
 
         // Refresh subjects list
         await refreshSubjects();
       } else {
-        // Create new subject
-        const { data, error } = await supabase
-          .from(TABLES.SUBJECTS)
-          .insert([subjectData])
-          .select();
+        // 🚀 Create new subject using enhanced tenant system
+        const { data, error } = await tenantDatabase.create(
+          'subjects',
+          subjectData
+        );
 
         if (error) throw error;
 
-        // Handle teacher assignment through junction table
-        if (subjectForm.teacherId && data[0]) {
-          await supabase
-            .from(TABLES.TEACHER_SUBJECTS)
-            .insert([{
-              teacher_id: subjectForm.teacherId,
-              subject_id: data[0].id,
-              tenant_id: tenantId,
-            }]);
+        // 🚀 Handle teacher assignment using enhanced tenant system
+        if (subjectForm.teacherId && data) {
+          await tenantDatabase.create('teacher_subjects', {
+            teacher_id: subjectForm.teacherId,
+            subject_id: data.id,
+          });
         }
 
         // Refresh subjects list
@@ -641,16 +762,17 @@ const SubjectsTimetable = ({ route }) => {
   const refreshSubjects = async () => {
     try {
       console.log('🔄 SubjectsTimetable.refreshSubjects: Starting refresh...');
-      
-      // 🔍 Validate tenant context
-      if (!validateTenantReady()) {
+      // 🔍 Enhanced tenant system check
+      if (!isTenantReady()) {
         console.error('❌ refreshSubjects: Tenant context not ready');
         return;
       }
       
-      const { data: subjectData, error: subjectError } = await supabase
-        .from(TABLES.SUBJECTS)
-        .select(`
+      // 🚀 Use enhanced tenant database for subjects
+      const { data: subjectData, error: subjectError } = await tenantDatabase.read(
+        'subjects',
+        {},
+        `
           *,
           teacher_subjects(
             teachers(id, name)
@@ -660,9 +782,8 @@ const SubjectsTimetable = ({ route }) => {
             class_name,
             section
           )
-        `)
-        .eq('tenant_id', tenantId)
-        .order('name');
+        `
+      );
         
       if (subjectError) {
         console.error('❌ refreshSubjects: Database error:', subjectError);
@@ -685,34 +806,18 @@ const SubjectsTimetable = ({ route }) => {
           setLoading(true);
           console.log('🗑️ SubjectsTimetable.handleDeleteSubject: Starting delete operation for:', id);
           
-          // 🔍 Validate tenant context with email fallback
-          let operationTenantId = currentTenant?.id;
-          console.log('🏷️ handleDeleteSubject: Current tenant ID:', operationTenantId);
-          
-          if (!operationTenantId) {
-            console.log('⚠️ handleDeleteSubject: No tenant from context, trying email lookup...');
-            
-            try {
-              const emailTenant = await getCurrentUserTenantByEmail();
-              operationTenantId = emailTenant?.id;
-              console.log('📧 handleDeleteSubject: Email-based tenant ID:', operationTenantId);
-            } catch (emailError) {
-              console.error('❌ handleDeleteSubject: Email tenant lookup failed:', emailError);
-            }
-            
-            if (!operationTenantId) {
-              Alert.alert('Error', 'Unable to determine tenant context. Please try logging out and back in.');
-              setLoading(false);
-              return;
-            }
+          // 🔍 Enhanced tenant system check
+          if (!isTenantReady()) {
+            console.log('⚠️ handleDeleteSubject: Tenant context not ready');
+            Alert.alert('Error', 'Tenant context not ready. Please try again.');
+            setLoading(false);
+            return;
           }
           
-          // 🗿 Delete with tenant validation
-          const { error } = await supabase
-            .from(TABLES.SUBJECTS)
-            .delete()
-            .eq('id', id)
-            .eq('tenant_id', operationTenantId); // 🔒 Ensure tenant ownership
+          console.log('🅿️ handleDeleteSubject: Using enhanced tenant system with ID:', tenantId);
+          
+          // 🚀 Use enhanced tenant database for delete
+          const { error } = await tenantDatabase.delete('subjects', id);
 
           if (error) {
             console.error('❌ handleDeleteSubject: Delete error:', error);
@@ -802,8 +907,8 @@ const SubjectsTimetable = ({ route }) => {
       setLoading(true);
       console.log('💾 SubjectsTimetable.handleSavePeriod: Starting save operation...');
       
-      // 🔍 Validate tenant context
-      if (!validateTenantReady()) {
+      // 🔍 Enhanced tenant system check
+      if (!isTenantReady()) {
         setLoading(false);
         return;
       }
@@ -825,12 +930,12 @@ const SubjectsTimetable = ({ route }) => {
       // 🔍 Get teacher for the selected subject with tenant filtering
       console.log('👨‍🏫 handleSavePeriod: Finding teacher for subject:', subjectId);
       let teacherId = null;
-      const { data: teacherSubject, error: teacherError } = await supabase
-        .from('teacher_subjects')
-        .select('teacher_id')
-        .eq('subject_id', subjectId)
-        .eq('tenant_id', tenantId)
-        .single();
+      // 🚀 Use enhanced tenant database for teacher lookup
+      const { data: teacherSubject, error: teacherError } = await tenantDatabase.read(
+        'teacher_subjects',
+        { subject_id: subjectId },
+        'teacher_id'
+      );
 
       if (teacherError) {
         console.log('⚠️ No teacher assigned to this subject yet:', teacherError.message);
@@ -850,6 +955,7 @@ const SubjectsTimetable = ({ route }) => {
         return;
       }
 
+      // 💻 Prepare timetable data without tenant_id (added automatically)
       const timetableData = {
         class_id: selectedClass,
         subject_id: subjectId,
@@ -858,8 +964,8 @@ const SubjectsTimetable = ({ route }) => {
         period_number: periodNumber,
         start_time: startTime,
         end_time: endTime,
-        academic_year: academicYear,
-        tenant_id: tenantId // 🏷️ Ensure tenant context is included
+        academic_year: academicYear
+        // tenant_id added automatically by enhanced tenant system
       };
       
       console.log('💾 handleSavePeriod: Timetable data prepared:', {
@@ -878,12 +984,12 @@ const SubjectsTimetable = ({ route }) => {
         // 🔄 Edit existing period with enhanced tenant validation
         console.log('🔄 handleSavePeriod: Updating existing period:', periodModal.period.id);
         
-        const { data, error } = await supabase
-          .from(TABLES.TIMETABLE)
-          .update(timetableData)
-          .eq('id', periodModal.period.id)
-          .eq('tenant_id', tenantId) // 🔒 Double-check tenant ownership
-          .select('*');
+        // 🚀 Use enhanced tenant database for update
+        const { data, error } = await tenantDatabase.update(
+          'timetable_entries',
+          periodModal.period.id,
+          timetableData
+        );
         
         if (error) {
           console.error('❌ handleSavePeriod: Update error:', error);
@@ -931,10 +1037,11 @@ const SubjectsTimetable = ({ route }) => {
         // ➕ Add new period with tenant validation
         console.log('➕ handleSavePeriod: Creating new period');
         
-        const { data, error } = await supabase
-          .from(TABLES.TIMETABLE)
-          .insert([timetableData])
-          .select('*');
+        // 🚀 Use enhanced tenant database for create
+        const { data, error } = await tenantDatabase.create(
+          'timetable_entries',
+          timetableData
+        );
         
         if (error) {
           console.error('❌ handleSavePeriod: Insert error:', error);
@@ -1032,34 +1139,17 @@ const SubjectsTimetable = ({ route }) => {
           setLoading(true);
           console.log('🗑️ SubjectsTimetable.handleDeletePeriod: Starting delete operation for:', id);
           
-          // 🔍 Validate tenant context with email fallback
-          let operationTenantId = currentTenant?.id;
-          console.log('🏷️ handleDeletePeriod: Current tenant ID:', operationTenantId);
-          
-          if (!operationTenantId) {
-            console.log('⚠️ handleDeletePeriod: No tenant from context, trying email lookup...');
-            
-            try {
-              const emailTenant = await getCurrentUserTenantByEmail();
-              operationTenantId = emailTenant?.id;
-              console.log('📧 handleDeletePeriod: Email-based tenant ID:', operationTenantId);
-            } catch (emailError) {
-              console.error('❌ handleDeletePeriod: Email tenant lookup failed:', emailError);
-            }
-            
-            if (!operationTenantId) {
-              Alert.alert('Error', 'Unable to determine tenant context. Please try logging out and back in.');
-              setLoading(false);
-              return;
-            }
+          // 🔍 Enhanced tenant system check
+          if (!isTenantReady()) {
+            Alert.alert('Error', 'Tenant context not ready. Please try again.');
+            setLoading(false);
+            return;
           }
           
-          // 🗿 Delete with tenant validation
-          const { error } = await supabase
-            .from(TABLES.TIMETABLE)
-            .delete()
-            .eq('id', id)
-            .eq('tenant_id', operationTenantId); // 🔒 Ensure tenant ownership
+          console.log('🏷️ handleDeletePeriod: Using tenant ID:', tenantId);
+          
+          // 🚀 Use enhanced tenant database for delete
+          const { error } = await tenantDatabase.delete('timetable_entries', id);
           
           if (error) {
             console.error('❌ handleDeletePeriod: Delete error:', error);
@@ -1132,8 +1222,8 @@ const SubjectsTimetable = ({ route }) => {
       const currentYear = new Date().getFullYear();
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
 
-      // 🔍 Validate tenant context
-      if (!validateTenantReady()) {
+      // 🔍 Enhanced tenant system check
+      if (!isTenantReady()) {
         console.warn('Could not determine tenantId from context for period settings; using defaults');
         setPeriodSettings(getDefaultPeriods());
         return;
@@ -1218,8 +1308,8 @@ const SubjectsTimetable = ({ route }) => {
       setLoading(true);
       console.log('🔄 handleSubjectChange: Starting subject assignment for', { day, slot: slot.number, subjectId });
       
-      // 🔍 Validate tenant context
-      if (!validateTenantReady()) {
+      // 🔍 Enhanced tenant system check
+      if (!isTenantReady()) {
         Alert.alert('Error', 'Tenant context not ready. Please try again.');
         setLoading(false);
         return;
@@ -1228,12 +1318,14 @@ const SubjectsTimetable = ({ route }) => {
       // Get teacher for the selected subject with tenant filtering
       console.log('👨‍🏫 handleSubjectChange: Finding teacher for subject:', subjectId);
       let teacherId = null;
-      const { data: teacherSubject, error: teacherError } = await supabase
-        .from('teacher_subjects')
-        .select('teacher_id')
-        .eq('subject_id', subjectId)
-        .eq('tenant_id', tenantId)
-        .single();
+      // 🚀 Use enhanced tenant database for teacher lookup
+      const { data: teacherSubjects, error: teacherError } = await tenantDatabase.read(
+        'teacher_subjects',
+        { subject_id: subjectId },
+        'teacher_id'
+      );
+      
+      const teacherSubject = teacherSubjects?.[0];
 
       if (teacherError) {
         console.log('⚠️ No teacher assigned to this subject yet:', teacherError.message);
@@ -1278,15 +1370,18 @@ const SubjectsTimetable = ({ route }) => {
         p => p.startTime === slot.startTime
       );
 
-      // Also check database for existing period
-      const { data: existingPeriodBySlot, error: checkError } = await supabase
-        .from(TABLES.TIMETABLE)
-        .select('id, subject_id, subjects(id, name)')
-        .eq('class_id', selectedClass)
-        .eq('day_of_week', day)
-        .eq('period_number', slot.number)
-        .eq('tenant_id', tenantId)
-        .maybeSingle();
+      // 🚀 Use enhanced tenant database to check for existing period
+      const { data: existingPeriodData, error: checkError } = await tenantDatabase.read(
+        'timetable_entries',
+        {
+          class_id: selectedClass,
+          day_of_week: day,
+          period_number: slot.number
+        },
+        'id, subject_id, subjects(id, name)'
+      );
+      
+      const existingPeriodBySlot = existingPeriodData?.[0];
 
       if (checkError && checkError.code !== 'PGRST116') {
         console.error('❌ Error checking existing period:', checkError);
@@ -1302,32 +1397,29 @@ const SubjectsTimetable = ({ route }) => {
         
         const updateId = existingPeriod.id || existingPeriodBySlot?.id;
         if (updateId) {
-          const { data, error } = await supabase
-            .from(TABLES.TIMETABLE)
-            .update(timetableData)
-            .eq('id', updateId)
-            .eq('tenant_id', tenantId)
-            .select('*, subjects(id, name)')
-            .single();
+          // 🚀 Use enhanced tenant database for update
+          const { data, error } = await tenantDatabase.update(
+            'timetable_entries',
+            updateId,
+            timetableData
+          );
         
           if (error) {
             console.error('❌ handleSubjectChange: Update error:', error);
             throw error;
           }
-          dbResult = data;
+          dbResult = data[0];
         } else {
           throw new Error('Could not find period ID to update');
         }
       } else {
-        // Create new period using upsert to handle any conflicts
+        // 🚀 Create new period using enhanced tenant database
         console.log('➕ handleSubjectChange: Creating new period');
         
-        const { data, error } = await supabase
-          .from(TABLES.TIMETABLE)
-          .upsert([timetableData], {
-            onConflict: 'class_id,day_of_week,period_number,tenant_id'
-          })
-          .select('*, subjects(id, name)');
+        const { data, error } = await tenantDatabase.create(
+          'timetable_entries',
+          timetableData
+        );
         
         if (error) {
           console.error('❌ handleSubjectChange: Insert error:', error);
@@ -1395,20 +1487,14 @@ const SubjectsTimetable = ({ route }) => {
       setLoading(true);
       console.log('🗑️ removePeriod: Starting delete operation for period:', periodId, 'on', day);
       
-      // 🔍 Get effective tenant ID
-      const operationTenantId = await initializeTenantContext();
-      
-      if (!operationTenantId) {
-        Alert.alert('Error', 'No tenant context available. Please contact administrator.');
+      // 🔍 Enhanced tenant system check
+      if (!isTenantReady()) {
+        Alert.alert('Error', 'Tenant context not ready. Please try again.');
         return;
       }
       
-      // Delete with tenant validation
-      const { error } = await supabase
-        .from(TABLES.TIMETABLE)
-        .delete()
-        .eq('id', periodId)
-        .eq('tenant_id', operationTenantId);
+      // 🚀 Use enhanced tenant database for delete
+      const { error } = await tenantDatabase.delete('timetable_entries', periodId);
       
       if (error) {
         console.error('❌ removePeriod: Delete error:', error);
@@ -1559,20 +1645,20 @@ const SubjectsTimetable = ({ route }) => {
               for (const copiedPeriod of copiedDayData) {
                 // Get teacher for the subject
                 let teacherId = null;
-                // 🔍 Validate tenant context
-                if (!validateTenantReady()) {
+                // 🔍 Enhanced tenant system check
+                if (!isTenantReady()) {
                   throw new Error('Tenant context not ready');
                 }
                 
-                const { data: teacherSubject, error: teacherError } = await supabase
-                  .from('teacher_subjects')
-                  .select('teacher_id')
-                  .eq('subject_id', copiedPeriod.subjectId)
-                  .eq('tenant_id', tenantId)
-                  .single();
+                // 🚀 Use enhanced tenant database for teacher lookup
+                const { data: teacherSubjects, error: teacherError } = await tenantDatabase.read(
+                  'teacher_subjects',
+                  { subject_id: copiedPeriod.subjectId },
+                  'teacher_id'
+                );
 
-                if (!teacherError && teacherSubject) {
-                  teacherId = teacherSubject.teacher_id;
+                if (!teacherError && teacherSubjects?.[0]) {
+                  teacherId = teacherSubjects[0].teacher_id;
                 }
 
                 // Generate period number based on start time
@@ -1590,9 +1676,8 @@ const SubjectsTimetable = ({ route }) => {
                   tenant_id: tenantId,
                 };
 
-                await supabase
-                  .from(TABLES.TIMETABLE)
-                  .insert([timetableData]);
+                // 🚀 Use enhanced tenant database for insert
+                await tenantDatabase.create('timetable_entries', timetableData);
               }
 
               // Refresh the timetable data to update UI
@@ -1666,8 +1751,8 @@ const SubjectsTimetable = ({ route }) => {
   // Save period settings to database
   const savePeriodSettingsToDatabase = async (periods, academicYear) => {
     try {
-      // 🔍 Validate tenant context
-      if (!validateTenantReady()) {
+      // 🔍 Enhanced tenant system check
+      if (!isTenantReady()) {
         throw new Error('Tenant context not ready');
       }
       
@@ -1805,20 +1890,65 @@ const SubjectsTimetable = ({ route }) => {
     };
   };
 
-  if (loading) {
+  if (loading || tenantLoading) {
     return (
       <View style={styles.container}>
         <Header title="Subjects & Timetable" showBack={true} />
-        <ActivityIndicator size="large" color="#2196F3" style={{ marginTop: 40 }} />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <ActivityIndicator size="large" color="#2196F3" style={{ marginBottom: 16 }} />
+          <Text style={{ textAlign: 'center', color: '#666' }}>
+            {tenantLoading ? 'Initializing school context...' : 'Loading timetable data...'}
+          </Text>
+          {!isReady && !tenantLoading && (
+            <Text style={{ textAlign: 'center', color: '#999', marginTop: 8, fontSize: 12 }}>
+              Tenant Status: {tenantId ? 'ID Available' : 'Waiting for tenant ID'}
+            </Text>
+          )}
+        </View>
       </View>
     );
   }
 
-  if (error) {
+  if (error || tenantError) {
+    const errorMessage = error || tenantError?.message || tenantError;
     return (
       <View style={styles.container}>
         <Header title="Subjects & Timetable" showBack={true} />
-        <Text style={{ color: 'red', margin: 24 }}>{error}</Text>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <Text style={{ color: 'red', marginBottom: 16, textAlign: 'center' }}>
+            {errorMessage}
+          </Text>
+          <TouchableOpacity 
+            onPress={() => {
+              setError(null);
+              setLoading(true);
+              // Trigger a refresh
+              const fetchData = async () => {
+                try {
+                  if (!isTenantReady()) {
+                    // Try manual tenant initialization
+                    const result = await getCurrentUserTenantByEmail();
+                    if (result.success) {
+                      initializeTenantHelpers(result.data.tenantId);
+                    }
+                  }
+                } catch (retryError) {
+                  console.error('Retry failed:', retryError);
+                } finally {
+                  setLoading(false);
+                }
+              };
+              fetchData();
+            }}
+            style={{
+              backgroundColor: '#2196F3',
+              padding: 12,
+              borderRadius: 6
+            }}
+          >
+            <Text style={{ color: 'white' }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -1933,11 +2063,11 @@ const SubjectsTimetable = ({ route }) => {
               </View>
             </View>
           </Modal>
-          {/* Floating Add Button */}
+          </ScrollView>
+          {/* Sticky Floating Add Button */}
           <TouchableOpacity style={styles.fab} onPress={openAddSubject}>
             <Text style={styles.fabIcon}>+</Text>
           </TouchableOpacity>
-          </ScrollView>
         </View>
       ) : (
         <View style={styles.scrollWrapper}>
@@ -2671,7 +2801,7 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 24,
-    bottom: 24,
+    bottom: 80,
     backgroundColor: '#007bff',
     width: 56,
     height: 56,
@@ -2688,7 +2818,7 @@ const styles = StyleSheet.create({
       position: 'fixed',
       zIndex: 9999,
       right: '24px',
-      bottom: '24px',
+      bottom: '80px',
     })
   },
   fabIcon: {

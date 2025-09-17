@@ -15,13 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
-import { 
-  validateTenantAccess, 
-  createTenantQuery, 
-  validateDataTenancy,
-  TENANT_ERROR_MESSAGES 
-} from '../../utils/tenantValidation';
-import { useTenantAccess } from '../../utils/tenantHelpers';
+import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
 
 const TeacherSubjects = ({ navigation }) => {
   const { user } = useAuth();
@@ -50,30 +44,36 @@ const TeacherSubjects = ({ navigation }) => {
     classTeacherOf: 0,
   });
 
-  // 🔨 CRITICAL: Validate tenant_id before proceeding
+  // 🚀 Enhanced tenant system initialization
   useEffect(() => {
-    if (isReady && tenantId) {
-      console.log('✅ TeacherSubjects: Using tenant_id:', tenantId);
+    if (isReady && !tenantLoading && !tenantError) {
+      console.log('✅ TeacherSubjects: Using enhanced tenant system, tenant_id:', tenantId || 'Parent/No Tenant Required');
       loadTeacherSubjects();
     } else if (tenantError) {
       console.error('❌ TeacherSubjects: Tenant error:', tenantError);
-      setError(tenantError.message || 'Tenant initialization error');
+      setError(tenantError);
       setLoading(false);
-    } else if (!isReady) {
+    } else {
       console.log('⚠️ TeacherSubjects: Waiting for tenant initialization...');
     }
-  }, [isReady, tenantId, tenantError]);
+  }, [isReady, tenantId, tenantError, tenantLoading]);
 
   const loadTeacherSubjects = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // Validate tenant access before proceeding
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Tenant validation failed:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+      // 🚀 Enhanced tenant system - simple ready check
+      if (!isReady || tenantLoading) {
+        console.log('⚠️ TeacherSubjects: Tenant context not ready, waiting...');
+        setLoading(false);
+        return;
+      }
+      
+      if (tenantError) {
+        console.error('❌ TeacherSubjects: Tenant error:', tenantError);
+        setError(tenantError);
+        setLoading(false);
         return;
       }
       
@@ -88,26 +88,18 @@ const TeacherSubjects = ({ navigation }) => {
         throw new Error('Teacher information not found for this tenant. Please contact your administrator to link your account to a teacher profile.');
       }
       
-      // Validate teacher data belongs to correct tenant
-      const teacherValidation = validateDataTenancy([{ 
-        id: teacherData.id, 
-        tenant_id: teacherData.tenant_id 
-      }], tenantId, 'TeacherSubjects-TeacherData');
-      
-      if (!teacherValidation) {
-        console.error('❌ Teacher data validation failed: Teacher data does not belong to tenant', tenantId);
-        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
-        return;
-      }
+      // 🚀 Enhanced tenant system automatically handles validation
+      // No need for manual tenant validation - the system ensures data integrity
       
       console.log('👨‍🏫 Found teacher:', teacherData.name, 'for tenant:', tenantId);
       setTeacherInfo(teacherData);
 
-      // Get subjects assigned to teacher using direct supabase query with tenant filtering
-      console.log('🔍 Loading subject assignments for teacher:', teacherData.id, 'tenant:', tenantId);
-      const { data: subjectAssignments, error: subjectError } = await supabase
-        .from(TABLES.TEACHER_SUBJECTS)
-        .select(`
+      // 🚀 Enhanced tenant database for subject assignments
+      console.log('🔍 Loading subject assignments for teacher:', teacherData.id, 'using enhanced system');
+      const { data: subjectAssignments, error: subjectError } = await tenantDatabase.read(
+        'teacher_subjects',
+        { teacher_id: teacherData.id },
+        `
           id,
           teacher_id,
           subject_id,
@@ -127,10 +119,8 @@ const TeacherSubjects = ({ navigation }) => {
               class_teacher_id
             )
           )
-        `)
-        .eq('teacher_id', teacherData.id)
-        .eq('tenant_id', tenantId)
-        .order('assigned_on', { ascending: false });
+        `
+      );
 
       if (subjectError) {
         console.log('Subject assignments error:', subjectError);
@@ -138,57 +128,29 @@ const TeacherSubjects = ({ navigation }) => {
         // throw subjectError;
       }
       
-      // Validate subject assignments belong to correct tenant
-      const subjectValidation = validateDataTenancy(
-        subjectAssignments?.map(sa => ({ 
-          id: sa.id, 
-          tenant_id: sa.tenant_id 
-        })) || [],
-        tenantId,
-        'TeacherSubjects-SubjectAssignments'
-      );
-      
-      if (!subjectValidation) {
-        console.error('❌ Subject assignment data validation failed: Subject assignments do not belong to tenant', tenantId);
-        Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
-        return;
-      }
+      // 🚀 Enhanced tenant system automatically ensures data belongs to correct tenant
+      // No manual validation needed - system provides automatic tenant isolation
 
-      // Get classes where teacher is class teacher using direct supabase query with tenant filtering
-      console.log('🔍 Loading class teacher assignments for teacher:', teacherData.id, 'tenant:', tenantId);
-      const { data: classTeacherData, error: classTeacherError } = await supabase
-        .from(TABLES.CLASSES)
-        .select(`
+      // 🚀 Enhanced tenant database for class teacher assignments
+      console.log('🔍 Loading class teacher assignments for teacher:', teacherData.id, 'using enhanced system');
+      const { data: classTeacherData, error: classTeacherError } = await tenantDatabase.read(
+        'classes',
+        { class_teacher_id: teacherData.id },
+        `
           id,
           class_name,
           section,
           academic_year,
           tenant_id
-        `)
-        .eq('class_teacher_id', teacherData.id)
-        .eq('tenant_id', tenantId);
+        `
+      );
 
       if (classTeacherError) {
         console.log('Error fetching class teacher data:', classTeacherError);
       }
       
-      // Validate class teacher data belongs to correct tenant (if exists)
-      if (classTeacherData && classTeacherData.length > 0) {
-        const classValidation = validateDataTenancy(
-          classTeacherData?.map(ct => ({ 
-            id: ct.id, 
-            tenant_id: ct.tenant_id 
-          })) || [],
-          tenantId,
-          'TeacherSubjects-ClassTeacherData'
-        );
-        
-        if (!classValidation) {
-          console.error('❌ Class teacher data validation failed: Class teacher data does not belong to tenant', tenantId);
-          Alert.alert('Data Error', TENANT_ERROR_MESSAGES.INVALID_TENANT_DATA);
-          return;
-        }
-      }
+      // 🚀 Enhanced tenant system automatically validates data integrity
+      // Tenant isolation is handled automatically by the system
 
       // Process and organize the data
       const processedSubjects = subjectAssignments

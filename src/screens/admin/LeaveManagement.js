@@ -21,16 +21,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import Header from '../../components/Header';
-import { supabase, getUserTenantId } from '../../utils/supabase';
+import { supabase } from '../../utils/supabase';
 import { format, parseISO, isAfter, isBefore } from 'date-fns';
 import ModernFilters from '../../components/ui/ModernFilters';
 import Colors from '../../constants/Colors';
 import { useAuth } from '../../utils/AuthContext';
 import { createLeaveStatusNotificationForTeacher } from '../../services/notificationService';
 import LogViewer from '../../components/debug/LogViewer';
-import { validateTenantAccess, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
-import { useTenantAccess } from '../../utils/tenantHelpers';
-import { addLeaveApplication, reviewLeaveApplication, loadLeaveApplications } from '../../utils/leaveApplicationUtils';
+import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
 
 const { width } = Dimensions.get('window');
 
@@ -102,24 +100,29 @@ const LeaveManagement = ({ navigation }) => {
   
   const logDebugInfo = async () => {
     try {
-      console.log('🧪 [ADMIN_LEAVE] === AUTOMATIC DEBUG INFO ===');
+      console.log('🧪 [ADMIN_LEAVE] === ENHANCED TENANT DEBUG INFO ===');
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      const tenantId = await getUserTenantId();
-      const { data: countData, error: countError } = await supabase
-        .from('leave_applications')
-        .select('count', { count: 'exact', head: true });
       
       console.log('🧪 [ADMIN_LEAVE] Debug Summary:');
       console.log('   - Session exists:', !!session?.session);
       console.log('   - Session user:', session?.session?.user?.email || 'None');
       console.log('   - Session error:', sessionError?.message || 'None');
-      console.log('   - Tenant ID:', tenantId || 'NONE');
-      console.log('   - Total leave_applications count:', countData || 'ERROR');
-      console.log('   - Count query error:', countError?.message || 'None');
-      console.log('   - Count error code:', countError?.code || 'None');
-      console.log('🧪 [ADMIN_LEAVE] === END DEBUG INFO ===');
+      console.log('   - Tenant ID (cached):', tenantId || 'NONE');
+      console.log('   - Tenant ready:', isReady);
+      console.log('   - Tenant loading:', tenantLoading);
+      console.log('   - Tenant name:', tenantName || 'NONE');
+      console.log('   - Tenant error:', tenantError || 'None');
+      
+      // Test enhanced tenant database access
+      if (isReady && tenantId) {
+        const { data: countData, error: countError } = await tenantDatabase.read('leave_applications', {}, 'COUNT(*)');
+        console.log('   - Enhanced tenant query result:', countData?.length || 0);
+        console.log('   - Enhanced tenant error:', countError?.message || 'None');
+      }
+      
+      console.log('🧪 [ADMIN_LEAVE] === END ENHANCED DEBUG INFO ===');
     } catch (error) {
-      console.error('🧪 [ADMIN_LEAVE] Debug info error:', error.message);
+      console.error('🧪 [ADMIN_LEAVE] Enhanced debug info error:', error.message);
     }
   };
 
@@ -144,7 +147,7 @@ const LeaveManagement = ({ navigation }) => {
     let timeoutId;
     
     try {
-      console.log('🚀 LeaveManagement: Starting optimized data load...');
+      console.log('🚀 LeaveManagement: Starting enhanced tenant data load...');
       
       // ⏰ Set timeout protection
       timeoutId = setTimeout(() => {
@@ -152,77 +155,63 @@ const LeaveManagement = ({ navigation }) => {
         throw new Error('Loading timeout - please check your connection');
       }, 10000);
       
-      // Use cached tenant ID from enhanced tenant context
-      if (tenantLoading || !isReady || !tenantId) {
-        console.log('🔄 [TENANT-AWARE] Tenant context not ready, delaying leave applications load...');
+      // Wait for tenant context to be ready
+      if (tenantLoading || !isReady) {
+        console.log('🔄 [ENHANCED-TENANT] Tenant context not ready, waiting...');
         setLoading(false);
         return;
       }
       
       if (tenantError) {
-        console.error('❌ [TENANT-AWARE] Tenant error detected:', tenantError);
+        console.error('❌ [ENHANCED-TENANT] Tenant error detected:', tenantError);
         Alert.alert('Tenant Error', tenantError);
         setLoading(false);
         return;
       }
       
-      // 🛡️ Validate tenant access first using centralized utility
-      const validation = await validateTenantAccess(user?.id, tenantId, 'LeaveManagement - loadLeaveApplications');
-      if (!validation.isValid) {
-        console.error('❌ LeaveManagement loadLeaveApplications: Tenant validation failed:', validation.error);
-        Alert.alert('Access Denied', validation.error);
-        return;
-      }
-      
-      // Check current session first (keeping existing logic for compatibility)
+      // Check current session (simplified)
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      console.log('📄 [ADMIN_LEAVE] Session check:');
-      console.log('   - Session exists:', !!session);
-      console.log('   - Session user:', session?.user?.email || 'None');
-      console.log('   - Session error:', sessionError?.message || 'None');
-      
       if (!session) {
         console.log('❌ [ADMIN_LEAVE] No active session found');
         Alert.alert('Authentication Error', 'Please log in to view leave applications.');
         return;
       }
       
-      console.log('🏢 LeaveManagement: Using tenant ID from enhanced context:', tenantId);
+      console.log('🏢 LeaveManagement: Using enhanced tenant system, tenant ID:', tenantId || 'Parent/No Tenant Required');
 
-      console.log('📄 LeaveManagement: Querying leave_applications table with tenant filter...');
-      const { data, error } = await supabase
-        .from('leave_applications')
-        .select(`
+      console.log('📄 LeaveManagement: Using enhanced tenant database query...');
+      
+      // 🚀 Use enhanced tenant database helper
+      const { data, error } = await tenantDatabase.read(
+        'leave_applications',
+        {},
+        `
           *,
           teacher:teachers!leave_applications_teacher_id_fkey(id, name),
           applied_by_user:users!leave_applications_applied_by_fkey(id, full_name),
           reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name),
           replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
-        `)
-        .eq('tenant_id', tenantId)
-        .order('applied_date', { ascending: false });
+        `
+      );
 
-      console.log('📊 [ADMIN_LEAVE] Leave applications query result:');
+      console.log('📊 [ADMIN_LEAVE] Enhanced tenant query result:');
       console.log('   - Applications found:', data?.length || 0);
       console.log('   - Error:', error?.message || 'None');
       console.log('   - Error code:', error?.code || 'None');
-      console.log('   - Error hint:', error?.hint || 'None');
-      console.log('   - Error details:', error?.details || 'None');
       
       if (data && data.length > 0) {
         console.log('📄 [ADMIN_LEAVE] Sample application structure:', data[0]);
-        console.log('📄 [ADMIN_LEAVE] Raw data preview:', JSON.stringify(data.slice(0, 2), null, 2));
       }
       
       if (error) {
-        console.error('❌ [ADMIN_LEAVE] Error loading leave applications:', error);
+        console.error('❌ [ADMIN_LEAVE] Enhanced tenant query error:', error);
         
         // Check if it's an RLS error
         if (error.code === '42501') {
           console.log('🔒 [ADMIN_LEAVE] RLS blocking leave applications access');
           Alert.alert(
             'Database Access Issue',
-            'Unable to load leave applications due to database permissions. Please run the leave RLS fix script or contact support.',
+            'Unable to load leave applications due to database permissions. Please contact your administrator.',
             [
               { text: 'OK' },
               { text: 'Retry', onPress: loadLeaveApplications }
@@ -238,35 +227,25 @@ const LeaveManagement = ({ navigation }) => {
         throw error;
       }
       
-      // 🛡️ Validate leave applications data belongs to correct tenant
-      if (data && data.length > 0) {
-        const applicationsValid = validateDataTenancy(data, tenantId, 'LeaveManagement - Leave Applications');
-        if (!applicationsValid) {
-          Alert.alert('Data Security Alert', 'Leave applications data validation failed. Please contact administrator.');
-          setLeaveApplications([]);
-          return;
-        }
-      }
-      
       clearTimeout(timeoutId);
       
-      console.log(`✅ LeaveManagement: Successfully loaded ${data?.length || 0} leave applications`);
+      console.log(`✅ LeaveManagement: Successfully loaded ${data?.length || 0} leave applications using enhanced tenant system`);
       setLeaveApplications(data || []);
       
       // 📊 Performance monitoring
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
-      console.log(`✅ LeaveManagement: Data loaded in ${loadTime}ms`);
+      console.log(`✅ LeaveManagement: Enhanced tenant data loaded in ${loadTime}ms`);
       
       if (loadTime > 2000) {
         console.warn('⚠️ LeaveManagement: Slow loading (>2s). Check network.');
       } else {
-        console.log('🚀 LeaveManagement: Fast loading achieved!');
+        console.log('🚀 LeaveManagement: Fast enhanced tenant loading achieved!');
       }
       
     } catch (error) {
       clearTimeout(timeoutId);
-      console.error('❌ LeaveManagement: Failed to load data:', error.message);
+      console.error('❌ LeaveManagement: Enhanced tenant load failed:', error.message);
       Alert.alert('Error', error.message || 'Failed to load leave applications');
     } finally {
       clearTimeout(timeoutId);
@@ -275,11 +254,11 @@ const LeaveManagement = ({ navigation }) => {
 
   const loadTeachers = async () => {
     try {
-      console.log('🚀 LeaveManagement: Loading teachers...');
+      console.log('🚀 LeaveManagement: Loading teachers with enhanced tenant system...');
       
-      // Use cached tenant ID from enhanced context
-      if (!tenantId) {
-        console.error('❌ LeaveManagement loadTeachers: No tenant context available');
+      // Wait for tenant context
+      if (!isReady) {
+        console.log('🔄 LeaveManagement loadTeachers: Tenant context not ready');
         setTeachers([]);
         return;
       }
@@ -290,60 +269,43 @@ const LeaveManagement = ({ navigation }) => {
         return;
       }
       
-      // 🛡️ Validate tenant access
-      const validation = await validateTenantAccess(user?.id, tenantId, 'LeaveManagement - loadTeachers');
-      if (!validation.isValid) {
-        console.error('❌ LeaveManagement loadTeachers: Tenant validation failed:', validation.error);
-        setTeachers([]);
-        return;
-      }
+      console.log('📊 LeaveManagement: Using enhanced tenant database for teachers...');
       
-      console.log('📊 LeaveManagement: Fetching teachers with tenant_id:', tenantId);
-      const { data, error } = await supabase
-        .from('teachers')
-        .select('id, name, tenant_id') // Include tenant_id in selection for debugging
-        .eq('tenant_id', tenantId)
-        .order('name');
+      // 🚀 Use enhanced tenant database helper
+      const { data, error } = await tenantDatabase.read(
+        'teachers',
+        {},
+        'id, name, tenant_id' // Include tenant_id for debugging
+      );
       
-      console.log('📄 LeaveManagement: Teachers query result:');
+      console.log('📄 LeaveManagement: Enhanced teachers query result:');
       console.log('   - Teachers found:', data?.length || 0);
       console.log('   - Error:', error?.message || 'None');
+      
       if (data && data.length > 0) {
         console.log('   - Sample teacher:', data[0]);
-        // Check tenant_id distribution
+        // Check tenant_id distribution for debugging
         const tenantDistribution = data.reduce((acc, teacher) => {
           const tid = teacher.tenant_id || 'null';
           acc[tid] = (acc[tid] || 0) + 1;
           return acc;
         }, {});
-        console.log('   - Tenant ID distribution:', tenantDistribution);
+        console.log('   - Enhanced query tenant ID distribution:', tenantDistribution);
       }
 
       if (error) throw error;
       
-      // 🛡️ Filter teachers data to ensure only correct tenant data
-      let validTeachers = data || [];
-      if (data && data.length > 0) {
-        // Filter out any teachers that don't belong to current tenant
-        validTeachers = data.filter(teacher => teacher.tenant_id === tenantId);
-        
-        if (validTeachers.length !== data.length) {
-          console.warn(`⚠️ LeaveManagement: Filtered ${data.length - validTeachers.length} teachers with wrong tenant_id`);
-          console.log(`ℹ️ LeaveManagement: Keeping ${validTeachers.length} teachers with correct tenant_id`);
-        }
-      }
-      
       // Map teachers to only include UI-needed fields
-      const teachersForUI = validTeachers.map(teacher => ({
+      const teachersForUI = (data || []).map(teacher => ({
         id: teacher.id,
         name: teacher.name
       }));
       
       setTeachers(teachersForUI);
-      console.log(`✅ LeaveManagement: Successfully loaded ${teachersForUI.length} teachers for UI`);
+      console.log(`✅ LeaveManagement: Successfully loaded ${teachersForUI.length} teachers using enhanced tenant system`);
       
     } catch (error) {
-      console.error('❌ LeaveManagement: Error loading teachers:', error.message);
+      console.error('❌ LeaveManagement: Enhanced tenant teachers load error:', error.message);
       setTeachers([]); // Set empty array as fallback
     }
   };
@@ -484,24 +446,41 @@ const LeaveManagement = ({ navigation }) => {
         return;
       }
       
-      // Prepare leave form data for the utility
-      const leaveFormData = {
+      // Calculate total days
+      const startDate = newLeaveForm.start_date;
+      const endDate = newLeaveForm.end_date;
+      const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+      
+      // Prepare leave application data
+      const leaveApplicationData = {
         teacher_id: newLeaveForm.teacher_id,
         leave_type: newLeaveForm.leave_type,
-        start_date: format(newLeaveForm.start_date, 'yyyy-MM-dd'),
-        end_date: format(newLeaveForm.end_date, 'yyyy-MM-dd'),
+        start_date: format(startDate, 'yyyy-MM-dd'),
+        end_date: format(endDate, 'yyyy-MM-dd'),
+        total_days: totalDays,
         reason: newLeaveForm.reason.trim(),
         replacement_teacher_id: newLeaveForm.replacement_teacher_id || null,
-        replacement_notes: newLeaveForm.replacement_notes?.trim() || null
+        replacement_notes: newLeaveForm.replacement_notes?.trim() || null,
+        applied_by: user.id,
+        applied_date: new Date().toISOString(),
+        status: 'Pending'
       };
       
-      // Use the utility to add leave application
-      const result = await addLeaveApplication(leaveFormData, user, currentTenant);
+      console.log('📝 LeaveManagement: Creating leave application with enhanced tenant system...');
       
-      if (!result.success) {
-        Alert.alert('Error', result.error);
+      // 🚀 Use enhanced tenant database helper
+      const { data: newLeaveApplication, error } = await tenantDatabase.create(
+        'leave_applications',
+        leaveApplicationData
+      );
+      
+      if (error) {
+        console.error('❌ Enhanced tenant leave creation failed:', error);
+        Alert.alert('Error', error.message || 'Failed to create leave application');
         return;
       }
+      
+      console.log('✅ Leave application created successfully with enhanced tenant system:', newLeaveApplication.id);
       
       Alert.alert('Success', 'Leave application added successfully');
       setShowAddLeaveModal(false);
@@ -516,23 +495,16 @@ const LeaveManagement = ({ navigation }) => {
 
   const handleReviewLeave = async () => {
     try {
-      console.log('🚀 LeaveManagement: Starting handleReviewLeave...');
+      console.log('🚀 LeaveManagement: Starting handleReviewLeave with enhanced tenant system...');
       
-      // Use cached tenant ID from enhanced context
-      if (!tenantId) {
-        Alert.alert('Error', 'Tenant context not available for reviewing leave');
+      // Wait for tenant context
+      if (!isReady) {
+        Alert.alert('Error', 'Tenant context not ready for reviewing leave');
         return;
       }
       
       if (tenantError) {
         Alert.alert('Error', 'Tenant error: ' + tenantError);
-        return;
-      }
-      
-      // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'LeaveManagement - handleReviewLeave');
-      if (!validation.isValid) {
-        Alert.alert('Access Denied', validation.error);
         return;
       }
 
@@ -556,7 +528,6 @@ const LeaveManagement = ({ navigation }) => {
         return;
       }
 
-
       const updateData = {
         status: reviewForm.status,
         reviewed_by: user.id,
@@ -566,14 +537,21 @@ const LeaveManagement = ({ navigation }) => {
         replacement_notes: reviewForm.replacement_notes.trim() || null,
       };
 
-      // 🛡️ Ensure we only update leave applications belonging to our tenant
-      const { error } = await supabase
-        .from('leave_applications')
-        .update(updateData)
-        .eq('id', selectedLeave.id)
-        .eq('tenant_id', tenantId);
+      console.log('✏️ LeaveManagement: Updating leave application with enhanced tenant system...');
+      
+      // 🚀 Use enhanced tenant database helper for update
+      const { error } = await tenantDatabase.update(
+        'leave_applications',
+        selectedLeave.id,
+        updateData
+      );
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Enhanced tenant leave review update failed:', error);
+        throw error;
+      }
+      
+      console.log('✅ Leave application reviewed successfully with enhanced tenant system');
 
       // Send notification to teacher using notification service
       if (selectedLeave?.teacher_id) {

@@ -30,7 +30,7 @@ export class FeeManagementOptimizer {
 
     try {
       // Validate tenant access first
-      const validation = await validateTenantAccess(this.user?.id, this.tenantId, 'FeeManagement - loadOptimizedData');
+      const validation = await validateTenantAccess(this.tenantId, this.user?.id, 'FeeManagement - loadOptimizedData');
       if (!validation.isValid) {
         throw new Error(`Tenant validation failed: ${validation.error}`);
       }
@@ -245,7 +245,7 @@ export class FeeManagementOptimizer {
    */
   async getClassOverview() {
     try {
-      const validation = await validateTenantAccess(this.user?.id, this.tenantId, 'FeeManagement - getClassOverview');
+      const validation = await validateTenantAccess(this.tenantId, this.user?.id, 'FeeManagement - getClassOverview');
       if (!validation.isValid) {
         throw new Error(`Tenant validation failed: ${validation.error}`);
       }

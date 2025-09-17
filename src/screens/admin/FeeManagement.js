@@ -27,17 +27,16 @@ import { isValidDate, isReasonableDate, formatDateForDB, cleanDateForForm } from
 import * as Animatable from 'react-native-animatable';
 import { Picker } from '@react-native-picker/picker';
 import { useTenant } from '../../contexts/TenantContext';
+import { tenantDatabase, getCachedTenantId, initializeTenantHelpers } from '../../utils/tenantHelpers';
 import { calculateStudentFees } from '../../utils/feeCalculation';
 import FeeService from '../../services/FeeService';
-import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
 import { useAuth } from '../../utils/AuthContext';
 import { FeeManagementOptimizer, loadFeeDataInBackground } from '../../utils/feeManagementOptimizations';
 import { 
   getOptimizedFeeManagementData, 
   calculateOptimizedClassPaymentStats, 
   getRecentPayments, 
-  getOrganizedFeeStructures,
-  clearFeeCache 
+  getOrganizedFeeStructures
 } from '../../utils/optimizedFeeHelpers';
 import { 
   sortFeeStructuresByClass, 
@@ -47,7 +46,15 @@ import {
 
 const FeeManagement = () => {
   const navigation = useNavigation();
-  const { tenantId, tenantName, currentTenant, loading: tenantLoading } = useTenant();
+  const { 
+    tenantId, 
+    isReady, 
+    loading: tenantLoading, 
+    currentTenant: tenant, 
+    tenantName, 
+    error: tenantError,
+    initializeTenant: initializeTenantContext
+  } = useTenant();
   const { user } = useAuth();
   
   const [tab, setTab] = useState('structure');
@@ -106,7 +113,28 @@ const FeeManagement = () => {
   const [pendingUPIPayments, setPendingUPIPayments] = useState([]);
   const [upiLoading, setUpiLoading] = useState(false);
   
+  // Enhanced tenant system - simplified validation
+  const checkTenantReady = () => {
+    return isReady && !tenantLoading && !tenantError && tenantId;
+  };
   
+  // Enhanced tenant system handles initialization automatically
+  React.useEffect(() => {
+    if (tenantId && isReady) {
+      console.log('🚀 FeeManagement: Enhanced tenant system ready with ID:', tenantId);
+      // Initialize tenant helpers to ensure cache is set
+      initializeTenantHelpers(tenantId);
+    } else {
+      console.log('⚠️ FeeManagement: Waiting for tenant context to be ready:', {
+        tenantId: tenantId || 'NULL',
+        isReady,
+        tenantLoading,
+        tenantError: tenantError?.message || 'none'
+      });
+    }
+  }, [tenantId, isReady, tenantLoading, tenantError]);
+  
+  // Enhanced tenant system handles initialization automatically - no manual init needed
 
   // Add safe date formatting function at the top
   const formatSafeDate = (dateValue) => {
@@ -135,10 +163,9 @@ const FeeManagement = () => {
   // Helper function to calculate total fees for a student
       // Calculate fee statistics
       const calculateFeeStats = async () => {
-        // 🛡️ Validate tenant access first
-        const validation = await validateTenantAccess(user?.id, tenantId, 'FeeManagement - calculateFeeStats');
-        if (!validation.isValid) {
-          console.error('❌ FeeManagement calculateFeeStats: Tenant validation failed:', validation.error);
+        // 🔍 Enhanced tenant system check
+        if (!checkTenantReady()) {
+          console.error('❌ FeeManagement calculateFeeStats: Tenant context not ready');
           setFeeStats({ totalDue: 0, totalPaid: 0, pendingStudents: 0 });
           return;
         }
@@ -146,32 +173,30 @@ const FeeManagement = () => {
         try {
           console.log('🔍 FeeManagement: Calculating fee stats for tenant:', tenantId);
           
-          // Validate tenantId and table names
-          if (!tenantId) {
-            throw new Error('TenantId is required for tenant-aware queries');
-          }
-          if (!TABLES.FEE_STRUCTURE || !TABLES.STUDENT_FEES || !TABLES.STUDENTS) {
-            throw new Error('Required table constants are undefined');
-          }
-          
-          const feeResult = await createTenantQuery(tenantId, TABLES.FEE_STRUCTURE)
-            .select('amount')
-            .execute();
-          const { data: feeStructures, error: feeError } = feeResult;
+          // 🚀 Use enhanced tenant database for fee structures
+          const { data: feeStructures, error: feeError } = await tenantDatabase.read(
+            'fee_structure',
+            {},
+            'amount'
+          );
 
           if (feeError) throw feeError;
 
-          const paymentResult = await createTenantQuery(tenantId, TABLES.STUDENT_FEES)
-            .select('amount_paid, student_id')
-            .execute();
-          const { data: studentFees, error: paymentError } = paymentResult;
+          // 🚀 Use enhanced tenant database for student fees
+          const { data: studentFees, error: paymentError } = await tenantDatabase.read(
+            'student_fees',
+            {},
+            'amount_paid, student_id'
+          );
 
           if (paymentError) throw paymentError;
 
-          const studentsResult = await createTenantQuery(tenantId, TABLES.STUDENTS)
-            .select('id')
-            .execute();
-          const { data: allStudents, error: studentsError } = studentsResult;
+          // 🚀 Use enhanced tenant database for students
+          const { data: allStudents, error: studentsError } = await tenantDatabase.read(
+            'students',
+            {},
+            'id'
+          );
 
           if (studentsError) throw studentsError;
 
@@ -193,36 +218,28 @@ const FeeManagement = () => {
 
   // Helper function to get pending fees for a student
   const getPendingFees = async (studentId, classId) => {
-    // 🛡️ Validate tenant access first
-    const validation = await validateTenantAccess(user?.id, tenantId, 'FeeManagement - getPendingFees');
-    if (!validation.isValid) {
-      console.error('❌ FeeManagement getPendingFees: Tenant validation failed:', validation.error);
+    // 🔍 Enhanced tenant system check
+    if (!checkTenantReady()) {
+      console.error('❌ FeeManagement getPendingFees: Tenant context not ready');
       return [];
     }
 
     try {
-      // Validate parameters
-      if (!tenantId) {
-        throw new Error('TenantId is required for tenant-aware queries');
-      }
-      if (!TABLES.STUDENT_FEES || !TABLES.FEE_STRUCTURE) {
-        throw new Error('Required table constants are undefined');
-      }
-      
-      const feesResult = await createTenantQuery(tenantId, TABLES.STUDENT_FEES)
-        .select('*')
-        .eq('student_id', studentId)
-        .execute();
-      const { data: fees, error } = feesResult;
+      // 🚀 Use enhanced tenant database for student fees
+      const { data: fees, error } = await tenantDatabase.read(
+        'student_fees',
+        { student_id: studentId },
+        '*'
+      );
 
       if (error) throw error;
       
-      // Get fee structure for this class using tenant-aware query
-      const structureResult = await createTenantQuery(tenantId, TABLES.FEE_STRUCTURE)
-        .select('*')
-        .eq('class_id', classId)
-        .execute();
-      const { data: feeStructure, error: feeError } = structureResult;
+      // 🚀 Use enhanced tenant database for fee structure
+      const { data: feeStructure, error: feeError } = await tenantDatabase.read(
+        'fee_structure',
+        { class_id: classId },
+        '*'
+      );
       
       if (feeError) throw feeError;
       
@@ -243,10 +260,9 @@ const FeeManagement = () => {
 
   // Calculate class-wise payment statistics - OPTIMIZED VERSION
   const calculateClassPaymentStats = async () => {
-    // 🛡️ Validate tenant access first
-    const validation = await validateTenantAccess(user?.id, tenantId, 'FeeManagement - calculateClassPaymentStats');
-    if (!validation.isValid) {
-      console.error('❌ FeeManagement calculateClassPaymentStats: Tenant validation failed:', validation.error);
+    // 🔍 Enhanced tenant system check
+    if (!checkTenantReady()) {
+      console.error('❌ FeeManagement calculateClassPaymentStats: Tenant context not ready');
       setClassPaymentStats([]);
       setPaymentSummary({ totalCollected: 0, totalDue: 0, totalOutstanding: 0, collectionRate: 0 });
       return;
@@ -261,32 +277,14 @@ const FeeManagement = () => {
       const academicYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
       console.log('📅 Academic year being used:', academicYear);
 
-      // Validate tenantId and table name before creating query
-      if (!tenantId) {
-        throw new Error('TenantId is required for tenant-aware queries');
-      }
-      if (!TABLES.CLASSES) {
-        throw new Error('TABLES.CLASSES is undefined');
-      }
-      
-      console.log('🔍 Debug info:', { tenantId, tableName: TABLES.CLASSES });
+      console.log('🔍 Debug info:', { tenantId });
 
-      // Get all classes in a single query using tenant-aware query with error handling
-      let classesWithStats, error;
-      try {
-        const result = await createTenantQuery(tenantId, TABLES.CLASSES)
-          .select(`
-            id,
-            class_name,
-            section
-          `)
-          .execute();
-        classesWithStats = result.data;
-        error = result.error;
-      } catch (queryError) {
-        console.error('❌ Error creating tenant query:', queryError);
-        error = queryError;
-      }
+      // 🚀 Use enhanced tenant database for classes
+      const { data: classesWithStats, error } = await tenantDatabase.read(
+        'classes',
+        {},
+        'id, class_name, section'
+      );
 
       if (error) throw error;
       console.log('📊 Classes found:', classesWithStats?.length || 0);
@@ -300,19 +298,21 @@ const FeeManagement = () => {
 
       const classIds = classesWithStats.map(c => c.id);
 
-      // Get all fee structures for all classes using tenant-aware query
-      let allFeeStructures;
+      // 🚀 Get all fee structures for all classes using enhanced tenant database
+      let allFeeStructures = [];
       try {
-        if (!TABLES.FEE_STRUCTURE) {
-          throw new Error('TABLES.FEE_STRUCTURE is undefined');
-        }
-        const feeResult = await createTenantQuery(tenantId, TABLES.FEE_STRUCTURE)
-          .select('*')
-          .in('class_id', classIds)
-          .execute();
-        allFeeStructures = feeResult.data;
-        if (feeResult.error) {
-          console.error('❌ Fee structures query error:', feeResult.error);
+        // Get fee structures for all classes
+        const { data: feeStructures, error: feeError } = await tenantDatabase.read(
+          'fee_structure',
+          {},
+          '*'
+        );
+        
+        if (feeError) {
+          console.error('❌ Fee structures query error:', feeError);
+        } else {
+          // Filter by class IDs
+          allFeeStructures = feeStructures?.filter(fee => classIds.includes(fee.class_id)) || [];
         }
       } catch (feeError) {
         console.error('❌ Error in fee structures query:', feeError);
@@ -324,19 +324,20 @@ const FeeManagement = () => {
         console.log('💰 Sample fee structure:', allFeeStructures[0]);
       }
 
-      // Get all students for all classes using tenant-aware query
-      let allStudents;
+      // 🚀 Get all students for all classes using enhanced tenant database
+      let allStudents = [];
       try {
-        if (!TABLES.STUDENTS) {
-          throw new Error('TABLES.STUDENTS is undefined');
-        }
-        const studentsResult = await createTenantQuery(tenantId, TABLES.STUDENTS)
-          .select('id, name, class_id')
-          .in('class_id', classIds)
-          .execute();
-        allStudents = studentsResult.data;
-        if (studentsResult.error) {
-          console.error('❌ Students query error:', studentsResult.error);
+        const { data: students, error: studentsError } = await tenantDatabase.read(
+          'students',
+          {},
+          'id, name, class_id'
+        );
+        
+        if (studentsError) {
+          console.error('❌ Students query error:', studentsError);
+        } else {
+          // Filter by class IDs
+          allStudents = students?.filter(student => classIds.includes(student.class_id)) || [];
         }
       } catch (studentsError) {
         console.error('❌ Error in students query:', studentsError);
@@ -392,99 +393,68 @@ const FeeManagement = () => {
         }
       }
       
-      // Get all concessions for all students using tenant-aware query
+      // 🚀 Get all concessions for all students using enhanced tenant database
       let allConcessions = [];
       if (studentIds.length > 0) {
         try {
-          if (!TABLES.STUDENT_DISCOUNTS) {
-            throw new Error('TABLES.STUDENT_DISCOUNTS is undefined');
-          }
-          const concessionsResult = await createTenantQuery(tenantId, TABLES.STUDENT_DISCOUNTS)
-            .select('student_id, discount_value, fee_component')
-            .in('student_id', studentIds)
-            .eq('academic_year', academicYear)
-            .eq('is_active', true)
-            .execute();
+          const { data: concessions, error: concessionsError } = await tenantDatabase.read(
+            'student_discounts',
+            { 
+              academic_year: academicYear,
+              is_active: true 
+            },
+            'student_id, discount_value, fee_component'
+          );
           
-          if (!concessionsResult.error && concessionsResult.data) {
-            allConcessions = concessionsResult.data;
+          if (!concessionsError && concessions) {
+            // Filter by student IDs
+            allConcessions = concessions.filter(concession => 
+              studentIds.includes(concession.student_id)
+            );
             console.log('🎫 Concessions found:', allConcessions.length);
-          } else if (concessionsResult.error) {
-            console.error('❌ Concessions query error:', concessionsResult.error);
+          } else if (concessionsError) {
+            console.error('❌ Concessions query error:', concessionsError);
           }
         } catch (concessionsError) {
           console.error('❌ Error in concessions query:', concessionsError);
         }
       }
       
-      // Debug the table reference issue
-      console.log('🔍 Table reference being used:', TABLES.STUDENT_FEES);
+      // 🚀 Get payment data using enhanced tenant database
+      console.log('🔍 Using enhanced tenant database for payments');
       
-      // First, let's check what student IDs actually exist in the payments table using tenant-aware query
-      // Fix: Remove fee_id as it doesn't exist in the schema
-      let allPaymentsCheck;
+      // First, check all payments in database
+      let allPaymentsUnfiltered = [];
       try {
-        if (!TABLES.STUDENT_FEES) {
-          throw new Error('TABLES.STUDENT_FEES is undefined');
-        }
-        const checkResult = await createTenantQuery(tenantId, TABLES.STUDENT_FEES)
-          .select('student_id, amount_paid')
-          .limit(5)
-          .execute();
-        allPaymentsCheck = checkResult.data;
-        if (checkResult.error) {
-          console.error('🚨 Error checking payments table:', checkResult.error);
-        }
-      } catch (checkError) {
-        console.error('🚨 Error in payments check query:', checkError);
-      }
-      
-      console.log('🎯 Sample payment student IDs from database:', allPaymentsCheck?.map(p => p.student_id) || 'No payments in DB');
-      
-      // Also try getting ALL payments for tenant without filtering to see if there's a mismatch
-      let allPaymentsUnfiltered;
-      try {
-        const unfilteredResult = await createTenantQuery(tenantId, TABLES.STUDENT_FEES)
-          .select('student_id, amount_paid')
-          .execute();
-        allPaymentsUnfiltered = unfilteredResult.data;
-        if (unfilteredResult.error) {
-          console.error('🚨 Error getting unfiltered payments:', unfilteredResult.error);
+        const { data: unfilteredPayments, error: unfilteredError } = await tenantDatabase.read(
+          'student_fees',
+          {},
+          'student_id, amount_paid'
+        );
+        
+        if (unfilteredError) {
+          console.error('🚨 Error getting unfiltered payments:', unfilteredError);
+        } else {
+          allPaymentsUnfiltered = unfilteredPayments || [];
         }
       } catch (unfilteredError) {
         console.error('🚨 Error in unfiltered payments query:', unfilteredError);
       }
         
-      console.log('🎯 Total payments in database (for tenant):', allPaymentsUnfiltered?.length || 0);
-      if (allPaymentsUnfiltered && allPaymentsUnfiltered.length > 0) {
+      console.log('🎯 Total payments in database (for tenant):', allPaymentsUnfiltered.length);
+      if (allPaymentsUnfiltered.length > 0) {
         console.log('🎯 Sample unfiltered payment:', allPaymentsUnfiltered[0]);
         const totalFromUnfiltered = allPaymentsUnfiltered.reduce((sum, p) => sum + (parseFloat(p.amount_paid || 0)), 0);
         console.log('🎯 Total amount from unfiltered payments:', totalFromUnfiltered);
       }
       
-      // Get all payments for all students using tenant-aware query
-      // Fix: Remove fee_id as it doesn't exist in the schema
-      let allPayments, paymentsError;
+      // Get payments for students in our classes
+      let allPayments = [];
       if (studentIds.length > 0) {
-        try {
-          const paymentsResult = await createTenantQuery(tenantId, TABLES.STUDENT_FEES)
-            .select('student_id, amount_paid')
-            .in('student_id', studentIds)
-            .execute();
-          allPayments = paymentsResult.data;
-          paymentsError = paymentsResult.error;
-        } catch (error) {
-          console.error('🚨 Error in filtered payments query:', error);
-          allPayments = [];
-          paymentsError = error;
-        }
-      } else {
-        allPayments = [];
-        paymentsError = null;
-      }
-        
-      if (paymentsError) {
-        console.error('🚨 Error getting filtered payments:', paymentsError);
+        // Filter payments for our student IDs
+        allPayments = allPaymentsUnfiltered.filter(payment => 
+          studentIds.includes(payment.student_id)
+        );
       }
 
       console.log('💳 Payments found:', allPayments?.length || 0);
@@ -692,26 +662,35 @@ const FeeManagement = () => {
     }
   };
 
-  // Clear cache and refresh data helper
+  // Enhanced tenant system refresh with automatic cache invalidation
   const refreshWithCacheClear = async () => {
-    if (tenantId) {
-      clearFeeCache(tenantId);
+    if (checkTenantReady()) {
+      console.log('🔄 FeeManagement: Refreshing data with enhanced tenant system cache clear');
+      
+      // Enhanced tenant system handles cache invalidation automatically
+      // Reset local state and loading guards
       setOptimizedData(null);
       setUseOptimizedQueries(true);
       isLoadingRef.current = false; // Reset loading guard
+      
+      // The tenantDatabase system will automatically handle cache invalidation
+      // when we perform the next data operations
     }
     await loadAllData();
   };
   
 
-  // Load data when tenant is available (once)
+  // Load data when enhanced tenant system is ready (once)
   const hasInitiallyLoaded = useRef(false);
   useEffect(() => {
-    if (!tenantLoading && tenantId && !hasInitiallyLoaded.current) {
+    if (checkTenantReady() && !hasInitiallyLoaded.current) {
+      console.log('🚀 FeeManagement: Enhanced tenant system ready, loading data...');
+      // Ensure tenant helpers are initialized
+      initializeTenantHelpers(tenantId);
       hasInitiallyLoaded.current = true;
       loadAllData();
     }
-  }, [tenantId, tenantLoading]);
+  }, [tenantId, isReady, tenantLoading, tenantError]);
 
 
   // Remove the tab change effect as it's causing continuous refreshing
@@ -719,7 +698,8 @@ const FeeManagement = () => {
 
   const isLoadingRef = useRef(false);
   const loadAllData = async () => {
-    if (!tenantId || isLoadingRef.current) {
+    if (!checkTenantReady() || isLoadingRef.current) {
+      console.log('⚠️ FeeManagement: Cannot load data - tenant not ready or already loading');
       return;
     }
     
@@ -729,13 +709,15 @@ const FeeManagement = () => {
       setLoading(true);
       setRefreshing(true);
 
-      // Use new optimized loader with progress
-      console.log('🚀 FeeManagement: Using optimized data loader');
-      setLoadingProgress({ step: 1, message: 'Initializing...' });
+      // Use enhanced tenant database fallback method (more reliable)
+      console.log('🚀 FeeManagement: Using enhanced tenant database method');
+      setLoadingProgress({ step: 1, message: 'Loading data...' });
       
-      const optimizedData = await loadFeeDataInBackground(tenantId, user, (progress) => {
-        setLoadingProgress(progress);
-      });
+      // Call the fallback method directly since it uses tenantDatabase helpers
+      await loadAllDataOriginal();
+      
+      setLoadingProgress({ step: 4, message: 'Complete' });
+      return; // Exit early
       
       // Set all data from optimized loader
       console.log('🏗️ Setting optimized data:', {
@@ -770,11 +752,14 @@ const FeeManagement = () => {
       if (optimizedData.feeStructures.length === 0) {
         console.log('🔍 No fee structures found, checking database directly...');
         try {
-          const { data: directCheck, error: directError } = await supabase
-            .from(TABLES.FEE_STRUCTURE)
-            .select('id, class_id, fee_component, amount')
-            .eq('tenant_id', tenantId)
-            .limit(10);
+          const { data: directCheckData, error: directError } = await tenantDatabase.read(
+            'fee_structure',
+            {},
+            'id, class_id, fee_component, amount'
+          );
+          
+          // Limit to 10 results manually
+          const directCheck = directCheckData?.slice(0, 10);
           
           if (directError) {
             console.error('❌ Direct database check failed:', directError);
@@ -812,50 +797,54 @@ const FeeManagement = () => {
     }
   };
 
-  // Original method as fallback
+  // Original method as fallback using enhanced tenant database
   const loadAllDataOriginal = async () => {
-    console.log('📋 Using original fee data loading method');
-    // Load all data in parallel for better performance with tenant filtering
+    console.log('📋 Using enhanced tenant database fallback method');
+    // Load all data in parallel using tenantDatabase helpers
     const [
-      { data: classesData, error: classesError },
-      { data: feeStructuresData, error: feeStructuresError },
-      { data: studentsData, error: studentsError },
-      { data: paymentsData, error: paymentsError },
-      { data: allFeeStructures, error: allFeeError }
+      classesResult,
+      feeStructuresResult,
+      studentsResult,
+      paymentsResult,
+      allFeeResult
     ] = await Promise.all([
-      supabase.from(TABLES.CLASSES).select('*').eq('tenant_id', tenantId),
-      supabase.from(TABLES.FEE_STRUCTURE).select(`
-        *,
-        classes:${TABLES.CLASSES}(id, class_name)
-      `).eq('tenant_id', tenantId),
-      supabase.from(TABLES.STUDENTS).select(`
-        *,
-        classes:${TABLES.CLASSES}(class_name)
-      `).eq('tenant_id', tenantId),
-      supabase.from(TABLES.STUDENT_FEES).select(`
-        *,
-        students(name)
-      `).eq('tenant_id', tenantId),
-      supabase.from(TABLES.FEE_STRUCTURE).select('*').eq('tenant_id', tenantId)
+      tenantDatabase.read('classes', {}, '*'),
+      tenantDatabase.read('fee_structure', {}, '*'),
+      tenantDatabase.read('students', {}, '*'),
+      tenantDatabase.read('student_fees', {}, '*'),
+      tenantDatabase.read('fee_structure', {}, '*')
     ]);
 
-    // Check for errors
-    if (classesError) throw classesError;
-    if (feeStructuresError) throw feeStructuresError;
-    if (studentsError) throw studentsError;
-    if (paymentsError) throw paymentsError;
-    if (allFeeError) throw allFeeError;
+    // Check for errors and extract data
+    if (classesResult.error) throw classesResult.error;
+    if (feeStructuresResult.error) throw feeStructuresResult.error;
+    if (studentsResult.error) throw studentsResult.error;
+    if (paymentsResult.error) throw paymentsResult.error;
+    if (allFeeResult.error) throw allFeeResult.error;
+
+    const classesData = classesResult.data || [];
+    const feeStructuresData = feeStructuresResult.data || [];
+    const studentsData = studentsResult.data || [];
+    const paymentsData = paymentsResult.data || [];
+    const allFeeStructures = allFeeResult.data || [];
 
     // Set classes data
-    setClasses(classesData || []);
+    setClasses(classesData);
     
-    // Process fee structures to group by class - optimized
+    // Process fee structures to group by class - optimized with enhanced tenant data
     const groupedByClass = {};
-    (feeStructuresData || []).forEach(fee => {
+    
+    // Create class lookup for fee structure processing
+    const classLookup = {};
+    classesData.forEach(cls => {
+      classLookup[cls.id] = cls;
+    });
+    
+    feeStructuresData.forEach(fee => {
       if (!groupedByClass[fee.class_id]) {
         groupedByClass[fee.class_id] = {
           classId: fee.class_id,
-          name: fee.classes?.class_name || 'Unknown Class',
+          name: classLookup[fee.class_id]?.class_name || 'Unknown Class',
           fees: []
         };
       }
@@ -878,7 +867,7 @@ const FeeManagement = () => {
     setFeeStructures(sortedFeeStructures);
 
     // Process students data - optimized mapping
-    const mappedStudents = (studentsData || []).map(student => ({
+    const mappedStudents = studentsData.map(student => ({
       ...student,
       full_name: student.name
     }));
@@ -886,16 +875,23 @@ const FeeManagement = () => {
 
     // Create fee structure lookup for O(1) access
     const feeStructureLookup = {};
-    (allFeeStructures || []).forEach(fs => {
+    allFeeStructures.forEach(fs => {
       feeStructureLookup[fs.id] = fs;
+    });
+    
+    // Create student lookup for payments processing
+    const studentLookup = {};
+    studentsData.forEach(student => {
+      studentLookup[student.id] = student;
     });
 
     // Process payments data with lookup - no async operations
-    const enrichedPayments = (paymentsData || []).map(payment => {
+    const enrichedPayments = paymentsData.map(payment => {
       const feeStructure = feeStructureLookup[payment.fee_id];
+      const student = studentLookup[payment.student_id];
       return {
         ...payment,
-        students: { full_name: payment.students?.name },
+        students: { full_name: student?.name || 'Unknown Student' },
         fee_structure: feeStructure
       };
     });
@@ -929,20 +925,18 @@ const FeeManagement = () => {
       // Format the date properly before saving
       const formattedDueDate = formatDateForDB(dueDate);
 
-      const { error } = await supabase
-        .from(TABLES.FEE_STRUCTURE)
-        .upsert([
-          {
-            id: operation === 'edit' ? feeData.id : undefined,
-            class_id: operation === 'edit' ? feeData.classId : selectedClassId,
-            type: operation === 'edit' ? feeData.type : newFeeStructure.type,
-            amount: operation === 'edit' ? feeData.amount : newFeeStructure.amount,
-            due_date: formattedDueDate,
-            description: operation === 'edit' ? feeData.description : newFeeStructure.description,
-            tenant_id: tenantId
-          }
-        ])
-        .select();
+      const feeRecord = {
+        id: operation === 'edit' ? feeData.id : undefined,
+        class_id: operation === 'edit' ? feeData.classId : selectedClassId,
+        fee_component: operation === 'edit' ? feeData.type : newFeeStructure.type,
+        amount: operation === 'edit' ? feeData.amount : newFeeStructure.amount,
+        due_date: formattedDueDate,
+        description: operation === 'edit' ? feeData.description : newFeeStructure.description
+      };
+      
+      const { error } = operation === 'edit' 
+        ? await tenantDatabase.update('fee_structure', { id: feeData.id }, feeRecord)
+        : await tenantDatabase.create('fee_structure', feeRecord);
 
       if (error) throw error;
 
@@ -984,15 +978,15 @@ const FeeManagement = () => {
       // Format the date properly before saving
       const formattedDueDate = formatDateForDB(fee.dueDate);
 
-      const { error } = await supabase
-        .from(TABLES.FEE_STRUCTURE)
-        .update({
+      const { error } = await tenantDatabase.update(
+        'fee_structure',
+        { id: feeId },
+        {
           fee_component: fee.type,
           amount: fee.amount,
           due_date: fee.dueDate ? new Date(fee.dueDate).toISOString().split('T')[0] : null
-        })
-        .eq('id', feeId)
-        .eq('tenant_id', tenantId);
+        }
+      );
 
       if (error) throw error;
 
@@ -1025,24 +1019,30 @@ const FeeManagement = () => {
     try {
       setPaymentLoading(true);
       
-      // Get the fee structure to know the details
-      const { data: feeStructure, error: feeStructureError } = await supabase
-        .from(TABLES.FEE_STRUCTURE)
-        .select('amount, fee_component, academic_year')
-        .eq('id', feeStructureId)
-        .eq('tenant_id', tenantId)
-        .single();
+      // Get the fee structure to know the details using enhanced tenant database
+      const { data: feeStructureData, error: feeStructureError } = await tenantDatabase.read(
+        'fee_structure',
+        { id: feeStructureId },
+        'amount, fee_component, academic_year'
+      );
         
       if (feeStructureError) throw feeStructureError;
       
+      const feeStructure = feeStructureData?.[0];
+      if (!feeStructure) {
+        throw new Error('Fee structure not found');
+      }
+      
       // First check if there's an existing record for this student and fee component
-      const { data: existingFees, error: checkError } = await supabase
-        .from(TABLES.STUDENT_FEES)
-        .select('*')
-        .eq('student_id', studentId)
-        .eq('fee_component', feeStructure.fee_component)
-        .eq('academic_year', feeStructure.academic_year)
-        .eq('tenant_id', tenantId);
+      const { data: existingFees, error: checkError } = await tenantDatabase.read(
+        'student_fees',
+        {
+          student_id: studentId,
+          fee_component: feeStructure.fee_component,
+          academic_year: feeStructure.academic_year
+        },
+        '*'
+      );
         
       if (checkError) {
         throw checkError;
@@ -1063,20 +1063,15 @@ const FeeManagement = () => {
       }
       
       // Always create a new payment record (this represents a payment transaction)
-      const { error: insertError } = await supabase
-        .from(TABLES.STUDENT_FEES)
-        .insert([
-          {
-            student_id: studentId,
-            fee_component: feeStructure.fee_component,
-            academic_year: feeStructure.academic_year,
-            amount_paid: amountPaid,
-            payment_date: paymentDate.toISOString().split('T')[0], // Date only
-            payment_mode: 'Cash', // Default payment mode, can be made configurable
-            tenant_id: tenantId
-            // Note: status will be automatically calculated by the database trigger we created
-          }
-        ]);
+      const { error: insertError } = await tenantDatabase.create('student_fees', {
+        student_id: studentId,
+        fee_component: feeStructure.fee_component,
+        academic_year: feeStructure.academic_year,
+        amount_paid: amountPaid,
+        payment_date: paymentDate.toISOString().split('T')[0], // Date only
+        payment_mode: 'Cash' // Default payment mode, can be made configurable
+        // Note: status and tenant_id will be automatically handled by tenantDatabase
+      });
 
       if (insertError) throw insertError;
 
@@ -1180,23 +1175,29 @@ const FeeManagement = () => {
     try {
       setPaymentLoading(true);
       
-      // First get the fee structure details
-      const { data: feeStructure, error: feeError } = await supabase
-        .from(TABLES.FEE_STRUCTURE)
-        .select('fee_component, academic_year')
-        .eq('id', feeId)
-        .eq('tenant_id', tenantId)
-        .single();
+      // First get the fee structure details using enhanced tenant database
+      const { data: feeStructure, error: feeError } = await tenantDatabase.read(
+        'fee_structure',
+        { id: feeId },
+        'fee_component, academic_year'
+      );
       
       if (feeError) throw feeError;
       
+      const feeRecord = feeStructure?.[0];
+      if (!feeRecord) {
+        throw new Error('Fee structure not found');
+      }
+      
       // Check if there are any student fees associated with this fee component
-      const { data: associatedFees, error: checkError } = await supabase
-        .from(TABLES.STUDENT_FEES)
-        .select('id')
-        .eq('fee_component', feeStructure?.fee_component || 'Unknown')
-        .eq('academic_year', feeStructure?.academic_year || '2024-25')
-        .eq('tenant_id', tenantId);
+      const { data: associatedFees, error: checkError } = await tenantDatabase.read(
+        'student_fees',
+        {
+          fee_component: feeRecord.fee_component,
+          academic_year: feeRecord.academic_year
+        },
+        'id'
+      );
       
       if (checkError) throw checkError;
       
@@ -1209,11 +1210,7 @@ const FeeManagement = () => {
       }
       
       // If no associated fees, proceed with deletion
-      const { error } = await supabase
-        .from(TABLES.FEE_STRUCTURE)
-        .delete()
-        .eq('id', feeId)
-        .eq('tenant_id', tenantId);
+      const { error } = await tenantDatabase.delete('fee_structure', { id: feeId });
 
       if (error) throw error;
 
@@ -1240,12 +1237,14 @@ const FeeManagement = () => {
       setPaymentLoading(true);
       
       // Check if there are any student fees associated with this fee component
-      const { data: associatedFees, error: checkError } = await supabase
-        .from(TABLES.STUDENT_FEES)
-        .select('id')
-        .eq('fee_component', fee.fee_component || fee.type || 'Unknown')
-        .eq('academic_year', fee.academic_year || '2024-25')
-        .eq('tenant_id', tenantId);
+      const { data: associatedFees, error: checkError } = await tenantDatabase.read(
+        'student_fees',
+        {
+          fee_component: fee.fee_component || fee.type || 'Unknown',
+          academic_year: fee.academic_year || '2024-25'
+        },
+        'id'
+      );
       
       if (checkError) throw checkError;
       
@@ -1258,11 +1257,7 @@ const FeeManagement = () => {
       }
       
       // If no associated fees, proceed with deletion
-      const { error } = await supabase
-        .from(TABLES.FEE_STRUCTURE)
-        .delete()
-        .eq('id', fee.id)
-        .eq('tenant_id', tenantId);
+      const { error } = await tenantDatabase.delete('fee_structure', { id: fee.id });
 
       if (error) throw error;
 
@@ -1315,7 +1310,7 @@ const FeeManagement = () => {
     try {
       setPaymentLoading(true);
       
-      // Create fee structure for each selected class
+      // Create fee structure for each selected class using enhanced tenant database
       const amountValue = parseFloat(newFeeStructure.amount);
       const feeStructures = selectedClassIds.map(classId => ({
         class_id: classId,
@@ -1324,13 +1319,10 @@ const FeeManagement = () => {
         amount: amountValue,
         base_amount: amountValue, // ✅ FIXED: Set base_amount equal to amount for class fees
         academic_year: newFeeStructure.academicYear.trim(),
-        due_date: format(new Date(newFeeStructure.dueDate), 'yyyy-MM-dd'),
-        tenant_id: tenantId
+        due_date: format(new Date(newFeeStructure.dueDate), 'yyyy-MM-dd')
       }));
 
-      const { error } = await supabase
-        .from(TABLES.FEE_STRUCTURE)
-        .insert(feeStructures);
+      const { error } = await tenantDatabase.createMany('fee_structure', feeStructures);
 
       if (error) throw error;
 
