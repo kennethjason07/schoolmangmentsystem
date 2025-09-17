@@ -341,11 +341,8 @@ const ViewReportCard = () => {
       // Direct query without tenant filtering for parent mode
       console.log('🔄 [PARENT-AWARE] Fetching school details without tenant context');
       
-      // Direct query without tenant filtering
-      const directResult = await supabase
-        .from('school_details')
-        .select('*')
-        .single();
+      // Use tenant-aware helper to get school details
+      const directResult = await dbHelpers.getSchoolDetails();
       
       if (directResult.error) {
         console.log('❌ [PARENT-AWARE] School details query error:', directResult.error);

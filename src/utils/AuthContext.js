@@ -876,8 +876,8 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
         setUserType(null);
         
-        // Enhanced navigation for web
-        handleWebNavigation();
+        // Let AppNavigator handle navigation automatically when user becomes null
+        console.log('✅ [AuthContext] User state cleared, AppNavigator will handle navigation');
         return { error: null };
       }
       
@@ -902,8 +902,8 @@ export const AuthProvider = ({ children }) => {
           setUser(null);
           setUserType(null);
           
-          // Enhanced navigation for web
-          handleWebNavigation();
+          // Let AppNavigator handle navigation automatically when user becomes null
+          console.log('✅ [AuthContext] User state cleared, AppNavigator will handle navigation');
           return { error: null };
         }
         // For other errors, continue with cleanup
@@ -914,8 +914,8 @@ export const AuthProvider = ({ children }) => {
       setUser(null);
       setUserType(null);
       
-      // Enhanced navigation for web
-      handleWebNavigation();
+      // Let AppNavigator handle navigation automatically when user becomes null
+      console.log('✅ [AuthContext] User state cleared, AppNavigator will handle navigation');
       
       return { error: null };
     } catch (error) {
@@ -929,8 +929,8 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
         setUserType(null);
         
-        // Enhanced navigation for web
-        handleWebNavigation();
+        // Let AppNavigator handle navigation automatically when user becomes null
+        console.log('✅ [AuthContext] User state cleared, AppNavigator will handle navigation');
         return { error: null };
       }
       
@@ -938,8 +938,8 @@ export const AuthProvider = ({ children }) => {
       setUser(null);
       setUserType(null);
       
-      // Enhanced navigation for web
-      handleWebNavigation();
+      // Let AppNavigator handle navigation automatically when user becomes null
+      console.log('✅ [AuthContext] User state cleared, AppNavigator will handle navigation');
       
       return { error };
     } finally {

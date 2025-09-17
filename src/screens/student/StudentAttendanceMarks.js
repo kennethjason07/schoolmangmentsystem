@@ -442,11 +442,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
 
       // Get school details
       try {
-        const { data: schoolDetails, error: schoolError } = await supabase
-          .from(TABLES.SCHOOL_DETAILS)
-          .select('*')
-          .limit(1)
-          .single();
+        const { data: schoolDetails, error: schoolError } = await dbHelpers.getSchoolDetails();
 
         if (!schoolError && schoolDetails) {
           setSchoolInfo({

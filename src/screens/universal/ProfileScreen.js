@@ -604,10 +604,8 @@ const ProfileScreen = ({ navigation, route }) => {
                 // Mobile platforms - use standard logout
                 console.log('📱 [ProfileScreen] Mobile platform - standard logout');
                 await signOut();
-                navigationService.reset({
-                  index: 0,
-                  routes: [{ name: 'Login' }],
-                });
+                // Don't manually navigate - auth context will handle navigation when user becomes null
+                console.log('✅ [ProfileScreen] Sign out completed, auth context will handle navigation');
               }
               
             } catch (error) {
@@ -618,12 +616,10 @@ const ProfileScreen = ({ navigation, route }) => {
                 console.log('💥 [ProfileScreen] Forcing redirect due to error');
                 window.location.href = '/';
               } else {
-                // For mobile, show error but still try to navigate
+                // For mobile, show error but let auth handle the navigation
                 Alert.alert('Logout Error', 'There was an issue logging out. Please try again.');
-                navigationService.reset({
-                  index: 0,
-                  routes: [{ name: 'Login' }],
-                });
+                // Don't manually navigate - if signOut was successful, auth context will handle navigation
+                console.log('⚠️ [ProfileScreen] Error during logout, but letting auth context handle navigation');
               }
               
             } finally {

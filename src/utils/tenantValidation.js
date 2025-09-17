@@ -78,19 +78,29 @@ export const validateTenantAccess = async (tenantId, userId, context = 'Unknown'
     }
 
     // Validate tenant exists and is active
+    // Use .maybeSingle() to handle cases where multiple or no rows exist
     const { data: tenant, error: tenantError } = await supabase
       .from('tenants')
       .select('*')
       .eq('id', tenantId)
       .eq('status', 'active')
-      .single();
+      .maybeSingle();
 
-    if (tenantError || !tenant) {
-      console.error('❌ [TENANT VALIDATION] Invalid or inactive tenant:', tenantError?.message || 'Not found');
+    if (tenantError) {
+      console.error('❌ [TENANT VALIDATION] Database error during tenant lookup:', tenantError);
       return { 
         isValid: false, 
         tenant: null, 
-        error: tenantError?.message || 'Invalid or inactive tenant' 
+        error: `Database error: ${tenantError.message}` 
+      };
+    }
+    
+    if (!tenant) {
+      console.error('❌ [TENANT VALIDATION] No active tenant found with ID:', tenantId);
+      return { 
+        isValid: false, 
+        tenant: null, 
+        error: 'No active tenant found for the provided ID' 
       };
     }
 

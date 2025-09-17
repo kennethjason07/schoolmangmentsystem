@@ -18,6 +18,7 @@ import { testRealtimeConnection, testUserFilteredConnection, insertTestMessage }
 import ImageViewer from '../../components/ImageViewer';
 import { useParentAuth } from '../../hooks/useParentAuth'; // Import parent auth hook
 import { getTeacherUserId } from './teacherUserIdHelper'; // Import teacher user ID helper
+import ChatBadgeDebugger from '../../utils/chatBadgeDebugger'; // Import chat badge debugger
 
 // Debug mode constant for parent chat
 const DEBUG_MODE = __DEV__ && true; // Enable debug logging in development

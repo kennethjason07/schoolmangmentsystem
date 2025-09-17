@@ -275,7 +275,7 @@ const StudentDashboard = ({ navigation }) => {
       }
 
       // Validate tenant access before proceeding (with resolved tenant ID)
-      const tenantValidation = await validateTenantAccess(user.id, effectiveTenantId);
+      const tenantValidation = await validateTenantAccess(effectiveTenantId, user.id, 'StudentDashboard-FetchAssignments');
       if (!tenantValidation.isValid) {
         console.error('❌ Student dashboard tenant validation failed:', tenantValidation.error);
         return; // Silent return for better UX
@@ -399,7 +399,7 @@ const StudentDashboard = ({ navigation }) => {
       }
       
       // Validate tenant access before refreshing notifications (with resolved tenant ID)
-      const tenantValidation = await validateTenantAccess(user.id, effectiveTenantId);
+      const tenantValidation = await validateTenantAccess(effectiveTenantId, user.id, 'StudentDashboard-RefreshNotifications');
       if (!tenantValidation.isValid) {
         console.error('❌ Student dashboard notification validation failed:', tenantValidation.error);
         return; // Silent return for better UX
@@ -408,7 +408,7 @@ const StudentDashboard = ({ navigation }) => {
       console.log('Dashboard: Refreshing notifications for user:', user.id);
       
       // Fetch notifications with recipient info using tenant-aware query
-      const tenantNotificationQuery = createTenantQuery(supabase.from('notification_recipients'), effectiveTenantId);
+      const tenantNotificationQuery = createTenantQuery(effectiveTenantId, 'notification_recipients');
       const { data: notificationsData, error: notifError } = await tenantNotificationQuery
         .select(`
           id,
@@ -585,7 +585,7 @@ const StudentDashboard = ({ navigation }) => {
       }
 
       // Validate tenant access before proceeding (with resolved tenant ID)
-      const tenantValidation = await validateTenantAccess(user.id, effectiveTenantId);
+      const tenantValidation = await validateTenantAccess(effectiveTenantId, user.id, 'StudentDashboard-MainDataFetch');
       if (!tenantValidation.isValid) {
         console.error('❌ Student dashboard tenant validation failed:', tenantValidation.error);
         Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);

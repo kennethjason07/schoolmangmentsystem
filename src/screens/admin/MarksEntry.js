@@ -50,7 +50,7 @@ const MarksEntry = () => {
       setLoading(true);
       
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'MarksEntry - loadData');
+      const validation = await validateTenantAccess(tenantId, user?.id, 'MarksEntry - loadData');
       if (!validation.isValid) {
         console.error('❌ MarksEntry loadData: Tenant validation failed:', validation.error);
         Alert.alert('Access Denied', validation.error);
@@ -179,7 +179,7 @@ const MarksEntry = () => {
       });
       
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'MarksEntry - handleBulkSaveMarks');
+      const validation = await validateTenantAccess(tenantId, user?.id, 'MarksEntry - handleBulkSaveMarks');
       if (!validation.isValid) {
         console.error('❌ [MARKS DEBUG] Tenant validation failed:', validation.error);
         Alert.alert('Access Denied', validation.error);

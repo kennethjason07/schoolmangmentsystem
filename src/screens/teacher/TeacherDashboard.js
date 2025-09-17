@@ -191,7 +191,7 @@ function groupAndSortSchedule(schedule) {
       setError(null);
       
       // Validate tenant access before proceeding
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      const tenantValidation = await validateTenantAccess(tenantId, user.id);
       if (!tenantValidation.isValid) {
         console.error('❌ Tenant validation failed:', tenantValidation.error);
         Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
@@ -906,7 +906,7 @@ function groupAndSortSchedule(schedule) {
   async function handleCompletePersonalTask(id) {
     try {
       // Validate tenant access before completing task
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      const tenantValidation = await validateTenantAccess(tenantId, user.id);
       if (!tenantValidation.isValid) {
         console.error('❌ [COMPLETE_TASK] Tenant validation failed:', tenantValidation.error);
         Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.ACCESS_DENIED);
@@ -950,7 +950,7 @@ function groupAndSortSchedule(schedule) {
 
     try {
       // Validate tenant access before adding task
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      const tenantValidation = await validateTenantAccess(tenantId, user.id);
       if (!tenantValidation.isValid) {
         console.error('❌ [ADD_TASK] Tenant validation failed:', tenantValidation.error);
         Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.ACCESS_DENIED);
@@ -1229,7 +1229,7 @@ function groupAndSortSchedule(schedule) {
     
     try {
       // Validate tenant access before fetching analytics
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
+      const tenantValidation = await validateTenantAccess(tenantId, user.id);
       if (!tenantValidation.isValid) {
         console.error('❌ Tenant validation failed for attendance analytics:', tenantValidation.error);
         return; // Silent return for better UX

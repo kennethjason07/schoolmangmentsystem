@@ -57,10 +57,7 @@ export default function StudentMarks({ navigation }) {
 
   const fetchSchoolDetails = async () => {
     try {
-      const { data, error } = await supabase
-        .from(TABLES.SCHOOL_DETAILS)
-        .select('*')
-        .single();
+      const { data, error } = await dbHelpers.getSchoolDetails();
       
       if (error) throw error;
       setSchoolDetails(data);
