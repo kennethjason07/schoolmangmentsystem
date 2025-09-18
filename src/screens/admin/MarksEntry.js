@@ -1,20 +1,68 @@
-import React, { useState, useEffect, useRef } from 'react';
+/**
+ * MarksEntry - Enhanced Tenant System Implementation
+ * 
+ * This component has been migrated to use the Enhanced Tenant System:
+ * - Uses useTenantAccess hook for tenant context
+ * - Leverages tenantDatabase helpers for automatic tenant filtering
+ * - Implements robust tenant validation with validateTenantReadiness()
+ * - All database operations are tenant-scoped automatically
+ * - Removed complex email-based tenant validation logic
+ * - Uses getCachedTenantId for fast tenant ID access
+ */
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, ScrollView, ActivityIndicator, FlatList, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Header from '../../components/Header';
 import { supabase, TABLES } from '../../utils/supabase';
 import { createBulkMarksNotifications } from '../../utils/marksNotificationHelpers';
-import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
-import { useTenant } from '../../contexts/TenantContext';
+import { useTenantAccess, tenantDatabase, createTenantQuery, getCachedTenantId } from '../../utils/tenantHelpers';
 import { useAuth } from '../../utils/AuthContext';
 
 const MarksEntry = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const inputRefs = useRef({});
-  const { tenantId } = useTenant();
   const { user } = useAuth();
+  const tenantAccess = useTenantAccess();
+  
+  // Helper function to validate tenant readiness and get effective tenant ID
+  const validateTenantReadiness = useCallback(async () => {
+    console.log('🔍 [MarksEntry] validateTenantReadiness - Starting validation');
+    console.log('🔍 [MarksEntry] User state:', { 
+      id: user?.id, 
+      email: user?.email 
+    });
+    console.log('🔍 [MarksEntry] Tenant access state:', { 
+      isReady: tenantAccess.isReady,
+      isLoading: tenantAccess.isLoading,
+      currentTenant: tenantAccess.currentTenant?.id
+    });
+    
+    // Wait for tenant system to be ready
+    if (!tenantAccess.isReady || tenantAccess.isLoading) {
+      console.log('⏳ [MarksEntry] Tenant system not ready, waiting...');
+      return { success: false, reason: 'TENANT_NOT_READY' };
+    }
+    
+    // Get effective tenant ID
+    const effectiveTenantId = await getCachedTenantId();
+    if (!effectiveTenantId) {
+      console.log('❌ [MarksEntry] No effective tenant ID available');
+      return { success: false, reason: 'NO_TENANT_ID' };
+    }
+    
+    console.log('✅ [MarksEntry] Tenant validation successful:', {
+      effectiveTenantId,
+      currentTenant: tenantAccess.currentTenant?.id
+    });
+    
+    return { 
+      success: true, 
+      effectiveTenantId,
+      tenantContext: tenantAccess.currentTenant
+    };
+  }, [user?.id, user?.email, tenantAccess.isReady, tenantAccess.isLoading, tenantAccess.currentTenant?.id]);
   
   // Get exam and class data from route params
   const { exam, examClass } = route.params || {};
@@ -44,60 +92,49 @@ const MarksEntry = () => {
   const [subjectMenuVisible, setSubjectMenuVisible] = useState(null);
   const [showAdmissionNumbers, setShowAdmissionNumbers] = useState(false);
 
-  // Load data
-  const loadData = async () => {
+  // Load data with enhanced tenant system
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
+      console.log('🚀 [MarksEntry] loadData - Starting with enhanced tenant validation');
       
-      // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'MarksEntry - loadData');
-      if (!validation.isValid) {
-        console.error('❌ MarksEntry loadData: Tenant validation failed:', validation.error);
-        Alert.alert('Access Denied', validation.error);
-        setLoading(false);
-        return;
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [MarksEntry] Tenant not ready for data loading:', tenantValidation.reason);
+        if (tenantValidation.reason === 'TENANT_NOT_READY') {
+          setLoading(false);
+          return;
+        }
+        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
       }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [MarksEntry] Using effective tenant ID for data loading:', effectiveTenantId);
 
-      // Load subjects for the class using tenant-aware query
-      const { data: subjectsData, error: subjectsError } = await createTenantQuery(tenantId, 'subjects')
-        .select('id, name, class_id, academic_year, is_optional, tenant_id, created_at')
-        .eq('class_id', examClass.id);
+      // Load subjects for the class using enhanced tenant database
+      console.log('🔍 Loading subjects via enhanced tenant database for class:', examClass.id);
+      const { data: subjectsData, error: subjectsError } = await tenantDatabase.read('subjects', { class_id: examClass.id }, 'id, name, class_id, academic_year, is_optional');
 
       if (subjectsError) throw subjectsError;
 
-      // Load students for the class using tenant-aware query
-      const { data: studentsData, error: studentsError } = await createTenantQuery(tenantId, 'students')
-        .select('id, admission_no, name, roll_no, class_id, academic_year, tenant_id, created_at')
-        .eq('class_id', examClass.id);
+      // Load students for the class using enhanced tenant database
+      console.log('🔍 Loading students via enhanced tenant database for class:', examClass.id);
+      const { data: studentsData, error: studentsError } = await tenantDatabase.read('students', { class_id: examClass.id }, 'id, admission_no, name, roll_no, class_id, academic_year');
 
       if (studentsError) throw studentsError;
 
-      // Load existing marks for this exam using tenant-aware query
-      const { data: marksData, error: marksError } = await createTenantQuery(tenantId, 'marks')
-        .select('id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks, tenant_id, created_at')
-        .eq('exam_id', exam.id);
+      // Load existing marks for this exam using enhanced tenant database
+      console.log('🔍 Loading marks via enhanced tenant database for exam:', exam.id);
+      const { data: marksData, error: marksError } = await tenantDatabase.read('marks', { exam_id: exam.id }, 'id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks');
 
       if (marksError) throw marksError;
-
-      // 🛡️ Validate all data belongs to correct tenant
-      const dataValidations = [
-        { data: subjectsData, name: 'MarksEntry - Subjects' },
-        { data: studentsData, name: 'MarksEntry - Students' },
-        { data: marksData, name: 'MarksEntry - Marks' }
-      ];
       
-      for (const { data, name } of dataValidations) {
-        if (data && data.length > 0) {
-          const isValid = validateDataTenancy(data, tenantId, name);
-          if (!isValid) {
-            Alert.alert('Data Security Alert', `${name.split(' - ')[1]} data validation failed. Please contact administrator.`);
-            setSubjects([]);
-            setStudents([]);
-            setMarks([]);
-            return;
-          }
-        }
-      }
+      console.log('📬 Loaded data:', {
+        subjects: subjectsData?.length || 0,
+        students: studentsData?.length || 0,
+        marks: marksData?.length || 0
+      });
       
       // Set validated data
       let processedSubjects = subjectsData || [];
@@ -127,20 +164,24 @@ const MarksEntry = () => {
         formData[mark.student_id][mark.subject_id] = mark.marks_obtained.toString();
       });
       setMarksForm(formData);
+      
+      console.log('✅ [MarksEntry] Data loaded successfully');
 
     } catch (error) {
-      console.error('Error loading data:', error);
-      Alert.alert('Error', 'Failed to load data');
+      console.error('❌ [MarksEntry] Error loading data:', error);
+      Alert.alert('Error', `Failed to load data: ${error.message}`);
     } finally {
       setLoading(false);
     }
-  };
+  }, [examClass?.id, exam?.id, validateTenantReadiness]);
 
+  // Load data when enhanced tenant system is ready
   useEffect(() => {
-    if (exam && examClass) {
+    if (exam && examClass && tenantAccess.isReady && !tenantAccess.isLoading) {
+      console.log('🚀 [MarksEntry] Enhanced tenant system ready, loading data...');
       loadData();
     }
-  }, [exam, examClass]);
+  }, [exam, examClass, tenantAccess.isReady, tenantAccess.isLoading, loadData]);
 
   // Handle marks change with validation
   const handleMarksChange = (studentId, subjectId, value) => {
@@ -162,53 +203,47 @@ const MarksEntry = () => {
     }));
   };
 
-  // Save all marks
+  // Save all marks with enhanced tenant system
   const handleBulkSaveMarks = async () => {
     try {
-      console.log('🚀 [MARKS DEBUG] Starting handleBulkSaveMarks...');
-      console.log('🚀 [MARKS DEBUG] Current state:', {
+      console.log('🚀 [MarksEntry] Starting handleBulkSaveMarks...');
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [MarksEntry] Tenant not ready for marks saving:', tenantValidation.reason);
+        Alert.alert('Error', 'System not ready. Please try again.');
+        return;
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [MarksEntry] Using effective tenant ID for marks saving:', effectiveTenantId);
+      
+      console.log('🚀 [MarksEntry] Current state:', {
         exam: exam ? { id: exam.id, name: exam.name, max_marks: exam.max_marks } : 'NO EXAM',
         examClass: examClass ? { id: examClass.id, class_name: examClass.class_name } : 'NO CLASS',
-        tenantId: tenantId || 'NO TENANT',
+        effectiveTenantId,
         userId: user?.id || 'NO USER',
         marksFormKeys: Object.keys(marksForm),
         marksFormSize: Object.keys(marksForm).length
       });
       
-      // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(tenantId, user?.id, 'MarksEntry - handleBulkSaveMarks');
-      if (!validation.isValid) {
-        console.error('❌ [MARKS DEBUG] Tenant validation failed:', validation.error);
-        Alert.alert('Access Denied', validation.error);
-        return;
-      }
-      console.log('✅ [MARKS DEBUG] Tenant validation passed');
-      
       if (!exam) {
-        console.error('❌ [MARKS DEBUG] No exam provided');
+        console.error('❌ [MarksEntry] No exam provided');
         Alert.alert('Error', 'Exam information is missing');
         return;
       }
 
-      // Use already validated tenantId from context
-      if (!tenantId) {
-        console.error('❌ [Admin MarksEntry] No tenant_id available for marks saving');
-        Alert.alert('Error', 'Unable to determine tenant information. Please try again.');
-        return;
-      }
-      
-      console.log('✅ [Admin MarksEntry] Using validated tenant_id for marks:', tenantId);
-
       const marksToSave = [];
-      console.log('📝 [MARKS DEBUG] Processing marks form data...', {
+      console.log('📝 [MarksEntry] Processing marks form data...', {
         marksForm: marksForm,
         examMaxMarks: exam.max_marks || 100
       });
 
       Object.entries(marksForm).forEach(([studentId, subjectMarks]) => {
-        console.log('📝 [MARKS DEBUG] Processing student:', studentId, 'subjects:', subjectMarks);
+        console.log('📝 [MarksEntry] Processing student:', studentId, 'subjects:', subjectMarks);
         Object.entries(subjectMarks).forEach(([subjectId, marksObtained]) => {
-          console.log('📝 [MARKS DEBUG] Processing subject:', subjectId, 'marks:', marksObtained);
+          console.log('📝 [MarksEntry] Processing subject:', subjectId, 'marks:', marksObtained);
           if (marksObtained && !isNaN(parseFloat(marksObtained))) {
             const marksValue = parseFloat(marksObtained);
             const maxMarks = exam.max_marks || 100; // Use exam's max_marks
@@ -227,55 +262,54 @@ const MarksEntry = () => {
               marks_obtained: marksValue,
               grade: grade,
               max_marks: maxMarks, // Store exam's max_marks
-              remarks: exam.name || 'Exam', // Store exam name as remarks
-              tenant_id: tenantId
+              remarks: exam.name || 'Exam' // Store exam name as remarks
             };
             
-            console.log('📝 [MARKS DEBUG] Adding mark record:', markRecord);
+            console.log('📝 [MarksEntry] Adding mark record:', markRecord);
             marksToSave.push(markRecord);
           } else {
-            console.log('⚠️ [MARKS DEBUG] Skipping invalid marks:', { studentId, subjectId, marksObtained });
+            console.log('⚠️ [MarksEntry] Skipping invalid marks:', { studentId, subjectId, marksObtained });
           }
         });
       });
 
-      console.log('💾 [MARKS DEBUG] Final marks to save:', {
+      console.log('💾 [MarksEntry] Final marks to save:', {
         count: marksToSave.length,
         data: marksToSave
       });
       
       if (marksToSave.length > 0) {
-        // Delete existing marks for this exam first with tenant validation
-        console.log('🗚 [MARKS DEBUG] Deleting existing marks for exam:', exam.id, 'tenant:', tenantId);
-        const deleteResult = await supabase
-          .from('marks')
+        // Delete existing marks for this exam first using enhanced tenant system
+        console.log('🗚 [MarksEntry] Deleting existing marks for exam:', exam.id);
+        const deleteQuery = createTenantQuery('marks', '*')
           .delete()
-          .eq('exam_id', exam.id)
-          .eq('tenant_id', tenantId);
+          .eq('exam_id', exam.id);
         
-        console.log('🗚 [MARKS DEBUG] Delete result:', deleteResult);
+        const deleteResult = await deleteQuery;
+        
+        console.log('🗚 [MarksEntry] Delete result:', deleteResult);
         if (deleteResult.error) {
-          console.error('❌ [MARKS DEBUG] Delete error:', deleteResult.error);
+          console.error('❌ [MarksEntry] Delete error:', deleteResult.error);
           throw deleteResult.error;
         }
 
-        // Insert new marks
-        console.log('💾 [MARKS DEBUG] Inserting new marks:', marksToSave.length, 'records');
-        const { data: insertData, error: insertError } = await supabase
-          .from('marks')
-          .insert(marksToSave)
-          .select('*'); // Get back the inserted records
-        
-        console.log('💾 [MARKS DEBUG] Insert result:', {
-          data: insertData,
-          error: insertError,
-          recordsInserted: insertData ? insertData.length : 0
-        });
-
-        if (insertError) {
-          console.error('❌ [MARKS DEBUG] Insert error:', insertError);
-          throw insertError;
+        // Insert new marks using enhanced tenant database
+        console.log('💾 [MarksEntry] Inserting new marks:', marksToSave.length, 'records');
+        const insertedMarks = [];
+        for (const markRecord of marksToSave) {
+          const { data, error } = await tenantDatabase.create('marks', markRecord);
+          
+          if (error) {
+            console.error('❌ [MarksEntry] Insert error:', error);
+            throw error;
+          }
+          
+          if (data) insertedMarks.push(data);
         }
+        
+        console.log('💾 [MarksEntry] Insert result:', {
+          recordsInserted: insertedMarks.length
+        });
 
         // Send marks notifications to parents silently in background
         try {
@@ -287,7 +321,7 @@ const MarksEntry = () => {
           );
         } catch (notificationError) {
           // Log error but don't show to user - notifications are secondary
-          console.error('❌ [ADMIN MARKS] Error sending bulk marks notifications:', notificationError);
+          console.error('❌ [MarksEntry] Error sending bulk marks notifications:', notificationError);
         }
 
         // Show simple success message
@@ -301,8 +335,8 @@ const MarksEntry = () => {
       }
 
     } catch (error) {
-      console.error('Error saving marks:', error);
-      Alert.alert('Error', 'Failed to save marks');
+      console.error('❌ [MarksEntry] Error saving marks:', error);
+      Alert.alert('Error', `Failed to save marks: ${error.message}`);
     }
   };
 

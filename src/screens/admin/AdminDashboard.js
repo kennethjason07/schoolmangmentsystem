@@ -616,10 +616,6 @@ const AdminDashboard = ({ navigation }) => {
   // Upcoming Events state - Initialize with empty array, load from database
   const [events, setEvents] = useState([]);
   const [isEventModalVisible, setIsEventModalVisible] = useState(false);
-  // Upcoming Events Popup state
-  const [showUpcomingEventsPopup, setShowUpcomingEventsPopup] = useState(false);
-  const [hasShownPopupThisSession, setHasShownPopupThisSession] = useState(false);
-  const [userHasInteracted, setUserHasInteracted] = useState(false);
   const [eventInput, setEventInput] = useState({ 
     type: 'Event', 
     title: '', 
@@ -721,7 +717,6 @@ const AdminDashboard = ({ navigation }) => {
   const openAddEventModal = async () => {
     console.log('🔧 === OPENING ADD EVENT MODAL ===');
     console.log('🔧 Current isEventModalVisible state:', isEventModalVisible);
-    console.log('🔧 Current showUpcomingEventsPopup state:', showUpcomingEventsPopup);
     console.log('🔧 Current eventInput state:', eventInput);
     
     // Prevent multiple modal opens and avoid resetting eventInput if modal is already open
@@ -731,13 +726,6 @@ const AdminDashboard = ({ navigation }) => {
     }
     
     try {
-      // Close the upcoming events popup if it's open to prevent conflicts
-      if (showUpcomingEventsPopup) {
-        console.log('🔧 Closing upcoming events popup to prevent conflicts');
-        setShowUpcomingEventsPopup(false);
-        // Add a small delay to ensure the popup closes before opening the add modal
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
       
       // Check if events table exists first with better error handling
       const tableExists = await checkEventsTable();
@@ -1194,30 +1182,7 @@ const AdminDashboard = ({ navigation }) => {
   //   userId: user?.id
   // });
 
-  // Show upcoming events popup after dashboard loads
-  useEffect(() => {
-    const showPopupAfterDelay = () => {
-      // Only show if:
-      // 1. User is logged in
-      // 2. Dashboard has finished loading
-      // 3. Haven't shown popup this session
-      // 4. There are upcoming events to show
-      // 5. Add event modal is not already open
-      // 6. User hasn't interacted with the dashboard yet
-      if (user?.id && !loading && !hasShownPopupThisSession && events.length > 0 && !isEventModalVisible && !userHasInteracted) {
-        // Show upcoming events popup
-        setTimeout(() => {
-          // Double check that add event modal is still not open before showing popup
-          if (!isEventModalVisible) {
-            setShowUpcomingEventsPopup(true);
-            setHasShownPopupThisSession(true);
-          }
-        }, 2000); // 2 second delay after dashboard loads
-      }
-    };
-
-    showPopupAfterDelay();
-  }, [user?.id, loading, events.length, hasShownPopupThisSession, isEventModalVisible]);
+  // Upcoming events popup has been disabled - no automatic popup after login
 
   // Universal notification system automatically handles real-time updates
   // No manual refresh needed
@@ -1432,14 +1397,10 @@ const AdminDashboard = ({ navigation }) => {
               onPress={() => {
                 console.log('🔧 Direct Add Event button pressed');
                 console.log('🔧 Current state - isEventModalVisible:', isEventModalVisible);
-                console.log('🔧 Current state - showUpcomingEventsPopup:', showUpcomingEventsPopup);
                 console.log('🔧 Button touch detected, calling openAddEventModal');
                 
-                // Mark user as having interacted to prevent automatic popup
-                setUserHasInteracted(true);
-                
                 // Prevent multiple modal opens
-                if (!isEventModalVisible && !showUpcomingEventsPopup) {
+                if (!isEventModalVisible) {
                   openAddEventModal();
                 } else {
                   console.log('🔧 Modal already open, ignoring button press');
@@ -1535,138 +1496,6 @@ const AdminDashboard = ({ navigation }) => {
           </View>
         </View>
       </ScrollView>
-
-      {/* Upcoming Events Popup Modal */}
-      <Modal
-        visible={showUpcomingEventsPopup}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setShowUpcomingEventsPopup(false)}
-      >
-        <View style={styles.popupModalOverlay}>
-          <View style={styles.popupModalContainer}>
-            {/* Header */}
-            <View style={styles.popupModalHeader}>
-              <View style={styles.popupModalHeaderContent}>
-                <View style={styles.popupModalIconContainer}>
-                  <Ionicons name="calendar" size={28} color="#2196F3" />
-                </View>
-                <View style={styles.popupModalTitleContainer}>
-                  <Text style={styles.popupModalTitle}>Upcoming Events</Text>
-                  <Text style={styles.popupModalSubtitle}>Welcome back! Here's what's coming up</Text>
-                </View>
-              </View>
-              <TouchableOpacity 
-                style={styles.popupModalCloseButton}
-                onPress={() => setShowUpcomingEventsPopup(false)}
-              >
-                <Ionicons name="close" size={24} color="#666" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Events List */}
-            <ScrollView 
-              style={styles.popupModalScrollView}
-              contentContainerStyle={styles.popupModalScrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {events.length === 0 ? (
-                <View style={styles.popupModalNoEvents}>
-                  <Ionicons name="calendar-outline" size={48} color="#ccc" />
-                  <Text style={styles.popupModalNoEventsText}>No upcoming events</Text>
-                  <Text style={styles.popupModalNoEventsSubtext}>Your schedule is clear for now</Text>
-                </View>
-              ) : (
-                events.slice(0, 5).sort((a, b) => {
-                  // Convert DD-MM-YYYY back to YYYY-MM-DD for proper date sorting
-                  const dateA = formatDateToStorage(a.date);
-                  const dateB = formatDateToStorage(b.date);
-                  return new Date(dateA) - new Date(dateB);
-                }).map((item, idx) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={styles.popupModalEventItem}
-                    onPress={() => {
-                      const eventDate = new Date(item.date);
-                      const formattedDate = eventDate.toLocaleDateString('en-US', {
-                        weekday: 'long',
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      });
-                      
-                      Alert.alert(
-                        item.title,
-                        `${item.type}\n\nDate: ${formattedDate}\n\nTap the event on the dashboard below for more options.`,
-                        [{ text: 'OK' }]
-                      );
-                    }}
-                  >
-                    <View style={[styles.popupModalEventIcon, { backgroundColor: item.color }]}>
-                      <Ionicons name={item.icon} size={20} color="#fff" />
-                    </View>
-                    <View style={styles.popupModalEventContent}>
-                      <Text style={styles.popupModalEventTitle}>{item.title}</Text>
-                      <Text style={styles.popupModalEventType}>{item.type}</Text>
-                      <View style={styles.popupModalEventDateContainer}>
-                        <Ionicons name="calendar-outline" size={14} color="#666" />
-                        <Text style={styles.popupModalEventDate}>
-                          {item.date.replace(/-/g, '/')}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={styles.popupModalEventArrow}>
-                      <Ionicons name="chevron-forward" size={16} color="#ccc" />
-                    </View>
-                  </TouchableOpacity>
-                ))
-              )}
-
-              {events.length > 5 && (
-                <TouchableOpacity 
-                  style={styles.popupModalViewAllButton}
-                  onPress={() => {
-                    setShowUpcomingEventsPopup(false);
-                    // Scroll to events section on dashboard
-                  }}
-                >
-                  <Text style={styles.popupModalViewAllText}>
-                    View all {events.length} events on dashboard
-                  </Text>
-                  <Ionicons name="arrow-down" size={16} color="#2196F3" />
-                </TouchableOpacity>
-              )}
-            </ScrollView>
-
-            {/* Footer */}
-            <View style={styles.popupModalFooter}>
-              <TouchableOpacity 
-                style={styles.popupModalFooterButton}
-                onPress={() => {
-                  console.log('🔧 Add Event button in popup footer pressed');
-                  setShowUpcomingEventsPopup(false);
-                  // Add a longer delay to ensure the popup modal fully closes before opening the add event modal
-                  setTimeout(() => {
-                    console.log('🔧 Opening add event modal from popup footer');
-                    openAddEventModal();
-                  }, 500);
-                }}
-              >
-                <Ionicons name="add" size={18} color="#2196F3" />
-                <Text style={styles.popupModalFooterButtonText}>Add Event</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={[styles.popupModalFooterButton, styles.popupModalFooterButtonPrimary]}
-                onPress={() => setShowUpcomingEventsPopup(false)}
-              >
-                <Text style={styles.popupModalFooterButtonTextPrimary}>Continue to Dashboard</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
 
 
       {/* Event Modal using React Native Modal to hide tab bar */}
@@ -2955,195 +2784,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-  },
-  // Upcoming Events Popup Modal Styles
-  popupModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  popupModalContainer: {
-    width: '95%',
-    maxWidth: 420,
-    maxHeight: '80%',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
-    shadowOpacity: 0.4,
-    shadowRadius: 25,
-    elevation: 15,
-    overflow: 'hidden',
-  },
-  popupModalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#f8f9fa',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
-  },
-  popupModalHeaderContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  popupModalIconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#e3f2fd',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  popupModalTitleContainer: {
-    flex: 1,
-  },
-  popupModalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 2,
-  },
-  popupModalSubtitle: {
-    fontSize: 13,
-    color: '#666',
-  },
-  popupModalCloseButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f0f0f0',
-  },
-  popupModalScrollView: {
-    maxHeight: 360,
-    paddingHorizontal: 20,
-  },
-  popupModalScrollContent: {
-    paddingVertical: 16,
-  },
-  popupModalNoEvents: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  popupModalNoEventsText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  popupModalNoEventsSubtext: {
-    fontSize: 14,
-    color: '#999',
-  },
-  popupModalEventItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 8,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-  },
-  popupModalEventIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  popupModalEventContent: {
-    flex: 1,
-  },
-  popupModalEventTitle: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 2,
-  },
-  popupModalEventType: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 4,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  popupModalEventDateContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  popupModalEventDate: {
-    fontSize: 13,
-    color: '#666',
-    marginLeft: 4,
-  },
-  popupModalEventArrow: {
-    marginLeft: 8,
-  },
-  popupModalViewAllButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    marginTop: 8,
-    backgroundColor: '#e3f2fd',
-    borderRadius: 8,
-  },
-  popupModalViewAllText: {
-    fontSize: 14,
-    color: '#2196F3',
-    fontWeight: '600',
-    marginRight: 6,
-  },
-  popupModalFooter: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#f8f9fa',
-    borderTopWidth: 1,
-    borderTopColor: '#e9ecef',
-  },
-  popupModalFooterButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginHorizontal: 4,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#2196F3',
-  },
-  popupModalFooterButtonPrimary: {
-    backgroundColor: '#2196F3',
-    borderColor: '#2196F3',
-  },
-  popupModalFooterButtonText: {
-    fontSize: 14,
-    color: '#2196F3',
-    fontWeight: '600',
-    marginLeft: 6,
-  },
-  popupModalFooterButtonTextPrimary: {
-    fontSize: 14,
-    color: '#fff',
-    fontWeight: '600',
   },
 
 });
