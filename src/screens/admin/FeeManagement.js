@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import Header from '../../components/Header';
 import { useNavigation } from '@react-navigation/native';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import CrossPlatformDatePicker from '../../components/CrossPlatformDatePicker';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import { format, parseISO } from 'date-fns';
@@ -88,7 +88,6 @@ const FeeManagement = () => {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [feeStructureModal, setFeeStructureModal] = useState(false);
   const [selectedClassIds, setSelectedClassIds] = useState([]); // Changed to array
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [paymentDate, setPaymentDate] = useState(new Date());
   const [paymentAmount, setPaymentAmount] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -806,45 +805,6 @@ const FeeManagement = () => {
 
   // Note: Using imported isValidDate from dateValidation utils
 
-  // Handle date change
-  const handleDateChange = (event, selectedDate) => {
-    setShowDatePicker(false);
-
-    if (!selectedDate) return;
-
-    // Validate the selected date
-    if (!isValidDate(selectedDate)) {
-      Alert.alert('Error', 'Invalid date selected. Please select a valid date.');
-      return;
-    }
-
-    // Check for reasonable date range
-    if (!isReasonableDate(selectedDate)) {
-      Alert.alert('Error', 'Please select a date within a reasonable range (within 1 year ago to 5 years from now).');
-      return;
-    }
-
-    // Format date to ensure it's properly formatted
-    const formattedDate = selectedDate.toISOString();
-
-    if (paymentModal) {
-      setPaymentDate(selectedDate);
-    } else if (feeModal.visible) {
-      setFeeModal(prev => ({
-        ...prev,
-        fee: {
-          ...prev.fee,
-          dueDate: formattedDate
-        }
-      }));
-    } else if (feeStructureModal) {
-      setNewFeeStructure(prev => ({
-        ...prev,
-        dueDate: formattedDate
-      }));
-    }
-  };
-
   // Handle delete structure
   const handleDeleteStructure = async (feeId) => {
     if (!feeId) {
@@ -1395,21 +1355,20 @@ const FeeManagement = () => {
                   placeholder="Enter payment amount"
                   keyboardType="numeric"
                 />
-                <TouchableOpacity
+                <Text style={styles.inputLabel}>Payment Date *</Text>
+                <CrossPlatformDatePicker
+                  value={paymentDate && !isNaN(new Date(paymentDate).getTime()) ? new Date(paymentDate) : new Date()}
+                  mode="date"
+                  placeholder="Select payment date"
+                  label=""
+                  onChange={(event, selectedDate) => {
+                    if (selectedDate) {
+                      setPaymentDate(selectedDate);
+                    }
+                  }}
                   style={styles.dateButton}
-                  onPress={() => setShowDatePicker(true)}
-                >
-                  <Text style={styles.dateButtonText}>Select Payment Date</Text>
-                </TouchableOpacity>
-                {showDatePicker && (
-                  <DateTimePicker
-                    value={paymentDate && !isNaN(new Date(paymentDate).getTime()) ? new Date(paymentDate) : new Date()}
-                    mode="date"
-                    is24Hour={true}
-                    display="default"
-                    onChange={handleDateChange}
-                  />
-                )}
+                  textStyle={styles.dateButtonText}
+                />
               </View>
             ) : feeModal.visible ? (
               <View>
@@ -1458,32 +1417,27 @@ const FeeManagement = () => {
                   multiline
                   numberOfLines={3}
                 />
-                <TouchableOpacity
+                <Text style={styles.inputLabel}>Due Date *</Text>
+                <CrossPlatformDatePicker
+                  value={feeModal.fee.dueDate ? new Date(feeModal.fee.dueDate) : new Date()}
+                  mode="date"
+                  placeholder="Select due date"
+                  label=""
+                  onChange={(event, selectedDate) => {
+                    if (selectedDate) {
+                      setFeeModal(prev => ({
+                        ...prev,
+                        fee: {
+                          ...prev.fee,
+                          dueDate: selectedDate.toISOString().split('T')[0]
+                        }
+                      }));
+                    }
+                  }}
+                  minimumDate={new Date()}
                   style={styles.dateButton}
-                  onPress={() => setShowDatePicker(true)}
-                >
-                  <Text style={styles.dateButtonText}>Select Due Date</Text>
-                </TouchableOpacity>
-                {showDatePicker && (
-                  <DateTimePicker
-                    value={feeModal.fee.dueDate ? new Date(feeModal.fee.dueDate) : new Date()}
-                    mode="date"
-                    display="default"
-                    onChange={(event, selectedDate) => {
-                      setShowDatePicker(false);
-                      if (selectedDate) {
-                        setFeeModal(prev => ({
-                          ...prev,
-                          fee: {
-                            ...prev.fee,
-                            dueDate: selectedDate.toISOString().split('T')[0]
-                          }
-                        }));
-                      }
-                    }}
-                    minimumDate={new Date()}
-                  />
-                )}
+                  textStyle={styles.dateButtonText}
+                />
               </View>
             ) : (
               <View>
@@ -1572,30 +1526,20 @@ const FeeManagement = () => {
               />
 
               <Text style={styles.inputLabel}>Due Date *</Text>
-              <TouchableOpacity
+              <CrossPlatformDatePicker
+                value={newFeeStructure.dueDate || new Date()}
+                mode="date"
+                placeholder="Select due date"
+                label=""
+                onChange={(event, selectedDate) => {
+                  if (selectedDate) {
+                    setNewFeeStructure({ ...newFeeStructure, dueDate: selectedDate });
+                  }
+                }}
+                minimumDate={new Date()}
                 style={styles.dateButton}
-                onPress={() => setShowDatePicker(true)}
-              >
-                <Ionicons name="calendar-outline" size={20} color="#1976d2" />
-                <Text style={[styles.dateButtonText, { color: newFeeStructure.dueDate ? '#333' : '#999' }]}>
-                  {newFeeStructure.dueDate ? formatSafeDate(newFeeStructure.dueDate) : 'Select due date'}
-                </Text>
-              </TouchableOpacity>
-
-              {showDatePicker && (
-                <DateTimePicker
-                  value={newFeeStructure.dueDate || new Date()}
-                  mode="date"
-                  display="default"
-                  onChange={(event, selectedDate) => {
-                    setShowDatePicker(false);
-                    if (selectedDate) {
-                      setNewFeeStructure({ ...newFeeStructure, dueDate: selectedDate });
-                    }
-                  }}
-                  minimumDate={new Date()}
-                />
-              )}
+                textStyle={styles.dateButtonText}
+              />
 
               <Text style={styles.requiredNote}>* Required fields</Text>
               

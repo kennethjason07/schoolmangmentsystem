@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../utils/AuthContext';
@@ -18,6 +18,7 @@ const StatCard = ({
 }) => {
   const { userType } = useAuth();
   const isTeacher = userType === 'teacher';
+  const [isHovered, setIsHovered] = useState(false);
   const getTrendIcon = () => {
     if (trend === 1) return 'trending-up';
     if (trend === -1) return 'trending-down';
@@ -75,9 +76,44 @@ const StatCard = ({
     </View>
   );
 
+  const handlePress = (event) => {
+    console.log(`🔧 StatCard pressed: ${title}`);
+    
+    // Prevent default action for web
+    if (Platform.OS === 'web' && event && event.preventDefault) {
+      event.preventDefault();
+    }
+    
+    if (onPress) {
+      console.log('🔧 Calling onPress handler...');
+      try {
+        onPress();
+        console.log('🔧 onPress handler completed successfully');
+      } catch (error) {
+        console.error('🔧 Error in onPress handler:', error);
+      }
+    } else {
+      console.log('🔧 No onPress handler provided');
+    }
+  };
+
   if (onPress) {
     return (
-      <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
+      <TouchableOpacity 
+        onPress={handlePress}
+        activeOpacity={0.7}
+        style={[
+          Platform.OS === 'web' && styles.webTouchable,
+          Platform.OS === 'web' && isHovered && styles.webHovered
+        ]}
+        accessibilityRole={Platform.OS === 'web' ? 'button' : undefined}
+        accessibilityLabel={`Navigate to ${title}`}
+        accessibilityHint={`Tap to view details for ${title}`}
+        accessible={true}
+        testID={`stat-card-${title?.toLowerCase()?.replace(/\s+/g, '-')}`}
+        onMouseEnter={Platform.OS === 'web' ? () => setIsHovered(true) : undefined}
+        onMouseLeave={Platform.OS === 'web' ? () => setIsHovered(false) : undefined}
+      >
         <CardContent />
       </TouchableOpacity>
     );
@@ -182,6 +218,29 @@ const styles = StyleSheet.create({
     borderRadius: Theme.BorderRadius.md,
     padding: Theme.Spacing.xs,
   },
+  // Web-specific styles
+  webTouchable: {
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+        userSelect: 'none',
+        outlineStyle: 'none',
+        WebkitTapHighlightColor: 'transparent',
+        transition: 'transform 0.15s ease-in-out, box-shadow 0.15s ease-in-out',
+      },
+    }),
+  },
+  webHovered: {
+    ...Platform.select({
+      web: {
+        transform: [{ scale: 1.02 }],
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+        elevation: 8,
+      },
+    }),
+  },
 });
 
-export default StatCard; 
+export default StatCard;
