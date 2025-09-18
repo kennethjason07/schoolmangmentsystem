@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   RefreshControl,
   Dimensions,
   FlatList,
+  Platform,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -20,11 +22,17 @@ import { exportAttendanceData, exportIndividualAttendanceRecord, EXPORT_FORMATS 
 import { getCurrentUserTenantByEmail } from '../../../utils/getTenantByEmail';
 import { LineChart, BarChart } from 'react-native-chart-kit';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../../components/CrossPlatformDatePicker';
-import { Platform } from 'react-native';
+import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../../styles/webScrollFix';
 
 const { width: screenWidth } = Dimensions.get('window');
 
 const AttendanceReport = ({ navigation }) => {
+  // Refs and scroll state
+  const scrollViewRef = useRef(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const scrollTopOpacity = useRef(new Animated.Value(0)).current;
+  
+  // Data states
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [attendanceData, setAttendanceData] = useState([]);
@@ -327,6 +335,28 @@ const AttendanceReport = ({ navigation }) => {
     setRefreshing(false);
   };
 
+  // Scroll event handler for scroll-to-top button
+  const handleScroll = useCallback((event) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    const shouldShow = offsetY > 200;
+    
+    if (shouldShow !== showScrollTop) {
+      setShowScrollTop(shouldShow);
+      Animated.timing(scrollTopOpacity, {
+        toValue: shouldShow ? 1 : 0,
+        duration: 300,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    }
+  }, [showScrollTop, scrollTopOpacity]);
+
+  // Scroll to top function
+  const scrollToTop = useCallback(() => {
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({ y: 0, animated: true });
+    }
+  }, []);
+
   const handleDateChange = (event, selectedDate, type) => {
     if (type === 'start') {
       setShowStartDatePicker(false);
@@ -414,7 +444,7 @@ const AttendanceReport = ({ navigation }) => {
 
   if (loading) {
     return (
-      <View style={styles.container}>
+      <View style={styles.mainContainer}>
         <Header title="Attendance Report" showBack={true} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2196F3" />
@@ -425,16 +455,26 @@ const AttendanceReport = ({ navigation }) => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={styles.mainContainer}>
       <Header title="Attendance Report" showBack={true} />
-
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
+      
+      <View style={styles.scrollableContainer}>
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={true}
+          scrollEventThrottle={16}
+          onScroll={handleScroll}
+          refreshControl={
+            <RefreshControl 
+              refreshing={refreshing} 
+              onRefresh={onRefresh}
+              colors={['#2196F3']}
+            />
+          }
+          {...getWebScrollProps()}
+        >
         {/* Filters Section */}
         <View style={styles.filtersSection}>
           <Text style={styles.sectionTitle}>Filters</Text>
@@ -605,6 +645,14 @@ const AttendanceReport = ({ navigation }) => {
         <View style={styles.recordsSection}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Recent Records</Text>
+            <TouchableOpacity 
+              style={styles.exportButton}
+              onPress={() => setShowExportModal(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="download-outline" size={16} color="#2196F3" />
+              <Text style={styles.exportText}>Export</Text>
+            </TouchableOpacity>
           </View>
 
           <FlatList
@@ -624,7 +672,11 @@ const AttendanceReport = ({ navigation }) => {
             }
           />
         </View>
+        
+        {/* Extra bottom space for better scrolling */}
+        <View style={styles.bottomSpacing} />
       </ScrollView>
+    </View>
 
       {/* Date Pickers - Only show on mobile platforms */}
       {Platform.OS !== 'web' && showStartDatePicker && (
@@ -645,6 +697,21 @@ const AttendanceReport = ({ navigation }) => {
         />
       )}
 
+      {/* Scroll to Top Button - Web Only */}
+      {Platform.OS === 'web' && (
+        <Animated.View 
+          style={[styles.scrollToTopButton, { opacity: scrollTopOpacity }]}
+        >
+          <TouchableOpacity 
+            style={styles.scrollToTopInner} 
+            onPress={scrollToTop}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="chevron-up" size={24} color="#fff" />
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
       {/* Export Modal */}
       <ExportModal
         visible={showExportModal}
@@ -658,16 +725,77 @@ const AttendanceReport = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
+  // 🎯 CRITICAL: Main container with fixed viewport height
+  mainContainer: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    ...(Platform.OS === 'web' && {
+      height: '100vh',           // ✅ CRITICAL: Fixed viewport height
+      maxHeight: '100vh',        // ✅ CRITICAL: Prevent expansion
+      overflow: 'hidden',        // ✅ CRITICAL: Hide overflow on main container
+      position: 'relative',      // ✅ CRITICAL: For absolute positioning
+    }),
   },
-  content: {
+  
+  // 🎯 CRITICAL: Scrollable area with calculated height
+  scrollableContainer: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: 'calc(100vh - 60px)',      // ✅ CRITICAL: Account for header (60px)
+      maxHeight: 'calc(100vh - 60px)',   // ✅ CRITICAL: Prevent expansion
+      overflow: 'hidden',                // ✅ CRITICAL: Control overflow
+    }),
   },
+  
+  // 🎯 CRITICAL: ScrollView with explicit overflow
+  scrollView: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: '100%',                    // ✅ CRITICAL: Full height
+      maxHeight: '100%',                 // ✅ CRITICAL: Prevent expansion
+      overflowY: 'scroll',              // ✅ CRITICAL: Enable vertical scroll
+      overflowX: 'hidden',              // ✅ CRITICAL: Disable horizontal scroll
+      WebkitOverflowScrolling: 'touch', // ✅ GOOD: Smooth iOS scrolling
+      scrollBehavior: 'smooth',         // ✅ GOOD: Smooth animations
+      scrollbarWidth: 'thin',           // ✅ GOOD: Thin scrollbars
+      scrollbarColor: '#2196F3 #f5f5f5', // ✅ GOOD: Custom scrollbar colors
+    }),
+  },
+  
+  // 🎯 CRITICAL: Content container properties
   scrollContent: {
-    paddingBottom: 100, // Bottom padding for the entire ScrollView to prevent home button overlap
+    flexGrow: 1,                    // ✅ CRITICAL: Allow content to grow
+    paddingBottom: 100,             // ✅ IMPORTANT: Extra bottom padding
   },
+  
+  // 🎯 GOOD TO HAVE: Bottom spacing for better scroll experience
+  bottomSpacing: {
+    height: 100,                    // ✅ IMPORTANT: Extra space at bottom
+  },
+  // Scroll to Top Button Styles
+  scrollToTopButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    zIndex: 1000,
+    ...(Platform.OS === 'web' && {
+      position: 'fixed',
+    }),
+  },
+  scrollToTopInner: {
+    backgroundColor: '#2196F3',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
