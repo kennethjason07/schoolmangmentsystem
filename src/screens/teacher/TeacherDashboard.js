@@ -25,6 +25,11 @@ import { useGlobalRefresh } from '../../contexts/GlobalRefreshContext';
 const screenWidth = Dimensions.get('window').width;
 
 
+// Simple cache for teacher data to reduce redundant queries
+let teacherProfileCache = null;
+let teacherProfileCacheTime = 0;
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
+
 const TeacherDashboard = ({ navigation }) => {
   const [personalTasks, setPersonalTasks] = useState([]);
   const [adminTaskList, setAdminTaskList] = useState([]);
@@ -201,12 +206,18 @@ function groupAndSortSchedule(schedule) {
 
   // 🚀 ENHANCED: Fetch all dashboard data with enhanced tenant system
   const fetchDashboardData = async () => {
+    const startTime = performance.now();
+    console.log('📊 [PERF] TeacherDashboard: Starting data fetch at', new Date().toISOString());
+    
     try {
       setLoading(true);
       setError(null);
       
       // 🚀 ENHANCED: Validate tenant access using new helper
+      const tenantValidationStart = performance.now();
       const validation = validateTenantAccess();
+      console.log('📊 [PERF] Tenant validation took:', (performance.now() - tenantValidationStart).toFixed(2), 'ms');
+      
       if (!validation.valid) {
         console.error('❌ Enhanced tenant validation failed:', validation.error);
         Alert.alert('Access Denied', validation.error);
@@ -231,10 +242,12 @@ function groupAndSortSchedule(schedule) {
       let currentAdminTasks = [];
 
       // Run critical initial queries in parallel
+      const initialQueriesStart = performance.now();
       const [schoolResponse, teacherResponse] = await Promise.all([
         dbHelpers.getSchoolDetails(),
         dbHelpers.getTeacherByUserId(user.id)
       ]);
+      console.log('📊 [PERF] Initial queries took:', (performance.now() - initialQueriesStart).toFixed(2), 'ms');
       
       const schoolData = schoolResponse.data;
       const teacherData = teacherResponse.data;
@@ -259,6 +272,7 @@ function groupAndSortSchedule(schedule) {
       setTeacherProfile(teacher);
 
       // 🚀 ENHANCED: Use tenantDatabase helpers for reliable data fetching
+      const mainQueriesStart = performance.now();
       const [
         subjectsResponse,
         classTeacherResponse,
@@ -302,6 +316,7 @@ function groupAndSortSchedule(schedule) {
           .order('priority', { ascending: false })
           .order('due_date', { ascending: true })
       ]);
+      console.log('📊 [PERF] Main parallel queries took:', (performance.now() - mainQueriesStart).toFixed(2), 'ms');
       
       // 🚀 ENHANCED: Process subject assignments (tenant validation handled automatically)
       const assignedSubjects = subjectsResponse.data || [];
@@ -358,6 +373,7 @@ function groupAndSortSchedule(schedule) {
       const todayName = dayNames[today];
 
       // 🚀 ENHANCED: Fetch timetable using enhanced tenant query
+      const timetableStart = performance.now();
       const timetableResponse = await createTenantQuery(tenantId, TABLES.TIMETABLE, `
         id, start_time, end_time, period_number, day_of_week, academic_year,
         subjects(id, name),
@@ -367,6 +383,7 @@ function groupAndSortSchedule(schedule) {
         day_of_week: todayName 
       })
         .order('start_time');
+      console.log('📊 [PERF] Timetable query took:', (performance.now() - timetableStart).toFixed(2), 'ms');
         
       // Process notifications from parallel fetch
       const notificationsData = notificationsResponse.data || [];
@@ -514,7 +531,7 @@ function groupAndSortSchedule(schedule) {
       // Lazy load the actual attendance stats after dashboard is shown
       setTimeout(() => {
         fetchAttendanceAnalytics(classMap, assignedSubjects, classTeacherClasses);
-      }, 2000);
+      }, 1000); // Reduced from 2000ms to 1000ms for better UX
 
       // Recent activities (using function-level variables with unique IDs)
       const recentActivities = [
@@ -536,89 +553,20 @@ function groupAndSortSchedule(schedule) {
       const totalSubjects = assignedSubjects.length;
       const todayClasses = schedule.length;
 
-      // Calculate total students from assigned classes - improved version
+      // Set basic stats immediately (student count will be loaded progressively)
       let totalStudents = 0;
       const uniqueStudentIds = new Set();
       
-      try {
-        // Get unique class IDs from both subject assignments and class teacher assignments
-        const subjectClassIds = assignedSubjects
-          .filter(assignment => assignment.subjects?.class_id)
-          .map(assignment => assignment.subjects.class_id);
-          
-        const classTeacherClassIds = classTeacherClasses
-          .map(cls => cls.id);
-        
-        const uniqueClassIds = [...new Set([...subjectClassIds, ...classTeacherClassIds])];
-        
-        console.log('💼 Subject class IDs:', subjectClassIds);
-        console.log('🏫 Class teacher class IDs:', classTeacherClassIds);
-        console.log('📋 Combined unique class IDs:', uniqueClassIds);
-        
-        if (uniqueClassIds.length > 0) {
-          // 🚀 ENHANCED: Get all students from these classes using tenantDatabase
-          const { data: allStudentsData, error: studentsError } = await tenantDatabase.read(
-            TABLES.STUDENTS,
-            {},  // No additional filters needed - will filter by class_id below
-            'id, class_id, name'
-          );
-          
-          // Filter by class IDs after fetching (more efficient for large datasets)
-          const filteredStudents = allStudentsData?.filter(student => 
-            uniqueClassIds.includes(student.class_id)
-          ) || [];
-
-          if (!studentsError && filteredStudents) {
-            console.log('🚀 Enhanced: Total students found across all classes:', filteredStudents.length);
-            filteredStudents.forEach(student => {
-              uniqueStudentIds.add(student.id);
-              console.log(`📚 Student: ${student.name} (ID: ${student.id}, Class: ${student.class_id})`);
-            });
-            totalStudents = filteredStudents.length;
-          } else {
-            console.log('❌ Error fetching students:', studentsError);
-          }
-        } else {
-          console.log('⚠️ No class assignments found for teacher');
-        }
-      } catch (error) {
-        console.log('💥 Error calculating students:', error);
-      }
-
-      const uniqueStudentCount = uniqueStudentIds.size;
-      console.log('📊 Final student count - Total:', totalStudents, 'Unique:', uniqueStudentCount);
-      
-      // 🚀 ENHANCED: Get current events data using enhanced tenant system
-      let currentEventsForStats = [];
-      try {
-        const todayDateForStats = new Date().toISOString().split('T')[0];
-        const { data: statsEventsData } = await tenantDatabase.read(
-          'events',
-          { status: 'Active' },
-          '*'
-        );
-        
-        // Filter and sort events client-side for better performance
-        currentEventsForStats = (statsEventsData || [])
-          .filter(event => event.event_date >= todayDateForStats)
-          .sort((a, b) => new Date(a.event_date) - new Date(b.event_date))
-          .slice(0, 5);
-          
-        console.log('🚀 Enhanced: Using current events for stats calculation:', currentEventsForStats.length);
-      } catch (error) {
-        console.log('❌ Error fetching events for stats:', error);
-        currentEventsForStats = [];
-      }
-
-      // Set enhanced teacher stats using current events data
+      // Set preliminary stats without student count for faster initial load
       setTeacherStats([
         {
           title: 'My Students',
-          value: (uniqueStudentCount || 0).toString(),
+          value: '...',
           icon: 'people',
           color: '#2196F3',
-          subtitle: `Across ${uniqueClasses || 0} class${(uniqueClasses || 0) !== 1 ? 'es' : ''}`,
+          subtitle: 'Loading...',
           trend: 0,
+          isLoading: true,
           onPress: () => navigation?.navigate('ViewStudentInfo')
         },
         {
@@ -649,31 +597,169 @@ function groupAndSortSchedule(schedule) {
         },
         {
           title: 'Upcoming Events',
-          value: (currentEventsForStats?.length || 0).toString(),
+          value: '...',
           icon: 'calendar',
-          color: (currentEventsForStats?.length || 0) > 0 ? '#E91E63' : '#9E9E9E',
-          subtitle: (currentEventsForStats?.length || 0) > 0 ?
-            `Next: ${currentEventsForStats[0]?.title || 'Event'}` :
-            'No events scheduled',
-          trend: (currentEventsForStats?.filter(e => e.event_type === 'Exam')?.length || 0) > 0 ? 1 : 0,
-          onPress: () => {
-            // Scroll to events section or show events modal
-            Alert.alert(
-              'Upcoming Events',
-              (currentEventsForStats?.length || 0) > 0 ?
-                currentEventsForStats.map(e => `• ${e.title} (${new Date(e.event_date).toLocaleDateString('en-GB')})`).join('\n') :
-                'No upcoming events scheduled.',
-              [{ text: 'OK' }]
-            );
-          }
+          color: '#9E9E9E',
+          subtitle: 'Loading...',
+          trend: 0,
+          isLoading: true,
+          onPress: () => Alert.alert('Events', 'Loading events data...')
         }
       ]);
       
-      console.log('✅ Teacher stats updated with', currentEventsForStats.length, 'events');
-      console.log('📋 Stats card will show:', currentEventsForStats.length, 'upcoming events');
+      // Calculate total students from assigned classes - deferred for progressive loading
+      setTimeout(async () => {
+        console.log('📊 [PROGRESSIVE] Loading student count...');
+        const progressiveStart = performance.now();
+        try {
+          // Get unique class IDs from both subject assignments and class teacher assignments
+          const subjectClassIds = assignedSubjects
+            .filter(assignment => assignment.subjects?.class_id)
+            .map(assignment => assignment.subjects.class_id);
+            
+          const classTeacherClassIds = classTeacherClasses
+            .map(cls => cls.id);
+          
+          const uniqueClassIds = [...new Set([...subjectClassIds, ...classTeacherClassIds])];
+          
+          console.log('💼 Subject class IDs:', subjectClassIds);
+          console.log('🏫 Class teacher class IDs:', classTeacherClassIds);
+          console.log('📋 Combined unique class IDs:', uniqueClassIds);
+          
+          let progressiveTotalStudents = 0;
+          const progressiveUniqueStudentIds = new Set();
+          
+          if (uniqueClassIds.length > 0) {
+            // 🚀 ENHANCED: Get all students from these classes using tenantDatabase
+            const studentsStart = performance.now();
+            const { data: allStudentsData, error: studentsError } = await tenantDatabase.read(
+              TABLES.STUDENTS,
+              {},  // No additional filters needed - will filter by class_id below
+              'id, class_id, name'
+            );
+            console.log('📊 [PERF] Progressive students query took:', (performance.now() - studentsStart).toFixed(2), 'ms');
+            
+            // Filter by class IDs after fetching (more efficient for large datasets)
+            const filteredStudents = allStudentsData?.filter(student => 
+              uniqueClassIds.includes(student.class_id)
+            ) || [];
 
+            if (!studentsError && filteredStudents) {
+              console.log('🚀 Progressive: Total students found across all classes:', filteredStudents.length);
+              filteredStudents.forEach(student => {
+                progressiveUniqueStudentIds.add(student.id);
+              });
+              progressiveTotalStudents = filteredStudents.length;
+            } else {
+              console.log('❌ Error fetching students progressively:', studentsError);
+            }
+          } else {
+            console.log('⚠️ No class assignments found for teacher');
+          }
+
+          const uniqueStudentCount = progressiveUniqueStudentIds.size;
+          console.log('📊 Progressive student count - Total:', progressiveTotalStudents, 'Unique:', uniqueStudentCount);
+          
+          // 🚀 PROGRESSIVE: Get current events data using enhanced tenant system
+          let currentEventsForStats = [];
+          try {
+            const todayDateForStats = new Date().toISOString().split('T')[0];
+            const eventsStart = performance.now();
+            const { data: statsEventsData } = await tenantDatabase.read(
+              'events',
+              { status: 'Active' },
+              '*'
+            );
+            console.log('📊 [PERF] Progressive events query took:', (performance.now() - eventsStart).toFixed(2), 'ms');
+            
+            // Filter and sort events client-side for better performance
+            currentEventsForStats = (statsEventsData || [])
+              .filter(event => event.event_date >= todayDateForStats)
+              .sort((a, b) => new Date(a.event_date) - new Date(b.event_date))
+              .slice(0, 5);
+              
+            console.log('🚀 Progressive: Using current events for stats calculation:', currentEventsForStats.length);
+          } catch (error) {
+            console.log('❌ Error fetching events progressively:', error);
+            currentEventsForStats = [];
+          }
+
+          // Update teacher stats with final data
+          setTeacherStats([
+            {
+              title: 'My Students',
+              value: (uniqueStudentCount || 0).toString(),
+              icon: 'people',
+              color: '#2196F3',
+              subtitle: `Across ${uniqueClasses || 0} class${(uniqueClasses || 0) !== 1 ? 'es' : ''}`,
+              trend: 0,
+              onPress: () => navigation?.navigate('ViewStudentInfo')
+            },
+            {
+              title: 'My Subjects',
+              value: (totalSubjects || 0).toString(),
+              icon: 'book',
+              color: '#4CAF50',
+              subtitle: `${uniqueClasses || 0} class${(uniqueClasses || 0) !== 1 ? 'es' : ''} assigned`,
+              trend: 0,
+              onPress: () => navigation?.navigate('TeacherSubjects')
+            },
+            {
+              title: 'Today\'s Classes',
+              value: (todayClasses || 0).toString(),
+              icon: 'time',
+              color: '#FF9800',
+              subtitle: (() => {
+                if (schedule?.length === 0) return 'No classes today';
+                
+                const nextClass = getNextClass(schedule);
+                if (!nextClass) return 'No more classes today';
+                
+                const formattedTime = formatTimeForDisplay(nextClass.start_time);
+                return `Next: ${formattedTime}`;
+              })(),
+              trend: 0,
+              onPress: () => navigation?.navigate('TeacherTimetable')
+            },
+            {
+              title: 'Upcoming Events',
+              value: (currentEventsForStats?.length || 0).toString(),
+              icon: 'calendar',
+              color: (currentEventsForStats?.length || 0) > 0 ? '#E91E63' : '#9E9E9E',
+              subtitle: (currentEventsForStats?.length || 0) > 0 ?
+                `Next: ${currentEventsForStats[0]?.title || 'Event'}` :
+                'No events scheduled',
+              trend: (currentEventsForStats?.filter(e => e.event_type === 'Exam')?.length || 0) > 0 ? 1 : 0,
+              onPress: () => {
+                // Scroll to events section or show events modal
+                Alert.alert(
+                  'Upcoming Events',
+                  (currentEventsForStats?.length || 0) > 0 ?
+                    currentEventsForStats.map(e => `• ${e.title} (${new Date(e.event_date).toLocaleDateString('en-GB')})`).join('\n') :
+                    'No upcoming events scheduled.',
+                  [{ text: 'OK' }]
+                );
+              }
+            }
+          ]);
+          
+          console.log('✅ Progressive teacher stats updated with', currentEventsForStats.length, 'events');
+          console.log('📊 [PERF] Progressive loading completed in:', (performance.now() - progressiveStart).toFixed(2), 'ms');
+          
+        } catch (progressiveError) {
+          console.error('❌ Progressive loading error:', progressiveError);
+        }
+      }, 100); // Load progressive data after 100ms
+
+      const totalTime = performance.now() - startTime;
+      console.log('📊 [PERF] TeacherDashboard: Total loading time:', totalTime.toFixed(2), 'ms');
+      if (totalTime > 3000) {
+        console.warn('⚠️ [PERF] TeacherDashboard: Slow loading detected! Total time:', totalTime.toFixed(2), 'ms');
+      }
       setLoading(false);
     } catch (err) {
+      const totalTime = performance.now() - startTime;
+      console.log('📊 [PERF] TeacherDashboard: Loading failed after:', totalTime.toFixed(2), 'ms');
       setError(err.message);
       setLoading(false);
       console.error('Error fetching dashboard data:', err);

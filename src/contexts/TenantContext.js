@@ -131,18 +131,27 @@ export const TenantProvider = ({ children }) => {
       
       console.log('🚀 TenantContext: Initializing tenant for first time...');
       
-      // Try to load from AsyncStorage first
-      const storedTenantId = await AsyncStorage.getItem('currentTenantId');
-      if (storedTenantId && currentTenant?.id === storedTenantId) {
-        console.log('🚀 TenantContext: Using stored tenant ID:', storedTenantId);
-        setCachedTenantId(storedTenantId);
-        setTenantInitialized(true);
-        return {
-          success: true,
-          tenantId: storedTenantId,
-          tenant: currentTenant,
-          fromStorage: true
-        };
+      // Try to load from AsyncStorage first (skip on web for performance)
+      let storedTenantId = null;
+      try {
+        // On web, AsyncStorage can be slow, so we skip it if we already have tenant data
+        if (typeof window === 'undefined' || !currentTenant?.id) {
+          storedTenantId = await AsyncStorage.getItem('currentTenantId');
+        }
+        
+        if (storedTenantId && currentTenant?.id === storedTenantId) {
+          console.log('🚀 TenantContext: Using stored tenant ID:', storedTenantId);
+          setCachedTenantId(storedTenantId);
+          setTenantInitialized(true);
+          return {
+            success: true,
+            tenantId: storedTenantId,
+            tenant: currentTenant,
+            fromStorage: true
+          };
+        }
+      } catch (asyncStorageError) {
+        console.warn('⚠️ TenantContext: AsyncStorage error (continuing without cache):', asyncStorageError);
       }
       
       // Fetch tenant via email lookup (one-time initialization)
@@ -186,8 +195,16 @@ export const TenantProvider = ({ children }) => {
       // 🚀 ENHANCED: Initialize tenant helpers for global access
       initializeTenantHelpers(tenantId);
       
-      // Persist to storage
-      await AsyncStorage.setItem('currentTenantId', tenantId);
+      // Persist to storage (non-blocking on web)
+      if (typeof window === 'undefined') {
+        // On native, persist synchronously
+        await AsyncStorage.setItem('currentTenantId', tenantId);
+      } else {
+        // On web, persist asynchronously without blocking
+        AsyncStorage.setItem('currentTenantId', tenantId).catch(err => 
+          console.warn('⚠️ TenantContext: Failed to persist tenant ID:', err)
+        );
+      }
       
       // Update Supabase context
       await updateSupabaseContext(tenantId);
