@@ -233,6 +233,37 @@ const SubjectsTimetable = ({ route }) => {
     return () => subscription?.remove();
   }, []);
 
+  // Track component lifecycle for debugging
+  useEffect(() => {
+    console.log('🎆 SubjectsTimetable: Component mounted');
+    return () => {
+      console.log('📍 SubjectsTimetable: Component unmounting');
+    };
+  }, []);
+
+  // Track navigation events on web
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      const handleBeforeUnload = (e) => {
+        console.log('⚠️ Web: Page is about to unload/refresh!');
+        e.preventDefault();
+        e.returnValue = '';
+      };
+      
+      const handleUnload = () => {
+        console.log('📍 Web: Page unloaded/refreshed!');
+      };
+      
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      window.addEventListener('unload', handleUnload);
+      
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        window.removeEventListener('unload', handleUnload);
+      };
+    }
+  }, []);
+
   // Set current day on component mount
   useEffect(() => {
     const getCurrentDay = () => {
@@ -1305,7 +1336,10 @@ const SubjectsTimetable = ({ route }) => {
     }
 
     try {
-      setLoading(true);
+      // Only show loading on native platforms to prevent web re-renders
+      if (Platform.OS !== 'web') {
+        setLoading(true);
+      }
       console.log('🔄 handleSubjectChange: Starting subject assignment for', { day, slot: slot.number, subjectId });
       
       // 🔍 Enhanced tenant system check
@@ -1341,6 +1375,10 @@ const SubjectsTimetable = ({ route }) => {
           'This subject has no teacher assigned. Please assign a teacher to this subject first, or select a different subject.',
           [{ text: 'OK' }]
         );
+        // Reset loading state before returning
+        if (Platform.OS !== 'web') {
+          setLoading(false);
+        }
         return;
       }
 
@@ -1357,7 +1395,7 @@ const SubjectsTimetable = ({ route }) => {
         start_time: slot.startTime,
         end_time: slot.endTime,
         academic_year: academicYear,
-        tenant_id: tenantId
+        // tenant_id will be added automatically by enhanced tenant system
       };
       
       console.log('💾 handleSubjectChange: Timetable data prepared:', {
@@ -1453,6 +1491,8 @@ const SubjectsTimetable = ({ route }) => {
         const classTT = { ...prev[selectedClass] } || {};
         const dayTT = classTT[day] ? [...classTT[day]] : [];
         
+        console.log('🔄 handleSubjectChange: Before update - dayTT:', dayTT.map(p => ({ startTime: p.startTime, subjectId: p.subjectId, label: p.label })));
+        
         // Remove any existing period for this time slot
         const filteredDayTT = dayTT.filter(p => p.startTime !== slot.startTime);
         
@@ -1463,12 +1503,15 @@ const SubjectsTimetable = ({ route }) => {
         filteredDayTT.sort((a, b) => a.startTime.localeCompare(b.startTime));
         
         classTT[day] = filteredDayTT;
-        console.log('🔄 handleSubjectChange: Local state updated for', day, ':', filteredDayTT.length, 'periods');
+        console.log('🔄 handleSubjectChange: After update - filteredDayTT:', filteredDayTT.map(p => ({ startTime: p.startTime, subjectId: p.subjectId, label: p.label })));
         
-        return { ...prev, [selectedClass]: classTT };
+        const newState = { ...prev, [selectedClass]: classTT };
+        console.log('🔄 handleSubjectChange: Final state for', selectedClass, day, ':', newState[selectedClass][day]?.length, 'periods');
+        
+        return newState;
       });
       
-      // Force UI refresh
+      // Force UI refresh - needed for both platforms
       setRefreshCounter(prev => prev + 1);
       
       console.log('✅ handleSubjectChange: Subject assignment completed successfully');
@@ -1477,7 +1520,38 @@ const SubjectsTimetable = ({ route }) => {
       console.error('❌ handleSubjectChange: Error updating period:', error);
       Alert.alert('Error', 'Failed to update period: ' + (error.message || 'Unknown error'));
     } finally {
-      setLoading(false);
+      // Only update loading state on native platforms
+      if (Platform.OS !== 'web') {
+        setLoading(false);
+      }
+    }
+  };
+
+  // Web-specific wrapper for handleSubjectChange to prevent page refresh
+  const safeHandleSubjectChange = async (day, slot, subjectId) => {
+    console.log('📝 SafeHandleSubjectChange: Starting with:', { 
+      platform: Platform.OS,
+      day, 
+      slotTime: slot.startTime, 
+      subjectId,
+      tenantReady: isTenantReady(),
+      tenantId: tenantId
+    });
+    
+    try {
+      await handleSubjectChange(day, slot, subjectId);
+      console.log('✅ SafeHandleSubjectChange: Successfully completed');
+    } catch (error) {
+      console.error('🚨 SafeHandleSubjectChange: Caught error:', error);
+      console.error('🚨 SafeHandleSubjectChange: Error stack:', error.stack);
+      
+      // Prevent any unhandled promise rejection that could cause page refresh
+      if (Platform.OS === 'web') {
+        console.error('🚨 Web Platform: Showing error alert instead of throwing');
+        Alert.alert('Error', 'Failed to update timetable: ' + (error.message || 'Unknown error'));
+      } else {
+        throw error; // Re-throw on native platforms
+      }
     }
   };
 
@@ -1513,8 +1587,10 @@ const SubjectsTimetable = ({ route }) => {
         return { ...prev, [selectedClass]: classTT };
       });
       
-      // Force UI refresh
-      setRefreshCounter(prev => prev + 1);
+      // Force UI refresh (skip on web to prevent re-render)
+      if (Platform.OS !== 'web') {
+        setRefreshCounter(prev => prev + 1);
+      }
       
     } catch (error) {
       console.error('❌ removePeriod: Error removing period:', error);
@@ -1573,8 +1649,10 @@ const SubjectsTimetable = ({ route }) => {
       // Refresh timetable data from database
       await fetchTimetableForClass(selectedClass);
       
-      // Force UI refresh
-      setRefreshCounter(prev => prev + 1);
+      // Force UI refresh (skip on web to prevent re-render)
+      if (Platform.OS !== 'web') {
+        setRefreshCounter(prev => prev + 1);
+      }
       
       console.log('✅ saveDayTimetable: Timetable data refreshed successfully');
       Alert.alert('Success', 'Timetable refreshed successfully! All changes are now synchronized.');
@@ -1673,7 +1751,7 @@ const SubjectsTimetable = ({ route }) => {
                   start_time: copiedPeriod.startTime,
                   end_time: copiedPeriod.endTime,
                   academic_year: academicYear,
-                  tenant_id: tenantId,
+                  // tenant_id will be added automatically by enhanced tenant system
                 };
 
                 // 🚀 Use enhanced tenant database for insert
@@ -2077,14 +2155,14 @@ const SubjectsTimetable = ({ route }) => {
             showsVerticalScrollIndicator={Platform.OS === 'web'}
             keyboardShouldPersistTaps="handled"
             bounces={Platform.OS !== 'web'}
-            refreshControl={
+            refreshControl={Platform.OS !== 'web' ? (
               <RefreshControl 
                 refreshing={refreshing} 
                 onRefresh={onRefresh} 
                 colors={['#4CAF50']}
                 tintColor="#4CAF50"
               />
-            }
+            ) : undefined}
           >
           {/* Class Selector */}
           <View style={styles.classSelector}>
@@ -2170,8 +2248,21 @@ const SubjectsTimetable = ({ route }) => {
               const existingPeriod = timetables[selectedClass]?.[selectedDay]?.find(
                 p => p.startTime === slot.startTime
               );
+              
+              // Debug logging for existingPeriod calculation
+              if (Platform.OS === 'web') {
+                console.log(`🔍 Slot ${slot.number} (${slot.startTime}):`, {
+                  existingPeriod: existingPeriod ? {
+                    id: existingPeriod.id,
+                    subjectId: existingPeriod.subjectId,
+                    label: existingPeriod.label
+                  } : null,
+                  dayPeriods: timetables[selectedClass]?.[selectedDay]?.length || 0,
+                  refreshCounter
+                });
+              }
               return (
-                <View key={`${index}-${refreshCounter}`} style={styles.periodSlot}>
+                <View key={`period-${selectedClass}-${selectedDay}-${slot.startTime}`} style={styles.periodSlot}>
                   <View style={styles.periodTimeSlot}>
                     <Text style={styles.periodNumber}>Period {slot.number}</Text>
                     <Text style={styles.periodTime}>
@@ -2182,12 +2273,28 @@ const SubjectsTimetable = ({ route }) => {
                   <View style={styles.subjectSelector}>
                     <View style={styles.subjectPickerWrapper}>
                       <Picker
-                        key={`${selectedDay}-${slot.startTime}-${existingPeriod?.subjectId || 'empty'}-${refreshCounter}`}
+                        key={`picker-${selectedClass}-${selectedDay}-${slot.startTime}`}
                         selectedValue={existingPeriod?.subjectId || ''}
                         style={styles.subjectPicker}
                         onValueChange={(subjectId) => {
-                          console.log('🔄 Picker onChange:', { selectedDay, slotTime: slot.startTime, subjectId, existingPeriod: existingPeriod?.label });
-                          handleSubjectChange(selectedDay, slot, subjectId);
+                          console.log('🔄 Picker onChange STARTED:', { 
+                            selectedDay, 
+                            slotTime: slot.startTime, 
+                            subjectId, 
+                            existingPeriod: existingPeriod?.label,
+                            platform: Platform.OS,
+                            timestamp: new Date().toISOString()
+                          });
+                          
+                          // Use the safe wrapper function for all platforms
+                          safeHandleSubjectChange(selectedDay, slot, subjectId);
+                          
+                          console.log('🔄 Picker onChange COMPLETED:', { 
+                            selectedDay, 
+                            slotTime: slot.startTime, 
+                            subjectId,
+                            timestamp: new Date().toISOString()
+                          });
                         }}
                       >
                         <Picker.Item label="Select Subject" value="" />
