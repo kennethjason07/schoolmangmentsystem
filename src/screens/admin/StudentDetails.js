@@ -1,24 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  ActivityIndicator, 
-  ScrollView, 
-  TouchableOpacity, 
-  Alert, 
-  Platform, 
-  Linking, 
-  Animated,
-  Dimensions,
-  RefreshControl
-} from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, Platform, Linking, KeyboardAvoidingView, RefreshControl, Dimensions, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import Header from '../../components/Header';
-import { dbHelpers, supabase, TABLES } from '../../utils/supabase';
+import { dbHelpers, supabase } from '../../utils/supabase';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 const StudentDetails = ({ route }) => {
   const navigation = useNavigation();
@@ -30,14 +17,19 @@ const StudentDetails = ({ route }) => {
   const [feeStatus, setFeeStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState('profile');
-  const [showScrollTop, setShowScrollTop] = useState(false);
   
-  // Animation values
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scrollTopOpacity = useRef(new Animated.Value(0)).current;
+  // Enhanced scroll functionality
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [currentRefreshColor, setCurrentRefreshColor] = useState(0);
   const scrollViewRef = useRef(null);
+  const scrollTopOpacity = useRef(new Animated.Value(0)).current;
+  const scrollTopScale = useRef(new Animated.Value(0.8)).current;
+  
+  // Constants for scroll behavior
+  const isWeb = Platform.OS === 'web';
+  const SCROLL_THRESHOLD = isWeb ? 80 : 120;
+  const SCROLL_THROTTLE = isWeb ? 32 : 16;
+  const refreshColors = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0'];
   
   // Early return if no student data is provided
   if (!student || !student.id) {
@@ -48,10 +40,10 @@ const StudentDetails = ({ route }) => {
           <Ionicons name="alert-circle" size={64} color="#f44336" />
           <Text style={styles.errorText}>No student data provided</Text>
           <TouchableOpacity 
-            style={styles.actionButton}
+            style={styles.retryButton}
             onPress={() => navigation.goBack()}
           >
-            <Text style={styles.actionButtonText}>Go Back</Text>
+            <Text style={styles.retryButtonText}>Go Back</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -188,13 +180,6 @@ const StudentDetails = ({ route }) => {
       
       setFeeStatus(calculatedFeeStatus);
       
-      // Animate content in
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 500,
-        useNativeDriver: Platform.OS !== 'web',
-      }).start();
-      
     } catch (err) {
       console.error('Full error in fetchStudentDetails:', err);
       setError(`Failed to load student details: ${err.message || err}`);
@@ -207,42 +192,59 @@ const StudentDetails = ({ route }) => {
     fetchStudentDetails();
   }, [student.id]);
 
-  // Refresh handler
+  // Refresh handler to reload student data
   const onRefresh = async () => {
-    setRefreshing(true);
+    // Cycle through refresh colors for better UX
+    setCurrentRefreshColor((prev) => (prev + 1) % refreshColors.length);
     await fetchStudentDetails();
-    setRefreshing(false);
   };
 
-  // Scroll event handler
+  // Enhanced scroll event handler
   const handleScroll = (event) => {
     const offsetY = event.nativeEvent.contentOffset.y;
-    const shouldShow = offsetY > 150;
+    const shouldShow = offsetY > SCROLL_THRESHOLD;
     
     if (shouldShow !== showScrollTop) {
       setShowScrollTop(shouldShow);
-      Animated.timing(scrollTopOpacity, {
-        toValue: shouldShow ? 1 : 0,
-        duration: 300,
-        useNativeDriver: Platform.OS !== 'web',
-      }).start();
+      animateScrollTopButton(shouldShow);
     }
+  };
+
+  // Animate scroll-to-top button
+  const animateScrollTopButton = (show) => {
+    Animated.parallel([
+      Animated.timing(scrollTopOpacity, {
+        toValue: show ? 1 : 0,
+        duration: 300,
+        useNativeDriver: !isWeb, // Native driver not supported on web for opacity
+      }),
+      Animated.spring(scrollTopScale, {
+        toValue: show ? 1 : 0.8,
+        tension: 100,
+        friction: 8,
+        useNativeDriver: !isWeb,
+      }),
+    ]).start();
   };
 
   // Scroll to top function
   const scrollToTop = () => {
     if (scrollViewRef.current) {
-      scrollViewRef.current.scrollTo({ 
-        y: 0, 
-        animated: true 
+      scrollViewRef.current.scrollTo({
+        y: 0,
+        animated: !isWeb // Use CSS smooth scroll on web
       });
     }
   };
 
-  // Tab navigation function
-  const navigateToTab = (tabName) => {
-    setActiveTab(tabName);
-    // You could also scroll to specific sections using ref
+  // Quick navigation function
+  const scrollToSection = (yPosition) => {
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({
+        y: yPosition,
+        animated: !isWeb
+      });
+    }
   };
 
   // Helper function to format date
@@ -327,6 +329,35 @@ const StudentDetails = ({ route }) => {
     );
   };
 
+  // Quick Navigation Component
+  const QuickNavigation = () => {
+    const navigationItems = [
+      { label: 'Summary', icon: 'person-circle', position: 0 },
+      { label: 'Personal', icon: 'information-circle', position: 300 },
+      { label: 'Parent', icon: 'people', position: 500 },
+      { label: 'Academic', icon: 'school', position: 700 },
+    ];
+
+    return (
+      <View style={styles.quickNavContainer}>
+        <Text style={styles.quickNavTitle}>Quick Navigation</Text>
+        <View style={styles.quickNavButtons}>
+          {navigationItems.map((item, index) => (
+            <TouchableOpacity
+              key={index}
+              style={styles.quickNavButton}
+              onPress={() => scrollToSection(item.position)}
+              accessibilityLabel={`Navigate to ${item.label} section`}
+              accessibilityHint={`Scrolls to the ${item.label.toLowerCase()} section of the student details`}
+            >
+              <Ionicons name={item.icon} size={20} color="#2196F3" />
+              <Text style={styles.quickNavButtonText}>{item.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
+  };
 
   if (loading) {
     return (
@@ -347,461 +378,324 @@ const StudentDetails = ({ route }) => {
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle" size={64} color="#f44336" />
           <Text style={styles.errorText}>{error || 'No student data found'}</Text>
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Text style={styles.actionButtonText}>Go Back</Text>
-          </TouchableOpacity>
         </View>
       </View>
     );
   }
 
   return (
-    <View style={styles.mainContainer}>
+    <View style={styles.container}>
+      {/* Use the proper Header component for consistent profile photo loading */}
       <Header title="Student Profile" showBack={true} />
       
-      {/* Main Content Container - This defines the scrollable area */}
       <View style={styles.scrollableContainer}>
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={true}
-          scrollEventThrottle={16}
-          onScroll={handleScroll}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={['#2196F3']}
-              progressBackgroundColor="#fff"
-            />
-          }
+        <KeyboardAvoidingView 
+          style={styles.keyboardAvoidingView}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
-          {/* Tab Navigation */}
-          <View style={styles.tabContainer}>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.tabScrollContent}
-            >
-              <TouchableOpacity 
-                style={[styles.tabButton, activeTab === 'profile' && styles.activeTabButton]}
-                onPress={() => navigateToTab('profile')}
-              >
-                <Ionicons name="person" size={20} color={activeTab === 'profile' ? "#2196F3" : "#757575"} />
-                <Text style={[styles.tabButtonText, activeTab === 'profile' && styles.activeTabText]}>Profile</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.tabButton, activeTab === 'parent' && styles.activeTabButton]}
-                onPress={() => navigateToTab('parent')}
-              >
-                <Ionicons name="people" size={20} color={activeTab === 'parent' ? "#2196F3" : "#757575"} />
-                <Text style={[styles.tabButtonText, activeTab === 'parent' && styles.activeTabText]}>Parent Info</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.tabButton, activeTab === 'academic' && styles.activeTabButton]}
-                onPress={() => navigateToTab('academic')}
-              >
-                <Ionicons name="school" size={20} color={activeTab === 'academic' ? "#2196F3" : "#757575"} />
-                <Text style={[styles.tabButtonText, activeTab === 'academic' && styles.activeTabText]}>Academic</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.tabButton, activeTab === 'additional' && styles.activeTabButton]}
-                onPress={() => navigateToTab('additional')}
-              >
-                <Ionicons name="information-circle" size={20} color={activeTab === 'additional' ? "#2196F3" : "#757575"} />
-                <Text style={[styles.tabButtonText, activeTab === 'additional' && styles.activeTabText]}>Additional</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-
-          {/* Student Profile Header Card */}
-          <Animated.View 
-            style={[styles.profileCard, { opacity: fadeAnim }]}
+          <ScrollView 
+            ref={scrollViewRef}
+            style={styles.content}
+            contentContainerStyle={styles.scrollContent}
+            onScroll={handleScroll}
+            scrollEventThrottle={SCROLL_THROTTLE}
+            refreshControl={
+              <RefreshControl 
+                refreshing={loading} 
+                onRefresh={onRefresh}
+                colors={[refreshColors[currentRefreshColor]]}
+                tintColor={refreshColors[currentRefreshColor]}
+                title="Pull to refresh student details"
+                titleColor="#666"
+                progressBackgroundColor="#fff"
+              />
+            }
+            showsVerticalScrollIndicator={!isWeb}
+            bounces={Platform.OS !== 'web'}
           >
-            <View style={styles.profileAvatarContainer}>
-              <View style={styles.profileAvatar}>
-                <Text style={styles.avatarText}>
-                  {studentData.name ? studentData.name.charAt(0).toUpperCase() : '?'}
+          {/* Quick Navigation */}
+          <QuickNavigation />
+          {/* Student Info Summary Card */}
+          <View style={styles.summaryCard}>
+          <Text style={styles.studentName}>{studentData.name}</Text>
+          <Text style={styles.classInfo}>
+            {studentData.classes ? `${studentData.classes.class_name} - Section ${studentData.classes.section}` : 'Class not assigned'}
+          </Text>
+          <Text style={styles.rollNumber}>Roll No: {studentData.roll_no || 'N/A'}</Text>
+        </View>
+
+        {/* Information Cards */}
+        <View style={styles.infoSection}>
+          <Text style={styles.sectionTitle}>Personal Information</Text>
+          
+          <View style={styles.infoCard}>
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="calendar" size={20} color="#2196F3" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Date of Birth</Text>
+                <Text style={styles.infoValue}>{formatDate(studentData.dob)}</Text>
+              </View>
+            </View>
+            
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="hourglass" size={20} color="#2196F3" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Age</Text>
+                <Text style={styles.infoValue}>{calculateAge(studentData.dob)} years</Text>
+              </View>
+            </View>
+            
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="person" size={20} color="#2196F3" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Gender</Text>
+                <Text style={styles.infoValue}>{studentData.gender || 'Not provided'}</Text>
+              </View>
+            </View>
+
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="id-card" size={20} color="#2196F3" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Student ID</Text>
+                <Text style={styles.infoValue}>{studentData.id}</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* Parent Information */}
+        <View style={styles.infoSection}>
+          <Text style={styles.sectionTitle}>Parent/Guardian Information</Text>
+          
+          <View style={styles.infoCard}>
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="people" size={20} color="#4CAF50" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Parent/Guardian Name</Text>
+                <Text style={styles.infoValue}>{studentData.parent_info?.name || 'Not available'}</Text>
+              </View>
+            </View>
+            
+            {studentData.parent_info?.relation && (
+              <View style={styles.infoRow}>
+                <View style={styles.infoIcon}>
+                  <Ionicons name="heart" size={20} color="#4CAF50" />
+                </View>
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Relationship</Text>
+                  <Text style={styles.infoValue}>{studentData.parent_info.relation}</Text>
+                </View>
+              </View>
+            )}
+            
+            {studentData.parent_info?.phone && (
+              <View style={styles.infoRow}>
+                <View style={styles.infoIcon}>
+                  <Ionicons name="call" size={20} color="#4CAF50" />
+                </View>
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Phone Number</Text>
+                  <Text style={styles.infoValue}>{studentData.parent_info.phone}</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.callButton, { backgroundColor: '#4CAF50' }]}
+                  onPress={() => handleCallParent(studentData.parent_info.phone, studentData.parent_info.name)}
+                >
+                  <Ionicons name="call" size={16} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            )}
+            
+            {studentData.parent_info?.email && (
+              <View style={styles.infoRow}>
+                <View style={styles.infoIcon}>
+                  <Ionicons name="mail" size={20} color="#4CAF50" />
+                </View>
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Email</Text>
+                  <Text style={styles.infoValue}>{studentData.parent_info.email}</Text>
+                </View>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Academic Information */}
+        <View style={styles.infoSection}>
+          <Text style={styles.sectionTitle}>Academic Information</Text>
+          
+          <View style={styles.infoCard}>
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="school" size={20} color="#4CAF50" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Academic Performance</Text>
+                <Text style={[styles.infoValue, styles.academicPercentage]}>
+                  {student.hasMarks ? `${student.academicPercentage}%` : '0%'}
                 </Text>
               </View>
             </View>
             
-            <View style={styles.profileInfo}>
-              <Text style={styles.studentName}>{studentData.name}</Text>
-              <Text style={styles.classInfo}>
-                {studentData.classes ? `${studentData.classes.class_name} - Section ${studentData.classes.section}` : 'Class not assigned'}
-              </Text>
-              <Text style={styles.rollNumber}>Admission No: {studentData.admission_no || 'N/A'}</Text>
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="stats-chart" size={20} color="#FF9800" />
+              </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Attendance</Text>
+                <Text style={styles.infoValue}>{student.attendancePercentage || 0}%</Text>
+              </View>
             </View>
-          </Animated.View>
-
-          {/* Student Information Cards - Conditionally shown based on active tab */}
-          <Animated.View style={{ opacity: fadeAnim }}>
-            {/* PROFILE TAB */}
-            {activeTab === 'profile' && (
-              <View style={styles.sectionContainer}>
-                <Text style={styles.sectionTitle}>Personal Information</Text>
-                <View style={styles.card}>
-                  <View style={styles.cardItem}>
-                    <Ionicons name="calendar" size={24} color="#2196F3" style={styles.cardIcon} />
-                    <View style={styles.cardContent}>
-                      <Text style={styles.cardLabel}>Date of Birth</Text>
-                      <Text style={styles.cardValue}>{formatDate(studentData.dob)}</Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.divider} />
-                  
-                  <View style={styles.cardItem}>
-                    <Ionicons name="hourglass" size={24} color="#2196F3" style={styles.cardIcon} />
-                    <View style={styles.cardContent}>
-                      <Text style={styles.cardLabel}>Age</Text>
-                      <Text style={styles.cardValue}>{calculateAge(studentData.dob)} years</Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.divider} />
-                  
-                  <View style={styles.cardItem}>
-                    <Ionicons name="person" size={24} color="#2196F3" style={styles.cardIcon} />
-                    <View style={styles.cardContent}>
-                      <Text style={styles.cardLabel}>Gender</Text>
-                      <Text style={styles.cardValue}>{studentData.gender || 'Not provided'}</Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.divider} />
-                  
-                  <View style={styles.cardItem}>
-                    <Ionicons name="id-card" size={24} color="#2196F3" style={styles.cardIcon} />
-                    <View style={styles.cardContent}>
-                      <Text style={styles.cardLabel}>Student ID</Text>
-                      <Text style={styles.cardValue}>{studentData.id}</Text>
-                    </View>
-                  </View>
-                </View>
+            
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}>
+                <Ionicons name="cash" size={20} color="#2196F3" />
               </View>
-            )}
-
-            {/* PARENT TAB */}
-            {activeTab === 'parent' && (
-              <View style={styles.sectionContainer}>
-                <Text style={styles.sectionTitle}>Parent/Guardian Information</Text>
-                <View style={styles.card}>
-                  <View style={styles.cardItem}>
-                    <Ionicons name="people" size={24} color="#4CAF50" style={styles.cardIcon} />
-                    <View style={styles.cardContent}>
-                      <Text style={styles.cardLabel}>Parent/Guardian Name</Text>
-                      <Text style={styles.cardValue}>{studentData.parent_info?.name || 'Not available'}</Text>
-                    </View>
-                  </View>
-                  
-                  {studentData.parent_info?.relation && (
-                    <>
-                      <View style={styles.divider} />
-                      <View style={styles.cardItem}>
-                        <Ionicons name="heart" size={24} color="#4CAF50" style={styles.cardIcon} />
-                        <View style={styles.cardContent}>
-                          <Text style={styles.cardLabel}>Relationship</Text>
-                          <Text style={styles.cardValue}>{studentData.parent_info.relation}</Text>
-                        </View>
-                      </View>
-                    </>
-                  )}
-                  
-                  {studentData.parent_info?.phone && (
-                    <>
-                      <View style={styles.divider} />
-                      <View style={styles.cardItem}>
-                        <Ionicons name="call" size={24} color="#4CAF50" style={styles.cardIcon} />
-                        <View style={styles.cardContent}>
-                          <Text style={styles.cardLabel}>Phone Number</Text>
-                          <Text style={styles.cardValue}>{studentData.parent_info.phone}</Text>
-                        </View>
-                        <TouchableOpacity
-                          style={styles.callButton}
-                          onPress={() => handleCallParent(studentData.parent_info.phone, studentData.parent_info.name)}
-                        >
-                          <Ionicons name="call" size={20} color="#fff" />
-                        </TouchableOpacity>
-                      </View>
-                    </>
-                  )}
-                  
-                  {studentData.parent_info?.email && (
-                    <>
-                      <View style={styles.divider} />
-                      <View style={styles.cardItem}>
-                        <Ionicons name="mail" size={24} color="#4CAF50" style={styles.cardIcon} />
-                        <View style={styles.cardContent}>
-                          <Text style={styles.cardLabel}>Email</Text>
-                          <Text style={styles.cardValue}>{studentData.parent_info.email}</Text>
-                        </View>
-                      </View>
-                    </>
-                  )}
-                </View>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Fee Status</Text>
+                <Text style={[styles.infoValue, feeStatus === 'Paid' ? styles.paidStatus : styles.unpaidStatus]}>
+                  {feeStatus || 'Unknown'}
+                </Text>
               </View>
-            )}
-
-            {/* ACADEMIC TAB */}
-            {activeTab === 'academic' && (
-              <View style={styles.sectionContainer}>
-                <Text style={styles.sectionTitle}>Academic Information</Text>
-                <View style={styles.card}>
-                  <View style={styles.cardItem}>
-                    <Ionicons name="school" size={24} color="#FF9800" style={styles.cardIcon} />
-                    <View style={styles.cardContent}>
-                      <Text style={styles.cardLabel}>Class</Text>
-                      <Text style={styles.cardValue}>
-                        {studentData.classes ? `${studentData.classes.class_name} - Section ${studentData.classes.section}` : 'Not assigned'}
-                      </Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.divider} />
-                  
-                  <View style={styles.cardItem}>
-                    <Ionicons name="stats-chart" size={24} color="#FF9800" style={styles.cardIcon} />
-                    <View style={styles.cardContent}>
-                      <Text style={styles.cardLabel}>Attendance</Text>
-                      <Text style={styles.cardValue}>{student.attendancePercentage || 0}%</Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.divider} />
-                  
-                  <View style={styles.cardItem}>
-                    <Ionicons name="trophy" size={24} color="#FF9800" style={styles.cardIcon} />
-                    <View style={styles.cardContent}>
-                      <Text style={styles.cardLabel}>Academic Performance</Text>
-                      <Text style={[styles.cardValue, styles.highlight]}>
-                        {student.hasMarks ? `${student.academicPercentage}%` : 'No marks available'}
-                      </Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.divider} />
-                  
-                  <View style={styles.cardItem}>
-                    <Ionicons name="cash" size={24} color="#FF9800" style={styles.cardIcon} />
-                    <View style={styles.cardContent}>
-                      <Text style={styles.cardLabel}>Fee Status</Text>
-                      <Text style={[
-                        styles.cardValue, 
-                        feeStatus === 'Paid' ? styles.statusPaid : styles.statusUnpaid
-                      ]}>
-                        {feeStatus || 'Unknown'}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {/* ADDITIONAL TAB */}
-            {activeTab === 'additional' && (
-              <View style={styles.sectionContainer}>
-                <Text style={styles.sectionTitle}>Additional Details</Text>
-                <View style={styles.card}>
-                  <View style={styles.cardItem}>
-                    <Ionicons name="time" size={24} color="#9C27B0" style={styles.cardIcon} />
-                    <View style={styles.cardContent}>
-                      <Text style={styles.cardLabel}>Enrollment Date</Text>
-                      <Text style={styles.cardValue}>{formatDate(studentData.created_at) || 'N/A'}</Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.divider} />
-                  
-                  <View style={styles.cardItem}>
-                    <Ionicons name="location" size={24} color="#9C27B0" style={styles.cardIcon} />
-                    <View style={styles.cardContent}>
-                      <Text style={styles.cardLabel}>Address</Text>
-                      <Text style={styles.cardValue}>{studentData.address || 'Not provided'}</Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.divider} />
-                  
-                  <View style={styles.cardItem}>
-                    <Ionicons name="medical" size={24} color="#9C27B0" style={styles.cardIcon} />
-                    <View style={styles.cardContent}>
-                      <Text style={styles.cardLabel}>Medical Information</Text>
-                      <Text style={styles.cardValue}>{studentData.medical_info || 'No medical information on file'}</Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.divider} />
-                  
-                  <View style={styles.cardItem}>
-                    <Ionicons name="document-text" size={24} color="#9C27B0" style={styles.cardIcon} />
-                    <View style={styles.cardContent}>
-                      <Text style={styles.cardLabel}>Notes</Text>
-                      <Text style={styles.cardValue}>{studentData.notes || 'No additional notes'}</Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {/* Extra content to ensure scrollability */}
-            <View style={styles.bottomSpacing} />
-          </Animated.View>
-        </ScrollView>
+            </View>
+          </View>
+        </View>
         
-        {/* Scroll to top button */}
-        {Platform.OS === 'web' && (
-          <Animated.View 
-            style={[
-              styles.scrollToTopButton,
-              { opacity: scrollTopOpacity }
-            ]}
-          >
-            <TouchableOpacity
-              style={styles.scrollToTopButtonInner}
-              onPress={scrollToTop}
-            >
-              <Ionicons name="chevron-up" size={24} color="#fff" />
-            </TouchableOpacity>
-          </Animated.View>
-        )}
+        {/* Bottom spacing for better scroll experience */}
+        <View style={styles.bottomSpacing} />
+        </ScrollView>
+        </KeyboardAvoidingView>
       </View>
+
+      {/* Floating Scroll-to-Top Button */}
+      {showScrollTop && (
+        <Animated.View
+          style={[
+            styles.scrollToTopButton,
+            {
+              opacity: scrollTopOpacity,
+              transform: [{ scale: scrollTopScale }],
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.scrollToTopInner}
+            onPress={scrollToTop}
+            accessibilityLabel="Scroll to top"
+            accessibilityHint="Scrolls the student details back to the top"
+          >
+            <Ionicons name="arrow-up" size={24} color="#fff" />
+          </TouchableOpacity>
+        </Animated.View>
+      )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  // Main container styles
-  mainContainer: {
+  // Enhanced container with web optimizations
+  container: {
     flex: 1,
-    backgroundColor: '#f5f5f7',
+    backgroundColor: '#f5f5f5',
     ...(Platform.OS === 'web' && {
       height: '100vh',
-      overflow: 'hidden'
+      maxHeight: '100vh',
+      overflow: 'hidden',
+      position: 'relative',
     }),
   },
+  
+  // Scrollable area with calculated height
   scrollableContainer: {
     flex: 1,
-    position: 'relative',
     ...(Platform.OS === 'web' && {
-      height: 'calc(100vh - 60px)', // Adjust based on your header height
+      height: 'calc(100vh - 60px)', // Account for header
+      maxHeight: 'calc(100vh - 60px)',
+      overflow: 'hidden',
     }),
   },
-  scrollView: {
+  
+  keyboardAvoidingView: {
+    flex: 1,
+  },
+  
+  // Enhanced ScrollView with web scroll properties
+  content: {
     flex: 1,
     ...(Platform.OS === 'web' && {
       height: '100%',
-      overflowY: 'auto',
+      maxHeight: '100%',
+      overflowY: 'scroll',
       overflowX: 'hidden',
+      WebkitOverflowScrolling: 'touch',
+      scrollBehavior: 'smooth',
+      scrollbarWidth: 'thin',
+      scrollbarColor: '#2196F3 #f5f5f5',
     }),
   },
+  
+  // Content container properties
   scrollContent: {
     flexGrow: 1,
     padding: 16,
-    paddingBottom: 40,
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f7',
+    paddingBottom: 100, // Extra bottom padding for better UX
   },
   
-  // Loading and error states
+  // Loading States
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 40,
   },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
     color: '#666',
+    textAlign: 'center',
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: 40,
   },
   errorText: {
     marginTop: 16,
     fontSize: 16,
     color: '#f44336',
     textAlign: 'center',
-    marginBottom: 24,
-  },
-  actionButton: {
-    backgroundColor: '#2196F3',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginTop: 16,
-  },
-  actionButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '500',
   },
   
-  // Tab navigation
-  tabContainer: {
+  // Header Card
+  headerCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    marginBottom: 16,
+    padding: 20,
+    marginBottom: 20,
+    elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 2,
-  },
-  tabScrollContent: {
-    flexDirection: 'row',
-    paddingHorizontal: 8,
-  },
-  tabButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginHorizontal: 4,
-    borderRadius: 8,
   },
-  activeTabButton: {
-    backgroundColor: 'rgba(33, 150, 243, 0.1)',
+  avatarContainer: {
+    marginRight: 20,
   },
-  tabButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#757575',
-    marginLeft: 8,
-  },
-  activeTabText: {
-    color: '#2196F3',
-    fontWeight: '600',
-  },
-  
-  // Profile card
-  profileCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  profileAvatarContainer: {
-    marginRight: 16,
-  },
-  profileAvatar: {
+  avatar: {
     width: 80,
     height: 80,
     borderRadius: 40,
@@ -814,17 +708,17 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
   },
-  profileInfo: {
+  headerInfo: {
     flex: 1,
   },
   studentName: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   classInfo: {
-    fontSize: 15,
+    fontSize: 16,
     color: '#666',
     marginBottom: 4,
   },
@@ -834,8 +728,8 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // Section containers
-  sectionContainer: {
+  // Information Sections
+  infoSection: {
     marginBottom: 20,
   },
   sectionTitle: {
@@ -843,98 +737,58 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 12,
-    paddingHorizontal: 4,
   },
-  
-  // Card styles
-  card: {
+  infoCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
+    elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 2,
   },
-  cardItem: {
+  infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
-  cardIcon: {
-    marginRight: 16,
-  },
-  cardContent: {
-    flex: 1,
-  },
-  cardLabel: {
-    fontSize: 14,
-    color: '#757575',
-    marginBottom: 4,
-  },
-  cardValue: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '500',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#e0e0e0',
-    marginHorizontal: 0,
-  },
-  
-  // Special styles
-  highlight: {
-    color: '#4CAF50',
-    fontWeight: 'bold',
-  },
-  statusPaid: {
-    color: '#4CAF50',
-    fontWeight: 'bold',
-  },
-  statusUnpaid: {
-    color: '#f44336',
-    fontWeight: 'bold',
-  },
-  callButton: {
+  infoIcon: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#f8f9fa',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 16,
+    marginRight: 16,
   },
-  
-  // Scroll to top button
-  scrollToTopButton: {
-    position: 'absolute',
-    bottom: 20,
-    right: 20,
-    zIndex: 1000,
+  infoContent: {
+    flex: 1,
   },
-  scrollToTopButtonInner: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#2196F3',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
-    ...(Platform.OS === 'web' && {
-      cursor: 'pointer',
-      transition: 'all 0.2s ease',
-    }),
+  infoLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
   },
-  
-  // Spacing
+  infoValue: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+  },
+  paidStatus: {
+    color: '#4CAF50',
+  },
+  unpaidStatus: {
+    color: '#f44336',
+  },
+  academicPercentage: {
+    color: '#4CAF50',
+    fontWeight: '700',
+  },
   bottomSpacing: {
-    height: 40,
+    height: 20,
   },
   
   // Retry Button Styles
@@ -963,6 +817,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+    alignItems: 'center',
   },
   
   // Call Button Styles
@@ -979,219 +834,69 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 2,
   },
+
+  // Enhanced Scroll Features Styles
   
-  // Enhanced Floating Buttons Container
-  floatingButtonsContainer: {
-    position: 'absolute',
-    right: 20,
-    bottom: 30,
-    zIndex: 1000,
-    alignItems: 'center',
+  // Quick Navigation Styles
+  quickNavContainer: {
+    backgroundColor: '#fff',
+    margin: 16,
+    marginBottom: 8,
+    padding: 16,
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
-  
-  // Scroll Progress Indicator
-  scrollProgressContainer: {
+  quickNavTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
     marginBottom: 12,
+    textAlign: 'center',
+  },
+  quickNavButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  quickNavButton: {
     alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#f8f9fa',
+    minWidth: 70,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
   },
-  scrollProgressBar: {
-    width: 4,
-    height: 40,
-    backgroundColor: 'rgba(33, 150, 243, 0.2)',
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  scrollProgressFill: {
-    width: '100%',
-    height: '30%', // This would be dynamically calculated in a real implementation
-    backgroundColor: '#2196F3',
-    borderRadius: 2,
+  quickNavButtonText: {
+    fontSize: 11,
+    color: '#2196F3',
+    marginTop: 6,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   
-  // Enhanced Scroll to Top Button Styles
+  // Scroll-to-Top Button Styles
   scrollToTopButton: {
-    // Position handled by container
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    zIndex: 1000,
   },
   scrollToTopInner: {
     width: 56,
     height: 56,
     borderRadius: 28,
     backgroundColor: '#2196F3',
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 12,
-    shadowColor: '#2196F3',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    // Enhanced visibility and interaction for web
-    ...(Platform.OS === 'web' && {
-      boxShadow: '0 6px 20px rgba(33, 150, 243, 0.4)',
-      border: '2px solid rgba(255, 255, 255, 0.2)',
-      cursor: 'pointer',
-      transition: 'all 0.3s ease',
-    }),
-  },
-  
-  // Profile Header with Photo Styles
-  profileHeader: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  photoSection: {
-    marginRight: 20,
-  },
-  photoContainer: {
-    position: 'relative',
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    overflow: 'hidden',
-  },
-  profilePhoto: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-  },
-  placeholderPhoto: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#2196F3',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  cameraIcon: {
-    position: 'absolute',
-    bottom: 5,
-    right: 5,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(33, 150, 243, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  uploadingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 50,
-  },
-  
-  // Photo Modal Styles
-  photoModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  photoModalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    width: '100%',
-    maxWidth: 320,
     elevation: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-  },
-  photoModalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  photoOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    backgroundColor: '#f8f9fa',
-    marginBottom: 10,
-  },
-  photoOptionText: {
-    fontSize: 16,
-    color: '#2196F3',
-    fontWeight: '500',
-    marginLeft: 15,
-  },
-  photoCancelButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
-    marginTop: 10,
-  },
-  photoCancelText: {
-    fontSize: 16,
-    color: '#666',
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  
-  // Enhanced Web-specific ScrollView styles
-  webScrollView: {
-    flex: 1,
-    height: '100%',
-    overflow: 'auto',
-    ...Platform.select({
-      web: {
-        // Enhanced scrollbar styling
-        scrollbarWidth: 'thin',
-        scrollbarColor: '#2196F3 #f5f5f5',
-        '::-webkit-scrollbar': {
-          width: '8px',
-        },
-        '::-webkit-scrollbar-track': {
-          background: '#f5f5f5',
-          borderRadius: '10px',
-        },
-        '::-webkit-scrollbar-thumb': {
-          background: '#2196F3',
-          borderRadius: '10px',
-          ':hover': {
-            background: '#1976D2',
-          },
-        },
-        // Smooth scrolling behavior
-        scrollBehavior: 'smooth',
-        overflowScrolling: 'touch', // For iOS Safari
-        WebkitOverflowScrolling: 'touch',
-        // Performance optimizations
-        willChange: 'scroll-position',
-        transform: 'translateZ(0)', // Force GPU acceleration
-        // Better momentum scrolling
-        overscrollBehavior: 'contain',
-        // Enhanced focus and interaction
-        ':focus': {
-          outline: 'none',
-        },
-        // Better scroll snapping for sections
-        scrollSnapType: 'y proximity',
-      },
-    }),
   },
 });
 
