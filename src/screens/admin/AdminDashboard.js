@@ -99,20 +99,64 @@ const AdminDashboard = ({ navigation }) => {
   // Component rendered
 
   // Load real-time data from Supabase using actual schema
-  const loadDashboardData = async () => {
+  const loadDashboardData = async (retryCount = 0) => {
     try {
       setLoading(true);
       setError(null);
-
-      // Get current tenant for proper filtering
-      const tenantResult = await getCurrentUserTenantByEmail();
       
-      if (!tenantResult.success) {
-        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      // 🚀 FIXED: Enhanced auth and tenant validation for web refresh
+      console.log('🔄 [AdminDashboard] Starting data load, retry count:', retryCount);
+      console.log('🔄 [AdminDashboard] User state:', { 
+        hasUser: !!user, 
+        userId: user?.id, 
+        userEmail: user?.email,
+        platform: Platform.OS
+      });
+      
+      // Wait for user authentication to be ready
+      if (!user || !user.id || !user.email) {
+        console.warn('⚠️ [AdminDashboard] User not ready, delaying load...');
+        
+        if (retryCount < 3) {
+          // Retry after a short delay
+          setTimeout(() => {
+            console.log('🔄 [AdminDashboard] Retrying dashboard load...');
+            loadDashboardData(retryCount + 1);
+          }, 1000 * (retryCount + 1)); // Progressive delay
+          return;
+        } else {
+          throw new Error('User authentication not ready. Please refresh the page or log in again.');
+        }
+      }
+      
+      // Get current tenant for proper filtering with enhanced error handling
+      console.log('🏢 [AdminDashboard] Attempting to get tenant for user:', user.email);
+      
+      let tenantResult;
+      try {
+        tenantResult = await getCurrentUserTenantByEmail();
+      } catch (tenantError) {
+        console.error('❌ [AdminDashboard] Tenant lookup error:', tenantError);
+        throw new Error(`Failed to resolve tenant context: ${tenantError.message}. Please ensure you're logged in with the correct account.`);
+      }
+      
+      if (!tenantResult || !tenantResult.success) {
+        console.error('❌ [AdminDashboard] Tenant resolution failed:', tenantResult?.error);
+        throw new Error(`Failed to get tenant: ${tenantResult?.error || 'Unknown tenant error'}. Please check your account setup.`);
+      }
+      
+      if (!tenantResult.data?.tenant?.id) {
+        console.error('❌ [AdminDashboard] Invalid tenant data:', tenantResult.data);
+        throw new Error('Invalid tenant data received. Please contact support.');
       }
       
       const tenantId = tenantResult.data.tenant.id;
-      console.log('🏢 Loading dashboard data for tenant:', tenantResult.data.tenant.name);
+      const tenantName = tenantResult.data.tenant.name;
+      console.log('✅ [AdminDashboard] Successfully resolved tenant:', { 
+        tenantId, 
+        tenantName,
+        userEmail: user.email 
+      });
 
       // Load school details
       const { data: schoolData, error: schoolError } = await dbHelpers.getSchoolDetails();
@@ -317,24 +361,80 @@ const AdminDashboard = ({ navigation }) => {
       setActivities(recentActivities.slice(0, 5));
 
     } catch (error) {
-      console.error('🏠 Error loading dashboard data:', error);
-      setError('Failed to load dashboard data');
-      console.log('🏠 loadDashboardData - Set error state:', 'Failed to load dashboard data');
+      console.error('🏠 [AdminDashboard] Error loading dashboard data:', error);
+      
+      // 🚀 FIXED: Enhanced error handling with specific error types
+      let errorMessage = 'Failed to load dashboard data';
+      let shouldRetry = false;
+      
+      if (error.message.includes('User authentication not ready')) {
+        errorMessage = 'Authentication is loading. Please wait...';
+        shouldRetry = true;
+      } else if (error.message.includes('Failed to resolve tenant')) {
+        errorMessage = 'Unable to determine your school context. Please log out and log back in.';
+      } else if (error.message.includes('Failed to get tenant')) {
+        errorMessage = 'School context error. Please verify your account is properly configured.';
+      } else if (error.message.includes('JWT') || error.message.includes('session')) {
+        errorMessage = 'Session expired. Please refresh the page or log in again.';
+        shouldRetry = true;
+      } else if (error.message.includes('permission denied') || error.message.includes('RLS')) {
+        errorMessage = 'Database permission error. Please refresh the page or contact support.';
+      } else if (error.message.includes('network') || error.message.includes('fetch')) {
+        errorMessage = 'Network connection error. Please check your internet and try again.';
+        shouldRetry = true;
+      } else {
+        // Use the original error message if it's descriptive
+        errorMessage = error.message.length > 10 ? error.message : 'Failed to load dashboard data';
+      }
+      
+      setError(errorMessage);
+      console.log('🏠 [AdminDashboard] Set error state:', errorMessage);
+      
+      // Auto-retry for certain error types on web
+      if (shouldRetry && Platform.OS === 'web' && retryCount < 2) {
+        console.log('🔄 [AdminDashboard] Auto-retrying due to recoverable error...');
+        setTimeout(() => {
+          loadDashboardData(retryCount + 1);
+        }, 2000);
+        return;
+      }
     } finally {
       setLoading(false);
-      console.log('🏠 loadDashboardData - Set loading to false');
+      console.log('🏠 [AdminDashboard] Set loading to false');
     }
   };
 
   useEffect(() => {
+    // 🚀 FIXED: Wait for user authentication before loading dashboard
+    console.log('🔄 [AdminDashboard] useEffect triggered, user state:', { 
+      hasUser: !!user, 
+      userId: user?.id,
+      userEmail: user?.email 
+    });
+    
+    // Don't initialize dashboard if user isn't ready
+    if (!user || !user.id || !user.email) {
+      console.log('⚠️ [AdminDashboard] User not ready, skipping dashboard initialization');
+      return;
+    }
+    
     const initializeDashboard = async () => {
-      await loadDashboardData();
-      await loadChartData();
+      console.log('🚀 [AdminDashboard] Initializing dashboard for user:', user.email);
+      try {
+        await Promise.all([
+          loadDashboardData(),
+          loadChartData()
+        ]);
+        console.log('✅ [AdminDashboard] Dashboard initialization completed');
+      } catch (error) {
+        console.error('❌ [AdminDashboard] Dashboard initialization failed:', error);
+      }
     };
 
     initializeDashboard();
 
     // Subscribe to Supabase real-time updates for multiple tables
+    console.log('🔌 [AdminDashboard] Setting up real-time subscriptions');
     const subscription = supabase
       .channel('dashboard-updates')
       .on('postgres_changes', {
@@ -342,6 +442,7 @@ const AdminDashboard = ({ navigation }) => {
         schema: 'public',
         table: 'students'
       }, () => {
+        console.log('🔄 [AdminDashboard] Students table changed, refreshing dashboard');
         loadDashboardData();
         loadChartData();
       })
@@ -350,6 +451,7 @@ const AdminDashboard = ({ navigation }) => {
         schema: 'public',
         table: 'student_attendance'
       }, () => {
+        console.log('🔄 [AdminDashboard] Student attendance changed, refreshing dashboard');
         loadDashboardData();
         loadChartData();
       })
@@ -358,6 +460,7 @@ const AdminDashboard = ({ navigation }) => {
         schema: 'public',
         table: 'student_fees'
       }, () => {
+        console.log('🔄 [AdminDashboard] Student fees changed, refreshing dashboard');
         loadDashboardData();
         loadChartData();
       })
@@ -366,6 +469,7 @@ const AdminDashboard = ({ navigation }) => {
         schema: 'public',
         table: 'exams'
       }, () => {
+        console.log('🔄 [AdminDashboard] Exams changed, refreshing dashboard');
         loadDashboardData();
       })
       .on('postgres_changes', {
@@ -373,14 +477,16 @@ const AdminDashboard = ({ navigation }) => {
         schema: 'public',
         table: 'events'
       }, () => {
+        console.log('🔄 [AdminDashboard] Events changed, refreshing dashboard');
         loadDashboardData();
       })
       .subscribe();
 
     return () => {
+      console.log('🧽 [AdminDashboard] Cleaning up real-time subscriptions');
       subscription.unsubscribe();
     };
-  }, []);
+  }, [user?.id, user?.email]); // 🚀 FIXED: Added proper dependencies
 
 
   const onRefresh = async () => {
@@ -427,15 +533,30 @@ const AdminDashboard = ({ navigation }) => {
   // Load chart data
   const loadChartData = async () => {
     try {
-      // Get current tenant for proper filtering
-      const tenantResult = await getCurrentUserTenantByEmail();
-      
-      if (!tenantResult.success) {
-        console.error('Failed to get tenant for chart data:', tenantResult.error);
+      // 🚀 FIXED: Enhanced tenant validation for chart data
+      if (!user || !user.id || !user.email) {
+        console.warn('⚠️ [AdminDashboard] User not ready for chart data load');
         return;
       }
       
+      // Get current tenant for proper filtering
+      console.log('📈 [AdminDashboard] Loading chart data for user:', user.email);
+      
+      let tenantResult;
+      try {
+        tenantResult = await getCurrentUserTenantByEmail();
+      } catch (tenantError) {
+        console.error('❌ [AdminDashboard] Chart data tenant lookup error:', tenantError);
+        return; // Fail silently for chart data
+      }
+      
+      if (!tenantResult || !tenantResult.success) {
+        console.error('❌ [AdminDashboard] Failed to get tenant for chart data:', tenantResult?.error);
+        return; // Fail silently for chart data
+      }
+      
       const tenantId = tenantResult.data.tenant.id;
+      console.log('✅ [AdminDashboard] Loading chart data for tenant:', tenantResult.data.tenant.name);
       
       // Load fee collection data
       const currentMonth = format(new Date(), 'yyyy-MM');
@@ -1135,10 +1256,21 @@ const AdminDashboard = ({ navigation }) => {
         <View style={styles.error}>
           <Ionicons name="alert-circle" size={48} color="#dc3545" />
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => {
+          <TouchableOpacity style={styles.retryButton} onPress={async () => {
+            console.log('🔄 [AdminDashboard] Manual retry button pressed');
             setError(null);
-            loadDashboardData();
-            loadChartData();
+            setLoading(true);
+            
+            try {
+              await Promise.all([
+                loadDashboardData(0), // Reset retry count
+                loadChartData()
+              ]);
+              console.log('✅ [AdminDashboard] Manual retry completed successfully');
+            } catch (error) {
+              console.error('❌ [AdminDashboard] Manual retry failed:', error);
+              // Error will be set by loadDashboardData
+            }
           }}>
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
