@@ -20,6 +20,7 @@ import { supabase, TABLES } from '../../utils/supabase';
 import { useTenantAccess, tenantDatabase, createTenantQuery, getCachedTenantId } from '../../utils/tenantHelpers';
 import { useAuth } from '../../utils/AuthContext';
 import { useFocusEffect } from '@react-navigation/native';
+// import { runTenantDataDiagnostics } from '../../utils/tenantDataDiagnostic';
 // Helper functions for date formatting
 const formatDate = (dateString) => {
   if (!dateString) return '';
@@ -172,44 +173,7 @@ const ExamsMarks = () => {
   const [addSubjectModalVisible, setAddSubjectModalVisible] = useState(false);
   const [newSubjectName, setNewSubjectName] = useState('');
 
-  const loadAllData = useCallback(async () => {
-    console.log('🚀 [ExamsMarks] loadAllData - Starting with enhanced tenant validation');
-    
-    // Validate tenant readiness
-    const tenantValidation = await validateTenantReadiness();
-    if (!tenantValidation.success) {
-      console.log('⚠️ [ExamsMarks] Tenant not ready:', tenantValidation.reason);
-      if (tenantValidation.reason === 'TENANT_NOT_READY') {
-        // Don't throw error, just wait for tenant to be ready
-        setLoading(false);
-        return;
-      }
-      throw new Error('Tenant validation failed: ' + tenantValidation.reason);
-    }
-    
-    const { effectiveTenantId } = tenantValidation;
-    console.log('✅ [ExamsMarks] Using effective tenant ID:', effectiveTenantId);
-    
-    console.log('🔄 ExamsMarks: Loading data with enhanced tenant system...');
-    setLoading(true);
-    
-    try {
-      await Promise.all([
-        loadExams(),
-        loadClasses(),
-        loadSubjects(),
-        loadStudents(),
-        loadMarks()
-      ]);
-      console.log('✅ ExamsMarks: All data loaded successfully');
-    } catch (error) {
-      console.error('❌ ExamsMarks: Error loading data:', error);
-      Alert.alert('Error', `Failed to load data: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [loadExams, loadClasses, loadSubjects, loadStudents, loadMarks, validateTenantReadiness]);
-
+  // First, define all the load functions that will be used by loadAllData
   const loadExams = useCallback(async () => {
     try {
       console.log('🚀 [ExamsMarks] loadExams - Starting with enhanced tenant validation');
@@ -318,31 +282,70 @@ const ExamsMarks = () => {
     }
   }, []);
 
+  const loadAllData = useCallback(async () => {
+    console.log('🚀 [ExamsMarks] loadAllData - Starting with enhanced tenant validation');
+    
+    // Validate tenant readiness
+    const tenantValidation = await validateTenantReadiness();
+    if (!tenantValidation.success) {
+      console.log('⚠️ [ExamsMarks] Tenant not ready:', tenantValidation.reason);
+      if (tenantValidation.reason === 'TENANT_NOT_READY') {
+        // Don't throw error, just wait for tenant to be ready
+        setLoading(false);
+        return;
+      }
+      throw new Error('Tenant validation failed: ' + tenantValidation.reason);
+    }
+    
+    const { effectiveTenantId } = tenantValidation;
+    console.log('✅ [ExamsMarks] Using effective tenant ID:', effectiveTenantId);
+    
+    console.log('🔄 ExamsMarks: Loading data with enhanced tenant system...');
+    setLoading(true);
+    
+    try {
+      await Promise.all([
+        loadExams(),
+        loadClasses(),
+        loadSubjects(),
+        loadStudents(),
+        loadMarks()
+      ]);
+      console.log('✅ ExamsMarks: All data loaded successfully');
+    } catch (error) {
+      console.error('❌ ExamsMarks: Error loading data:', error);
+      Alert.alert('Error', `Failed to load data: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadExams, loadClasses, loadSubjects, loadStudents, loadMarks, validateTenantReadiness]);
+
   // 🩺 Run diagnostic function
   const handleDiagnostic = async () => {
     try {
-      console.log('🩺 Running comprehensive diagnostic from ExamsMarks...');
-      const result = await runTenantDataDiagnostics();
-      
-      Alert.alert(
-        'Diagnostic Complete',
-        `System Health Check:\n\n` +
-        `✅ Passed: ${result.summary.passed}\n` +
-        `❌ Failed: ${result.summary.failed}\n` +
-        `⚠️ Warnings: ${result.summary.warnings}\n` +
-        `📊 Success Rate: ${Math.round((result.summary.passed / result.summary.totalTests) * 100)}%\n\n` +
-        `Check console for detailed report.`,
-        [
-          { text: 'View Errors', onPress: () => {
-            if (result.errors.length > 0) {
-              Alert.alert('Errors Found', result.errors.map(e => `• ${e.test}: ${e.message}`).join('\n'));
-            } else {
-              Alert.alert('No Errors', 'All systems are working correctly!');
-            }
-          }},
-          { text: 'OK' }
-        ]
-      );
+      console.log('🩺 Diagnostic temporarily disabled');
+      Alert.alert('Diagnostic', 'Diagnostic feature is temporarily disabled.');
+      // const result = await runTenantDataDiagnostics();
+      // 
+      // Alert.alert(
+      //   'Diagnostic Complete',
+      //   `System Health Check:\n\n` +
+      //   `✅ Passed: ${result.summary.passed}\n` +
+      //   `❌ Failed: ${result.summary.failed}\n` +
+      //   `⚠️ Warnings: ${result.summary.warnings}\n` +
+      //   `📊 Success Rate: ${Math.round((result.summary.passed / result.summary.totalTests) * 100)}%\n\n` +
+      //   `Check console for detailed report.`,
+      //   [
+      //     { text: 'View Errors', onPress: () => {
+      //       if (result.errors.length > 0) {
+      //         Alert.alert('Errors Found', result.errors.map(e => `• ${e.test}: ${e.message}`).join('\n'));
+      //       } else {
+      //         Alert.alert('No Errors', 'All systems are working correctly!');
+      //       }
+      //     }},
+      //     { text: 'OK' }
+      //   ]
+      // );
       
     } catch (error) {
       Alert.alert('Diagnostic Error', `Failed to run diagnostic: ${error.message}`);
@@ -733,46 +736,249 @@ const ExamsMarks = () => {
         return;
       }
 
-      if (marksToSave.length > 0) {
-        // Process each mark individually using tenantDatabase.create()
-        let successCount = 0;
-        const errors = [];
+      console.log('🔧 Inserting marks with Enhanced Tenant System:', marksToSave);
+      
+      // Use Enhanced Tenant System for each mark record
+      const createdMarks = [];
+      for (const markRecord of marksToSave) {
+        // Remove tenant_id as it's handled automatically
+        const { tenant_id, ...markData } = markRecord;
+        const { data, error } = await tenantDatabase.create('marks', markData);
         
-        for (const markData of marksToSave) {
-          try {
-            // Remove tenant_id as it's handled automatically by tenantDatabase.create()
-            const { tenant_id, ...markWithoutTenantId } = markData;
-            const { error } = await tenantDatabase.create('marks', markWithoutTenantId);
-            
-            if (error) {
-              errors.push(`${markData.student_id}-${markData.subject_id}: ${error.message}`);
-            } else {
-              successCount++;
-            }
-          } catch (error) {
-            errors.push(`${markData.student_id}-${markData.subject_id}: ${error.message}`);
-          }
+        if (error) {
+          console.error('Database error:', error);
+          throw error;
         }
         
-        if (errors.length > 0) {
-          console.error('Some marks failed to save:', errors);
-          Alert.alert(
-            'Partial Success',
-            `Saved ${successCount} marks successfully.\n${errors.length} failed:\n${errors.slice(0, 3).join('\n')}${errors.length > 3 ? '\n...' : ''}`
-          );
-        } else {
-          Alert.alert('Success', `Saved marks for ${successCount} entries`);
-        }
-        
-        setMarksModalVisible(false);
-        setMarksForm({});
-        loadAllData();
-      } else {
-        Alert.alert('Info', 'No valid marks to save');
+        if (data) createdMarks.push(data);
       }
 
+      console.log('✅ Marks created successfully:', createdMarks);
+
+      Alert.alert('Success', `Marks saved successfully for ${createdMarks.length} students.`);
+      
+      // Reset form and close modal
+      setMarksModalVisible(false);
+      setMarksForm({});
+      setSelectedClassForMarks(null);
+      setSelectedClassesForMarks([]);
+      
+      // Reload data
+      await loadAllData();
+
     } catch (error) {
-      Alert.alert('Error', error.message);
+      console.error('❌ Error in handleBulkSaveMarks:', error);
+      Alert.alert('Error', `Failed to save marks: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  // Add class (schema.txt: classes table)
+  const handleAddClass = async () => {
+    try {
+      console.log('📝 handleAddClass called with form:', newClassName);
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [ExamsMarks] Tenant not ready for class creation:', tenantValidation.reason);
+        Alert.alert('Error', 'System not ready. Please try again.');
+        return;
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [ExamsMarks] Using effective tenant ID for class creation:', effectiveTenantId);
+      
+      // Validate required fields
+      if (!newClassName || !newClassName.trim()) {
+        Alert.alert('Validation Error', 'Please enter a class name');
+        return;
+      }
+      
+      console.log('📝 Using validated tenant_id for class creation:', effectiveTenantId);
+
+      const classData = {
+        class_name: newClassName.trim(),
+        tenant_id: effectiveTenantId
+      };
+
+      console.log('🔧 Inserting class with Enhanced Tenant System:', classData);
+      
+      // Use Enhanced Tenant System for class record
+      const { data, error } = await tenantDatabase.create('classes', classData);
+      
+      if (error) {
+        console.error('Database error:', error);
+        throw error;
+      }
+      
+      if (data) {
+        console.log('✅ Class created successfully:', data);
+        Alert.alert('Success', `Class "${newClassName}" created successfully.`);
+      }
+      
+      // Reset form and close modal
+      setAddClassModalVisible(false);
+      setNewClassName('');
+      
+      // Reload data
+      await loadAllData();
+
+    } catch (error) {
+      console.error('❌ Error in handleAddClass:', error);
+      Alert.alert('Error', `Failed to create class: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  // Add student (schema.txt: students table)
+  const handleAddStudent = async () => {
+    try {
+      console.log('📝 handleAddStudent called with form:', { newStudentName, newStudentRollNo, newStudentEmail });
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [ExamsMarks] Tenant not ready for student creation:', tenantValidation.reason);
+        Alert.alert('Error', 'System not ready. Please try again.');
+        return;
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [ExamsMarks] Using effective tenant ID for student creation:', effectiveTenantId);
+      
+      // Validate required fields
+      if (!newStudentName || !newStudentName.trim()) {
+        Alert.alert('Validation Error', 'Please enter a student name');
+        return;
+      }
+      
+      if (!newStudentRollNo || !newStudentRollNo.trim()) {
+        Alert.alert('Validation Error', 'Please enter a roll number');
+        return;
+      }
+      
+      if (!newStudentEmail || !newStudentEmail.trim()) {
+        Alert.alert('Validation Error', 'Please enter an email address');
+        return;
+      }
+      
+      console.log('📝 Using validated tenant_id for student creation:', effectiveTenantId);
+
+      const studentData = {
+        name: newStudentName.trim(),
+        roll_no: newStudentRollNo.trim(),
+        email: newStudentEmail.trim(),
+        tenant_id: effectiveTenantId
+      };
+
+      console.log('🔧 Inserting student with Enhanced Tenant System:', studentData);
+      
+      // Use Enhanced Tenant System for student record
+      const { data, error } = await tenantDatabase.create('students', studentData);
+      
+      if (error) {
+        console.error('Database error:', error);
+        throw error;
+      }
+      
+      if (data) {
+        console.log('✅ Student created successfully:', data);
+        Alert.alert('Success', `Student "${newStudentName}" created successfully.`);
+      }
+      
+      // Reset form and close modal
+      setAddStudentModalVisible(false);
+      setNewStudentName('');
+      setNewStudentRollNo('');
+      setNewStudentEmail('');
+      
+      // Reload data
+      await loadAllData();
+
+    } catch (error) {
+      console.error('❌ Error in handleAddStudent:', error);
+      Alert.alert('Error', `Failed to create student: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  // Add subject (schema.txt: subjects table)
+  const handleAddSubject = async () => {
+    try {
+      console.log('📝 handleAddSubject called with form:', newSubjectName);
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [ExamsMarks] Tenant not ready for subject creation:', tenantValidation.reason);
+        Alert.alert('Error', 'System not ready. Please try again.');
+        return;
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [ExamsMarks] Using effective tenant ID for subject creation:', effectiveTenantId);
+      
+      // Validate required fields
+      if (!newSubjectName || !newSubjectName.trim()) {
+        Alert.alert('Validation Error', 'Please enter a subject name');
+        return;
+      }
+      
+      console.log('📝 Using validated tenant_id for subject creation:', effectiveTenantId);
+
+      const subjectData = {
+        name: newSubjectName.trim(),
+        tenant_id: effectiveTenantId
+      };
+
+      console.log('🔧 Inserting subject with Enhanced Tenant System:', subjectData);
+      
+      // Use Enhanced Tenant System for subject record
+      const { data, error } = await tenantDatabase.create('subjects', subjectData);
+      
+      if (error) {
+        console.error('Database error:', error);
+        throw error;
+      }
+      
+      if (data) {
+        console.log('✅ Subject created successfully:', data);
+        Alert.alert('Success', `Subject "${newSubjectName}" created successfully.`);
+      }
+      
+      // Reset form and close modal
+      setAddSubjectModalVisible(false);
+      setNewSubjectName('');
+      
+      // Reload data
+      await loadAllData();
+
+    } catch (error) {
+      console.error('❌ Error in handleAddSubject:', error);
+      Alert.alert('Error', `Failed to create subject: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  // Generate report cards (schema.txt: marks table)
+  const handleGenerateReportCards = async () => {
+    try {
+      console.log('📝 handleGenerateReportCards called');
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [ExamsMarks] Tenant not ready for report card generation:', tenantValidation.reason);
+        Alert.alert('Error', 'System not ready. Please try again.');
+        return;
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [ExamsMarks] Using effective tenant ID for report card generation:', effectiveTenantId);
+      
+      // Generate report cards logic will be implemented here
+      Alert.alert('Info', 'Report card generation feature is under development.');
+      
+    } catch (error) {
+      console.error('❌ Error in handleGenerateReportCards:', error);
+      Alert.alert('Error', `Failed to generate report cards: ${error.message || 'Unknown error'}`);
     }
   };
 
@@ -917,8 +1123,8 @@ const ExamsMarks = () => {
     }));
   };
 
-  // Add new subject
-  const handleAddSubject = () => {
+  // Add new subject - Open modal
+  const handleOpenAddSubjectModal = () => {
     console.log('Add Subject button clicked');
     setNewSubjectName('');
     setAddSubjectModalVisible(true);
@@ -950,7 +1156,7 @@ const ExamsMarks = () => {
   };
 
   // Add new student - Open modal with reset form
-  const handleAddStudent = () => {
+  const handleOpenAddStudentModal = () => {
     console.log('Add Student button clicked');
     
     // Reset form data
@@ -1291,8 +1497,8 @@ const ExamsMarks = () => {
     setSelectedClassesForMarks(prev => prev.filter(c => c.id !== classId));
   };
 
-  // Add new class
-  const handleAddClass = () => {
+  // Add new class - Open modal
+  const handleOpenAddClassModal = () => {
     setNewClassName('');
     setAddClassModalVisible(true);
   };
