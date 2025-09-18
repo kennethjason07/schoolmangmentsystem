@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Dimensions,
   FlatList,
   Platform,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -45,6 +46,19 @@ const AcademicPerformance = ({ navigation }) => {
   const [pdfPreviewContent, setPDFPreviewContent] = useState('');
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [selectedAcademicYear, setSelectedAcademicYear] = useState('2024-25');
+  
+  // Enhanced scroll functionality
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [currentRefreshColor, setCurrentRefreshColor] = useState(0);
+  const scrollViewRef = useRef(null);
+  const scrollTopOpacity = useRef(new Animated.Value(0)).current;
+  const scrollTopScale = useRef(new Animated.Value(0.8)).current;
+  
+  // Constants for scroll behavior
+  const isWeb = Platform.OS === 'web';
+  const SCROLL_THRESHOLD = isWeb ? 80 : 120;
+  const SCROLL_THROTTLE = isWeb ? 32 : 16;
+  const refreshColors = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0'];
   
   // Statistics
   const [stats, setStats] = useState({
@@ -296,8 +310,58 @@ const AcademicPerformance = ({ navigation }) => {
 
   const onRefresh = async () => {
     setRefreshing(true);
+    // Cycle through refresh colors for better UX
+    setCurrentRefreshColor((prev) => (prev + 1) % refreshColors.length);
     await loadAcademicData();
     setRefreshing(false);
+  };
+
+  // Enhanced scroll event handler
+  const handleScroll = (event) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    const shouldShow = offsetY > SCROLL_THRESHOLD;
+    
+    if (shouldShow !== showScrollTop) {
+      setShowScrollTop(shouldShow);
+      animateScrollTopButton(shouldShow);
+    }
+  };
+
+  // Animate scroll-to-top button
+  const animateScrollTopButton = (show) => {
+    Animated.parallel([
+      Animated.timing(scrollTopOpacity, {
+        toValue: show ? 1 : 0,
+        duration: 300,
+        useNativeDriver: !isWeb, // Native driver not supported on web for opacity
+      }),
+      Animated.spring(scrollTopScale, {
+        toValue: show ? 1 : 0.8,
+        tension: 100,
+        friction: 8,
+        useNativeDriver: !isWeb,
+      }),
+    ]).start();
+  };
+
+  // Scroll to top function
+  const scrollToTop = () => {
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({
+        y: 0,
+        animated: !isWeb // Use CSS smooth scroll on web
+      });
+    }
+  };
+
+  // Quick navigation function
+  const scrollToSection = (yPosition) => {
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({
+        y: yPosition,
+        animated: !isWeb
+      });
+    }
   };
 
   const handleExport = async (format) => {
@@ -381,6 +445,36 @@ const AcademicPerformance = ({ navigation }) => {
     }
   };
 
+  // Quick Navigation Component
+  const QuickNavigation = () => {
+    const navigationItems = [
+      { label: 'Filters', icon: 'filter', position: 0 },
+      { label: 'Stats', icon: 'analytics', position: 400 },
+      { label: 'Charts', icon: 'pie-chart', position: 800 },
+      { label: 'Performers', icon: 'trophy', position: 1200 },
+    ];
+
+    return (
+      <View style={styles.quickNavContainer}>
+        <Text style={styles.quickNavTitle}>Quick Navigation</Text>
+        <View style={styles.quickNavButtons}>
+          {navigationItems.map((item, index) => (
+            <TouchableOpacity
+              key={index}
+              style={styles.quickNavButton}
+              onPress={() => scrollToSection(item.position)}
+              accessibilityLabel={`Navigate to ${item.label} section`}
+              accessibilityHint={`Scrolls to the ${item.label.toLowerCase()} section of the academic performance report`}
+            >
+              <Ionicons name={item.icon} size={20} color="#2196F3" />
+              <Text style={styles.quickNavButtonText}>{item.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
   const renderTopPerformer = ({ item, index }) => (
     <View style={styles.performerCard}>
       <View style={styles.rankContainer}>
@@ -424,12 +518,27 @@ const AcademicPerformance = ({ navigation }) => {
     <View style={styles.container}>
       <Header title="Academic Performance" showBack={true} />
       
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
+      <View style={styles.scrollableContainer}>
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.content}
+          contentContainerStyle={styles.scrollContent}
+          onScroll={handleScroll}
+          scrollEventThrottle={SCROLL_THROTTLE}
+          showsVerticalScrollIndicator={!isWeb}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[refreshColors[currentRefreshColor]]}
+              tintColor={refreshColors[currentRefreshColor]}
+              title="Pull to refresh academic performance"
+              titleColor="#666"
+            />
+          }
+        >
+        {/* Quick Navigation */}
+        <QuickNavigation />
         {/* Filters Section */}
         <View style={styles.filtersSection}>
           <Text style={styles.sectionTitle}>Filters</Text>
@@ -698,7 +807,33 @@ const AcademicPerformance = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         </View>
+        
+        {/* Bottom spacing for better scroll experience */}
+        <View style={styles.bottomSpacing} />
       </ScrollView>
+      </View>
+
+      {/* Floating Scroll-to-Top Button */}
+      {showScrollTop && (
+        <Animated.View
+          style={[
+            styles.scrollToTopButton,
+            {
+              opacity: scrollTopOpacity,
+              transform: [{ scale: scrollTopScale }],
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.scrollToTopInner}
+            onPress={scrollToTop}
+            accessibilityLabel="Scroll to top"
+            accessibilityHint="Scrolls the academic performance report back to the top"
+          >
+            <Ionicons name="arrow-up" size={24} color="#fff" />
+          </TouchableOpacity>
+        </Animated.View>
+      )}
 
       {/* Export Modal */}
       <ExportModal
@@ -734,12 +869,47 @@ const AcademicPerformance = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  // Enhanced container with web optimizations
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    ...(Platform.OS === 'web' && {
+      height: '100vh',
+      maxHeight: '100vh',
+      overflow: 'hidden',
+      position: 'relative',
+    }),
   },
+  
+  // Scrollable area with calculated height
+  scrollableContainer: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: 'calc(100vh - 60px)', // Account for header
+      maxHeight: 'calc(100vh - 60px)',
+      overflow: 'hidden',
+    }),
+  },
+  
+  // Enhanced ScrollView with web scroll properties
   content: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: '100%',
+      maxHeight: '100%',
+      overflowY: 'scroll',
+      overflowX: 'hidden',
+      WebkitOverflowScrolling: 'touch',
+      scrollBehavior: 'smooth',
+      scrollbarWidth: 'thin',
+      scrollbarColor: '#2196F3 #f5f5f5',
+    }),
+  },
+  
+  // Content container properties
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 100, // Extra bottom padding for better UX
   },
   loadingContainer: {
     flex: 1,
@@ -1042,6 +1212,76 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     textAlign: 'center',
+  },
+
+  // Enhanced Scroll Features Styles
+  
+  // Quick Navigation Styles
+  quickNavContainer: {
+    backgroundColor: '#fff',
+    margin: 16,
+    marginBottom: 8,
+    padding: 16,
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  quickNavTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  quickNavButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  quickNavButton: {
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#f8f9fa',
+    minWidth: 70,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  quickNavButtonText: {
+    fontSize: 11,
+    color: '#2196F3',
+    marginTop: 6,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  
+  // Scroll-to-Top Button Styles
+  scrollToTopButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    zIndex: 1000,
+  },
+  scrollToTopInner: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#2196F3',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  
+  // Bottom spacing for better scroll experience
+  bottomSpacing: {
+    height: 100,
+    backgroundColor: 'transparent',
   },
 });
 
