@@ -19,10 +19,23 @@ import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import { supabase } from '../../utils/supabase';
 import ReportCardModal from '../../components/ReportCardModal';
+import { useTenantAccess } from '../../utils/tenantHelpers';
+import { useAuth } from '../../utils/AuthContext';
 
 const isWeb = Platform.OS === 'web';
 
 const ReportCardGeneration = ({ navigation }) => {
+  // Tenant and auth context
+  const { user } = useAuth();
+  const { 
+    tenantId, 
+    isReady, 
+    isLoading: tenantLoading, 
+    tenant, 
+    tenantName, 
+    error: tenantError 
+  } = useTenantAccess();
+  
   // Dynamic responsive state that updates on resize
   const [dimensions, setDimensions] = useState(() => {
     const { width, height } = Dimensions.get('window');
@@ -61,8 +74,22 @@ const ReportCardGeneration = ({ navigation }) => {
   }, []);
 
   useEffect(() => {
-    loadInitialData();
-  }, []);
+    console.log('🏢 ReportCardGeneration: Tenant context changed:', {
+      tenantId: tenantId || 'NULL',
+      isReady,
+      tenantLoading,
+      userEmail: user?.email || 'NULL'
+    });
+    
+    // Only load data when tenant and user are available
+    if (tenantId && user && isReady && !tenantLoading) {
+      console.log('🚀 ReportCardGeneration: Loading initial data with tenant:', tenantId);
+      loadInitialData();
+    } else if (tenantError) {
+      console.error('❌ ReportCardGeneration: Tenant error:', tenantError);
+      Alert.alert('Error', tenantError);
+    }
+  }, [tenantId, user, isReady, tenantLoading, tenantError]);
 
   useEffect(() => {
     if (selectedClass && selectedExam) {
@@ -84,12 +111,26 @@ const ReportCardGeneration = ({ navigation }) => {
 
   const loadClasses = async () => {
     try {
+      console.log('🏢 ReportCardGeneration: Loading classes for tenant:', tenantId);
+      
+      if (!tenantId) {
+        console.warn('🏢 ReportCardGeneration: No tenantId available for classes');
+        setClasses([]);
+        return;
+      }
+      
       const { data, error } = await supabase
         .from('classes')
         .select('*')
+        .eq('tenant_id', tenantId)
         .order('class_name', { ascending: true });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ ReportCardGeneration: Error loading classes:', error);
+        throw error;
+      }
+      
+      console.log('✅ ReportCardGeneration: Loaded', data?.length || 0, 'classes for tenant');
       setClasses(data || []);
     } catch (error) {
       console.error('Error loading classes:', error);
@@ -99,6 +140,14 @@ const ReportCardGeneration = ({ navigation }) => {
 
   const loadExams = async () => {
     try {
+      console.log('📋 ReportCardGeneration: Loading exams for tenant:', tenantId);
+      
+      if (!tenantId) {
+        console.warn('📋 ReportCardGeneration: No tenantId available for exams');
+        setExams([]);
+        return;
+      }
+      
       const { data, error } = await supabase
         .from('exams')
         .select(`
@@ -111,15 +160,22 @@ const ReportCardGeneration = ({ navigation }) => {
           remarks,
           max_marks,
           created_at,
+          tenant_id,
           classes:class_id (
             id,
             class_name,
             section
           )
         `)
+        .eq('tenant_id', tenantId)
         .order('start_date', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ ReportCardGeneration: Error loading exams:', error);
+        throw error;
+      }
+      
+      console.log('✅ ReportCardGeneration: Loaded', data?.length || 0, 'exams for tenant');
       setExams(data || []);
     } catch (error) {
       console.error('Error loading exams:', error);
@@ -129,6 +185,20 @@ const ReportCardGeneration = ({ navigation }) => {
 
   const loadStudents = async () => {
     try {
+      console.log('👨‍🎓 ReportCardGeneration: Loading students for class:', selectedClass, 'tenant:', tenantId);
+      
+      if (!tenantId) {
+        console.warn('👨‍🎓 ReportCardGeneration: No tenantId available for students');
+        setStudents([]);
+        return;
+      }
+      
+      if (!selectedClass) {
+        console.warn('👨‍🎓 ReportCardGeneration: No class selected for students');
+        setStudents([]);
+        return;
+      }
+      
       const { data, error } = await supabase
         .from('students')
         .select(`
@@ -145,9 +215,15 @@ const ReportCardGeneration = ({ navigation }) => {
           )
         `)
         .eq('class_id', selectedClass)
+        .eq('tenant_id', tenantId)
         .order('roll_no', { ascending: true });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ ReportCardGeneration: Error loading students:', error);
+        throw error;
+      }
+      
+      console.log('✅ ReportCardGeneration: Loaded', data?.length || 0, 'students for class');
       setStudents(data || []);
     } catch (error) {
       console.error('Error loading students:', error);
@@ -613,16 +689,50 @@ const ReportCardGeneration = ({ navigation }) => {
     },
   });
 
-  // Loading state
-
+  // Loading state - include tenant loading
+  const isLoading = loading || tenantLoading || !isReady;
+  
   // Return the JSX here since styles are now created inside
-  if (loading) {
+  if (isLoading) {
     return (
       <View style={styles.container}>
         <Header title="Report Card Generation" showBack={true} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#1976d2" />
-          <Text style={styles.loadingText}>Loading data...</Text>
+          <Text style={styles.loadingText}>
+            {tenantLoading ? 'Loading tenant context...' : 'Loading data...'}
+          </Text>
+          {tenantName && (
+            <Text style={[styles.loadingText, { fontSize: 14, marginTop: 8 }]}>
+              Tenant: {tenantName}
+            </Text>
+          )}
+        </View>
+      </View>
+    );
+  }
+  
+  // Handle tenant error state
+  if (tenantError && !tenantId) {
+    return (
+      <View style={styles.container}>
+        <Header title="Report Card Generation" showBack={true} />
+        <View style={styles.loadingContainer}>
+          <Ionicons name="alert-circle" size={48} color="#dc3545" />
+          <Text style={[styles.loadingText, { color: '#dc3545' }]}>Tenant Error</Text>
+          <Text style={[styles.loadingText, { fontSize: 14 }]}>{tenantError}</Text>
+          <TouchableOpacity
+            style={{
+              backgroundColor: '#1976d2',
+              paddingHorizontal: 20,
+              paddingVertical: 10,
+              borderRadius: 8,
+              marginTop: 16
+            }}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={{ color: 'white', fontWeight: '600' }}>Go Back</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
