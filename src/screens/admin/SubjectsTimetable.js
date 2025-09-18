@@ -54,16 +54,7 @@ const SubjectsTimetable = ({ route }) => {
   } = useTenant();
   const { user } = useAuth();
   
-  // 🔍 DEBUG: Log tenant info on component load
-  console.log('🏢 SubjectsTimetable - Enhanced Tenant Debug:', {
-    tenantId,
-    tenantName,
-    isReady,
-    tenantLoading,
-    tenantError: tenantError?.message || 'none',
-    tenant: tenant ? 'SET' : 'NULL',
-    classId
-  });
+  // Tenant debug disabled to prevent excessive re-renders
   const [tab, setTab] = useState(classId ? 'timetable' : 'subjects');
   const [subjects, setSubjects] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -189,40 +180,7 @@ const SubjectsTimetable = ({ route }) => {
     return () => clearTimeout(timer);
   }, [isReady, tenantLoading, user, tenantError]);
   
-  // Immediate effect: Check tenant context every 2 seconds and provide status
-  React.useEffect(() => {
-    const statusInterval = setInterval(() => {
-      console.log('🔍 SubjectsTimetable: Tenant Status Check:', {
-        isReady,
-        tenantId,
-        tenantLoading,
-        tenantError: tenantError?.message || 'none',
-        tenant: tenant ? 'SET' : 'NULL',
-        user: user ? user.email : 'NULL'
-      });
-      
-      // If we have a user but no tenant context, something is wrong
-      if (user && !isReady && !tenantLoading && !tenantError) {
-        console.log('🚨 SubjectsTimetable: CRITICAL - User authenticated but tenant context not ready!');
-        
-        // Try to trigger tenant context initialization
-        if (initializeTenantContext) {
-          console.log('🚀 SubjectsTimetable: Attempting to trigger tenant context initialization...');
-          initializeTenantContext().then(result => {
-            console.log('📄 SubjectsTimetable: Tenant context initialization result:', result);
-            if (result?.success && result?.tenantId) {
-              initializeTenantHelpers(result.tenantId);
-              setRefreshCounter(prev => prev + 1);
-            }
-          }).catch(error => {
-            console.error('❌ SubjectsTimetable: Tenant context initialization failed:', error);
-          });
-        }
-      }
-    }, 2000);
-    
-    return () => clearInterval(statusInterval);
-  }, [isReady, tenantId, tenantLoading, tenantError, tenant, user]);
+  // Remove the excessive tenant status logging that causes re-renders
 
   // Add screen dimension change listener
   useEffect(() => {
@@ -1326,8 +1284,12 @@ const SubjectsTimetable = ({ route }) => {
   const handleSubjectChange = async (day, slot, subjectId) => {
     if (!subjectId) {
       // Remove subject from this slot if empty
+      const normalizeTime = (time) => {
+        if (!time) return '';
+        return time.split(':').slice(0, 2).join(':'); // Keep only HH:MM
+      };
       const existingPeriod = timetables[selectedClass]?.[day]?.find(
-        p => p.startTime === slot.startTime
+        p => normalizeTime(p.startTime) === normalizeTime(slot.startTime)
       );
       if (existingPeriod) {
         await removePeriod(day, existingPeriod.id);
@@ -1345,7 +1307,9 @@ const SubjectsTimetable = ({ route }) => {
       // 🔍 Enhanced tenant system check
       if (!isTenantReady()) {
         Alert.alert('Error', 'Tenant context not ready. Please try again.');
-        setLoading(false);
+        if (Platform.OS !== 'web') {
+          setLoading(false);
+        }
         return;
       }
       
@@ -1493,8 +1457,12 @@ const SubjectsTimetable = ({ route }) => {
         
         console.log('🔄 handleSubjectChange: Before update - dayTT:', dayTT.map(p => ({ startTime: p.startTime, subjectId: p.subjectId, label: p.label })));
         
-        // Remove any existing period for this time slot
-        const filteredDayTT = dayTT.filter(p => p.startTime !== slot.startTime);
+        // Remove any existing period for this time slot (normalize time format)
+        const normalizeTime = (time) => {
+          if (!time) return '';
+          return time.split(':').slice(0, 2).join(':'); // Keep only HH:MM
+        };
+        const filteredDayTT = dayTT.filter(p => normalizeTime(p.startTime) !== normalizeTime(slot.startTime));
         
         // Add the updated period
         filteredDayTT.push(updatedPeriod);
@@ -2050,14 +2018,14 @@ const SubjectsTimetable = ({ route }) => {
             showsVerticalScrollIndicator={Platform.OS === 'web'}
             keyboardShouldPersistTaps="handled"
             bounces={Platform.OS !== 'web'}
-            refreshControl={
+            refreshControl={Platform.OS !== 'web' ? (
               <RefreshControl 
                 refreshing={refreshing} 
                 onRefresh={onRefresh} 
                 colors={['#4CAF50']}
                 tintColor="#4CAF50"
               />
-            }
+            ) : undefined}
           >
           <View style={styles.subjectsSection}>
             {subjects.map((item) => (
@@ -2245,20 +2213,34 @@ const SubjectsTimetable = ({ route }) => {
 
             {/* Pre-defined time slots */}
             {getTimeSlots().map((slot, index) => {
+              // Normalize time format for comparison (remove seconds if present)
+              const normalizeTime = (time) => {
+                if (!time) return '';
+                return time.split(':').slice(0, 2).join(':'); // Keep only HH:MM
+              };
+              
               const existingPeriod = timetables[selectedClass]?.[selectedDay]?.find(
-                p => p.startTime === slot.startTime
+                p => normalizeTime(p.startTime) === normalizeTime(slot.startTime)
               );
               
-              // Debug logging for existingPeriod calculation
-              if (Platform.OS === 'web') {
+              // Debug logging for existingPeriod calculation  
+              if (Platform.OS === 'web' && slot.number <= 3) { // Only log first 3 slots to avoid spam
+                const dayPeriods = timetables[selectedClass]?.[selectedDay] || [];
                 console.log(`🔍 Slot ${slot.number} (${slot.startTime}):`, {
                   existingPeriod: existingPeriod ? {
                     id: existingPeriod.id,
                     subjectId: existingPeriod.subjectId,
-                    label: existingPeriod.label
+                    label: existingPeriod.label,
+                    originalStartTime: existingPeriod.startTime,
+                    normalizedStartTime: normalizeTime(existingPeriod.startTime)
                   } : null,
-                  dayPeriods: timetables[selectedClass]?.[selectedDay]?.length || 0,
-                  refreshCounter
+                  // Show the exact comparison with normalization
+                  slotStartTime: `"${slot.startTime}"`,
+                  normalizedSlotTime: `"${normalizeTime(slot.startTime)}"`,
+                  allStartTimes: dayPeriods.map(p => `"${p.startTime}"`),
+                  allNormalizedTimes: dayPeriods.map(p => `"${normalizeTime(p.startTime)}"`),
+                  // Show if any match with normalization
+                  hasMatch: dayPeriods.some(p => normalizeTime(p.startTime) === normalizeTime(slot.startTime))
                 });
               }
               return (

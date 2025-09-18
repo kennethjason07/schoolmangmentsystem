@@ -154,10 +154,12 @@ export const tenantDatabase = {
     const { data: result, error } = await supabase
       .from(table)
       .insert(dataWithTenant)
-      .select()
-      .single();
+      .select();
 
-    return { data: result, error };
+    // Return array format to match timetable code expectations
+    // Convert single result to array if it's not already an array
+    const normalizedResult = Array.isArray(result) ? result : (result ? [result] : []);
+    return { data: normalizedResult, error };
   },
 
   /**
@@ -256,9 +258,11 @@ export const tenantDatabase = {
       query = query.eq('tenant_id', tenantId);
     }
     
-    const { data, error } = await query.select();
-
-    return { data, error };
+    const { data: result, error } = await query.select();
+    
+    // Return array format to match timetable code expectations
+    const normalizedResult = Array.isArray(result) ? result : (result ? [result] : []);
+    return { data: normalizedResult, error };
   },
 
   /**

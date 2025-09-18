@@ -428,13 +428,7 @@ const AttendanceReport = ({ navigation }) => {
     <View style={styles.container}>
       <Header title="Attendance Report" showBack={true} />
 
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
+      <View style={styles.scrollWrapper}>
         {/* Filters Section */}
         <View style={styles.filtersSection}>
           <Text style={styles.sectionTitle}>Filters</Text>
@@ -532,7 +526,20 @@ const AttendanceReport = ({ navigation }) => {
             </View>
           )}
         </View>
+      </View>
 
+      {/* Main Content with ScrollView for Statistics and Charts */}
+      <ScrollView
+        style={styles.scrollContainer}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        nestedScrollEnabled={true}
+        overScrollMode="always"
+        scrollEventThrottle={16}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {/* Statistics Cards */}
         <View style={styles.statsSection}>
           <Text style={styles.sectionTitle}>Today's Overview</Text>
@@ -600,7 +607,6 @@ const AttendanceReport = ({ navigation }) => {
           </View>
         )}
 
-
         {/* Recent Attendance Records */}
         <View style={styles.recordsSection}>
           <View style={styles.sectionHeader}>
@@ -613,6 +619,7 @@ const AttendanceReport = ({ navigation }) => {
             renderItem={renderClassWiseRecord}
             scrollEnabled={false}
             showsVerticalScrollIndicator={false}
+            nestedScrollEnabled={false}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <Ionicons name="document-text-outline" size={48} color="#ccc" />
@@ -662,11 +669,46 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
-  content: {
+  scrollWrapper: {
     flex: 1,
+    ...Platform.select({
+      web: {
+        height: 'calc(100vh - 120px)',
+        maxHeight: 'calc(100vh - 120px)',
+        minHeight: 500,
+        overflow: 'hidden',
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+      },
+      default: {
+        minHeight: 400,
+      },
+    }),
+  },
+  scrollContainer: {
+    flex: 1,
+    ...Platform.select({
+      web: {
+        overflowY: 'scroll',
+        overflowX: 'hidden',
+        height: '100%',
+        maxHeight: '100%',
+        WebkitOverflowScrolling: 'touch',
+        scrollBehavior: 'smooth',
+      },
+    }),
   },
   scrollContent: {
-    paddingBottom: 100, // Bottom padding for the entire ScrollView to prevent home button overlap
+    flexGrow: 1,
+    paddingBottom: 40,
+    ...Platform.select({
+      web: {
+        paddingBottom: 60,
+        paddingTop: 4,
+        minHeight: '100%',
+      },
+    }),
   },
   loadingContainer: {
     flex: 1,
@@ -684,9 +726,10 @@ const styles = StyleSheet.create({
   // Filters Section
   filtersSection: {
     backgroundColor: '#fff',
-    margin: 16,
-    padding: 16,
-    borderRadius: 12,
+    marginHorizontal: 12,
+    marginVertical: 2,
+    padding: 8,
+    borderRadius: 6,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -694,52 +737,54 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 16,
+    marginBottom: 10,
   },
   filterRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 6,
   },
   filterItem: {
     flex: 1,
-    marginHorizontal: 4,
+    marginHorizontal: 2,
   },
   filterLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
     color: '#666',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   pickerContainer: {
     borderWidth: 1,
     borderColor: '#e0e0e0',
-    borderRadius: 8,
+    borderRadius: 6,
     backgroundColor: '#f8f9fa',
+    minHeight: 40,
   },
   picker: {
-    height: 50,
+    height: 40,
     color: '#333',
   },
   customDateRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 12,
+    marginTop: 8,
   },
   dateButton: {
     flex: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 12,
-    marginHorizontal: 4,
+    padding: 8,
+    marginHorizontal: 2,
     borderWidth: 1,
     borderColor: '#e0e0e0',
-    borderRadius: 8,
+    borderRadius: 6,
     backgroundColor: '#f8f9fa',
+    minHeight: 40,
   },
   dateButtonText: {
     fontSize: 14,
@@ -749,10 +794,10 @@ const styles = StyleSheet.create({
   // Statistics Section
   statsSection: {
     backgroundColor: '#fff',
-    margin: 16,
-    marginTop: 0,
-    padding: 16,
-    borderRadius: 12,
+    marginHorizontal: 16,
+    marginVertical: 8,
+    padding: 12,
+    borderRadius: 8,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -794,10 +839,10 @@ const styles = StyleSheet.create({
   // Chart Section
   chartSection: {
     backgroundColor: '#fff',
-    margin: 16,
-    marginTop: 0,
-    padding: 16,
-    borderRadius: 12,
+    marginHorizontal: 16,
+    marginVertical: 8,
+    padding: 12,
+    borderRadius: 8,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -868,11 +913,11 @@ const styles = StyleSheet.create({
   // Records Section
   recordsSection: {
     backgroundColor: '#fff',
-    margin: 16,
-    marginTop: 0,
-    padding: 16,
-    paddingBottom: 80, // Increased bottom padding to prevent home button overlap
-    borderRadius: 12,
+    marginHorizontal: 16,
+    marginVertical: 8,
+    padding: 12,
+    paddingBottom: 60,
+    borderRadius: 8,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -883,7 +928,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 10,
   },
   exportButton: {
     flexDirection: 'row',
