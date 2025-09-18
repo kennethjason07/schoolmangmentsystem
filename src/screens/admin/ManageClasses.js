@@ -90,6 +90,14 @@ const ManageClasses = ({ navigation }) => {
     }
   }, [tenantId, user, tenantLoading]);
 
+  // Debug modal state changes
+  useEffect(() => {
+    console.log('🔧 ManageClasses: Class details modal state changed:', classDetailsModal);
+    if (classDetailsModal && selectedClassDetails) {
+      console.log('🔧 ManageClasses: Selected class details:', selectedClassDetails.class_name);
+    }
+  }, [classDetailsModal, selectedClassDetails]);
+
   const loadAllData = async () => {
     const startTime = performance.now();
     setLoading(true);
@@ -150,14 +158,52 @@ const ManageClasses = ({ navigation }) => {
         teachers: teacherData?.length || 0
       });
       
-      // 🚀 OPTIMIZED: Simple processing without complex counts initially
-      const processedClasses = (classData || []).map(cls => ({
-        ...cls,
-        students_count: 0, // Load on-demand if needed
-        subjects_count: 0  // Load on-demand if needed
+      // 🚀 ENHANCED: Load student and subject counts for each class
+      console.log('📊 ManageClasses: Loading student and subject counts...');
+      
+      const classesWithCounts = await Promise.all((classData || []).map(async (cls) => {
+        try {
+          // Get student count for this class
+          const { count: studentsCount, error: studentsError } = await supabase
+            .from(TABLES.STUDENTS)
+            .select('*', { count: 'exact', head: true })
+            .eq('class_id', cls.id)
+            .eq('tenant_id', tenantId);
+          
+          // Get subjects count for this class
+          const { count: subjectsCount, error: subjectsError } = await supabase
+            .from(TABLES.SUBJECTS)
+            .select('*', { count: 'exact', head: true })
+            .eq('class_id', cls.id)
+            .eq('tenant_id', tenantId);
+          
+          if (studentsError) {
+            console.warn(`Warning: Could not load student count for class ${cls.class_name}:`, studentsError.message);
+          }
+          
+          if (subjectsError) {
+            console.warn(`Warning: Could not load subject count for class ${cls.class_name}:`, subjectsError.message);
+          }
+          
+          return {
+            ...cls,
+            students_count: studentsCount || 0,
+            subjects_count: subjectsCount || 0
+          };
+        } catch (error) {
+          console.warn(`Error loading counts for class ${cls.class_name}:`, error.message);
+          return {
+            ...cls,
+            students_count: 0,
+            subjects_count: 0
+          };
+        }
       }));
-      // 🚀 OPTIMIZED: Set data immediately
-      setClasses(processedClasses);
+      
+      console.log('📊 ManageClasses: Counts loaded for all classes');
+      
+      // Set data with actual counts
+      setClasses(classesWithCounts);
       setTeachers(teacherData || []);
       
       console.log('📊 ManageClasses: Data loaded successfully:', {
@@ -392,11 +438,12 @@ const ManageClasses = ({ navigation }) => {
               
               console.log('Starting class deletion process for class ID:', classId);
 
-              // Step 1: Get all subjects for this class to handle cascading deletes using tenant-aware query
-              const { data: classSubjects } = await createTenantQuery(tenantId, 'subjects')
+              // Step 1: Get all subjects for this class to handle cascading deletes
+              const { data: classSubjects } = await supabase
+                .from(TABLES.SUBJECTS)
                 .select('id')
                 .eq('class_id', classId)
-                .execute();
+                .eq('tenant_id', tenantId);
               
               const subjectIds = classSubjects?.map(s => s.id) || [];
               console.log('Found subjects to delete:', subjectIds);
@@ -558,11 +605,16 @@ const ManageClasses = ({ navigation }) => {
   };
 
   const openClassDetails = async (classItem) => {
+    console.log('🔧 ManageClasses: Opening class details for:', classItem.class_name);
+    
     try {
       setSelectedClassDetails(classItem);
       
-      // Fetch subjects for this class with their assigned teachers using tenant-aware query
-      const { data: subjectsData, error: subjectsError } = await createTenantQuery(tenantId, 'subjects')
+      // Fetch subjects for this class with their assigned teachers
+      console.log('📋 ManageClasses: Fetching subjects for class ID:', classItem.id);
+      
+      const { data: subjectsData, error: subjectsError } = await supabase
+        .from(TABLES.SUBJECTS)
         .select(`
           *,
           teacher_subjects(
@@ -573,20 +625,14 @@ const ManageClasses = ({ navigation }) => {
           )
         `)
         .eq('class_id', classItem.id)
-        .execute();
+        .eq('tenant_id', tenantId);
       
-      if (subjectsError) throw subjectsError;
-      
-      // 🛡️ Validate subjects data belongs to correct tenant
-      if (subjectsData && subjectsData.length > 0) {
-        const subjectsValid = validateDataTenancy(subjectsData, tenantId, 'ManageClasses - Class Subjects');
-        if (!subjectsValid) {
-          console.error('Class subjects data validation failed');
-          setClassSubjects([]);
-          setClassDetailsModal(true);
-          return;
-        }
+      if (subjectsError) {
+        console.error('Error fetching subjects:', subjectsError);
+        throw subjectsError;
       }
+      
+      console.log('📋 ManageClasses: Subjects data loaded:', subjectsData?.length || 0, 'subjects');
       
       // Process the data to get teacher info for each subject
       const processedSubjects = subjectsData?.map(subject => ({
@@ -594,8 +640,10 @@ const ManageClasses = ({ navigation }) => {
         teacher: subject.teacher_subjects?.[0]?.teachers || null
       })) || [];
       
+      console.log('🔧 ManageClasses: Setting class subjects and showing modal');
       setClassSubjects(processedSubjects);
       setClassDetailsModal(true);
+      
     } catch (error) {
       console.error('Error loading class details:', error);
       Alert.alert('Error', 'Failed to load class details');
@@ -626,8 +674,17 @@ const ManageClasses = ({ navigation }) => {
 
     return (
       <TouchableOpacity 
-        style={styles.classCard}
-        onPress={() => openClassDetails(item)}
+        style={[
+          styles.classCard,
+          Platform.OS === 'web' && styles.webClickable
+        ]}
+        onPress={() => {
+          console.log('🔧 ManageClasses: Class card pressed:', item.class_name);
+          openClassDetails(item);
+        }}
+        activeOpacity={0.7}
+        accessibilityRole={Platform.OS === 'web' ? 'button' : undefined}
+        accessibilityLabel={`View details for ${item.class_name}`}
       >
         <View style={styles.classHeader}>
           <View style={styles.classInfo}>
@@ -813,13 +870,19 @@ const ManageClasses = ({ navigation }) => {
   );
 
   // Add class details modal
-  const renderClassDetailsModal = () => (
-    <Modal
-      visible={classDetailsModal}
-      animationType="slide"
-      transparent={false}
-      onRequestClose={() => setClassDetailsModal(false)}
-    >
+  const renderClassDetailsModal = () => {
+    console.log('🔧 ManageClasses: Rendering class details modal. Visible:', classDetailsModal);
+    
+    return (
+      <Modal
+        visible={classDetailsModal}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => {
+          console.log('🔧 ManageClasses: Closing class details modal');
+          setClassDetailsModal(false);
+        }}
+      >
       <View style={styles.fullScreenModal}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>
@@ -883,7 +946,8 @@ const ManageClasses = ({ navigation }) => {
         </TouchableOpacity>
       </View>
     </Modal>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -1292,6 +1356,16 @@ const styles = StyleSheet.create({
     ...Platform.select({
       web: {
         paddingBottom: 40,
+      },
+    }),
+  },
+  // Web-specific styles for clickable elements
+  webClickable: {
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+        userSelect: 'none',
+        transition: 'transform 0.15s ease-in-out, box-shadow 0.15s ease-in-out',
       },
     }),
   },
