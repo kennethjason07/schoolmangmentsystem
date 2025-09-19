@@ -1397,16 +1397,23 @@ const ClassStudentDetails = ({ route, navigation }) => {
         const paymentAmountFloat = parseFloat(paymentAmount);
         
         // 🚨 PREVENT OVERPAYMENT WITH WARNING POPUP
-        if (paymentAmountFloat > remainingForComponent) {
+        // Allow payments even when there's no outstanding amount (for additional payments)
+        if (paymentAmountFloat > remainingForComponent && remainingForComponent > 0) {
           Alert.alert(
             'Payment Failed', 
-            `Payment amount cannot exceed outstanding balance of ₹${remainingForComponent.toFixed(2)}\n\nEntered: ₹${paymentAmountFloat.toFixed(2)}\nOutstanding: ₹${remainingForComponent.toFixed(2)}\n\nThis prevents duplicate or overpayments to maintain fee accuracy.`,
+            `Payment amount cannot exceed outstanding balance of ₹${remainingForComponent.toFixed(2)}
+
+Entered: ₹${paymentAmountFloat.toFixed(2)}
+Outstanding: ₹${remainingForComponent.toFixed(2)}
+
+This prevents duplicate or overpayments to maintain fee accuracy.`,
             [{ text: 'OK', style: 'default' }]
           );
           return;
         }
         
         // 📊 Additional validation: Check if payment would result in negative outstanding
+        // Only show warning if there was originally an outstanding amount
         const studentOutstanding = selectedStudent.outstanding || 0;
         if (paymentAmountFloat > studentOutstanding && studentOutstanding > 0) {
           Alert.alert(
@@ -1627,9 +1634,9 @@ const ClassStudentDetails = ({ route, navigation }) => {
 
 
       {/* Action Buttons */}
-      {student.outstanding > 0 && (
+      {(student.outstanding > 0 || student.totalConcessions > 0 || student.totalFeeStructure > 0) && (
         <View style={styles.actionButtonsContainer}>
-          {/* Pay Button */}
+          {/* Pay Button - Always show if there are fees to manage */}
           <TouchableOpacity
             style={styles.markAsPaidButton}
             onPress={(e) => {
@@ -1644,7 +1651,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
             </Text>
           </TouchableOpacity>
 
-          {/* Fee Concession Button */}
+          {/* Fee Concession Button - Always show if there are fees to manage */}
           <TouchableOpacity
             style={styles.feeConcessionButton}
             onPress={(e) => {
@@ -1655,7 +1662,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
           >
             <Ionicons name="pricetags" size={16} color="#fff" style={{ marginRight: 6 }} />
             <Text style={styles.feeConcessionButtonText}>
-              Fee Concession
+              {student.totalConcessions > 0 ? 'Manage Concessions' : 'Fee Concession'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -2470,10 +2477,13 @@ const ClassStudentDetails = ({ route, navigation }) => {
                               onPress={() => {
                                 setSelectedFeeComponent(component.fee_component);
                                 // ✅ AUTO-POPULATE the payment amount with the remaining outstanding amount (after concessions)
+                                // Allow setting payment amount even when fully paid (for additional payments)
+                                // If fully paid, default to 0 but allow user to change
                                 setPaymentAmount(remainingForComponent.toString());
                                 setPaymentRemarks(`Payment for ${component.fee_component}`);
                               }}
-                              disabled={remainingForComponent === 0}
+                              // Allow selecting components even when fully paid (for additional payments)
+                              disabled={false}
                             >
                               {/* Left side: Fee component name and status */}
                               <View style={styles.feeChipLeft}>

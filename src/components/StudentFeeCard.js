@@ -214,6 +214,7 @@ const StudentFeeCard = ({
       {/* Action Buttons - Only show Pay Now in student/parent views, not admin */}
       {!compact && (
         <View style={styles.actionSection}>
+          {/* Pay Button - Show if there's an outstanding amount */}
           {showPaymentButton && fees.totalOutstanding > 0 && (
             <TouchableOpacity 
               style={styles.payButton}
@@ -224,6 +225,7 @@ const StudentFeeCard = ({
             </TouchableOpacity>
           )}
           
+          {/* Discount Button - Show if discounts exist or there are fees to manage */}
           {showDiscountButton && (
             <TouchableOpacity 
               style={styles.discountButton}

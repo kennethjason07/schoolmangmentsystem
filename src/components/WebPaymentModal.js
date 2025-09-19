@@ -67,24 +67,19 @@ const WebPaymentModal = ({
     }
   };
 
-  // 🚨 Strict Overpayment Validation (Total Amount Based)
+  // 🔒 Validate Payment Amount
   const validatePaymentAmount = () => {
+    if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
+      Alert.alert('Validation Error', 'Please enter a valid payment amount greater than ₹0.');
+      return false;
+    }
+
     const amount = parseFloat(paymentAmount);
-    
-    if (!amount || amount <= 0) {
-      Alert.alert('Invalid Amount', 'Please enter a valid payment amount greater than ₹0.');
-      return false;
-    }
-
-    if (!selectedFeeComponent) {
-      Alert.alert('Missing Selection', 'Please select a fee component.');
-      return false;
-    }
-
     const studentOutstanding = selectedStudent?.outstanding || 0;
     
-    // 🚨 STRICT: Block payment if exceeds total outstanding
-    if (amount > studentOutstanding) {
+    // 🚨 STRICT: Block payment if exceeds total outstanding (only when there is outstanding amount)
+    // Allow payments even when there's no outstanding amount (for additional payments)
+    if (amount > studentOutstanding && studentOutstanding > 0) {
       Alert.alert(
         'Payment Blocked',
         `Payment amount ₹${amount.toFixed(2)} exceeds total outstanding amount ₹${studentOutstanding.toFixed(2)}.\n\nOverpayment is not allowed. Please enter the correct amount.`,
@@ -444,12 +439,13 @@ const WebPaymentModal = ({
                           remainingAmount === 0 && styles.componentChipPaid
                         ]}
                         onPress={() => {
-                          if (remainingAmount > 0) {
-                            setSelectedFeeComponent(component.fee_component);
-                            setPaymentAmount(remainingAmount.toString());
-                          }
+                          // Allow selecting components even when fully paid (for additional payments)
+                          setSelectedFeeComponent(component.fee_component);
+                          // Auto-populate with remaining amount (0 if fully paid)
+                          setPaymentAmount(remainingAmount.toString());
                         }}
-                        disabled={remainingAmount === 0}
+                        // Allow selecting components even when fully paid (for additional payments)
+                        disabled={false}
                       >
                         <Text style={[
                           styles.componentChipText,
