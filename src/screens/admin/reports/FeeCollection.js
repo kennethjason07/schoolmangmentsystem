@@ -136,7 +136,18 @@ const FeeCollection = ({ navigation }) => {
 
   useEffect(() => {
     if (isReady && !loading) {
-      loadFeeData();
+      // Reload students and fee structure when class or academic year changes
+      if (selectedClass || selectedAcademicYear) {
+        console.log('🔄 Class or academic year changed, reloading data...');
+        Promise.all([
+          loadStudents(),
+          loadFeeStructure()
+        ]).then(() => {
+          loadFeeData();
+        });
+      } else {
+        loadFeeData();
+      }
     }
   }, [isReady, selectedClass, selectedAcademicYear, selectedPaymentStatus, selectedDateRange, startDate, endDate, loading]);
 
@@ -201,6 +212,8 @@ const FeeCollection = ({ navigation }) => {
         filters.class_id = selectedClass;
       }
       
+      console.log('🏫 Loading students with filters:', filters);
+      
       // Use tenantDatabase helper as per ENHANCED_TENANT_SYSTEM
       const { data, error } = await tenantDatabase.read(
         TABLES.STUDENTS,
@@ -213,7 +226,17 @@ const FeeCollection = ({ navigation }) => {
         throw error;
       }
       
-      console.log('✅ Loaded students:', data?.length || 0);
+      console.log('✅ Loaded students:', data?.length || 0, 'for class:', selectedClass === 'All' ? 'All Classes' : selectedClass);
+      
+      // Debug: Log class information for specific students
+      if (data && data.length > 0) {
+        console.log('🏫 Sample student:', {
+          id: data[0].id,
+          name: data[0].name || data[0].full_name,
+          class_id: data[0].class_id
+        });
+      }
+      
       setStudents(data || []);
     } catch (error) {
       console.error('❌ Error loading students:', error);
@@ -333,18 +356,27 @@ const FeeCollection = ({ navigation }) => {
       }
       
       console.log('🚀 Using tenantDatabase.read with filters:', filters);
+      console.log('📍 Selected class for fee data:', selectedClass === 'All' ? 'All Classes' : selectedClass);
       
       // Use tenantDatabase helper as per ENHANCED_TENANT_SYSTEM guidelines
-      const { data, error } = await tenantDatabase.read(
+      const { data: allFeeData, error } = await tenantDatabase.read(
         TABLES.STUDENT_FEES,
         filters,
         '*'
       );
+      
       if (error) {
         console.error('❌ Fee data loading error:', error);
         throw error;
       }
       
+      // Filter by selected class if not 'All'
+      let data = allFeeData || [];
+      if (selectedClass !== 'All' && students && students.length > 0) {
+        const classStudentIds = students.map(s => s.id);
+        data = data.filter(fee => classStudentIds.includes(fee.student_id));
+        console.log('🏫 Filtered fee data by class students:', data.length, 'records');
+      }
       console.log('✅ ENHANCED: Loaded fee records:', data?.length || 0);
       
       // Show sample data for debugging
@@ -392,49 +424,84 @@ const FeeCollection = ({ navigation }) => {
   };
 
   const calculateStatistics = (data) => {
-    console.log('📊 Calculating statistics for fee data:', data?.length || 0, 'records');
+    console.log('📊 ENHANCED: Calculating statistics for fee data:', data?.length || 0, 'records');
+    console.log('🏫 Students count:', students?.length || 0);
+    console.log('📋 Fee structure count:', feeStructureData?.length || 0);
     
     // Debug: Log sample fee data to check field names
     if (data && data.length > 0) {
       console.log('💰 Sample fee record:', JSON.stringify(data[0], null, 2));
     }
     
-    // Calculate total collected - check multiple possible field names
+    // Calculate total collected - use primary field name
     const totalCollected = data.reduce((sum, fee) => {
-      const amount = fee.amount_paid || fee.amount || fee.paid_amount || fee.collection_amount || 0;
-      const numericAmount = parseFloat(amount) || 0;
+      // Use amount_paid as primary field (standard field name)
+      const amount = parseFloat(fee.amount_paid) || 0;
       
-      if (numericAmount > 0) {
-        console.log(`💰 Adding ${numericAmount} from record:`, fee.id || 'unknown');
+      if (amount > 0) {
+        console.log(`💰 Adding ${amount} from record:`, fee.id || 'unknown');
       }
       
-      return sum + numericAmount;
+      return sum + amount;
     }, 0);
     
     console.log('💰 Total Collected Amount:', totalCollected);
 
-    // Calculate expected amount from fee structure
-    const totalExpected = feeStructureData.reduce((sum, structure) => {
-      const amount = parseFloat(structure.amount) || parseFloat(structure.fee_amount) || 0;
-      return sum + amount;
-    }, 0);
+    // 🚀 ENHANCED: Calculate expected amount properly (per student basis with discounts)
+    let totalExpected = 0;
     
-    console.log('📈 Total Expected Amount:', totalExpected);
+    if (feeStructureData && feeStructureData.length > 0 && students && students.length > 0) {
+      // Calculate base fee per student from fee structure
+      const baseFeePerStudent = feeStructureData.reduce((sum, structure) => {
+        const amount = parseFloat(structure.amount) || parseFloat(structure.fee_amount) || 0;
+        return sum + amount;
+      }, 0);
+      
+      console.log('💰 Base fee per student:', baseFeePerStudent);
+      
+      // Calculate expected amount considering discounts for each student
+      let totalDiscountAmount = 0;
+      const studentsCount = students.length;
+      
+      // For now, calculate total expected as base fee × students
+      // Discounts will be handled separately if discount data is available
+      totalExpected = baseFeePerStudent * studentsCount;
+      
+      console.log('🏫 Students count:', studentsCount);
+      console.log('📈 Total Expected (base calculation):', totalExpected);
+      console.log('💵 Total Discounts:', totalDiscountAmount);
+      console.log('📈 Final Expected Amount:', totalExpected - totalDiscountAmount);
+      
+      // Adjust for discounts if any
+      totalExpected = totalExpected - totalDiscountAmount;
+    } else {
+      console.warn('⚠️ Missing fee structure or students data for expected calculation');
+      // Fallback: use old calculation
+      totalExpected = feeStructureData.reduce((sum, structure) => {
+        const amount = parseFloat(structure.amount) || parseFloat(structure.fee_amount) || 0;
+        return sum + amount;
+      }, 0);
+      console.log('📈 Total Expected (fallback):', totalExpected);
+    }
 
-    // Calculate outstanding
+    // Calculate outstanding (Expected - Collected)
     const totalOutstanding = Math.max(0, totalExpected - totalCollected);
 
     // Calculate collection rate
     const collectionRate = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
+    
+    console.log('💯 CALCULATION VERIFICATION:');
+    console.log('  Formula: Outstanding = Expected - Collected');
+    console.log('  Outstanding = ' + totalExpected + ' - ' + totalCollected + ' = ' + totalOutstanding);
 
     // Calculate monthly collection for chart
     const monthlyData = {};
     data.forEach(fee => {
-      const paymentDate = fee.payment_date || fee.paid_date || fee.collection_date;
+      const paymentDate = fee.payment_date || fee.created_at;
       if (paymentDate) {
         const month = new Date(paymentDate).toLocaleDateString('en-IN', { month: 'short' });
-        const amount = fee.amount_paid || fee.amount || fee.paid_amount || fee.collection_amount || 0;
-        monthlyData[month] = (monthlyData[month] || 0) + (parseFloat(amount) || 0);
+        const amount = parseFloat(fee.amount_paid) || 0;
+        monthlyData[month] = (monthlyData[month] || 0) + amount;
       }
     });
 
@@ -465,8 +532,8 @@ const FeeCollection = ({ navigation }) => {
         if (!classData[className]) {
           classData[className] = { collected: 0, count: 0 };
         }
-        const amount = fee.amount_paid || fee.amount || fee.paid_amount || fee.collection_amount || 0;
-        classData[className].collected += parseFloat(amount) || 0;
+        const amount = parseFloat(fee.amount_paid) || 0;
+        classData[className].collected += amount;
         classData[className].count++;
       }
     });
@@ -480,11 +547,28 @@ const FeeCollection = ({ navigation }) => {
       }))
       .sort((a, b) => b.collected - a.collected);
 
-    console.log('📊 FINAL STATS SUMMARY:');
-    console.log('💰 Total Collected:', totalCollected);
-    console.log('📈 Total Expected:', totalExpected);
+    console.log('📊 ENHANCED FINAL STATS SUMMARY:');
+    console.log('💰 Total Collected:', totalCollected, '(from', data?.length || 0, 'payment records)');
+    console.log('📈 Total Expected:', totalExpected, '(fee structure:', feeStructureData?.length || 0, 'entries × students:', students?.length || 0, ')');
     console.log('🔴 Total Outstanding:', totalOutstanding);
     console.log('📅 Collection Rate:', collectionRate + '%');
+    
+    // Clear calculation verification
+    console.log('\n🧮 CALCULATION VERIFICATION:');
+    if (feeStructureData && students) {
+      const feePerStudent = feeStructureData.reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
+      console.log('Formula: Fee per student (₹' + feePerStudent + ') × Students (' + students.length + ') = Expected (₹' + totalExpected + ')');
+      console.log('Outstanding: Expected (₹' + totalExpected + ') - Collected (₹' + totalCollected + ') = ₹' + totalOutstanding);
+    }
+    
+    // Additional debugging for your specific case
+    console.log('\n📝 DEBUG INFO:');
+    console.log('- Selected class:', selectedClass === 'All' ? 'All Classes' : selectedClass);
+    console.log('- Academic year:', selectedAcademicYear);
+    console.log('- Classes available:', classes?.length || 0);
+    console.log('- Students in selected class:', students?.length || 0);
+    console.log('- Fee structure entries:', feeStructureData?.length || 0);
+    console.log('- Payment records:', data?.length || 0);
     
     setStats({
       totalCollected,
