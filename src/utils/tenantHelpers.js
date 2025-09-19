@@ -82,11 +82,38 @@ export const createTenantQuery = (tenantId, table, selectClause = '*', filters =
     throw new Error('No tenant ID provided. Please ensure tenant is initialized.');
   }
 
-  console.log(`🔍 Creating tenant query for '${table}' with tenant_id: ${tenantId}`);
+  console.log(`🔍 Creating tenant query for '${selectClause}' with tenant_id: ${tenantId}`);
   
   let query = supabase
     .from(table)
     .select(selectClause)
+    .eq('tenant_id', tenantId);
+
+  // Apply additional filters
+  Object.entries(filters).forEach(([key, value]) => {
+    query = query.eq(key, value);
+  });
+
+  return query;
+};
+
+/**
+ * 🚀 Enhanced database delete helper with tenant ID parameter
+ * @param {string} tenantId - Tenant ID to filter by
+ * @param {string} table - Table name
+ * @param {Object} filters - Filters for deletion
+ * @returns {Object} Delete query builder with tenant filter applied
+ */
+export const createTenantDeleteQuery = (tenantId, table, filters = {}) => {
+  if (!tenantId) {
+    throw new Error('No tenant ID provided. Please ensure tenant is initialized.');
+  }
+
+  console.log(`🗑️ Creating tenant delete query for '${table}' with tenant_id: ${tenantId}`);
+  
+  let query = supabase
+    .from(table)
+    .delete()
     .eq('tenant_id', tenantId);
 
   // Apply additional filters

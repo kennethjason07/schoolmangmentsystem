@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Marks Save Debug - Web Platform Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .step {
+            margin: 20px 0;
+            padding: 15px;
+            border-left: 4px solid #2196F3;
+            background: #f8f9fa;
+        }
+        .success {
+            border-left-color: #4CAF50;
+            background: #e8f5e9;
+        }
+        .warning {
+            border-left-color: #FF9800;
+            background: #fff3e0;
+        }
+        .error {
+            border-left-color: #f44336;
+            background: #ffebee;
+        }
+        .code {
+            background: #f4f4f4;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            margin: 10px 0;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Marks Save Debug - Web Platform</h1>
+        
+        <div class="step">
+            <h3>📋 Step 1: Check Enhanced Components</h3>
+            <p>Before testing marks save, let's verify the enhanced components are loaded:</p>
+            <button onclick="checkEnhancements()">Check Enhancements</button>
+            <div id="enhancement-result"></div>
+        </div>
+
+        <div class="step">
+            <h3>🕷️ Step 2: Debug Instructions for Web Testing</h3>
+            <p><strong>Follow these steps to debug the marks save issue:</strong></p>
+            
+            <ol>
+                <li><strong>Open Web App:</strong>
+                    <div class="code">npm run web</div>
+                </li>
+                
+                <li><strong>Open Browser DevTools:</strong>
+                    <div class="code">Press F12 → Console tab</div>
+                </li>
+                
+                <li><strong>Navigate to Marks:</strong>
+                    <div class="code">Admin → Exams and Marks → Enter Marks</div>
+                </li>
+                
+                <li><strong>Check Component Load Messages:</strong>
+                    <p>Look for these console messages:</p>
+                    <div class="code success">
+💻 EXAMS MARKS - Component loaded on platform: web<br>
+🔧 EXAMS MARKS - Enhanced marks saving functionality active
+                    </div>
+                    <p><strong>❌ If missing:</strong> The enhanced version isn't loaded. Try hard refresh (Ctrl+F5)</p>
+                </li>
+                
+                <li><strong>Test Marks Entry:</strong>
+                    <p>Select an exam → Enter marks → Click "Save Changes"</p>
+                </li>
+                
+                <li><strong>Watch Console During Save:</strong>
+                    <p>You should see these debug messages:</p>
+                    <div class="code success">
+💾 MARKS SAVE DEBUG - Starting save process on platform: web<br>
+📊 MARKS SAVE DEBUG - Current marksForm state: [number] students<br>
+🎯 MARKS SAVE DEBUG - Selected exam: [exam name] [exam id]<br>
+✅ [ExamsMarks] Using effective tenant ID for marks saving: [tenant_id]<br>
+🔧 MARKS SAVE DEBUG - Starting database insertion process<br>
+✅ MARKS SAVE DEBUG - Successfully saved mark 1: [mark_id]<br>
+✅ MARKS SAVE SUCCESS - Final save summary: {...}
+                    </div>
+                </li>
+            </ol>
+        </div>
+
+        <div class="step warning">
+            <h3>🚨 Common Issues on Web Platform</h3>
+            
+            <h4>Issue 1: No Console Messages When Clicking Save</h4>
+            <p><strong>Symptoms:</strong> Click "Save Changes" but no debug logs appear</p>
+            <p><strong>Causes:</strong></p>
+            <ul>
+                <li>Enhanced version not loaded (need hard refresh)</li>
+                <li>Save button not connected to enhanced function</li>
+                <li>JavaScript errors preventing execution</li>
+            </ul>
+            <p><strong>Solution:</strong> Hard refresh (Ctrl+F5) and check for any JavaScript errors in console</p>
+
+            <h4>Issue 2: Save Process Starts But Fails</h4>
+            <p><strong>Symptoms:</strong> See initial logs but process stops with error</p>
+            <p><strong>Causes:</strong></p>
+            <ul>
+                <li>Tenant validation failure</li>
+                <li>Network connectivity issues</li>
+                <li>Database permission problems</li>
+            </ul>
+            <p><strong>Solution:</strong> Check specific error messages in console logs</p>
+
+            <h4>Issue 3: Web-Specific Alert Issues</h4>
+            <p><strong>Symptoms:</strong> Process seems to complete but no success message</p>
+            <p><strong>Causes:</strong></p>
+            <ul>
+                <li>window.alert() being blocked by browser</li>
+                <li>Pop-up blocker interfering</li>
+            </ul>
+            <p><strong>Solution:</strong> Check if browser is blocking pop-ups</p>
+        </div>
+
+        <div class="step">
+            <h3>🔍 What To Look For In Console</h3>
+            
+            <h4>✅ Success Pattern:</h4>
+            <div class="code success">
+1. Component load verification<br>
+2. Save process initiation<br>
+3. Tenant validation success<br>
+4. Individual mark processing<br>
+5. Database insertion success<br>
+6. Success summary<br>
+7. Native browser alert appears
+            </div>
+
+            <h4>❌ Failure Patterns:</h4>
+            <div class="code error">
+• No component load messages → Hard refresh needed<br>
+• "Tenant not ready" → Authentication/context issue<br>
+• "Network error" → API connectivity problem<br>
+• "Permission denied" → Database access issue<br>
+• Individual mark save failures → Data validation problem
+            </div>
+        </div>
+
+        <div class="step">
+            <h3>📞 Report Results</h3>
+            <p>After testing, please share:</p>
+            <ol>
+                <li><strong>Console Output:</strong> Copy all messages that appear when clicking save</li>
+                <li><strong>Error Messages:</strong> Any errors or warnings in console</li>
+                <li><strong>Network Activity:</strong> Check Network tab for failed API calls</li>
+                <li><strong>Alert Behavior:</strong> Does a browser alert appear after clicking save?</li>
+                <li><strong>Data State:</strong> Are marks entered in the form before saving?</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        function checkEnhancements() {
+            const resultDiv = document.getElementById('enhancement-result');
+            
+            // Check if we're on web platform
+            const isWeb = typeof window !== 'undefined' && window.alert;
+            
+            let result = '<div class="code">';
+            result += `<strong>🌐 Platform Detection:</strong><br>`;
+            result += `- Running on: Web Browser ✅<br>`;
+            result += `- window.alert available: ${isWeb ? 'Yes ✅' : 'No ❌'}<br>`;
+            result += `- localStorage available: ${typeof localStorage !== 'undefined' ? 'Yes ✅' : 'No ❌'}<br>`;
+            result += `- Console available: ${typeof console !== 'undefined' ? 'Yes ✅' : 'No ❌'}<br><br>`;
+            
+            result += `<strong>📋 Next Steps:</strong><br>`;
+            result += `1. Open the React app in another tab<br>`;
+            result += `2. Open DevTools (F12) → Console<br>`;
+            result += `3. Navigate to Admin → Exams and Marks<br>`;
+            result += `4. Look for component load messages<br>`;
+            result += `5. Test marks saving with console monitoring<br>`;
+            result += '</div>';
+            
+            resultDiv.innerHTML = result;
+        }
+
+        // Auto-run platform check
+        window.addEventListener('load', () => {
+            console.log('🧪 Marks Save Debug Tool Loaded');
+            console.log('📋 This is a debugging helper - open your React app in another tab');
+            console.log('🔍 Use this guide to debug the marks save functionality');
+        });
+    </script>
+</body>
+</html>

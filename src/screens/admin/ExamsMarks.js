@@ -21,6 +21,13 @@ import { useTenantAccess, tenantDatabase, createTenantQuery, getCachedTenantId }
 import { useAuth } from '../../utils/AuthContext';
 import { useFocusEffect } from '@react-navigation/native';
 // import { runTenantDataDiagnostics } from '../../utils/tenantDataDiagnostic';
+
+// Component load verification
+console.log('💻 EXAMS MARKS - Component loaded on platform:', Platform.OS);
+console.log('🔧 EXAMS MARKS - Enhanced marks saving functionality active');
+console.log('🔍 EXAMS MARKS - Version: Enhanced with web compatibility and detailed logging');
+console.log('🕰️ EXAMS MARKS - Load time:', new Date().toISOString());
+
 // Helper functions for date formatting
 const formatDate = (dateString) => {
   if (!dateString) return '';
@@ -238,6 +245,22 @@ const ExamsMarks = () => {
 
   const loadSubjects = useCallback(async () => {
     try {
+      console.log('🚀 [ExamsMarks] loadSubjects - Starting with enhanced tenant validation');
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [ExamsMarks] Tenant not ready for subjects fetch:', tenantValidation.reason);
+        if (tenantValidation.reason === 'TENANT_NOT_READY') {
+          setSubjects([]);
+          return;
+        }
+        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [ExamsMarks] Using effective tenant ID for subjects:', effectiveTenantId);
+      
       console.log('🔍 Loading subjects via enhanced tenant database');
       const { data: subjectsData, error } = await tenantDatabase.read('subjects', {}, '*');
       
@@ -249,10 +272,26 @@ const ExamsMarks = () => {
       console.error('❌ Error loading subjects:', error);
       setSubjects([]);
     }
-  }, []);
+  }, [validateTenantReadiness]);
 
   const loadStudents = useCallback(async () => {
     try {
+      console.log('🚀 [ExamsMarks] loadStudents - Starting with enhanced tenant validation');
+      
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [ExamsMarks] Tenant not ready for students fetch:', tenantValidation.reason);
+        if (tenantValidation.reason === 'TENANT_NOT_READY') {
+          setStudents([]);
+          return;
+        }
+        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [ExamsMarks] Using effective tenant ID for students:', effectiveTenantId);
+      
       console.log('🔍 Loading students via enhanced tenant database');
       const { data: studentsData, error } = await tenantDatabase.read('students', {}, '*');
       
@@ -265,22 +304,68 @@ const ExamsMarks = () => {
       console.error('❌ Error loading students:', error);
       setStudents([]);
     }
-  }, []);
+  }, [validateTenantReadiness]);
 
   const loadMarks = useCallback(async () => {
     try {
-      console.log('🔍 Loading marks via enhanced tenant database');
+      console.log('🚀 [ExamsMarks] loadMarks - Starting with enhanced tenant validation');
+      
+      // Validate tenant readiness - CRITICAL FOR MARKS LOADING
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        console.log('⚠️ [ExamsMarks] Tenant not ready for marks fetch:', tenantValidation.reason);
+        if (tenantValidation.reason === 'TENANT_NOT_READY') {
+          console.log('🚨 MARKS LOAD DEBUG - Tenant not ready, setting empty marks array');
+          setMarks([]);
+          return;
+        }
+        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
+      }
+      
+      const { effectiveTenantId } = tenantValidation;
+      console.log('✅ [ExamsMarks] Using effective tenant ID for marks:', effectiveTenantId);
+      
+      console.log('🔍 MARKS LOAD DEBUG - Loading marks via enhanced tenant database');
       const { data: marksData, error } = await tenantDatabase.read('marks', {}, '*');
       
-      if (error) throw error;
+      if (error) {
+        console.error('❌ MARKS LOAD ERROR - Database error:', error);
+        throw error;
+      }
       
-      console.log('📦 Loaded marks:', marksData?.length, 'items');
+      console.log('📦 MARKS LOAD DEBUG - Loaded marks:', marksData?.length, 'items');
+      console.log('📊 MARKS LOAD DEBUG - Sample marks data:', marksData?.slice(0, 3));
+      
+      // Log marks by exam for debugging
+      if (marksData && marksData.length > 0) {
+        const marksByExam = {};
+        marksData.forEach(mark => {
+          if (!marksByExam[mark.exam_id]) {
+            marksByExam[mark.exam_id] = [];
+          }
+          marksByExam[mark.exam_id].push(mark);
+        });
+        
+        console.log('📊 MARKS LOAD DEBUG - Marks grouped by exam:', {
+          totalMarks: marksData.length,
+          examIds: Object.keys(marksByExam),
+          marksPerExam: Object.fromEntries(
+            Object.entries(marksByExam).map(([examId, marks]) => [examId, marks.length])
+          )
+        });
+      }
+      
       setMarks(marksData || []);
+      console.log('✅ MARKS LOAD DEBUG - Marks state updated successfully');
     } catch (error) {
-      console.error('❌ Error loading marks:', error);
+      console.error('❌ MARKS LOAD EXCEPTION - Error loading marks:', error);
+      console.error('❌ MARKS LOAD ERROR DETAILS:', {
+        message: error.message,
+        name: error.name
+      });
       setMarks([]);
     }
-  }, []);
+  }, [validateTenantReadiness]);
 
   const loadAllData = useCallback(async () => {
     console.log('🚀 [ExamsMarks] loadAllData - Starting with enhanced tenant validation');
@@ -665,14 +750,80 @@ const ExamsMarks = () => {
     );
   };
 
-  // Save marks (schema.txt: marks table)
+  // Enhanced Save marks with web compatibility and detailed debugging
   const handleBulkSaveMarks = async () => {
+    console.log('💾 MARKS SAVE DEBUG - Starting save process on platform:', Platform.OS);
+    console.log('📊 MARKS SAVE DEBUG - Current marksForm state:', Object.keys(marksForm).length, 'students');
+    console.log('🎯 MARKS SAVE DEBUG - Selected exam:', selectedExam?.name, selectedExam?.id);
+    
+    // Add network monitoring for web platform
+    let networkMonitor = null;
+    if (Platform.OS === 'web' && window.fetch) {
+      console.log('🌐 Starting network monitoring for API calls...');
+      const originalFetch = window.fetch;
+      let requestCount = 0;
+      
+      window.fetch = function(...args) {
+        requestCount++;
+        const [url, options] = args;
+        console.log(`🌐 Network Request #${requestCount}:`, {
+          url: typeof url === 'string' ? url : url.toString(),
+          method: options?.method || 'GET',
+          headers: options?.headers,
+          body: options?.body ? 'Present' : 'None',
+          timestamp: new Date().toISOString()
+        });
+        
+        const startTime = Date.now();
+        return originalFetch.apply(this, args).then(response => {
+          const duration = Date.now() - startTime;
+          console.log(`🌐 Network Response #${requestCount}:`, {
+            status: response.status,
+            statusText: response.statusText,
+            ok: response.ok,
+            duration: `${duration}ms`,
+            url: typeof url === 'string' ? url : url.toString()
+          });
+          return response;
+        }).catch(error => {
+          const duration = Date.now() - startTime;
+          console.error(`🌐 Network Error #${requestCount}:`, {
+            error: error.message,
+            duration: `${duration}ms`,
+            url: typeof url === 'string' ? url : url.toString()
+          });
+          throw error;
+        });
+      };
+      
+      networkMonitor = () => {
+        console.log('🌐 Restoring original fetch function');
+        window.fetch = originalFetch;
+      };
+    }
+    
     try {
       // Validate tenant readiness
       const tenantValidation = await validateTenantReadiness();
       if (!tenantValidation.success) {
         console.log('⚠️ [ExamsMarks] Tenant not ready for marks saving:', tenantValidation.reason);
-        Alert.alert('Error', 'System not ready. Please try again.');
+        
+        // Platform-aware error display
+        const errorMsg = 'System not ready. Please try again.';
+        if (Platform.OS === 'web') {
+          window.alert(`Error: ${errorMsg}`);
+        } else {
+          Alert.alert('Error', errorMsg);
+        }
+        
+        // Clean up network monitoring before return
+        if (networkMonitor && typeof networkMonitor === 'function') {
+          try {
+            networkMonitor();
+          } catch (cleanupError) {
+            console.warn('⚠️ Failed to cleanup network monitoring:', cleanupError);
+          }
+        }
         return;
       }
       
@@ -680,9 +831,26 @@ const ExamsMarks = () => {
       console.log('✅ [ExamsMarks] Using effective tenant ID for marks saving:', effectiveTenantId);
       
       if (!selectedExam) {
-        Alert.alert('Error', 'Please select an exam');
+        console.error('❌ MARKS SAVE ERROR - No exam selected');
+        const errorMsg = 'Please select an exam';
+        if (Platform.OS === 'web') {
+          window.alert(`Error: ${errorMsg}`);
+        } else {
+          Alert.alert('Error', errorMsg);
+        }
+        
+        // Clean up network monitoring before return
+        if (networkMonitor && typeof networkMonitor === 'function') {
+          try {
+            networkMonitor();
+          } catch (cleanupError) {
+            console.warn('⚠️ Failed to cleanup network monitoring:', cleanupError);
+          }
+        }
         return;
       }
+      
+      console.log('📊 MARKS SAVE DEBUG - Processing marks for exam max_marks:', selectedExam.max_marks);
 
       const marksToSave = [];
       const examMaxMarks = selectedExam?.max_marks || 100;
@@ -728,34 +896,109 @@ const ExamsMarks = () => {
 
       // Show validation errors if any
       if (hasInvalidMarks) {
-        Alert.alert(
-          'Invalid Marks Found', 
-          `Please enter valid marks (0-${examMaxMarks}) for:\n\n${invalidMarkDetails.slice(0, 5).join('\n')}${invalidMarkDetails.length > 5 ? '\n...and more' : ''}`,
-          [{ text: 'OK' }]
-        );
+        console.error('❌ MARKS SAVE ERROR - Invalid marks found:', invalidMarkDetails.length, 'errors');
+        
+        const errorTitle = 'Invalid Marks Found';
+        const errorMsg = `Please enter valid marks (0-${examMaxMarks}) for:\n\n${invalidMarkDetails.slice(0, 5).join('\n')}${invalidMarkDetails.length > 5 ? '\n...and more' : ''}`;
+        
+        if (Platform.OS === 'web') {
+          window.alert(`${errorTitle}: ${errorMsg.replace(/\n/g, ' ')}`);
+        } else {
+          Alert.alert(errorTitle, errorMsg, [{ text: 'OK' }]);
+        }
+        
+        // Clean up network monitoring before return
+        if (networkMonitor && typeof networkMonitor === 'function') {
+          try {
+            networkMonitor();
+          } catch (cleanupError) {
+            console.warn('⚠️ Failed to cleanup network monitoring:', cleanupError);
+          }
+        }
         return;
       }
+      
+      console.log('📊 MARKS SAVE DEBUG - Validation passed. Marks to save:', marksToSave.length);
 
-      console.log('🔧 Inserting marks with Enhanced Tenant System:', marksToSave);
+      console.log('🔧 MARKS SAVE DEBUG - Starting database insertion process');
+      console.log('📊 MARKS SAVE DEBUG - About to save', marksToSave.length, 'mark records');
+      console.log('📊 MARKS SAVE DEBUG - Using tenant system with tenant ID:', effectiveTenantId);
       
       // Use Enhanced Tenant System for each mark record
       const createdMarks = [];
-      for (const markRecord of marksToSave) {
-        // Remove tenant_id as it's handled automatically
-        const { tenant_id, ...markData } = markRecord;
-        const { data, error } = await tenantDatabase.create('marks', markData);
+      let saveErrors = [];
+      
+      for (let i = 0; i < marksToSave.length; i++) {
+        const markRecord = marksToSave[i];
+        console.log(`🔄 MARKS SAVE DEBUG - Processing mark ${i + 1}/${marksToSave.length}:`, {
+          student_id: markRecord.student_id,
+          subject_id: markRecord.subject_id,
+          marks_obtained: markRecord.marks_obtained,
+          grade: markRecord.grade
+        });
         
-        if (error) {
-          console.error('Database error:', error);
-          throw error;
+        try {
+          // Remove tenant_id as it's handled automatically
+          const { tenant_id, ...markData } = markRecord;
+          const { data, error } = await tenantDatabase.create('marks', markData);
+          
+          if (error) {
+            console.error(`❌ MARKS SAVE ERROR - Failed to save mark ${i + 1}:`, error);
+            saveErrors.push({ index: i + 1, error: error.message || 'Unknown error', markRecord });
+            continue;
+          }
+          
+          if (data) {
+            console.log(`✅ MARKS SAVE DEBUG - Successfully saved mark ${i + 1}:`, data.id);
+            createdMarks.push(data);
+          } else {
+            console.warn(`⚠️ MARKS SAVE WARNING - No data returned for mark ${i + 1}`);
+          }
+        } catch (individualError) {
+          console.error(`💥 MARKS SAVE EXCEPTION - Mark ${i + 1} save failed:`, individualError);
+          saveErrors.push({ index: i + 1, error: individualError.message || 'Exception occurred', markRecord });
+        }
+      }
+      
+      console.log('📊 MARKS SAVE DEBUG - Save process completed:', {
+        attempted: marksToSave.length,
+        successful: createdMarks.length,
+        failed: saveErrors.length
+      });
+      
+      // Handle partial failures
+      if (saveErrors.length > 0) {
+        console.error('❌ MARKS SAVE ERROR - Some marks failed to save:', saveErrors);
+        
+        const errorTitle = 'Partial Save Error';
+        const errorMsg = `${createdMarks.length} marks saved successfully, but ${saveErrors.length} failed. Check console for details.`;
+        
+        if (Platform.OS === 'web') {
+          window.alert(`${errorTitle}: ${errorMsg}`);
+        } else {
+          Alert.alert(errorTitle, errorMsg, [{ text: 'OK' }]);
         }
         
-        if (data) createdMarks.push(data);
+        // Don't return here - still show success for the ones that worked
       }
 
-      console.log('✅ Marks created successfully:', createdMarks);
+      console.log('✅ MARKS SAVE SUCCESS - Final save summary:', {
+        totalCreated: createdMarks.length,
+        totalFailed: saveErrors.length,
+        exam: selectedExam?.name,
+        tenant: effectiveTenantId
+      });
 
-      Alert.alert('Success', `Marks saved successfully for ${createdMarks.length} students.`);
+      const successTitle = 'Success';
+      const successMsg = `Marks saved successfully for ${createdMarks.length} students.`;
+      
+      if (Platform.OS === 'web') {
+        window.alert(`${successTitle}: ${successMsg}`);
+      } else {
+        Alert.alert(successTitle, successMsg);
+      }
+      
+      console.log('🔄 MARKS SAVE DEBUG - Resetting form and closing modal...');
       
       // Reset form and close modal
       setMarksModalVisible(false);
@@ -763,12 +1006,53 @@ const ExamsMarks = () => {
       setSelectedClassForMarks(null);
       setSelectedClassesForMarks([]);
       
+      console.log('🔄 MARKS SAVE DEBUG - Reloading data from server...');
       // Reload data
       await loadAllData();
+      console.log('✅ MARKS SAVE DEBUG - Data reload completed');
 
     } catch (error) {
-      console.error('❌ Error in handleBulkSaveMarks:', error);
-      Alert.alert('Error', `Failed to save marks: ${error.message || 'Unknown error'}`);
+      console.error('💥 MARKS SAVE EXCEPTION - Unexpected error in handleBulkSaveMarks:', error);
+      console.error('💥 MARKS SAVE ERROR DETAILS:', {
+        message: error.message,
+        name: error.name,
+        stack: error.stack?.substring(0, 500) // Limit stack trace length
+      });
+      
+      const errorTitle = 'Save Failed';
+      const errorMsg = `Failed to save marks: ${error.message || 'Unknown error'}`;
+      
+      if (Platform.OS === 'web') {
+        window.alert(`${errorTitle}: ${errorMsg}`);
+      } else {
+        Alert.alert(errorTitle, errorMsg, [
+          { text: 'OK' },
+          {
+            text: 'Copy Error',
+            onPress: () => {
+              console.log('Full marks save error for debugging:', JSON.stringify({
+                error: error.message,
+                name: error.name,
+                selectedExam: selectedExam?.name,
+                marksFormSize: Object.keys(marksForm).length,
+                platform: Platform.OS
+              }, null, 2));
+            }
+          }
+        ]);
+      }
+    } finally {
+      // Clean up network monitoring
+      if (networkMonitor && typeof networkMonitor === 'function') {
+        try {
+          networkMonitor();
+          console.log('✅ Network monitoring cleaned up successfully');
+        } catch (cleanupError) {
+          console.warn('⚠️ Failed to cleanup network monitoring:', cleanupError);
+        }
+      }
+      
+      console.log('🏁 handleBulkSaveMarks function completed');
     }
   };
 
@@ -1043,22 +1327,53 @@ const ExamsMarks = () => {
       setSubjects(prev => [...prev, ...newSubjects]);
     }
 
-    // Load existing marks for this exam and class
+    // Load existing marks for this exam and class with enhanced debugging
+    console.log('📊 MARKS FORM DEBUG - Loading existing marks for exam:', selectedExam.id);
+    console.log('📊 MARKS FORM DEBUG - Selected class:', classItem.id, classItem.class_name);
+    console.log('📊 MARKS FORM DEBUG - Total marks in state:', marks.length);
+    
     const examMarks = getMarksForExam(selectedExam.id);
+    console.log('📊 MARKS FORM DEBUG - Marks for this exam:', examMarks.length);
+    console.log('📊 MARKS FORM DEBUG - Exam marks data:', examMarks);
+    
     const formData = {};
 
-    // Filter marks for the selected class
-    examMarks
-      .filter(mark => {
-        const student = students.find(s => s.id === mark.student_id);
-        return student && student.class_id === classItem.id;
-      })
-      .forEach(mark => {
-        if (!formData[mark.student_id]) {
-          formData[mark.student_id] = {};
-        }
-        formData[mark.student_id][mark.subject_id] = mark.marks_obtained.toString();
+    // Filter marks for the selected class with detailed logging
+    const classMarks = examMarks.filter(mark => {
+      const student = students.find(s => s.id === mark.student_id);
+      const belongsToClass = student && student.class_id === classItem.id;
+      
+      if (!belongsToClass && student) {
+        console.log('🔍 MARKS FORM DEBUG - Mark filtered out (different class):', {
+          markId: mark.id,
+          studentId: mark.student_id,
+          studentName: student.name,
+          studentClassId: student.class_id,
+          targetClassId: classItem.id
+        });
+      }
+      
+      return belongsToClass;
+    });
+    
+    console.log('📊 MARKS FORM DEBUG - Marks for this class:', classMarks.length);
+    console.log('📊 MARKS FORM DEBUG - Class marks data:', classMarks);
+    
+    classMarks.forEach(mark => {
+      if (!formData[mark.student_id]) {
+        formData[mark.student_id] = {};
+      }
+      formData[mark.student_id][mark.subject_id] = mark.marks_obtained.toString();
+      
+      console.log('📊 MARKS FORM DEBUG - Populating form:', {
+        studentId: mark.student_id,
+        subjectId: mark.subject_id,
+        marks: mark.marks_obtained
       });
+    });
+    
+    console.log('📊 MARKS FORM DEBUG - Final form data:', formData);
+    console.log('📊 MARKS FORM DEBUG - Students with marks:', Object.keys(formData).length);
 
     setMarksForm(formData);
     setMarksModalVisible(true);
@@ -2292,7 +2607,38 @@ const ExamsMarks = () => {
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={styles.modalButton}
-                onPress={handleBulkSaveMarks}
+                onPress={() => {
+                  console.log('🚀 SAVE BUTTON CLICKED - Immediate detection!');
+                  console.log('⏰ Click timestamp:', new Date().toISOString());
+                  console.log('🌐 Platform detected:', Platform.OS);
+                  console.log('📊 Current marksForm keys:', Object.keys(marksForm));
+                  console.log('📊 Selected exam:', selectedExam?.name, selectedExam?.id);
+                  console.log('📊 Selected class:', selectedClassForMarks?.class_name, selectedClassForMarks?.id);
+                  
+                  // Count total marks entered
+                  let totalMarksEntered = 0;
+                  Object.values(marksForm).forEach(studentMarks => {
+                    Object.values(studentMarks || {}).forEach(mark => {
+                      if (mark && mark.trim() !== '') {
+                        totalMarksEntered++;
+                      }
+                    });
+                  });
+                  console.log('📊 Total marks to save:', totalMarksEntered);
+                  
+                  if (totalMarksEntered === 0) {
+                    console.warn('⚠️ WARNING: No marks entered to save!');
+                    if (Platform.OS === 'web') {
+                      window.alert('Warning: No marks have been entered. Please enter some marks before saving.');
+                    } else {
+                      Alert.alert('Warning', 'No marks have been entered. Please enter some marks before saving.');
+                    }
+                    return;
+                  }
+                  
+                  console.log('🚀 Calling handleBulkSaveMarks...');
+                  handleBulkSaveMarks();
+                }}
               >
                 <Text style={styles.modalButtonText}>Save All Marks</Text>
               </TouchableOpacity>

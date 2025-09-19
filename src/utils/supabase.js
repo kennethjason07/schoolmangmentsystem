@@ -81,7 +81,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       persistSession: true,
       detectSessionInUrl: true,
       storageKey: 'sb-dmagnsbdjsnzsddxqrwd-auth-token',
-      debug: true,
+      debug: false,
     } : {
       // For mobile: use custom AsyncStorage adapter
       storage: customStorageAdapter,

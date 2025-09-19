@@ -281,11 +281,7 @@ const MarksEntry = () => {
       if (marksToSave.length > 0) {
         // Delete existing marks for this exam first using enhanced tenant system
         console.log('🗚 [MarksEntry] Deleting existing marks for exam:', exam.id);
-        const deleteQuery = createTenantQuery('marks', '*')
-          .delete()
-          .eq('exam_id', exam.id);
-        
-        const deleteResult = await deleteQuery;
+        const deleteResult = await tenantDatabase.delete('marks', { exam_id: exam.id });
         
         console.log('🗚 [MarksEntry] Delete result:', deleteResult);
         if (deleteResult.error) {

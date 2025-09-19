@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Marks Save Issue</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .debug-section {
+            background: white;
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .step {
+            border-left: 4px solid #2196F3;
+            padding-left: 15px;
+            margin: 15px 0;
+        }
+        .step.completed {
+            border-color: #4CAF50;
+            background-color: #f1f8e9;
+        }
+        .step.error {
+            border-color: #f44336;
+            background-color: #ffebee;
+        }
+        .console-output {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 10px 0;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px 10px 5px 0;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+        button.success {
+            background: #4CAF50;
+        }
+        button.error {
+            background: #f44336;
+        }
+        input, select {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .test-form {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-pending { background-color: #ffc107; }
+        .status-success { background-color: #28a745; }
+        .status-error { background-color: #dc3545; }
+        
+        .diagnostic-result {
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+        .result-success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .result-warning {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        .result-error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚨 Marks Save Issue - Debug Dashboard</h1>
+    <p>This tool helps debug the marks saving issue in your school management system.</p>
+    
+    <!-- Current Issue Summary -->
+    <div class="debug-section">
+        <h2>🎯 Current Issue</h2>
+        <div class="diagnostic-result result-error">
+            <strong>Problem:</strong> When entering marks and clicking "Save Changes", the marks are not being saved to the database. After refreshing, the same empty form appears.
+        </div>
+        <div class="diagnostic-result result-warning">
+            <strong>Environment:</strong> Web platform (localhost:8082), Windows, PowerShell 5.1
+        </div>
+    </div>
+
+    <!-- Step 1: Component Loading Check -->
+    <div class="debug-section">
+        <h2>📋 Step 1: Verify Enhanced Component is Loaded</h2>
+        <div class="step" id="step1">
+            <span class="status-indicator status-pending"></span>
+            <strong>Check for component load messages</strong>
+        </div>
+        
+        <p><strong>Instructions:</strong></p>
+        <ol>
+            <li>Open your app at <a href="http://localhost:8082" target="_blank">http://localhost:8082</a></li>
+            <li>Open Browser DevTools (F12) → Console tab</li>
+            <li>Navigate to: Admin Dashboard → Exams and Marks → Enter Marks</li>
+            <li>Look for these messages in the console:</li>
+        </ol>
+        
+        <div class="console-output" id="expected-logs">💻 EXAMS MARKS - Component loaded on platform: web
+🔧 EXAMS MARKS - Enhanced marks saving functionality active
+🔍 EXAMS MARKS - Version: Enhanced with web compatibility and detailed logging
+🕰️ EXAMS MARKS - Load time: [timestamp]</div>
+
+        <button onclick="checkStep1()">✅ I See These Messages</button>
+        <button onclick="failStep1()" class="error">❌ I Don't See These Messages</button>
+        
+        <div id="step1-result"></div>
+    </div>
+
+    <!-- Step 2: Form State Test -->
+    <div class="debug-section">
+        <h2>📊 Step 2: Test Marks Entry Form State</h2>
+        <div class="step" id="step2">
+            <span class="status-indicator status-pending"></span>
+            <strong>Verify marks are being stored in form state</strong>
+        </div>
+        
+        <p><strong>Instructions:</strong></p>
+        <ol>
+            <li>Select an exam from the list</li>
+            <li>Click "Enter Marks" button</li>
+            <li>Select a class</li>
+            <li>Enter some marks (e.g., enter "85" for one student in Math)</li>
+            <li>In the console, type and press Enter:</li>
+        </ol>
+        
+        <div class="console-output">// Check if marks are being stored in form state
+console.log('Form data:', Object.keys(window.marksForm || {}));
+console.log('Form details:', window.marksForm);</div>
+
+        <p><strong>Expected Result:</strong> Should show student IDs and mark values</p>
+        
+        <button onclick="checkStep2()">✅ Form Data Shows Correctly</button>
+        <button onclick="failStep2()" class="error">❌ No Form Data or Errors</button>
+        
+        <div id="step2-result"></div>
+    </div>
+
+    <!-- Step 3: Save Button Click Test -->
+    <div class="debug-section">
+        <h2>🚀 Step 3: Test Save Button Click Detection</h2>
+        <div class="step" id="step3">
+            <span class="status-indicator status-pending"></span>
+            <strong>Verify save button triggers the enhanced function</strong>
+        </div>
+        
+        <p><strong>Instructions:</strong></p>
+        <ol>
+            <li>Keep console open and enter some marks</li>
+            <li>Click "Save Changes" button</li>
+            <li>Look for these immediate messages:</li>
+        </ol>
+        
+        <div class="console-output">🚀 SAVE BUTTON CLICKED - Immediate detection!
+💾 MARKS SAVE DEBUG - Starting save process on platform: web
+📊 MARKS SAVE DEBUG - Current marksForm state: [X] students</div>
+
+        <button onclick="checkStep3()">✅ Save Process Starts</button>
+        <button onclick="failStep3()" class="error">❌ No Save Messages</button>
+        
+        <div id="step3-result"></div>
+    </div>
+
+    <!-- Step 4: Network Activity Analysis -->
+    <div class="debug-section">
+        <h2>🌐 Step 4: Network Activity Analysis</h2>
+        <div class="step" id="step4">
+            <span class="status-indicator status-pending"></span>
+            <strong>Check API calls and database operations</strong>
+        </div>
+        
+        <p><strong>Instructions:</strong></p>
+        <ol>
+            <li>Open DevTools → Network tab</li>
+            <li>Clear network log</li>
+            <li>Click "Save Changes"</li>
+            <li>Look for API requests (especially to Supabase endpoints)</li>
+            <li>Check if requests succeed (status 200) or fail (4xx/5xx)</li>
+        </ol>
+        
+        <div class="test-form">
+            <label>Number of API requests seen:</label>
+            <input type="number" id="api-requests" min="0" max="20" value="0">
+            
+            <label>Any failed requests (4xx/5xx)?</label>
+            <select id="failed-requests">
+                <option value="no">No</option>
+                <option value="yes">Yes</option>
+            </select>
+            
+            <label>Console shows network monitoring?</label>
+            <select id="network-monitoring">
+                <option value="no">No</option>
+                <option value="yes">Yes - I see network request logs</option>
+            </select>
+        </div>
+        
+        <button onclick="checkStep4()">✅ Analyze Network Activity</button>
+        
+        <div id="step4-result"></div>
+    </div>
+
+    <!-- Step 5: Manual Function Test -->
+    <div class="debug-section">
+        <h2>🧪 Step 5: Manual Function Test</h2>
+        <div class="step" id="step5">
+            <span class="status-indicator status-pending"></span>
+            <strong>Test calling save function directly</strong>
+        </div>
+        
+        <p><strong>Instructions:</strong></p>
+        <ol>
+            <li>Enter some marks in the form first</li>
+            <li>In console, type and press Enter:</li>
+        </ol>
+        
+        <div class="console-output">// Check if function exists and call it directly
+console.log('Function available:', typeof handleBulkSaveMarks);
+if (typeof handleBulkSaveMarks === 'function') {
+    handleBulkSaveMarks();
+} else {
+    console.error('Function not available in global scope');
+}</div>
+
+        <button onclick="checkStep5()">✅ Direct Function Call Works</button>
+        <button onclick="failStep5()" class="error">❌ Function Not Available/Fails</button>
+        
+        <div id="step5-result"></div>
+    </div>
+
+    <!-- Solution Recommendations -->
+    <div class="debug-section">
+        <h2>🔧 Solution Recommendations</h2>
+        <div id="solution-recommendations">
+            <p>Complete the diagnostic steps above to get personalized solution recommendations.</p>
+        </div>
+    </div>
+
+    <!-- Quick Fixes -->
+    <div class="debug-section">
+        <h2>🛠️ Quick Fixes to Try</h2>
+        
+        <div class="test-form">
+            <h4>Fix 1: Hard Refresh</h4>
+            <button onclick="performHardRefresh()">Perform Hard Refresh (Ctrl+Shift+R)</button>
+            <p>This forces reload of all JavaScript files and clears browser cache.</p>
+        </div>
+        
+        <div class="test-form">
+            <h4>Fix 2: Clear Browser Storage</h4>
+            <button onclick="clearBrowserStorage()">Clear All Browser Storage</button>
+            <p>This clears localStorage, sessionStorage, and cached data.</p>
+        </div>
+        
+        <div class="test-form">
+            <h4>Fix 3: Test in Different Browser</h4>
+            <p>Try opening the app in Chrome, Firefox, or Edge to isolate browser-specific issues.</p>
+        </div>
+    </div>
+
+    <script>
+        let diagnosticResults = {
+            step1: null,
+            step2: null, 
+            step3: null,
+            step4: null,
+            step5: null
+        };
+
+        function updateStepStatus(stepId, status, message) {
+            const step = document.getElementById(stepId);
+            const indicator = step.querySelector('.status-indicator');
+            const resultDiv = document.getElementById(stepId + '-result');
+            
+            // Update indicator
+            indicator.className = 'status-indicator status-' + status;
+            
+            // Update step class
+            step.className = 'step ' + status;
+            
+            // Show result
+            if (message) {
+                resultDiv.innerHTML = `<div class="diagnostic-result result-${status}">${message}</div>`;
+            }
+        }
+
+        function checkStep1() {
+            diagnosticResults.step1 = 'success';
+            updateStepStatus('step1', 'success', 
+                '✅ <strong>Component Load Verified:</strong> Enhanced version is active. Proceed to Step 2.');
+            updateSolutionRecommendations();
+        }
+
+        function failStep1() {
+            diagnosticResults.step1 = 'error';
+            updateStepStatus('step1', 'error', 
+                '❌ <strong>Component Not Enhanced:</strong> Hard refresh needed (Ctrl+F5). Check if server restarted after changes.');
+            updateSolutionRecommendations();
+        }
+
+        function checkStep2() {
+            diagnosticResults.step2 = 'success';
+            updateStepStatus('step2', 'success',
+                '✅ <strong>Form State Working:</strong> Marks are being captured correctly. Proceed to Step 3.');
+            updateSolutionRecommendations();
+        }
+
+        function failStep2() {
+            diagnosticResults.step2 = 'error';
+            updateStepStatus('step2', 'error',
+                '❌ <strong>Form State Issue:</strong> handleMarksChange function may not be working. Check console for errors.');
+            updateSolutionRecommendations();
+        }
+
+        function checkStep3() {
+            diagnosticResults.step3 = 'success';
+            updateStepStatus('step3', 'success',
+                '✅ <strong>Save Button Working:</strong> Function is being called correctly. Proceed to Step 4.');
+            updateSolutionRecommendations();
+        }
+
+        function failStep3() {
+            diagnosticResults.step3 = 'error';
+            updateStepStatus('step3', 'error',
+                '❌ <strong>Save Button Not Connected:</strong> Button click handler may be disconnected or JavaScript error preventing execution.');
+            updateSolutionRecommendations();
+        }
+
+        function checkStep4() {
+            const apiRequests = parseInt(document.getElementById('api-requests').value) || 0;
+            const hasFailedRequests = document.getElementById('failed-requests').value === 'yes';
+            const hasNetworkMonitoring = document.getElementById('network-monitoring').value === 'yes';
+            
+            if (apiRequests > 0 && !hasFailedRequests) {
+                diagnosticResults.step4 = 'success';
+                updateStepStatus('step4', 'success',
+                    `✅ <strong>Network Activity Normal:</strong> ${apiRequests} API requests successful. Proceed to Step 5.`);
+            } else if (hasFailedRequests) {
+                diagnosticResults.step4 = 'error';
+                updateStepStatus('step4', 'error',
+                    '❌ <strong>API Requests Failing:</strong> Database/authentication issue. Check Network tab for error details.');
+            } else if (apiRequests === 0) {
+                diagnosticResults.step4 = 'error';
+                updateStepStatus('step4', 'error',
+                    '❌ <strong>No API Calls:</strong> Save function may not be reaching database operations.');
+            } else {
+                diagnosticResults.step4 = 'warning';
+                updateStepStatus('step4', 'warning',
+                    '⚠️ <strong>Partial Network Activity:</strong> Some activity detected but unclear results.');
+            }
+            updateSolutionRecommendations();
+        }
+
+        function checkStep5() {
+            diagnosticResults.step5 = 'success';
+            updateStepStatus('step5', 'success',
+                '✅ <strong>Direct Function Call Works:</strong> Function is available and executable. Issue may be with button binding.');
+            updateSolutionRecommendations();
+        }
+
+        function failStep5() {
+            diagnosticResults.step5 = 'error';
+            updateStepStatus('step5', 'error',
+                '❌ <strong>Function Not Available:</strong> handleBulkSaveMarks not in global scope or has errors.');
+            updateSolutionRecommendations();
+        }
+
+        function updateSolutionRecommendations() {
+            const resultsDiv = document.getElementById('solution-recommendations');
+            let recommendations = [];
+
+            // Analyze results and provide targeted recommendations
+            if (diagnosticResults.step1 === 'error') {
+                recommendations.push(`
+                    <div class="diagnostic-result result-error">
+                        <h4>🔄 Fix 1: Component Not Enhanced</h4>
+                        <p><strong>Problem:</strong> Enhanced marks saving code is not loaded.</p>
+                        <p><strong>Solution:</strong></p>
+                        <ol>
+                            <li>Hard refresh: Ctrl+F5 (Windows) or Cmd+Shift+R (Mac)</li>
+                            <li>Clear browser cache completely</li>
+                            <li>Restart development server if needed</li>
+                            <li>Verify ExamsMarks.js file contains the enhanced code</li>
+                        </ol>
+                    </div>
+                `);
+            }
+
+            if (diagnosticResults.step2 === 'error') {
+                recommendations.push(`
+                    <div class="diagnostic-result result-error">
+                        <h4>📊 Fix 2: Form State Issue</h4>
+                        <p><strong>Problem:</strong> Marks are not being stored in form state.</p>
+                        <p><strong>Solution:</strong></p>
+                        <ol>
+                            <li>Check console for JavaScript errors</li>
+                            <li>Verify handleMarksChange function is working</li>
+                            <li>Ensure TextInput onChangeText is properly connected</li>
+                            <li>Test with simple values like "10", "20"</li>
+                        </ol>
+                    </div>
+                `);
+            }
+
+            if (diagnosticResults.step3 === 'error') {
+                recommendations.push(`
+                    <div class="diagnostic-result result-error">
+                        <h4>🚀 Fix 3: Save Button Not Working</h4>
+                        <p><strong>Problem:</strong> Save button click is not triggering the function.</p>
+                        <p><strong>Solution:</strong></p>
+                        <ol>
+                            <li>Check for JavaScript errors preventing execution</li>
+                            <li>Verify button onPress handler is correctly bound</li>
+                            <li>Test calling handleBulkSaveMarks() directly in console</li>
+                            <li>Check if pop-up blockers are interfering</li>
+                        </ol>
+                    </div>
+                `);
+            }
+
+            if (diagnosticResults.step4 === 'error') {
+                recommendations.push(`
+                    <div class="diagnostic-result result-error">
+                        <h4>🌐 Fix 4: Network/Database Issue</h4>
+                        <p><strong>Problem:</strong> API calls are failing or not being made.</p>
+                        <p><strong>Solution:</strong></p>
+                        <ol>
+                            <li>Check Supabase connection and credentials</li>
+                            <li>Verify tenant access and authentication</li>
+                            <li>Check Network tab for specific error messages</li>
+                            <li>Test database permissions</li>
+                        </ol>
+                    </div>
+                `);
+            }
+
+            if (diagnosticResults.step1 === 'success' && 
+                diagnosticResults.step2 === 'success' && 
+                diagnosticResults.step3 === 'success' &&
+                diagnosticResults.step4 === 'success') {
+                recommendations.push(`
+                    <div class="diagnostic-result result-success">
+                        <h4>✅ All Systems Working</h4>
+                        <p><strong>Status:</strong> All diagnostic steps passed successfully!</p>
+                        <p><strong>Next Steps:</strong></p>
+                        <ol>
+                            <li>Try saving marks again with the diagnostics complete</li>
+                            <li>If still not working, check for timing issues</li>
+                            <li>Monitor console for any late-appearing errors</li>
+                            <li>Test with minimal data first (1-2 marks)</li>
+                        </ol>
+                    </div>
+                `);
+            }
+
+            if (recommendations.length === 0) {
+                recommendations.push(`
+                    <div class="diagnostic-result result-warning">
+                        <h4>📋 Continue Diagnostics</h4>
+                        <p>Complete all diagnostic steps above to get targeted solutions.</p>
+                    </div>
+                `);
+            }
+
+            resultsDiv.innerHTML = recommendations.join('');
+        }
+
+        function performHardRefresh() {
+            alert('Press Ctrl+Shift+R (Windows) or Cmd+Shift+R (Mac) to perform a hard refresh.');
+        }
+
+        function clearBrowserStorage() {
+            if (confirm('This will clear all browser storage for this site. Continue?')) {
+                localStorage.clear();
+                sessionStorage.clear();
+                if ('caches' in window) {
+                    caches.keys().then(names => {
+                        names.forEach(name => {
+                            caches.delete(name);
+                        });
+                    });
+                }
+                alert('Browser storage cleared. Please refresh the page.');
+            }
+        }
+
+        // Initialize with current status
+        updateSolutionRecommendations();
+    </script>
+</body>
+</html>
