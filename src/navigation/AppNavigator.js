@@ -16,6 +16,9 @@ import UniversalNotificationBadge from '../components/UniversalNotificationBadge
 import ChatBadge from '../components/ChatBadge';
 import InAppNotificationBanner from '../components/InAppNotificationBanner';
 import { navigationRef } from '../services/NavigationService';
+// Import FeatureGuard for access control
+import FeatureGuard from '../components/FeatureGuard';
+
 // Admin Screens
 import AdminDashboard from '../screens/admin/AdminDashboard';
 import ManageClasses from '../screens/admin/ManageClasses';
@@ -108,6 +111,31 @@ import EduCartoonAI from '../screens/universal/EduCartoonAI';
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 
+// Feature-protected tab screen components
+const ClassesScreen = (props) => (
+  <FeatureGuard screenName="ManageClasses">
+    <ManageClasses {...props} />
+  </FeatureGuard>
+);
+
+const StudentsScreen = (props) => (
+  <FeatureGuard screenName="ManageStudents">
+    <ManageStudents {...props} />
+  </FeatureGuard>
+);
+
+const TeachersScreen = (props) => (
+  <FeatureGuard screenName="ManageTeachers">
+    <ManageTeachers {...props} />
+  </FeatureGuard>
+);
+
+const ReportsScreen = (props) => (
+  <FeatureGuard screenName="AnalyticsReports">
+    <AnalyticsReports {...props} />
+  </FeatureGuard>
+);
+
 // Admin Tab Navigator
 function AdminTabNavigator() {
   return (
@@ -138,14 +166,14 @@ function AdminTabNavigator() {
         component={AdminDashboard}
         options={{ tabBarLabel: 'Dashboard' }}
       />
-      <Tab.Screen name="Classes" component={ManageClasses} />
-      <Tab.Screen name="Students" component={ManageStudents} />
+      <Tab.Screen name="Classes" component={ClassesScreen} />
+      <Tab.Screen name="Students" component={StudentsScreen} />
       <Tab.Screen
         name="Teachers"
-        component={ManageTeachers}
+        component={TeachersScreen}
         options={{ tabBarLabel: 'Teachers' }}
       />
-      <Tab.Screen name="Reports" component={AnalyticsReports} />
+      <Tab.Screen name="Reports" component={ReportsScreen} />
     </Tab.Navigator>
   );
 }

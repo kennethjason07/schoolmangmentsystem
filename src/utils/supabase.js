@@ -1042,29 +1042,49 @@ export const dbHelpers = {
 
   async createTeacherAccount(teacherData, authData) {
     try {
-      // 0. Ensure roles exist
-      await this.ensureRolesExist();
+      console.log('🔨 Creating teacher account for:', authData.email);
+      
+      // 0. Check if teacher record exists and get tenant context
+      const { data: teacherRecord, error: teacherCheckError } = await supabase
+        .from(TABLES.TEACHERS)
+        .select('id, name, tenant_id')
+        .eq('id', teacherData.teacherId)
+        .single();
 
-      // 1. Create auth user using regular signup
-      const { data: authUser, error: authError } = await supabase.auth.signUp({
-        email: authData.email,
-        password: authData.password,
-        options: {
-          data: {
-            full_name: authData.full_name,
-            role: 'teacher'
-          },
-          emailRedirectTo: undefined // Disable email confirmation for admin-created accounts
-        }
-      });
-
-      if (authError) throw authError;
-
-      if (!authUser.user) {
-        throw new Error('Failed to create user account');
+      if (teacherCheckError || !teacherRecord) {
+        throw new Error(`Teacher record not found for ID: ${teacherData.teacherId}`);
       }
 
-      // 2. Get teacher role ID safely
+      const tenantId = teacherRecord.tenant_id;
+      if (!tenantId) {
+        throw new Error('Teacher record is missing tenant_id');
+      }
+
+      console.log('✅ Teacher record found:', teacherRecord.name, 'Tenant:', tenantId);
+
+      // 1. Check if user already exists in auth or users table
+      const { data: existingUser, error: existingUserError } = await supabase
+        .from(TABLES.USERS)
+        .select('id, email, linked_teacher_id')
+        .eq('email', authData.email)
+        .maybeSingle();
+
+      if (existingUserError && existingUserError.code !== 'PGRST116') {
+        throw new Error(`Error checking existing user: ${existingUserError.message}`);
+      }
+
+      if (existingUser) {
+        if (existingUser.linked_teacher_id === teacherData.teacherId) {
+          throw new Error(`Account already exists for ${authData.email} and is properly linked to this teacher.`);
+        } else {
+          throw new Error(`Email ${authData.email} is already registered to another user. Please use a different email.`);
+        }
+      }
+
+      // 2. Ensure roles exist
+      await this.ensureRolesExist();
+
+      // 3. Get teacher role ID safely
       const teacherRoleId = await this.getRoleIdSafely('teacher');
       console.log(`✅ Using teacher role ID: ${teacherRoleId}`);
       
@@ -1079,41 +1099,79 @@ export const dbHelpers = {
         throw new Error(`Invalid teacher role ID: expected number, got ${typeof teacherRoleId}`);
       }
 
-      // 3. Create user profile with linked_teacher_id
+      // 4. Create auth user using admin signup
+      console.log('🔐 Creating auth user for:', authData.email);
+      const { data: authUser, error: authError } = await supabase.auth.signUp({
+        email: authData.email,
+        password: authData.password,
+        options: {
+          data: {
+            full_name: authData.full_name,
+            role: 'teacher',
+            tenant_id: tenantId
+          },
+          emailRedirectTo: undefined // Disable email confirmation for admin-created accounts
+        }
+      });
+
+      if (authError) {
+        console.error('❌ Auth signup error:', authError);
+        throw new Error(`Authentication signup failed: ${authError.message}`);
+      }
+
+      if (!authUser.user) {
+        throw new Error('Failed to create user account - no user returned from auth signup');
+      }
+
+      console.log('✅ Auth user created:', authUser.user.id);
+
+      // 5. Create user profile with proper tenant and teacher linkage
+      console.log('👤 Creating user profile with tenant:', tenantId);
+      const userProfileData = {
+        id: authUser.user.id,
+        email: authData.email,
+        full_name: authData.full_name,
+        phone: authData.phone || '',
+        role_id: teacherRoleId,
+        linked_teacher_id: teacherData.teacherId,
+        tenant_id: tenantId  // ✅ Add tenant_id to user profile
+      };
+
       const { data: userProfile, error: userError } = await supabase
         .from(TABLES.USERS)
-        .insert({
-          id: authUser.user.id,
-          email: authData.email,
-          full_name: authData.full_name,
-          phone: authData.phone || '',
-          role_id: teacherRoleId,
-          linked_teacher_id: teacherData.teacherId  // ✅ Link to teacher record
-        })
+        .insert(userProfileData)
         .select()
         .single();
 
-      if (userError) throw userError;
+      if (userError) {
+        console.error('❌ User profile creation error:', userError);
+        // Try to clean up auth user if profile creation fails
+        try {
+          await supabase.auth.admin.deleteUser(authUser.user.id);
+        } catch (cleanupError) {
+          console.error('❌ Failed to cleanup auth user after profile creation failure:', cleanupError);
+        }
+        throw new Error(`Failed to create user profile: ${userError.message}`);
+      }
 
-      // 4. Get the teacher record for return
-      const { data: teacher, error: teacherError } = await supabase
-        .from(TABLES.TEACHERS)
-        .select('*')
-        .eq('id', teacherData.teacherId)
-        .single();
+      console.log('✅ User profile created successfully:', userProfile.id);
 
-      if (teacherError) throw teacherError;
-
+      // 6. Return success with all created data
+      console.log('🎉 Teacher account creation completed successfully');
       return {
         data: {
           authUser: authUser.user,
           userProfile,
-          teacher
+          teacher: teacherRecord
         },
         error: null
       };
     } catch (error) {
-      return { data: null, error };
+      console.error('❌ createTeacherAccount failed:', error);
+      return { 
+        data: null, 
+        error: new Error(error.message || 'Failed to create teacher account')
+      };
     }
   },
 

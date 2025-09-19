@@ -274,8 +274,21 @@ Please share these credentials with the teacher.`,
   };
 
   const renderTeacherItem = ({ item }) => {
-    // Check if teacher has a linked user account
-    const hasAccount = item.users && item.users.length > 0;
+    // Enhanced account status check with better validation
+    const userAccount = item.users && item.users.length > 0 ? item.users[0] : null;
+    const hasAccount = userAccount && userAccount.email && userAccount.linked_teacher_id === item.id;
+    
+    // Detailed account status for debugging
+    let accountStatusText = 'No Account';
+    let statusColor = '#666';
+    
+    if (hasAccount) {
+      accountStatusText = 'Account Active';
+      statusColor = '#4CAF50';
+    } else if (userAccount && userAccount.email) {
+      accountStatusText = 'Account Unlinked'; // User exists but not properly linked
+      statusColor = '#FF9800';
+    }
 
     return (
       <View style={styles.teacherCard}>
@@ -289,17 +302,30 @@ Please share these credentials with the teacher.`,
           </View>
           <View style={styles.teacherDetails}>
             <Text style={styles.teacherName}>{item.name}</Text>
-            <Text style={styles.teacherStatus}>
-              {hasAccount ? `Email: ${item.users[0]?.email}` : 'No login account'}
+            
+            {/* Show email if available */}
+            <Text style={[styles.teacherStatus, { color: statusColor }]}>
+              {hasAccount ? `📬 Email: ${userAccount.email}` : `❌ ${accountStatusText}`}
             </Text>
-            {hasAccount && (
+            
+            {/* Show phone from user or teacher record */}
+            {(userAccount?.phone || item.phone) && (
               <Text style={styles.teacherPhone}>
-                Phone: {item.users[0]?.phone || 'Not provided'}
+                📱 Phone: {userAccount?.phone || item.phone || 'Not provided'}
               </Text>
             )}
+            
+            {/* Show qualification */}
             <Text style={styles.teacherDetails}>
-              Qualification: {item.qualification || 'Not specified'}
+              🎓 Qualification: {item.qualification || 'Not specified'}
             </Text>
+            
+            {/* Debug info for troubleshooting */}
+            {userAccount && (
+              <Text style={styles.debugInfo}>
+                🔍 User ID: {userAccount.id?.substring(0, 8)}... | Linked: {userAccount.linked_teacher_id ? 'Yes' : 'No'}
+              </Text>
+            )}
           </View>
         </View>
 
@@ -1020,6 +1046,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#fff',
     fontWeight: '500',
+  },
+  
+  // Enhanced debug info style
+  debugInfo: {
+    fontSize: 11,
+    color: '#999',
+    fontStyle: 'italic',
+    marginTop: 2,
   },
 });
 
