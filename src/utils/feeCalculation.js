@@ -358,12 +358,15 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
       } else if (discount.discount_type === 'fixed' || discount.discount_type === 'fixed_amount') {
         discountAmount = Number(discount.discount_value) || 0;
       }
+      // Ensure discount doesn't exceed base amount
+      discountAmount = Math.min(discountAmount, baseAmount);
       individualDiscount += discountAmount;
       console.log(`  💰 Applied ${discount.discount_type} discount: ₹${discountAmount} (reason: ${discount.reason || discount.description || 'No reason'})`);
     });
 
     // 🔥 ENHANCED: Calculate final amount with all discounts
     const totalDiscounts = structureDiscount + individualDiscount;
+    // Ensure final amount doesn't go below zero
     const finalAmount = Math.max(0, baseAmount - totalDiscounts);
     console.log(`💸 Final amount calculation: Base(₹${baseAmount}) - StructureDisc(₹${structureDiscount}) - IndividualDisc(₹${individualDiscount}) = ₹${finalAmount}`);
 
@@ -434,11 +437,12 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
       }
       
       // 🔥 ENHANCED: Calculate remaining amount for this fee
+      // Ensure remaining amount doesn't go below zero
       const remainingAmount = Math.max(0, finalAmount - totalPaid);
       
       // 🔥 ENHANCED: Determine status with better logic
       let status = 'pending';
-      if (finalAmount === 0) {
+      if (baseAmount === 0) {
         status = 'no_fee';
       } else if (totalPaid >= finalAmount) {
         status = 'paid';
