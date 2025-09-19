@@ -343,7 +343,8 @@ const FeeManagement = () => {
       classesResult,
       studentsResult,
       feeStructuresResult,
-      paymentsResult
+      paymentsResult,
+      studentDiscountsResult
     ] = await Promise.all([
       // Classes query
       supabase
@@ -357,10 +358,10 @@ const FeeManagement = () => {
         .select('id, name, admission_no, academic_year, class_id')
         .eq('tenant_id', tenantId),
       
-      // Fee structures query
+      // Fee structures query with discount information
       supabase
         .from('fee_structure')
-        .select('id, class_id, fee_component, amount, base_amount, due_date, academic_year, discount_applied')
+        .select('id, class_id, student_id, fee_component, amount, base_amount, due_date, academic_year, discount_applied')
         .eq('tenant_id', tenantId),
       
       // Payments query
@@ -368,13 +369,20 @@ const FeeManagement = () => {
         .from('student_fees')
         .select('id, student_id, fee_component, amount_paid, payment_date, payment_mode, academic_year')
         .eq('tenant_id', tenantId)
-        .order('payment_date', { ascending: false })
+        .order('payment_date', { ascending: false }),
+      
+      // Student discounts query
+      supabase
+        .from('student_discounts')
+        .select('id, student_id, class_id, academic_year, discount_type, discount_value, fee_component, is_active')
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true)
     ]);
     
     // Check for errors
-    [classesResult, studentsResult, feeStructuresResult, paymentsResult].forEach((result, index) => {
+    [classesResult, studentsResult, feeStructuresResult, paymentsResult, studentDiscountsResult].forEach((result, index) => {
       if (result.error) {
-        const queryNames = ['classes', 'students', 'fee_structures', 'payments'];
+        const queryNames = ['classes', 'students', 'fee_structures', 'payments', 'student_discounts'];
         throw new Error(`${queryNames[index]} query failed: ${result.error.message}`);
       }
     });
@@ -389,7 +397,8 @@ const FeeManagement = () => {
       classesResult.data || [], 
       feeStructuresResult.data || [],
       studentsResult.data || [],
-      paymentsResult.data || []
+      paymentsResult.data || [],
+      studentDiscountsResult.data || []
     );
     
     const processingEndTime = performance.now();
@@ -416,21 +425,23 @@ const FeeManagement = () => {
   const loadAllDataOptimized = async () => {
     console.log('⚡ Using optimized parallel loading as fallback...');
     
-    // Parallel data loading with optimized queries
+    // Parallel data loading with optimized queries including discounts
     const [
       classesResult,
       feeStructuresResult,
       studentsResult,
-      paymentsResult
+      paymentsResult,
+      studentDiscountsResult
     ] = await Promise.all([
       tenantDatabase.read('classes', {}, 'id, class_name, section, academic_year'),
-      tenantDatabase.read('fee_structure', {}, 'id, class_id, fee_component, amount, base_amount, due_date, academic_year'),
+      tenantDatabase.read('fee_structure', {}, 'id, class_id, student_id, fee_component, amount, base_amount, due_date, academic_year, discount_applied'),
       tenantDatabase.read('students', {}, 'id, name, class_id, admission_no, academic_year'),
-      tenantDatabase.read('student_fees', {}, 'id, student_id, fee_component, amount_paid, payment_date, payment_mode, academic_year')
+      tenantDatabase.read('student_fees', {}, 'id, student_id, fee_component, amount_paid, payment_date, payment_mode, academic_year'),
+      tenantDatabase.read('student_discounts', { is_active: true }, 'id, student_id, class_id, academic_year, discount_type, discount_value, fee_component, is_active')
     ]);
 
     // Check for errors
-    [classesResult, feeStructuresResult, studentsResult, paymentsResult].forEach(result => {
+    [classesResult, feeStructuresResult, studentsResult, paymentsResult, studentDiscountsResult].forEach(result => {
       if (result.error) throw result.error;
     });
 
@@ -438,9 +449,10 @@ const FeeManagement = () => {
     const feeStructuresData = feeStructuresResult.data || [];
     const studentsData = studentsResult.data || [];
     const paymentsData = paymentsResult.data || [];
+    const studentDiscountsData = studentDiscountsResult.data || [];
 
-    // Fast in-memory processing
-    const processedData = processOptimizedData(classesData, feeStructuresData, studentsData, paymentsData);
+    // Fast in-memory processing with discount support
+    const processedData = processOptimizedData(classesData, feeStructuresData, studentsData, paymentsData, studentDiscountsData);
     
     // Set all state
     setClasses(processedData.classes);
@@ -455,13 +467,24 @@ const FeeManagement = () => {
   };
   
   // Optimized data processor for fallback method
-  const processOptimizedData = (classesData, feeStructuresData, studentsData, paymentsData) => {
+  const processOptimizedData = (classesData, feeStructuresData, studentsData, paymentsData, studentDiscountsData = []) => {
+    console.log('🔍 Processing fee data with discount support...', {
+      classes: classesData.length,
+      feeStructures: feeStructuresData.length,
+      students: studentsData.length,
+      payments: paymentsData.length,
+      discounts: studentDiscountsData.length
+    });
+    
     // Create efficient lookup maps
     const classLookup = new Map();
     const studentLookup = new Map();
     const paymentsByStudent = new Map();
     const feesByClass = new Map();
+    const feesByStudent = new Map();
+    const discountsByStudent = new Map();
     
+    // Build lookup maps
     classesData.forEach(cls => classLookup.set(cls.id, cls));
     studentsData.forEach(student => studentLookup.set(student.id, student));
     
@@ -472,12 +495,57 @@ const FeeManagement = () => {
       paymentsByStudent.get(payment.student_id).push(payment);
     });
     
-    feeStructuresData.forEach(fee => {
-      if (!feesByClass.has(fee.class_id)) {
-        feesByClass.set(fee.class_id, []);
+    // Process student discounts
+    studentDiscountsData.forEach(discount => {
+      if (!discountsByStudent.has(discount.student_id)) {
+        discountsByStudent.set(discount.student_id, []);
       }
-      feesByClass.get(fee.class_id).push(fee);
+      discountsByStudent.get(discount.student_id).push(discount);
     });
+    
+    // Process fee structures - separate class fees from student-specific fees
+    feeStructuresData.forEach(fee => {
+      // Class-level fees (student_id is null)
+      if (!fee.student_id) {
+        if (!feesByClass.has(fee.class_id)) {
+          feesByClass.set(fee.class_id, []);
+        }
+        feesByClass.get(fee.class_id).push(fee);
+      } else {
+        // Student-specific fees
+        if (!feesByStudent.has(fee.student_id)) {
+          feesByStudent.set(fee.student_id, []);
+        }
+        feesByStudent.get(fee.student_id).push(fee);
+      }
+    });
+    
+    // Helper function to calculate class-level fee for a student considering discounts
+    // Note: Student-specific fees are handled separately to avoid double-counting
+    const calculateStudentFeeAmount = (baseFee, studentId, feeComponent) => {
+      let feeAmount = parseFloat(baseFee.amount || baseFee.base_amount || 0);
+      
+      // Apply student discounts to class-level fees
+      const studentDiscounts = discountsByStudent.get(studentId) || [];
+      const applicableDiscount = studentDiscounts.find(d => 
+        !d.fee_component || d.fee_component === feeComponent
+      );
+      
+      if (applicableDiscount) {
+        if (applicableDiscount.discount_type === 'percentage') {
+          const discountAmount = (feeAmount * parseFloat(applicableDiscount.discount_value)) / 100;
+          feeAmount = Math.max(0, feeAmount - discountAmount);
+          console.log(`💰 Applied ${applicableDiscount.discount_value}% discount for ${studentId}: ${feeComponent} = ₹${feeAmount}`);
+        } else if (applicableDiscount.discount_type === 'fixed_amount') {
+          feeAmount = Math.max(0, feeAmount - parseFloat(applicableDiscount.discount_value));
+          console.log(`💰 Applied ₹${applicableDiscount.discount_value} discount for ${studentId}: ${feeComponent} = ₹${feeAmount}`);
+        }
+      } else {
+        console.log(`💵 Class fee for ${studentId}: ${feeComponent} = ₹${feeAmount} (no discount)`);
+      }
+      
+      return feeAmount;
+    };
     
     // Process fee structures
     const feeStructures = [];
@@ -508,35 +576,75 @@ const FeeManagement = () => {
       };
     });
     
-    // Calculate class stats efficiently
+    // Calculate class stats efficiently with discount support
     const classStats = [];
     let totalCollected = 0;
     let totalDue = 0;
-    let totalOutstanding = 0;
+    let totalOutstanding = 0; // Will be calculated from totalDue - totalCollected for consistency
+    
+    console.log('📋 Starting class-wise fee calculation with discount support...');
     
     classesData.forEach(classData => {
       const studentsInClass = studentsData.filter(s => s.class_id === classData.id);
       const feeStructuresForClass = feesByClass.get(classData.id) || [];
       
-      const totalFeePerStudent = feeStructuresForClass.reduce((sum, fee) => 
-        sum + (parseFloat(fee.amount) || 0), 0);
+      console.log(`📊 Processing class ${classData.class_name}${classData.section ? '-' + classData.section : ''}:`, {
+        students: studentsInClass.length,
+        feeComponents: feeStructuresForClass.length
+      });
       
+      let classExpectedFees = 0;
       let classPaidAmount = 0;
       let classStudentsWithPayments = 0;
       
+      // Calculate expected fees per student considering individual discounts
       studentsInClass.forEach(student => {
+        let studentExpectedFees = 0;
+        const processedComponents = new Set(); // Track processed fee components to avoid double-counting
+        
+        // 🔥 FIXED: First process student-specific fees (highest priority)
+        const studentSpecificFees = feesByStudent.get(student.id) || [];
+        studentSpecificFees.forEach(fee => {
+          if (fee.class_id === classData.id) { // Only fees for this class
+            const feeAmount = parseFloat(fee.amount || fee.base_amount || 0);
+            studentExpectedFees += feeAmount;
+            processedComponents.add(fee.fee_component);
+            console.log(`📦 Student-specific fee for ${student.name}: ${fee.fee_component} = ₹${feeAmount}`);
+          }
+        });
+        
+        // 🔥 FIXED: Then process class-level fees (only if not already processed as student-specific)
+        feeStructuresForClass.forEach(fee => {
+          if (!processedComponents.has(fee.fee_component)) {
+            const studentFeeAmount = calculateStudentFeeAmount(fee, student.id, fee.fee_component);
+            studentExpectedFees += studentFeeAmount;
+            processedComponents.add(fee.fee_component);
+          } else {
+            console.log(`⚠️ Skipping class fee for ${student.name}: ${fee.fee_component} (student-specific fee exists)`);
+          }
+        });
+        
+        classExpectedFees += studentExpectedFees;
+        
+        // Calculate how much this student has paid
         const studentPayments = paymentsByStudent.get(student.id) || [];
         const studentTotalPaid = studentPayments.reduce((sum, p) => 
           sum + (parseFloat(p.amount_paid) || 0), 0);
         
         classPaidAmount += studentTotalPaid;
         if (studentTotalPaid > 0) classStudentsWithPayments++;
+        
+        console.log(`  Student ${student.name}: Expected=₹${studentExpectedFees}, Paid=₹${studentTotalPaid}`);
       });
       
-      const classExpectedFees = totalFeePerStudent * studentsInClass.length;
       const classOutstanding = Math.max(0, classExpectedFees - classPaidAmount);
       const collectionRate = classExpectedFees > 0 ? 
         Math.round((classPaidAmount / classExpectedFees) * 10000) / 100 : 0;
+      
+      console.log(`  Class totals: Expected=₹${classExpectedFees}, Collected=₹${classPaidAmount}, Outstanding=₹${classOutstanding}`);
+      
+      // Calculate total fee per student for display (average)
+      const avgFeePerStudent = studentsInClass.length > 0 ? classExpectedFees / studentsInClass.length : 0;
       
       classStats.push({
         classId: classData.id,
@@ -548,12 +656,20 @@ const FeeManagement = () => {
         collectionRate,
         studentsWithPayments: classStudentsWithPayments,
         studentsWithoutPayments: studentsInClass.length - classStudentsWithPayments,
-        feeStructureAmount: totalFeePerStudent
+        feeStructureAmount: avgFeePerStudent // Updated to use average fee per student
       });
       
       totalDue += classExpectedFees;
       totalCollected += classPaidAmount;
-      totalOutstanding += classOutstanding;
+      // Note: Don't add classOutstanding here - calculate total outstanding from totals
+    });
+    
+    // ✅ FIXED: Calculate total outstanding from total due and total collected to ensure mathematical consistency
+    totalOutstanding = Math.max(0, totalDue - totalCollected);
+    
+    console.log('🔧 Recalculated Outstanding for consistency:', {
+      calculatedOutstanding: `₹${totalOutstanding}`,
+      formula: `max(0, ${totalDue} - ${totalCollected})`
     });
     
     // Sort data
@@ -562,6 +678,14 @@ const FeeManagement = () => {
     
     const overallCollectionRate = totalDue > 0 ? 
       Math.round((totalCollected / totalDue) * 10000) / 100 : 0;
+    
+    console.log('✅ Fee calculation completed with discount support:', {
+      totalDue: `₹${totalDue}`,
+      totalCollected: `₹${totalCollected}`,
+      totalOutstanding: `₹${totalOutstanding}`,
+      collectionRate: `${overallCollectionRate}%`,
+      classesProcessed: classStats.length
+    });
     
     return {
       classes: classesData,
