@@ -17,14 +17,13 @@ import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { Picker } from '@react-native-picker/picker';
 import { supabase, TABLES } from '../../utils/supabase';
-import { useTenantAccess } from '../../utils/tenantHelpers';
+import { useTenantAccess, tenantDatabase, getCachedTenantId } from '../../utils/tenantHelpers';
 import { useAuth } from '../../utils/AuthContext';
-import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 import { validateTenantAccess } from '../../utils/tenantValidation';
 
 const ManageClasses = ({ navigation }) => {
   const { 
-    tenantId, 
+    tenantId,
     isReady, 
     isLoading: tenantLoading, 
     tenant, 
@@ -32,7 +31,7 @@ const ManageClasses = ({ navigation }) => {
     error: tenantError 
   } = useTenantAccess();
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   
   // 🏢 LOG: Component initialization with optimized logging
   console.log('🏢 ManageClasses: Component initialized with email-based tenant system');
@@ -60,35 +59,51 @@ const ManageClasses = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
-  // 🔍 LOG: Tenant context changes
+  // 🛡️ Enhanced tenant validation function
+  const validateTenantAccessLocal = () => {
+    if (!isReady) {
+      return { valid: false, error: 'Tenant context not ready' };
+    }
+    
+    const cachedTenantId = getCachedTenantId();
+    if (!cachedTenantId) {
+      return { valid: false, error: 'No tenant ID available' };
+    }
+    
+    if (!user) {
+      return { valid: false, error: 'User not authenticated' };
+    }
+    
+    return { valid: true, tenantId: cachedTenantId };
+  };
+
+  // 🚀 Enhanced tenant context loading
   useEffect(() => {
-    console.log('🔄 ManageClasses: Tenant context changed');
-    console.log('📍 ManageClasses: Updated tenant context:', {
-      tenantId: tenantId || 'null',
-      currentTenant: tenant ? {
-        id: tenant.id,
-        name: tenant.name
-      } : 'null',
+    console.log('🔄 ManageClasses: Enhanced tenant context changed');
+    console.log('📍 ManageClasses: Enhanced tenant status:', {
+      isReady,
       tenantLoading,
-      userId: user?.id || 'null'
+      tenantId: tenantId || 'null',
+      tenantName: tenantName || 'null',
+      userId: user?.id || 'null',
+      hasError: !!tenantError
     });
     
-    // Only load data when tenant and user are available
-    if (tenantId && user && !tenantLoading) {
-      console.log('🚀 ManageClasses: All requirements met, loading data...');
-      console.log('📍 ManageClasses: Using tenant_id:', tenantId);
-      console.log('👤 ManageClasses: Using user_id:', user.id);
+    // Only load data when tenant is ready
+    if (isReady && user) {
+      console.log('🚀 ManageClasses: Tenant ready, loading data...');
       loadAllData();
+    } else if (tenantError) {
+      console.error('❌ ManageClasses: Tenant error detected:', tenantError);
+      setError(tenantError);
     } else {
-      console.log('⏳ ManageClasses: Waiting for required context...', {
-        hasTenantId: !!tenantId,
+      console.log('⏳ ManageClasses: Waiting for tenant to be ready...', {
+        isReady,
         hasUser: !!user,
-        isTenantLoading: tenantLoading,
-        actualTenantId: tenantId,
-        actualUserId: user?.id
+        tenantLoading
       });
     }
-  }, [tenantId, user, tenantLoading]);
+  }, [isReady, user, tenantError]);
 
   // Debug modal state changes
   useEffect(() => {
@@ -110,34 +125,20 @@ const ManageClasses = ({ navigation }) => {
     }, 10000);
     
     try {
-      console.log('🏢 ManageClasses: Starting optimized data loading...');
+      console.log('🏢 ManageClasses: Starting enhanced tenant data loading...');
       
-      // Verify tenant context or use email fallback
-      if (!tenantId) {
-        console.warn('🏢 ManageClasses: No tenantId from context, trying email lookup...');
-        const emailResult = await getCurrentUserTenantByEmail();
-        
-        if (!emailResult.success) {
-          throw new Error(`No tenant available: ${emailResult.error}`);
-        }
-        
-        console.log('🏢 ManageClasses: Email lookup successful but context is null');
-        throw new Error('Tenant context loading issue. Please refresh.');
+      // 🛡️ Enhanced tenant validation
+      const validation = validateTenantAccessLocal();
+      if (!validation.valid) {
+        throw new Error(`Tenant validation failed: ${validation.error}`);
       }
-      // 🚀 OPTIMIZED: Parallel loading of classes and teachers
-      console.log('🏢 ManageClasses: Fetching classes and teachers in parallel...');
+      
+      // 🚀 ENHANCED: Parallel loading using tenantDatabase helpers
+      console.log('🏢 ManageClasses: Fetching classes and teachers using enhanced helpers...');
       
       const [classesResult, teachersResult] = await Promise.all([
-        supabase
-          .from(TABLES.CLASSES)
-          .select('*')
-          .eq('tenant_id', tenantId)
-          .order('class_name', { ascending: true }),
-        supabase
-          .from(TABLES.TEACHERS)
-          .select('*')
-          .eq('tenant_id', tenantId)
-          .order('name', { ascending: true })
+        tenantDatabase.read(TABLES.CLASSES, {}, '*'),
+        tenantDatabase.read(TABLES.TEACHERS, {}, '*')
       ]);
       
       const { data: classData, error: classError } = classesResult;
@@ -159,23 +160,23 @@ const ManageClasses = ({ navigation }) => {
       });
       
       // 🚀 ENHANCED: Load student and subject counts for each class
-      console.log('📊 ManageClasses: Loading student and subject counts...');
+      console.log('📊 ManageClasses: Loading student and subject counts using enhanced helpers...');
       
       const classesWithCounts = await Promise.all((classData || []).map(async (cls) => {
         try {
-          // Get student count for this class
-          const { count: studentsCount, error: studentsError } = await supabase
-            .from(TABLES.STUDENTS)
-            .select('*', { count: 'exact', head: true })
-            .eq('class_id', cls.id)
-            .eq('tenant_id', tenantId);
+          // Get student count for this class using tenantDatabase
+          const { data: studentsData, error: studentsError } = await tenantDatabase.read(
+            TABLES.STUDENTS,
+            { class_id: cls.id },
+            'id'
+          );
           
-          // Get subjects count for this class
-          const { count: subjectsCount, error: subjectsError } = await supabase
-            .from(TABLES.SUBJECTS)
-            .select('*', { count: 'exact', head: true })
-            .eq('class_id', cls.id)
-            .eq('tenant_id', tenantId);
+          // Get subjects count for this class using tenantDatabase
+          const { data: subjectsData, error: subjectsError } = await tenantDatabase.read(
+            TABLES.SUBJECTS,
+            { class_id: cls.id },
+            'id'
+          );
           
           if (studentsError) {
             console.warn(`Warning: Could not load student count for class ${cls.class_name}:`, studentsError.message);
@@ -187,8 +188,8 @@ const ManageClasses = ({ navigation }) => {
           
           return {
             ...cls,
-            students_count: studentsCount || 0,
-            subjects_count: subjectsCount || 0
+            students_count: studentsData?.length || 0,
+            subjects_count: subjectsData?.length || 0
           };
         } catch (error) {
           console.warn(`Error loading counts for class ${cls.class_name}:`, error.message);
@@ -207,7 +208,7 @@ const ManageClasses = ({ navigation }) => {
       setTeachers(teacherData || []);
       
       console.log('📊 ManageClasses: Data loaded successfully:', {
-        classes: processedClasses.length,
+        classes: classesWithCounts.length,
         teachers: teacherData?.length || 0,
         tenantId
       });
@@ -235,9 +236,9 @@ const ManageClasses = ({ navigation }) => {
 
   const handleAddClass = async () => {
     try {
-      // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ManageClasses - handleAddClass');
-      if (!validation.isValid) {
+      // 🛡️ Enhanced tenant validation
+      const validation = validateTenantAccessLocal();
+      if (!validation.valid) {
         Alert.alert('Access Denied', validation.error);
         return;
       }
@@ -247,28 +248,25 @@ const ManageClasses = ({ navigation }) => {
         return;
       }
 
-      console.log('🏫 ManageClasses: Creating new class');
-      console.log('📍 ManageClasses: Insert will use tenant_id:', tenantId);
-      console.log('📍 ManageClasses: Insert tenant_id type:', typeof tenantId);
-      console.log('📋 ManageClasses: Complete class data for insert:', {
+      console.log('🏠 ManageClasses: Creating new class with enhanced tenant system');
+      console.log('📋 ManageClasses: Class data for insert:', {
         class_name: newClass.class_name,
         academic_year: newClass.academic_year,
         section: newClass.section,
-        class_teacher_id: newClass.class_teacher_id || null,
-        tenant_id: tenantId,
-        tenant_id_type: typeof tenantId
+        class_teacher_id: newClass.class_teacher_id || null
       });
       
-      // First, check if a class with the same name, section, and academic year already exists in this tenant
-      console.log('🔍 ManageClasses: Checking for existing class in tenant');
-      const { data: existingClass, error: checkError } = await supabase
-        .from('classes')
-        .select('id, class_name, section, academic_year')
-        .eq('class_name', newClass.class_name)
-        .eq('section', newClass.section)
-        .eq('academic_year', newClass.academic_year)
-        .eq('tenant_id', tenantId)
-        .limit(1);
+      // First, check if a class with the same name, section, and academic year already exists using enhanced helpers
+      console.log('🔍 ManageClasses: Checking for existing class using enhanced tenant system');
+      const { data: existingClass, error: checkError } = await tenantDatabase.read(
+        TABLES.CLASSES,
+        {
+          class_name: newClass.class_name,
+          section: newClass.section,
+          academic_year: newClass.academic_year
+        },
+        'id, class_name, section, academic_year'
+      );
       
       if (checkError) {
         console.error('❌ ManageClasses: Error checking for existing class:', checkError);
@@ -282,19 +280,15 @@ const ManageClasses = ({ navigation }) => {
         return; // Don't proceed with insert
       }
       
-      console.log('✅ ManageClasses: No duplicate found, proceeding with insert');
+      console.log('✅ ManageClasses: No duplicate found, proceeding with enhanced insert');
       
-      // Insert a new class - as specified in easy.txt
-      const { data: insertedData, error } = await supabase
-        .from('classes')
-        .insert({
-          class_name: newClass.class_name,
-          academic_year: newClass.academic_year,
-          section: newClass.section,
-          class_teacher_id: newClass.class_teacher_id || null,
-          tenant_id: tenantId,
-        })
-        .select();
+      // Insert a new class using enhanced tenant database helpers
+      const { data: insertedData, error } = await tenantDatabase.create(TABLES.CLASSES, {
+        class_name: newClass.class_name,
+        academic_year: newClass.academic_year,
+        section: newClass.section,
+        class_teacher_id: newClass.class_teacher_id || null
+      });
 
       if (error) {
         console.error('❌ ManageClasses: Database error adding class:', error);
@@ -309,18 +303,19 @@ const ManageClasses = ({ navigation }) => {
         throw error;
       }
       
-      console.log('✅ ManageClasses: Class created successfully!');
+      console.log('✅ ManageClasses: Class created successfully with enhanced tenant system!');
       console.log('📋 ManageClasses: Inserted class details:');
       if (insertedData && insertedData.length > 0) {
         insertedData.forEach((cls, index) => {
           console.log(`   [${index + 1}] New Class: ${cls.class_name} | tenant_id: ${cls.tenant_id} | id: ${cls.id}`);
           
-          // Verify the inserted class has the correct tenant_id
-          if (cls.tenant_id === tenantId) {
-            console.log('✅ ManageClasses: New class has correct tenant_id');
+          // Verify the inserted class has the correct tenant_id (auto-injected by tenantDatabase)
+          const cachedTenantId = getCachedTenantId();
+          if (cls.tenant_id === cachedTenantId) {
+            console.log('✅ ManageClasses: New class has correct tenant_id (auto-injected)');
           } else {
             console.error('❌ ManageClasses: NEW CLASS TENANT MISMATCH!');
-            console.error('❌ Expected tenant_id:', tenantId);
+            console.error('❌ Expected tenant_id:', cachedTenantId);
             console.error('❌ Actual tenant_id:', cls.tenant_id);
           }
         });
@@ -344,9 +339,9 @@ const ManageClasses = ({ navigation }) => {
 
   const handleEditClass = async () => {
     try {
-      // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'ManageClasses - handleEditClass');
-      if (!validation.isValid) {
+      // 🛡️ Enhanced tenant validation
+      const validation = validateTenantAccessLocal();
+      if (!validation.valid) {
         Alert.alert('Access Denied', validation.error);
         return;
       }
@@ -356,17 +351,20 @@ const ManageClasses = ({ navigation }) => {
         return;
       }
 
-      // First, check if another class with the same name, section, and academic year already exists in this tenant
-      console.log('🔍 ManageClasses: Checking for existing class in tenant (edit)');
-      const { data: existingClass, error: checkError } = await supabase
-        .from('classes')
-        .select('id, class_name, section, academic_year')
-        .eq('class_name', selectedClass.class_name)
-        .eq('section', selectedClass.section)
-        .eq('academic_year', selectedClass.academic_year)
-        .eq('tenant_id', tenantId)
-        .neq('id', selectedClass.id) // Exclude the current class being edited
-        .limit(1);
+      // First, check if another class with the same name, section, and academic year already exists using enhanced helpers
+      console.log('🔍 ManageClasses: Checking for existing class in tenant (edit) using enhanced system');
+      const { data: allExistingClasses, error: checkError } = await tenantDatabase.read(
+        TABLES.CLASSES,
+        {
+          class_name: selectedClass.class_name,
+          section: selectedClass.section,
+          academic_year: selectedClass.academic_year
+        },
+        'id, class_name, section, academic_year'
+      );
+      
+      // Filter out the current class being edited
+      const existingClass = allExistingClasses?.filter(cls => cls.id !== selectedClass.id) || [];
       
       if (checkError) {
         console.error('❌ ManageClasses: Error checking for existing class during edit:', checkError);
@@ -380,19 +378,15 @@ const ManageClasses = ({ navigation }) => {
         return; // Don't proceed with update
       }
       
-      console.log('✅ ManageClasses: No duplicate found during edit, proceeding with update');
+      console.log('✅ ManageClasses: No duplicate found during edit, proceeding with enhanced update');
 
-      // Update a class with tenant validation
-      const { error } = await supabase
-        .from('classes')
-        .update({
-          class_name: selectedClass.class_name,
-          academic_year: selectedClass.academic_year,
-          section: selectedClass.section,
-          class_teacher_id: selectedClass.class_teacher_id || null,
-        })
-        .eq('id', selectedClass.id)
-        .eq('tenant_id', tenantId);
+      // Update a class using enhanced tenant database helpers
+      const { error } = await tenantDatabase.update(TABLES.CLASSES, selectedClass.id, {
+        class_name: selectedClass.class_name,
+        academic_year: selectedClass.academic_year,
+        section: selectedClass.section,
+        class_teacher_id: selectedClass.class_teacher_id || null
+      });
 
       if (error) {
         console.error('Database error updating class:', error);
@@ -429,9 +423,9 @@ const ManageClasses = ({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              // 🛡️ Validate tenant access first
-              const validation = await validateTenantAccess(user?.id, tenantId, 'ManageClasses - handleDeleteClass');
-              if (!validation.isValid) {
+              // 🛡️ Enhanced tenant validation
+              const validation = validateTenantAccessLocal();
+              if (!validation.valid) {
                 Alert.alert('Access Denied', validation.error);
                 return;
               }
@@ -610,9 +604,17 @@ const ManageClasses = ({ navigation }) => {
     try {
       setSelectedClassDetails(classItem);
       
-      // Fetch subjects for this class with their assigned teachers
-      console.log('📋 ManageClasses: Fetching subjects for class ID:', classItem.id);
+      // Enhanced tenant validation
+      const validation = validateTenantAccessLocal();
+      if (!validation.valid) {
+        Alert.alert('Access Denied', validation.error);
+        return;
+      }
       
+      // Fetch subjects for this class with their assigned teachers using manual query (complex join)
+      console.log('📋 ManageClasses: Fetching subjects for class ID using enhanced system:', classItem.id);
+      
+      const cachedTenantId = getCachedTenantId();
       const { data: subjectsData, error: subjectsError } = await supabase
         .from(TABLES.SUBJECTS)
         .select(`
@@ -625,7 +627,7 @@ const ManageClasses = ({ navigation }) => {
           )
         `)
         .eq('class_id', classItem.id)
-        .eq('tenant_id', tenantId);
+        .eq('tenant_id', cachedTenantId);
       
       if (subjectsError) {
         console.error('Error fetching subjects:', subjectsError);
@@ -965,12 +967,16 @@ const ManageClasses = ({ navigation }) => {
         </TouchableOpacity>
       </View>
 
-      {(loading || tenantLoading) ? (
+      {(loading || tenantLoading || !isReady) ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2196F3" />
           <Text style={styles.loadingText}>
-            {tenantLoading ? 'Loading tenant context...' : 'Loading classes...'}
+            {tenantLoading || !isReady ? 'Initializing enhanced tenant access...' : 'Loading classes...'}
           </Text>
+        </View>
+      ) : tenantError ? (
+        <View style={styles.loadingContainer}>
+          <Text style={[styles.loadingText, { color: 'red' }]}>Tenant Error: {tenantError}</Text>
         </View>
       ) : (
         <FlatList
