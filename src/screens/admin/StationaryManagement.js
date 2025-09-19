@@ -986,13 +986,14 @@ const StationaryManagement = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
         }
         contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={Platform.OS === 'web'}
-        nestedScrollEnabled={true}
+        showsVerticalScrollIndicator={false}
+        nestedScrollEnabled={Platform.OS !== 'web'}
         bounces={false}
         overScrollMode="never"
         scrollBehavior="smooth"
         style={styles.scrollContainer}
         WebkitOverflowScrolling="touch"
+        scrollEnabled={Platform.OS !== 'web'}
       />
     </View>
   );
@@ -1018,13 +1019,14 @@ const StationaryManagement = ({ navigation }) => {
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
         }
         contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={Platform.OS === 'web'}
-        nestedScrollEnabled={true}
+        showsVerticalScrollIndicator={false}
+        nestedScrollEnabled={Platform.OS !== 'web'}
         bounces={false}
         overScrollMode="never"
         scrollBehavior="smooth"
         style={styles.scrollContainer}
         WebkitOverflowScrolling="touch"
+        scrollEnabled={Platform.OS !== 'web'}
       />
     </View>
   );
@@ -1033,12 +1035,13 @@ const StationaryManagement = ({ navigation }) => {
     <ScrollView 
       style={[styles.tabContent, styles.scrollContainer]}
       contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={Platform.OS === 'web'}
-      nestedScrollEnabled={true}
+      showsVerticalScrollIndicator={false}
+      nestedScrollEnabled={Platform.OS !== 'web'}
       bounces={false}
       overScrollMode="never"
       scrollBehavior="smooth"
       WebkitOverflowScrolling="touch"
+      scrollEnabled={Platform.OS !== 'web'}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
       }
@@ -1502,16 +1505,16 @@ const styles = StyleSheet.create({
   scrollWrapper: {
     flex: 1,
     ...(Platform.OS === 'web' ? {
-      height: 'calc(100vh - 120px)',
-      minHeight: 300,
-      maxHeight: '100%',
-      overflow: 'hidden',
+      height: 'calc(100vh - 180px)',
+      overflow: 'auto',
+      overflowX: 'hidden',
+      overflowY: 'auto',
     } : {}),
   },
   scrollContainer: {
     flex: 1,
     ...(Platform.OS === 'web' ? {
-      overflowY: 'scroll',
+      overflow: 'visible',
     } : {}),
   },
   scrollContent: {
