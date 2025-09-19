@@ -2007,22 +2007,6 @@ const ManageStudents = () => {
               >
                 <Text style={styles.modalButtonText}>Cancel</Text>
               </TouchableOpacity>
-              
-              {/* Debug Test Button - Remove after testing */}
-              {Platform.OS === 'web' && (
-                <TouchableOpacity
-                  style={[styles.modalButton, { backgroundColor: '#FF9500', marginTop: 8 }]}
-                  onPress={() => {
-                    console.log('🧪 ManageStudents: DEBUG TEST BUTTON pressed!');
-                    console.log('🧪 Platform:', Platform.OS);
-                    console.log('🧪 Current form state:', form);
-                    console.log('🧪 Loading state:', loading);
-                    Alert.alert('Debug Test', `Platform: ${Platform.OS}\nForm valid: ${!!form.admission_no && !!form.name}\nLoading: ${loading}`);
-                  }}
-                >
-                  <Text style={styles.modalButtonText}>🧪 Debug Test</Text>
-                </TouchableOpacity>
-              )}
             </View>
           </View>
         </View>

@@ -59,6 +59,9 @@ const TeacherSubjects = ({ navigation }) => {
   }, [isReady, tenantId, tenantError, tenantLoading]);
 
   const loadTeacherSubjects = async () => {
+    const startTime = performance.now();
+    console.log('📊 [PERF] TeacherSubjects: Starting data fetch at', new Date().toISOString());
+    
     try {
       setLoading(true);
       setError(null);
@@ -186,7 +189,15 @@ const TeacherSubjects = ({ navigation }) => {
       });
 
       setSubjects(processedSubjects);
+      
+      const totalTime = performance.now() - startTime;
+      console.log('📊 [PERF] TeacherSubjects: Total loading time:', totalTime.toFixed(2), 'ms');
+      if (totalTime > 2000) {
+        console.warn('⚠️ [PERF] TeacherSubjects: Slow loading detected! Total time:', totalTime.toFixed(2), 'ms');
+      }
     } catch (err) {
+      const totalTime = performance.now() - startTime;
+      console.log('📊 [PERF] TeacherSubjects: Loading failed after:', totalTime.toFixed(2), 'ms');
       console.error('Error loading teacher subjects:', err);
       setError(err.message);
     } finally {
