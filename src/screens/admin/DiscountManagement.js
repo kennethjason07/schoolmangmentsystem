@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   FlatList,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -18,6 +19,12 @@ import Header from '../../components/Header';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import { formatCurrency } from '../../utils/helpers';
 import { useTenant } from '../../contexts/TenantContext';
+
+// Component load verification
+console.log('💻 DISCOUNT MANAGEMENT - Component loaded on platform:', Platform.OS);
+console.log('🔧 DISCOUNT MANAGEMENT - Enhanced delete functionality active');
+console.log('🔍 DISCOUNT MANAGEMENT - Version: Enhanced with optimistic updates and detailed logging');
+console.log('🕰️ DISCOUNT MANAGEMENT - Load time:', new Date().toISOString());
 
 const DiscountManagement = ({ navigation, route }) => {
   // Get navigation parameters
@@ -80,9 +87,21 @@ const DiscountManagement = ({ navigation, route }) => {
 
   const loadStudentDiscounts = async () => {
     try {
+      console.log('🔄 REFRESH DEBUG - Loading student discounts...', {
+        studentId,
+        academicYear: formData.academicYear,
+        timestamp: new Date().toISOString()
+      });
+      
       if (studentId) {
         const { data, error } = await dbHelpers.getDiscountsByStudent(studentId, formData.academicYear);
         if (error) throw error;
+        
+        console.log('📊 REFRESH DEBUG - Got discounts for student:', {
+          count: data?.length || 0,
+          discountIds: data?.map(d => d.id) || []
+        });
+        
         setDiscounts(data || []);
       } else {
         // Load all discounts if no specific student
@@ -90,10 +109,15 @@ const DiscountManagement = ({ navigation, route }) => {
           academicYear: formData.academicYear
         });
         if (error) throw error;
+        
+        console.log('📊 REFRESH DEBUG - Got discount summary:', {
+          count: data?.length || 0
+        });
+        
         setDiscounts(data || []);
       }
     } catch (error) {
-      console.error('Error loading fee concessions:', error);
+      console.error('❌ REFRESH ERROR - Failed to load fee concessions:', error);
     }
   };
 
@@ -260,32 +284,141 @@ const DiscountManagement = ({ navigation, route }) => {
   };
 
   const handleDeleteDiscount = async (discountId) => {
-    Alert.alert(
-      'Confirm Delete',
-      'Are you sure you want to delete this fee concession?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await dbHelpers.deleteStudentDiscount(discountId, false); // Soft delete
-              
-              if (error) throw error;
-              
-              Alert.alert('Success', 'Fee concession deleted successfully');
-              
-              // Refresh data
-              loadStudentDiscounts();
-            } catch (error) {
-              console.error('Error deleting discount:', error);
-              Alert.alert('Error', 'Failed to delete fee concession');
-            }
-          }
+    console.log('🗑️ DELETE DEBUG - Starting delete process for discount:', discountId);
+    console.log('🔍 DELETE DEBUG - Platform detected:', Platform.OS);
+    console.log('🔍 DELETE DEBUG - Current discounts count:', discounts.length);
+    
+    // Platform-aware confirmation dialog
+    const confirmDelete = () => {
+      if (Platform.OS === 'web') {
+        return window.confirm('Are you sure you want to delete this fee concession? This action will remove the concession and may affect fee calculations.');
+      } else {
+        return new Promise((resolve) => {
+          Alert.alert(
+            'Confirm Delete',
+            'Are you sure you want to delete this fee concession? This action will remove the concession and may affect fee calculations.',
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Delete', style: 'destructive', onPress: () => resolve(true) }
+            ]
+          );
+        });
+      }
+    };
+    
+    const deleteConfirmed = Platform.OS === 'web' ? confirmDelete() : await confirmDelete();
+    
+    if (!deleteConfirmed) {
+      console.log('🙄 DELETE DEBUG - User cancelled deletion');
+      return;
+    }
+    
+    // Execute delete operation
+    try {
+      console.log('🔄 DELETE DEBUG - User confirmed deletion, calling deleteStudentDiscount...');
+      setLoading(true); // Show loading indicator
+      const deleteResult = await dbHelpers.deleteStudentDiscount(discountId, false); // Soft delete
+      
+      console.log('📊 DELETE DEBUG - Delete result:', deleteResult);
+      
+      if (deleteResult.error) {
+        console.error('❌ DELETE ERROR:', deleteResult.error);
+        console.error('Error details:', {
+          message: deleteResult.error.message,
+          code: deleteResult.error.code,
+          hint: deleteResult.error.hint,
+          details: deleteResult.error.details
+        });
+        
+        // Provide more specific error messages
+        let errorMessage = deleteResult.error.message;
+        if (deleteResult.error.message.includes('permission')) {
+          errorMessage = 'You do not have permission to delete this concession. Please contact your administrator.';
+        } else if (deleteResult.error.message.includes('foreign key')) {
+          errorMessage = 'This concession cannot be deleted because it is linked to existing fee records. Please contact support.';
+        } else if (deleteResult.error.message.includes('not found')) {
+          errorMessage = 'The concession was not found. It may have been deleted already.';
         }
-      ]
-    );
+        
+        // Platform-aware error display
+        if (Platform.OS === 'web') {
+          window.alert(`Delete Failed: ${errorMessage}`);
+        } else {
+          Alert.alert(
+            'Delete Failed',
+            errorMessage,
+            [
+              { text: 'OK' },
+              {
+                text: 'Copy Error',
+                onPress: () => {
+                  console.log('Full delete error for debugging:', JSON.stringify(deleteResult.error, null, 2));
+                }
+              }
+            ]
+          );
+        }
+        return;
+      }
+      
+      console.log('✅ DELETE SUCCESS - Fee concession deleted successfully');
+      
+      // Immediate optimistic UI update - remove from local state
+      console.log('🔄 Applying optimistic UI update - removing deleted discount from view...');
+      setDiscounts(prevDiscounts => {
+        const filtered = prevDiscounts.filter(d => d.id !== discountId);
+        console.log('📊 Optimistic update - discounts count:', prevDiscounts.length, '->', filtered.length);
+        return filtered;
+      });
+      
+      // Also refresh from server to be sure
+      console.log('🔄 Refreshing discount data from server after successful delete...');
+      loadStudentDiscounts();
+      
+      // Platform-aware success message
+      if (Platform.OS === 'web') {
+        window.alert('Success: Fee concession deleted successfully. The changes have been applied.');
+      } else {
+        Alert.alert(
+          'Success', 
+          'Fee concession deleted successfully. The changes have been applied.',
+          [{ text: 'OK' }]
+        );
+      }
+      
+    } catch (error) {
+      console.error('💥 DELETE EXCEPTION - Unexpected error during delete:', error);
+      console.error('Exception details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+      
+      // Platform-aware exception display
+      if (Platform.OS === 'web') {
+        window.alert(`Delete Error: An unexpected error occurred: ${error.message || 'Unknown error'}`);
+      } else {
+        Alert.alert(
+          'Delete Error',
+          `An unexpected error occurred: ${error.message || 'Unknown error'}`,
+          [
+            { text: 'OK' },
+            {
+              text: 'Copy Error',
+              onPress: () => {
+                console.log('Full exception for debugging:', JSON.stringify(error, null, 2));
+              }
+            }
+          ]
+        );
+      }
+    } finally {
+      // Small delay before hiding loading to prevent flicker
+      setTimeout(() => {
+        setLoading(false);
+      }, 100);
+      console.log('🏁 DELETE DEBUG - Delete process completed');
+    }
   };
 
   const renderDiscounts = () => (
