@@ -12,6 +12,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   Image,
+  Modal,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -39,6 +41,8 @@ const LoginScreen = ({ navigation }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [loginError, setLoginError] = useState(''); // New state for login errors
+  const [showErrorPopup, setShowErrorPopup] = useState(false); // State for popup visibility
   const [logoError, setLogoError] = useState(false); // Try to load PNG logo first
   const { signIn } = useAuth();
   // 🚀 ENHANCED_TENANT_SYSTEM: Use tenant access hook
@@ -192,6 +196,11 @@ Please contact the administrator to add this role.`
   };
 
   const handleLogin = async () => {
+    // Clear previous errors
+    setLoginError('');
+    setEmailError('');
+    setPasswordError('');
+    
     // Validate inputs
     let isValid = true;
     isValid = validateEmail(email) && isValid;
@@ -213,7 +222,15 @@ Please contact the administrator to add this role.`
       const { data, error } = await signIn(email, password, selectedRole);
       
       if (error) {
-        Alert.alert('Login Failed', error.message || 'Invalid credentials');
+        // Handle specific error messages
+        if (error.message && error.message.toLowerCase().includes('invalid credentials')) {
+          setLoginError('Incorrect password. Please try again.');
+        } else if (error.message && error.message.toLowerCase().includes('user not found')) {
+          setLoginError('User not found. Please check your email address.');
+        } else {
+          setLoginError(error.message || 'Login failed. Please try again.');
+        }
+        setShowErrorPopup(true); // Show the popup error
         return;
       }
 
@@ -222,14 +239,64 @@ Please contact the administrator to add this role.`
       
     } catch (error) {
       console.error('Login error:', error);
-      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+      setLoginError('An unexpected error occurred. Please try again.');
+      setShowErrorPopup(true); // Show the popup error
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Function to close the error popup
+  const closeErrorPopup = () => {
+    setShowErrorPopup(false);
+    setLoginError('');
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
+      {/* Error Popup Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={showErrorPopup}
+        onRequestClose={closeErrorPopup}
+      >
+        <View style={styles.popupOverlay}>
+          <Animatable.View 
+            style={styles.popupContainer}
+            animation="zoomIn"
+            duration={300}
+          >
+            <View style={styles.popupHeader}>
+              <Ionicons name="close-circle" size={24} color="#dc3545" />
+              <Text style={styles.popupTitle}>Login Error</Text>
+            </View>
+            <View style={styles.popupContent}>
+              <Text style={styles.popupMessage}>{loginError}</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.popupButton}
+              onPress={closeErrorPopup}
+              // Web-specific enhancement for hover effect
+              {...(Platform.OS === 'web' && {
+                onMouseEnter: (e) => {
+                  e.currentTarget.style.backgroundColor = '#1565c0';
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 4px 8px rgba(25, 118, 210, 0.4)';
+                },
+                onMouseLeave: (e) => {
+                  e.currentTarget.style.backgroundColor = '#1976d2';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }
+              })}
+            >
+              <Text style={styles.popupButtonText}>OK</Text>
+            </TouchableOpacity>
+          </Animatable.View>
+        </View>
+      </Modal>
+
       <KeyboardAvoidingView 
         style={styles.container} 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -296,6 +363,21 @@ Please contact the administrator to add this role.`
                       selectedRole === role.key && { backgroundColor: role.color }
                     ]}
                     onPress={() => setSelectedRole(role.key)}
+                    // Web-specific enhancement for hover effect
+                    {...(Platform.OS === 'web' && {
+                      onMouseEnter: (e) => {
+                        if (selectedRole !== role.key) {
+                          e.currentTarget.style.backgroundColor = '#e3f2fd';
+                          e.currentTarget.style.transform = 'translateY(-2px)';
+                        }
+                      },
+                      onMouseLeave: (e) => {
+                        if (selectedRole !== role.key) {
+                          e.currentTarget.style.backgroundColor = '#f5f5f5';
+                          e.currentTarget.style.transform = 'translateY(0)';
+                        }
+                      }
+                    })}
                   >
                     <View style={styles.roleButtonContent}>
                       {/* Show logo for teacher, parent, student; icon for admin */}
@@ -361,6 +443,17 @@ Please contact the administrator to add this role.`
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoCorrect={false}
+                  // Web-specific enhancement
+                  {...(Platform.OS === 'web' && {
+                    onFocus: (e) => {
+                      e.currentTarget.style.borderColor = '#1976d2';
+                      e.currentTarget.style.boxShadow = '0 0 0 2px rgba(25, 118, 210, 0.25)';
+                    },
+                    onBlur: (e) => {
+                      e.currentTarget.style.borderColor = '#ddd';
+                      e.currentTarget.style.boxShadow = 'none';
+                    }
+                  })}
                 />
               </View>
               {emailError && (
@@ -383,10 +476,30 @@ Please contact the administrator to add this role.`
                     validatePassword(text);
                   }}
                   secureTextEntry={!showPassword}
+                  // Web-specific enhancement
+                  {...(Platform.OS === 'web' && {
+                    onFocus: (e) => {
+                      e.currentTarget.style.borderColor = '#1976d2';
+                      e.currentTarget.style.boxShadow = '0 0 0 2px rgba(25, 118, 210, 0.25)';
+                    },
+                    onBlur: (e) => {
+                      e.currentTarget.style.borderColor = '#ddd';
+                      e.currentTarget.style.boxShadow = 'none';
+                    }
+                  })}
                 />
                 <TouchableOpacity
                   style={styles.showPasswordButton}
                   onPress={() => setShowPassword(!showPassword)}
+                  // Web-specific enhancement for hover effect
+                  {...(Platform.OS === 'web' && {
+                    onMouseEnter: (e) => {
+                      e.currentTarget.style.opacity = 0.7;
+                    },
+                    onMouseLeave: (e) => {
+                      e.currentTarget.style.opacity = 1;
+                    }
+                  })}
                 >
                   <Ionicons
                     name={showPassword ? "eye-off" : "eye"}
@@ -408,6 +521,23 @@ Please contact the administrator to add this role.`
               ]}
               onPress={handleLogin}
               disabled={isLoading}
+              // Web-specific enhancement for hover effect
+              {...(Platform.OS === 'web' && {
+                onMouseEnter: (e) => {
+                  if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = '#1565c0';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 4px 8px rgba(25, 118, 210, 0.4)';
+                  }
+                },
+                onMouseLeave: (e) => {
+                  if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = '#1976d2';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }
+                }
+              })}
             >
               {isLoading ? (
                 <ActivityIndicator color="#fff" />
@@ -424,13 +554,33 @@ Please contact the administrator to add this role.`
               <TouchableOpacity 
                 style={styles.forgotPasswordButton}
                 onPress={() => navigation.navigate('ForgotPassword')}
+                // Web-specific enhancement for hover effect
+                {...(Platform.OS === 'web' && {
+                  onMouseEnter: (e) => {
+                    e.currentTarget.style.opacity = 0.8;
+                  },
+                  onMouseLeave: (e) => {
+                    e.currentTarget.style.opacity = 1;
+                  }
+                })}
               >
                 <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
               </TouchableOpacity>
               
               <View style={styles.signupContainer}>
                 <Text style={styles.signupText}>Don't have an account? </Text>
-                <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
+                <TouchableOpacity 
+                  onPress={() => navigation.navigate('Signup')}
+                  // Web-specific enhancement for hover effect
+                  {...(Platform.OS === 'web' && {
+                    onMouseEnter: (e) => {
+                      e.currentTarget.style.opacity = 0.8;
+                    },
+                    onMouseLeave: (e) => {
+                      e.currentTarget.style.opacity = 1;
+                    }
+                  })}
+                >
                   <Text style={styles.signupLink}>Sign Up</Text>
                 </TouchableOpacity>
               </View>
@@ -638,14 +788,27 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderWidth: 1,
     borderColor: '#ddd',
+    // Web-specific enhancements
+    ...(Platform.OS === 'web' && {
+      transition: 'all 0.2s ease-in-out',
+    }),
   },
   input: {
     flex: 1,
     fontSize: 16,
     color: '#333',
+    // Web-specific enhancements
+    ...(Platform.OS === 'web' && {
+      outline: 'none',
+    }),
   },
   showPasswordButton: {
     marginLeft: 10,
+    // Web-specific enhancements
+    ...(Platform.OS === 'web' && {
+      cursor: 'pointer',
+      transition: 'opacity 0.2s ease-in-out',
+    }),
   },
   errorText: {
     color: '#dc3545',
@@ -664,11 +827,6 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' && {
       cursor: 'pointer',
       transition: 'all 0.2s ease-in-out',
-      ':hover': {
-        backgroundColor: '#1565c0',
-        transform: 'translateY(-1px)',
-        boxShadow: '0 4px 8px rgba(25, 118, 210, 0.3)',
-      },
     }),
   },
   loginButtonDisabled: {
@@ -689,6 +847,11 @@ const styles = StyleSheet.create({
   forgotPasswordButton: {
     alignItems: 'flex-end',
     marginTop: 15,
+    // Web-specific enhancements
+    ...(Platform.OS === 'web' && {
+      cursor: 'pointer',
+      transition: 'opacity 0.2s ease-in-out',
+    }),
   },
   forgotPasswordText: {
     color: '#1976d2',
@@ -709,7 +872,83 @@ const styles = StyleSheet.create({
     color: '#1976d2',
     fontSize: 14,
     fontWeight: '600',
+    // Web-specific enhancements
+    ...(Platform.OS === 'web' && {
+      cursor: 'pointer',
+      transition: 'opacity 0.2s ease-in-out',
+    }),
+  },
+  // Popup Styles
+  popupOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    // Web-specific enhancements
+    ...(Platform.OS === 'web' && {
+      cursor: 'pointer',
+    }),
+  },
+  popupContainer: {
+    backgroundColor: 'white',
+    borderRadius: 15,
+    padding: 20,
+    width: '80%',
+    maxWidth: 400,
+    alignItems: 'center',
+    elevation: 20,
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0 10px 25px rgba(0, 0, 0, 0.2)',
+      cursor: 'default',
+    } : {
+      shadowColor: '#000',
+      shadowOffset: {
+        width: 0,
+        height: 10,
+      },
+      shadowOpacity: 0.25,
+      shadowRadius: 14,
+    }),
+  },
+  popupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  popupTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#dc3545',
+    marginLeft: 10,
+  },
+  popupContent: {
+    marginBottom: 20,
+    width: '100%',
+  },
+  popupMessage: {
+    fontSize: 16,
+    color: '#333',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  popupButton: {
+    backgroundColor: '#1976d2',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    alignItems: 'center',
+    width: '100%',
+    // Web-specific enhancements
+    ...(Platform.OS === 'web' && {
+      cursor: 'pointer',
+      transition: 'all 0.2s ease-in-out',
+    }),
+  },
+  popupButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 
-export default LoginScreen;  
+export default LoginScreen;

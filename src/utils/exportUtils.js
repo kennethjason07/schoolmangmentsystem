@@ -3,7 +3,48 @@ import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
 import { Alert, Platform } from 'react-native';
+
+// Console logger for export operations
+const logExport = (component, message, data) => {
+  console.log(`[Export: ${component}] ${message}`, data || '');
+};
+
+// Simple test export function to verify basic functionality
+export const testExport = async () => {
+  console.log('🧪 testExport: Starting basic export test...');
+  try {
+    const testContent = 'Test Export Data\nThis is a simple test to verify export functionality.\nDate: ' + new Date().toISOString();
+    const testFileName = 'test_export_' + Date.now() + '.txt';
+    
+    console.log('🧪 testExport: Test content prepared:', { testFileName, contentLength: testContent.length });
+    
+    // Test clipboard functionality first (most reliable)
+    const clipboardSuccess = await copyToClipboard(testContent, 'Test Export');
+    
+    if (clipboardSuccess) {
+      console.log('🧪 testExport: Clipboard test successful');
+      return { success: true, method: 'clipboard', message: 'Test export copied to clipboard successfully!' };
+    }
+    
+    // If clipboard fails, try file save
+    const fileSuccess = await saveFile(testContent, testFileName, 'text/plain');
+    
+    if (fileSuccess) {
+      console.log('🧪 testExport: File save test successful');
+      return { success: true, method: 'file', message: 'Test export saved to file successfully!' };
+    }
+    
+    console.error('🧪 testExport: All export methods failed');
+    return { success: false, method: 'none', message: 'All export methods failed during test.' };
+    
+  } catch (error) {
+    console.error('🧪 testExport ERROR:', error);
+    console.error('🧪 testExport ERROR stack:', error.stack);
+    return { success: false, method: 'error', message: `Test export failed: ${error.message}` };
+  }
+};
 import { supabase, TABLES } from './supabase';
+import { tenantHelpers } from './supabase';
 
 // Export formats
 export const EXPORT_FORMATS = {
@@ -17,9 +58,19 @@ export const EXPORT_FORMATS = {
 // Check if sharing is available (no permissions needed for file system operations)
 export const checkSharingAvailability = async () => {
   try {
-    return await Sharing.isAvailableAsync();
+    console.log('🔄 checkSharingAvailability: Checking if sharing is available...');
+    // For web platform, default to false since native sharing is limited
+    if (Platform.OS === 'web') {
+      console.log('🔄 checkSharingAvailability: Web platform detected, sharing limited');
+      return false;
+    }
+    
+    const isAvailable = await Sharing.isAvailableAsync();
+    console.log('🔄 checkSharingAvailability: Sharing available:', isAvailable);
+    return isAvailable;
   } catch (error) {
-    console.error('Error checking sharing availability:', error);
+    console.error('🔄 checkSharingAvailability ERROR:', error);
+    console.error('🔄 checkSharingAvailability ERROR stack:', error.stack);
     return false;
   }
 };
@@ -185,23 +236,52 @@ export const generateFileName = (baseName, format, includeTimestamp = true) => {
 
 // Save file to device and share
 export const saveFile = async (content, fileName, mimeType = 'text/plain') => {
+  console.log('📂 saveFile: Starting file save process', { fileName, mimeType });
   try {
+    // Ensure FileSystem is properly imported and available
+    if (!FileSystem) {
+      console.error('📂 saveFile: FileSystem module is not available');
+      throw new Error('FileSystem module is not available');
+    }
+    
+    console.log('📂 saveFile: FileSystem module is available');
+    console.log('📂 saveFile: Platform is', Platform.OS);
+    
+    // For web platform, use a different approach since file system is limited
+    if (Platform.OS === 'web') {
+      console.log('📂 saveFile: Using web-specific export approach');
+      return await saveFileWeb(content, fileName, mimeType);
+    }
+
     // Create file in document directory (no permissions needed)
     const fileUri = `${FileSystem.documentDirectory}${fileName}`;
-    await FileSystem.writeAsStringAsync(fileUri, content, {
+    console.log('📂 saveFile: File URI created', fileUri);
+    
+    // Ensure content is a string
+    const fileContent = typeof content === 'string' ? content : JSON.stringify(content);
+    console.log('📂 saveFile: Content prepared, length:', fileContent.length);
+    
+    // Write file with explicit UTF8 encoding
+    console.log('📂 saveFile: Writing file to device storage...');
+    await FileSystem.writeAsStringAsync(fileUri, fileContent, {
       encoding: FileSystem.EncodingType.UTF8,
     });
+    console.log('📂 saveFile: File written successfully');
 
     // Check if sharing is available
+    console.log('📂 saveFile: Checking sharing availability...');
     const canShare = await checkSharingAvailability();
+    console.log('📂 saveFile: Sharing available:', canShare);
 
     if (canShare) {
       // Share the file using native sharing dialog
+      console.log('📂 saveFile: Sharing file...', { fileUri, mimeType });
       await Sharing.shareAsync(fileUri, {
         mimeType,
         dialogTitle: 'Export Report',
         UTI: mimeType,
       });
+      console.log('📂 saveFile: Share dialog shown successfully');
 
       // Show success message
       Alert.alert(
@@ -211,6 +291,7 @@ export const saveFile = async (content, fileName, mimeType = 'text/plain') => {
       );
     } else {
       // Fallback: just show success message with file location
+      console.log('📂 saveFile: Using fallback success message (no sharing)');
       Alert.alert(
         'Export Successful',
         `Report saved as ${fileName} in the app's documents folder.`,
@@ -220,31 +301,246 @@ export const saveFile = async (content, fileName, mimeType = 'text/plain') => {
 
     return true;
   } catch (error) {
-    console.error('Error saving file:', error);
+    console.error('📂 saveFile ERROR:', error);
+    console.error('📂 saveFile ERROR stack:', error.stack);
+    console.error('📂 saveFile ERROR message:', error.message);
     Alert.alert(
       'Export Error',
-      'Failed to export report. Please try again.',
+      `Failed to export report: ${error.message || 'Unknown error'}. Please try again.`,
       [{ text: 'OK' }]
     );
     return false;
   }
 };
 
+// Web-specific file save function (fallback for web platform)
+export const saveFileWeb = async (content, fileName, mimeType = 'text/plain') => {
+  console.log('🌐 saveFileWeb: Starting web file save process', { fileName, mimeType });
+  try {
+    // Try multiple methods for web export
+    
+    // Method 1: HTML5 download (most compatible)
+    if (typeof window !== 'undefined' && window.document) {
+      console.log('🌐 saveFileWeb: Attempting HTML5 download...');
+      try {
+        const result = await downloadFileWeb(content, fileName, mimeType);
+        if (result) {
+          console.log('🌐 saveFileWeb: HTML5 download successful');
+          Alert.alert(
+            'Export Successful',
+            `${fileName} has been downloaded to your Downloads folder.`,
+            [{ text: 'OK' }]
+          );
+          return true;
+        }
+      } catch (downloadError) {
+        console.warn('🌐 saveFileWeb: HTML5 download failed:', downloadError);
+      }
+    }
+    
+    // Method 2: Clipboard as fallback
+    console.log('🌐 saveFileWeb: Attempting clipboard fallback...');
+    const clipboardSuccess = await copyToClipboard(content, `${fileName} Export`);
+    
+    if (clipboardSuccess) {
+      console.log('🌐 saveFileWeb: Clipboard fallback successful');
+      // Don't show another alert since copyToClipboard already shows one
+      return true;
+    }
+  } catch (error) {
+    console.error('🌐 saveFileWeb ERROR:', error);
+    console.error('🌐 saveFileWeb ERROR stack:', error.stack);
+    
+    // Final fallback - try showing content in a new window
+    try {
+      console.log('🌐 saveFileWeb: Attempting to show content in new window...');
+      const success = await showContentInNewWindow(content, fileName);
+      if (success) {
+        Alert.alert(
+          'Export Alternative',
+          `${fileName} content is displayed in a new window. You can copy and save it from there.`,
+          [{ text: 'OK' }]
+        );
+        return true;
+      }
+    } catch (windowError) {
+      console.error('🌐 saveFileWeb: New window fallback failed:', windowError);
+    }
+    
+    // Show error message for web
+    Alert.alert(
+      'Export Error',
+      `Failed to export: ${error.message || 'Unknown error'}. Please try copying the data manually or use a different browser.`,
+      [{ text: 'OK' }]
+    );
+    return false;
+  }
+};
+
+// HTML5 download function for web
+const downloadFileWeb = async (content, fileName, mimeType) => {
+  return new Promise((resolve, reject) => {
+    try {
+      console.log('📥 downloadFileWeb: Creating download blob...', { fileName, mimeType });
+      
+      // Create blob with proper MIME type
+      const blob = new Blob([content], { type: mimeType });
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      
+      // Append to document, click, and remove
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url);
+      }, 100);
+      
+      console.log('📥 downloadFileWeb: Download triggered successfully');
+      resolve(true);
+    } catch (error) {
+      console.error('📥 downloadFileWeb ERROR:', error);
+      reject(error);
+    }
+  });
+};
+
+// Show content in new window (final fallback)
+const showContentInNewWindow = async (content, fileName) => {
+  return new Promise((resolve, reject) => {
+    try {
+      console.log('🪟 showContentInNewWindow: Opening content in new window...', { fileName });
+      
+      const newWindow = window.open('', '_blank');
+      if (!newWindow) {
+        throw new Error('Popup blocked or failed to open');
+      }
+      
+      // Create HTML content for the new window
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>${fileName}</title>
+          <style>
+            body { font-family: monospace; padding: 20px; white-space: pre-wrap; }
+            .header { background: #f0f0f0; padding: 10px; margin-bottom: 20px; border-radius: 5px; }
+            .content { border: 1px solid #ddd; padding: 15px; border-radius: 5px; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h2>${fileName}</h2>
+            <p>Select all content below and copy it to save the data.</p>
+          </div>
+          <div class="content">${content}</div>
+        </body>
+        </html>
+      `;
+      
+      newWindow.document.write(htmlContent);
+      newWindow.document.close();
+      
+      console.log('🪟 showContentInNewWindow: Content displayed in new window');
+      resolve(true);
+    } catch (error) {
+      console.error('🪟 showContentInNewWindow ERROR:', error);
+      reject(error);
+    }
+  });
+};
+
 // Copy data to clipboard (useful for development and quick sharing)
 export const copyToClipboard = async (content, title = 'Report Data') => {
+  console.log('📋 copyToClipboard: Starting clipboard copy process', { title, contentLength: content?.length });
   try {
+    if (!content) {
+      console.error('📋 copyToClipboard: No content provided to copy');
+      throw new Error('No content provided to copy');
+    }
+    
+    console.log('📋 copyToClipboard: Platform detected:', Platform.OS);
+    
+    // For web platform, use navigator.clipboard if available
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.navigator?.clipboard) {
+      console.log('📋 copyToClipboard: Using web navigator.clipboard API...');
+      try {
+        // Check if we have permission first
+        if (window.navigator.permissions) {
+          const permission = await window.navigator.permissions.query({ name: 'clipboard-write' });
+          console.log('📋 copyToClipboard: Clipboard permission state:', permission.state);
+        }
+        
+        await window.navigator.clipboard.writeText(content);
+        console.log('📋 copyToClipboard: Web clipboard write successful');
+        
+        Alert.alert(
+          'Copied to Clipboard',
+          `${title} has been copied to your clipboard. You can paste it into Excel, Notepad, or any other application.`,
+          [{ text: 'OK' }]
+        );
+        return true;
+      } catch (webClipboardError) {
+        console.warn('📋 copyToClipboard: Web clipboard failed, trying fallback:', webClipboardError.message);
+        
+        // If it's a permission error, show specific message
+        if (webClipboardError.message?.includes('permission') || webClipboardError.name === 'NotAllowedError') {
+          console.log('📋 copyToClipboard: Permission denied, trying manual fallback...');
+        }
+        // Fall through to expo-clipboard fallback
+      }
+    }
+    
+    // Use expo-clipboard as fallback
+    console.log('📋 copyToClipboard: Using expo-clipboard fallback...');
     await Clipboard.setStringAsync(content);
+    console.log('📋 copyToClipboard: Expo clipboard copy successful');
+    
     Alert.alert(
       'Copied to Clipboard',
-      `${title} has been copied to your clipboard. You can paste it into any text editor or email.`,
+      `${title} has been copied to your clipboard. You can paste it into Excel, Notepad, or any other application.`,
       [{ text: 'OK' }]
     );
     return true;
   } catch (error) {
-    console.error('Error copying to clipboard:', error);
+    console.error('📋 copyToClipboard ERROR:', error);
+    console.error('📋 copyToClipboard ERROR stack:', error.stack);
+    
+    // Try one more fallback for web - create a temporary text area
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      console.log('📋 copyToClipboard: Trying web textarea fallback...');
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = content;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        
+        console.log('📋 copyToClipboard: Web textarea fallback successful');
+        Alert.alert(
+          'Copied to Clipboard',
+          `${title} has been copied to your clipboard using a fallback method. You can paste it into Excel, Notepad, or any other application.`,
+          [{ text: 'OK' }]
+        );
+        return true;
+      } catch (textareaError) {
+        console.error('📋 copyToClipboard: Web textarea fallback failed:', textareaError);
+      }
+    }
+    
+    // Enhanced error message with more details
     Alert.alert(
       'Copy Error',
-      'Failed to copy data to clipboard. Please try again.',
+      `Failed to copy data to clipboard: ${error.message || 'Unknown error'}. Please try selecting all content manually and copying it, or try a different export option.`,
       [{ text: 'OK' }]
     );
     return false;
@@ -253,7 +549,16 @@ export const copyToClipboard = async (content, title = 'Report Data') => {
 
 // Export individual attendance record
 export const exportIndividualAttendanceRecord = async (recordData, format = EXPORT_FORMATS.CSV) => {
+  console.log('📝 exportIndividualAttendanceRecord: Starting export process', { format, recordId: recordData?.id });
   try {
+    // Validate input data
+    if (!recordData) {
+      console.error('📝 exportIndividualAttendanceRecord: No record data provided');
+      throw new Error('No attendance record provided for export');
+    }
+    
+    console.log('📝 exportIndividualAttendanceRecord: Record data validation passed, proceeding with format:', format);
+    
     let content = '';
     let fileName = '';
     let mimeType = 'text/plain';
@@ -265,16 +570,30 @@ export const exportIndividualAttendanceRecord = async (recordData, format = EXPO
       year: 'numeric'
     });
     
-    // Get teacher name from marked_by ID if available
+    // Get teacher name from marked_by ID if available with better error handling
     let markedByTeacher = 'System';
     if (recordData.marked_by) {
       try {
-        const { data: teacherData } = await supabase
+        // Add tenant context for the query
+        const tenantId = await tenantHelpers.getCurrentTenantId();
+        let query = supabase
           .from(TABLES.TEACHERS)
-          .select('name')
+          .select('name');
+        
+        // Add tenant filtering if tenantId exists
+        if (tenantId) {
+          query = query.eq('tenant_id', tenantId);
+        }
+        
+        const { data: teacherData, error: teacherError } = await query
           .eq('id', recordData.marked_by)
           .single();
-        markedByTeacher = teacherData?.name || 'Unknown Teacher';
+        
+        if (teacherError) {
+          console.log('Teacher fetch error:', teacherError);
+        } else if (teacherData) {
+          markedByTeacher = teacherData.name || 'Unknown Teacher';
+        }
       } catch (error) {
         console.log('Could not fetch teacher name:', error);
       }
@@ -299,8 +618,8 @@ export const exportIndividualAttendanceRecord = async (recordData, format = EXPO
           { 'Field': 'Class', 'Value': `${recordData.classes?.class_name || ''} ${recordData.classes?.section || ''}`.trim() }
         ];
 
-        content = `INDIVIDUAL ATTENDANCE RECORD\nExported on: ${exportDate}\n\nRECORD DETAILS\n` + 
-                 convertToCSV(metadata) + '\n\nATTENDANCE DATA\n' + convertToCSV(csvData);
+        content = "INDIVIDUAL ATTENDANCE RECORD\nExported on: " + exportDate + "\n\nRECORD DETAILS\n" + 
+                 convertToCSV(metadata) + "\n\nATTENDANCE DATA\n" + convertToCSV(csvData);
         fileName = generateFileName(`attendance_${recordData.classes?.class_name}_${recordData.date}`, 'csv');
         mimeType = 'text/csv';
         break;
@@ -363,11 +682,12 @@ export const exportIndividualAttendanceRecord = async (recordData, format = EXPO
           return true;
         } catch (error) {
           console.error('Error generating PDF:', error);
-          Alert.alert('PDF Error', 'Failed to generate PDF. Please try another format.');
+          Alert.alert('PDF Error', `Failed to generate PDF: ${error.message || 'Unknown error'}. Please try another format.`);
           return false;
         }
 
       case EXPORT_FORMATS.CLIPBOARD:
+        console.log('📋 exportIndividualAttendanceRecord: Processing clipboard export...');
         const clipboardData = [{
           'Student Name': recordData.students?.name || 'N/A',
           'Admission No': recordData.students?.admission_no || 'N/A',
@@ -376,24 +696,58 @@ export const exportIndividualAttendanceRecord = async (recordData, format = EXPO
           'Status': recordData.status,
           'Marked By': markedByTeacher
         }];
-        content = `Individual Attendance Record (${exportDate})\n` + convertToCSV(clipboardData);
-        return await copyToClipboard(content, 'Individual Attendance Record');
+        
+        // Format content nicely for clipboard
+        const clipboardContent = `INDIVIDUAL ATTENDANCE RECORD\nExported on: ${exportDate}\n\nSTUDENT DETAILS:\n${convertToCSV(clipboardData)}`;
+        console.log('📋 exportIndividualAttendanceRecord: Clipboard content prepared, length:', clipboardContent.length);
+        return await copyToClipboard(clipboardContent, 'Individual Attendance Record');
 
       default:
         throw new Error('Unsupported export format');
     }
 
+    console.log('📝 exportIndividualAttendanceRecord: Content prepared, saving file...', { fileName, contentLength: content.length });
     return await saveFile(content, fileName, mimeType);
   } catch (error) {
-    console.error('Error exporting individual attendance record:', error);
-    Alert.alert('Export Error', 'Failed to export individual attendance record.');
+    console.error('📝 exportIndividualAttendanceRecord ERROR:', error);
+    console.error('📝 exportIndividualAttendanceRecord ERROR stack:', error.stack);
+    
+    // Enhanced error messages
+    let userMessage = 'Failed to export attendance record.';
+    
+    if (error.message?.includes('No attendance record')) {
+      userMessage = 'No attendance record data available for export.';
+    } else if (error.message?.includes('FileSystem')) {
+      userMessage = 'File system error. Please check app permissions and try again.';
+    } else if (error.message?.includes('sharing')) {
+      userMessage = 'Sharing not available. Please try copying to clipboard instead.';
+    } else if (error.message?.includes('Permission')) {
+      userMessage = 'Permission denied. Please check app permissions in device settings.';
+    }
+    
+    Alert.alert('Export Error', `${userMessage}\n\nTechnical details: ${error.message || 'Unknown error'}`);
     return false;
   }
 };
 
 // Export attendance data
 export const exportAttendanceData = async (data, stats, format = EXPORT_FORMATS.CSV) => {
+  console.log('📄 exportAttendanceData: Starting export process', { format, dataLength: data?.length });
   try {
+    // Validate input data
+    if (!data || !Array.isArray(data)) {
+      console.error('📄 exportAttendanceData: Invalid data provided');
+      throw new Error('No attendance data provided for export');
+    }
+    
+    if (data.length === 0) {
+      console.warn('📄 exportAttendanceData: Empty data array provided');
+      Alert.alert('No Data', 'No attendance records available for export.');
+      return false;
+    }
+    
+    console.log('📄 exportAttendanceData: Data validation passed, proceeding with format:', format);
+    
     let content = '';
     let fileName = '';
     let mimeType = 'text/plain';
@@ -412,14 +766,28 @@ export const exportAttendanceData = async (data, stats, format = EXPORT_FORMATS.
           let markedByTeacher = 'System';
           if (record.marked_by) {
             try {
-              const { data: teacherData } = await supabase
+              // Add tenant context for the query
+              const tenantId = await tenantHelpers.getCurrentTenantId();
+              let query = supabase
                 .from(TABLES.TEACHERS)
-                .select('name')
+                .select('name');
+              
+              // Add tenant filtering if tenantId exists
+              if (tenantId) {
+                query = query.eq('tenant_id', tenantId);
+              }
+              
+              const { data: teacherData, error: teacherError } = await query
                 .eq('id', record.marked_by)
                 .single();
-              markedByTeacher = teacherData?.name || 'Unknown Teacher';
+              
+              if (teacherError) {
+                console.log('Teacher fetch error for record:', record.id, teacherError);
+              } else if (teacherData) {
+                markedByTeacher = teacherData.name || 'Unknown Teacher';
+              }
             } catch (error) {
-              console.log('Could not fetch teacher name for record:', error);
+              console.log('Could not fetch teacher name for record:', record.id, error);
             }
           }
           
@@ -429,23 +797,171 @@ export const exportAttendanceData = async (data, stats, format = EXPORT_FORMATS.
             'Class': `${record.classes?.class_name || ''} ${record.classes?.section || ''}`.trim(),
             'Date': record.date,
             'Status': record.status,
-            'Marked By': markedByTeacher
+            'Marked By': markedByTeacher,
+            'Marked At': record.marked_at || 'N/A'
           };
         }));
 
         // Add summary statistics with export date
         const summaryData = [
           { 'Metric': 'Export Date', 'Value': exportDate },
-          { 'Metric': 'Total Present Today', 'Value': stats.presentToday },
-          { 'Metric': 'Total Absent Today', 'Value': stats.absentToday },
-          { 'Metric': 'Attendance Rate', 'Value': `${stats.attendanceRate}%` },
-          { 'Metric': 'Total Students', 'Value': stats.totalStudents }
+          { 'Metric': 'Total Present Today', 'Value': stats.presentToday || 0 },
+          { 'Metric': 'Total Absent Today', 'Value': stats.absentToday || 0 },
+          { 'Metric': 'Attendance Rate', 'Value': `${stats.attendanceRate || 0}%` },
+          { 'Metric': 'Total Students', 'Value': stats.totalStudents || data.length }
         ];
 
-        content = `ATTENDANCE SUMMARY\nGenerated on: ${exportDate}\n\n` + convertToCSV(summaryData) + '\n\nATTENDANCE RECORDS\n' + convertToCSV(csvData);
+        content = "ATTENDANCE SUMMARY\nGenerated on: " + exportDate + "\n\n" + convertToCSV(summaryData) + "\n\nATTENDANCE RECORDS\n" + convertToCSV(csvData);
         fileName = generateFileName('attendance_report', 'csv');
         mimeType = 'text/csv';
         break;
+
+      case EXPORT_FORMATS.PDF:
+        console.log('📄 exportAttendanceData: Processing PDF export...');
+        
+        // Get current date for the export
+        const pdfExportDate = new Date().toLocaleDateString('en-IN', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        });
+
+        // Prepare attendance data for PDF (similar to CSV but for PDF)
+        const pdfData = await Promise.all(data.map(async (record) => {
+          let markedByTeacher = 'System';
+          if (record.marked_by) {
+            try {
+              // Add tenant context for the query
+              const tenantId = await tenantHelpers.getCurrentTenantId();
+              let query = supabase
+                .from(TABLES.TEACHERS)
+                .select('name');
+              
+              // Add tenant filtering if tenantId exists
+              if (tenantId) {
+                query = query.eq('tenant_id', tenantId);
+              }
+              
+              const { data: teacherData, error: teacherError } = await query
+                .eq('id', record.marked_by)
+                .single();
+              
+              if (teacherError) {
+                console.log('Teacher fetch error for PDF record:', record.id, teacherError);
+              } else if (teacherData) {
+                markedByTeacher = teacherData.name || 'Unknown Teacher';
+              }
+            } catch (error) {
+              console.log('Could not fetch teacher name for PDF record:', record.id, error);
+            }
+          }
+          
+          return {
+            'Student Name': record.students?.name || 'N/A',
+            'Admission No': record.students?.admission_no || 'N/A',
+            'Class': `${record.classes?.class_name || ''} ${record.classes?.section || ''}`.trim(),
+            'Date': record.date,
+            'Status': record.status,
+            'Marked By': markedByTeacher,
+            'Marked At': record.marked_at || 'N/A'
+          };
+        }));
+
+        // Prepare additional info for PDF
+        const pdfAdditionalInfo = {
+          'Export Date': pdfExportDate,
+          'Total Present Today': stats.presentToday || 0,
+          'Total Absent Today': stats.absentToday || 0,
+          'Attendance Rate': `${stats.attendanceRate || 0}%`,
+          'Total Students': stats.totalStudents || data.length
+        };
+
+        const htmlContent = convertToHTML(
+          pdfData, 
+          'Attendance Report', 
+          pdfAdditionalInfo
+        );
+
+        try {
+          console.log('📄 exportAttendanceData: Generating PDF...');
+          
+          // For web platform, use a different approach
+          if (Platform.OS === 'web') {
+            console.log('📄 exportAttendanceData: Using web PDF approach...');
+            
+            // For web, we'll download the HTML content as PDF using the browser's print functionality
+            // or fallback to downloading as HTML file
+            try {
+              // Create a data URL with the HTML content
+              const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
+              const url = window.URL.createObjectURL(htmlBlob);
+              
+              // Create download link for HTML file that can be opened and printed as PDF
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = `attendance_report_${new Date().toISOString().split('T')[0]}.html`;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+              
+              // Clean up
+              setTimeout(() => {
+                window.URL.revokeObjectURL(url);
+              }, 100);
+              
+              Alert.alert(
+                'Export Successful',
+                'Attendance report has been downloaded as an HTML file. Open it in your browser and use Print > Save as PDF to convert it to PDF format.',
+                [{ text: 'OK' }]
+              );
+              
+              console.log('📄 exportAttendanceData: Web PDF export completed');
+              return true;
+            } catch (webError) {
+              console.error('📄 exportAttendanceData: Web PDF failed:', webError);
+              throw webError;
+            }
+          } else {
+            // Native mobile PDF generation
+            const { uri } = await Print.printToFileAsync({ 
+              html: htmlContent,
+              base64: false
+            });
+            
+            // Create a new filename with .pdf extension
+            fileName = generateFileName('attendance_report', 'pdf');
+            const newUri = `${FileSystem.documentDirectory}${fileName}`;
+            
+            // Move the file to our desired location
+            await FileSystem.moveAsync({ from: uri, to: newUri });
+            
+            // Share the PDF
+            const canShare = await checkSharingAvailability();
+            if (canShare) {
+              await Sharing.shareAsync(newUri, {
+                mimeType: 'application/pdf',
+                dialogTitle: 'Export Attendance Report',
+                UTI: 'com.adobe.pdf',
+              });
+              Alert.alert(
+                'Export Successful',
+                `Attendance report exported as ${fileName}. You can share it using the options shown.`,
+                [{ text: 'OK' }]
+              );
+            } else {
+              Alert.alert(
+                'Export Successful', 
+                `Attendance report saved as ${fileName} in the app's documents folder.`,
+                [{ text: 'OK' }]
+              );
+            }
+            return true;
+          }
+        } catch (error) {
+          console.error('📄 exportAttendanceData: PDF generation error:', error);
+          Alert.alert('PDF Error', `Failed to generate PDF: ${error.message || 'Unknown error'}. Please try another format.`);
+          return false;
+        }
 
       case EXPORT_FORMATS.JSON:
         content = convertToJSON({
@@ -458,26 +974,83 @@ export const exportAttendanceData = async (data, stats, format = EXPORT_FORMATS.
         break;
 
       case EXPORT_FORMATS.CLIPBOARD:
-        // For clipboard, use CSV format as it's more readable
-        const clipboardData = data.map(record => ({
-          'Student Name': record.students?.name || 'N/A',
-          'Admission No': record.students?.admission_no || 'N/A',
-          'Class': `${record.classes?.class_name || ''} ${record.classes?.section || ''}`.trim(),
-          'Date': record.date,
-          'Status': record.status,
-          'Remarks': record.remarks || ''
+        console.log('📋 exportAttendanceData: Processing clipboard export...');
+        
+        // Get current date for the export
+        const clipboardExportDate = new Date().toLocaleDateString('en-IN', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        });
+        
+        const clipboardData = await Promise.all(data.map(async (record) => {
+          let markedByTeacher = 'System';
+          if (record.marked_by) {
+            try {
+              // Add tenant context for the query
+              const tenantId = await tenantHelpers.getCurrentTenantId();
+              let query = supabase
+                .from(TABLES.TEACHERS)
+                .select('name');
+              
+              // Add tenant filtering if tenantId exists
+              if (tenantId) {
+                query = query.eq('tenant_id', tenantId);
+              }
+              
+              const { data: teacherData, error: teacherError } = await query
+                .eq('id', record.marked_by)
+                .single();
+              
+              if (!teacherError && teacherData) {
+                markedByTeacher = teacherData.name || 'Unknown Teacher';
+              }
+            } catch (error) {
+              console.log('Could not fetch teacher name for clipboard:', error);
+            }
+          }
+          
+          return {
+            'Student Name': record.students?.name || 'N/A',
+            'Admission No': record.students?.admission_no || 'N/A',
+            'Class': `${record.classes?.class_name || ''} ${record.classes?.section || ''}`.trim(),
+            'Date': record.date,
+            'Status': record.status,
+            'Marked By': markedByTeacher
+          };
         }));
-        content = convertToCSV(clipboardData);
+        
+        // Add summary information at the top
+        const summaryText = `ATTENDANCE REPORT\nExported on: ${clipboardExportDate}\n\nSUMMARY:\nPresent Today: ${stats.presentToday || 0}\nAbsent Today: ${stats.absentToday || 0}\nAttendance Rate: ${stats.attendanceRate || 0}%\nTotal Students: ${stats.totalStudents || data.length}\n\nDETAILS:\n`;
+        
+        content = summaryText + convertToCSV(clipboardData);
+        console.log('📋 exportAttendanceData: Clipboard content prepared, length:', content.length);
         return await copyToClipboard(content, 'Attendance Report');
 
       default:
         throw new Error('Unsupported export format');
     }
 
+    console.log('📄 exportAttendanceData: Content prepared, saving file...', { fileName, contentLength: content.length });
     return await saveFile(content, fileName, mimeType);
   } catch (error) {
-    console.error('Error exporting attendance data:', error);
-    Alert.alert('Export Error', 'Failed to export attendance report.');
+    console.error('📄 exportAttendanceData ERROR:', error);
+    console.error('📄 exportAttendanceData ERROR stack:', error.stack);
+    
+    // Enhanced error messages
+    let userMessage = 'Failed to export attendance report.';
+    
+    if (error.message?.includes('No attendance data')) {
+      userMessage = 'No attendance data available for export. Please ensure attendance records exist.';
+    } else if (error.message?.includes('FileSystem')) {
+      userMessage = 'File system error. Please check app permissions and try again.';
+    } else if (error.message?.includes('sharing')) {
+      userMessage = 'Sharing not available. Please try copying to clipboard instead.';
+    } else if (error.message?.includes('Permission')) {
+      userMessage = 'Permission denied. Please check app permissions in device settings.';
+    }
+    
+    Alert.alert('Export Error', `${userMessage}\n\nTechnical details: ${error.message || 'Unknown error'}`);
     return false;
   }
 };
@@ -585,7 +1158,7 @@ export const exportFeeData = async (data, stats, format = EXPORT_FORMATS.CSV) =>
           { 'Metric': 'Collection Rate', 'Value': `${stats.collectionRate || 0}%` }
         ];
 
-        content = 'FEE COLLECTION SUMMARY\n' + convertToCSV(summaryData) + '\n\nFEE RECORDS\n' + convertToCSV(csvData);
+        content = "FEE COLLECTION SUMMARY\n" + convertToCSV(summaryData) + "\n\nFEE RECORDS\n" + convertToCSV(csvData);
         fileName = generateFileName('fee_collection', 'csv');
         mimeType = 'text/csv';
         break;
@@ -661,7 +1234,7 @@ export const exportStudentData = async (data, stats, format = EXPORT_FORMATS.CSV
           { 'Metric': 'Average Age', 'Value': stats.averageAge }
         ];
 
-        content = 'STUDENT OVERVIEW SUMMARY\n' + convertToCSV(summaryData) + '\n\nSTUDENT RECORDS\n' + convertToCSV(csvData);
+        content = "STUDENT OVERVIEW SUMMARY\n" + convertToCSV(summaryData) + "\n\nSTUDENT RECORDS\n" + convertToCSV(csvData);
         fileName = generateFileName('student_overview', 'csv');
         mimeType = 'text/csv';
         break;
@@ -829,381 +1402,387 @@ export const generateAcademicPerformanceHTML = (data, stats) => {
     day: 'numeric'
   });
 
-  return `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Academic Performance Report</title>
-        <style>
-          body { 
-            font-family: 'Arial', sans-serif; 
-            margin: 20px; 
-            line-height: 1.6;
-            color: #333;
-          }
-          
-          .header { 
-            text-align: center; 
-            margin-bottom: 30px; 
-            border-bottom: 3px solid #2196F3;
-            padding-bottom: 20px;
-          }
-          
-          .school-name { 
-            font-size: 28px; 
-            font-weight: bold; 
-            color: #2196F3; 
-            margin-bottom: 5px;
-          }
-          
-          .report-title {
-            font-size: 22px;
-            color: #1976D2;
-            margin: 10px 0;
-          }
-          
-          .report-date {
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 20px;
-          }
-          
-          .summary-section {
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            padding: 25px;
-            border-radius: 12px;
-            margin-bottom: 25px;
-            border-left: 5px solid #2196F3;
-          }
-          
-          .summary-title {
-            font-size: 18px;
-            font-weight: bold;
-            color: #2196F3;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-          }
-          
-          .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-          }
-          
-          .summary-card {
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-          }
-          
-          .summary-value {
-            font-size: 24px;
-            font-weight: bold;
-            margin-bottom: 5px;
-          }
-          
-          .summary-label {
-            color: #666;
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-          }
-          
-          .grade-section {
-            margin-bottom: 25px;
-            background: white;
-            padding: 20px;
-            border-radius: 12px;
-            border: 1px solid #e0e0e0;
-          }
-          
-          .section-title {
-            font-size: 18px;
-            font-weight: bold;
-            color: #2196F3;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #f0f0f0;
-          }
-          
-          .grade-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-          }
-          
-          .grade-card {
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-            border: 2px solid;
-          }
-          
-          .grade-a { border-color: #4CAF50; background: rgba(76, 175, 80, 0.1); }
-          .grade-b { border-color: #8BC34A; background: rgba(139, 195, 74, 0.1); }
-          .grade-c { border-color: #FF9800; background: rgba(255, 152, 0, 0.1); }
-          .grade-d { border-color: #FF5722; background: rgba(255, 87, 34, 0.1); }
-          .grade-f { border-color: #f44336; background: rgba(244, 67, 54, 0.1); }
-          
-          .grade-name {
-            font-size: 16px;
-            font-weight: bold;
-            margin-bottom: 8px;
-          }
-          
-          .grade-count {
-            font-size: 20px;
-            font-weight: bold;
-            margin-bottom: 5px;
-          }
-          
-          .grade-percentage {
-            font-size: 12px;
-            color: #666;
-          }
-          
-          .subject-section {
-            margin-bottom: 25px;
-          }
-          
-          table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            margin: 15px 0;
-            background: white;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-          }
-          
-          th, td { 
-            padding: 12px 15px;
-            text-align: left;
-            border-bottom: 1px solid #e0e0e0;
-          }
-          
-          th { 
-            background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
-            color: white;
-            font-weight: bold;
-            text-transform: uppercase;
-            font-size: 12px;
-            letter-spacing: 0.5px;
-          }
-          
-          tr:nth-child(even) {
-            background: #f8f9fa;
-          }
-          
-          tr:hover {
-            background: #e3f2fd;
-          }
-          
-          .performance-bar {
-            background: #e0e0e0;
-            border-radius: 10px;
-            height: 8px;
-            margin: 5px 0;
-          }
-          
-          .performance-fill {
-            height: 100%;
-            border-radius: 10px;
-          }
-          
-          .performers-section {
-            margin-bottom: 25px;
-          }
-          
-          .performer-card {
-            display: flex;
-            align-items: center;
-            padding: 10px 15px;
-            margin-bottom: 8px;
-            background: white;
-            border-radius: 8px;
-            border-left: 4px solid #2196F3;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-          }
-          
-          .rank-badge {
-            background: #2196F3;
-            color: white;
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            margin-right: 15px;
-          }
-          
-          .performer-info {
-            flex: 1;
-          }
-          
-          .performer-name {
-            font-weight: bold;
-            margin-bottom: 3px;
-          }
-          
-          .performer-details {
-            color: #666;
-            font-size: 12px;
-          }
-          
-          .performer-score {
-            font-size: 18px;
-            font-weight: bold;
-            color: #4CAF50;
-          }
-          
-          .footer {
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid #e0e0e0;
-            text-align: center;
-            color: #666;
-            font-size: 12px;
-          }
-          
-          @media print {
-            .grade-section, .subject-section, .performers-section {
-              page-break-inside: avoid;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        <!-- Header -->
-        <div class="header">
-          <div class="school-name">ABC School</div>
-          <h1 class="report-title">Academic Performance Report</h1>
-          <p class="report-date">Generated on ${currentDate}</p>
-        </div>
+  let gradeGridContent = '';
+  if (stats.gradeDistribution) {
+    stats.gradeDistribution.forEach(grade => {
+      const totalStudents = stats.gradeDistribution.reduce((sum, g) => sum + g.population, 0);
+      const percentage = totalStudents > 0 ? Math.round((grade.population / totalStudents) * 100) : 0;
+      const gradeClass = grade.name.includes('A') ? 'grade-a' : 
+                        grade.name.includes('B') ? 'grade-b' : 
+                        grade.name.includes('C') ? 'grade-c' : 
+                        grade.name.includes('D') ? 'grade-d' : 'grade-f';
+      
+      gradeGridContent += '<div class="grade-card ' + gradeClass + '">' +
+        '<div class="grade-name">' + grade.name + '</div>' +
+        '<div class="grade-count">' + grade.population + '</div>' +
+        '<div class="grade-percentage">' + percentage + '% of students</div>' +
+        '</div>';
+    });
+  }
 
-        <!-- Performance Summary -->
-        <div class="summary-section">
-          <h2 class="summary-title">📊 Performance Overview</h2>
-          <div class="summary-grid">
-            <div class="summary-card">
-              <div class="summary-value" style="color: #2196F3;">${stats.totalStudents}</div>
-              <div class="summary-label">Total Students</div>
-            </div>
-            <div class="summary-card">
-              <div class="summary-value" style="color: #4CAF50;">${stats.averagePercentage}%</div>
-              <div class="summary-label">Average Performance</div>
-            </div>
-            <div class="summary-card">
-              <div class="summary-value" style="color: #FF9800;">${stats.highestScore}%</div>
-              <div class="summary-label">Highest Score</div>
-            </div>
-            <div class="summary-card">
-              <div class="summary-value" style="color: #f44336;">${stats.lowestScore}%</div>
-              <div class="summary-label">Lowest Score</div>
-            </div>
-          </div>
-        </div>
+  let subjectPerformanceContent = '';
+  if (stats.subjectPerformance && stats.subjectPerformance.length > 0) {
+    subjectPerformanceContent = '<div class="subject-section">' +
+      '<h2 class="section-title">📚 Subject-wise Performance</h2>' +
+      '<table>' +
+      '<thead>' +
+      '<tr>' +
+      '<th>Subject</th>' +
+      '<th>Students Evaluated</th>' +
+      '<th>Average Performance</th>' +
+      '<th>Performance Bar</th>' +
+      '</tr>' +
+      '</thead>' +
+      '<tbody>';
+    
+    stats.subjectPerformance.forEach(subject => {
+      const performanceColor = subject.percentage >= 90 ? '#4CAF50' : 
+                              subject.percentage >= 80 ? '#8BC34A' : 
+                              subject.percentage >= 70 ? '#FF9800' : 
+                              subject.percentage >= 60 ? '#FF5722' : '#f44336';
+      
+      subjectPerformanceContent += '<tr>' +
+        '<td><strong>' + subject.subject + '</strong></td>' +
+        '<td>' + subject.count + '</td>' +
+        '<td><strong style="color: ' + performanceColor + '">' + subject.percentage + '%</strong></td>' +
+        '<td>' +
+        '<div class="performance-bar">' +
+        '<div class="performance-fill" style="width: ' + subject.percentage + '%; background: ' + performanceColor + ';"></div>' +
+        '</div>' +
+        '</td>' +
+        '</tr>';
+    });
+    
+    subjectPerformanceContent += '</tbody></table></div>';
+  }
 
-        <!-- Grade Distribution -->
-        <div class="grade-section">
-          <h2 class="section-title">🎯 Grade Distribution Analysis</h2>
-          <div class="grade-grid">
-            ${stats.gradeDistribution.map(grade => {
-              const totalStudents = stats.gradeDistribution.reduce((sum, g) => sum + g.population, 0);
-              const percentage = totalStudents > 0 ? Math.round((grade.population / totalStudents) * 100) : 0;
-              const gradeClass = grade.name.includes('A') ? 'grade-a' : 
-                                grade.name.includes('B') ? 'grade-b' : 
-                                grade.name.includes('C') ? 'grade-c' : 
-                                grade.name.includes('D') ? 'grade-d' : 'grade-f';
-              
-              return `
-                <div class="grade-card ${gradeClass}">
-                  <div class="grade-name">${grade.name}</div>
-                  <div class="grade-count">${grade.population}</div>
-                  <div class="grade-percentage">${percentage}% of students</div>
-                </div>
-              `;
-            }).join('')}
-          </div>
-        </div>
+  let topPerformersContent = '';
+  if (stats.topPerformers && stats.topPerformers.length > 0) {
+    topPerformersContent = '<div class="performers-section">' +
+      '<h2 class="section-title">📅 Top Performers</h2>';
+    
+    stats.topPerformers.slice(0, 10).forEach((performer, index) => {
+      const scoreColor = performer.percentage >= 90 ? '#4CAF50' : 
+                        performer.percentage >= 80 ? '#8BC34A' : 
+                        performer.percentage >= 70 ? '#FF9800' : 
+                        performer.percentage >= 60 ? '#FF5722' : '#f44336';
+      
+      topPerformersContent += '<div class="performer-card">' +
+        '<div class="rank-badge">' + (index + 1) + '</div>' +
+        '<div class="performer-info">' +
+        '<div class="performer-name">' + performer.name + '</div>' +
+        '<div class="performer-details">' + performer.admissionNo + ' • ' + performer.count + ' subjects</div>' +
+        '</div>' +
+        '<div class="performer-score" style="color: ' + scoreColor + '">' + performer.percentage + '%</div>' +
+        '</div>';
+    });
+    
+    topPerformersContent += '</div>';
+  }
 
-        <!-- Subject Performance -->
-        ${stats.subjectPerformance.length > 0 ? `
-        <div class="subject-section">
-          <h2 class="section-title">📚 Subject-wise Performance</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Subject</th>
-                <th>Students Evaluated</th>
-                <th>Average Performance</th>
-                <th>Performance Bar</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${stats.subjectPerformance.map(subject => {
-                const performanceColor = subject.percentage >= 90 ? '#4CAF50' : 
-                                        subject.percentage >= 80 ? '#8BC34A' : 
-                                        subject.percentage >= 70 ? '#FF9800' : 
-                                        subject.percentage >= 60 ? '#FF5722' : '#f44336';
-                
-                return `
-                  <tr>
-                    <td><strong>${subject.subject}</strong></td>
-                    <td>${subject.count}</td>
-                    <td><strong style="color: ${performanceColor}">${subject.percentage}%</strong></td>
-                    <td>
-                      <div class="performance-bar">
-                        <div class="performance-fill" style="width: ${subject.percentage}%; background: ${performanceColor};"></div>
-                      </div>
-                    </td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-        ` : ''}
+  return '' +
+    '<!DOCTYPE html>' +
+    '<html>' +
+      '<head>' +
+        '<meta charset="utf-8">' +
+        '<title>Academic Performance Report</title>' +
+        '<style>' +
+          'body { ' +
+            'font-family: \'Arial\', sans-serif; ' +
+            'margin: 20px; ' +
+            'line-height: 1.6;' +
+            'color: #333;' +
+          '}' +
+          '' +
+          '.header { ' +
+            'text-align: center; ' +
+            'margin-bottom: 30px; ' +
+            'border-bottom: 3px solid #2196F3;' +
+            'padding-bottom: 20px;' +
+          '}' +
+          '' +
+          '.school-name { ' +
+            'font-size: 28px; ' +
+            'font-weight: bold; ' +
+            'color: #2196F3; ' +
+            'margin-bottom: 5px;' +
+          '}' +
+          '' +
+          '.report-title {' +
+            'font-size: 22px;' +
+            'color: #1976D2;' +
+            'margin: 10px 0;' +
+          '}' +
+          '' +
+          '.report-date {' +
+            'color: #666;' +
+            'font-size: 14px;' +
+            'margin-bottom: 20px;' +
+          '}' +
+          '' +
+          '.summary-section {' +
+            'background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);' +
+            'padding: 25px;' +
+            'border-radius: 12px;' +
+            'margin-bottom: 25px;' +
+            'border-left: 5px solid #2196F3;' +
+          '}' +
+          '' +
+          '.summary-title {' +
+            'font-size: 18px;' +
+            'font-weight: bold;' +
+            'color: #2196F3;' +
+            'margin-bottom: 15px;' +
+            'display: flex;' +
+            'align-items: center;' +
+          '}' +
+          '' +
+          '.summary-grid {' +
+            'display: grid;' +
+            'grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));' +
+            'gap: 15px;' +
+          '}' +
+          '' +
+          '.summary-card {' +
+            'background: white;' +
+            'padding: 15px;' +
+            'border-radius: 8px;' +
+            'text-align: center;' +
+            'box-shadow: 0 2px 4px rgba(0,0,0,0.1);' +
+          '}' +
+          '' +
+          '.summary-value {' +
+            'font-size: 24px;' +
+            'font-weight: bold;' +
+            'margin-bottom: 5px;' +
+          '}' +
+          '' +
+          '.summary-label {' +
+            'color: #666;' +
+            'font-size: 12px;' +
+            'text-transform: uppercase;' +
+            'letter-spacing: 0.5px;' +
+          '}' +
+          '' +
+          '.grade-section {' +
+            'margin-bottom: 25px;' +
+            'background: white;' +
+            'padding: 20px;' +
+            'border-radius: 12px;' +
+            'border: 1px solid #e0e0e0;' +
+          '}' +
+          '' +
+          '.section-title {' +
+            'font-size: 18px;' +
+            'font-weight: bold;' +
+            'color: #2196F3;' +
+            'margin-bottom: 20px;' +
+            'display: flex;' +
+            'align-items: center;' +
+            'padding-bottom: 10px;' +
+            'border-bottom: 2px solid #f0f0f0;' +
+          '}' +
+          '' +
+          '.grade-grid {' +
+            'display: grid;' +
+            'grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));' +
+            'gap: 15px;' +
+            'margin-bottom: 20px;' +
+          '}' +
+          '' +
+          '.grade-card {' +
+            'padding: 15px;' +
+            'border-radius: 8px;' +
+            'text-align: center;' +
+            'border: 2px solid;' +
+          '}' +
+          '' +
+          '.grade-a { border-color: #4CAF50; background: rgba(76, 175, 80, 0.1); }' +
+          '.grade-b { border-color: #8BC34A; background: rgba(139, 195, 74, 0.1); }' +
+          '.grade-c { border-color: #FF9800; background: rgba(255, 152, 0, 0.1); }' +
+          '.grade-d { border-color: #FF5722; background: rgba(255, 87, 34, 0.1); }' +
+          '.grade-f { border-color: #f44336; background: rgba(244, 67, 54, 0.1); }' +
+          '' +
+          '.grade-name {' +
+            'font-size: 16px;' +
+            'font-weight: bold;' +
+            'margin-bottom: 8px;' +
+          '}' +
+          '' +
+          '.grade-count {' +
+            'font-size: 20px;' +
+            'font-weight: bold;' +
+            'margin-bottom: 5px;' +
+          '}' +
+          '' +
+          '.grade-percentage {' +
+            'font-size: 12px;' +
+            'color: #666;' +
+          '}' +
+          '' +
+          '.subject-section {' +
+            'margin-bottom: 25px;' +
+          '}' +
+          '' +
+          'table { ' +
+            'width: 100%; ' +
+            'border-collapse: collapse; ' +
+            'margin: 15px 0;' +
+            'background: white;' +
+            'border-radius: 8px;' +
+            'overflow: hidden;' +
+            'box-shadow: 0 2px 8px rgba(0,0,0,0.1);' +
+          '}' +
+          '' +
+          'th, td { ' +
+            'padding: 12px 15px;' +
+            'text-align: left;' +
+            'border-bottom: 1px solid #e0e0e0;' +
+          '}' +
+          '' +
+          'th { ' +
+            'background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);' +
+            'color: white;' +
+            'font-weight: bold;' +
+            'text-transform: uppercase;' +
+            'font-size: 12px;' +
+            'letter-spacing: 0.5px;' +
+          '}' +
+          '' +
+          'tr:nth-child(even) {' +
+            'background: #f8f9fa;' +
+          '}' +
+          '' +
+          'tr:hover {' +
+            'background: #e3f2fd;' +
+          '}' +
+          '' +
+          '.performance-bar {' +
+            'background: #e0e0e0;' +
+            'border-radius: 10px;' +
+            'height: 8px;' +
+            'margin: 5px 0;' +
+          '}' +
+          '' +
+          '.performance-fill {' +
+            'height: 100%;' +
+            'border-radius: 10px;' +
+          '}' +
+          '' +
+          '.performers-section {' +
+            'margin-bottom: 25px;' +
+          '}' +
+          '' +
+          '.performer-card {' +
+            'display: flex;' +
+            'align-items: center;' +
+            'padding: 10px 15px;' +
+            'margin-bottom: 8px;' +
+            'background: white;' +
+            'border-radius: 8px;' +
+            'border-left: 4px solid #2196F3;' +
+            'box-shadow: 0 1px 3px rgba(0,0,0,0.1);' +
+          '}' +
+          '' +
+          '.rank-badge {' +
+            'background: #2196F3;' +
+            'color: white;' +
+            'width: 30px;' +
+            'height: 30px;' +
+            'border-radius: 50%;' +
+            'display: flex;' +
+            'align-items: center;' +
+            'justify-content: center;' +
+            'font-weight: bold;' +
+            'margin-right: 15px;' +
+          '}' +
+          '' +
+          '.performer-info {' +
+            'flex: 1;' +
+          '}' +
+          '' +
+          '.performer-name {' +
+            'font-weight: bold;' +
+            'margin-bottom: 3px;' +
+          '}' +
+          '' +
+          '.performer-details {' +
+            'color: #666;' +
+            'font-size: 12px;' +
+          '}' +
+          '' +
+          '.performer-score {' +
+            'font-size: 18px;' +
+            'font-weight: bold;' +
+            'color: #4CAF50;' +
+          '}' +
+          '' +
+          '.footer {' +
+            'margin-top: 40px;' +
+            'padding-top: 20px;' +
+            'border-top: 1px solid #e0e0e0;' +
+            'text-align: center;' +
+            'color: #666;' +
+            'font-size: 12px;' +
+          '}' +
+          '' +
+          '@media print {' +
+            '.grade-section, .subject-section, .performers-section {' +
+              'page-break-inside: avoid;' +
+            '}' +
+          '}' +
+        '</style>' +
+      '</head>' +
+      '<body>' +
+        '<!-- Header -->' +
+        '<div class="header">' +
+          '<div class="school-name">ABC School</div>' +
+          '<h1 class="report-title">Academic Performance Report</h1>' +
+          '<p class="report-date">Generated on ' + currentDate + '</p>' +
+        '</div>' +
 
-        <!-- Top Performers -->
-        ${stats.topPerformers.length > 0 ? `
-        <div class="performers-section">
-          <h2 class="section-title">📅 Top Performers</h2>
-          ${stats.topPerformers.slice(0, 10).map((performer, index) => {
-            const scoreColor = performer.percentage >= 90 ? '#4CAF50' : 
-                              performer.percentage >= 80 ? '#8BC34A' : 
-                              performer.percentage >= 70 ? '#FF9800' : 
-                              performer.percentage >= 60 ? '#FF5722' : '#f44336';
-            
-            return `
-              <div class="performer-card">
-                <div class="rank-badge">${index + 1}</div>
-                <div class="performer-info">
-                  <div class="performer-name">${performer.name}</div>
-                  <div class="performer-details">${performer.admissionNo} • ${performer.count} subjects</div>
-                </div>
-                <div class="performer-score" style="color: ${scoreColor}">${performer.percentage}%</div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-        ` : ''}
+        '<!-- Performance Summary -->' +
+        '<div class="summary-section">' +
+          '<h2 class="summary-title">📊 Performance Overview</h2>' +
+          '<div class="summary-grid">' +
+            '<div class="summary-card">' +
+              '<div class="summary-value" style="color: #2196F3;">' + (stats.totalStudents || 0) + '</div>' +
+              '<div class="summary-label">Total Students</div>' +
+            '</div>' +
+            '<div class="summary-card">' +
+              '<div class="summary-value" style="color: #4CAF50;">' + (stats.averagePercentage || 0) + '%</div>' +
+              '<div class="summary-label">Average Performance</div>' +
+            '</div>' +
+            '<div class="summary-card">' +
+              '<div class="summary-value" style="color: #FF9800;">' + (stats.highestScore || 0) + '%</div>' +
+              '<div class="summary-label">Highest Score</div>' +
+            '</div>' +
+            '<div class="summary-card">' +
+              '<div class="summary-value" style="color: #f44336;">' + (stats.lowestScore || 0) + '%</div>' +
+              '<div class="summary-label">Lowest Score</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
 
-        <!-- Footer -->
-        <div class="footer">
-          <p>This report was generated automatically by the School Management System</p>
-          <p>Report Date: ${currentDate} | Total Records Analyzed: ${data.length}</p>
-        </div>
-      </body>
-    </html>
-  `;
+        '<!-- Grade Distribution -->' +
+        '<div class="grade-section">' +
+          '<h2 class="section-title">🎯 Grade Distribution Analysis</h2>' +
+          '<div class="grade-grid">' +
+            gradeGridContent +
+          '</div>' +
+        '</div>' +
+
+        '<!-- Subject Performance -->' +
+        subjectPerformanceContent +
+
+        '<!-- Top Performers -->' +
+        topPerformersContent +
+
+        '<!-- Footer -->' +
+        '<div class="footer">' +
+          '<p>This report was generated automatically by the School Management System</p>' +
+          '<p>Report Date: ' + currentDate + ' | Total Records Analyzed: ' + (data.length || 0) + '</p>' +
+        '</div>' +
+      '</body>' +
+    '</html>';
 };

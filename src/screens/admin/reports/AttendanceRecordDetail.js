@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Header from '../../../components/Header';
 import ExportModal from '../../../components/ExportModal';
 import { supabase, TABLES } from '../../../utils/supabase';
-import { exportIndividualAttendanceRecord, EXPORT_FORMATS } from '../../../utils/exportUtils';
+import { exportIndividualAttendanceRecord, exportAttendanceData, EXPORT_FORMATS } from '../../../utils/exportUtils';
 import { PieChart, BarChart } from 'react-native-chart-kit';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -184,8 +184,24 @@ const AttendanceRecordDetail = ({ navigation, route }) => {
   const handleExport = async (format) => {
     try {
       if (attendanceData.length > 0) {
-        const success = await exportIndividualAttendanceRecord(attendanceData[0], format);
-        return success;
+        // For individual record export (existing functionality)
+        if (attendanceData.length === 1) {
+          const success = await exportIndividualAttendanceRecord(attendanceData[0], format);
+          return success;
+        } 
+        // For class attendance export (new functionality)
+        else {
+          // Prepare stats for export
+          const exportStats = {
+            presentToday: stats.present,
+            absentToday: stats.absent,
+            totalStudents: stats.total,
+            attendanceRate: stats.attendanceRate
+          };
+          
+          const success = await exportAttendanceData(attendanceData, exportStats, format);
+          return success;
+        }
       } else {
         Alert.alert('No Data', 'No attendance records found to export.');
         return false;
@@ -461,7 +477,7 @@ const AttendanceRecordDetail = ({ navigation, route }) => {
         onClose={() => setShowExportModal(false)}
         onExport={handleExport}
         title="Export Attendance Record"
-        availableFormats={[EXPORT_FORMATS.CSV, EXPORT_FORMATS.PDF, EXPORT_FORMATS.CLIPBOARD]}
+        availableFormats={[EXPORT_FORMATS.CSV, EXPORT_FORMATS.PDF, EXPORT_FORMATS.CLIPBOARD, EXPORT_FORMATS.JSON]}
       />
     </View>
   );

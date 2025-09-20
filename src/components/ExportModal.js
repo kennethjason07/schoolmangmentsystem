@@ -20,6 +20,8 @@ const ExportModal = ({
 }) => {
   const [selectedFormat, setSelectedFormat] = useState(EXPORT_FORMATS.CSV);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState('');
+  const [hasError, setHasError] = useState(false);
 
   const formatOptions = [
     {
@@ -69,21 +71,65 @@ const ExportModal = ({
       return;
     }
 
+    console.log('📤 ExportModal: Starting export process with format:', selectedFormat);
     setIsExporting(true);
+    setHasError(false);
+    
     try {
+      // Show progress messages
+      setExportProgress('Preparing export...');
+      await new Promise(resolve => setTimeout(resolve, 500)); // Small delay for UX
+      
+      setExportProgress('Generating content...');
       const success = await onExport(selectedFormat);
+      
+      console.log('📤 ExportModal: Export operation result:', success);
+      
       if (success) {
+        // Different success message for clipboard
+        if (selectedFormat === 'clipboard') {
+          setExportProgress('Copied to clipboard successfully!');
+        } else {
+          setExportProgress('Export completed successfully!');
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
         onClose();
         // Reset state after successful export
         setTimeout(() => {
           setSelectedFormat(EXPORT_FORMATS.CSV);
+          setExportProgress('');
         }, 300);
+      } else {
+        console.warn('📤 ExportModal: Export operation returned false');
+        setHasError(true);
+        setExportProgress('Export failed. Please try again.');
+        Alert.alert('Export Failed', 'The export operation could not be completed. Please try a different format or check your device permissions.');
       }
     } catch (error) {
-      console.error('Export error:', error);
-      Alert.alert('Export Error', 'Failed to export report. Please try again.');
+      console.error('📤 ExportModal ERROR:', error);
+      console.error('📤 ExportModal ERROR stack:', error.stack);
+      setHasError(true);
+      setExportProgress('Export failed due to an error.');
+      
+      // Enhanced error message based on error type
+      let errorMessage = 'Failed to export report. Please try again.';
+      
+      if (error.message?.includes('FileSystem')) {
+        errorMessage = 'File system access failed. Please check app permissions.';
+      } else if (error.message?.includes('sharing')) {
+        errorMessage = 'Sharing not available on this device. Try copying to clipboard instead.';
+      } else if (error.message?.includes('clipboard')) {
+        errorMessage = 'Clipboard access failed. Please try a file export instead.';
+      }
+      
+      Alert.alert('Export Error', errorMessage);
     } finally {
-      setIsExporting(false);
+      setTimeout(() => {
+        setIsExporting(false);
+        if (!hasError) {
+          setExportProgress('');
+        }
+      }, hasError ? 2000 : 0); // Keep error message visible longer
     }
   };
 
@@ -117,6 +163,22 @@ const ExportModal = ({
           {/* Content */}
           <View style={styles.content}>
             <Text style={styles.subtitle}>Choose export format:</Text>
+            
+            {/* Progress indicator */}
+            {isExporting && (
+              <View style={styles.progressContainer}>
+                <ActivityIndicator size="small" color="#2196F3" />
+                <Text style={styles.progressText}>{exportProgress}</Text>
+              </View>
+            )}
+            
+            {/* Error indicator */}
+            {hasError && !isExporting && (
+              <View style={styles.errorContainer}>
+                <Ionicons name="warning" size={16} color="#f44336" />
+                <Text style={styles.errorText}>{exportProgress}</Text>
+              </View>
+            )}
             
             {filteredFormats.map((format) => (
               <TouchableOpacity
@@ -308,6 +370,34 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#fff',
     marginLeft: 8,
+  },
+  progressContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e3f2fd',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  progressText: {
+    fontSize: 14,
+    color: '#1976D2',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffebee',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#c62828',
+    marginLeft: 8,
+    fontWeight: '500',
   },
 });
 
