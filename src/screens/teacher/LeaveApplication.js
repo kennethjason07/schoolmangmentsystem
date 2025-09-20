@@ -402,6 +402,15 @@ const LeaveApplication = ({ navigation }) => {
             <Text style={styles.replacementNotesText}>{item.replacement_notes}</Text>
           </View>
         )}
+        
+        {item.status === 'Approved' && item.admin_remarks && item.admin_remarks.includes('Auto-approved') && (
+          <View style={styles.autoApprovedSection}>
+            <View style={styles.autoApprovedBadge}>
+              <Ionicons name="checkmark-done-circle" size={16} color="#4CAF50" />
+              <Text style={styles.autoApprovedText}>Auto-Approved by Admin</Text>
+            </View>
+          </View>
+        )}
       </View>
     );
   };
@@ -1257,6 +1266,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
     marginLeft: 8,
+  },
+  autoApprovedSection: {
+    marginTop: 12,
+  },
+  autoApprovedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F5E8',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#4CAF50',
+    alignSelf: 'flex-start',
+  },
+  autoApprovedText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2E7D32',
+    marginLeft: 6,
   },
 });
 

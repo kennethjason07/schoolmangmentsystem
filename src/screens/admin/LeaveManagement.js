@@ -452,6 +452,21 @@ const LeaveManagement = ({ navigation }) => {
       const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
       
       // Prepare leave application data
+      // Check if this should be auto-approved (admin creating leave for teacher)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const thirtyDaysFromNow = new Date(today);
+      thirtyDaysFromNow.setDate(today.getDate() + 30);
+      
+      const startDateObj = new Date(startDate);
+      startDateObj.setHours(0, 0, 0, 0);
+      
+      // Auto-approve if:
+      // 1. Admin is creating leave for teacher (not backdated and not too far future)
+      // 2. Start date is today or future (not backdated)
+      // 3. Start date is within 30 days (not too far future)
+      const shouldAutoApprove = startDateObj >= today && startDateObj <= thirtyDaysFromNow;
+      
       const leaveApplicationData = {
         teacher_id: newLeaveForm.teacher_id,
         leave_type: newLeaveForm.leave_type,
@@ -463,7 +478,14 @@ const LeaveManagement = ({ navigation }) => {
         replacement_notes: newLeaveForm.replacement_notes?.trim() || null,
         applied_by: user.id,
         applied_date: new Date().toISOString(),
-        status: 'Pending'
+        status: shouldAutoApprove ? 'Approved' : 'Pending',
+        ...(shouldAutoApprove && {
+          approved_by: user.id,
+          approved_at: new Date().toISOString(),
+          reviewed_by: user.id,
+          reviewed_at: new Date().toISOString(),
+          admin_remarks: `Auto-approved: Leave created by admin (${user.email}) on behalf of teacher`
+        })
       };
       
       console.log('📝 LeaveManagement: Creating leave application with enhanced tenant system...');
@@ -482,7 +504,37 @@ const LeaveManagement = ({ navigation }) => {
       
       console.log('✅ Leave application created successfully with enhanced tenant system:', newLeaveApplication.id);
       
-      Alert.alert('Success', 'Leave application added successfully');
+      // If auto-approved, send notification to teacher immediately
+      if (shouldAutoApprove) {
+        try {
+          console.log('📧 Sending auto-approval notification to teacher...');
+          const notificationResult = await createLeaveStatusNotificationForTeacher(
+            {
+              teacher_id: newLeaveForm.teacher_id,
+              leave_type: newLeaveForm.leave_type,
+              start_date: format(startDate, 'MMM dd, yyyy'),
+              end_date: format(endDate, 'yyyy-MM-dd')
+            },
+            'Approved',
+            `Auto-approved: Leave created by admin on your behalf`,
+            user.id
+          );
+          
+          if (notificationResult.success) {
+            console.log('✅ Auto-approval notification sent to teacher successfully');
+          } else {
+            console.error('❌ Failed to send auto-approval notification:', notificationResult.error);
+          }
+        } catch (notificationError) {
+          console.error('❌ Error sending auto-approval notification:', notificationError);
+          // Don't fail the entire operation if notification fails
+        }
+        
+        Alert.alert('Success', `Leave application added and automatically approved! The teacher has been notified.`);
+      } else {
+        Alert.alert('Success', 'Leave application added successfully and is pending review.');
+      }
+      
       setShowAddLeaveModal(false);
       resetAddLeaveForm();
       await loadLeaveApplications();
@@ -698,6 +750,15 @@ const LeaveManagement = ({ navigation }) => {
               <Ionicons name="checkmark" size={16} color="#FFFFFF" />
               <Text style={styles.actionButtonText}>Review</Text>
             </TouchableOpacity>
+          </View>
+        )}
+        
+        {item.status === 'Approved' && item.admin_remarks && item.admin_remarks.includes('Auto-approved') && (
+          <View style={styles.autoApprovedSection}>
+            <View style={styles.autoApprovedBadge}>
+              <Ionicons name="checkmark-done-circle" size={16} color="#4CAF50" />
+              <Text style={styles.autoApprovedText}>Auto-Approved by Admin</Text>
+            </View>
           </View>
         )}
 
@@ -1588,6 +1649,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
     fontStyle: 'italic',
+    lineHeight: 20,
+  },
+  autoApprovedSection: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E8F5E8',
+  },
+  autoApprovedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F5E8',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    alignSelf: 'flex-start',
+  },
+  autoApprovedText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4CAF50',
+    marginLeft: 6,
   },
   emptyContainer: {
     flex: 1,
