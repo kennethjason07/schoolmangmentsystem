@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Header from '../../../components/Header';
 import ExportModal from '../../../components/ExportModal';
 import { supabase, TABLES } from '../../../utils/supabase';
-import { exportIndividualAttendanceRecord, exportAttendanceData, EXPORT_FORMATS } from '../../../utils/exportUtils';
+import { exportIndividualAttendanceRecord, exportAttendanceData, EXPORT_FORMATS, testPDFExport } from '../../../utils/exportUtils';
 import { PieChart, BarChart } from 'react-native-chart-kit';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -442,6 +442,21 @@ const AttendanceRecordDetail = ({ navigation, route }) => {
               <Text style={styles.exportBtnText}>Export Attendance Record</Text>
             </TouchableOpacity>
           </View>
+          
+          {/* PDF Test Button (for debugging) */}
+          <View style={styles.testExportContainer}>
+            <TouchableOpacity
+              style={[styles.exportBtn, { backgroundColor: '#9C27B0', marginTop: 8 }]}
+              onPress={async () => {
+                console.log('🔧 PDF Test Button pressed');
+                const result = await testPDFExport();
+                console.log('🔧 PDF Test Result:', result);
+              }}
+            >
+              <Ionicons name="document" size={20} color="#fff" />
+              <Text style={styles.exportBtnText}>Test PDF Generation</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Bottom spacing for better scroll experience */}
@@ -767,6 +782,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
     marginLeft: 8,
+  },
+  
+  // Test export container
+  testExportContainer: {
+    marginTop: 8,
   },
 
   // Empty State

@@ -4,9 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Animatable from 'react-native-animatable';
 import { LinearGradient } from 'expo-linear-gradient';
 
-// Import VidyaSethu logo
+// Import VidyaSetu logo
 // TODO: Add your logo file to assets/logo-white.png
-const VidyaSethuLogo = require('../../assets/logo-white.png');
+const VidyaSetuLogo = require('../../assets/logo-white.png');
 
 const LoadingScreen = () => {
   const logoRef = useRef(null);
@@ -36,18 +36,18 @@ const LoadingScreen = () => {
         animation="fadeInDown"
         duration={1000}
       >
-        {/* VidyaSethu Logo - Replace with your custom logo */}
+        {/* VidyaSetu Logo - Replace with your custom logo */}
         <Image
-          source={VidyaSethuLogo}
+          source={VidyaSetuLogo}
           style={styles.logoImage}
-          tintColor="#fff"
           resizeMode="contain"
           onError={() => {
             // Fallback to icon if logo file is not found
             console.log('Logo file not found, using fallback icon');
           }}
         />
-        <Text style={styles.appTitle}>VidyaSethu</Text>
+        {/* Logo already contains the VidyaSetu text, so we can hide these or keep them for emphasis */}
+        {/* <Text style={styles.appTitle}>VidyaSetu</Text> */}
         <Text style={styles.subtitle}>Bridge of Knowledge</Text>
       </Animatable.View>
       
@@ -78,9 +78,9 @@ const styles = StyleSheet.create({
     marginBottom: 60,
   },
   logoImage: {
-    width: 100,
-    height: 100,
-    // tintColor moved to Image component prop
+    width: 150,
+    height: 150,
+    // tintColor removed to show original logo colors
   },
   appTitle: {
     fontSize: 32,

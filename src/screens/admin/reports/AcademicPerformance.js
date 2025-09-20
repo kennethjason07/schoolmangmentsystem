@@ -20,7 +20,7 @@ import ExportModal from '../../../components/ExportModal';
 import GradeAnalysisModal from '../../../components/GradeAnalysisModal';
 import PDFPreviewModal from '../../../components/PDFPreviewModal';
 import { supabase, TABLES } from '../../../utils/supabase';
-import { exportAcademicData, EXPORT_FORMATS, copyToClipboard, generateAcademicPerformancePDF, generateAcademicPerformanceHTML } from '../../../utils/exportUtils';
+import { exportAcademicData, EXPORT_FORMATS, copyToClipboard, generateAcademicPerformancePDF, generateAcademicPerformanceHTML, exportTopPerformers } from '../../../utils/exportUtils';
 import { BarChart, PieChart } from 'react-native-chart-kit';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -45,6 +45,7 @@ const AcademicPerformance = ({ navigation }) => {
   const [showPDFPreviewModal, setShowPDFPreviewModal] = useState(false);
   const [pdfPreviewContent, setPDFPreviewContent] = useState('');
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [showTopPerformersModal, setShowTopPerformersModal] = useState(false);
   const [selectedAcademicYear, setSelectedAcademicYear] = useState('2024-25');
   
   // Enhanced scroll functionality
@@ -285,7 +286,7 @@ const AcademicPerformance = ({ navigation }) => {
       .sort((a, b) => b.percentage - a.percentage)
       .slice(0, 10);
 
-    setStats({
+    const newStats = {
       totalStudents: Object.keys(studentData).length,
       averagePercentage,
       highestScore: Math.round(highestScore),
@@ -294,7 +295,12 @@ const AcademicPerformance = ({ navigation }) => {
       subjectPerformance,
       topPerformers,
       classRankings: [],
-    });
+    };
+    
+    console.log('📊 calculateStatistics: Setting stats with topPerformers count:', topPerformers.length);
+    console.log('📊 calculateStatistics: Sample topPerformers:', topPerformers.slice(0, 2));
+    
+    setStats(newStats);
   };
 
   const getGradeColor = (grade) => {
@@ -442,6 +448,46 @@ const AcademicPerformance = ({ navigation }) => {
       await copyToClipboard(text, 'Grade Analysis');
     } catch (error) {
       console.error('Failed to copy analysis:', error);
+    }
+  };
+
+  const handleTopPerformers = async () => {
+    console.log('🏆 handleTopPerformers: Function called');
+    console.log('🏆 handleTopPerformers: stats object:', stats);
+    console.log('🏆 handleTopPerformers: stats.topPerformers:', stats.topPerformers);
+    console.log('🏆 handleTopPerformers: topPerformers length:', stats.topPerformers?.length);
+    
+    if (!stats.topPerformers || stats.topPerformers.length === 0) {
+      console.log('🏆 handleTopPerformers: No top performers data found');
+      Alert.alert(
+        'No Data Available',
+        'No top performers data available for export. Please check your filters and ensure academic records exist.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
+    console.log('🏆 handleTopPerformers: Found', stats.topPerformers.length, 'top performers');
+    console.log('🏆 handleTopPerformers: Sample top performer:', stats.topPerformers[0]);
+    console.log('🏆 handleTopPerformers: Opening export modal...');
+
+    // Show the export modal
+    setShowTopPerformersModal(true);
+  };
+
+  const handleTopPerformersExport = async (format) => {
+    console.log('🏆 handleTopPerformersExport: Exporting in format:', format);
+    setShowTopPerformersModal(false);
+    
+    try {
+      const success = await exportTopPerformers(stats.topPerformers, stats, format);
+      if (success) {
+        console.log('✅ Top performers export completed successfully');
+      } else {
+        console.log('❌ Top performers export failed');
+      }
+    } catch (error) {
+      console.error('❌ Top performers export error:', error);
     }
   };
 
@@ -801,7 +847,13 @@ const AcademicPerformance = ({ navigation }) => {
               <Text style={styles.exportButtonText}>Grade Analysis</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.exportButton}>
+            <TouchableOpacity 
+              style={styles.exportButton}
+              onPress={() => {
+                console.log('💆 Top Performers button clicked!');
+                handleTopPerformers();
+              }}
+            >
               <Ionicons name="trophy" size={20} color="#FF9800" />
               <Text style={styles.exportButtonText}>Top Performers</Text>
             </TouchableOpacity>
@@ -850,6 +902,15 @@ const AcademicPerformance = ({ navigation }) => {
         onClose={() => setShowGradeAnalysisModal(false)}
         stats={stats}
         onCopyAnalysis={handleCopyGradeAnalysis}
+      />
+
+      {/* Top Performers Export Modal */}
+      <ExportModal
+        visible={showTopPerformersModal}
+        onClose={() => setShowTopPerformersModal(false)}
+        onExport={handleTopPerformersExport}
+        title="Export Top Performers Report"
+        availableFormats={[EXPORT_FORMATS.CSV, EXPORT_FORMATS.PDF, EXPORT_FORMATS.CLIPBOARD]}
       />
 
       {/* PDF Preview Modal */}

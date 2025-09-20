@@ -39,6 +39,7 @@ const SchoolDetails = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [clearingLogo, setClearingLogo] = useState(false);
   const [schoolData, setSchoolData] = useState({
     name: '',
     type: 'School', // School or College
@@ -125,7 +126,10 @@ const SchoolDetails = ({ navigation }) => {
   };
 
   const showImagePicker = () => {
-    if (Platform.OS === 'ios') {
+    if (Platform.OS === 'web') {
+      // For web, directly open file picker (camera is not available)
+      pickImageFromGallery();
+    } else if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
           options: ['Cancel', 'Take Photo', 'Choose from Gallery'],
@@ -178,25 +182,54 @@ const SchoolDetails = ({ navigation }) => {
 
   const pickImageFromGallery = async () => {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      console.log('🖼️ Starting image picker for platform:', Platform.OS);
       
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Please grant camera roll permissions to upload logo.');
-        return;
+      // For web platform, permissions are handled differently
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        
+        if (status !== 'granted') {
+          Alert.alert('Permission Required', 'Please grant camera roll permissions to upload logo.');
+          return;
+        }
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images',
+        mediaTypes: Platform.OS === 'web' ? ImagePicker.MediaTypeOptions.Images : 'images',
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
+        // Web-specific options
+        ...(Platform.OS === 'web' && {
+          allowsMultipleSelection: false,
+        }),
       });
 
-      if (!result.canceled && result.assets[0]) {
+      console.log('🖼️ Image picker result:', {
+        canceled: result.canceled,
+        hasAssets: !!result.assets,
+        assetsLength: result.assets?.length,
+        firstAsset: result.assets?.[0] ? {
+          uri: result.assets[0].uri,
+          type: result.assets[0].type,
+          fileSize: result.assets[0].fileSize
+        } : null
+      });
+
+      if (!result.canceled && result.assets && result.assets[0]) {
+        console.log('🖼️ Processing selected image...');
         await uploadImage(result.assets[0]);
+      } else {
+        console.log('🖼️ Image selection was canceled or no image selected');
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to pick image: ' + (error.message || error));
+      console.error('🖼️ Error in pickImageFromGallery:', error);
+      Alert.alert(
+        'Error', 
+        Platform.OS === 'web' 
+          ? 'Failed to select image. Please make sure you selected a valid image file.' 
+          : 'Failed to pick image: ' + (error.message || error)
+      );
     }
   };
 
@@ -239,17 +272,34 @@ const SchoolDetails = ({ navigation }) => {
       // Step 4: Generate filename exactly like working profile pictures
       console.log('Step 4: Preparing file for upload...');
       const timestamp = Date.now();
-      const fileName = `${user.id}_${timestamp}.jpg`;
-      console.log('Generated filename (exact profile picture format):', fileName);
+      const fileName = `school_logo_${user.id}_${timestamp}.jpg`;
+      console.log('Generated filename (school logo format):', fileName);
       
-      // Read the image using expo-file-system legacy API (React Native compatible)
-      console.log('Reading image via FileSystem legacy API...');
-      const base64 = await FileSystem.readAsStringAsync(imageAsset.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      // Read the image - different approach for web vs mobile
+      let fileData;
+      if (Platform.OS === 'web') {
+        console.log('Reading image for web platform...');
+        // For web, the URI might be a blob URL or data URL
+        if (imageAsset.uri.startsWith('data:')) {
+          // Data URL - extract base64 part
+          const base64 = imageAsset.uri.split(',')[1];
+          fileData = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+        } else {
+          // Blob URL - fetch as blob then convert to array buffer
+          const response = await fetch(imageAsset.uri);
+          const blob = await response.blob();
+          const arrayBuffer = await blob.arrayBuffer();
+          fileData = new Uint8Array(arrayBuffer);
+        }
+      } else {
+        // Mobile - use FileSystem
+        console.log('Reading image via FileSystem legacy API...');
+        const base64 = await FileSystem.readAsStringAsync(imageAsset.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        fileData = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+      }
       
-      // Convert base64 → Uint8Array (React Native compatible)
-      const fileData = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
       console.log('File data created - size:', fileData.length, 'type: image/jpeg');
 
       // Step 5: Delete old logo if exists
@@ -310,42 +360,78 @@ const SchoolDetails = ({ navigation }) => {
       console.log('Step 8: Updating state with new URL...');
       handleInputChange('logo_url', publicUrl);
       
-      // Step 9: Save the new logo URL to database immediately
+      // Step 9: Save the new logo URL to database with retry mechanism
       console.log('Step 9: Saving new logo URL to database...');
+      
+      const saveToDatabase = async (retryCount = 0) => {
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY = 1000; // 1 second
+        
+        try {
+          const updatedSchoolData = { ...schoolData, logo_url: publicUrl };
+          console.log('Updating database with:', updatedSchoolData, `(Attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
+          
+          // 🚀 ENHANCED: Use tenant database for saving
+          const { data: existing } = await tenantDatabase.read('school_details');
+          
+          let saveResult;
+          if (existing && existing.length > 0) {
+            // Update existing record
+            saveResult = await tenantDatabase.update('school_details', existing[0].id, updatedSchoolData);
+          } else {
+            // Create new record
+            saveResult = await tenantDatabase.create('school_details', updatedSchoolData);
+          }
+          
+          const { data: saveData, error: saveError } = saveResult;
+          
+          if (saveError) {
+            console.error(`Failed to save logo URL to database (attempt ${retryCount + 1}):`, saveError);
+            
+            // Check if this is a timeout or connection error that we can retry
+            if ((saveError.message?.includes('timeout') || 
+                 saveError.message?.includes('network') ||
+                 saveError.message?.includes('connection')) && 
+                retryCount < MAX_RETRIES) {
+              
+              console.log(`Retrying database save in ${RETRY_DELAY}ms...`);
+              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+              return await saveToDatabase(retryCount + 1);
+            }
+            
+            throw new Error('Failed to save logo URL: ' + saveError.message);
+          }
+          
+          console.log('Logo URL saved to database successfully:', saveData);
+          
+          // Update local state with saved data
+          if (saveData) {
+            setSchoolData(saveData);
+            console.log('Local state updated with saved data:', saveData);
+          }
+          
+          return saveData;
+        } catch (dbError) {
+          if (retryCount < MAX_RETRIES && 
+              (dbError.message?.includes('timeout') || 
+               dbError.message?.includes('network') ||
+               dbError.message?.includes('connection'))) {
+            
+            console.log(`Retrying database save due to error: ${dbError.message}`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            return await saveToDatabase(retryCount + 1);
+          }
+          
+          throw dbError;
+        }
+      };
+      
       try {
-        const updatedSchoolData = { ...schoolData, logo_url: publicUrl };
-        console.log('Updating database with:', updatedSchoolData);
-        
-        // 🚀 ENHANCED: Use tenant database for saving
-        const { data: existing } = await tenantDatabase.read('school_details');
-        
-        let saveResult;
-        if (existing && existing.length > 0) {
-          // Update existing record
-          saveResult = await tenantDatabase.update('school_details', existing[0].id, updatedSchoolData);
-        } else {
-          // Create new record
-          saveResult = await tenantDatabase.create('school_details', updatedSchoolData);
-        }
-        
-        const { data: saveData, error: saveError } = saveResult;
-        
-        if (saveError) {
-          console.error('Failed to save logo URL to database:', saveError);
-          throw new Error('Failed to save logo URL: ' + saveError.message);
-        }
-        
-        console.log('Logo URL saved to database successfully:', saveData);
-        
-        // Update local state with saved data
-        if (saveData) {
-          setSchoolData(saveData);
-          console.log('Local state updated with saved data:', saveData);
-        }
+        await saveToDatabase();
       } catch (dbError) {
-        console.error('Database save error:', dbError);
+        console.error('Database save error after all retries:', dbError);
         // Still show success for upload, but warn about database
-        Alert.alert('Warning', 'Image uploaded but failed to save to database. Please try saving the form.');
+        Alert.alert('Warning', 'Image uploaded successfully but failed to save to database. Please try saving the form manually.');
         return;
       }
       
@@ -386,77 +472,221 @@ const SchoolDetails = ({ navigation }) => {
         userFriendlyMessage = errorMessage + ': ' + (error.message || 'Unknown error');
       }
       
-      Alert.alert(
-        'Upload Error', 
-        userFriendlyMessage,
-        [
-          {
-            text: 'OK',
-            style: 'default'
-          },
-          {
-            text: 'View Details',
-            style: 'default',
-            onPress: () => {
-              Alert.alert(
-                'Technical Details',
-                `Error Type: ${error.name || 'Unknown'}
-
-Message: ${error.message || 'No message'}
-
-Please share these details with your administrator.`,
-                [{ text: 'OK', style: 'default' }]
-              );
+      // Enhanced error handling for web platform
+      if (Platform.OS === 'web') {
+        console.log('🌐 Web platform error - providing enhanced feedback');
+        Alert.alert(
+          'Upload Error', 
+          userFriendlyMessage + '\n\nTip: Make sure you selected a valid image file (JPG, PNG) under 10MB.',
+          [
+            {
+              text: 'OK',
+              style: 'default'
+            },
+            {
+              text: 'Try Again',
+              style: 'default',
+              onPress: () => showImagePicker()
+            },
+            {
+              text: 'View Details',
+              style: 'default',
+              onPress: () => {
+                Alert.alert(
+                  'Technical Details',
+                  `Platform: Web\nError Type: ${error.name || 'Unknown'}\nMessage: ${error.message || 'No message'}\n\nIf this persists, try refreshing the page or using a different browser.`,
+                  [{ text: 'OK', style: 'default' }]
+                );
+              }
             }
-          }
-        ]
-      );
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Upload Error', 
+          userFriendlyMessage,
+          [
+            {
+              text: 'OK',
+              style: 'default'
+            },
+            {
+              text: 'View Details',
+              style: 'default',
+              onPress: () => {
+                Alert.alert(
+                  'Technical Details',
+                  `Error Type: ${error.name || 'Unknown'}\n\nMessage: ${error.message || 'No message'}\n\nPlease share these details with your administrator.`,
+                  [{ text: 'OK', style: 'default' }]
+                );
+              }
+            }
+          ]
+        );
+      }
     } finally {
       setUploading(false);
     }
   };
 
-  // Clear logo function
+  // Clear logo function with retry mechanism
   const clearLogo = async () => {
-    Alert.alert(
-      'Clear Logo',
-      'Are you sure you want to remove the current logo?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const updatedSchoolData = { ...schoolData, logo_url: null };
-              
-              // Use tenant database to update
-              const { data: existing } = await tenantDatabase.read('school_details');
-              
-              if (existing && existing.length > 0) {
-                const saveResult = await tenantDatabase.update('school_details', existing[0].id, updatedSchoolData);
-                const { data: saveData, error: saveError } = saveResult;
-                
-                if (saveError) {
-                  throw new Error('Failed to clear logo: ' + saveError.message);
-                }
-                
-                setSchoolData(saveData);
-                Alert.alert('Success', 'Logo cleared successfully!');
-                
-                // Reload school details to refresh UI
-                setTimeout(() => {
-                  loadSchoolDetails();
-                }, 500);
-              }
-            } catch (error) {
-              console.error('Error clearing logo:', error);
-              Alert.alert('Error', 'Failed to clear logo: ' + (error.message || error));
+    console.log('🗑️ Clear logo function called');
+    console.log('🗑️ Current logo URL:', schoolData.logo_url);
+    console.log('🗑️ Platform:', Platform.OS);
+    
+    // For web platform, use a simpler confirmation
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('Are you sure you want to remove the current logo?');
+      console.log('🗑️ Web confirmation result:', confirmed);
+      
+      if (confirmed) {
+        console.log('🗑️ User confirmed via web dialog - proceeding...');
+        await executeClearLogo();
+      } else {
+        console.log('🗑️ User cancelled via web dialog');
+      }
+    } else {
+      // Mobile - use Alert.alert
+      Alert.alert(
+        'Clear Logo',
+        'Are you sure you want to remove the current logo?',
+        [
+          { 
+            text: 'Cancel', 
+            style: 'cancel',
+            onPress: () => console.log('🗑️ User cancelled logo clearing')
+          },
+          {
+            text: 'Clear',
+            style: 'destructive',
+            onPress: async () => {
+              console.log('🗑️ User confirmed logo clearing - proceeding...');
+              await executeClearLogo();
             }
           }
+        ]
+      );
+    }
+  };
+  
+  // Extract the clear logo execution logic into a separate function
+  const executeClearLogo = async () => {
+    const clearFromDatabase = async (retryCount = 0) => {
+      const MAX_RETRIES = 3;
+      const RETRY_DELAY = 1000; // 1 second
+      
+      try {
+        console.log(`Clearing logo from database (attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
+        const updatedSchoolData = { ...schoolData, logo_url: '' };
+        
+        // Use tenant database to update
+        console.log('🗑️ Reading existing school details...');
+        const { data: existing } = await tenantDatabase.read('school_details');
+        console.log('🗑️ Existing school details:', existing);
+        
+        if (existing && existing.length > 0) {
+          console.log('🗑️ Updating existing record with ID:', existing[0].id);
+          console.log('🗑️ Update data:', updatedSchoolData);
+          
+          // Try both tenantDatabase and direct supabase update
+          let saveResult;
+          try {
+            saveResult = await tenantDatabase.update('school_details', existing[0].id, updatedSchoolData);
+            console.log('🗑️ Tenant database update result:', saveResult);
+          } catch (tenantError) {
+            console.log('🗑️ Tenant database update failed, trying direct update:', tenantError);
+            
+            // Fallback to direct supabase update
+            const { data: directData, error: directError } = await supabase
+              .from('school_details')
+              .update(updatedSchoolData)
+              .eq('id', existing[0].id)
+              .select()
+              .single();
+            
+            saveResult = { data: directData, error: directError };
+            console.log('🗑️ Direct supabase update result:', saveResult);
+          }
+          
+          const { data: saveData, error: saveError } = saveResult;
+          console.log('🗑️ Final update result:', { saveData, saveError });
+                  
+          if (saveError) {
+            console.error(`Failed to clear logo (attempt ${retryCount + 1}):`, saveError);
+            
+            // Check if this is a timeout or connection error that we can retry
+            if ((saveError.message?.includes('timeout') || 
+                 saveError.message?.includes('network') ||
+                 saveError.message?.includes('connection')) && 
+                retryCount < MAX_RETRIES) {
+              
+              console.log(`Retrying logo clear in ${RETRY_DELAY}ms...`);
+              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+              return await clearFromDatabase(retryCount + 1);
+            }
+            
+            throw new Error('Failed to clear logo: ' + saveError.message);
+          }
+          
+          console.log('Logo cleared from database successfully');
+          console.log('Updated data from database:', saveData);
+          
+          // Update local state immediately
+          const clearedData = { ...saveData, logo_url: '' };
+          setSchoolData(clearedData);
+          console.log('Local state updated with cleared logo:', clearedData);
+          
+          return clearedData;
+        } else {
+          throw new Error('No school details found to update');
         }
-      ]
-    );
+      } catch (dbError) {
+        if (retryCount < MAX_RETRIES && 
+            (dbError.message?.includes('timeout') || 
+             dbError.message?.includes('network') ||
+             dbError.message?.includes('connection'))) {
+          
+          console.log(`Retrying logo clear due to error: ${dbError.message}`);
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+          return await clearFromDatabase(retryCount + 1);
+        }
+        
+        throw dbError;
+      }
+    };
+    
+    try {
+      console.log('🗑️ Starting clear logo process...');
+      setClearingLogo(true);
+      
+      const result = await clearFromDatabase();
+      console.log('🗑️ Clear logo process completed successfully:', result);
+      
+      Alert.alert('Success', 'Logo cleared successfully!');
+      
+      // Reload school details to refresh UI
+      console.log('🗑️ Reloading school details to refresh UI...');
+      setTimeout(() => {
+        loadSchoolDetails();
+      }, 500);
+    } catch (error) {
+      console.error('Error clearing logo after all retries:', error);
+      Alert.alert(
+        'Error', 
+        'Failed to clear logo. This might be due to a connection issue. Please check your internet connection and try again.',
+        [
+          { text: 'OK', style: 'default' },
+          {
+            text: 'Retry',
+            style: 'default',
+            onPress: () => clearLogo() // Retry the entire operation
+          }
+        ]
+      );
+    } finally {
+      setClearingLogo(false);
+    }
   };
 
   // UPI Management Functions - Enhanced with tenant system
@@ -855,6 +1085,11 @@ Please share these details with your administrator.`,
           {/* Logo Section */}
           <View style={styles.logoSection}>
             <Text style={styles.sectionTitle}>Logo</Text>
+            {Platform.OS === 'web' && !schoolData.logo_url && (
+              <Text style={styles.webHint}>
+                💡 Click on the logo area below to select an image from your computer
+              </Text>
+            )}
             <TouchableOpacity 
               style={[styles.logoContainer, uploading && styles.logoContainerUploading]} 
               onPress={showImagePicker}
@@ -865,7 +1100,7 @@ Please share these details with your administrator.`,
                   <ActivityIndicator size="large" color="#2196F3" />
                   <Text style={styles.logoPlaceholderText}>Uploading...</Text>
                 </View>
-              ) : schoolData.logo_url && schoolData.logo_url.startsWith('http') && !schoolData.logo_url.startsWith('file:') ? (
+              ) : schoolData.logo_url && schoolData.logo_url.trim() !== '' && schoolData.logo_url.startsWith('http') && !schoolData.logo_url.startsWith('file:') ? (
                 <>
                   <Image 
                     key={schoolData.logo_url}
@@ -920,15 +1155,28 @@ Please share these details with your administrator.`,
                 </View>
               )}
             </TouchableOpacity>
-            {schoolData.logo_url && schoolData.logo_url.startsWith('http') && !schoolData.logo_url.startsWith('file:') && !uploading && (
+            {schoolData.logo_url && schoolData.logo_url.trim() !== '' && schoolData.logo_url.startsWith('http') && !schoolData.logo_url.startsWith('file:') && !uploading && (
               <>
                 <Text style={styles.logoHint}>Tap to change logo</Text>
                 <TouchableOpacity 
-                  style={styles.clearLogoButton}
-                  onPress={clearLogo}
+                  style={[styles.clearLogoButton, clearingLogo && styles.clearLogoButtonDisabled]}
+                  onPress={() => {
+                    console.log('🗑️ Clear logo button pressed!');
+                    clearLogo();
+                  }}
+                  disabled={clearingLogo}
                 >
-                  <Ionicons name="trash-outline" size={16} color="#F44336" />
-                  <Text style={styles.clearLogoText}>Clear Logo</Text>
+                  {clearingLogo ? (
+                    <>
+                      <ActivityIndicator size={16} color="#F44336" />
+                      <Text style={styles.clearLogoText}>Clearing...</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Ionicons name="trash-outline" size={16} color="#F44336" />
+                      <Text style={styles.clearLogoText}>Clear Logo</Text>
+                    </>
+                  )}
                 </TouchableOpacity>
               </>
             )}
@@ -1419,6 +1667,13 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 15,
   },
+  webHint: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 10,
+    fontStyle: 'italic',
+  },
   logoSection: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -1496,6 +1751,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#F44336',
     borderRadius: 6,
+  },
+  clearLogoButtonDisabled: {
+    opacity: 0.6,
+    borderColor: '#ccc',
   },
   clearLogoText: {
     marginLeft: 6,

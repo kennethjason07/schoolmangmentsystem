@@ -46,6 +46,7 @@ const ProfileScreen = ({ navigation, route }) => {
   const [scrollY, setScrollY] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
   const [scrollViewHeight, setScrollViewHeight] = useState(0);
+  const [photoUploading, setPhotoUploading] = useState(false);
   const { signOut, user: authUser, loading: authLoading } = useAuth();
 
   // Load user data
@@ -310,13 +311,18 @@ const ProfileScreen = ({ navigation, route }) => {
   // Handle photo upload
   const handleUploadPhoto = async (uri) => {
     try {
+      console.log('📷 [Photo Upload] Starting upload process...');
+      console.log('📷 [Photo Upload] Platform:', Platform.OS);
+      console.log('📷 [Photo Upload] Image URI:', uri);
+      
       if (!authUser) {
+        console.error('📷 [Photo Upload] No authenticated user found');
         Alert.alert('Error', 'No authenticated user found');
         return;
       }
 
-      console.log('Starting photo upload for user:', authUser.id);
-      console.log('Image URI:', uri);
+      setPhotoUploading(true);
+      console.log('📷 [Photo Upload] Starting photo upload for user:', authUser.id);
 
       // First, get the current profile image to delete it later
       let oldImageFileName = null;
@@ -428,60 +434,196 @@ const ProfileScreen = ({ navigation, route }) => {
         }
       }
       
+      console.log('📷 [Photo Upload] Upload completed successfully');
       Alert.alert('Success', 'Photo updated successfully');
       loadUserData();
     } catch (error) {
-      console.error('Error uploading photo:', error);
-      Alert.alert('Error', `Failed to upload photo: ${error.message || error}`);
+      console.error('📷 [Photo Upload] Upload failed with error:', error);
+      console.error('📷 [Photo Upload] Error stack:', error.stack);
+      Alert.alert('Upload Error', `Failed to upload photo: ${error.message || error}\n\nPlease check:\n- Your internet connection\n- App permissions\n- Try again with a smaller image`);
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
+
+  // Handle photo removal
+  const handleRemovePhoto = async () => {
+    try {
+      console.log('🗑️ [Photo Remove] Starting remove process...');
+      
+      if (!authUser) {
+        console.error('🗑️ [Photo Remove] No authenticated user found');
+        Alert.alert('Error', 'No authenticated user found');
+        return;
+      }
+
+      if (!user?.profile_url) {
+        console.log('🗑️ [Photo Remove] No profile photo to remove');
+        Alert.alert('Info', 'No profile photo to remove');
+        return;
+      }
+
+      setPhotoUploading(true);
+
+      // Extract filename from URL for deletion
+      const urlParts = user.profile_url.split('/');
+      const fileName = urlParts[urlParts.length - 1];
+      console.log('🗑️ [Photo Remove] File to delete:', fileName);
+
+      // Get the authenticated user's session token
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        throw new Error('No authenticated session found');
+      }
+
+      // Remove from database first
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ profile_url: null })
+        .eq('id', authUser.id);
+
+      if (updateError) {
+        console.error('🗑️ [Photo Remove] Database update error:', updateError);
+        throw new Error(`Database update failed: ${updateError.message}`);
+      }
+
+      console.log('🗑️ [Photo Remove] Database updated successfully');
+
+      // Delete from storage
+      try {
+        const supabaseUrl = 'https://dmagnsbdjsnzsddxqrwd.supabase.co';
+        const deleteResponse = await fetch(`${supabaseUrl}/storage/v1/object/profiles/${fileName}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        });
+        
+        if (deleteResponse.ok) {
+          console.log('🗑️ [Photo Remove] File deleted from storage successfully');
+        } else {
+          console.warn('🗑️ [Photo Remove] Failed to delete file from storage (non-critical):', deleteResponse.status);
+        }
+      } catch (storageError) {
+        console.warn('🗑️ [Photo Remove] Storage deletion error (non-critical):', storageError);
+      }
+
+      Alert.alert('Success', 'Profile photo removed successfully');
+      loadUserData();
+    } catch (error) {
+      console.error('🗑️ [Photo Remove] Remove failed with error:', error);
+      Alert.alert('Remove Error', `Failed to remove photo: ${error.message || error}`);
+    } finally {
+      setPhotoUploading(false);
     }
   };
 
   // Handle photo selection
   const handlePickPhoto = async () => {
-    if (Platform.OS === 'ios') {
+    console.log('📷 [Photo Pick] Opening photo selection menu, platform:', Platform.OS);
+    console.log('📷 [Photo Pick] Current user has photo:', !!user?.profile_url);
+    
+    const options = [];
+    const actions = [];
+    
+    // Always add gallery option (works best on web)
+    options.push('Choose from Gallery');
+    actions.push(handleChooseFromGallery);
+    
+    // Add camera option for mobile platforms
+    if (Platform.OS !== 'web') {
+      options.push('Take Photo');
+      actions.push(handleTakePhoto);
+    }
+    
+    // Add remove option if user has a photo
+    if (user?.profile_url) {
+      options.push('Remove Photo');
+      actions.push(() => {
+        Alert.alert(
+          'Remove Photo',
+          'Are you sure you want to remove your profile photo?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Remove', style: 'destructive', onPress: handleRemovePhoto }
+          ]
+        );
+      });
+    }
+    
+    options.push('Cancel');
+    
+    if (Platform.OS === 'ios' && Platform.OS !== 'web') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          options: ['Cancel', 'Take Photo', 'Choose from Gallery'],
-          cancelButtonIndex: 0,
+          options: options,
+          cancelButtonIndex: options.length - 1,
+          destructiveButtonIndex: user?.profile_url ? options.length - 2 : undefined,
         },
         async (buttonIndex) => {
-          if (buttonIndex === 1) {
-            await handleTakePhoto();
-          } else if (buttonIndex === 2) {
-            await handleChooseFromGallery();
+          if (buttonIndex < actions.length) {
+            await actions[buttonIndex]();
           }
         }
       );
     } else {
-      Alert.alert('Profile Photo', 'Select an option', [
-        { text: 'Take Photo', onPress: handleTakePhoto },
-        { text: 'Choose from Gallery', onPress: handleChooseFromGallery },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
+      const alertButtons = actions.map((action, index) => ({
+        text: options[index],
+        onPress: action,
+        style: options[index] === 'Remove Photo' ? 'destructive' : 'default'
+      }));
+      alertButtons.push({ text: 'Cancel', style: 'cancel' });
+      
+      Alert.alert('Profile Photo', 'Select an option', alertButtons);
     }
   };
 
   const handleChooseFromGallery = async () => {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Please grant permission to access your photo library');
-        return;
+      console.log('🖼️ [Gallery] Starting gallery selection...');
+      console.log('🖼️ [Gallery] Platform:', Platform.OS);
+      
+      // For web, permissions are usually handled by the browser
+      if (Platform.OS !== 'web') {
+        console.log('🖼️ [Gallery] Requesting media library permissions...');
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        console.log('🖼️ [Gallery] Permission status:', status);
+        
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Please grant permission to access your photo library to select a profile picture.');
+          return;
+        }
       }
 
+      console.log('🖼️ [Gallery] Launching image library...');
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images',
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
+        // Web-specific options
+        ...(Platform.OS === 'web' && {
+          allowsMultipleSelection: false,
+        })
+      });
+
+      console.log('🖼️ [Gallery] Image picker result:', {
+        canceled: result.canceled,
+        assetsLength: result.assets?.length,
+        firstAssetUri: result.assets?.[0]?.uri
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
+        console.log('🖼️ [Gallery] Image selected, starting upload...');
         await handleUploadPhoto(result.assets[0].uri);
+      } else {
+        console.log('🖼️ [Gallery] Image selection canceled or no assets');
       }
     } catch (error) {
-      console.error('Error choosing from gallery:', error);
-      Alert.alert('Error', 'Failed to select photo');
+      console.error('🖼️ [Gallery] Error choosing from gallery:', error);
+      console.error('🖼️ [Gallery] Error stack:', error.stack);
+      Alert.alert('Gallery Error', `Failed to select photo: ${error.message}\n\nThis might be due to:\n- Browser permissions\n- Image file format\n- File size too large`);
     }
   };
 
@@ -675,26 +817,49 @@ const ProfileScreen = ({ navigation, route }) => {
           >
           <View style={styles.profileHeader}>
             {user?.profile_url ? (
-              <TouchableOpacity onPress={handlePickPhoto}>
-                <Image
-                  source={{ uri: user.profile_url }}
-                  style={styles.profileImage}
-                />
-                <View style={styles.imageEditOverlay}>
-                  <Ionicons name="camera" size={20} color="#1976d2" />
+              <TouchableOpacity 
+                onPress={photoUploading ? undefined : handlePickPhoto}
+                disabled={photoUploading}
+              >
+                <View style={styles.imageContainer}>
+                  <Image
+                    source={{ uri: user.profile_url }}
+                    style={[styles.profileImage, photoUploading && styles.imageUploading]}
+                  />
+                  {photoUploading ? (
+                    <View style={styles.loadingOverlay}>
+                      <ActivityIndicator size="large" color="#1976d2" />
+                      <Text style={styles.loadingText}>Processing...</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.imageEditOverlay}>
+                      <Ionicons name="camera" size={20} color="#1976d2" />
+                    </View>
+                  )}
                 </View>
               </TouchableOpacity>
             ) : (
               <View style={styles.imageContainer}>
-                <View style={styles.defaultProfileImage}>
-                  <Ionicons name="person" size={60} color="#999" />
+                <View style={[styles.defaultProfileImage, photoUploading && styles.imageUploading]}>
+                  {photoUploading ? (
+                    <ActivityIndicator size="large" color="#1976d2" />
+                  ) : (
+                    <Ionicons name="person" size={60} color="#999" />
+                  )}
                 </View>
-                <TouchableOpacity
-                  style={styles.imageOverlay}
-                  onPress={handlePickPhoto}
-                >
-                  <Ionicons name="camera" size={24} color="#1976d2" />
-                </TouchableOpacity>
+                {!photoUploading && (
+                  <TouchableOpacity
+                    style={styles.imageOverlay}
+                    onPress={handlePickPhoto}
+                  >
+                    <Ionicons name="camera" size={24} color="#1976d2" />
+                  </TouchableOpacity>
+                )}
+                {photoUploading && (
+                  <View style={styles.loadingTextContainer}>
+                    <Text style={styles.loadingText}>Processing...</Text>
+                  </View>
+                )}
               </View>
             )}
             <Text style={styles.name}>{user?.full_name || 'No Name'}</Text>
@@ -853,6 +1018,33 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 3,
     elevation: 4,
+  },
+  imageUploading: {
+    opacity: 0.6,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingTextContainer: {
+    position: 'absolute',
+    bottom: -10,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 12,
+    color: '#1976d2',
+    fontWeight: '500',
+    marginTop: 8,
   },
   name: {
     fontSize: 24,

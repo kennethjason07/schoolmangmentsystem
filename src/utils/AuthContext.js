@@ -235,8 +235,8 @@ export const AuthProvider = ({ children }) => {
           key: supabase.supabaseKey ? 'Set' : 'Missing'
         });
         
-        // Use shorter timeout for web platform database queries
-        const DB_TIMEOUT = Platform.OS === 'web' ? 6000 : 10000;
+        // Use progressively longer timeouts with better error handling
+        const DB_TIMEOUT = Platform.OS === 'web' ? 25000 : 30000; // Increased for web reliability
         
         // First try with exact email match with timeout
         let profileQuery = supabase
@@ -248,12 +248,41 @@ export const AuthProvider = ({ children }) => {
         console.log('📧 [AUTH] Querying with exact email:', authUser.email);
         console.log('📧 [AUTH] Query object:', profileQuery);
         
-        let result = await Promise.race([
-          profileQuery,
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Database query timed out')), DB_TIMEOUT)
-          )
-        ]);
+        // Add retry mechanism for database queries
+        const executeQueryWithRetry = async (query, retryCount = 0) => {
+          const MAX_RETRIES = 2;
+          const RETRY_DELAY = 2000; // 2 seconds
+          
+          try {
+            return await Promise.race([
+              query,
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Database query timed out')), DB_TIMEOUT)
+              )
+            ]);
+          } catch (error) {
+            if (retryCount < MAX_RETRIES && 
+                (error.message?.includes('timeout') || 
+                 error.message?.includes('network') ||
+                 error.message?.includes('connection'))) {
+              
+              console.log(`🔁 Retrying user profile query (attempt ${retryCount + 2}/${MAX_RETRIES + 1}) in ${RETRY_DELAY}ms...`);
+              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+              
+              // Recreate the query for retry
+              const retryQuery = supabase
+                .from('users')
+                .select('*')
+                .eq('email', authUser.email)
+                .maybeSingle();
+              
+              return await executeQueryWithRetry(retryQuery, retryCount + 1);
+            }
+            throw error;
+          }
+        };
+        
+        let result = await executeQueryWithRetry(profileQuery);
         
         console.log('📊 [AUTH] Exact email query result:', {
           data: result.data,

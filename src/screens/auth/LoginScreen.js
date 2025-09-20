@@ -25,8 +25,8 @@ import * as Animatable from 'react-native-animatable';
 import { useTenantAccess, initializeTenantHelpers } from '../../utils/tenantHelpers';
 import { getTenantIdByEmail } from '../../utils/getTenantByEmail';
 
-// Import VidyaSethu logo with fallback
-const VidyaSethuLogo = require('../../../assets/logo-white.png');
+// Import VidyaSetu logo with fallback
+const VidyaSetuLogo = require('../../../assets/logo-white.png');
 
 // Import role-specific logos
 const TeacherLogo = require('../../../logo-teacher.jpg');
@@ -316,10 +316,10 @@ Please contact the administrator to add this role.`
             animation="fadeInDown"
             duration={1000}
           >
-            {/* VidyaSethu Logo - Replace with your custom logo */}
+            {/* VidyaSetu Logo - Replace with your custom logo */}
             {!logoError ? (
               <Image
-                source={VidyaSethuLogo}
+                source={VidyaSetuLogo}
                 style={styles.logoImage}
                 resizeMode="contain"
                 onError={(error) => {

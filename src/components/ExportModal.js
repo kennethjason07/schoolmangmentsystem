@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -64,6 +64,17 @@ const ExportModal = ({
   const filteredFormats = formatOptions.filter(format => 
     availableFormats.includes(format.key)
   );
+
+  // Reset state when modal opens
+  useEffect(() => {
+    if (visible) {
+      console.log('📄 ExportModal: Resetting state for new export session');
+      setHasError(false);
+      setExportProgress('');
+      setIsExporting(false);
+      setSelectedFormat(availableFormats[0] || EXPORT_FORMATS.CSV);
+    }
+  }, [visible, availableFormats]);
 
   const handleExport = async () => {
     if (!selectedFormat) {

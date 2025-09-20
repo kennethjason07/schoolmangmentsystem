@@ -157,6 +157,22 @@ const AttendanceManagement = () => {
   const [viewDate, setViewDate] = useState(new Date());
   const [studentsForClass, setStudentsForClass] = useState([]); // State for filtered students
 
+  // Debug: Track attendanceMark state changes
+  useEffect(() => {
+    console.log('📋 AttendanceMark state changed:', attendanceMark);
+    console.log('   - Number of marked students:', Object.keys(attendanceMark).length);
+    console.log('   - Present students:', Object.entries(attendanceMark).filter(([_, status]) => status === 'Present').map(([id]) => id));
+    console.log('   - Absent students:', Object.entries(attendanceMark).filter(([_, status]) => status === 'Absent').map(([id]) => id));
+  }, [attendanceMark]);
+
+  // Debug: Track teacherAttendanceMark state changes
+  useEffect(() => {
+    console.log('📋 TeacherAttendanceMark state changed:', teacherAttendanceMark);
+    console.log('   - Number of marked teachers:', Object.keys(teacherAttendanceMark).length);
+    console.log('   - Present teachers:', Object.entries(teacherAttendanceMark).filter(([_, status]) => status === 'Present').map(([id]) => id));
+    console.log('   - Absent teachers:', Object.entries(teacherAttendanceMark).filter(([_, status]) => status === 'Absent').map(([id]) => id));
+  }, [teacherAttendanceMark]);
+
   // Add Class Modal State
   const [showAddClassModal, setShowAddClassModal] = useState(false);
   const [newClassName, setNewClassName] = useState('');
@@ -705,80 +721,118 @@ const AttendanceManagement = () => {
 
   // Toggle attendance status for a student
   const toggleStudentAttendance = (studentId, status) => {
-    setAttendanceMark(prev => ({
-      ...prev,
-      [studentId]: status
-    }));
+    console.log(`🔄 toggleStudentAttendance called: studentId=${studentId}, status=${status}`);
+    console.log('   - Current attendanceMark before toggle:', attendanceMark);
+    
+    setAttendanceMark(prev => {
+      const newState = {
+        ...prev,
+        [studentId]: status
+      };
+      console.log('   - New attendanceMark after toggle:', newState);
+      return newState;
+    });
   };
 
   // Toggle attendance status for a teacher
   const toggleTeacherAttendance = (teacherId, status) => {
-    setTeacherAttendanceMark(prev => ({
-      ...prev,
-      [teacherId]: status
-    }));
+    console.log(`🔄 toggleTeacherAttendance called: teacherId=${teacherId}, status=${status}`);
+    console.log('   - Current teacherAttendanceMark before toggle:', teacherAttendanceMark);
+    
+    setTeacherAttendanceMark(prev => {
+      const newState = {
+        ...prev,
+        [teacherId]: status
+      };
+      console.log('   - New teacherAttendanceMark after toggle:', newState);
+      return newState;
+    });
   };
 
   // Mark all students as present
   const markAllStudentsAsPresent = () => {
+    console.log('🔄 Mark All Students Present function called');
+    console.log('   - studentsForClass.length:', studentsForClass.length);
+    console.log('   - studentsForClass:', studentsForClass.map(s => ({ id: s.id, name: s.full_name || s.name })));
+    
     if (studentsForClass.length === 0) {
       Alert.alert('No Students', 'No students found to mark as present.');
       return;
     }
 
-    Alert.alert(
-      'Mark All Students as Present',
-      `Are you sure you want to mark all ${studentsForClass.length} students as Present for ${formatSafeDate(selectedDate, 'dd MMM yyyy')}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Mark All Present',
-          style: 'default',
-          onPress: () => {
-            const newAttendanceMark = {};
-            studentsForClass.forEach(student => {
-              newAttendanceMark[student.id] = 'Present';
-            });
-            setAttendanceMark(newAttendanceMark);
-            
-            // Show success message
-            Alert.alert('Success', `All ${studentsForClass.length} students have been marked as Present.`);
-            console.log(`✅ Marked all ${studentsForClass.length} students as Present`);
-          }
-        }
-      ]
+    console.log('   - Current attendanceMark before clearing:', attendanceMark);
+
+    // Use web-compatible confirmation dialog
+    const confirmed = window.confirm(
+      `Are you sure you want to mark all ${studentsForClass.length} students as Present for ${formatSafeDate(selectedDate, 'dd MMM yyyy')}?`
     );
+    
+    if (!confirmed) {
+      console.log('❌ User cancelled marking all students as present');
+      return;
+    }
+    
+    console.log('✅ User confirmed marking all students as present');
+    
+    const newAttendanceMark = {};
+    studentsForClass.forEach(student => {
+      newAttendanceMark[student.id] = 'Present';
+      console.log(`   - Marking student ${student.id} (${student.full_name || student.name}) as Present`);
+    });
+    
+    console.log('   - New attendanceMark object:', newAttendanceMark);
+    console.log('   - About to call setAttendanceMark...');
+    
+    setAttendanceMark(newAttendanceMark);
+    
+    console.log('   - setAttendanceMark called successfully');
+    
+    // Show success message
+    alert(`Success: All ${studentsForClass.length} students have been marked as Present.`);
+    console.log(`✅ Marked all ${studentsForClass.length} students as Present`);
   };
 
   // Mark all teachers as present
   const markAllTeachersAsPresent = () => {
+    console.log('🔄 Mark All Teachers Present function called');
+    console.log('   - teachers.length:', teachers.length);
+    console.log('   - teachers:', teachers.map(t => ({ id: t.id, name: t.name })));
+    
     if (teachers.length === 0) {
-      Alert.alert('No Teachers', 'No teachers found to mark as present.');
+      alert('No teachers found to mark as present.');
       return;
     }
 
-    Alert.alert(
-      'Mark All Teachers as Present',
-      `Are you sure you want to mark all ${teachers.length} teachers as Present for ${formatSafeDate(teacherDate, 'dd MMM yyyy')}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Mark All Present',
-          style: 'default',
-          onPress: () => {
-            const newTeacherAttendanceMark = {};
-            teachers.forEach(teacher => {
-              newTeacherAttendanceMark[teacher.id] = 'Present';
-            });
-            setTeacherAttendanceMark(newTeacherAttendanceMark);
-            
-            // Show success message
-            Alert.alert('Success', `All ${teachers.length} teachers have been marked as Present.`);
-            console.log(`✅ Marked all ${teachers.length} teachers as Present`);
-          }
-        }
-      ]
+    console.log('   - Current teacherAttendanceMark before clearing:', teacherAttendanceMark);
+
+    // Use web-compatible confirmation dialog
+    const confirmed = window.confirm(
+      `Are you sure you want to mark all ${teachers.length} teachers as Present for ${formatSafeDate(teacherDate, 'dd MMM yyyy')}?`
     );
+    
+    if (!confirmed) {
+      console.log('❌ User cancelled marking all teachers as present');
+      return;
+    }
+    
+    console.log('✅ User confirmed marking all teachers as present');
+    
+    const newTeacherAttendanceMark = {};
+    teachers.forEach(teacher => {
+      newTeacherAttendanceMark[teacher.id] = 'Present';
+      console.log(`   - Marking teacher ${teacher.id} (${teacher.name}) as Present`);
+    });
+    
+    console.log('   - New teacherAttendanceMark object:', newTeacherAttendanceMark);
+    console.log('   - About to call setTeacherAttendanceMark...');
+    
+    setTeacherAttendanceMark(newTeacherAttendanceMark);
+    
+    console.log('   - setTeacherAttendanceMark called successfully');
+    
+    // Show success message
+    alert(`Success: All ${teachers.length} teachers have been marked as Present.`);
+    console.log(`✅ Marked all ${teachers.length} teachers as Present`);
   };
 
   // Export to PDF function
@@ -858,6 +912,7 @@ const AttendanceManagement = () => {
   // Render student attendance item with enhanced UI
   const renderStudentItem = ({ item, index }) => {
     const currentStatus = attendanceMark[item.id];
+    console.log(`📊 Rendering student ${item.id} (${item.full_name || item.name}): status = '${currentStatus}'`);
 
     return (
       <Animatable.View
@@ -962,6 +1017,7 @@ const AttendanceManagement = () => {
   // Render teacher attendance item with enhanced UI
   const renderTeacherItem = ({ item, index }) => {
     const currentStatus = teacherAttendanceMark[item.id];
+    console.log(`📊 Rendering teacher ${item.id} (${item.name}): status = '${currentStatus}'`);
 
     return (
       <Animatable.View
@@ -1105,16 +1161,40 @@ const AttendanceManagement = () => {
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Date</Text>
-              <TouchableOpacity
-                style={styles.dateInputCard}
-                onPress={() => setShowDatePicker(true)}
-              >
-                <Ionicons name="calendar-outline" size={20} color="#1976d2" style={styles.inputIcon} />
-                <Text style={styles.dateInputText}>
-                  {formatSafeDate(selectedDate, 'dd MMM yyyy')}
-                </Text>
-                <Ionicons name="chevron-down" size={16} color="#666" />
-              </TouchableOpacity>
+              {Platform.OS === 'web' ? (
+                <View style={styles.dateInputCard}>
+                  <Ionicons name="calendar-outline" size={20} color="#1976d2" style={styles.inputIcon} />
+                  <input
+                    type="date"
+                    value={selectedDate.toISOString().split('T')[0]}
+                    onChange={(e) => {
+                      const newDate = new Date(e.target.value);
+                      console.log('📅 Student date changed to:', newDate);
+                      setSelectedDate(newDate);
+                    }}
+                    style={{
+                      border: 'none',
+                      backgroundColor: 'transparent',
+                      fontSize: '16px',
+                      color: '#333',
+                      outline: 'none',
+                      flex: 1,
+                      marginLeft: '8px'
+                    }}
+                  />
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.dateInputCard}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <Ionicons name="calendar-outline" size={20} color="#1976d2" style={styles.inputIcon} />
+                  <Text style={styles.dateInputText}>
+                    {formatSafeDate(selectedDate, 'dd MMM yyyy')}
+                  </Text>
+                  <Ionicons name="chevron-down" size={16} color="#666" />
+                </TouchableOpacity>
+              )}
             </View>
 
             <Animatable.View animation="fadeInUp" delay={300}>
@@ -1144,7 +1224,10 @@ const AttendanceManagement = () => {
                   styles.submitButtonCard,
                   styles.markAllPresentButtonCard
                 ]}
-                onPress={markAllStudentsAsPresent}
+                onPress={() => {
+                  console.log('🔘 Mark All Students Present button pressed');
+                  markAllStudentsAsPresent();
+                }}
                 activeOpacity={0.8}
               >
                 <Ionicons name="checkmark-done-outline" size={20} color="#fff" style={styles.buttonIcon} />
@@ -1175,16 +1258,40 @@ const AttendanceManagement = () => {
           <View style={styles.selectionCard}>
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Date</Text>
-              <TouchableOpacity
-                style={styles.dateInputCard}
-                onPress={() => setTeacherShowDatePicker(true)}
-              >
-                <Ionicons name="calendar-outline" size={20} color="#1976d2" style={styles.inputIcon} />
-                <Text style={styles.dateInputText}>
-                  {formatSafeDate(teacherDate, 'dd MMM yyyy')}
-                </Text>
-                <Ionicons name="chevron-down" size={16} color="#666" />
-              </TouchableOpacity>
+              {Platform.OS === 'web' ? (
+                <View style={styles.dateInputCard}>
+                  <Ionicons name="calendar-outline" size={20} color="#1976d2" style={styles.inputIcon} />
+                  <input
+                    type="date"
+                    value={teacherDate.toISOString().split('T')[0]}
+                    onChange={(e) => {
+                      const newDate = new Date(e.target.value);
+                      console.log('📅 Teacher date changed to:', newDate);
+                      setTeacherDate(newDate);
+                    }}
+                    style={{
+                      border: 'none',
+                      backgroundColor: 'transparent',
+                      fontSize: '16px',
+                      color: '#333',
+                      outline: 'none',
+                      flex: 1,
+                      marginLeft: '8px'
+                    }}
+                  />
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.dateInputCard}
+                  onPress={() => setTeacherShowDatePicker(true)}
+                >
+                  <Ionicons name="calendar-outline" size={20} color="#1976d2" style={styles.inputIcon} />
+                  <Text style={styles.dateInputText}>
+                    {formatSafeDate(teacherDate, 'dd MMM yyyy')}
+                  </Text>
+                  <Ionicons name="chevron-down" size={16} color="#666" />
+                </TouchableOpacity>
+              )}
             </View>
 
             <Animatable.View animation="fadeInUp" delay={300}>
@@ -1429,7 +1536,10 @@ const AttendanceManagement = () => {
             <View style={styles.teacherButtonsRow}>
               <TouchableOpacity
                 style={styles.markAllPresentTeacherButton}
-                onPress={markAllStudentsAsPresent}
+                onPress={() => {
+                  console.log('🔘 Bottom Mark All Present button pressed');
+                  markAllStudentsAsPresent();
+                }}
               >
                 <Ionicons name="checkmark-done-outline" size={20} color="#fff" style={styles.buttonIcon} />
                 <Text style={styles.viewButtonText}>Mark All Present</Text>

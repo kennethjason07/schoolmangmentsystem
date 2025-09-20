@@ -9,6 +9,44 @@ const logExport = (component, message, data) => {
   console.log(`[Export: ${component}] ${message}`, data || '');
 };
 
+// Simple PDF test function
+export const testPDFExport = async () => {
+  console.log('🧪 testPDFExport: Starting PDF test...');
+  
+  if (Platform.OS !== 'web') {
+    Alert.alert('Test Info', 'PDF test only works on web platform.');
+    return { success: false, method: 'not-web', message: 'Test only available on web platform.' };
+  }
+  
+  try {
+    console.log('🧪 testPDFExport: Attempting to import jsPDF...');
+    
+    const { jsPDF } = await import('jspdf');
+    
+    console.log('🧪 testPDFExport: jsPDF imported, creating document...');
+    
+    const doc = new jsPDF();
+    doc.text('Test PDF Export', 20, 20);
+    doc.text('This is a test to verify PDF functionality.', 20, 40);
+    doc.text(`Generated at: ${new Date().toISOString()}`, 20, 60);
+    
+    const fileName = `test_pdf_${Date.now()}.pdf`;
+    doc.save(fileName);
+    
+    console.log('🧪 testPDFExport: Test PDF saved successfully as', fileName);
+    
+    Alert.alert('Test Successful', `Test PDF generated and downloaded as ${fileName}`);
+    return { success: true, method: 'pdf', message: 'Test PDF generated successfully!' };
+    
+  } catch (error) {
+    console.error('🧪 testPDFExport ERROR:', error);
+    console.error('🧪 testPDFExport ERROR stack:', error.stack);
+    
+    Alert.alert('Test Failed', `PDF test failed: ${error.message}`);
+    return { success: false, method: 'error', message: `PDF test failed: ${error.message}` };
+  }
+};
+
 // Simple test export function to verify basic functionality
 export const testExport = async () => {
   console.log('🧪 testExport: Starting basic export test...');
@@ -411,6 +449,182 @@ const downloadFileWeb = async (content, fileName, mimeType) => {
   });
 };
 
+// Generate PDF directly for web platform
+const generateWebPDF = async (data, additionalInfo, title) => {
+  console.log('📁 generateWebPDF: Starting PDF generation...', { title, dataLength: data?.length });
+  
+  // Check if we're in a web environment
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    console.error('📁 generateWebPDF: Not in web environment');
+    throw new Error('PDF generation only available in web environment');
+  }
+  
+  try {
+    console.log('📁 generateWebPDF: Attempting to load jsPDF...');
+    
+    // Try different import approaches
+    let jsPDF, autoTable;
+    
+    try {
+      // Method 1: Direct dynamic import
+      const jsPDFModule = await import('jspdf');
+      jsPDF = jsPDFModule.jsPDF || jsPDFModule.default;
+      
+      console.log('📁 generateWebPDF: jsPDF loaded, type:', typeof jsPDF);
+      
+      // Load autoTable
+      const autoTableModule = await import('jspdf-autotable');
+      autoTable = autoTableModule.default || autoTableModule;
+      
+      console.log('📁 generateWebPDF: autoTable loaded, type:', typeof autoTable);
+    } catch (importError) {
+      console.error('📁 generateWebPDF: Import failed:', importError);
+      
+      // Method 2: Check if globally available
+      if (typeof window.jsPDF !== 'undefined') {
+        jsPDF = window.jsPDF;
+        console.log('📁 generateWebPDF: Using global jsPDF');
+      } else {
+        throw new Error('jsPDF not available via import or global scope');
+      }
+    }
+    
+    if (!jsPDF) {
+      throw new Error('jsPDF constructor not found');
+    }
+    
+    console.log('📁 generateWebPDF: Creating PDF document...');
+    
+    // Create new PDF document
+    const doc = new jsPDF();
+    
+    console.log('📁 generateWebPDF: PDF document created successfully');
+    
+    // Add title
+    doc.setFontSize(20);
+    doc.text(title, 20, 20);
+    
+    // Add generation date
+    doc.setFontSize(12);
+    doc.text(`Generated on: ${new Date().toLocaleDateString('en-IN')}`, 20, 35);
+    
+    let yPosition = 50;
+    
+    // Add summary information if provided
+    if (additionalInfo) {
+      doc.setFontSize(14);
+      doc.text('Summary', 20, yPosition);
+      yPosition += 10;
+      
+      doc.setFontSize(10);
+      
+      Object.entries(additionalInfo).forEach(([key, value]) => {
+        doc.text(`${key}: ${value}`, 20, yPosition);
+        yPosition += 6;
+      });
+      
+      yPosition += 10;
+    }
+    
+    // Add data as simple text if autoTable is not available
+    if (data && data.length > 0) {
+      console.log('📁 generateWebPDF: Adding data table...');
+      
+      if (typeof doc.autoTable === 'function') {
+        // Use autoTable if available
+        const headers = Object.keys(data[0]);
+        const tableData = data.map(row => Object.values(row));
+        
+        doc.autoTable({
+          head: [headers],
+          body: tableData,
+          startY: yPosition,
+          styles: {
+            fontSize: 8,
+            cellPadding: 2,
+          },
+          headStyles: {
+            fillColor: [33, 150, 243],
+            textColor: 255,
+          },
+          alternateRowStyles: {
+            fillColor: [248, 249, 250],
+          },
+        });
+      } else {
+        // Fallback to manual table creation
+        console.log('📁 generateWebPDF: autoTable not available, using manual table creation');
+        
+        doc.setFontSize(12);
+        doc.text(`${title} Data`, 20, yPosition);
+        yPosition += 15;
+        
+        doc.setFontSize(8);
+        
+        // Add headers
+        const headers = Object.keys(data[0]);
+        let xPosition = 20;
+        headers.forEach((header, index) => {
+          doc.text(header, xPosition, yPosition);
+          xPosition += 30; // Adjust spacing
+        });
+        yPosition += 10;
+        
+        // Add data rows
+        data.slice(0, 20).forEach((row, rowIndex) => { // Limit to 20 rows to avoid page overflow
+          xPosition = 20;
+          Object.values(row).forEach((value, colIndex) => {
+            doc.text(String(value || ''), xPosition, yPosition);
+            xPosition += 30;
+          });
+          yPosition += 8;
+          
+          // Add new page if needed
+          if (yPosition > 280) {
+            doc.addPage();
+            yPosition = 20;
+          }
+        });
+        
+        if (data.length > 20) {
+          doc.text(`... and ${data.length - 20} more records`, 20, yPosition + 10);
+        }
+      }
+    }
+    
+    // Generate filename based on title
+    const reportType = title.toLowerCase().replace(/\s+/g, '_');
+    const fileName = `${reportType}_${new Date().toISOString().split('T')[0]}.pdf`;
+    
+    console.log('📁 generateWebPDF: Saving PDF as', fileName);
+    
+    // Save the PDF
+    doc.save(fileName);
+    
+    console.log('📁 generateWebPDF: PDF saved successfully!');
+    
+    // Show success message
+    Alert.alert(
+      'Export Successful',
+      `${title} has been downloaded as ${fileName}. Check your Downloads folder.`,
+      [{ text: 'OK' }]
+    );
+    
+    return true;
+  } catch (error) {
+    console.error('📁 generateWebPDF ERROR:', error);
+    console.error('📁 generateWebPDF ERROR message:', error.message);
+    console.error('📁 generateWebPDF ERROR stack:', error.stack);
+    
+    // More specific error handling
+    if (error.message?.includes('import') || error.message?.includes('module')) {
+      console.error('📁 generateWebPDF: Module import failed - jsPDF libraries may not be available');
+    }
+    
+    throw error;
+  }
+};
+
 // Show content in new window (final fallback)
 const showContentInNewWindow = async (content, fileName) => {
   return new Promise((resolve, reject) => {
@@ -647,41 +861,62 @@ export const exportIndividualAttendanceRecord = async (recordData, format = EXPO
         );
 
         try {
-          const { uri } = await Print.printToFileAsync({ 
-            html: htmlContent,
-            base64: false
-          });
-          
-          // Create a new filename with .pdf extension
-          fileName = generateFileName(`attendance_${recordData.classes?.class_name}_${recordData.date}`, 'pdf');
-          const newUri = `${FileSystem.documentDirectory}${fileName}`;
-          
-          // Move the file to our desired location
-          await FileSystem.moveAsync({ from: uri, to: newUri });
-          
-          // Share the PDF
-          const canShare = await checkSharingAvailability();
-          if (canShare) {
-            await Sharing.shareAsync(newUri, {
-              mimeType: 'application/pdf',
-              dialogTitle: 'Export Attendance Record',
-              UTI: 'com.adobe.pdf',
-            });
-            Alert.alert(
-              'Export Successful',
-              `Attendance record exported as ${fileName}. You can share it using the options shown.`,
-              [{ text: 'OK' }]
-            );
+          // For web platform, use direct PDF generation
+          if (Platform.OS === 'web') {
+            console.log('📝 exportIndividualAttendanceRecord: Using web PDF generation...');
+            
+            try {
+              const success = await generateWebPDF(pdfData, additionalInfo, 'Individual Attendance Record');
+              
+              if (success) {
+                console.log('📝 exportIndividualAttendanceRecord: Web PDF generation completed');
+                return true;
+              } else {
+                throw new Error('PDF generation failed');
+              }
+            } catch (webError) {
+              console.error('📝 exportIndividualAttendanceRecord: Web PDF failed:', webError);
+              Alert.alert('PDF Error', `Failed to generate PDF: ${webError.message || 'Unknown error'}. Please try another format.`);
+              return false;
+            }
           } else {
-            Alert.alert(
-              'Export Successful', 
-              `Attendance record saved as ${fileName} in the app's documents folder.`,
-              [{ text: 'OK' }]
-            );
+            // Native mobile PDF generation
+            const { uri } = await Print.printToFileAsync({ 
+              html: htmlContent,
+              base64: false
+            });
+            
+            // Create a new filename with .pdf extension
+            fileName = generateFileName(`attendance_${recordData.classes?.class_name}_${recordData.date}`, 'pdf');
+            const newUri = `${FileSystem.documentDirectory}${fileName}`;
+            
+            // Move the file to our desired location
+            await FileSystem.moveAsync({ from: uri, to: newUri });
+            
+            // Share the PDF
+            const canShare = await checkSharingAvailability();
+            if (canShare) {
+              await Sharing.shareAsync(newUri, {
+                mimeType: 'application/pdf',
+                dialogTitle: 'Export Attendance Record',
+                UTI: 'com.adobe.pdf',
+              });
+              Alert.alert(
+                'Export Successful',
+                `Attendance record exported as ${fileName}. You can share it using the options shown.`,
+                [{ text: 'OK' }]
+              );
+            } else {
+              Alert.alert(
+                'Export Successful', 
+                `Attendance record saved as ${fileName} in the app's documents folder.`,
+                [{ text: 'OK' }]
+              );
+            }
+            return true;
           }
-          return true;
         } catch (error) {
-          console.error('Error generating PDF:', error);
+          console.error('📝 exportIndividualAttendanceRecord: Error generating PDF:', error);
           Alert.alert('PDF Error', `Failed to generate PDF: ${error.message || 'Unknown error'}. Please try another format.`);
           return false;
         }
@@ -885,41 +1120,64 @@ export const exportAttendanceData = async (data, stats, format = EXPORT_FORMATS.
         try {
           console.log('📄 exportAttendanceData: Generating PDF...');
           
-          // For web platform, use a different approach
+          // For web platform, use direct PDF generation
           if (Platform.OS === 'web') {
-            console.log('📄 exportAttendanceData: Using web PDF approach...');
+            console.log('📄 exportAttendanceData: Using web PDF generation...');
+            console.log('📄 exportAttendanceData: PDF data prepared:', { 
+              dataLength: pdfData.length, 
+              additionalInfoKeys: Object.keys(pdfAdditionalInfo),
+              sampleData: pdfData.slice(0, 2)
+            });
             
-            // For web, we'll download the HTML content as PDF using the browser's print functionality
-            // or fallback to downloading as HTML file
             try {
-              // Create a data URL with the HTML content
-              const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
-              const url = window.URL.createObjectURL(htmlBlob);
+              console.log('📄 exportAttendanceData: Calling generateWebPDF...');
               
-              // Create download link for HTML file that can be opened and printed as PDF
-              const link = document.createElement('a');
-              link.href = url;
-              link.download = `attendance_report_${new Date().toISOString().split('T')[0]}.html`;
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
+              // Generate PDF directly using browser APIs
+              const success = await generateWebPDF(pdfData, pdfAdditionalInfo, 'Attendance Report');
               
-              // Clean up
-              setTimeout(() => {
-                window.URL.revokeObjectURL(url);
-              }, 100);
+              console.log('📄 exportAttendanceData: generateWebPDF returned:', success);
               
-              Alert.alert(
-                'Export Successful',
-                'Attendance report has been downloaded as an HTML file. Open it in your browser and use Print > Save as PDF to convert it to PDF format.',
-                [{ text: 'OK' }]
-              );
-              
-              console.log('📄 exportAttendanceData: Web PDF export completed');
-              return true;
+              if (success) {
+                console.log('📄 exportAttendanceData: Web PDF generation completed successfully');
+                return true;
+              } else {
+                console.error('📄 exportAttendanceData: generateWebPDF returned false');
+                throw new Error('PDF generation returned false');
+              }
             } catch (webError) {
-              console.error('📄 exportAttendanceData: Web PDF failed:', webError);
-              throw webError;
+              console.error('📄 exportAttendanceData: Web PDF failed, error details:');
+              console.error('  - Error name:', webError.name);
+              console.error('  - Error message:', webError.message);
+              console.error('  - Error stack:', webError.stack);
+              console.log('📄 exportAttendanceData: Trying HTML fallback...');
+              
+              // Fallback to HTML download if PDF generation fails
+              try {
+                const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
+                const url = window.URL.createObjectURL(htmlBlob);
+                
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `attendance_report_${new Date().toISOString().split('T')[0]}.html`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                setTimeout(() => {
+                  window.URL.revokeObjectURL(url);
+                }, 100);
+                
+                Alert.alert(
+                  'Export as HTML',
+                  'Could not generate PDF directly. Downloaded as HTML file instead. Open it in your browser and use Print > Save as PDF to convert it.',
+                  [{ text: 'OK' }]
+                );
+                
+                return true;
+              } catch (htmlError) {
+                console.error('📄 exportAttendanceData: HTML fallback also failed:', htmlError);
+                throw htmlError;
+              }
             }
           } else {
             // Native mobile PDF generation
@@ -1276,6 +1534,240 @@ export const exportStudentData = async (data, stats, format = EXPORT_FORMATS.CSV
   } catch (error) {
     console.error('Error exporting student data:', error);
     Alert.alert('Export Error', 'Failed to export student overview report.');
+    return false;
+  }
+};
+
+// Export top performers data
+export const exportTopPerformers = async (topPerformers, stats, format = EXPORT_FORMATS.CSV) => {
+  console.log('🏆 exportTopPerformers: Starting export process', { format, performersCount: topPerformers?.length });
+  try {
+    // Validate input data
+    if (!topPerformers || !Array.isArray(topPerformers)) {
+      console.error('🏆 exportTopPerformers: Invalid top performers data provided');
+      throw new Error('No top performers data provided for export');
+    }
+    
+    if (topPerformers.length === 0) {
+      console.warn('🏆 exportTopPerformers: Empty top performers array provided');
+      Alert.alert('No Data', 'No top performers data available for export.');
+      return false;
+    }
+    
+    console.log('🏆 exportTopPerformers: Data validation passed, proceeding with format:', format);
+    
+    let content = '';
+    let fileName = '';
+    let mimeType = 'text/plain';
+    
+    // Get current date for the export
+    const exportDate = new Date().toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+
+    switch (format) {
+      case EXPORT_FORMATS.CSV:
+        // Prepare top performers data for CSV
+        const csvData = topPerformers.map((performer, index) => ({
+          'Rank': index + 1,
+          'Student Name': performer.name || 'N/A',
+          'Admission No': performer.admissionNo || 'N/A',
+          'Percentage': `${performer.percentage}%`,
+          'Subjects Count': performer.count || 0,
+          'Total Marks': performer.totalMarks || 0,
+          'Max Marks': performer.totalMaxMarks || 0,
+          'Performance Grade': getGrade(performer.percentage)
+        }));
+
+        // Add summary statistics
+        const summaryData = [
+          { 'Metric': 'Export Date', 'Value': exportDate },
+          { 'Metric': 'Total Top Performers', 'Value': topPerformers.length },
+          { 'Metric': 'Highest Percentage', 'Value': `${topPerformers[0]?.percentage || 0}%` },
+          { 'Metric': 'Average Performance (Top 10)', 'Value': `${Math.round(topPerformers.slice(0, 10).reduce((sum, p) => sum + p.percentage, 0) / Math.min(10, topPerformers.length))}%` },
+          { 'Metric': 'School Average', 'Value': `${stats.averagePercentage || 0}%` }
+        ];
+
+        content = "TOP PERFORMERS REPORT\nGenerated on: " + exportDate + "\n\nSUMMARY\n" + convertToCSV(summaryData) + "\n\nTOP PERFORMERS\n" + convertToCSV(csvData);
+        fileName = generateFileName('top_performers', 'csv');
+        mimeType = 'text/csv';
+        break;
+
+      case EXPORT_FORMATS.PDF:
+        console.log('🏆 exportTopPerformers: Processing PDF export...');
+        
+        // Prepare top performers data for PDF
+        const pdfData = topPerformers.map((performer, index) => ({
+          'Rank': index + 1,
+          'Student Name': performer.name || 'N/A',
+          'Admission No': performer.admissionNo || 'N/A',
+          'Percentage': `${performer.percentage}%`,
+          'Subjects': performer.count || 0,
+          'Grade': getGrade(performer.percentage)
+        }));
+
+        // Prepare additional info for PDF
+        const pdfAdditionalInfo = {
+          'Export Date': exportDate,
+          'Total Top Performers': topPerformers.length,
+          'Highest Score': `${topPerformers[0]?.percentage || 0}%`,
+          'Top 10 Average': `${Math.round(topPerformers.slice(0, 10).reduce((sum, p) => sum + p.percentage, 0) / Math.min(10, topPerformers.length))}%`,
+          'School Average': `${stats.averagePercentage || 0}%`
+        };
+
+        const htmlContent = convertToHTML(
+          pdfData, 
+          'Top Performers Report', 
+          pdfAdditionalInfo
+        );
+
+        try {
+          console.log('🏆 exportTopPerformers: Generating PDF...');
+          
+          // For web platform, use direct PDF generation
+          if (Platform.OS === 'web') {
+            console.log('🏆 exportTopPerformers: Using web PDF generation...');
+            
+            try {
+              const success = await generateWebPDF(pdfData, pdfAdditionalInfo, 'Top Performers Report');
+              
+              if (success) {
+                console.log('🏆 exportTopPerformers: Web PDF generation completed successfully');
+                return true;
+              } else {
+                throw new Error('PDF generation returned false');
+              }
+            } catch (webError) {
+              console.error('🏆 exportTopPerformers: Web PDF failed:', webError);
+              // Fallback to HTML download
+              try {
+                const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
+                const url = window.URL.createObjectURL(htmlBlob);
+                
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `top_performers_${new Date().toISOString().split('T')[0]}.html`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                setTimeout(() => {
+                  window.URL.revokeObjectURL(url);
+                }, 100);
+                
+                Alert.alert(
+                  'Export as HTML',
+                  'Could not generate PDF directly. Downloaded as HTML file instead. Open it in your browser and use Print > Save as PDF to convert it.',
+                  [{ text: 'OK' }]
+                );
+                
+                return true;
+              } catch (htmlError) {
+                console.error('🏆 exportTopPerformers: HTML fallback failed:', htmlError);
+                throw htmlError;
+              }
+            }
+          } else {
+            // Native mobile PDF generation
+            const { uri } = await Print.printToFileAsync({ 
+              html: htmlContent,
+              base64: false
+            });
+            
+            // Create filename and move file
+            fileName = generateFileName('top_performers', 'pdf');
+            const newUri = `${FileSystem.documentDirectory}${fileName}`;
+            await FileSystem.moveAsync({ from: uri, to: newUri });
+            
+            // Share the PDF
+            const canShare = await checkSharingAvailability();
+            if (canShare) {
+              await Sharing.shareAsync(newUri, {
+                mimeType: 'application/pdf',
+                dialogTitle: 'Export Top Performers Report',
+                UTI: 'com.adobe.pdf',
+              });
+              Alert.alert(
+                'Export Successful',
+                `Top performers report exported as ${fileName}. You can share it using the options shown.`,
+                [{ text: 'OK' }]
+              );
+            } else {
+              Alert.alert(
+                'Export Successful', 
+                `Top performers report saved as ${fileName} in the app's documents folder.`,
+                [{ text: 'OK' }]
+              );
+            }
+            return true;
+          }
+        } catch (error) {
+          console.error('🏆 exportTopPerformers: PDF generation error:', error);
+          Alert.alert('PDF Error', `Failed to generate PDF: ${error.message || 'Unknown error'}. Please try another format.`);
+          return false;
+        }
+        break;
+
+      case EXPORT_FORMATS.JSON:
+        content = convertToJSON({
+          summary: {
+            exportDate,
+            totalPerformers: topPerformers.length,
+            schoolAverage: stats.averagePercentage,
+            highestScore: topPerformers[0]?.percentage || 0
+          },
+          topPerformers,
+          exportedAt: new Date().toISOString()
+        });
+        fileName = generateFileName('top_performers', 'json');
+        mimeType = 'application/json';
+        break;
+
+      case EXPORT_FORMATS.CLIPBOARD:
+        console.log('📋 exportTopPerformers: Processing clipboard export...');
+        
+        const clipboardData = topPerformers.map((performer, index) => ({
+          'Rank': index + 1,
+          'Student Name': performer.name || 'N/A',
+          'Admission No': performer.admissionNo || 'N/A',
+          'Percentage': `${performer.percentage}%`,
+          'Subjects': performer.count || 0,
+          'Grade': getGrade(performer.percentage)
+        }));
+        
+        // Add summary information at the top
+        const summaryText = `TOP PERFORMERS REPORT\nGenerated on: ${exportDate}\n\nSUMMARY:\nTotal Top Performers: ${topPerformers.length}\nHighest Score: ${topPerformers[0]?.percentage || 0}%\nTop 10 Average: ${Math.round(topPerformers.slice(0, 10).reduce((sum, p) => sum + p.percentage, 0) / Math.min(10, topPerformers.length))}%\nSchool Average: ${stats.averagePercentage || 0}%\n\nTOP PERFORMERS:\n`;
+        
+        content = summaryText + convertToCSV(clipboardData);
+        console.log('📋 exportTopPerformers: Clipboard content prepared, length:', content.length);
+        return await copyToClipboard(content, 'Top Performers Report');
+
+      default:
+        throw new Error('Unsupported export format');
+    }
+
+    console.log('🏆 exportTopPerformers: Content prepared, saving file...', { fileName, contentLength: content.length });
+    return await saveFile(content, fileName, mimeType);
+  } catch (error) {
+    console.error('🏆 exportTopPerformers ERROR:', error);
+    console.error('🏆 exportTopPerformers ERROR stack:', error.stack);
+    
+    // Enhanced error messages
+    let userMessage = 'Failed to export top performers report.';
+    
+    if (error.message?.includes('No top performers data')) {
+      userMessage = 'No top performers data available for export. Please ensure academic records exist.';
+    } else if (error.message?.includes('FileSystem')) {
+      userMessage = 'File system error. Please check app permissions and try again.';
+    } else if (error.message?.includes('sharing')) {
+      userMessage = 'Sharing not available. Please try copying to clipboard instead.';
+    } else if (error.message?.includes('Permission')) {
+      userMessage = 'Permission denied. Please check app permissions in device settings.';
+    }
+    
+    Alert.alert('Export Error', `${userMessage}\n\nTechnical details: ${error.message || 'Unknown error'}`);
     return false;
   }
 };
