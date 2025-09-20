@@ -412,180 +412,269 @@ const ManageClasses = ({ navigation }) => {
     }
   };
 
-  const handleDeleteClass = async (classId) => {
-    Alert.alert(
-      'Delete Class',
-      'Are you sure you want to delete this class? This will also delete all associated subjects, assignments, exams, and related data.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              // 🛡️ Enhanced tenant validation
-              const validation = validateTenantAccessLocal();
-              if (!validation.valid) {
-                Alert.alert('Access Denied', validation.error);
-                return;
-              }
-              
-              console.log('Starting class deletion process for class ID:', classId);
+  const handleDeleteClass = async (classItem) => {
+    // 🚀 FIXED: Web-compatible confirmation dialog (like teacher screen)
+    const confirmDelete = Platform.OS === 'web' 
+      ? window.confirm(`Are you sure you want to delete "${classItem.class_name}"? This will also delete all associated subjects, assignments, exams, and related data.`)
+      : await new Promise((resolve) => {
+          Alert.alert(
+            'Delete Class',
+            `Are you sure you want to delete "${classItem.class_name}"? This will also delete all associated subjects, assignments, exams, and related data.`,
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Delete', style: 'destructive', onPress: () => resolve(true) }
+            ]
+          );
+        });
+    
+    if (!confirmDelete) {
+      console.log('❌ User cancelled class deletion');
+      return;
+    }
+    
+    // Show loading state
+    setLoading(true);
+    
+    try {
+      // 🛡️ Enhanced tenant validation
+      const validation = validateTenantAccessLocal();
+      if (!validation.valid) {
+        const errorMsg = `Access Denied: ${validation.error}`;
+        if (Platform.OS === 'web') {
+          window.alert(errorMsg);
+        } else {
+          Alert.alert('Access Denied', validation.error);
+        }
+        return;
+      }
+      
+      console.log(`🗑️ Starting deletion process for class: ${classItem.class_name} (ID: ${classItem.id})`);
+      console.log('🏢 Using enhanced tenant system for deletion');
 
-              // Step 1: Get all subjects for this class to handle cascading deletes
-              const { data: classSubjects } = await supabase
-                .from(TABLES.SUBJECTS)
-                .select('id')
-                .eq('class_id', classId)
-                .eq('tenant_id', tenantId);
-              
-              const subjectIds = classSubjects?.map(s => s.id) || [];
-              console.log('Found subjects to delete:', subjectIds);
+      // 🚀 FIXED: Use consistent tenantDatabase helpers throughout (like teacher screen)
+      
+      // Step 1: Get all subjects for this class to handle cascading deletes
+      console.log('1. Finding subjects for this class...');
+      const { data: classSubjects, error: subjectsQueryError } = await tenantDatabase.read(
+        TABLES.SUBJECTS,
+        { class_id: classItem.id },
+        'id'
+      );
+      
+      if (subjectsQueryError) {
+        console.error('Error querying subjects:', subjectsQueryError);
+        throw new Error(`Failed to query subjects: ${subjectsQueryError.message}`);
+      }
+      
+      const subjectIds = classSubjects?.map(s => s.id) || [];
+      console.log('✓ Found subjects to delete:', subjectIds.length);
 
-              // Step 2: Delete teacher_subjects assignments for these subjects
-              if (subjectIds.length > 0) {
-                const { error: teacherSubjectsError } = await supabase
-                  .from('teacher_subjects')
-                  .delete()
-                  .in('subject_id', subjectIds);
-                if (teacherSubjectsError) {
-                  console.error('Error deleting teacher_subjects:', teacherSubjectsError);
-                  throw teacherSubjectsError;
-                }
-              }
+      // Step 2: Delete teacher_subjects assignments for these subjects
+      if (subjectIds.length > 0) {
+        console.log('2. Deleting teacher-subject assignments...');
+        const { error: teacherSubjectsError } = await tenantDatabase.delete(
+          'teacher_subjects',
+          { subject_id: { in: subjectIds } }
+        );
+        if (teacherSubjectsError) {
+          console.error('Error deleting teacher_subjects:', teacherSubjectsError);
+          throw new Error(`Failed to delete teacher assignments: ${teacherSubjectsError.message}`);
+        }
+        console.log('✓ Deleted teacher-subject assignments');
+      }
 
-              // Step 3: Delete marks related to subjects in this class
-              if (subjectIds.length > 0) {
-                const { error: marksError } = await supabase
-                  .from('marks')
-                  .delete()
-                  .in('subject_id', subjectIds);
-                if (marksError) {
-                  console.error('Error deleting marks:', marksError);
-                  throw marksError;
-                }
-              }
+      // Step 3: Delete marks related to subjects in this class
+      if (subjectIds.length > 0) {
+        console.log('3. Deleting marks...');
+        const { error: marksError } = await tenantDatabase.delete(
+          'marks',
+          { subject_id: { in: subjectIds } }
+        );
+        if (marksError && !marksError.message.includes('does not exist')) {
+          console.error('Error deleting marks:', marksError);
+          throw new Error(`Failed to delete marks: ${marksError.message}`);
+        }
+        console.log('✓ Deleted marks');
+      }
 
-              // Step 4: Delete timetable entries for this class
-              const { error: timetableError } = await supabase
-                .from('timetable_entries')
-                .delete()
-                .eq('class_id', classId);
-              if (timetableError) {
-                console.error('Error deleting timetable entries:', timetableError);
-                throw timetableError;
-              }
+      // Step 4: Delete timetable entries for this class
+      console.log('4. Deleting timetable entries...');
+      try {
+        const { error: timetableError } = await tenantDatabase.delete(
+          'timetable_entries',
+          { class_id: classItem.id }
+        );
+        if (timetableError && !timetableError.message.includes('does not exist')) {
+          console.warn('Error deleting timetable entries:', timetableError);
+        } else {
+          console.log('✓ Deleted timetable entries');
+        }
+      } catch (timetableErr) {
+        console.log('ℹ Timetable entries table not found, skipping...');
+      }
 
-              // Step 5: Delete assignment submissions for assignments in this class
-              const { data: classAssignments } = await supabase
-                .from('assignments')
-                .select('id')
-                .eq('class_id', classId);
-              
-              const assignmentIds = classAssignments?.map(a => a.id) || [];
-              if (assignmentIds.length > 0) {
-                const { error: submissionsError } = await supabase
-                  .from('assignment_submissions')
-                  .delete()
-                  .in('assignment_id', assignmentIds);
-                if (submissionsError) {
-                  console.error('Error deleting assignment submissions:', submissionsError);
-                  throw submissionsError;
-                }
-              }
+      // Step 5: Delete assignments and their submissions
+      console.log('5. Finding and deleting assignments...');
+      const { data: classAssignments } = await tenantDatabase.read(
+        'assignments',
+        { class_id: classItem.id },
+        'id'
+      );
+      
+      const assignmentIds = classAssignments?.map(a => a.id) || [];
+      if (assignmentIds.length > 0) {
+        // Delete assignment submissions first
+        const { error: submissionsError } = await tenantDatabase.delete(
+          'assignment_submissions',
+          { assignment_id: { in: assignmentIds } }
+        );
+        if (submissionsError && !submissionsError.message.includes('does not exist')) {
+          console.warn('Error deleting assignment submissions:', submissionsError);
+        }
+        
+        // Then delete assignments
+        const { error: assignmentsError } = await tenantDatabase.delete(
+          'assignments',
+          { class_id: classItem.id }
+        );
+        if (assignmentsError) {
+          console.error('Error deleting assignments:', assignmentsError);
+          throw new Error(`Failed to delete assignments: ${assignmentsError.message}`);
+        }
+      }
+      console.log('✓ Deleted assignments and submissions');
 
-              // Step 6: Delete assignments for this class
-              const { error: assignmentsError } = await supabase
-                .from('assignments')
-                .delete()
-                .eq('class_id', classId);
-              if (assignmentsError) {
-                console.error('Error deleting assignments:', assignmentsError);
-                throw assignmentsError;
-              }
+      // Step 6: Delete other related data
+      console.log('6. Deleting other related data...');
+      
+      // Delete homeworks
+      try {
+        const { error: homeworksError } = await tenantDatabase.delete(
+          'homeworks',
+          { class_id: classItem.id }
+        );
+        if (homeworksError && !homeworksError.message.includes('does not exist')) {
+          console.warn('Error deleting homeworks:', homeworksError);
+        } else {
+          console.log('✓ Deleted homeworks');
+        }
+      } catch (homeworkErr) {
+        console.log('ℹ Homeworks table not found, skipping...');
+      }
 
-              // Step 7: Delete homeworks for this class
-              const { error: homeworksError } = await supabase
-                .from('homeworks')
-                .delete()
-                .eq('class_id', classId);
-              if (homeworksError) {
-                console.error('Error deleting homeworks:', homeworksError);
-                throw homeworksError;
-              }
+      // Delete exams
+      try {
+        const { error: examsError } = await tenantDatabase.delete(
+          'exams',
+          { class_id: classItem.id }
+        );
+        if (examsError && !examsError.message.includes('does not exist')) {
+          console.warn('Error deleting exams:', examsError);
+        } else {
+          console.log('✓ Deleted exams');
+        }
+      } catch (examErr) {
+        console.log('ℹ Exams table not found, skipping...');
+      }
 
-              // Step 8: Delete exams for this class (marks are already deleted above)
-              const { error: examsError } = await supabase
-                .from('exams')
-                .delete()
-                .eq('class_id', classId);
-              if (examsError) {
-                console.error('Error deleting exams:', examsError);
-                throw examsError;
-              }
+      // Delete fee structures
+      try {
+        const { error: feeStructureError } = await tenantDatabase.delete(
+          'fee_structure',
+          { class_id: classItem.id }
+        );
+        if (feeStructureError && !feeStructureError.message.includes('does not exist')) {
+          console.warn('Error deleting fee structures:', feeStructureError);
+        } else {
+          console.log('✓ Deleted fee structures');
+        }
+      } catch (feeErr) {
+        console.log('ℹ Fee structure table not found, skipping...');
+      }
 
-              // Step 9: Delete fee structures for this class
-              const { error: feeStructureError } = await supabase
-                .from('fee_structure')
-                .delete()
-                .eq('class_id', classId);
-              if (feeStructureError) {
-                console.error('Error deleting fee structures:', feeStructureError);
-                throw feeStructureError;
-              }
+      // Delete attendance records
+      try {
+        const { error: attendanceError } = await tenantDatabase.delete(
+          'student_attendance',
+          { class_id: classItem.id }
+        );
+        if (attendanceError && !attendanceError.message.includes('does not exist')) {
+          console.warn('Error deleting student attendance:', attendanceError);
+        } else {
+          console.log('✓ Deleted student attendance');
+        }
+      } catch (attendanceErr) {
+        console.log('ℹ Student attendance table not found, skipping...');
+      }
 
-              // Step 10: Delete attendance records for this class
-              const { error: attendanceError } = await supabase
-                .from('student_attendance')
-                .delete()
-                .eq('class_id', classId);
-              if (attendanceError) {
-                console.error('Error deleting student attendance:', attendanceError);
-                throw attendanceError;
-              }
+      // Step 7: Update students to remove class assignment
+      console.log('7. Updating students to remove class assignment...');
+      const { error: updateError } = await tenantDatabase.update(
+        'students',
+        { class_id: classItem.id },
+        { class_id: null }
+      );
+      if (updateError) {
+        console.warn('Error updating students:', updateError);
+        // Don't throw error for this, as it's not critical
+      } else {
+        console.log('✓ Updated students to remove class assignment');
+      }
 
-              // Step 11: Set class_id to null for all students in this class
-              const { error: updateError } = await supabase
-                .from('students')
-                .update({ class_id: null })
-                .eq('class_id', classId);
-              if (updateError) {
-                console.error('Error updating students:', updateError);
-                throw updateError;
-              }
+      // Step 8: Delete subjects for this class
+      console.log('8. Deleting subjects...');
+      const { error: subjectsError } = await tenantDatabase.delete(
+        TABLES.SUBJECTS,
+        { class_id: classItem.id }
+      );
+      if (subjectsError) {
+        console.error('Error deleting subjects:', subjectsError);
+        throw new Error(`Failed to delete subjects: ${subjectsError.message}`);
+      }
+      console.log('✓ Deleted subjects');
 
-              // Step 12: Delete subjects for this class
-              const { error: subjectsError } = await supabase
-                .from('subjects')
-                .delete()
-                .eq('class_id', classId);
-              if (subjectsError) {
-                console.error('Error deleting subjects:', subjectsError);
-                throw subjectsError;
-              }
+      // Step 9: Finally, delete the class itself
+      console.log('9. Deleting class record...');
+      const { error: classDeleteError } = await tenantDatabase.delete(
+        TABLES.CLASSES,
+        classItem.id  // Use the ID directly for single record deletion
+      );
+      if (classDeleteError) {
+        console.error('Error deleting class:', classDeleteError);
+        throw new Error(`Failed to delete class: ${classDeleteError.message}`);
+      }
+      console.log('✓ Deleted class record');
 
-              // Step 13: Finally, delete the class with tenant validation
-              const { error: classDeleteError } = await supabase
-                .from('classes')
-                .delete()
-                .eq('id', classId)
-                .eq('tenant_id', tenantId);
-              if (classDeleteError) {
-                console.error('Error deleting class:', classDeleteError);
-                throw classDeleteError;
-              }
-
-              console.log('Class deletion completed successfully');
-              await loadAllData();
-              Alert.alert('Success', 'Class and all associated data deleted successfully.');
-            } catch (error) {
-              console.error('Failed to delete class:', error);
-              Alert.alert('Error', `Failed to delete class: ${error.message}`);
-            }
-          },
-        },
-      ]
-    );
+      // 🚀 FIXED: Update local state with proper React state management
+      setClasses(prevClasses => {
+        const updatedClasses = prevClasses.filter(c => c.id !== classItem.id);
+        console.log(`🔄 Updated local state: removed class ${classItem.class_name}, remaining: ${updatedClasses.length}`);
+        return updatedClasses;
+      });
+      
+      // 🚀 FIXED: Web-compatible success message
+      const successMsg = `Successfully deleted class: ${classItem.class_name}`;
+      if (Platform.OS === 'web') {
+        window.alert(successMsg);
+      } else {
+        Alert.alert('Success', successMsg);
+      }
+      
+      console.log(`✅ Class deletion completed successfully: ${classItem.class_name}`);
+      
+    } catch (error) {
+      console.error('❌ Error deleting class:', error);
+      
+      // 🚀 FIXED: Web-compatible error message
+      const errorMsg = `Could not delete "${classItem.class_name}": ${error.message}\n\nPlease check if this class has dependencies that need to be removed first.`;
+      if (Platform.OS === 'web') {
+        window.alert(errorMsg);
+      } else {
+        Alert.alert('Deletion Failed', errorMsg);
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const openEditModal = (classItem) => {
@@ -738,11 +827,14 @@ const ManageClasses = ({ navigation }) => {
           </TouchableOpacity>
           
           <TouchableOpacity 
-            style={[styles.actionButton, styles.deleteButton]}
+            style={[styles.actionButton, styles.deleteButton, Platform.OS === 'web' && { cursor: 'pointer' }]}
             onPress={(e) => {
-              e.stopPropagation();
-              handleDeleteClass(item.id);
+              if (e && e.stopPropagation) e.stopPropagation();
+              if (e && e.preventDefault) e.preventDefault();
+              console.log('🔄 Delete button clicked for class:', item.class_name);
+              handleDeleteClass(item);
             }}
+            activeOpacity={0.7}
           >
             <Ionicons name="trash" size={16} color="#f44336" />
             <Text style={styles.deleteButtonText}>Delete</Text>

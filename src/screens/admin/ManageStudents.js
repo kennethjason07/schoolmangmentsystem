@@ -108,7 +108,11 @@ const ManageStudents = () => {
         loadParents()
       ]);
     } catch (error) {
-      Alert.alert('Error', 'Failed to load data');
+      if (Platform.OS === 'web') {
+        window.alert('Error: Failed to load data');
+      } else {
+        Alert.alert('Error', 'Failed to load data');
+      }
     } finally {
       setLoading(false);
     }
@@ -656,20 +660,32 @@ const ManageStudents = () => {
           gender: !!form.gender,
           academic_year: !!form.academic_year
         });
-        Alert.alert('Error', 'Please fill in all required fields (Admission No, Name, DOB, Gender, Academic Year)');
+        if (Platform.OS === 'web') {
+          window.alert('Error: Please fill in all required fields (Admission No, Name, DOB, Gender, Academic Year)');
+        } else {
+          Alert.alert('Error', 'Please fill in all required fields (Admission No, Name, DOB, Gender, Academic Year)');
+        }
         return;
       }
 
       // Validate parent details - at least one parent name is required
       if (!form.father_name && !form.mother_name) {
         console.error('❌ ManageStudents: Validation failed - no parent names provided');
-        Alert.alert('Error', 'Please provide at least father name or mother name');
+        if (Platform.OS === 'web') {
+          window.alert('Error: Please provide at least father name or mother name');
+        } else {
+          Alert.alert('Error', 'Please provide at least father name or mother name');
+        }
         return;
       }
 
       if (!form.parent_phone) {
         console.error('❌ ManageStudents: Validation failed - no parent phone provided');
-        Alert.alert('Error', 'Parent/Guardian phone number is required');
+        if (Platform.OS === 'web') {
+          window.alert('Error: Parent/Guardian phone number is required');
+        } else {
+          Alert.alert('Error', 'Parent/Guardian phone number is required');
+        }
         return;
       }
       
@@ -712,7 +728,11 @@ const ManageStudents = () => {
         setLoading(false);
         console.log('⚠️ ManageStudents: Duplicate admission number found:', existingStudent[0]);
         const errorMessage = `A student with admission number "${form.admission_no}" already exists in your school (Student: ${existingStudent[0].name}). Please choose a different admission number.`;
-        Alert.alert('Duplicate Admission Number', errorMessage);
+        if (Platform.OS === 'web') {
+          window.alert('Duplicate Admission Number: ' + errorMessage);
+        } else {
+          Alert.alert('Duplicate Admission Number', errorMessage);
+        }
         return; // Don't proceed with insert
       }
       
@@ -771,7 +791,11 @@ const ManageStudents = () => {
         // Handle specific constraint violations with user-friendly messages
         if (studentError.code === '23505' && studentError.message.includes('students_admission_no_key')) {
           const errorMessage = `A student with admission number "${form.admission_no}" already exists in the system. Please choose a different admission number.`;
-          Alert.alert('Duplicate Admission Number', errorMessage);
+          if (Platform.OS === 'web') {
+            window.alert('Duplicate Admission Number: ' + errorMessage);
+          } else {
+            Alert.alert('Duplicate Admission Number', errorMessage);
+          }
           return; // Don't throw, just return to keep modal open
         }
         
@@ -797,7 +821,11 @@ const ManageStudents = () => {
         console.error('❌ ManageStudents: TenantId type:', typeof tenantId);
         // Delete the student since we can\'t create parents without tenant
         await supabase.from(TABLES.STUDENTS).delete().eq('id', studentId);
-        Alert.alert('Error', 'Failed to create parent records: Missing tenant information. Student record has been removed.');
+        if (Platform.OS === 'web') {
+          window.alert('Error: Failed to create parent records: Missing tenant information. Student record has been removed.');
+        } else {
+          Alert.alert('Error', 'Failed to create parent records: Missing tenant information. Student record has been removed.');
+        }
         return;
       }
       
@@ -846,7 +874,11 @@ const ManageStudents = () => {
           // Handle specific parent constraint violations
           if (parentError.code === '23502' && parentError.message.includes('tenant_id')) {
             const errorMessage = 'Parent creation failed: Missing tenant information. Please try again or contact administrator.';
-            Alert.alert('Parent Creation Error', errorMessage);
+            if (Platform.OS === 'web') {
+              window.alert('Parent Creation Error: ' + errorMessage);
+            } else {
+              Alert.alert('Parent Creation Error', errorMessage);
+            }
             // Still delete the student to maintain consistency
             await supabase.from(TABLES.STUDENTS).delete().eq('id', studentId);
             return;
@@ -859,11 +891,15 @@ const ManageStudents = () => {
       }
 
       console.log('✅ ManageStudents: Student and parents created successfully!');
-      Alert.alert(
-        'Success! 🎉',
-        `Student "${form.name}" has been successfully added with admission number ${form.admission_no}.`,
-        [{ text: 'Great!', style: 'default' }]
-      );
+      if (Platform.OS === 'web') {
+        window.alert(`Success! 🎉 Student "${form.name}" has been successfully added with admission number ${form.admission_no}.`);
+      } else {
+        Alert.alert(
+          'Success! 🎉',
+          `Student "${form.name}" has been successfully added with admission number ${form.admission_no}.`,
+          [{ text: 'Great!', style: 'default' }]
+        );
+      }
       
       console.log('🔄 ManageStudents: Refreshing student data...');
       await loadAllData();
@@ -875,10 +911,14 @@ const ManageStudents = () => {
       console.error('❌ ManageStudents: Unexpected error in handleSubmit:', error);
       console.error('❌ ManageStudents: Error stack:', error.stack);
       
-      Alert.alert(
-        'Error',
-        `Failed to add student: ${error.message}\n\nPlease try again or contact support if the problem persists.`
-      );
+      if (Platform.OS === 'web') {
+        window.alert(`Error: Failed to add student: ${error.message}\n\nPlease try again or contact support if the problem persists.`);
+      } else {
+        Alert.alert(
+          'Error',
+          `Failed to add student: ${error.message}\n\nPlease try again or contact support if the problem persists.`
+        );
+      }
     } finally {
       console.log('🔄 ManageStudents: Setting loading to false...');
       setLoading(false);
@@ -886,32 +926,170 @@ const ManageStudents = () => {
   };
 
   const handleDelete = async (id) => {
-    Alert.alert(
-      'Delete Student',
-      'Are you sure you want to delete this student? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from(TABLES.STUDENTS)
-                .delete()
-                .eq('id', id);
-
-              if (error) throw error;
-
-              Alert.alert('Success', 'Student deleted successfully');
-              await loadAllData();
-            } catch (error) {
-              Alert.alert('Error', 'Failed to delete student: ' + error.message);
-            }
-          }
+    const deleteStudent = async () => {
+      try {
+        console.log('🗑️ ManageStudents: Starting student deletion process for ID:', id);
+        
+        // Get current tenant for proper tenant validation
+        const tenantResult = await getCurrentUserTenantByEmail();
+        
+        if (!tenantResult.success) {
+          console.error('❌ ManageStudents Delete: Failed to get tenant:', tenantResult.error);
+          throw new Error(`Failed to get tenant: ${tenantResult.error}`);
         }
-      ]
-    );
+        
+        const tenantId = tenantResult.data.tenant.id;
+        console.log('🏢 ManageStudents Delete: Using tenant ID:', tenantId);
+        
+        // Step 1: Delete associated parent records first
+        console.log('👨‍👩‍👧 ManageStudents Delete: Deleting associated parent records...');
+        const { error: parentDeleteError } = await supabase
+          .from(TABLES.PARENTS)
+          .delete()
+          .eq('student_id', id)
+          .eq('tenant_id', tenantId); // Ensure we only delete parents in our tenant
+        
+        if (parentDeleteError) {
+          console.error('❌ ManageStudents Delete: Error deleting parent records:', parentDeleteError);
+          throw new Error(`Failed to delete parent records: ${parentDeleteError.message}`);
+        }
+        
+        console.log('✅ ManageStudents Delete: Parent records deleted successfully');
+        
+        // Step 2: Delete other related records that might reference the student
+        // Delete attendance records
+        console.log('📅 ManageStudents Delete: Deleting attendance records...');
+        const { error: attendanceDeleteError } = await supabase
+          .from(TABLES.STUDENT_ATTENDANCE)
+          .delete()
+          .eq('student_id', id);
+        
+        if (attendanceDeleteError) {
+          console.warn('⚠️ ManageStudents Delete: Warning - could not delete attendance records:', attendanceDeleteError.message);
+        }
+        
+        // Delete marks/grades records
+        console.log('📊 ManageStudents Delete: Deleting marks records...');
+        const { error: marksDeleteError } = await supabase
+          .from(TABLES.MARKS)
+          .delete()
+          .eq('student_id', id);
+        
+        if (marksDeleteError) {
+          console.warn('⚠️ ManageStudents Delete: Warning - could not delete marks records:', marksDeleteError.message);
+        }
+        
+        // Delete fee records
+        console.log('💰 ManageStudents Delete: Deleting fee records...');
+        const { error: feeDeleteError } = await supabase
+          .from(TABLES.STUDENT_FEES)
+          .delete()
+          .eq('student_id', id);
+        
+        if (feeDeleteError) {
+          console.warn('⚠️ ManageStudents Delete: Warning - could not delete fee records:', feeDeleteError.message);
+        }
+        
+        // Delete homework records
+        console.log('📝 ManageStudents Delete: Deleting homework records...');
+        const { error: homeworkDeleteError } = await supabase
+          .from(TABLES.HOMEWORKS)
+          .delete()
+          .eq('student_id', id);
+        
+        if (homeworkDeleteError) {
+          console.warn('⚠️ ManageStudents Delete: Warning - could not delete homework records:', homeworkDeleteError.message);
+        }
+        
+        // Delete assignment records
+        console.log('📋 ManageStudents Delete: Deleting assignment records...');
+        const { error: assignmentDeleteError } = await supabase
+          .from(TABLES.ASSIGNMENTS)
+          .delete()
+          .eq('student_id', id);
+        
+        if (assignmentDeleteError) {
+          console.warn('⚠️ ManageStudents Delete: Warning - could not delete assignment records:', assignmentDeleteError.message);
+        }
+        
+        // Delete student discount records
+        console.log('🏷️ ManageStudents Delete: Deleting student discount records...');
+        const { error: discountDeleteError } = await supabase
+          .from(TABLES.STUDENT_DISCOUNTS)
+          .delete()
+          .eq('student_id', id);
+        
+        if (discountDeleteError) {
+          console.warn('⚠️ ManageStudents Delete: Warning - could not delete student discount records:', discountDeleteError.message);
+        }
+        
+        // Delete messages where student is sender or recipient
+        console.log('💬 ManageStudents Delete: Deleting message records...');
+        const { error: messageDeleteError } = await supabase
+          .from(TABLES.MESSAGES)
+          .delete()
+          .or(`sender_id.eq.${id},recipient_id.eq.${id}`);
+        
+        if (messageDeleteError) {
+          console.warn('⚠️ ManageStudents Delete: Warning - could not delete message records:', messageDeleteError.message);
+        }
+        
+        // Step 3: Finally delete the student record with tenant validation
+        console.log('🎓 ManageStudents Delete: Deleting student record...');
+        const { error: studentDeleteError } = await supabase
+          .from(TABLES.STUDENTS)
+          .delete()
+          .eq('id', id)
+          .eq('tenant_id', tenantId); // Ensure we only delete students in our tenant
+        
+        if (studentDeleteError) {
+          console.error('❌ ManageStudents Delete: Error deleting student record:', studentDeleteError);
+          throw studentDeleteError;
+        }
+        
+        console.log('✅ ManageStudents Delete: Student deleted successfully');
+        
+        // Show success message
+        if (Platform.OS === 'web') {
+          window.alert('Success: Student and all associated records deleted successfully');
+        } else {
+          Alert.alert('Success', 'Student and all associated records deleted successfully');
+        }
+        
+        // Refresh data
+        await loadAllData();
+        
+      } catch (error) {
+        console.error('❌ ManageStudents Delete: Unexpected error:', error);
+        
+        if (Platform.OS === 'web') {
+          window.alert('Error: Failed to delete student: ' + error.message);
+        } else {
+          Alert.alert('Error', 'Failed to delete student: ' + error.message);
+        }
+      }
+    };
+    
+    // Show confirmation dialog
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('Are you sure you want to delete this student? This will also delete all associated records (parent info, attendance, marks, fees). This action cannot be undone.');
+      if (confirmed) {
+        await deleteStudent();
+      }
+    } else {
+      Alert.alert(
+        'Delete Student',
+        'Are you sure you want to delete this student? This will also delete all associated records (parent info, attendance, marks, fees). This action cannot be undone.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: deleteStudent
+          }
+        ]
+      );
+    }
   };
 
   const handleEdit = async (student) => {
@@ -1010,18 +1188,30 @@ const ManageStudents = () => {
     try {
       // Validate required fields
       if (!form.admission_no || !form.name || !form.dob || !form.gender || !form.academic_year) {
-        Alert.alert('Error', 'Please fill in all required fields (Admission No, Name, DOB, Gender, Academic Year)');
+        if (Platform.OS === 'web') {
+          window.alert('Error: Please fill in all required fields (Admission No, Name, DOB, Gender, Academic Year)');
+        } else {
+          Alert.alert('Error', 'Please fill in all required fields (Admission No, Name, DOB, Gender, Academic Year)');
+        }
         return;
       }
 
       // Validate parent details - at least one parent name is required
       if (!form.father_name && !form.mother_name) {
-        Alert.alert('Error', 'Please provide at least father name or mother name');
+        if (Platform.OS === 'web') {
+          window.alert('Error: Please provide at least father name or mother name');
+        } else {
+          Alert.alert('Error', 'Please provide at least father name or mother name');
+        }
         return;
       }
 
       if (!form.parent_phone) {
-        Alert.alert('Error', 'Parent/Guardian phone number is required');
+        if (Platform.OS === 'web') {
+          window.alert('Error: Parent/Guardian phone number is required');
+        } else {
+          Alert.alert('Error', 'Parent/Guardian phone number is required');
+        }
         return;
       }
 
@@ -1060,7 +1250,11 @@ const ManageStudents = () => {
         setLoading(false);
         console.log('⚠️ ManageStudents Edit: Duplicate admission number found:', existingStudent[0]);
         const errorMessage = `A student with admission number "${form.admission_no}" already exists in your school (Student: ${existingStudent[0].name}). Please choose a different admission number.`;
-        Alert.alert('Duplicate Admission Number', errorMessage);
+        if (Platform.OS === 'web') {
+          window.alert('Duplicate Admission Number: ' + errorMessage);
+        } else {
+          Alert.alert('Duplicate Admission Number', errorMessage);
+        }
         return; // Don't proceed with update
       }
       
@@ -1156,7 +1350,11 @@ const ManageStudents = () => {
           // Handle specific parent constraint violations
           if (parentError.code === '23502' && parentError.message.includes('tenant_id')) {
             const errorMessage = 'Parent update failed: Missing tenant information. Please try again or contact administrator.';
-            Alert.alert('Parent Update Error', errorMessage);
+            if (Platform.OS === 'web') {
+              window.alert('Parent Update Error: ' + errorMessage);
+            } else {
+              Alert.alert('Parent Update Error', errorMessage);
+            }
             return;
           }
           
@@ -1164,13 +1362,21 @@ const ManageStudents = () => {
         }
       }
 
-      Alert.alert('Success', 'Student and parent details updated successfully');
+      if (Platform.OS === 'web') {
+        window.alert('Success: Student and parent details updated successfully');
+      } else {
+        Alert.alert('Success', 'Student and parent details updated successfully');
+      }
       await loadAllData();
       setEditModalVisible(false);
       setSelectedStudent(null);
       resetForm();
     } catch (error) {
-      Alert.alert('Error', 'Failed to update student: ' + error.message);
+      if (Platform.OS === 'web') {
+        window.alert('Error: Failed to update student: ' + error.message);
+      } else {
+        Alert.alert('Error', 'Failed to update student: ' + error.message);
+      }
     } finally {
       setLoading(false);
     }

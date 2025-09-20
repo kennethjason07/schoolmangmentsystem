@@ -444,30 +444,50 @@ const ManageTeachers = ({ navigation, route }) => {
     
     if (!effectiveTenantId) {
       console.error('❌ ManageTeachers: No tenant ID available for save operation');
-      Alert.alert('Error', 'Unable to determine tenant context. Please try refreshing the page.');
+      if (Platform.OS === 'web') {
+        window.alert('Error: Unable to determine tenant context. Please try refreshing the page.');
+      } else {
+        Alert.alert('Error', 'Unable to determine tenant context. Please try refreshing the page.');
+      }
       return;
     }
     
     console.log('🏢 ManageTeachers: Validation passed, proceeding with save...');
 
     if (!form.name.trim() || !form.phone.trim() || !form.age.trim()) {
-      Alert.alert('Error', 'Please fill all required fields (name, phone, age).');
+      if (Platform.OS === 'web') {
+        window.alert('Error: Please fill all required fields (name, phone, age).');
+      } else {
+        Alert.alert('Error', 'Please fill all required fields (name, phone, age).');
+      }
       return;
     }
     
     // Check if classes and subjects are available
     if (classes.length === 0) {
-      Alert.alert('Info', 'No classes available. Teacher will be created without class assignments. You can assign classes later.');
+      if (Platform.OS === 'web') {
+        window.alert('Info: No classes available. Teacher will be created without class assignments. You can assign classes later.');
+      } else {
+        Alert.alert('Info', 'No classes available. Teacher will be created without class assignments. You can assign classes later.');
+      }
     }
     
     if (subjects.length === 0) {
-      Alert.alert('Info', 'No subjects available. Teacher will be created without subject assignments. You can assign subjects later.');
+      if (Platform.OS === 'web') {
+        window.alert('Info: No subjects available. Teacher will be created without subject assignments. You can assign subjects later.');
+      } else {
+        Alert.alert('Info', 'No subjects available. Teacher will be created without subject assignments. You can assign subjects later.');
+      }
     }
 
     // Validate age is a number and greater than 18 (as per schema constraint)
     const age = parseInt(form.age);
     if (isNaN(age) || age <= 18) {
-      Alert.alert('Error', 'Age must be a valid number greater than 18.');
+      if (Platform.OS === 'web') {
+        window.alert('Error: Age must be a valid number greater than 18.');
+      } else {
+        Alert.alert('Error', 'Age must be a valid number greater than 18.');
+      }
       return;
     }
 
@@ -498,7 +518,17 @@ const ManageTeachers = ({ navigation, route }) => {
         // Handle subject and class assignments
         await handleSubjectClassAssignments(newTeacher.id);
         
-        Alert.alert('Success', 'Teacher added successfully.');
+        // Show success message
+        if (Platform.OS === 'web') {
+          window.alert(`Success! 🎉 Teacher "${form.name.trim()}" has been successfully added.`);
+        } else {
+          Alert.alert('Success', `Teacher "${form.name.trim()}" added successfully! 🎉`);
+        }
+        
+        // Close modal and refresh data
+        closeModal();
+        await onRefresh(); // Refresh the teacher list
+        
       } else if (modalMode === 'edit' && selectedTeacher) {
         // Update teacher in Supabase
         const teacherData = {
@@ -520,12 +550,24 @@ const ManageTeachers = ({ navigation, route }) => {
         // Handle subject and class assignments
         await handleSubjectClassAssignments(selectedTeacher.id);
         
-        Alert.alert('Success', 'Changes saved.');
+        // Show success message
+        if (Platform.OS === 'web') {
+          window.alert(`Success! 🎉 Teacher "${form.name.trim()}" has been successfully updated.`);
+        } else {
+          Alert.alert('Success', `Teacher "${form.name.trim()}" updated successfully! 🎉`);
+        }
+        
+        // Close modal and refresh data
+        closeModal();
+        await onRefresh(); // Refresh the teacher list
       }
-      closeModal();
     } catch (err) {
       console.error('Error saving teacher:', err);
-      Alert.alert('Error', err.message);
+      if (Platform.OS === 'web') {
+        window.alert('Error: ' + err.message);
+      } else {
+        Alert.alert('Error', err.message);
+      }
     } finally {
       setSaving(false);
     }
