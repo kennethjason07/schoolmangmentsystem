@@ -420,8 +420,30 @@ const LeaveManagement = ({ navigation }) => {
 
   const handleAddLeave = async () => {
     try {
+      console.log('🚀 [DEBUG] handleAddLeave started');
+      console.log('🚀 [DEBUG] Form data:', newLeaveForm);
+      console.log('🚀 [DEBUG] Teachers loaded:', teachers.length);
+      console.log('🚀 [DEBUG] User type:', userType);
+      console.log('🚀 [DEBUG] Is authenticated:', isAuthenticated);
+      console.log('🚀 [DEBUG] Tenant ready:', isReady);
+      console.log('🚀 [DEBUG] Tenant error:', tenantError);
+      
+      // Check tenant readiness first
+      if (!isReady) {
+        console.log('❌ [DEBUG] Tenant context not ready');
+        Alert.alert('System Not Ready', 'Please wait for the system to initialize and try again.');
+        return;
+      }
+      
+      if (tenantError) {
+        console.log('❌ [DEBUG] Tenant error present:', tenantError);
+        Alert.alert('System Error', tenantError);
+        return;
+      }
+      
       // Basic form validation
       if (!newLeaveForm.teacher_id || !newLeaveForm.reason.trim()) {
+        console.log('❌ [DEBUG] Form validation failed - missing teacher_id or reason');
         Alert.alert('Error', 'Please fill in all required fields');
         return;
       }
@@ -472,16 +494,13 @@ const LeaveManagement = ({ navigation }) => {
         leave_type: newLeaveForm.leave_type,
         start_date: format(startDate, 'yyyy-MM-dd'),
         end_date: format(endDate, 'yyyy-MM-dd'),
-        total_days: totalDays,
         reason: newLeaveForm.reason.trim(),
         replacement_teacher_id: newLeaveForm.replacement_teacher_id || null,
         replacement_notes: newLeaveForm.replacement_notes?.trim() || null,
         applied_by: user.id,
-        applied_date: new Date().toISOString(),
+        applied_date: new Date().toISOString().split('T')[0],
         status: shouldAutoApprove ? 'Approved' : 'Pending',
         ...(shouldAutoApprove && {
-          approved_by: user.id,
-          approved_at: new Date().toISOString(),
           reviewed_by: user.id,
           reviewed_at: new Date().toISOString(),
           admin_remarks: `Auto-approved: Leave created by admin (${user.email}) on behalf of teacher`
@@ -905,7 +924,10 @@ const LeaveManagement = ({ navigation }) => {
         {/* Add Leave Button */}
         <View style={styles.addButtonContainer}>
           <TouchableOpacity
-            onPress={() => setShowAddLeaveModal(true)}
+            onPress={() => {
+              console.log('🔄 [DEBUG] Add Leave button pressed');
+              setShowAddLeaveModal(true);
+            }}
             style={styles.addButtonTouchable}
           >
             <LinearGradient
@@ -1139,7 +1161,10 @@ const LeaveManagement = ({ navigation }) => {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.saveButton}
-              onPress={handleAddLeave}
+              onPress={() => {
+                console.log('💾 [DEBUG] Save button pressed in modal');
+                handleAddLeave();
+              }}
             >
               <Text style={styles.saveButtonText}>Add Leave</Text>
             </TouchableOpacity>
