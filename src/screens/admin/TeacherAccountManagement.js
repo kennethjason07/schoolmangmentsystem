@@ -53,24 +53,51 @@ const TeacherAccountManagement = ({ navigation }) => {
 
   // Filter teachers based on search query
   useEffect(() => {
+    console.log('🔍 Search effect triggered:', {
+      searchQuery: `"${searchQuery}"`,
+      teachersCount: teachers.length,
+      queryLength: searchQuery.length
+    });
+    
     if (!searchQuery.trim()) {
+      console.log('🔄 No search query, showing all teachers');
       setFilteredTeachers(teachers);
     } else {
-      const filtered = teachers.filter(teacher => 
-        teacher.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        teacher.qualification?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (teacher.users && teacher.users.length > 0 && 
-         teacher.users[0].email?.toLowerCase().includes(searchQuery.toLowerCase()))
-      );
+      console.log('🔍 Filtering teachers by query:', searchQuery);
+      const filtered = teachers.filter(teacher => {
+        const nameMatch = teacher.name.toLowerCase().includes(searchQuery.toLowerCase());
+        const qualificationMatch = teacher.qualification?.toLowerCase().includes(searchQuery.toLowerCase());
+        const emailMatch = teacher.users && teacher.users.length > 0 && 
+          teacher.users[0].email?.toLowerCase().includes(searchQuery.toLowerCase());
+        
+        const matches = nameMatch || qualificationMatch || emailMatch;
+        
+        if (matches) {
+          console.log('✅ Teacher matches search:', {
+            name: teacher.name,
+            nameMatch,
+            qualificationMatch,
+            emailMatch,
+            userEmail: teacher.users?.[0]?.email
+          });
+        }
+        
+        return matches;
+      });
+      
+      console.log(`📊 Filtered ${filtered.length} out of ${teachers.length} teachers`);
       setFilteredTeachers(filtered);
     }
   }, [searchQuery, teachers]);
 
   const handleSearch = (query) => {
+    console.log('📝 handleSearch called with:', `"${query}"`);
+    console.log('🕰️ Call stack:', new Error().stack);
     setSearchQuery(query);
   };
 
   const clearSearch = () => {
+    console.log('🧹 clearSearch called');
     setSearchQuery('');
   };
 
@@ -88,33 +115,60 @@ const TeacherAccountManagement = ({ navigation }) => {
         throw new Error('Loading timeout - please check your connection');
       }, 10000);
       
-      // 🔍 Validate tenant context
-      console.log('📋 TeacherAccountManagement: Current tenant ID:', tenantId);
+      // 🔍 Enhanced tenant validation
+      console.log('🏢 TeacherAccountManagement: Tenant validation:', {
+        isReady,
+        tenantId,
+        tenantName,
+        tenantError: tenantError?.message
+      });
       
-      if (!isReady || !tenantId) {
-        throw new Error('Tenant context not ready. Please wait and try again.');
+      if (!isReady) {
+        throw new Error('Tenant context is still initializing. Please wait...');
+      }
+      
+      if (!tenantId) {
+        throw new Error('No tenant context available. Please refresh the page and try again.');
       }
       
       if (tenantError) {
         throw new Error(tenantError.message || 'Tenant initialization error');
       }
       
-      // 🏃‍♂️ Fast parallel data fetching
-      console.log('📊 TeacherAccountManagement: Fetching teachers data...');
+      // 🏃‍♂️ Enhanced data fetching with proper options
+      console.log('📊 TeacherAccountManagement: Fetching teachers with user details...');
       const { data, error } = await dbHelpers.getTeachers({ 
-        includeUserDetails: true // Include user details for account management
+        includeUserDetails: true, // Include user details for account management
+        pageSize: 100, // Get more teachers at once for better UX
+        page: 0
       });
       
-      if (error) throw error;
+      if (error) {
+        console.error('❌ TeacherAccountManagement: Database error:', error);
+        throw error;
+      }
       
       clearTimeout(timeoutId);
       
-      // ✅ Set data immediately
+      // ✅ Enhanced data processing
       const teachersData = data || [];
+      console.log('📋 TeacherAccountManagement: Raw teachers data:', teachersData.map(t => ({
+        id: t.id,
+        name: t.name,
+        hasUsers: t.users?.length > 0,
+        userEmail: t.users?.[0]?.email
+      })));
+      
       setTeachers(teachersData);
       setFilteredTeachers(teachersData);
       
-      console.log(`✅ TeacherAccountManagement: Loaded ${teachersData.length} teachers`);
+      // 📊 Enhanced statistics
+      const teachersWithAccounts = teachersData.filter(t => t.users && t.users.length > 0).length;
+      const teachersWithoutAccounts = teachersData.length - teachersWithAccounts;
+      
+      console.log(`✅ TeacherAccountManagement: Loaded ${teachersData.length} teachers:`);
+      console.log(`   👥 With accounts: ${teachersWithAccounts}`);
+      console.log(`   ❌ Without accounts: ${teachersWithoutAccounts}`);
       
       // 📊 Performance monitoring
       const endTime = performance.now();
@@ -144,6 +198,9 @@ const TeacherAccountManagement = ({ navigation }) => {
   };
 
   const openCreateAccount = (teacher) => {
+    console.log('👥 Opening account creation modal for:', teacher.name);
+    console.log('🔍 Current search query before modal:', searchQuery);
+    
     setSelectedTeacher(teacher);
     setAccountForm({
       email: '',
@@ -154,6 +211,9 @@ const TeacherAccountManagement = ({ navigation }) => {
     });
     setShowPassword(false);
     setShowConfirmPassword(false);
+    
+    // Clear search query when opening modal to prevent any interference
+    setSearchQuery('');
     setModalVisible(true);
   };
 
@@ -190,11 +250,17 @@ const TeacherAccountManagement = ({ navigation }) => {
     try {
       setLoading(true);
       
+      // Store the email before form reset to avoid any reference issues
+      const createdEmail = accountForm.email;
+      const createdPassword = accountForm.password;
+      
+      console.log('🚀 Creating account for:', selectedTeacher.name, 'with email:', createdEmail);
+      
       const { data, error } = await dbHelpers.createTeacherAccount(
         { teacherId: selectedTeacher.id },
         {
-          email: accountForm.email,
-          password: accountForm.password,
+          email: createdEmail,
+          password: createdPassword,
           full_name: accountForm.full_name,
           phone: accountForm.phone
         }
@@ -209,10 +275,15 @@ const TeacherAccountManagement = ({ navigation }) => {
         full_name: '',
         email: '',
         password: '',
-        confirmPassword: ''
+        confirmPassword: '',
+        phone: ''
       });
       setShowPassword(false);
       setShowConfirmPassword(false);
+      
+      // Clear search query to prevent auto-filtering by email
+      console.log('🎆 Account created successfully, clearing search query');
+      setSearchQuery(''); // ✅ This fixes the auto-search issue!
 
       // Then show success alert
       Alert.alert(
@@ -220,8 +291,8 @@ const TeacherAccountManagement = ({ navigation }) => {
         `Teacher account created successfully!
 
 Login credentials:
-Email: ${accountForm.email}
-Password: ${accountForm.password}
+Email: ${createdEmail}
+Password: ${createdPassword}
 
 The teacher can now login immediately with these credentials.
 
@@ -230,13 +301,14 @@ Please share these credentials with the teacher.`,
           {
             text: 'OK',
             onPress: () => {
+              console.log('🔄 Refreshing teacher list after account creation');
               loadTeachers(); // Refresh the list
             }
           }
         ]
       );
     } catch (error) {
-      console.error('Error creating teacher account:', error);
+      console.error('❌ Error creating teacher account:', error);
 
       let errorMessage = 'Failed to create teacher account';
 
@@ -274,8 +346,19 @@ Please share these credentials with the teacher.`,
   };
 
   const renderTeacherItem = ({ item }) => {
-    // Check if teacher has a linked user account
-    const hasAccount = item.users && item.users.length > 0;
+    // Enhanced account status detection with debugging
+    const hasAccount = item.users && Array.isArray(item.users) && item.users.length > 0;
+    const userAccount = hasAccount ? item.users[0] : null;
+    
+    // Debug logging for each teacher
+    console.log(`👨‍🏫 TeacherItem: ${item.name}:`, {
+      hasUsers: !!item.users,
+      usersType: typeof item.users,
+      usersLength: item.users?.length,
+      hasAccount,
+      userEmail: userAccount?.email,
+      teacherId: item.id
+    });
 
     return (
       <View style={styles.teacherCard}>
@@ -289,17 +372,26 @@ Please share these credentials with the teacher.`,
           </View>
           <View style={styles.teacherDetails}>
             <Text style={styles.teacherName}>{item.name}</Text>
-            <Text style={styles.teacherStatus}>
-              {hasAccount ? `Email: ${item.users[0]?.email}` : 'No login account'}
+            <Text style={[
+              styles.teacherStatus,
+              hasAccount ? { color: '#4CAF50' } : { color: '#ff6b35' }
+            ]}>
+              {hasAccount ? `Email: ${userAccount?.email}` : 'No login account created'}
             </Text>
             {hasAccount && (
               <Text style={styles.teacherPhone}>
-                Phone: {item.users[0]?.phone || 'Not provided'}
+                Phone: {userAccount?.phone || 'Not provided'}
               </Text>
             )}
             <Text style={styles.teacherDetails}>
               Qualification: {item.qualification || 'Not specified'}
             </Text>
+            {/* Debug info in development */}
+            {__DEV__ && (
+              <Text style={{ fontSize: 10, color: '#999' }}>
+                ID: {item.id} | Users: {JSON.stringify(item.users?.length || 'none')}
+              </Text>
+            )}
           </View>
         </View>
 
@@ -307,12 +399,15 @@ Please share these credentials with the teacher.`,
           {hasAccount ? (
             <View style={styles.statusBadge}>
               <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-              <Text style={styles.statusText}>Active</Text>
+              <Text style={styles.statusText}>Has Account</Text>
             </View>
           ) : (
             <TouchableOpacity
               style={styles.createButton}
-              onPress={() => openCreateAccount(item)}
+              onPress={() => {
+                console.log('🚀 Opening account creation for teacher:', item.name, 'ID:', item.id);
+                openCreateAccount(item);
+              }}
             >
               <Ionicons name="add-circle" size={16} color="#fff" />
               <Text style={styles.createButtonText}>Create Login</Text>

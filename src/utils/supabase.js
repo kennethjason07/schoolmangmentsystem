@@ -901,6 +901,7 @@ export const dbHelpers = {
 
       // Get current tenant ID for filtering
       const tenantId = await tenantHelpers.getCurrentTenantId();
+      console.log('🔍 getTeachers: Current tenant ID:', tenantId);
       
       let query = supabase
         .from(TABLES.TEACHERS)
@@ -920,6 +921,12 @@ export const dbHelpers = {
       }
       
       const { data: teachersData, error } = await query;
+      console.log('📋 getTeachers: Teachers query result:', {
+        success: !error,
+        count: teachersData?.length || 0,
+        includeUserDetails,
+        error: error?.message
+      });
       
       if (error) {
         return { data: null, error };
@@ -928,11 +935,28 @@ export const dbHelpers = {
       // Optionally fetch linked user details only when needed
       if (includeUserDetails && teachersData && teachersData.length > 0) {
         const teacherIds = teachersData.map(teacher => teacher.id);
+        console.log('👥 getTeachers: Fetching user details for teacher IDs:', teacherIds);
         
-        const { data: usersData, error: usersError } = await supabase
+        // Add tenant filtering to users query as well
+        let usersQuery = supabase
           .from(TABLES.USERS)
-          .select('id, email, full_name, phone, linked_teacher_id')
-          .in('linked_teacher_id', teacherIds);
+          .select('id, email, full_name, phone, linked_teacher_id, tenant_id')
+          .in('linked_teacher_id', teacherIds)
+          .not('linked_teacher_id', 'is', null);
+          
+        // Add tenant filtering for users if available
+        if (tenantId) {
+          usersQuery = usersQuery.eq('tenant_id', tenantId);
+        }
+        
+        const { data: usersData, error: usersError } = await usersQuery;
+        
+        console.log('👤 getTeachers: Users query result:', {
+          success: !usersError,
+          count: usersData?.length || 0,
+          error: usersError?.message,
+          foundUsers: usersData?.map(u => ({ email: u.email, linkedTeacherId: u.linked_teacher_id }))
+        });
         
         if (!usersError && usersData) {
           // Map user data to teachers
@@ -943,16 +967,34 @@ export const dbHelpers = {
             }
           });
           
-          // Enhance teachers with user data
+          console.log('🔗 getTeachers: Users lookup created:', Object.keys(usersLookup));
+          
+          // Enhance teachers with user data - fix the structure expected by UI
           teachersData.forEach(teacher => {
-            teacher.users = usersLookup[teacher.id] || null;
+            const linkedUser = usersLookup[teacher.id];
+            // The UI expects teacher.users to be an array, not a single object
+            teacher.users = linkedUser ? [linkedUser] : [];
+            
+            console.log(`👨‍🏫 Teacher ${teacher.name}: ${linkedUser ? 'HAS ACCOUNT' : 'NO ACCOUNT'} (${linkedUser?.email || 'none'})`);
+          });
+        } else {
+          // Ensure all teachers have empty users array when query fails
+          teachersData.forEach(teacher => {
+            teacher.users = [];
+          });
+        }
+      } else {
+        // When user details are not requested, still initialize the users field
+        if (teachersData) {
+          teachersData.forEach(teacher => {
+            teacher.users = [];
           });
         }
       }
       
       return { data: teachersData || [], error: null };
     } catch (error) {
-      console.error('Error in getTeachers:', error);
+      console.error('❌ Error in getTeachers:', error);
       return { data: null, error };
     }
   },
@@ -1042,31 +1084,50 @@ export const dbHelpers = {
 
   async createTeacherAccount(teacherData, authData) {
     try {
+      console.log('🚀 createTeacherAccount: Starting teacher account creation...');
+      console.log('📋 createTeacherAccount: Teacher data:', { teacherId: teacherData.teacherId });
+      console.log('📋 createTeacherAccount: Auth data:', { email: authData.email, fullName: authData.full_name });
+      
+      // Get current tenant ID for linking
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        throw new Error('No tenant context available. Please refresh the page and try again.');
+      }
+      console.log('🏢 createTeacherAccount: Using tenant ID:', tenantId);
+      
       // 0. Ensure roles exist
       await this.ensureRolesExist();
 
       // 1. Create auth user using regular signup
+      console.log('👤 createTeacherAccount: Creating Supabase auth user...');
       const { data: authUser, error: authError } = await supabase.auth.signUp({
         email: authData.email,
         password: authData.password,
         options: {
           data: {
             full_name: authData.full_name,
-            role: 'teacher'
+            role: 'teacher',
+            tenant_id: tenantId
           },
           emailRedirectTo: undefined // Disable email confirmation for admin-created accounts
         }
       });
 
-      if (authError) throw authError;
+      if (authError) {
+        console.error('❌ createTeacherAccount: Auth signup error:', authError);
+        throw authError;
+      }
 
       if (!authUser.user) {
+        console.error('❌ createTeacherAccount: No user returned from signup');
         throw new Error('Failed to create user account');
       }
+      
+      console.log('✅ createTeacherAccount: Auth user created with ID:', authUser.user.id);
 
       // 2. Get teacher role ID safely
       const teacherRoleId = await this.getRoleIdSafely('teacher');
-      console.log(`✅ Using teacher role ID: ${teacherRoleId}`);
+      console.log(`📝 createTeacherAccount: Using teacher role ID: ${teacherRoleId}`);
       
       if (!teacherRoleId || teacherRoleId === undefined || teacherRoleId === null) {
         console.error('❌ teacherRoleId is invalid:', teacherRoleId);
@@ -1079,32 +1140,58 @@ export const dbHelpers = {
         throw new Error(`Invalid teacher role ID: expected number, got ${typeof teacherRoleId}`);
       }
 
-      // 3. Create user profile with linked_teacher_id
+      // 3. Create user profile with linked_teacher_id and tenant_id
+      console.log('👥 createTeacherAccount: Creating user profile...');
+      const userProfileData = {
+        id: authUser.user.id,
+        email: authData.email,
+        full_name: authData.full_name,
+        phone: authData.phone || '',
+        role_id: teacherRoleId,
+        linked_teacher_id: teacherData.teacherId,  // ✅ Link to teacher record
+        tenant_id: tenantId  // ✅ Add tenant context
+      };
+      
+      console.log('📊 createTeacherAccount: User profile data:', userProfileData);
+      
       const { data: userProfile, error: userError } = await supabase
         .from(TABLES.USERS)
-        .insert({
-          id: authUser.user.id,
-          email: authData.email,
-          full_name: authData.full_name,
-          phone: authData.phone || '',
-          role_id: teacherRoleId,
-          linked_teacher_id: teacherData.teacherId  // ✅ Link to teacher record
-        })
+        .insert(userProfileData)
         .select()
         .single();
 
-      if (userError) throw userError;
+      if (userError) {
+        console.error('❌ createTeacherAccount: User profile creation error:', userError);
+        throw userError;
+      }
+      
+      console.log('✅ createTeacherAccount: User profile created:', {
+        id: userProfile.id,
+        email: userProfile.email,
+        linkedTeacherId: userProfile.linked_teacher_id
+      });
 
-      // 4. Get the teacher record for return
+      // 4. Get the teacher record for return with tenant filtering
+      console.log('🔍 createTeacherAccount: Fetching teacher record...');
       const { data: teacher, error: teacherError } = await supabase
         .from(TABLES.TEACHERS)
         .select('*')
         .eq('id', teacherData.teacherId)
+        .eq('tenant_id', tenantId)  // ✅ Ensure tenant context
         .single();
 
-      if (teacherError) throw teacherError;
+      if (teacherError) {
+        console.error('❌ createTeacherAccount: Teacher fetch error:', teacherError);
+        throw teacherError;
+      }
+      
+      console.log('✅ createTeacherAccount: Teacher record fetched:', {
+        id: teacher.id,
+        name: teacher.name,
+        tenantId: teacher.tenant_id
+      });
 
-      return {
+      const result = {
         data: {
           authUser: authUser.user,
           userProfile,
@@ -1112,7 +1199,12 @@ export const dbHelpers = {
         },
         error: null
       };
+      
+      console.log('🎉 createTeacherAccount: Account creation completed successfully!');
+      return result;
+      
     } catch (error) {
+      console.error('❌ createTeacherAccount: Failed with error:', error);
       return { data: null, error };
     }
   },
