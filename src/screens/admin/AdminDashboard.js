@@ -33,6 +33,8 @@ import { useTenantAccess, tenantDatabase, getCachedTenantId } from '../../utils/
 import { webScrollViewStyles, getWebScrollProps, webContainerStyle } from '../../styles/webScrollFix';
 import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificationCount';
 import useNavigateWithStatePreservation from '../../components/ui/SafeNavigate';
+import { useTenantFeatures } from '../../hooks/useTenantFeatures';
+import { getFeatureForQuickAction } from '../../constants/featureMapping';
 
 const { width } = Dimensions.get('window');
 
@@ -106,6 +108,39 @@ const AdminDashboard = ({ navigation }) => {
 
   // Safe navigation hook to prevent state loss
   const navigateSafely = useNavigateWithStatePreservation();
+  
+  // Feature access hook for quick action protection
+  const { hasFeature, debugFeatureAccess } = useTenantFeatures();
+  
+  // Feature-protected navigation handler
+  const navigateWithFeatureCheck = (actionTitle, screenName, actionFunction = null) => {
+    const featureKey = getFeatureForQuickAction(actionTitle);
+    
+    if (featureKey) {
+      debugFeatureAccess(featureKey, `QuickAction:${actionTitle}`);
+      
+      if (!hasFeature(featureKey)) {
+        Alert.alert(
+          'Access Restricted',
+          'Contact your service provider',
+          [
+            {
+              text: 'OK',
+              style: 'default'
+            }
+          ]
+        );
+        return;
+      }
+    }
+    
+    // Feature access granted or no feature check needed
+    if (actionFunction) {
+      actionFunction();
+    } else {
+      navigateSafely(screenName);
+    }
+  };
 
   // Component rendered
 
@@ -1281,18 +1316,25 @@ const AdminDashboard = ({ navigation }) => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.quickActionsGrid}>
-            {quickActions.map((action, index) => (
-              <TouchableOpacity
-                key={index}
-                style={styles.quickActionCard}
-                onPress={() => {
-                  if (action.action) {
-                    action.action(); // Call custom action function
-                  } else {
-                    navigateSafely(action.screen); // Navigate to screen
-                  }
-                }}
-              >
+            {quickActions.map((action, index) => {
+              const featureKey = getFeatureForQuickAction(action.title);
+              const hasAccess = !featureKey || hasFeature(featureKey);
+              
+              return (
+                <TouchableOpacity
+                  key={index}
+                  style={[
+                    styles.quickActionCard,
+                    !hasAccess && styles.quickActionCardDisabled
+                  ]}
+                  onPress={() => {
+                    navigateWithFeatureCheck(
+                      action.title, 
+                      action.screen, 
+                      action.action
+                    );
+                  }}
+                >
                 <View style={styles.actionIconContainer}>
                   <View style={[styles.actionIcon, { backgroundColor: action.color }]}>
                     <Ionicons name={action.icon} size={24} color="#fff" />
@@ -1303,9 +1345,10 @@ const AdminDashboard = ({ navigation }) => {
                     </View>
                   )}
                 </View>
-                <Text style={styles.actionTitle}>{action.title}</Text>
+                <Text style={[styles.actionTitle, !hasAccess && styles.actionTitleDisabled]}>{action.title}</Text>
               </TouchableOpacity>
-            ))}
+              );
+            })}
           </View>
         </View>
 
@@ -2727,6 +2770,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+  },
+  
+  // Feature-based access control styles
+  quickActionCardDisabled: {
+    opacity: 0.5,
+    backgroundColor: '#f5f5f5',
+  },
+  actionTitleDisabled: {
+    color: '#999999',
   },
 
 });

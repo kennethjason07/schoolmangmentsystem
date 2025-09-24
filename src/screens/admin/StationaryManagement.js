@@ -32,6 +32,7 @@ import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { useTenant } from '../../contexts/TenantContext';
 import { tenantDatabase, getCachedTenantId, initializeTenantHelpers } from '../../utils/tenantHelpers';
 import { useAuth } from '../../utils/AuthContext';
+import FeatureGuard from '../../components/FeatureGuard';
 import { supabase, TABLES } from '../../utils/supabase';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -2171,4 +2172,13 @@ const styles = StyleSheet.create({
   },
 });
 
-export default StationaryManagement;
+// Wrap with FeatureGuard for access control
+const StationaryManagementWithGuard = (props) => {
+  return (
+    <FeatureGuard screenName="StationaryManagement">
+      <StationaryManagement {...props} />
+    </FeatureGuard>
+  );
+};
+
+export default StationaryManagementWithGuard;

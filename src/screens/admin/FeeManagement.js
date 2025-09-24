@@ -32,6 +32,7 @@ import { calculateStudentFees } from '../../utils/feeCalculation';
 import FeeService from '../../services/FeeService';
 import { useAuth } from '../../utils/AuthContext';
 import { FeeManagementOptimizer, loadFeeDataInBackground } from '../../utils/feeManagementOptimizations';
+import FeatureGuard from '../../components/FeatureGuard';
 import { 
   getOptimizedFeeManagementData, 
   calculateOptimizedClassPaymentStats, 
@@ -2453,4 +2454,13 @@ const styles = StyleSheet.create({
   },
 });
 
-export default FeeManagement;
+// Wrap with FeatureGuard for access control
+const FeeManagementWithGuard = (props) => {
+  return (
+    <FeatureGuard screenName="FeeManagement">
+      <FeeManagement {...props} />
+    </FeatureGuard>
+  );
+};
+
+export default FeeManagementWithGuard;
