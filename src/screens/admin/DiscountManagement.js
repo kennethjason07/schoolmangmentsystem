@@ -42,6 +42,8 @@ const DiscountManagement = ({ navigation, route }) => {
   // Modal states
   const [modalVisible, setModalVisible] = useState(false);
   const [editingDiscount, setEditingDiscount] = useState(null);
+  const [distributionModalVisible, setDistributionModalVisible] = useState(false);
+  const [distributionData, setDistributionData] = useState(null);
   
   // Form states
   const [formData, setFormData] = useState({
@@ -222,7 +224,7 @@ const DiscountManagement = ({ navigation, route }) => {
         console.log('🚀 About to call dbHelpers.createStudentDiscount...');
         
         // Create a discount record which will be stored in student_discounts table
-        const { error: discountError, data: createdDiscount } = await dbHelpers.createStudentDiscount(discountData);
+        const { error: discountError, data: createdDiscount, distributionDetails } = await dbHelpers.createStudentDiscount(discountData);
         
         if (discountError) {
           console.error('❌ Create Error Details:', {
@@ -246,7 +248,14 @@ const DiscountManagement = ({ navigation, route }) => {
         }
         
         console.log('✅ Discount created successfully:', createdDiscount);
-        Alert.alert('Success', `Fee concession of ₹${parseFloat(formData.discountValue)} applied successfully to student. The discount will be reflected in fee calculations.`);
+        
+        // Show distribution popup if multiple records were created
+        if (distributionDetails && distributionDetails.distribution && distributionDetails.distribution.length > 1) {
+          setDistributionData(distributionDetails);
+          setDistributionModalVisible(true);
+        } else {
+          Alert.alert('Success', `Fee concession of ₹${parseFloat(formData.discountValue)} applied successfully to student. The discount will be reflected in fee calculations.`);
+        }
       }
 
       setModalVisible(false);
@@ -597,6 +606,99 @@ const DiscountManagement = ({ navigation, route }) => {
     </Modal>
   );
 
+  const renderDistributionModal = () => (
+    <Modal
+      animationType="slide"
+      transparent={true}
+      visible={distributionModalVisible}
+      onRequestClose={() => setDistributionModalVisible(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              🎩 Concession Distribution
+            </Text>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setDistributionModalVisible(false)}
+            >
+              <Ionicons name="close" size={24} color="#666" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent}>
+            {distributionData && (
+              <View>
+                <View style={styles.distributionSummary}>
+                  <Text style={styles.distributionTitle}>
+                    Your concession of ₹{distributionData.originalAmount} has been automatically distributed:
+                  </Text>
+                  
+                  <View style={styles.distributionStats}>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statLabel}>Total Applied:</Text>
+                      <Text style={styles.statValue}>₹{distributionData.totalDistributed}</Text>
+                    </View>
+                    {distributionData.remainingAmount > 0 && (
+                      <View style={styles.statItem}>
+                        <Text style={styles.statLabel}>Remaining:</Text>
+                        <Text style={[styles.statValue, { color: '#FF9800' }]}>₹{distributionData.remainingAmount}</Text>
+                      </View>
+                    )}
+                    <View style={styles.statItem}>
+                      <Text style={styles.statLabel}>Records Created:</Text>
+                      <Text style={styles.statValue}>{distributionData.distribution.length}</Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.distributionList}>
+                  <Text style={styles.distributionListTitle}>Distribution Details:</Text>
+                  {distributionData.distribution.map((item, index) => (
+                    <View key={index} style={styles.distributionItem}>
+                      <View style={styles.distributionItemHeader}>
+                        <Text style={styles.distributionComponent}>{item.component}</Text>
+                        <Text style={styles.distributionAmount}>₹{item.concessionAmount}</Text>
+                      </View>
+                      <View style={styles.distributionItemFooter}>
+                        <Text style={styles.distributionDetail}>
+                          Applied to fee of ₹{item.componentAmount}
+                        </Text>
+                        <Text style={styles.distributionPercentage}>
+                          {((item.concessionAmount / item.componentAmount) * 100).toFixed(1)}% discount
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={styles.distributionNote}>
+                  <Ionicons name="information-circle" size={20} color="#1976d2" />
+                  <Text style={styles.distributionNoteText}>
+                    Concessions are applied to the highest fee components first. Multiple discount records have been created for better tracking.
+                  </Text>
+                </View>
+              </View>
+            )}
+          </ScrollView>
+
+          <View style={styles.modalActions}>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.saveButton]}
+              onPress={() => {
+                setDistributionModalVisible(false);
+                Alert.alert('Success', 'Fee concessions have been applied successfully!');
+              }}
+            >
+              <Text style={styles.saveButtonText}>Got it!</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
   if (loading && discounts.length === 0) {
     return (
       <View style={styles.container}>
@@ -631,8 +733,9 @@ const DiscountManagement = ({ navigation, route }) => {
         </TouchableOpacity>
       )}
 
-      {/* Modal */}
+      {/* Modals */}
       {renderDiscountModal()}
+      {renderDistributionModal()}
     </View>
   );
 };
@@ -887,6 +990,99 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#fff',
     textAlign: 'center',
+  },
+  // Distribution modal styles
+  distributionSummary: {
+    backgroundColor: '#f0f7ff',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+  },
+  distributionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  distributionStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 8,
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1976d2',
+  },
+  distributionList: {
+    marginBottom: 16,
+  },
+  distributionListTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  distributionItem: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  distributionItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  distributionComponent: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+  },
+  distributionAmount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  distributionItemFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  distributionDetail: {
+    fontSize: 12,
+    color: '#666',
+  },
+  distributionPercentage: {
+    fontSize: 12,
+    color: '#1976d2',
+    fontWeight: '500',
+  },
+  distributionNote: {
+    flexDirection: 'row',
+    backgroundColor: '#e3f2fd',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'flex-start',
+  },
+  distributionNoteText: {
+    marginLeft: 8,
+    fontSize: 12,
+    color: '#1976d2',
+    flex: 1,
+    lineHeight: 16,
   },
 });
 

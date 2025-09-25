@@ -688,6 +688,39 @@ export const dbHelpers = {
     }
   },
 
+  // Fee utility functions
+  async getFeeComponentsSortedByAmount(classId, academicYear = '2024-25') {
+    try {
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        return { data: null, error: new Error('Tenant context required') };
+      }
+
+      console.log('🔍 Getting fee components sorted by amount for:', { classId, academicYear, tenantId });
+      
+      // Get class-level fees only (student_id = null) sorted by amount descending
+      const { data: feeStructures, error } = await supabase
+        .from(TABLES.FEE_STRUCTURE)
+        .select('id, fee_component, amount, base_amount')
+        .eq('class_id', classId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .is('student_id', null) // Only class-level fees
+        .order('amount', { ascending: false }); // Highest amount first
+      
+      if (error) {
+        console.error('❌ Error fetching fee components:', error);
+        return { data: null, error };
+      }
+
+      console.log('✅ Found fee components:', feeStructures?.map(f => `${f.fee_component}: ₹${f.amount}`) || []);
+      return { data: feeStructures || [], error: null };
+    } catch (error) {
+      console.error('❌ Error in getFeeComponentsSortedByAmount:', error);
+      return { data: null, error };
+    }
+  },
+
   // Student management - now tenant-aware
   async getStudentsByClass(classId, sectionId = null) {
     try {
@@ -4108,6 +4141,268 @@ export const dbHelpers = {
     } catch (error) {
       console.error('Error in verifyFeeStructureIntegrity:', error);
       return { data: null, error };
+    }
+  },
+
+  // Create student discount with automatic distribution logic
+  async createStudentDiscount(discountData) {
+    try {
+      console.log('🔧 Creating student discount with distribution logic:', discountData);
+      
+      // Validate input data
+      const validation = this.validateDiscountData(discountData);
+      if (!validation.isValid) {
+        return { 
+          data: null, 
+          error: new Error(`Validation failed: ${validation.errors.join(', ')}`) 
+        };
+      }
+
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        return { data: null, error: new Error('Tenant context required') };
+      }
+
+      // Check if fee_component is empty or null (meaning apply to all components)
+      const applyToAllComponents = !discountData.fee_component || discountData.fee_component.trim() === '';
+      
+      if (!applyToAllComponents) {
+        // Simple case: specific fee component, create single discount
+        console.log('📝 Creating discount for specific component:', discountData.fee_component);
+        
+        const singleDiscountData = {
+          ...discountData,
+          tenant_id: tenantId,
+          is_active: true,
+          created_at: new Date().toISOString()
+        };
+        
+        const { data, error } = await supabase
+          .from(TABLES.STUDENT_DISCOUNTS)
+          .insert(singleDiscountData)
+          .select()
+          .single();
+        
+        if (error) {
+          console.error('❌ Error creating single discount:', error);
+          return { data: null, error };
+        }
+        
+        console.log('✅ Single discount created successfully');
+        return { 
+          data: [data], // Return as array for consistency
+          distributionDetails: {
+            originalAmount: discountData.discount_value,
+            distribution: [{
+              component: discountData.fee_component,
+              amount: discountData.discount_value
+            }]
+          },
+          error: null 
+        };
+      }
+      
+      // Complex case: Apply to all components - implement distribution logic
+      console.log('🎯 Applying discount to all components with distribution logic');
+      
+      // Get fee components sorted by amount (highest first)
+      const { data: sortedFees, error: feesError } = await this.getFeeComponentsSortedByAmount(
+        discountData.class_id, 
+        discountData.academic_year
+      );
+      
+      if (feesError || !sortedFees || sortedFees.length === 0) {
+        return { 
+          data: null, 
+          error: new Error('No fee components found for this class. Please set up fee structure first.') 
+        };
+      }
+      
+      console.log('💰 Fee components sorted by amount:', sortedFees.map(f => `${f.fee_component}: ₹${f.amount}`));
+      
+      // Distribute the concession amount starting from highest fee
+      let remainingConcession = parseFloat(discountData.discount_value);
+      const distributionPlan = [];
+      
+      for (const feeComponent of sortedFees) {
+        if (remainingConcession <= 0) break;
+        
+        const componentAmount = parseFloat(feeComponent.amount);
+        const concessionToApply = Math.min(remainingConcession, componentAmount);
+        
+        if (concessionToApply > 0) {
+          distributionPlan.push({
+            component: feeComponent.fee_component,
+            componentAmount: componentAmount,
+            concessionAmount: concessionToApply
+          });
+          
+          remainingConcession -= concessionToApply;
+        }
+      }
+      
+      console.log('📊 Distribution plan:', distributionPlan);
+      
+      if (distributionPlan.length === 0) {
+        return { 
+          data: null, 
+          error: new Error('No valid fee components found to apply concession') 
+        };
+      }
+      
+      // Create multiple discount records based on distribution plan
+      const createdDiscounts = [];
+      
+      for (const plan of distributionPlan) {
+        const distributedDiscountData = {
+          student_id: discountData.student_id,
+          class_id: discountData.class_id,
+          academic_year: discountData.academic_year,
+          discount_type: 'fixed_amount', // Always fixed amount for distributed concessions
+          discount_value: plan.concessionAmount,
+          fee_component: plan.component,
+          description: `${discountData.description || 'Fee concession'} (Auto-distributed: ₹${plan.concessionAmount} from ₹${discountData.discount_value})`,
+          tenant_id: tenantId,
+          is_active: true,
+          created_at: new Date().toISOString()
+        };
+        
+        console.log('💾 Creating discount record:', distributedDiscountData);
+        
+        const { data: createdDiscount, error: createError } = await supabase
+          .from(TABLES.STUDENT_DISCOUNTS)
+          .insert(distributedDiscountData)
+          .select()
+          .single();
+        
+        if (createError) {
+          console.error('❌ Error creating distributed discount:', createError);
+          
+          // If we've created some discounts already, we should clean them up
+          if (createdDiscounts.length > 0) {
+            console.log('🧹 Cleaning up partially created discounts...');
+            const idsToCleanup = createdDiscounts.map(d => d.id);
+            await supabase
+              .from(TABLES.STUDENT_DISCOUNTS)
+              .delete()
+              .in('id', idsToCleanup);
+          }
+          
+          return { data: null, error: createError };
+        }
+        
+        createdDiscounts.push(createdDiscount);
+      }
+      
+      console.log(`✅ Successfully created ${createdDiscounts.length} distributed discount records`);
+      
+      return { 
+        data: createdDiscounts,
+        distributionDetails: {
+          originalAmount: parseFloat(discountData.discount_value),
+          totalDistributed: createdDiscounts.reduce((sum, d) => sum + parseFloat(d.discount_value), 0),
+          remainingAmount: remainingConcession,
+          distribution: distributionPlan.map(p => ({
+            component: p.component,
+            componentAmount: p.componentAmount,
+            concessionAmount: p.concessionAmount
+          }))
+        },
+        error: null 
+      };
+      
+    } catch (error) {
+      console.error('❌ Error in createStudentDiscount:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Get discounts by student
+  async getDiscountsByStudent(studentId, academicYear = '2024-25') {
+    try {
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        return { data: null, error: new Error('Tenant context required') };
+      }
+
+      const { data, error } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .select(`
+          *,
+          students(name),
+          classes(class_name, section)
+        `)
+        .eq('student_id', studentId)
+        .eq('academic_year', academicYear)
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+      
+      return { data: data || [], error };
+    } catch (error) {
+      console.error('❌ Error in getDiscountsByStudent:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Update student discount
+  async updateStudentDiscount(discountId, updates) {
+    try {
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        return { data: null, error: new Error('Tenant context required') };
+      }
+
+      const { data, error } = await supabase
+        .from(TABLES.STUDENT_DISCOUNTS)
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', discountId)
+        .eq('tenant_id', tenantId)
+        .select()
+        .single();
+      
+      return { data, error };
+    } catch (error) {
+      console.error('❌ Error in updateStudentDiscount:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Delete student discount
+  async deleteStudentDiscount(discountId, hardDelete = false) {
+    try {
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      if (!tenantId) {
+        return { error: new Error('Tenant context required') };
+      }
+
+      if (hardDelete) {
+        const { error } = await supabase
+          .from(TABLES.STUDENT_DISCOUNTS)
+          .delete()
+          .eq('id', discountId)
+          .eq('tenant_id', tenantId);
+        
+        return { error };
+      } else {
+        // Soft delete - mark as inactive
+        const { error } = await supabase
+          .from(TABLES.STUDENT_DISCOUNTS)
+          .update({ 
+            is_active: false,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', discountId)
+          .eq('tenant_id', tenantId);
+        
+        return { error };
+      }
+    } catch (error) {
+      console.error('❌ Error in deleteStudentDiscount:', error);
+      return { error };
     }
   },
 
