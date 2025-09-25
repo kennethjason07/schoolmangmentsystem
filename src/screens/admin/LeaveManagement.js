@@ -420,8 +420,30 @@ const LeaveManagement = ({ navigation }) => {
 
   const handleAddLeave = async () => {
     try {
+      console.log('🚀 [DEBUG] handleAddLeave started');
+      console.log('🚀 [DEBUG] Form data:', newLeaveForm);
+      console.log('🚀 [DEBUG] Teachers loaded:', teachers.length);
+      console.log('🚀 [DEBUG] User type:', userType);
+      console.log('🚀 [DEBUG] Is authenticated:', isAuthenticated);
+      console.log('🚀 [DEBUG] Tenant ready:', isReady);
+      console.log('🚀 [DEBUG] Tenant error:', tenantError);
+      
+      // Check tenant readiness first
+      if (!isReady) {
+        console.log('❌ [DEBUG] Tenant context not ready');
+        Alert.alert('System Not Ready', 'Please wait for the system to initialize and try again.');
+        return;
+      }
+      
+      if (tenantError) {
+        console.log('❌ [DEBUG] Tenant error present:', tenantError);
+        Alert.alert('System Error', tenantError);
+        return;
+      }
+      
       // Basic form validation
       if (!newLeaveForm.teacher_id || !newLeaveForm.reason.trim()) {
+        console.log('❌ [DEBUG] Form validation failed - missing teacher_id or reason');
         Alert.alert('Error', 'Please fill in all required fields');
         return;
       }
@@ -452,18 +474,37 @@ const LeaveManagement = ({ navigation }) => {
       const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
       
       // Prepare leave application data
+      // Check if this should be auto-approved (admin creating leave for teacher)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const thirtyDaysFromNow = new Date(today);
+      thirtyDaysFromNow.setDate(today.getDate() + 30);
+      
+      const startDateObj = new Date(startDate);
+      startDateObj.setHours(0, 0, 0, 0);
+      
+      // Auto-approve if:
+      // 1. Admin is creating leave for teacher (not backdated and not too far future)
+      // 2. Start date is today or future (not backdated)
+      // 3. Start date is within 30 days (not too far future)
+      const shouldAutoApprove = startDateObj >= today && startDateObj <= thirtyDaysFromNow;
+      
       const leaveApplicationData = {
         teacher_id: newLeaveForm.teacher_id,
         leave_type: newLeaveForm.leave_type,
         start_date: format(startDate, 'yyyy-MM-dd'),
         end_date: format(endDate, 'yyyy-MM-dd'),
-        total_days: totalDays,
         reason: newLeaveForm.reason.trim(),
         replacement_teacher_id: newLeaveForm.replacement_teacher_id || null,
         replacement_notes: newLeaveForm.replacement_notes?.trim() || null,
         applied_by: user.id,
-        applied_date: new Date().toISOString(),
-        status: 'Pending'
+        applied_date: new Date().toISOString().split('T')[0],
+        status: shouldAutoApprove ? 'Approved' : 'Pending',
+        ...(shouldAutoApprove && {
+          reviewed_by: user.id,
+          reviewed_at: new Date().toISOString(),
+          admin_remarks: `Auto-approved: Leave created by admin (${user.email}) on behalf of teacher`
+        })
       };
       
       console.log('📝 LeaveManagement: Creating leave application with enhanced tenant system...');
@@ -482,7 +523,37 @@ const LeaveManagement = ({ navigation }) => {
       
       console.log('✅ Leave application created successfully with enhanced tenant system:', newLeaveApplication.id);
       
-      Alert.alert('Success', 'Leave application added successfully');
+      // If auto-approved, send notification to teacher immediately
+      if (shouldAutoApprove) {
+        try {
+          console.log('📧 Sending auto-approval notification to teacher...');
+          const notificationResult = await createLeaveStatusNotificationForTeacher(
+            {
+              teacher_id: newLeaveForm.teacher_id,
+              leave_type: newLeaveForm.leave_type,
+              start_date: format(startDate, 'MMM dd, yyyy'),
+              end_date: format(endDate, 'yyyy-MM-dd')
+            },
+            'Approved',
+            `Auto-approved: Leave created by admin on your behalf`,
+            user.id
+          );
+          
+          if (notificationResult.success) {
+            console.log('✅ Auto-approval notification sent to teacher successfully');
+          } else {
+            console.error('❌ Failed to send auto-approval notification:', notificationResult.error);
+          }
+        } catch (notificationError) {
+          console.error('❌ Error sending auto-approval notification:', notificationError);
+          // Don't fail the entire operation if notification fails
+        }
+        
+        Alert.alert('Success', `Leave application added and automatically approved! The teacher has been notified.`);
+      } else {
+        Alert.alert('Success', 'Leave application added successfully and is pending review.');
+      }
+      
       setShowAddLeaveModal(false);
       resetAddLeaveForm();
       await loadLeaveApplications();
@@ -700,6 +771,15 @@ const LeaveManagement = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         )}
+        
+        {item.status === 'Approved' && item.admin_remarks && item.admin_remarks.includes('Auto-approved') && (
+          <View style={styles.autoApprovedSection}>
+            <View style={styles.autoApprovedBadge}>
+              <Ionicons name="checkmark-done-circle" size={16} color="#4CAF50" />
+              <Text style={styles.autoApprovedText}>Auto-Approved by Admin</Text>
+            </View>
+          </View>
+        )}
 
         {item.admin_remarks && (
           <View style={styles.remarksSection}>
@@ -844,7 +924,10 @@ const LeaveManagement = ({ navigation }) => {
         {/* Add Leave Button */}
         <View style={styles.addButtonContainer}>
           <TouchableOpacity
-            onPress={() => setShowAddLeaveModal(true)}
+            onPress={() => {
+              console.log('🔄 [DEBUG] Add Leave button pressed');
+              setShowAddLeaveModal(true);
+            }}
             style={styles.addButtonTouchable}
           >
             <LinearGradient
@@ -1078,7 +1161,10 @@ const LeaveManagement = ({ navigation }) => {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.saveButton}
-              onPress={handleAddLeave}
+              onPress={() => {
+                console.log('💾 [DEBUG] Save button pressed in modal');
+                handleAddLeave();
+              }}
             >
               <Text style={styles.saveButtonText}>Add Leave</Text>
             </TouchableOpacity>
@@ -1588,6 +1674,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
     fontStyle: 'italic',
+    lineHeight: 20,
+  },
+  autoApprovedSection: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E8F5E8',
+  },
+  autoApprovedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F5E8',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    alignSelf: 'flex-start',
+  },
+  autoApprovedText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4CAF50',
+    marginLeft: 6,
   },
   emptyContainer: {
     flex: 1,
