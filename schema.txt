@@ -617,6 +617,7 @@ CREATE TABLE public.users (
   phone text,
   profile_url text,
   tenant_id uuid NOT NULL,
+  features jsonb DEFAULT '{}'::jsonb,
   CONSTRAINT users_pkey PRIMARY KEY (id),
   CONSTRAINT users_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT users_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id),

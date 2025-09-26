@@ -7,6 +7,9 @@
 
 // Core feature keys that map to tenant.features in database
 export const FEATURES = {
+  // Special feature that grants access to all other features
+  FEATURES_ALL: 'features-all',
+  
   // Main navigation features
   STATIONARY_MANAGEMENT: 'stationary_management',
   FEE_MANAGEMENT: 'fee_management',
@@ -117,6 +120,7 @@ export const QUICK_ACTION_FEATURE_MAP = {
 
 // Default feature permissions (all disabled by default for security)
 export const DEFAULT_FEATURES = {
+  [FEATURES.FEATURES_ALL]: false, // Special feature that grants access to all others
   [FEATURES.STATIONARY_MANAGEMENT]: false,
   [FEATURES.FEE_MANAGEMENT]: false,
   [FEATURES.STUDENT_MANAGEMENT]: false,
@@ -161,6 +165,16 @@ export const isValidFeature = (featureKey) => {
   return Object.values(FEATURES).includes(featureKey);
 };
 
+// Helper function to check if a feature is the special "all features" feature
+export const isFeaturesAll = (featureKey) => {
+  return featureKey === FEATURES.FEATURES_ALL;
+};
+
+// Helper function to get all regular features (excluding features-all)
+export const getAllRegularFeatures = () => {
+  return Object.values(FEATURES).filter(feature => feature !== FEATURES.FEATURES_ALL);
+};
+
 export default {
   FEATURES,
   SCREEN_FEATURE_MAP,
@@ -168,5 +182,7 @@ export default {
   DEFAULT_FEATURES,
   getFeatureForScreen,
   getFeatureForQuickAction,
-  isValidFeature
+  isValidFeature,
+  isFeaturesAll,
+  getAllRegularFeatures
 };

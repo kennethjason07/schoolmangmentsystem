@@ -9,7 +9,7 @@ import { useContext, useState, useEffect } from 'react';
 import TenantContext from '../contexts/TenantContext';
 import { useAuth } from '../utils/AuthContext';
 import { supabase } from '../utils/supabase';
-import { DEFAULT_FEATURES, isValidFeature } from '../constants/featureMapping';
+import { DEFAULT_FEATURES, FEATURES, isValidFeature, isFeaturesAll } from '../constants/featureMapping';
 
 /**
  * Hook to check user feature permissions
@@ -99,6 +99,14 @@ export const useTenantFeatures = () => {
       return false;
     }
 
+    // 🌟 CHECK FOR FEATURES-ALL FIRST
+    // If user has features-all enabled, grant access to all regular features
+    const hasFeaturesAll = userFeatures[FEATURES.FEATURES_ALL] === true;
+    if (hasFeaturesAll && !isFeaturesAll(featureKey)) {
+      console.log(`🌟 useTenantFeatures: User has 'features-all' permission, granting access to '${featureKey}' for user ${user.email}`);
+      return true;
+    }
+
     // Check if feature is explicitly enabled for this user
     const hasAccess = userFeatures[featureKey] === true;
     
@@ -159,6 +167,14 @@ export const useTenantFeatures = () => {
   const getEnabledFeatures = () => {
     if (featuresLoading || !user?.id || featuresError) {
       return [];
+    }
+
+    // If user has features-all, return all regular features plus features-all itself
+    const hasFeaturesAll = userFeatures[FEATURES.FEATURES_ALL] === true;
+    if (hasFeaturesAll) {
+      const { getAllRegularFeatures } = require('../constants/featureMapping');
+      const allRegularFeatures = getAllRegularFeatures();
+      return [FEATURES.FEATURES_ALL, ...allRegularFeatures];
     }
 
     return Object.keys(userFeatures).filter(key => userFeatures[key] === true);
