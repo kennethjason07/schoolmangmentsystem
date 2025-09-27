@@ -7,6 +7,14 @@ import { View, ActivityIndicator, Platform } from 'react-native';
 
 // Import screens
 import LoginScreen from '../screens/auth/LoginScreen';
+
+// Warden imports
+import { WardenTabNavigator } from './WardenNavigator';
+import WardenDashboard from '../screens/warden/WardenDashboard';
+import HostelApplications from '../screens/warden/HostelApplications';
+import HostelManagement from '../screens/admin/HostelManagement';
+import HostelDetailList from '../screens/admin/HostelDetailList';
+import HostelDetailView from '../screens/admin/HostelDetailView';
 import SignupScreen from '../screens/auth/SignupScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 import LoadingScreen from '../screens/LoadingScreen';
@@ -470,6 +478,12 @@ export default function AppNavigator() {
                 <Stack.Screen name="EduCartoonAI" component={EduCartoonAI} />
                 <Stack.Screen name="StudentDetails" component={StudentDetails} />
                 <Stack.Screen name="StudentList" component={StudentList} />
+                
+                {/* Hostel Management Screens for Admin */}
+                <Stack.Screen name="HostelManagement" component={HostelManagement} />
+                <Stack.Screen name="HostelDetailList" component={HostelDetailList} />
+                <Stack.Screen name="HostelDetailView" component={HostelDetailView} />
+                <Stack.Screen name="HostelApplications" component={HostelApplications} />
               </>
             )}
             {userType === 'teacher' && (
@@ -516,6 +530,58 @@ export default function AppNavigator() {
                 <Stack.Screen name="NotificationSettings" component={NotificationSettings} />
                 <Stack.Screen name="EduCartoonAI" component={EduCartoonAI} />
                 <Stack.Screen name="StudentDetails" component={StudentDetails} />
+              </>
+            )}
+            {userType === 'warden' && (
+              <>
+                <Stack.Screen name="WardenTabs" component={WardenTabNavigator} />
+                <Stack.Screen name="HostelApplications" component={HostelApplications} />
+                <Stack.Screen name="Profile" component={ProfileScreen} />
+                <Stack.Screen name="Settings" component={SettingsScreen} />
+                <Stack.Screen name="NotificationSettings" component={NotificationSettings} />
+                <Stack.Screen name="EduCartoonAI" component={EduCartoonAI} />
+                
+                {/* Placeholder screens for future hostel features */}
+                <Stack.Screen 
+                  name="BedAllocations" 
+                  component={WardenDashboard} 
+                  options={{ title: 'Bed Allocations', headerShown: true }}
+                />
+                <Stack.Screen 
+                  name="ManageHostels" 
+                  component={WardenDashboard} 
+                  options={{ title: 'Manage Hostels', headerShown: true }}
+                />
+                <Stack.Screen 
+                  name="HostelDetails" 
+                  component={WardenDashboard} 
+                  options={{ title: 'Hostel Details', headerShown: true }}
+                />
+                <Stack.Screen 
+                  name="ApplicationDetails" 
+                  component={WardenDashboard} 
+                  options={{ title: 'Application Details', headerShown: true }}
+                />
+                <Stack.Screen 
+                  name="BedAllocation" 
+                  component={WardenDashboard} 
+                  options={{ title: 'Allocate Bed', headerShown: true }}
+                />
+                <Stack.Screen 
+                  name="Waitlist" 
+                  component={WardenDashboard} 
+                  options={{ title: 'Waitlist', headerShown: true }}
+                />
+                <Stack.Screen 
+                  name="Maintenance" 
+                  component={WardenDashboard} 
+                  options={{ title: 'Maintenance', headerShown: true }}
+                />
+                <Stack.Screen 
+                  name="HostelReports" 
+                  component={WardenDashboard} 
+                  options={{ title: 'Reports', headerShown: true }}
+                />
               </>
             )}
             

@@ -126,12 +126,13 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: Colors.surface,
     borderRadius: Theme.BorderRadius.lg,
-    padding: Theme.Spacing.base,
+    padding: Theme.Spacing.md,
     marginVertical: Theme.Spacing.sm,
     marginHorizontal: Theme.Spacing.xs,
     borderLeftWidth: 4,
-    minHeight: 110,
+    minHeight: 120,
     position: 'relative',
+    flex: 1,
     ...Theme.Shadows.base,
   },
   cardTeacher: {
@@ -156,13 +157,14 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   title: {
-    fontSize: Theme.Typography.sizes.base,
+    fontSize: Theme.Typography.sizes.sm,
     color: Colors.text,
     fontWeight: Theme.Typography.weights.semibold,
     marginRight: Theme.Spacing.sm,
     flexShrink: 1,
-    lineHeight: 20,
+    lineHeight: 18,
     marginBottom: Theme.Spacing.xs,
+    textAlign: 'left',
   },
   titleTeacher: {
     fontSize: 28, // Very large size for teachers (100% increase from original 14px)
