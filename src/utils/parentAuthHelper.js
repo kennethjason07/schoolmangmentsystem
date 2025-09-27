@@ -15,7 +15,11 @@ import { supabase, TABLES } from './supabase';
  */
 export const getParentStudents = async (parentUserId) => {
   try {
-    console.log('🔍 [PARENT AUTH] Fetching students for parent user ID:', parentUserId);
+    const DEBUG_PARENT_AUTH = false; // Set to true to see detailed parent auth logs
+    
+    if (DEBUG_PARENT_AUTH) {
+      console.log('🔍 [PARENT AUTH] Fetching students for parent user ID:', parentUserId);
+    }
 
     // Method 1: Check if user has linked_parent_of (new structure)
     const { data: userData, error: userError } = await supabase
@@ -52,7 +56,9 @@ export const getParentStudents = async (parentUserId) => {
 
     // Method 2: Use parent_student_relationships junction table
     if (students.length === 0) {
-      console.log('🔍 [PARENT AUTH] Checking parent_student_relationships table...');
+      if (DEBUG_PARENT_AUTH) {
+        console.log('🔍 [PARENT AUTH] Checking parent_student_relationships table...');
+      }
       
       const { data: relationshipData, error: relationshipError } = await supabase
         .from('parent_student_relationships')
@@ -85,7 +91,9 @@ export const getParentStudents = async (parentUserId) => {
 
     // Method 3: Direct parent table lookup (fallback)
     if (students.length === 0) {
-      console.log('🔍 [PARENT AUTH] Checking direct parents table...');
+      if (DEBUG_PARENT_AUTH) {
+        console.log('🔍 [PARENT AUTH] Checking direct parents table...');
+      }
       
       const { data: parentData, error: parentError } = await supabase
         .from('parents')
@@ -113,7 +121,9 @@ export const getParentStudents = async (parentUserId) => {
     }
 
     if (students.length === 0) {
-      console.warn('⚠️ [PARENT AUTH] No students found for parent user:', parentUserId);
+      if (DEBUG_PARENT_AUTH) {
+        console.warn('⚠️ [PARENT AUTH] No students found for parent user:', parentUserId);
+      }
       return {
         success: false,
         error: 'No students found for this parent account. Please contact the school administrator.'

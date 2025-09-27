@@ -351,14 +351,20 @@ export const getCurrentUserId = async () => {
 // User tenant helper function
 export const getUserTenantId = async () => {
   try {
-    console.log('🔍 getUserTenantId: Starting tenant lookup...');
+    const DEBUG_TENANT_LOOKUP = false; // Set to true to see detailed tenant lookup logs
+    
+    if (DEBUG_TENANT_LOOKUP) {
+      console.log('🔍 getUserTenantId: Starting tenant lookup...');
+    }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       console.log('❌ getUserTenantId: No user found');
       return null;
     }
     
-    console.log('👤 getUserTenantId: User found:', user.email);
+    if (DEBUG_TENANT_LOOKUP) {
+      console.log('👤 getUserTenantId: User found:', user.email);
+    }
 
     // Check database for tenant_id first
     try {
@@ -368,15 +374,19 @@ export const getUserTenantId = async () => {
         .eq('id', user.id)
         .maybeSingle();
 
-      console.log('📊 getUserTenantId: Database query result:', {
-        found: !!userProfile,
-        tenantId: userProfile?.tenant_id,
-        email: userProfile?.email,
-        error: profileError?.message
-      });
+      if (DEBUG_TENANT_LOOKUP) {
+        console.log('📊 getUserTenantId: Database query result:', {
+          found: !!userProfile,
+          tenantId: userProfile?.tenant_id,
+          email: userProfile?.email,
+          error: profileError?.message
+        });
+      }
 
       if (!profileError && userProfile?.tenant_id) {
-        console.log('✅ getUserTenantId: Found tenant_id in database:', userProfile.tenant_id);
+        if (DEBUG_TENANT_LOOKUP) {
+          console.log('✅ getUserTenantId: Found tenant_id in database:', userProfile.tenant_id);
+        }
         return userProfile.tenant_id;
       }
     } catch (profileError) {

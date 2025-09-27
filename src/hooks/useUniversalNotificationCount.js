@@ -45,11 +45,12 @@ export const useUniversalNotificationCount = (options = {}) => {
   const subscriptionRef = useRef(null);
   const appStateRef = useRef(AppState.currentState);
 
-  // Debug logging (optimized for performance)
+  // Debug logging (optimized for performance) - DISABLED for cleaner logs
   const debugLog = useCallback((message, data = '') => {
-    if (__DEV__) {
-      console.log(`🚀 [useUniversalNotificationCount - ${userType}] ${message}`, data);
-    }
+    // Temporarily disabled for cleaner debugging
+    // if (__DEV__) {
+    //   console.log(`🚀 [useUniversalNotificationCount - ${userType}] ${message}`, data);
+    // }
   }, [userType]);
 
   // Ultra-fast fetch notification counts

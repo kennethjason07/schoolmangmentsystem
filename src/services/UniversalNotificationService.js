@@ -110,9 +110,9 @@ export class UniversalNotificationService {
       try {
         tenantId = getCachedTenantId();
         if (tenantId) {
-          console.log(`🏢 [UniversalNotificationService] Using cached tenant filter for messages: ${tenantId}`);
+          // console.log(`🏢 [UniversalNotificationService] Using cached tenant filter for messages: ${tenantId}`);
         } else {
-          console.warn('⚠️ [UniversalNotificationService] No cached tenant ID available for messages - tenant context may not be initialized yet');
+          // console.warn('⚠️ [UniversalNotificationService] No cached tenant ID available for messages - tenant context may not be initialized yet');
         }
       } catch (tenantError) {
         console.warn('⚠️ [UniversalNotificationService] Could not get cached tenant context for messages:', tenantError);
@@ -137,14 +137,14 @@ export class UniversalNotificationService {
         return 0;
       }
 
-      // Enhanced debugging for message count issues
-      console.log(`📨 [UniversalNotificationService] Found ${data?.length || 0} unread messages for user ${userId}`);
-      if (data && data.length > 0) {
-        console.log('🔍 [UniversalNotificationService] Unread messages details:');
-        data.forEach((msg, idx) => {
-          console.log(`  ${idx + 1}. ID: ${msg.id}, From: ${msg.sender_id}, Message: "${msg.message?.substring(0, 30)}...", Sent: ${msg.sent_at}`);
-        });
-      }
+      // Enhanced debugging for message count issues - DISABLED for cleaner logs
+      // console.log(`📨 [UniversalNotificationService] Found ${data?.length || 0} unread messages for user ${userId}`);
+      // if (data && data.length > 0) {
+      //   console.log('🔍 [UniversalNotificationService] Unread messages details:');
+      //   data.forEach((msg, idx) => {
+      //     console.log(`  ${idx + 1}. ID: ${msg.id}, From: ${msg.sender_id}, Message: "${msg.message?.substring(0, 30)}...", Sent: ${msg.sent_at}`);
+      //   });
+      // }
       
       return data?.length || 0;
     } catch (error) {
@@ -161,6 +161,8 @@ export class UniversalNotificationService {
    */
   async getUnreadNotificationCount(userId, userType) {
     try {
+      const DEBUG_NOTIFICATION_FOUND = false; // Set to true to see "Found X notifications" logs
+      
       if (!userId || !userType) return 0;
 
       const recipientType = this.getUserTypeForDB(userType);
@@ -170,9 +172,9 @@ export class UniversalNotificationService {
       try {
         tenantId = getCachedTenantId();
         if (tenantId) {
-          console.log(`🏢 [UniversalNotificationService] Using cached tenant filter: ${tenantId}`);
+          // console.log(`🏢 [UniversalNotificationService] Using cached tenant filter: ${tenantId}`);
         } else {
-          console.warn('⚠️ [UniversalNotificationService] No cached tenant ID available - tenant context may not be initialized yet');
+          // console.warn('⚠️ [UniversalNotificationService] No cached tenant ID available - tenant context may not be initialized yet');
         }
       } catch (tenantError) {
         console.warn('⚠️ [UniversalNotificationService] Could not get cached tenant context:', tenantError);
@@ -212,7 +214,9 @@ export class UniversalNotificationService {
       }
 
       if (!notificationData || notificationData.length === 0) {
-        console.log(`🔔 [UniversalNotificationService] Found 0 unread notifications for user ${userId}`);
+        if (DEBUG_NOTIFICATION_FOUND) {
+          console.log(`🔔 [UniversalNotificationService] Found 0 unread notifications for user ${userId}`);
+        }
         return 0;
       }
 
@@ -260,7 +264,9 @@ export class UniversalNotificationService {
         }
       }
 
-      console.log(`🔔 [UniversalNotificationService] Found ${filteredNotifications.length} unread notifications for user ${userId}`);
+      if (DEBUG_NOTIFICATION_FOUND) {
+        console.log(`🔔 [UniversalNotificationService] Found ${filteredNotifications.length} unread notifications for user ${userId}`);
+      }
       return filteredNotifications.length;
     } catch (error) {
       console.warn('Error in getUnreadNotificationCount:', error);
@@ -307,14 +313,17 @@ export class UniversalNotificationService {
         totalCount: messageCount + notificationCount
       };
 
-      // Enhanced debugging for count separation
-      console.log(`📊 [UniversalNotificationService] Count breakdown for ${userId}:`, {
-        messageCount: result.messageCount,
-        notificationCount: result.notificationCount,
-        totalCount: result.totalCount,
-        userType,
-        'Note': 'messageCount = chat messages only, notificationCount = system notifications only'
-      });
+      // Enhanced debugging for count separation (only when debug enabled)
+      const DEBUG_NOTIFICATION_COUNTS = false; // Set to true to see detailed count breakdowns
+      if (DEBUG_NOTIFICATION_COUNTS) {
+        console.log(`📊 [UniversalNotificationService] Count breakdown for ${userId}:`, {
+          messageCount: result.messageCount,
+          notificationCount: result.notificationCount,
+          totalCount: result.totalCount,
+          userType,
+          'Note': 'messageCount = chat messages only, notificationCount = system notifications only'
+        });
+      }
 
       // Cache the result
       this.cache.set(cacheKey, {
@@ -403,7 +412,7 @@ export class UniversalNotificationService {
     if (!userId || !userType) return () => {};
 
     const subscriptionKey = `${userId}-${userType}`;
-    console.log(`🔔 [UniversalNotificationService] Setting up real-time subscription for ${subscriptionKey}`);
+    // console.log(`🔔 [UniversalNotificationService] Setting up real-time subscription for ${subscriptionKey}`);
     
     // Store callback for reconnection scenarios
     this.realTimeCallbacks.set(subscriptionKey, callback);
@@ -536,7 +545,7 @@ export class UniversalNotificationService {
     const subscribeWithRetry = async (channel, retryCount = 0) => {
       try {
         await channel.subscribe((status) => {
-          console.log(`📡 [UniversalNotificationService] Channel ${channel.topic} status:`, status);
+          // console.log(`📡 [UniversalNotificationService] Channel ${channel.topic} status:`, status);
           if (status === 'CHANNEL_ERROR' && retryCount < this.maxRetries) {
             console.log(`🔄 [UniversalNotificationService] Retrying subscription for ${channel.topic} (${retryCount + 1}/${this.maxRetries})`);
             setTimeout(() => subscribeWithRetry(channel, retryCount + 1), 1000 * (retryCount + 1));
@@ -555,7 +564,7 @@ export class UniversalNotificationService {
 
     // Create comprehensive unsubscribe function
     const unsubscribe = () => {
-      console.log(`🚫 [UniversalNotificationService] Unsubscribing from all channels for ${subscriptionKey}`);
+      // console.log(`🚫 [UniversalNotificationService] Unsubscribing from all channels for ${subscriptionKey}`);
       channels.forEach(channel => {
         try {
           channel.unsubscribe();
@@ -570,7 +579,7 @@ export class UniversalNotificationService {
 
     // Store the unsubscribe function
     this.subscriptions.set(subscriptionKey, unsubscribe);
-    console.log(`✅ [UniversalNotificationService] Real-time subscription setup complete for ${subscriptionKey}`);
+    // console.log(`✅ [UniversalNotificationService] Real-time subscription setup complete for ${subscriptionKey}`);
 
     return unsubscribe;
   }

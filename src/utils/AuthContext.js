@@ -8,6 +8,9 @@ import { navigationService } from '../services/NavigationService';
 
 const AuthContext = createContext({});
 
+// Debug flag - set to false to disable verbose auth logging
+const DEBUG_AUTH_LOGS = false;
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -114,7 +117,7 @@ export const AuthProvider = ({ children }) => {
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, sessionData) => {
-        console.log('🔊 Auth state change event:', event, 'isSigningIn:', isSigningInRef.current);
+        if (DEBUG_AUTH_LOGS) console.log('🔊 Auth state change event:', event, 'isSigningIn:', isSigningInRef.current);
         
         try {
           // Safely access session data
@@ -122,7 +125,7 @@ export const AuthProvider = ({ children }) => {
           
           // Don't handle SIGNED_IN if we're in the middle of a manual sign-in process
           if (event === 'SIGNED_IN' && currentSession?.user && !isSigningInRef.current) {
-            console.log('🔊 Handling auth state change for SIGNED_IN');
+            if (DEBUG_AUTH_LOGS) console.log('🔊 Handling auth state change for SIGNED_IN');
             await handleAuthChange(currentSession.user);
           } else if (event === 'SIGNED_IN' && isSigningInRef.current) {
             console.log('⏭️ Skipping auth state handler - manual sign-in in progress');
@@ -134,29 +137,18 @@ export const AuthProvider = ({ children }) => {
             }
             
             isHandlingSignOut = true;
-            console.log('🔊 Handling auth state change for SIGNED_OUT');
+            if (DEBUG_AUTH_LOGS) console.log('🔊 Handling auth state change for SIGNED_OUT');
             
-            // Clear auth state FIRST, then navigate
-            // This ensures Login screen is available in navigation
+            // Clear auth state and let AppNavigator handle navigation
+            // This ensures Login screen is available in navigation automatically
             setUser(null);
             setUserType(null);
             isSigningInRef.current = false;
             
-            // Use setTimeout to ensure state update completes before navigation
-            setTimeout(() => {
-              try {
-                navigationService.reset({
-                  index: 0,
-                  routes: [{ name: 'Login' }],
-                });
-              } catch (navError) {
-                console.warn('⚠️ Navigation service error (delayed):', navError.message);
-                // The navigation should work now that user state is cleared
-              }
-              
-              // Reset the flag after navigation attempt
-              isHandlingSignOut = false;
-            }, 100); // Small delay to let React re-render with updated state
+            if (DEBUG_AUTH_LOGS) console.log('✅ [AUTH] User state cleared - AppNavigator will automatically navigate to Login');
+            
+            // Reset the flag immediately since we're not doing manual navigation
+            isHandlingSignOut = false;
             
           } else if (event === 'INITIAL_SESSION') {
             console.log('🔊 Handling auth state change for INITIAL_SESSION');
@@ -182,18 +174,8 @@ export const AuthProvider = ({ children }) => {
             setLoading(false);
             isSigningInRef.current = false;
             
-            // Only navigate to login if we're not already handling signout
-            if (!isHandlingSignOut && event === 'SIGNED_OUT') {
-              try {
-                navigationService.reset({
-                  index: 0,
-                  routes: [{ name: 'Login' }],
-                });
-              } catch (navError) {
-                console.warn('⚠️ Navigation failed after auth error:', navError.message);
-                // Don't use window.location fallback here
-              }
-            }
+            // Let AppNavigator handle navigation automatically when user state changes
+            console.log('✅ [AUTH] Auth error handled - AppNavigator will automatically navigate when needed');
           } else {
             console.warn('⚠️ Non-auth error in auth state handler, continuing:', error.message);
           }
@@ -514,12 +496,18 @@ export const AuthProvider = ({ children }) => {
         .select('*')
         .eq('email', email);
       
-      // If tenant specified, filter by tenant - BUT NOT FOR PARENTS
+      // If tenant specified, filter by tenant - BUT NOT FOR PARENTS OR TEACHERS
       if (targetTenantId) {
-        // Check if this is a parent login (role will be determined later)
-        // For now, we'll add tenant filter for non-parent roles
-        console.log('🏢 Added tenant filter:', targetTenantId);
-        userQuery = userQuery.eq('tenant_id', targetTenantId);
+        // Check if this is a parent or teacher login (role will be determined later)
+        // For now, we'll add tenant filter for non-parent/teacher roles
+        const isParentOrTeacherLogin = selectedRole.toLowerCase() === 'parent' || 
+                                       selectedRole.toLowerCase() === 'teacher';
+        if (!isParentOrTeacherLogin) {
+          console.log('🏢 Added tenant filter:', targetTenantId);
+          userQuery = userQuery.eq('tenant_id', targetTenantId);
+        } else {
+          console.log('👨‍👩‍👧👨‍🏫 Parent/Teacher login detected - skipping tenant filter');
+        }
       }
       
       console.log('📡 Executing exact match query...');
@@ -540,12 +528,18 @@ export const AuthProvider = ({ children }) => {
           .select('*')
           .ilike('email', email);
         
-        // If tenant specified, filter by tenant - BUT NOT FOR PARENTS
+        // If tenant specified, filter by tenant - BUT NOT FOR PARENTS OR TEACHERS
         if (targetTenantId) {
-          // Check if this is a parent login (role will be determined later)
-          // For now, we'll add tenant filter for non-parent roles
-          console.log('🏢 Added tenant filter to case-insensitive query:', targetTenantId);
-          userQuery = userQuery.eq('tenant_id', targetTenantId);
+          // Check if this is a parent or teacher login (role will be determined later)
+          // For now, we'll add tenant filter for non-parent/teacher roles
+          const isParentOrTeacherLogin = selectedRole.toLowerCase() === 'parent' || 
+                                         selectedRole.toLowerCase() === 'teacher';
+          if (!isParentOrTeacherLogin) {
+            console.log('🏢 Added tenant filter to case-insensitive query:', targetTenantId);
+            userQuery = userQuery.eq('tenant_id', targetTenantId);
+          } else {
+            console.log('👨‍👩‍👧👨‍🏫 Parent/Teacher case-insensitive login - skipping tenant filter');
+          }
         }
         
         console.log('📡 Executing case-insensitive query...');
@@ -612,13 +606,16 @@ export const AuthProvider = ({ children }) => {
       
       console.log('Role validation:', { actualRole: actualRoleName, expectedRole, selectedRole });
       
-      // Special handling for parents - they don't need to be filtered by tenant_id
+      // Special handling for parents and teachers - they don't need strict tenant filtering
       const isParentLogin = selectedRole.toLowerCase() === 'parent' || 
                            (actualRoleName && actualRoleName.toLowerCase() === 'parent');
+      const isTeacherLogin = selectedRole.toLowerCase() === 'teacher' || 
+                            (actualRoleName && actualRoleName.toLowerCase() === 'teacher');
+      const isParentOrTeacherLogin = isParentLogin || isTeacherLogin;
       
       // Only validate role if we have both values (case-insensitive comparison)
-      // Skip role validation for parents since they might not have tenant_id
-      if (!isParentLogin && actualRoleName && expectedRole && 
+      // Skip role validation for parents/teachers since they might not have tenant_id
+      if (!isParentOrTeacherLogin && actualRoleName && expectedRole && 
           actualRoleName.toLowerCase() !== expectedRole.toLowerCase()) {
         console.log('Role mismatch:', actualRoleName, 'vs expected:', expectedRole);
         return { data: null, error: { message: `Invalid role for this user. User has role: ${actualRoleName}, but trying to sign in as: ${expectedRole}` } };
@@ -647,12 +644,14 @@ export const AuthProvider = ({ children }) => {
       console.log('👤 About to set user:', userData);
       console.log('🎭 About to set userType:', actualRoleName ? actualRoleName.toLowerCase() : 'user');
       
-      // Set tenant context in SupabaseService - but not for parents
-      if (userData.tenant_id && !isParentLogin) {
+      // Set tenant context in SupabaseService - NEVER for teachers (they use direct auth)
+      if (userData.tenant_id && !isParentOrTeacherLogin) {
         console.log('🏢 Setting tenant context during signIn:', userData.tenant_id);
         supabaseService.setTenantContext(userData.tenant_id);
       } else if (isParentLogin) {
-        console.log('👨‍👩‍👧 Parent login detected - not setting tenant context');
+        console.log('👨‍👩‍👧 Parent login detected - bypassing tenant context for direct authentication');
+      } else if (isTeacherLogin) {
+        console.log('👨‍🏫 Teacher login detected - bypassing tenant context for direct authentication');
       }
       
       setUser(userData);
@@ -976,38 +975,8 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  /**
-   * Handle web navigation with proper error checking
-   */
-  const handleWebNavigation = () => {
-    if (Platform.OS === 'web') {
-      try {
-        navigationService.reset({
-          index: 0,
-          routes: [{ name: 'Login' }],
-        });
-      } catch (navError) {
-        console.error('Navigation service error:', navError);
-        // Last resort for web: use window.location with proper checks
-        if (typeof window !== 'undefined' && window && typeof window.location !== 'undefined' && window.location) {
-          try {
-            window.location.href = '/';
-          } catch (locationError) {
-            console.error('❌ [AuthContext] Error setting window.location.href:', locationError);
-          }
-        }
-      }
-    } else {
-      try {
-        navigationService.reset({
-          index: 0,
-          routes: [{ name: 'Login' }],
-        });
-      } catch (navError) {
-        console.error('Navigation service error:', navError);
-      }
-    }
-  };
+  // Navigation is now handled automatically by AppNavigator based on user state
+  // No manual navigation needed
 
   const value = {
     user,

@@ -5,14 +5,17 @@
 
 import { supabase } from './supabase';
 
+// Debug flag - set to false to disable verbose logging
+const DEBUG_EMAIL_LOOKUP = false;
+
 export const getTenantIdByEmail = async (email) => {
-  console.log('📧 EMAIL LOOKUP: Starting tenant lookup by email:', email);
+  if (DEBUG_EMAIL_LOOKUP) console.log('📧 EMAIL LOOKUP: Starting tenant lookup by email:', email);
   
   try {
     // Validate email format first
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!email || !emailRegex.test(email)) {
-      console.error('📧 EMAIL LOOKUP: Invalid email format:', email);
+      if (DEBUG_EMAIL_LOOKUP) console.error('📧 EMAIL LOOKUP: Invalid email format:', email);
       return {
         success: false,
         error: 'Invalid email format provided',
@@ -21,9 +24,9 @@ export const getTenantIdByEmail = async (email) => {
     }
     
     // Step 1: Look up user record by email address (case-insensitive)
-    console.log('📧 EMAIL LOOKUP: Step 1 - Searching users table by email (case-insensitive)...');
-    console.log('📧 EMAIL LOOKUP: Original email:', email);
-    console.log('📧 EMAIL LOOKUP: Lowercase email:', email.toLowerCase());
+    if (DEBUG_EMAIL_LOOKUP) console.log('📧 EMAIL LOOKUP: Step 1 - Searching users table by email (case-insensitive)...');
+    if (DEBUG_EMAIL_LOOKUP) console.log('📧 EMAIL LOOKUP: Original email:', email);
+    if (DEBUG_EMAIL_LOOKUP) console.log('📧 EMAIL LOOKUP: Lowercase email:', email.toLowerCase());
     
     // Try case-insensitive email lookup using ilike
     const { data: userRecord, error: userError } = await supabase
@@ -33,7 +36,7 @@ export const getTenantIdByEmail = async (email) => {
       .maybeSingle(); // Use maybeSingle to avoid error when no rows found
     
     if (userError) {
-      console.error('📧 EMAIL LOOKUP: Error querying users by email:', userError);
+      if (DEBUG_EMAIL_LOOKUP) console.error('📧 EMAIL LOOKUP: Error querying users by email:', userError);
       return { 
         success: false, 
         error: `Database connection error: ${userError.message}. Please check your internet connection and try again.`,
@@ -43,7 +46,7 @@ export const getTenantIdByEmail = async (email) => {
     }
     
     if (!userRecord) {
-      console.log('📧 EMAIL LOOKUP: ❌ No user record found for email:', email);
+      if (DEBUG_EMAIL_LOOKUP) console.log('📧 EMAIL LOOKUP: ❌ No user record found for email:', email);
       return { 
         success: false, 
         error: `No account found for ${email}. Please contact your administrator to set up your account.`,
@@ -57,7 +60,7 @@ export const getTenantIdByEmail = async (email) => {
       };
     }
     
-    console.log('📧 EMAIL LOOKUP: ✅ Found user record by email:', {
+    if (DEBUG_EMAIL_LOOKUP) console.log('📧 EMAIL LOOKUP: ✅ Found user record by email:', {
       id: userRecord.id,
       email: userRecord.email,
       tenant_id: userRecord.tenant_id,
@@ -65,7 +68,7 @@ export const getTenantIdByEmail = async (email) => {
     });
     
     if (!userRecord.tenant_id) {
-      console.log('📧 EMAIL LOOKUP: ❌ User record exists but has no tenant_id assigned');
+      if (DEBUG_EMAIL_LOOKUP) console.log('📧 EMAIL LOOKUP: ❌ User record exists but has no tenant_id assigned');
       return { 
         success: false, 
         error: `Your account (${email}) is not assigned to a school yet. Please contact your administrator.`,
@@ -81,7 +84,7 @@ export const getTenantIdByEmail = async (email) => {
     }
     
     // Step 2: Get tenant details using the tenant_id
-    console.log('📧 EMAIL LOOKUP: Step 2 - Fetching tenant details for ID:', userRecord.tenant_id);
+    if (DEBUG_EMAIL_LOOKUP) console.log('📧 EMAIL LOOKUP: Step 2 - Fetching tenant details for ID:', userRecord.tenant_id);
     const { data: tenant, error: tenantError } = await supabase
       .from('tenants')
       .select('*')
@@ -89,7 +92,7 @@ export const getTenantIdByEmail = async (email) => {
       .single();
     
     if (tenantError) {
-      console.error('📧 EMAIL LOOKUP: Error fetching tenant:', tenantError);
+      if (DEBUG_EMAIL_LOOKUP) console.error('📧 EMAIL LOOKUP: Error fetching tenant:', tenantError);
       return { 
         success: false, 
         error: `School information could not be loaded: ${tenantError.message}. Please try again or contact support.`,
@@ -101,7 +104,7 @@ export const getTenantIdByEmail = async (email) => {
     }
     
     if (!tenant) {
-      console.log('📧 EMAIL LOOKUP: ❌ Tenant not found for ID:', userRecord.tenant_id);
+      if (DEBUG_EMAIL_LOOKUP) console.log('📧 EMAIL LOOKUP: ❌ Tenant not found for ID:', userRecord.tenant_id);
       return { 
         success: false, 
         error: `Your assigned school (ID: ${userRecord.tenant_id}) could not be found. This may be a system configuration issue.`,
@@ -116,7 +119,7 @@ export const getTenantIdByEmail = async (email) => {
       };
     }
     
-    console.log('📧 EMAIL LOOKUP: ✅ Successfully found tenant:', {
+    if (DEBUG_EMAIL_LOOKUP) console.log('📧 EMAIL LOOKUP: ✅ Successfully found tenant:', {
       id: tenant.id,
       name: tenant.name,
       subdomain: tenant.subdomain,
@@ -125,7 +128,7 @@ export const getTenantIdByEmail = async (email) => {
     
     // Step 3: Verify tenant is active
     if (tenant.status !== 'active') {
-      console.warn('📧 EMAIL LOOKUP: ⚠️ Tenant is not active:', tenant.status);
+      if (DEBUG_EMAIL_LOOKUP) console.warn('📧 EMAIL LOOKUP: ⚠️ Tenant is not active:', tenant.status);
       return {
         success: false,
         error: `Your school "${tenant.name}" is currently ${tenant.status}. Access is temporarily restricted.`,
@@ -141,7 +144,7 @@ export const getTenantIdByEmail = async (email) => {
       };
     }
     
-    console.log('📧 EMAIL LOOKUP: 🎉 SUCCESS! Complete tenant lookup successful');
+    if (DEBUG_EMAIL_LOOKUP) console.log('📧 EMAIL LOOKUP: 🎉 SUCCESS! Complete tenant lookup successful');
     
     return {
       success: true,
@@ -163,14 +166,14 @@ export const getTenantIdByEmail = async (email) => {
 };
 
 export const getCurrentUserTenantByEmail = async () => {
-  console.log('📧 CURRENT USER: Getting tenant for current authenticated user...');
-  console.log('📧 CURRENT USER: Timestamp:', new Date().toISOString());
+  if (DEBUG_EMAIL_LOOKUP) console.log('📧 CURRENT USER: Getting tenant for current authenticated user...');
+  if (DEBUG_EMAIL_LOOKUP) console.log('📧 CURRENT USER: Timestamp:', new Date().toISOString());
   
   try {
     // Get current authenticated user with enhanced debugging
-    console.log('📧 CURRENT USER: Calling supabase.auth.getUser()...');
+    if (DEBUG_EMAIL_LOOKUP) console.log('📧 CURRENT USER: Calling supabase.auth.getUser()...');
     const authResult = await supabase.auth.getUser();
-    console.log('📧 CURRENT USER: Auth result received:', {
+    if (DEBUG_EMAIL_LOOKUP) console.log('📧 CURRENT USER: Auth result received:', {
       hasData: !!authResult.data,
       hasUser: !!authResult.data?.user,
       hasError: !!authResult.error,

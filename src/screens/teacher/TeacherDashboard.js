@@ -21,6 +21,16 @@ import {
   getCachedTenantId 
 } from '../../utils/tenantHelpers';
 import { useGlobalRefresh } from '../../contexts/GlobalRefreshContext';
+// 👨‍🏫 TEACHER DUAL AUTHENTICATION IMPORTS
+import {
+  isUserTeacher,
+  getTeacherProfile,
+  getTeacherAssignments,
+  getTeacherStudents,
+  getTeacherSchedule,
+  getTeacherAttendance,
+  getTeacherExams
+} from '../../utils/teacherAuthHelper';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -55,6 +65,12 @@ const [teacherProfile, setTeacherProfile] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [schoolDetails, setSchoolDetails] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date()); // Add current time state
+  
+  // 👨‍🏫 TEACHER DUAL AUTHENTICATION STATE
+  const [useDirectTeacherAuth, setUseDirectTeacherAuth] = useState(false);
+  const [teacherAuthChecked, setTeacherAuthChecked] = useState(false);
+  const [directTeacherProfile, setDirectTeacherProfile] = useState(null);
+  
   const { user } = useAuth();
   // 🚀 ENHANCED TENANT SYSTEM - Use reliable cached tenant access
   const { 
@@ -68,6 +84,128 @@ const [teacherProfile, setTeacherProfile] = useState(null);
   
   // Global refresh hook for cross-screen refresh functionality
   const { registerRefreshCallback, triggerScreenRefresh } = useGlobalRefresh();
+  
+  // 👨‍🏫 Add debug utilities for development
+  if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+    // Define debug flags
+    const DEBUG_TEACHER_DASHBOARD = false; // Set to true to see debug function availability logs
+    
+    window.debugTeacherDashboard = () => {
+      const state = {
+        user: {
+          id: user?.id,
+          email: user?.email,
+          role_id: user?.role_id
+        },
+        teacherAuth: {
+          useDirectTeacherAuth,
+          teacherAuthChecked,
+          hasDirectProfile: !!directTeacherProfile,
+          directProfileName: directTeacherProfile?.name
+        },
+        tenant: {
+          isReady,
+          tenantLoading,
+          tenantError: tenantError?.message,
+          tenantId: getCachedTenantId(),
+          tenantName
+        },
+        loading,
+        error
+      };
+      
+      console.log('🔍 [DEBUG] TeacherDashboard State:', state);
+      return state;
+    };
+    
+    window.testTeacherAuthInDashboard = async () => {
+      if (!user?.id) {
+        console.error('No user ID available');
+        return { success: false, error: 'No user ID' };
+      }
+      
+      try {
+        const result = await isUserTeacher(user.id);
+        console.log('🔍 [DEBUG] Teacher Auth Test Result:', result);
+        return result;
+      } catch (error) {
+        console.error('Teacher auth test failed:', error);
+        return { success: false, error: error.message };
+      }
+    };
+    
+    window.forceTeacherAuth = () => {
+      console.log('🔄 [DEBUG] Forcing teacher authentication mode...');
+      setUseDirectTeacherAuth(true);
+      setTeacherAuthChecked(true);
+    };
+    
+    // Only log debug function availability if DEBUG_TEACHER_DASHBOARD is enabled
+    if (DEBUG_TEACHER_DASHBOARD) {
+      console.log('👨‍🏫 [DEBUG] Teacher Dashboard debug functions available:');
+      console.log('   • window.debugTeacherDashboard() - Show current state');
+      console.log('   • window.testTeacherAuthInDashboard() - Test teacher authentication');
+      console.log('   • window.forceTeacherAuth() - Force teacher auth mode');
+    }
+  }
+  
+  // 👨‍🏫 Check if user should use direct teacher authentication
+  useEffect(() => {
+    const checkTeacherAuthMode = async () => {
+      if (!user?.id) {
+        console.log('🔍 [TEACHER AUTH] No user ID available, skipping teacher auth check');
+        setTeacherAuthChecked(true);
+        return;
+      }
+      
+      if (teacherAuthChecked) {
+        console.log('🔍 [TEACHER AUTH] Teacher auth already checked, skipping');
+        return;
+      }
+      
+      console.log('🔍 [TEACHER AUTH] Checking if user should use direct teacher authentication...', {
+        userId: user.id,
+        userEmail: user.email
+      });
+      
+      try {
+        const teacherCheck = await isUserTeacher(user.id);
+        
+        console.log('🔍 [TEACHER AUTH] Teacher check result:', {
+          success: teacherCheck.success,
+          isTeacher: teacherCheck.isTeacher,
+          classCount: teacherCheck.classCount,
+          assignmentCount: teacherCheck.assignedClassesCount,
+          error: teacherCheck.error
+        });
+        
+        if (teacherCheck.success && teacherCheck.isTeacher) {
+          console.log('✅ [TEACHER AUTH] User is a teacher, enabling direct authentication mode');
+          setUseDirectTeacherAuth(true);
+          
+          // Get and store teacher profile
+          if (teacherCheck.teacherProfile) {
+            setDirectTeacherProfile(teacherCheck.teacherProfile);
+            console.log('📝 [TEACHER AUTH] Teacher profile stored:', teacherCheck.teacherProfile.name);
+          }
+        } else if (teacherCheck.success && !teacherCheck.isTeacher) {
+          console.log('⚠️ [TEACHER AUTH] User is not a teacher, will use tenant-based authentication');
+          setUseDirectTeacherAuth(false);
+        } else {
+          console.warn('⚠️ [TEACHER AUTH] Teacher check failed, defaulting to tenant-based auth:', teacherCheck.error);
+          setUseDirectTeacherAuth(false);
+        }
+      } catch (error) {
+        console.error('❌ [TEACHER AUTH] Unexpected error checking teacher status:', error);
+        setUseDirectTeacherAuth(false);
+      } finally {
+        setTeacherAuthChecked(true);
+        console.log('🏁 [TEACHER AUTH] Teacher authentication check complete');
+      }
+    };
+    
+    checkTeacherAuthMode();
+  }, [user?.id, teacherAuthChecked]);
 
   // 🚀 ENHANCED TENANT SYSTEM - Tenant validation helper
   const validateTenantAccess = () => {
@@ -129,11 +267,15 @@ function formatTimeForDisplay(timeString) {
 function getNextClass(schedule) {
   if (!schedule || schedule.length === 0) return null;
   
+  const DEBUG_NEXT_CLASS = false; // Set to true to see detailed time calculations
+  
   const now = new Date();
   const currentTimeMinutes = now.getHours() * 60 + now.getMinutes();
   
-  console.log('🕐 [NEXT_CLASS] Current time:', now.toLocaleTimeString());
-  console.log('🕐 [NEXT_CLASS] Current time in minutes:', currentTimeMinutes);
+  if (DEBUG_NEXT_CLASS) {
+    console.log('🕐 [NEXT_CLASS] Current time:', now.toLocaleTimeString());
+    console.log('🕐 [NEXT_CLASS] Current time in minutes:', currentTimeMinutes);
+  }
   
   // Convert schedule times to minutes for comparison
   const scheduleWithMinutes = schedule.map(cls => {
@@ -148,14 +290,18 @@ function getNextClass(schedule) {
       const [hours, minutes] = timeString.split(':');
       const classTimeMinutes = parseInt(hours, 10) * 60 + parseInt(minutes, 10);
       
-      console.log(`🕐 [NEXT_CLASS] Class "${cls.subject}" at ${cls.start_time} = ${classTimeMinutes} minutes`);
+      if (DEBUG_NEXT_CLASS) {
+        console.log(`🕐 [NEXT_CLASS] Class "${cls.subject}" at ${cls.start_time} = ${classTimeMinutes} minutes`);
+      }
       
       return {
         ...cls,
         timeInMinutes: classTimeMinutes
       };
     } catch (error) {
-      console.log('🕐 [NEXT_CLASS] Error parsing time for class:', cls, error);
+      if (DEBUG_NEXT_CLASS) {
+        console.log('🕐 [NEXT_CLASS] Error parsing time for class:', cls, error);
+      }
       return {
         ...cls,
         timeInMinutes: 0
@@ -169,7 +315,9 @@ function getNextClass(schedule) {
     .sort((a, b) => a.timeInMinutes - b.timeInMinutes);
   
   if (upcomingClasses.length > 0) {
-    console.log('🕐 [NEXT_CLASS] Next upcoming class:', upcomingClasses[0].subject, 'at', upcomingClasses[0].start_time);
+    if (DEBUG_NEXT_CLASS) {
+      console.log('🕐 [NEXT_CLASS] Next upcoming class:', upcomingClasses[0].subject, 'at', upcomingClasses[0].start_time);
+    }
     return upcomingClasses[0];
   }
   
@@ -178,7 +326,9 @@ function getNextClass(schedule) {
     .sort((a, b) => a.timeInMinutes - b.timeInMinutes);
   
   if (sortedClasses.length > 0) {
-    console.log('🕐 [NEXT_CLASS] No more classes today, showing first class:', sortedClasses[0].subject, 'at', sortedClasses[0].start_time);
+    if (DEBUG_NEXT_CLASS) {
+      console.log('🕐 [NEXT_CLASS] No more classes today, showing first class:', sortedClasses[0].subject, 'at', sortedClasses[0].start_time);
+    }
     return sortedClasses[0];
   }
   
@@ -204,27 +354,336 @@ function groupAndSortSchedule(schedule) {
   return sortedClassKeys.map(classKey => ({ classKey, items: groups[classKey] }));
 }
 
-  // 🚀 ENHANCED: Fetch all dashboard data with enhanced tenant system
+// 👨‍🏫 Function to fetch dashboard data using direct teacher authentication (NO TENANT REQUIRED)
+const fetchDashboardDataWithDirectAuth = async () => {
+  try {
+    const DEBUG_TEACHER_AUTH_DETAILED = false; // Set to true to see detailed teacher auth logs
+    
+    if (DEBUG_TEACHER_AUTH_DETAILED) {
+      console.log('📊 [TEACHER AUTH] Fetching dashboard data with direct teacher auth (NO TENANT)');
+      
+      // 🔍 DEBUG: Check tenant context availability
+      const { getCachedTenantId } = await import('../../utils/tenantHelpers');
+      const currentTenantId = getCachedTenantId();
+      console.log('🏢 [TEACHER AUTH DEBUG] Tenant context check:', {
+        tenantReady: isReady,
+        tenantId: currentTenantId,
+        tenantName: tenantName || 'Not available',
+        tenantError: tenantError?.message || 'None'
+      });
+    }
+    
+    // Get teacher profile
+    const profileResult = await getTeacherProfile(user.id);
+    if (!profileResult.success) {
+      throw new Error('Failed to load teacher profile: ' + profileResult.error);
+    }
+    
+    setDirectTeacherProfile(profileResult.profile);
+    setTeacherProfile(profileResult.profile); // Also set the regular teacher profile
+    
+    if (DEBUG_TEACHER_AUTH_DETAILED) {
+      console.log('✅ [TEACHER AUTH] Teacher profile loaded (NO TENANT):', profileResult.profile.name);
+    }
+    
+    // Get teacher assignments (classes and subjects) - declare variables outside
+    let classMap = {};
+    let subjectsSet = new Set();
+    let classesSet = new Set();
+    
+    const assignmentsResult = await getTeacherAssignments(user.id);
+    
+    if (assignmentsResult.success) {
+      // Process assignments data
+      const processedAssignments = assignmentsResult.assignments || [];
+      
+      processedAssignments.forEach(assignment => {
+        // The processed assignments already have flattened data structure
+        if (assignment.subject_name && assignment.class_name) {
+          const className = assignment.class_name; // Already includes section
+          const subjectName = assignment.subject_name;
+          
+          classesSet.add(className);
+          subjectsSet.add(subjectName);
+          
+          if (!classMap[className]) classMap[className] = [];
+          if (!classMap[className].includes(subjectName)) {
+            classMap[className].push(subjectName);
+          }
+        }
+      });
+      
+      setAssignedClasses(classMap);
+      
+      if (DEBUG_TEACHER_AUTH_DETAILED) {
+        console.log('✅ [TEACHER AUTH] Loaded assignments (NO TENANT):', {
+          classes: classesSet.size,
+          subjects: subjectsSet.size,
+          totalAssignments: processedAssignments.length
+        });
+      }
+    } else {
+      console.warn('⚠️ [TEACHER AUTH] Failed to load assignments:', assignmentsResult.error);
+      setAssignedClasses({});
+    }
+    
+    // Get teacher's schedule for today - declare variable outside
+    let todaySchedule = [];
+    const today = new Date().getDay();
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const todayName = dayNames[today];
+    
+    const scheduleResult = await getTeacherSchedule(user.id, todayName);
+    if (scheduleResult.success) {
+      todaySchedule = scheduleResult.schedule.map(slot => ({
+        id: slot.id,
+        subject: slot.subject,
+        class: slot.class,
+        start_time: slot.start_time,
+        end_time: slot.end_time,
+        room_number: slot.room_number,
+        day_of_week: slot.day_of_week,
+        period_number: slot.period_number
+      }));
+      
+      setSchedule(todaySchedule);
+      
+      if (DEBUG_TEACHER_AUTH_DETAILED) {
+        console.log('✅ [TEACHER AUTH] Loaded today\'s schedule (NO TENANT):', todaySchedule.length, 'classes');
+      }
+    } else {
+      console.warn('⚠️ [TEACHER AUTH] Failed to load schedule:', scheduleResult.error);
+      setSchedule([]);
+    }
+    
+    // Get teacher's students
+    const studentsResult = await getTeacherStudents(user.id);
+    let totalStudents = 0;
+    if (studentsResult.success) {
+      totalStudents = studentsResult.totalStudents;
+      
+      if (DEBUG_TEACHER_AUTH_DETAILED) {
+        console.log('✅ [TEACHER AUTH] Loaded students (NO TENANT):', totalStudents);
+      }
+    } else {
+      console.warn('⚠️ [TEACHER AUTH] Failed to load students:', studentsResult.error);
+    }
+    
+    // Get teacher's attendance data
+    const attendanceResult = await getTeacherAttendance(user.id);
+    let attendanceRate = 85; // Default fallback
+    if (attendanceResult.success) {
+      attendanceRate = attendanceResult.attendanceRate;
+      
+      if (DEBUG_TEACHER_AUTH_DETAILED) {
+        console.log('✅ [TEACHER AUTH] Loaded attendance data (NO TENANT):', attendanceRate + '%');
+      }
+    } else {
+      console.warn('⚠️ [TEACHER AUTH] Failed to load attendance:', attendanceResult.error);
+    }
+    
+    // Build teacher stats without tenant dependency - use fresh data
+    const assignmentCount = classesSet.size;
+    const subjectCount = subjectsSet.size;
+    const todayClassCount = todaySchedule.length;
+    
+    const statsData = [
+      {
+        title: 'My Students',
+        value: totalStudents.toString(),
+        icon: 'people',
+        color: '#2196F3',
+        subtitle: `${totalStudents} students across all classes`,
+        isLoading: false
+      },
+      {
+        title: 'My Subjects',
+        value: subjectCount.toString(),
+        icon: 'book',
+        color: '#4CAF50',
+        subtitle: `Teaching ${subjectCount} different subjects`,
+        isLoading: false
+      },
+      {
+        title: "Today's Classes",
+        value: todayClassCount.toString(),
+        icon: 'time',
+        color: '#FF9800',
+        subtitle: todayClassCount > 0 ? (() => {
+          const nextClass = getNextClass(todaySchedule);
+          if (!nextClass) return 'No more classes today';
+          const formattedTime = formatTimeForDisplay(nextClass.start_time);
+          return `Next: ${formattedTime}`;
+        })() : 'No classes today',
+        isLoading: false
+      },
+      {
+        title: 'Attendance Rate',
+        value: attendanceRate + '%',
+        icon: 'checkmark-circle',
+        color: attendanceRate >= 90 ? '#4CAF50' : attendanceRate >= 75 ? '#FF9800' : '#F44336',
+        subtitle: `Class attendance average`,
+        isLoading: false
+      }
+    ];
+    
+    setTeacherStats(statsData);
+    
+    if (DEBUG_TEACHER_AUTH_DETAILED) {
+      console.log('✅ [TEACHER AUTH] Updated teacher stats (NO TENANT):', {
+        students: totalStudents,
+        subjects: subjectCount,
+        todayClasses: todayClassCount,
+        attendanceRate: attendanceRate + '%'
+      });
+    }
+    
+    // Clear arrays that are not relevant for teachers using direct auth
+    setUpcomingEvents([]);
+    setPersonalTasks([]);
+    setAllPersonalTasks([]);
+    setAdminTaskList([]);
+    setAllAdminTasks([]);
+    setRecentActivities([]);
+    setAnnouncements([]);
+    
+    if (DEBUG_TEACHER_AUTH_DETAILED) {
+      console.log('🎉 [TEACHER AUTH] Dashboard data loaded successfully with direct authentication (NO TENANT)');
+    }
+    
+  } catch (error) {
+    console.error('📜 [TEACHER AUTH] Error fetching dashboard data:', error);
+    throw error;
+  }
+};
+
+  // 🚀 ENHANCED: Fetch all dashboard data with dual authentication system
   const fetchDashboardData = async () => {
+    const DEBUG_PERFORMANCE = false; // Set to true to see performance metrics
     const startTime = performance.now();
-    console.log('📊 [PERF] TeacherDashboard: Starting data fetch at', new Date().toISOString());
+    
+    if (DEBUG_PERFORMANCE) {
+      console.log('📊 [PERF] TeacherDashboard: Starting data fetch at', new Date().toISOString());
+    }
+    
+    // 🎆 EMERGENCY: Force teacher authentication check if not done
+    if (!teacherAuthChecked && user?.id) {
+      console.log('🎆 [EMERGENCY] Teacher auth not checked, checking now...');
+      try {
+        const emergencyCheck = await isUserTeacher(user.id);
+        if (emergencyCheck.success && emergencyCheck.isTeacher) {
+          console.log('🎆 [EMERGENCY] User IS a teacher, enabling direct auth mode (NO TENANT REQUIRED)');
+          setUseDirectTeacherAuth(true);
+          setTeacherAuthChecked(true);
+        } else {
+          console.log('🎆 [EMERGENCY] User is NOT a teacher');
+          setTeacherAuthChecked(true);
+        }
+      } catch (error) {
+        console.error('🎆 [EMERGENCY] Teacher check failed:', error);
+        setTeacherAuthChecked(true);
+      }
+    }
+    
+    const DEBUG_TEACHER_AUTH = false; // Set to true to see teacher auth state logs
+    
+    // Debug current authentication state
+    if (DEBUG_TEACHER_AUTH) {
+      console.log('🔍 [TEACHER AUTH] Current authentication state:', {
+        user: {
+          id: user?.id,
+          email: user?.email
+        },
+        teacherAuth: {
+          useDirectTeacherAuth,
+          teacherAuthChecked,
+          hasDirectProfile: !!directTeacherProfile
+        },
+        tenant: {
+          isReady,
+          tenantLoading,
+          tenantError: tenantError?.message
+        }
+      });
+    }
     
     try {
       setLoading(true);
       setError(null);
       
-      // 🚀 ENHANCED: Validate tenant access using new helper
-      const tenantValidationStart = performance.now();
-      const validation = validateTenantAccess();
-      console.log('📊 [PERF] Tenant validation took:', (performance.now() - tenantValidationStart).toFixed(2), 'ms');
+      // 👨‍🏫 Check if we should use direct teacher authentication (BYPASS TENANT SYSTEM)
+      if (useDirectTeacherAuth && teacherAuthChecked) {
+        if (DEBUG_TEACHER_AUTH) {
+          console.log('👨‍🏫 [TEACHER AUTH] Using direct teacher authentication mode (NO TENANT REQUIRED)');
+        }
+        try {
+          await fetchDashboardDataWithDirectAuth();
+          setLoading(false);
+          
+          if (DEBUG_TEACHER_AUTH) {
+            console.log('✅ [TEACHER AUTH] Direct teacher authentication completed successfully (NO TENANT)');
+          }
+          return;
+        } catch (directAuthError) {
+          console.error('❌ [TEACHER AUTH] Direct authentication failed:', directAuthError);
+          // For teachers, we don't fall back to tenant auth - direct auth is the only way
+          setError('Failed to load teacher data: ' + directAuthError.message);
+          setLoading(false);
+          return;
+        }
+      }
       
-      if (!validation.valid) {
-        console.error('❌ Enhanced tenant validation failed:', validation.error);
-        Alert.alert('Access Denied', validation.error);
-        setError(validation.error);
+      // Check if teacher auth check is still pending
+      if (!teacherAuthChecked) {
+        console.log('🔄 [TEACHER AUTH] Teacher auth check still pending, waiting...');
         setLoading(false);
         return;
       }
+      
+      // 🚀 ENHANCED: Validate tenant access using new helper (for non-teacher users)
+      if (DEBUG_PERFORMANCE) {
+        console.log('🏢 [TENANT AUTH] Attempting tenant-based authentication...');
+      }
+      const tenantValidationStart = performance.now();
+      const validation = validateTenantAccess();
+      
+      if (DEBUG_PERFORMANCE) {
+        console.log('📊 [PERF] Tenant validation took:', (performance.now() - tenantValidationStart).toFixed(2), 'ms');
+      }
+      
+      if (!validation.valid) {
+        console.error('❌ [TENANT AUTH] Enhanced tenant validation failed:', validation.error);
+        
+        // 👨‍🏫 Try emergency fallback to direct teacher authentication
+        console.log('🆘 [TEACHER AUTH] Attempting emergency fallback to direct teacher authentication...');
+        try {
+          const emergencyTeacherCheck = await isUserTeacher(user.id);
+          if (emergencyTeacherCheck.success && emergencyTeacherCheck.isTeacher) {
+            console.log('✅ [TEACHER AUTH] Emergency fallback successful - user is a teacher');
+            setUseDirectTeacherAuth(true);
+            setTeacherAuthChecked(true);
+            await fetchDashboardDataWithDirectAuth();
+            setLoading(false);
+            return;
+          } else {
+            console.log('⚠️ [TEACHER AUTH] Emergency fallback failed - user is not a teacher');
+          }
+        } catch (fallbackError) {
+          console.error('❌ [TEACHER AUTH] Emergency fallback error:', fallbackError);
+        }
+        
+        // If all authentication methods fail, show error
+        const errorMsg = 'Unable to load dashboard: ' + validation.error + '. Please contact support if you are a teacher.';
+        console.error('❌ [AUTH] All authentication methods failed:', errorMsg);
+        Alert.alert('Access Denied', errorMsg);
+        setError(errorMsg);
+        setLoading(false);
+        return;
+      }
+      
+      console.log('✅ [TENANT AUTH] Tenant validation successful, proceeding with tenant-based authentication');
+      
+      // Continue with existing tenant-based logic...
       
       const tenantId = validation.tenantId;
       console.log('🚀 Enhanced tenant system: Using cached tenant ID:', tenantId);
@@ -607,11 +1066,14 @@ function groupAndSortSchedule(schedule) {
         }
       ]);
       
-      // Calculate total students from assigned classes - deferred for progressive loading
+      // Calculate total students from assigned classes - use immediate data for better UX
       setTimeout(async () => {
-        console.log('📊 [PROGRESSIVE] Loading student count...');
+        console.log('📊 [PROGRESSIVE] Loading student count using working tenant system...');
         const progressiveStart = performance.now();
         try {
+          // ✅ Use the data that's already being loaded successfully by the working tenant system
+          console.log('📊 [PROGRESSIVE] Using successful tenant queries to get student count...');
+          
           // Get unique class IDs from both subject assignments and class teacher assignments
           const subjectClassIds = assignedSubjects
             .filter(assignment => assignment.subjects?.class_id)
@@ -622,43 +1084,43 @@ function groupAndSortSchedule(schedule) {
           
           const uniqueClassIds = [...new Set([...subjectClassIds, ...classTeacherClassIds])];
           
-          console.log('💼 Subject class IDs:', subjectClassIds);
-          console.log('🏫 Class teacher class IDs:', classTeacherClassIds);
-          console.log('📋 Combined unique class IDs:', uniqueClassIds);
+          console.log('💼 [PROGRESSIVE] Subject class IDs:', subjectClassIds);
+          console.log('🏫 [PROGRESSIVE] Class teacher class IDs:', classTeacherClassIds);
+          console.log('📋 [PROGRESSIVE] Combined unique class IDs:', uniqueClassIds);
           
+          // ✅ SIMPLIFIED: Get students count using the same reliable tenant system
           let progressiveTotalStudents = 0;
           const progressiveUniqueStudentIds = new Set();
           
           if (uniqueClassIds.length > 0) {
-            // 🚀 ENHANCED: Get all students from these classes using tenantDatabase
-            const studentsStart = performance.now();
-            const { data: allStudentsData, error: studentsError } = await tenantDatabase.read(
-              TABLES.STUDENTS,
-              {},  // No additional filters needed - will filter by class_id below
-              'id, class_id, name'
-            );
-            console.log('📊 [PERF] Progressive students query took:', (performance.now() - studentsStart).toFixed(2), 'ms');
-            
-            // Filter by class IDs after fetching (more efficient for large datasets)
-            const filteredStudents = allStudentsData?.filter(student => 
-              uniqueClassIds.includes(student.class_id)
-            ) || [];
-
-            if (!studentsError && filteredStudents) {
-              console.log('🚀 Progressive: Total students found across all classes:', filteredStudents.length);
-              filteredStudents.forEach(student => {
-                progressiveUniqueStudentIds.add(student.id);
-              });
-              progressiveTotalStudents = filteredStudents.length;
-            } else {
-              console.log('❌ Error fetching students progressively:', studentsError);
+            // Process each class individually to get accurate counts
+            for (const classId of uniqueClassIds) {
+              try {
+                const { data: classStudents, error: classError } = await tenantDatabase.read(
+                  TABLES.STUDENTS,
+                  { class_id: classId },
+                  'id, name, class_id'
+                );
+                
+                if (!classError && classStudents) {
+                  console.log(`✅ [PROGRESSIVE] Found ${classStudents.length} students in class ${classId}`);
+                  classStudents.forEach(student => {
+                    progressiveUniqueStudentIds.add(student.id);
+                  });
+                  progressiveTotalStudents += classStudents.length;
+                } else {
+                  console.log(`❌ [PROGRESSIVE] Error fetching students for class ${classId}:`, classError);
+                }
+              } catch (classQueryError) {
+                console.log(`❌ [PROGRESSIVE] Query error for class ${classId}:`, classQueryError);
+              }
             }
           } else {
-            console.log('⚠️ No class assignments found for teacher');
+            console.log('⚠️ [PROGRESSIVE] No class assignments found for teacher');
           }
 
           const uniqueStudentCount = progressiveUniqueStudentIds.size;
-          console.log('📊 Progressive student count - Total:', progressiveTotalStudents, 'Unique:', uniqueStudentCount);
+          console.log('📊 [PROGRESSIVE] Final student count - Total:', progressiveTotalStudents, 'Unique:', uniqueStudentCount);
           
           // 🚀 PROGRESSIVE: Get current events data using enhanced tenant system
           let currentEventsForStats = [];
@@ -670,7 +1132,9 @@ function groupAndSortSchedule(schedule) {
               { status: 'Active' },
               '*'
             );
-            console.log('📊 [PERF] Progressive events query took:', (performance.now() - eventsStart).toFixed(2), 'ms');
+            if (DEBUG_PERFORMANCE) {
+              console.log('📊 [PERF] Progressive events query took:', (performance.now() - eventsStart).toFixed(2), 'ms');
+            }
             
             // Filter and sort events client-side for better performance
             currentEventsForStats = (statsEventsData || [])
@@ -685,6 +1149,8 @@ function groupAndSortSchedule(schedule) {
           }
 
           // Update teacher stats with final data
+          console.log('✅ [PROGRESSIVE] Updating stat cards with student count:', uniqueStudentCount);
+          console.log('✅ [PROGRESSIVE] Navigation object available:', !!navigation);
           setTeacherStats([
             {
               title: 'My Students',
@@ -744,35 +1210,61 @@ function groupAndSortSchedule(schedule) {
           ]);
           
           console.log('✅ Progressive teacher stats updated with', currentEventsForStats.length, 'events');
-          console.log('📊 [PERF] Progressive loading completed in:', (performance.now() - progressiveStart).toFixed(2), 'ms');
+          if (DEBUG_PERFORMANCE) {
+            console.log('📊 [PERF] Progressive loading completed in:', (performance.now() - progressiveStart).toFixed(2), 'ms');
+          }
           
         } catch (progressiveError) {
           console.error('❌ Progressive loading error:', progressiveError);
         }
-      }, 100); // Load progressive data after 100ms
+      }, 50); // Load progressive data after 50ms for faster UI updates
 
       const totalTime = performance.now() - startTime;
-      console.log('📊 [PERF] TeacherDashboard: Total loading time:', totalTime.toFixed(2), 'ms');
-      if (totalTime > 3000) {
-        console.warn('⚠️ [PERF] TeacherDashboard: Slow loading detected! Total time:', totalTime.toFixed(2), 'ms');
+      
+      if (DEBUG_PERFORMANCE) {
+        console.log('📊 [PERF] TeacherDashboard: Total loading time:', totalTime.toFixed(2), 'ms');
+        if (totalTime > 3000) {
+          console.warn('⚠️ [PERF] TeacherDashboard: Slow loading detected! Total time:', totalTime.toFixed(2), 'ms');
+        }
       }
       setLoading(false);
     } catch (err) {
       const totalTime = performance.now() - startTime;
-      console.log('📊 [PERF] TeacherDashboard: Loading failed after:', totalTime.toFixed(2), 'ms');
+      
+      if (DEBUG_PERFORMANCE) {
+        console.log('📊 [PERF] TeacherDashboard: Loading failed after:', totalTime.toFixed(2), 'ms');
+      }
       setError(err.message);
       setLoading(false);
       console.error('Error fetching dashboard data:', err);
     }
   };
 
-  // 🚀 ENHANCED: Wait for tenant to be ready before loading data
+  // 🎆 ENHANCED: Wait for teacher auth check to complete, then load data
   useEffect(() => {
-    if (isReady && user?.id) {
-      console.log('🚀 Enhanced: Tenant and user ready, loading dashboard data...');
+    if (user?.id && teacherAuthChecked) {
+      if (useDirectTeacherAuth) {
+        // Direct teacher authentication is ready (NO TENANT REQUIRED)
+        console.log('👨‍🏫 Enhanced: Direct teacher auth ready, loading dashboard data (NO TENANT)...');
+        fetchDashboardData();
+      } else if (isReady) {
+        // Tenant-based authentication is ready (for non-teachers)
+        console.log('🎆 Enhanced: Tenant-based auth ready, loading dashboard data...');
+        fetchDashboardData();
+      } else {
+        // Teacher auth checked but not a teacher, and tenant not ready - wait for tenant
+        console.log('⚠️ Enhanced: Non-teacher user - tenant not ready, waiting...');
+      }
+    }
+  }, [user?.id, teacherAuthChecked, useDirectTeacherAuth, isReady]);
+  
+  // Separate useEffect to handle tenant readiness for non-teachers
+  useEffect(() => {
+    if (user?.id && teacherAuthChecked && !useDirectTeacherAuth && isReady) {
+      console.log('🚀 Enhanced: Tenant ready for non-teacher user, loading dashboard data...');
       fetchDashboardData();
     }
-  }, [isReady, user?.id]);
+  }, [user?.id, teacherAuthChecked, useDirectTeacherAuth, isReady]);
   
   useEffect(() => {
     if (isReady) {
@@ -875,8 +1367,12 @@ function groupAndSortSchedule(schedule) {
 
   // Effect to handle data updates when schedule changes
   useEffect(() => {
+    const DEBUG_SCHEDULE_LOADING = false; // Set to true to see schedule loading logs
+    
     if (schedule.length > 0 && !loading) {
-      console.log('📅 Schedule loaded, updating stat cards immediately...');
+      if (DEBUG_SCHEDULE_LOADING) {
+        console.log('📅 Schedule loaded, updating stat cards immediately...');
+      }
       // Force an immediate update of stat cards when schedule is loaded
       setTeacherStats(prevStats => {
         if (prevStats.length === 0) return prevStats; // Skip if stats not loaded yet
@@ -908,13 +1404,17 @@ function groupAndSortSchedule(schedule) {
 
   // Pull-to-refresh handler with cross-screen refresh
   const onRefresh = async () => {
+    const DEBUG_REFRESH = false; // Set to true to see refresh trigger logs
+    
     setRefreshing(true);
     try {
       // Refresh dashboard data
       await fetchDashboardData();
       
       // Trigger refresh on TeacherNotifications screen to keep notifications in sync
-      console.log('🔄 [TeacherDashboard] Triggering cross-screen refresh for TeacherNotifications...');
+      if (DEBUG_REFRESH) {
+        console.log('🔄 [TeacherDashboard] Triggering cross-screen refresh for TeacherNotifications...');
+      }
       triggerScreenRefresh('TeacherNotifications');
       
     } catch (error) {
@@ -1211,6 +1711,8 @@ function groupAndSortSchedule(schedule) {
 
   // Use universal notification count hook for real-time badge updates
   // IMPORTANT: Using notificationCount for bell icon (system notifications ONLY)
+  const DEBUG_NOTIFICATION_COUNTS = false; // Set to true to see detailed notification count logs
+  
   const { 
     totalCount = 0, 
     notificationCount = 0, 
@@ -1222,24 +1724,28 @@ function groupAndSortSchedule(schedule) {
     realTime: true,
     context: 'TeacherDashboard-BellIcon', // For debugging purposes
     onCountChange: (counts) => {
-      console.log('🔔 [TeacherDashboard] Notification counts updated:', counts);
-      console.log('📊 [TeacherDashboard] Count usage: Bell icon shows notificationCount =', counts.notificationCount);
+      if (DEBUG_NOTIFICATION_COUNTS) {
+        console.log('🔔 [TeacherDashboard] Notification counts updated:', counts);
+        console.log('📊 [TeacherDashboard] Count usage: Bell icon shows notificationCount =', counts.notificationCount);
+      }
     }
   }) || {};
   
   // Use notificationCount for bell icon (EXCLUDES chat messages - system notifications only)
   const unreadCount = notificationCount;
   
-  // Debug the notification count separation with clear explanation
-  console.log('📱 TeacherDashboard - Notification counts breakdown:', {
-    totalCount: totalCount + ' (messages + notifications combined)',
-    notificationCount: notificationCount + ' (system notifications only - USED IN BELL ICON)',
-    messageCount: messageCount + ' (chat messages only - NOT used in bell)',
-    unreadCount: unreadCount + ' (what actually shows in bell icon)',
-    notificationLoading,
-    userId: user?.id,
-    '⚠️ NOTE': 'Bell icon should ONLY show system notifications, NOT chat messages'
-  });
+  // Debug the notification count separation with clear explanation (only if debug enabled)
+  if (DEBUG_NOTIFICATION_COUNTS) {
+    console.log('📱 TeacherDashboard - Notification counts breakdown:', {
+      totalCount: totalCount + ' (messages + notifications combined)',
+      notificationCount: notificationCount + ' (system notifications only - USED IN BELL ICON)',
+      messageCount: messageCount + ' (chat messages only - NOT used in bell)',
+      unreadCount: unreadCount + ' (what actually shows in bell icon)',
+      notificationLoading,
+      userId: user?.id,
+      '⚠️ NOTE': 'Bell icon should ONLY show system notifications, NOT chat messages'
+    });
+  }
 
   // No need for manual refresh - universal hook handles everything automatically
   
@@ -1318,13 +1824,17 @@ function groupAndSortSchedule(schedule) {
 
   // Add real-time clock updates for time-sensitive stat cards
   useEffect(() => {
+    const DEBUG_REAL_TIME = false; // Set to true to see real-time update logs
+    
     // Update current time every minute to refresh next class logic
     const timer = setInterval(() => {
       setCurrentTime(new Date());
       
       // Only update stats if we have schedule data and teacher stats
       if (schedule.length > 0 && teacherStats.length >= 3) {
-        console.log('🔄 [REAL_TIME] Updating next class display...');
+        if (DEBUG_REAL_TIME) {
+          console.log('🔄 [REAL_TIME] Updating next class display...');
+        }
         
         // Update just the Today's Classes stat card with new time calculation
         setTeacherStats(prevStats => {
@@ -1544,6 +2054,7 @@ function groupAndSortSchedule(schedule) {
                 color="#2196F3"
                 subtitle="Loading..."
                 loading={loading}
+                onPress={() => navigation?.navigate('ViewStudentInfo')}
               />
             )}
 
@@ -1557,6 +2068,7 @@ function groupAndSortSchedule(schedule) {
                 color="#4CAF50"
                 subtitle="Loading..."
                 loading={loading}
+                onPress={() => navigation?.navigate('TeacherSubjects')}
               />
             )}
 
@@ -1570,6 +2082,7 @@ function groupAndSortSchedule(schedule) {
                 color="#FF9800"
                 subtitle="Loading..."
                 loading={loading}
+                onPress={() => navigation?.navigate('TeacherTimetable')}
               />
             )}
 
@@ -1583,6 +2096,7 @@ function groupAndSortSchedule(schedule) {
                 color="#4CAF50"
                 subtitle="Loading..."
                 loading={loading}
+                onPress={() => navigation?.navigate('Attendance')}
               />
             )}
           </View>

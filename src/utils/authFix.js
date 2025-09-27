@@ -7,9 +7,12 @@ import { supabase } from './supabase';
  * This utility provides functions to handle authentication issues
  */
 
+// Debug flag - set to false to disable verbose auth fix logging
+const DEBUG_AUTH_FIX_LOGS = false;
+
 export class AuthFix {
   /**
-   * Timeout wrapper for async operations
+   * Helper function to add timeout to promises
    */
   static async withTimeout(promise, timeoutMs = 5000) {
     return Promise.race([
@@ -25,7 +28,7 @@ export class AuthFix {
    */
   static async clearAllAuthData() {
     try {
-      console.log('🧹 Clearing all authentication data...');
+      if (DEBUG_AUTH_FIX_LOGS) console.log('🧼 Clearing all authentication data...');
       
       // List of possible auth storage keys
       const authKeys = [
@@ -42,9 +45,9 @@ export class AuthFix {
       for (const key of authKeys) {
         try {
           await this.withTimeout(AsyncStorage.removeItem(key), 2000);
-          console.log(`✅ Cleared: ${key}`);
+          if (DEBUG_AUTH_FIX_LOGS) console.log(`✅ Cleared: ${key}`);
         } catch (error) {
-          console.warn(`⚠️ Could not clear ${key}:`, error.message);
+          if (DEBUG_AUTH_FIX_LOGS) console.warn(`⚠️ Could not clear ${key}:`, error.message);
         }
       }
       
@@ -62,16 +65,16 @@ export class AuthFix {
           for (const key of authRelatedKeys) {
             try {
               await AsyncStorage.removeItem(key);
-              console.log(`✅ Cleared auth-related key: ${key}`);
+              if (DEBUG_AUTH_FIX_LOGS) console.log(`✅ Cleared auth-related key: ${key}`);
             } catch (error) {
-              console.warn(`⚠️ Could not clear ${key}:`, error.message);
+              if (DEBUG_AUTH_FIX_LOGS) console.warn(`⚠️ Could not clear ${key}:`, error.message);
             }
           }
         } catch (error) {
-          console.warn('⚠️ Could not enumerate all storage keys (this is normal on web):', error.message);
+          if (DEBUG_AUTH_FIX_LOGS) console.warn('⚠️ Could not enumerate all storage keys (this is normal on web):', error.message);
         }
       } else {
-        console.log('🌐 Web platform - skipping key enumeration to prevent hanging');
+        if (DEBUG_AUTH_FIX_LOGS) console.log('🌐 Web platform - skipping key enumeration to prevent hanging');
         
         // On web, try to clear additional web-specific keys
         const webAuthKeys = [
@@ -84,14 +87,14 @@ export class AuthFix {
         for (const key of webAuthKeys) {
           try {
             await AsyncStorage.removeItem(key);
-            console.log(`✅ Cleared web key: ${key}`);
+            if (DEBUG_AUTH_FIX_LOGS) console.log(`✅ Cleared web key: ${key}`);
           } catch (error) {
             // Ignore errors for web-specific keys
           }
         }
       }
       
-      console.log('✅ All authentication data cleared');
+      if (DEBUG_AUTH_FIX_LOGS) console.log('✅ All authentication data cleared');
       return true;
     } catch (error) {
       console.error('❌ Error clearing auth data:', error);
@@ -104,7 +107,7 @@ export class AuthFix {
    */
   static async forceSignOut() {
     try {
-      console.log('🚪 Force signing out...');
+      if (DEBUG_AUTH_FIX_LOGS) console.log('🚺 Force signing out...');
       
       // Try to sign out through Supabase (may fail if token is invalid)
       try {
@@ -112,7 +115,7 @@ export class AuthFix {
         if (error) {
           console.warn('⚠️ Supabase signOut error (expected):', error.message);
         } else {
-          console.log('✅ Supabase signOut successful');
+          if (DEBUG_AUTH_FIX_LOGS) console.log('✅ Supabase signOut successful');
         }
       } catch (signOutError) {
         console.warn('⚠️ Supabase signOut failed (expected):', signOutError.message);
@@ -136,7 +139,7 @@ export class AuthFix {
     const VALIDATION_TIMEOUT = Platform.OS === 'web' ? 4000 : 8000; // Much shorter timeout for web
     
     try {
-      console.log('🔍 Validating current session...');
+      if (DEBUG_AUTH_FIX_LOGS) console.log('🔍 Validating current session...');
       
       // Wrap the validation in a timeout to prevent hanging
       const result = await this.withTimeout(this._performSessionValidation(), VALIDATION_TIMEOUT);

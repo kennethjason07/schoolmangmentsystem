@@ -16,6 +16,9 @@ export const useGlobalRefresh = () => {
 };
 
 export const GlobalRefreshProvider = ({ children }) => {
+  // Debug flag for refresh logging
+  const DEBUG_GLOBAL_REFRESH = false; // Set to true to see detailed refresh logs
+  
   // Store refresh callbacks from different screens
   const refreshCallbacks = useRef({});
 
@@ -27,13 +30,19 @@ export const GlobalRefreshProvider = ({ children }) => {
     }
     
     refreshCallbacks.current[screenName] = refreshFn;
-    console.log(`🔄 [GlobalRefresh] Registered refresh callback for ${screenName}`);
+    
+    if (DEBUG_GLOBAL_REFRESH) {
+      console.log(`🔄 [GlobalRefresh] Registered refresh callback for ${screenName}`);
+    }
   }, []);
 
   // Unregister a screen's refresh function
   const unregisterRefreshCallback = useCallback((screenName) => {
     delete refreshCallbacks.current[screenName];
-    console.log(`🔄 [GlobalRefresh] Unregistered refresh callback for ${screenName}`);
+    
+    if (DEBUG_GLOBAL_REFRESH) {
+      console.log(`🔄 [GlobalRefresh] Unregistered refresh callback for ${screenName}`);
+    }
   }, []);
 
   // Trigger refresh for all registered screens
@@ -71,16 +80,22 @@ export const GlobalRefreshProvider = ({ children }) => {
       screenNames = [screenNames];
     }
 
-    console.log(`🔄 [GlobalRefresh] Triggering refresh for screens:`, screenNames);
+    if (DEBUG_GLOBAL_REFRESH) {
+      console.log(`🔄 [GlobalRefresh] Triggering refresh for screens:`, screenNames);
+    }
 
     const refreshPromises = screenNames.map(async (screenName) => {
       try {
         const refreshFn = refreshCallbacks.current[screenName];
         if (refreshFn) {
           await refreshFn();
-          console.log(`✅ [GlobalRefresh] ${screenName} refreshed successfully`);
+          if (DEBUG_GLOBAL_REFRESH) {
+            console.log(`✅ [GlobalRefresh] ${screenName} refreshed successfully`);
+          }
         } else {
-          console.warn(`⚠️ [GlobalRefresh] No refresh callback found for ${screenName}`);
+          if (DEBUG_GLOBAL_REFRESH) {
+            console.warn(`⚠️ [GlobalRefresh] No refresh callback found for ${screenName}`);
+          }
         }
       } catch (error) {
         console.error(`❌ [GlobalRefresh] Failed to refresh ${screenName}:`, error);

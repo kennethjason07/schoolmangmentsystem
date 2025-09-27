@@ -139,16 +139,53 @@ export const createTenantQuery = (tenantId, table, selectClause = '*', filters =
     throw new Error('No tenant ID provided. Please ensure tenant is initialized.');
   }
 
-  console.log(`🔍 Creating tenant query for '${selectClause}' with tenant_id: ${tenantId}`);
+  // console.log(`🔍 Creating tenant query for '${selectClause}' with tenant_id: ${tenantId}`);
   
   let query = supabase
     .from(table)
     .select(selectClause)
     .eq('tenant_id', tenantId);
 
-  // Apply additional filters
+  // Apply additional filters with support for complex operators
   Object.entries(filters).forEach(([key, value]) => {
-    query = query.eq(key, value);
+    if (typeof value === 'object' && value !== null) {
+      // Handle complex operators like { in: [...] }, { gte: value }, etc.
+      Object.entries(value).forEach(([operator, operatorValue]) => {
+        switch (operator) {
+          case 'in':
+            query = query.in(key, operatorValue);
+            break;
+          case 'gte':
+            query = query.gte(key, operatorValue);
+            break;
+          case 'lte':
+            query = query.lte(key, operatorValue);
+            break;
+          case 'gt':
+            query = query.gt(key, operatorValue);
+            break;
+          case 'lt':
+            query = query.lt(key, operatorValue);
+            break;
+          case 'neq':
+            query = query.neq(key, operatorValue);
+            break;
+          case 'like':
+            query = query.like(key, operatorValue);
+            break;
+          case 'ilike':
+            query = query.ilike(key, operatorValue);
+            break;
+          default:
+            console.warn(`Unknown operator '${operator}' for key '${key}'. Using eq as fallback.`);
+            query = query.eq(key, operatorValue);
+            break;
+        }
+      });
+    } else {
+      // Handle simple equality filters
+      query = query.eq(key, value);
+    }
   });
 
   return query;
@@ -173,9 +210,46 @@ export const createTenantDeleteQuery = (tenantId, table, filters = {}) => {
     .delete()
     .eq('tenant_id', tenantId);
 
-  // Apply additional filters
+  // Apply additional filters with support for complex operators
   Object.entries(filters).forEach(([key, value]) => {
-    query = query.eq(key, value);
+    if (typeof value === 'object' && value !== null) {
+      // Handle complex operators like { in: [...] }, { gte: value }, etc.
+      Object.entries(value).forEach(([operator, operatorValue]) => {
+        switch (operator) {
+          case 'in':
+            query = query.in(key, operatorValue);
+            break;
+          case 'gte':
+            query = query.gte(key, operatorValue);
+            break;
+          case 'lte':
+            query = query.lte(key, operatorValue);
+            break;
+          case 'gt':
+            query = query.gt(key, operatorValue);
+            break;
+          case 'lt':
+            query = query.lt(key, operatorValue);
+            break;
+          case 'neq':
+            query = query.neq(key, operatorValue);
+            break;
+          case 'like':
+            query = query.like(key, operatorValue);
+            break;
+          case 'ilike':
+            query = query.ilike(key, operatorValue);
+            break;
+          default:
+            console.warn(`Unknown operator '${operator}' for key '${key}'. Using eq as fallback.`);
+            query = query.eq(key, operatorValue);
+            break;
+        }
+      });
+    } else {
+      // Handle simple equality filters
+      query = query.eq(key, value);
+    }
   });
 
   return query;
@@ -212,9 +286,46 @@ export const createCachedTenantQuery = (table, selectClause = '*', filters = {})
     query = query.eq('tenant_id', tenantId);
   }
 
-  // Apply additional filters
+  // Apply additional filters with support for complex operators
   Object.entries(filters).forEach(([key, value]) => {
-    query = query.eq(key, value);
+    if (typeof value === 'object' && value !== null) {
+      // Handle complex operators like { in: [...] }, { gte: value }, etc.
+      Object.entries(value).forEach(([operator, operatorValue]) => {
+        switch (operator) {
+          case 'in':
+            query = query.in(key, operatorValue);
+            break;
+          case 'gte':
+            query = query.gte(key, operatorValue);
+            break;
+          case 'lte':
+            query = query.lte(key, operatorValue);
+            break;
+          case 'gt':
+            query = query.gt(key, operatorValue);
+            break;
+          case 'lt':
+            query = query.lt(key, operatorValue);
+            break;
+          case 'neq':
+            query = query.neq(key, operatorValue);
+            break;
+          case 'like':
+            query = query.like(key, operatorValue);
+            break;
+          case 'ilike':
+            query = query.ilike(key, operatorValue);
+            break;
+          default:
+            console.warn(`Unknown operator '${operator}' for key '${key}'. Using eq as fallback.`);
+            query = query.eq(key, operatorValue);
+            break;
+        }
+      });
+    } else {
+      // Handle simple equality filters
+      query = query.eq(key, value);
+    }
   });
 
   return query;
@@ -402,7 +513,7 @@ export const tenantDatabase = {
  */
 export const initializeTenantHelpers = (tenantId) => {
   setCachedTenantId(tenantId);
-  console.log('🚀 TenantHelpers: Initialized with tenant ID:', tenantId);
+  // console.log('🚀 TenantHelpers: Initialized with tenant ID:', tenantId);
 };
 
 /**
