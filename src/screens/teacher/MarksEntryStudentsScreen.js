@@ -125,15 +125,16 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
       
       // 🚀 ENHANCED: Get all students from assigned classes using createTenantQuery
       const { data: studentsData, error: studentsError } = await createTenantQuery(
-        TABLES.STUDENTS,
+        tenantId, // First parameter: tenant ID
+        TABLES.STUDENTS, // Second parameter: table name
         `
           id,
           name,
           roll_no,
           admission_no,
           classes(class_name, section)
-        `,
-        { class_id: { in: classIds } }
+        `, // Third parameter: select clause
+        { class_id: { in: classIds } } // Fourth parameter: filters
       )
         .order('roll_no');
 
@@ -198,9 +199,10 @@ export default function MarksEntryStudentsScreen({ navigation, route }) {
         try {
           // 🚀 ENHANCED: Use createTenantQuery for automatic tenant filtering
           const { data: batchMarks, error: batchError } = await createTenantQuery(
-            TABLES.MARKS,
-            'student_id, subject_id, marks_obtained, max_marks, grade, created_at',
-            { 
+            validation.tenantId, // First parameter: tenant ID
+            TABLES.MARKS, // Second parameter: table name
+            'student_id, subject_id, marks_obtained, max_marks, grade, created_at', // Third parameter: select clause
+            { // Fourth parameter: filters
               subject_id: { in: validSubjectIds },
               student_id: { in: studentBatch }
             }

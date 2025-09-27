@@ -1600,13 +1600,15 @@ const fetchDashboardDataWithDirectAuth = async () => {
         return;
       }
       
-      // 🚀 ENHANCED: Use createTenantQuery for complex admin task update
-      const { error } = await createTenantQuery(validation.tenantId, TABLES.TASKS)
+      // 🚀 ENHANCED: Use supabase directly for update operation with tenant validation
+      const { error } = await supabase
+        .from(TABLES.TASKS)
         .update({
           status: 'Completed',
           completed_at: new Date().toISOString()
         })
         .eq('id', id)
+        .eq('tenant_id', validation.tenantId) // Ensure tenant isolation
         .overlaps('assigned_teacher_ids', [teacherProfile?.id]);
 
       if (error) {

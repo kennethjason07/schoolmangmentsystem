@@ -75,13 +75,14 @@ const StudentMarksScreen = ({ navigation, route }) => {
       
       // 🚀 ENHANCED: Get marks using createTenantQuery with automatic tenant filtering
       const { data: marksData, error: marksError } = await createTenantQuery(
-        TABLES.MARKS,
+        tenantId, // First parameter: tenant ID
+        TABLES.MARKS, // Second parameter: table name
         `
           *,
           subjects(name),
           exams(name, start_date, end_date)
-        `,
-        { student_id: student.id }
+        `, // Third parameter: select clause
+        { student_id: student.id } // Fourth parameter: filters
       )
         .order('created_at', { ascending: false });
 

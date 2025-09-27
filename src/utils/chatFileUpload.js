@@ -1,10 +1,49 @@
 import { supabase } from './supabase';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import { decode as atob } from 'base-64';
 
 /**
  * Utility functions for handling chat file uploads to Supabase Storage
+ * Updated for Expo FileSystem API v54 (using File class)
  */
+
+// Validate expo-file-system import
+if (!File) {
+  console.error('❌ expo-file-system File class is not properly imported or unavailable');
+}
+
+/**
+ * Modern file reading utility using Expo FileSystem v54 File class
+ * @param {string} uri - File URI to read
+ * @returns {Promise<string>} - Base64 encoded string
+ */
+const readFileAsBase64 = async (uri) => {
+  try {
+    console.log('🔄 Using new Expo FileSystem v54 File class for chat');
+    
+    // Create File instance from URI
+    const file = new File(uri);
+    
+    // Check if file exists
+    if (!file.exists) {
+      throw new Error(`Chat file does not exist at URI: ${uri}`);
+    }
+    
+    // Use the new base64() method from File class
+    const base64String = await file.base64();
+    
+    if (!base64String || typeof base64String !== 'string') {
+      throw new Error('Invalid base64 data received from File.base64()');
+    }
+    
+    console.log('✅ Successfully read chat file using File.base64() method');
+    return base64String;
+    
+  } catch (error) {
+    console.error('❌ Error reading chat file with new FileSystem API:', error.message);
+    throw new Error(`Failed to read chat file using new FileSystem API: ${error.message}`);
+  }
+};
 
 /**
  * Upload a file to the chat-files bucket
@@ -43,16 +82,24 @@ export const uploadChatFile = async (file, senderId, receiverId, studentId = nul
     if (file.uri) {
       console.log('🔄 Reading file via FileSystem:', file.uri);
       
-      // Use expo-file-system to read the file as base64
-      const base64 = await FileSystem.readAsStringAsync(file.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      
-      // Convert base64 → Uint8Array (React Native Blob polyfill doesn't support ArrayBuffer)
-      fileData = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-      contentType = file.mimeType || file.type || 'application/octet-stream';
-      
-      console.log('📦 File data created via FileSystem, size:', fileData.length, 'type:', contentType);
+      try {
+        // Use robust file reading utility
+        const base64 = await readFileAsBase64(file.uri);
+        
+        // Validate base64 string
+        if (!base64 || typeof base64 !== 'string') {
+          throw new Error('Invalid base64 data received from file reading');
+        }
+        
+        // Convert base64 → Uint8Array (React Native Blob polyfill doesn't support ArrayBuffer)
+        fileData = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+        contentType = file.mimeType || file.type || 'application/octet-stream';
+        
+        console.log('📦 Chat file data created via FileSystem, size:', fileData.length, 'type:', contentType);
+      } catch (readError) {
+        console.error('❌ Error reading chat file:', readError);
+        throw new Error(`Failed to read chat file: ${readError.message}`);
+      }
     } else {
       throw new Error('No file URI provided');
     }
