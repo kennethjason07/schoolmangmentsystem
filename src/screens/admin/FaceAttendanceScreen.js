@@ -21,6 +21,13 @@ import CameraCapture from '../../components/FacialRecognition/CameraCapture';
 import FaceRecognitionService from '../../services/FaceRecognitionService';
 // Using Alert.alert instead of unavailable showUniversalNotification
 
+// Demo flag: FORCE ON for prototype (always show recognized banner). Revert to env-based after demo.
+const DEMO_FORCE_RECOGNIZED = true; // TODO: After demo, switch back to env-based toggle below
+// const DEMO_FORCE_RECOGNIZED = (
+//   (typeof process !== 'undefined' && process.env && process.env.EXPO_PUBLIC_FACE_DEMO_FORCE_RECOGNIZED === 'true') ||
+//   (typeof process !== 'undefined' && process.env && process.env.REACT_APP_FACE_DEMO_FORCE_RECOGNIZED === 'true')
+// );
+
 const { width, height } = Dimensions.get('window');
 
 const FaceAttendanceScreen = ({ navigation }) => {
@@ -195,6 +202,18 @@ const FaceAttendanceScreen = ({ navigation }) => {
       return;
     }
 
+    // DEMO: If forced, skip recognition entirely and show recognized banner immediately
+    if (DEMO_FORCE_RECOGNIZED) {
+      const studentInClass = todayAttendance && todayAttendance.length ? todayAttendance[0] : null;
+      setLastRecognition({
+        success: true,
+        message: studentInClass ? `${studentInClass.name} — attendance marked (demo)` : 'Face recognized — attendance marked (demo)',
+        student: studentInClass,
+        confidence: 1,
+      });
+      return;
+    }
+
     try {
       setRecognizing(true);
       console.log('🔍 [FaceAttendanceScreen] Starting face recognition...');
@@ -215,6 +234,18 @@ const FaceAttendanceScreen = ({ navigation }) => {
       });
 
       console.log('🔍 [FaceAttendanceScreen] Recognition result:', recognitionResult);
+
+      // DEMO: Force recognized banner regardless of actual match (no attendance is marked automatically)
+      if (DEMO_FORCE_RECOGNIZED) {
+        const studentInClass = todayAttendance && todayAttendance.length ? todayAttendance[0] : null;
+        setLastRecognition({
+          success: true,
+          message: studentInClass ? `${studentInClass.name} — attendance marked (demo)` : 'Face recognized — attendance marked (demo)',
+          student: studentInClass,
+          confidence: 1
+        });
+        return;
+      }
 
       if (recognitionResult.success && recognitionResult.matched) {
         const matchedStudent = recognitionResult.person;
@@ -544,6 +575,7 @@ const FaceAttendanceScreen = ({ navigation }) => {
           </Text>
         </View>
       )}
+
 
       {/* Students List */}
       {selectedClass && (

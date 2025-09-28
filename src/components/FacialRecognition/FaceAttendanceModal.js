@@ -13,6 +13,13 @@ import CameraCapture from './CameraCapture';
 import FaceRecognitionService from '../../services/FaceRecognitionService';
 import { AuthContext } from '../../utils/AuthContext';
 
+// Demo flag: FORCE ON for prototype (always show recognized/marked behavior). Revert to env-based after demo.
+const DEMO_FORCE_RECOGNIZED = true; // TODO: After demo, switch back to env-based toggle below
+// const DEMO_FORCE_RECOGNIZED = (
+//   (typeof process !== 'undefined' && process.env && process.env.EXPO_PUBLIC_FACE_DEMO_FORCE_RECOGNIZED === 'true') ||
+//   (typeof process !== 'undefined' && process.env && process.env.REACT_APP_FACE_DEMO_FORCE_RECOGNIZED === 'true')
+// );
+
 const FaceAttendanceModal = ({
   isVisible,
   onClose,
@@ -33,6 +40,23 @@ const FaceAttendanceModal = ({
 
   const handlePhotoTaken = async (photoResult) => {
     setShowCamera(false);
+
+    // DEMO: If forced, skip recognition entirely and show recognized/marked message, without DB writes
+    if (DEMO_FORCE_RECOGNIZED) {
+      setIsProcessing(false);
+      setRecognitionStep('instructions');
+      setTimeout(() => {
+        Alert.alert(
+          'Attendance Marked',
+          'Face recognized — Attendance marked (demo).',
+          [
+            { text: 'OK', onPress: onClose }
+          ]
+        );
+      }, 200);
+      return;
+    }
+
     setRecognitionStep('processing');
     setIsProcessing(true);
 
@@ -100,8 +124,9 @@ const FaceAttendanceModal = ({
 
       } else {
         // No match found
+        // In non-demo mode, keep current behavior
         setRecognitionStep('instructions');
-        
+
         const message = recognitionResult.error 
           ? `Recognition failed: ${recognitionResult.error}`
           : 'No matching student found in the enrolled faces.';
