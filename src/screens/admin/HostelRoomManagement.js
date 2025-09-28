@@ -18,10 +18,18 @@ import Header from '../../components/Header';
 const { width } = Dimensions.get('window');
 
 const HostelRoomManagement = ({ navigation, route }) => {
-  const { hostel } = route.params;
+  const { hostel, allocationContext } = route.params;
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [rooms, setRooms] = useState([]);
+  
+  // Filter states
+  const [floorFilter, setFloorFilter] = useState('all');
+  const [availabilityFilter, setAvailabilityFilter] = useState('all');
+  
+  // Dropdown states
+  const [showFloorDropdown, setShowFloorDropdown] = useState(false);
+  const [showAvailabilityDropdown, setShowAvailabilityDropdown] = useState(false);
   
   // Modal states
   const [addRoomModalVisible, setAddRoomModalVisible] = useState(false);
@@ -48,6 +56,17 @@ const HostelRoomManagement = ({ navigation, route }) => {
 
   useEffect(() => {
     loadRooms();
+  }, []);
+
+  // Show allocation message if in allocation mode
+  useEffect(() => {
+    if (allocationContext) {
+      Alert.alert(
+        'Room Allocation',
+        `Select a room in ${hostel.name} for ${allocationContext.student.first_name} ${allocationContext.student.last_name}`,
+        [{ text: 'OK' }]
+      );
+    }
   }, []);
 
   const loadRooms = () => {
@@ -107,6 +126,44 @@ const HostelRoomManagement = ({ navigation, route }) => {
       setRooms(mockRooms);
       setLoading(false);
     }, 1000);
+  };
+
+  // Get unique floors for dropdown
+  const getUniqueFloors = () => {
+    const floors = [...new Set(rooms.map(room => room.floor))];
+    return floors.sort((a, b) => parseInt(a) - parseInt(b));
+  };
+
+  // Filter rooms based on selected filters
+  const getFilteredRooms = () => {
+    return rooms.filter(room => {
+      // Floor filter
+      if (floorFilter !== 'all' && room.floor !== floorFilter) {
+        return false;
+      }
+      
+      // Availability filter
+      const availableBeds = room.capacity - room.occupied;
+      switch (availabilityFilter) {
+        case 'full':
+          return availableBeds === 0;
+        case 'empty':
+          return availableBeds === room.capacity;
+        case 'partial':
+          return availableBeds > 0 && availableBeds < room.capacity;
+        default:
+          return true;
+      }
+    });
+  };
+
+  // Get room count text for display
+  const getRoomCountText = () => {
+    const filteredCount = getFilteredRooms().length;
+    if (floorFilter === 'all' && availabilityFilter === 'all') {
+      return `${rooms.length} rooms`;
+    }
+    return `${filteredCount} of ${rooms.length} rooms`;
   };
 
   const onRefresh = async () => {
@@ -231,7 +288,25 @@ const HostelRoomManagement = ({ navigation, route }) => {
   };
 
   const renderRoomCard = (room) => (
-    <View key={room.id} style={styles.roomCard}>
+    <TouchableOpacity 
+      key={room.id} 
+      style={styles.roomCard}
+      onPress={() => {
+        if (allocationContext && room.status === 'active' && room.occupied < room.capacity) {
+          // Navigate to bed management for allocation
+          navigation.navigate('HostelBedManagement', { 
+            hostel, 
+            room,
+            allocationContext: allocationContext
+          });
+        } else if (allocationContext) {
+          Alert.alert(
+            'Cannot Allocate',
+            'This room is not available for allocation. Please select another room.'
+          );
+        }
+      }}
+    >
       <View style={styles.roomHeader}>
         <View style={styles.roomTitleContainer}>
           <Text style={styles.roomNumber}>{room.room_number}</Text>
@@ -292,27 +367,36 @@ const HostelRoomManagement = ({ navigation, route }) => {
       <View style={styles.cardActions}>
         <TouchableOpacity
           style={[styles.actionButton, { backgroundColor: '#2196F3' }]}
-          onPress={() => navigation.navigate('HostelBedManagement', { hostel, room })}
+          onPress={(e) => {
+            e.stopPropagation();
+            navigation.navigate('HostelBedManagement', { hostel, room });
+          }}
         >
           <Ionicons name="bed" size={16} color="#fff" />
           <Text style={styles.actionButtonText}>Manage Beds</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.actionButton, { backgroundColor: '#FF9800' }]}
-          onPress={() => openEditModal(room)}
+          onPress={(e) => {
+            e.stopPropagation();
+            openEditModal(room);
+          }}
         >
           <Ionicons name="create" size={16} color="#fff" />
           <Text style={styles.actionButtonText}>Edit</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.actionButton, { backgroundColor: '#F44336' }]}
-          onPress={() => deleteRoom(room)}
+          onPress={(e) => {
+            e.stopPropagation();
+            deleteRoom(room);
+          }}
         >
           <Ionicons name="trash" size={16} color="#fff" />
           <Text style={styles.actionButtonText}>Delete</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const RoomModal = ({ visible, onClose, onSubmit, title, isEdit = false }) => (
@@ -339,31 +423,22 @@ const HostelRoomManagement = ({ navigation, route }) => {
             
             <View style={styles.pickerContainer}>
               <Text style={styles.pickerLabel}>Room Type</Text>
-              {roomTypes.map((type) => (
-                <TouchableOpacity
-                  key={type.value}
-                  style={[
-                    styles.pickerOption,
-                    roomData.room_type === type.value && styles.pickerOptionSelected
-                  ]}
-                  onPress={() => {
-                    setRoomData(prev => ({ 
-                      ...prev, 
-                      room_type: type.value,
-                      capacity: type.value === 'single' ? '1' : 
-                               type.value === 'double' ? '2' : 
-                               type.value === 'triple' ? '3' : '4'
-                    }));
-                  }}
-                >
-                  <Text style={[
-                    styles.pickerOptionText,
-                    roomData.room_type === type.value && styles.pickerOptionTextSelected
-                  ]}>
-                    {type.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              <Picker
+                selectedValue={roomData.room_type}
+                onValueChange={(itemValue) => {
+                  setRoomData(prev => ({ 
+                    ...prev, 
+                    room_type: itemValue,
+                    capacity: itemValue === 'single' ? '1' : 
+                             itemValue === 'double' ? '2' : 
+                             itemValue === 'triple' ? '3' : '4'
+                  }));
+                }}
+              >
+                {roomTypes.map((type) => (
+                  <Picker.Item key={type.value} label={type.label} value={type.value} />
+                ))}
+              </Picker>
             </View>
             
             <TextInput
@@ -428,7 +503,7 @@ const HostelRoomManagement = ({ navigation, route }) => {
       <Header
         title={`${hostel.name} - Rooms`}
         onBackPress={() => navigation.goBack()}
-        showBackButton={true}
+        showBack={true}
       />
 
       <View style={styles.headerSection}>
@@ -436,7 +511,7 @@ const HostelRoomManagement = ({ navigation, route }) => {
           <Ionicons name="business" size={28} color="#2196F3" />
           <View style={styles.titleInfo}>
             <Text style={styles.mainTitle}>Room Management</Text>
-            <Text style={styles.subtitle}>{hostel.name}</Text>
+            <Text style={styles.subtitle}>{hostel.name} • {getRoomCountText()}</Text>
           </View>
         </View>
         <TouchableOpacity
@@ -458,6 +533,50 @@ const HostelRoomManagement = ({ navigation, route }) => {
           style={styles.scrollView}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
+          {/* Filter Section */}
+          <View style={styles.filterSection}>
+            <View style={styles.filterRow}>
+              <View style={styles.filterGroup}>
+                <Text style={styles.filterLabel}>Floor:</Text>
+                <TouchableOpacity 
+                  style={styles.dropdown}
+                  onPress={() => setShowFloorDropdown(true)}
+                >
+                  <Text style={styles.dropdownText}>
+                    {floorFilter === 'all' ? 'All Floors' : `Floor ${floorFilter}`}
+                  </Text>
+                  <Ionicons name="chevron-down" size={16} color="#666" />
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.filterGroup}>
+                <Text style={styles.filterLabel}>Availability:</Text>
+                <TouchableOpacity 
+                  style={styles.dropdown}
+                  onPress={() => setShowAvailabilityDropdown(true)}
+                >
+                  <Text style={styles.dropdownText}>
+                    {availabilityFilter === 'all' ? 'All Rooms' : 
+                     availabilityFilter === 'full' ? 'Full (0 available)' :
+                     availabilityFilter === 'empty' ? 'Empty (All available)' :
+                     'Partially Occupied'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={16} color="#666" />
+                </TouchableOpacity>
+              </View>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.resetButton}
+              onPress={() => {
+                setFloorFilter('all');
+                setAvailabilityFilter('all');
+              }}
+            >
+              <Text style={styles.resetButtonText}>Reset Filters</Text>
+            </TouchableOpacity>
+          </View>
+          
           {rooms.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="bed-outline" size={64} color="#ccc" />
@@ -473,11 +592,110 @@ const HostelRoomManagement = ({ navigation, route }) => {
             </View>
           ) : (
             <View style={styles.roomsList}>
-              {rooms.map(renderRoomCard)}
+              {getFilteredRooms().map(renderRoomCard)}
             </View>
           )}
         </ScrollView>
       )}
+
+      {/* Floor Dropdown Modal */}
+      <Modal
+        visible={showFloorDropdown}
+        transparent={true}
+        animationType="fade"
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay}
+          onPress={() => setShowFloorDropdown(false)}
+        >
+          <View style={styles.dropdownModal}>
+            <TouchableOpacity
+              style={styles.dropdownItem}
+              onPress={() => {
+                setFloorFilter('all');
+                setShowFloorDropdown(false);
+              }}
+            >
+              <Text style={[styles.dropdownItemText, floorFilter === 'all' && styles.dropdownItemTextSelected]}>
+                All Floors
+              </Text>
+            </TouchableOpacity>
+            {getUniqueFloors().map(floor => (
+              <TouchableOpacity
+                key={floor}
+                style={styles.dropdownItem}
+                onPress={() => {
+                  setFloorFilter(floor);
+                  setShowFloorDropdown(false);
+                }}
+              >
+                <Text style={[styles.dropdownItemText, floorFilter === floor && styles.dropdownItemTextSelected]}>
+                  Floor {floor}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Availability Dropdown Modal */}
+      <Modal
+        visible={showAvailabilityDropdown}
+        transparent={true}
+        animationType="fade"
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay}
+          onPress={() => setShowAvailabilityDropdown(false)}
+        >
+          <View style={styles.dropdownModal}>
+            <TouchableOpacity
+              style={styles.dropdownItem}
+              onPress={() => {
+                setAvailabilityFilter('all');
+                setShowAvailabilityDropdown(false);
+              }}
+            >
+              <Text style={[styles.dropdownItemText, availabilityFilter === 'all' && styles.dropdownItemTextSelected]}>
+                All Rooms
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.dropdownItem}
+              onPress={() => {
+                setAvailabilityFilter('full');
+                setShowAvailabilityDropdown(false);
+              }}
+            >
+              <Text style={[styles.dropdownItemText, availabilityFilter === 'full' && styles.dropdownItemTextSelected]}>
+                Full (0 available)
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.dropdownItem}
+              onPress={() => {
+                setAvailabilityFilter('empty');
+                setShowAvailabilityDropdown(false);
+              }}
+            >
+              <Text style={[styles.dropdownItemText, availabilityFilter === 'empty' && styles.dropdownItemTextSelected]}>
+                Empty (All available)
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.dropdownItem}
+              onPress={() => {
+                setAvailabilityFilter('partial');
+                setShowAvailabilityDropdown(false);
+              }}
+            >
+              <Text style={[styles.dropdownItemText, availabilityFilter === 'partial' && styles.dropdownItemTextSelected]}>
+                Partially Occupied
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Add Room Modal */}
       <RoomModal
@@ -565,6 +783,93 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  filterSection: {
+    backgroundColor: '#fff',
+    padding: 16,
+    marginBottom: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  filterGroup: {
+    flex: 1,
+  },
+  filterLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  pickerContainer: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  picker: {
+    height: 40,
+    width: '100%',
+  },
+  dropdown: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    backgroundColor: '#fff',
+  },
+  dropdownText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  resetButton: {
+    marginTop: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  resetButtonText: {
+    color: '#333',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dropdownModal: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 8,
+    minWidth: 200,
+    maxHeight: 300,
+  },
+  dropdownItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  dropdownItemText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  dropdownItemTextSelected: {
+    fontWeight: 'bold',
+    color: '#2196F3',
   },
   roomsList: {
     padding: 16,

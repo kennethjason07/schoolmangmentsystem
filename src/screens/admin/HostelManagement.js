@@ -13,6 +13,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRoute } from '@react-navigation/native';
 import Header from '../../components/Header';
 import HostelStatCard from '../../components/HostelStatCard';
 import { supabase } from '../../utils/supabase';
@@ -22,6 +23,7 @@ import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 const { width } = Dimensions.get('window');
 
 const HostelManagement = ({ navigation }) => {
+  const route = useRoute();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -55,6 +57,33 @@ const HostelManagement = ({ navigation }) => {
   useEffect(() => {
     // Load mock data for frontend demo
     loadMockData();
+    
+    // Check if we have an allocation context from navigation
+    if (route.params?.allocationContext) {
+      const { student, applicationId } = route.params.allocationContext;
+      Alert.alert(
+        'Student Allocation',
+        `Allocate ${student.first_name} ${student.last_name} to a hostel room.`,
+        [
+          {
+            text: 'Select Hostel',
+            onPress: () => {
+              // Navigate to hostel selection
+              navigation.navigate('HostelDetailList', {
+                type: 'hostels',
+                title: 'Select Hostel for Allocation',
+                data: hostels,
+                icon: 'business',
+                color: '#2196F3',
+                description: `Select a hostel for ${student.first_name} ${student.last_name}`,
+                allocationContext: route.params.allocationContext
+              });
+            }
+          },
+          { text: 'Cancel', style: 'cancel' }
+        ]
+      );
+    }
   }, []);
 
   // Mock data for frontend demo
@@ -388,7 +417,7 @@ const HostelManagement = ({ navigation }) => {
       <Header 
         title="Hostel Management" 
         onBackPress={() => navigation.goBack()}
-        showBackButton={true}
+        showBack={true}
       />
 
       <ScrollView
@@ -752,6 +781,26 @@ const HostelManagement = ({ navigation }) => {
                     >
                       <Text style={styles.actionButtonText}>Waitlist</Text>
                     </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.actionButton, { backgroundColor: '#9C27B0' }]}
+                      onPress={() => {
+                        // Start allocation process
+                        navigation.navigate('HostelDetailList', {
+                          type: 'hostels',
+                          title: 'Select Hostel for Allocation',
+                          data: hostels,
+                          icon: 'business',
+                          color: '#2196F3',
+                          description: `Select a hostel for ${application.students?.first_name} ${application.students?.last_name}`,
+                          allocationContext: {
+                            student: application.students,
+                            applicationId: application.id
+                          }
+                        });
+                      }}
+                    >
+                      <Text style={styles.actionButtonText}>Allocate</Text>
+                    </TouchableOpacity>
                   </View>
                 )}
               </View>
@@ -816,6 +865,48 @@ const HostelManagement = ({ navigation }) => {
           </View>
         )}
       </ScrollView>
+
+      {/* Bottom Navigation Bar */}
+      <View style={styles.bottomNav}>
+        <TouchableOpacity 
+          style={styles.navItem}
+          onPress={() => navigation.navigate('HostelManagement')}
+        >
+          <Ionicons name="home" size={24} color="#2196F3" />
+          <Text style={styles.navText}>Dashboard</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.navItem}
+          onPress={() => navigation.navigate('HostelStudentManagement')}
+        >
+          <Ionicons name="people" size={24} color="#666" />
+          <Text style={styles.navText}>Students</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.navItem}
+          onPress={() => navigation.navigate('HostelDetailList', {
+            type: 'applications',
+            title: 'All Applications',
+            data: applications,
+            icon: 'document-text',
+            color: '#2196F3',
+            description: 'View and manage all hostel applications'
+          })}
+        >
+          <Ionicons name="document-text" size={24} color="#666" />
+          <Text style={styles.navText}>Applications</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.navItem}
+          onPress={() => navigation.navigate('HostelMaintenanceManagement', { hostel: hostels[0] || { name: 'All Hostels', id: 'all' } })}
+        >
+          <Ionicons name="construct" size={24} color="#666" />
+          <Text style={styles.navText}>Maintenance</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Add Hostel Modal */}
       <Modal
@@ -1291,6 +1382,33 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  // Bottom Navigation Styles
+  bottomNav: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  navItem: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+  },
+  navText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+    fontWeight: '500',
   },
 });
 

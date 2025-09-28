@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 
 const HostelBedManagement = ({ navigation, route }) => {
-  const { hostel, room } = route.params;
+  const { hostel, room, allocationContext } = route.params;
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [beds, setBeds] = useState([]);
@@ -39,6 +39,16 @@ const HostelBedManagement = ({ navigation, route }) => {
   useEffect(() => {
     loadBeds();
     loadStudents();
+  }, []);
+
+  // Show allocation message if in allocation mode
+  useEffect(() => {
+    if (allocationContext) {
+      Alert.alert(
+        'Bed Allocation',
+        `Select an available bed in ${room.room_number} for ${allocationContext.student.first_name} ${allocationContext.student.last_name}`
+      );
+    }
   }, []);
 
   const loadBeds = () => {
@@ -268,7 +278,44 @@ const HostelBedManagement = ({ navigation, route }) => {
   );
 
   const renderBedCard = (bed) => (
-    <View key={bed.id} style={styles.bedCard}>
+    <TouchableOpacity 
+      key={bed.id} 
+      style={styles.bedCard}
+      onPress={() => {
+        if (allocationContext && bed.status === 'available') {
+          // Assign the student directly to this bed
+          const updatedBed = {
+            ...bed,
+            status: 'occupied',
+            student: {
+              ...allocationContext.student,
+              allocation_date: new Date().toISOString().split('T')[0]
+            }
+          };
+          
+          setBeds(prev => prev.map(b => b.id === bed.id ? updatedBed : b));
+          
+          Alert.alert(
+            'Allocation Successful',
+            `${allocationContext.student.first_name} ${allocationContext.student.last_name} has been allocated to ${bed.bed_number}`,
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  // Navigate back to hostel management
+                  navigation.navigate('HostelManagement');
+                }
+              }
+            ]
+          );
+        } else if (allocationContext && bed.status !== 'available') {
+          Alert.alert(
+            'Cannot Allocate',
+            'This bed is not available for allocation. Please select another bed.'
+          );
+        }
+      }}
+    >
       <View style={styles.bedHeader}>
         <View style={styles.bedInfo}>
           <Text style={styles.bedNumber}>{bed.bed_number}</Text>
@@ -308,10 +355,11 @@ const HostelBedManagement = ({ navigation, route }) => {
       </View>
 
       <View style={styles.bedActions}>
-        {bed.status === 'available' && (
+        {bed.status === 'available' && !allocationContext && (
           <TouchableOpacity
             style={[styles.actionButton, { backgroundColor: '#4CAF50' }]}
-            onPress={() => {
+            onPress={(e) => {
+              e.stopPropagation();
               setSelectedBed(bed);
               setStudentSearchModalVisible(true);
             }}
@@ -321,10 +369,13 @@ const HostelBedManagement = ({ navigation, route }) => {
           </TouchableOpacity>
         )}
         
-        {bed.status === 'occupied' && (
+        {bed.status === 'occupied' && !allocationContext && (
           <TouchableOpacity
             style={[styles.actionButton, { backgroundColor: '#F44336' }]}
-            onPress={() => unassignStudent(bed)}
+            onPress={(e) => {
+              e.stopPropagation();
+              unassignStudent(bed);
+            }}
           >
             <Ionicons name="person-remove" size={16} color="#fff" />
             <Text style={styles.actionButtonText}>Unassign</Text>
@@ -333,7 +384,10 @@ const HostelBedManagement = ({ navigation, route }) => {
 
         <TouchableOpacity
           style={[styles.actionButton, { backgroundColor: bed.status === 'maintenance' ? '#2196F3' : '#FF9800' }]}
-          onPress={() => toggleBedStatus(bed)}
+          onPress={(e) => {
+            e.stopPropagation();
+            toggleBedStatus(bed);
+          }}
         >
           <Ionicons name={bed.status === 'maintenance' ? 'checkmark' : 'build'} size={16} color="#fff" />
           <Text style={styles.actionButtonText}>
@@ -343,13 +397,16 @@ const HostelBedManagement = ({ navigation, route }) => {
 
         <TouchableOpacity
           style={[styles.actionButton, { backgroundColor: '#666' }]}
-          onPress={() => deleteBed(bed)}
+          onPress={(e) => {
+            e.stopPropagation();
+            deleteBed(bed);
+          }}
         >
           <Ionicons name="trash" size={16} color="#fff" />
           <Text style={styles.actionButtonText}>Delete</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderStudentItem = ({ item }) => (
@@ -373,7 +430,7 @@ const HostelBedManagement = ({ navigation, route }) => {
       <Header
         title={`${room.room_number} - Beds`}
         onBackPress={() => navigation.goBack()}
-        showBackButton={true}
+        showBack={true}
       />
 
       <View style={styles.headerSection}>

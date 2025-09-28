@@ -462,7 +462,7 @@ const HostelMaintenanceManagement = ({ navigation, route }) => {
       <Header
         title={`${hostel.name} - Maintenance`}
         onBackPress={() => navigation.goBack()}
-        showBackButton={true}
+        showBack={true}
       />
 
       <View style={styles.headerSection}>

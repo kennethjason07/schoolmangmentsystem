@@ -22,6 +22,7 @@ import { useAuth } from '../utils/AuthContext';
 import { supabase } from '../utils/supabase';
 import { getSchoolLogoBase64, getLogoHTML, getReceiptHeaderCSS } from '../utils/logoUtils';
 import { formatReferenceNumberForDisplay } from '../utils/referenceNumberGenerator';
+import { generateWebReceiptHTML, openReceiptInNewWindow } from '../utils/webReceiptGenerator';
 import * as Print from 'expo-print';
 import * as FileSystem from 'expo-file-system';
 
@@ -500,7 +501,7 @@ const UPIQRModal = ({
   const generateInstantReceipt = async (feeRecord, outstandingAmount = 0) => {
     try {
       // Use the new web receipt generator for consistent format
-      const { generateWebReceiptHTML } = await import('../utils/webReceiptGenerator');
+      // Using regular import declared at the top of the file
       
       const receiptHTML = await generateWebReceiptHTML({
         schoolDetails,
@@ -672,7 +673,7 @@ const UPIQRModal = ({
       // Check if running in web environment
       if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
         // Web environment - open in new window
-        const { openReceiptInNewWindow } = await import('../utils/webReceiptGenerator');
+        // Using regular import declared at the top of the file
         openReceiptInNewWindow(receiptData.html, `Receipt - ${receiptData.studentName}`);
       } else {
         // Mobile environment - generate PDF and share

@@ -252,7 +252,7 @@ const HostelDetailView = ({ navigation, route }) => {
       <Header 
         title={hostel.name}
         onBackPress={() => navigation.goBack()}
-        showBackButton={true}
+        showBack={true}
       />
       
       <ScrollView

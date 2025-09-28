@@ -43,6 +43,7 @@ import { badgeNotifier } from '../../utils/badgeNotifier';
 import DebugBadge from '../../components/DebugBadge';
 import NotificationTester from '../../components/NotificationTester';
 import universalNotificationService from '../../services/UniversalNotificationService';
+import { getTenantIdByEmail } from '../../utils/getTenantByEmail';
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -256,7 +257,7 @@ const ParentDashboard = ({ navigation }) => {
         
         // Try to get tenant information using email lookup for parents
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          // Using regular import declared at the top of the file
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {
@@ -390,7 +391,7 @@ const ParentDashboard = ({ navigation }) => {
         
         // Try to get tenant information using email lookup for parents
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          // Using regular import declared at the top of the file
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {
@@ -522,7 +523,7 @@ const ParentDashboard = ({ navigation }) => {
         
         // Try to get tenant information using email lookup for parents
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          // Using regular import declared at the top of the file
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {
@@ -650,7 +651,7 @@ const ParentDashboard = ({ navigation }) => {
         
         // Try to get tenant information using email lookup for parents
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          // Using regular import declared at the top of the file
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {
@@ -774,7 +775,7 @@ const ParentDashboard = ({ navigation }) => {
         
         // Try to get tenant information using email lookup for parents
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          // Using regular import declared at the top of the file
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {

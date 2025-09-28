@@ -28,6 +28,7 @@ import NotificationPopup from '../../components/NotificationPopup';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 
 import { useUnreadNotificationCount } from '../../hooks/useUnreadNotificationCount';
+import { getTenantIdByEmail } from '../../utils/getTenantByEmail';
 
 const StudentDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -291,7 +292,7 @@ const StudentDashboard = ({ navigation }) => {
         console.log('🔍 Student Dashboard - No tenant context, attempting to resolve from user email...');
         
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          // Using regular import declared at the top of the file
           const emailTenantResult = await getTenantIdByEmail(user.email);
           
           if (emailTenantResult.success) {
@@ -415,7 +416,7 @@ const StudentDashboard = ({ navigation }) => {
         console.log('🔍 Student Dashboard - No tenant context for notifications, attempting to resolve from user email...');
         
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          // Using regular import declared at the top of the file
           const emailTenantResult = await getTenantIdByEmail(user.email);
           
           if (emailTenantResult.success) {
@@ -597,7 +598,7 @@ const StudentDashboard = ({ navigation }) => {
         console.log('🔍 Student Dashboard - No tenant context for main data fetch, attempting to resolve from user email...');
         
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
+          // Using regular import declared at the top of the file
           const emailTenantResult = await getTenantIdByEmail(user.email);
           
           if (emailTenantResult.success) {

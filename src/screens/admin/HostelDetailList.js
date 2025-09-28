@@ -5,15 +5,31 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 
 const HostelDetailList = ({ navigation, route }) => {
-  const { type, title, data, icon, color, description, stats } = route.params;
+  const { type, title, data, icon, color, description, stats, allocationContext } = route.params;
 
   const renderHostelItem = (hostel) => (
-    <View key={hostel.id} style={styles.card}>
+    <TouchableOpacity 
+      key={hostel.id} 
+      style={styles.card}
+      onPress={() => {
+        if (allocationContext) {
+          // If we're in allocation mode, navigate to room selection
+          navigation.navigate('HostelRoomManagement', {
+            hostel: hostel,
+            allocationContext: allocationContext
+          });
+        } else {
+          // Normal navigation
+          navigation.navigate('HostelDetailView', { hostel });
+        }
+      }}
+    >
       <View style={styles.cardHeader}>
         <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>
           <Ionicons name="business" size={24} color={color} />
@@ -37,11 +53,24 @@ const HostelDetailList = ({ navigation, route }) => {
           <Text style={styles.contactText}>{hostel.contact_phone}</Text>
         </View>
       )}
-    </View>
+    </TouchableOpacity>
   );
 
   const renderApplicationItem = (application) => (
-    <View key={application.id} style={styles.card}>
+    <TouchableOpacity 
+      key={application.id} 
+      style={styles.card}
+      onPress={() => {
+        // Navigate to hostel management with student allocation context
+        navigation.navigate('HostelManagement', {
+          allocationContext: {
+            student: application.students,
+            applicationId: application.id,
+            allocationMode: true
+          }
+        });
+      }}
+    >
       <View style={styles.cardHeader}>
         <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>
           <Ionicons name="person" size={24} color={color} />
@@ -64,7 +93,7 @@ const HostelDetailList = ({ navigation, route }) => {
           <Text style={styles.statusText}>{application.status}</Text>
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderAllocationItem = (allocation) => (
@@ -283,7 +312,7 @@ const HostelDetailList = ({ navigation, route }) => {
       <Header 
         title={title}
         onBackPress={() => navigation.goBack()}
-        showBackButton={true}
+        showBack={true}
       />
       
       <View style={styles.headerSection}>

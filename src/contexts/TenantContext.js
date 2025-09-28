@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../utils/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getCurrentUserTenantByEmail } from '../utils/getTenantByEmail';
+import { getCurrentUserTenantByEmail, getTenantIdByEmail } from '../utils/getTenantByEmail';
 import { validateTenantAccess, createTenantQuery } from '../utils/tenantValidation';
 import { initializeTenantHelpers, resetTenantHelpers } from '../utils/tenantHelpers';
 // DISABLED: Auto-importing test utilities that run database queries before login
@@ -794,7 +794,7 @@ export const TenantProvider = ({ children }) => {
       
       // Step 2: Test tenant lookup directly
       console.log('📝 Step 2: Testing tenant lookup directly...');
-      const { getTenantIdByEmail } = await import('../utils/getTenantByEmail');
+      // Using regular import declared at the top of the file
       const directResult = await getTenantIdByEmail(user.email);
       console.log('📝 Direct tenant lookup result:', {
         success: directResult.success,

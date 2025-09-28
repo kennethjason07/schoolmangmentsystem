@@ -300,7 +300,7 @@ const HostelStudentManagement = ({ navigation }) => {
       <Header
         title="Student Management"
         onBackPress={() => navigation.goBack()}
-        showBackButton={true}
+        showBack={true}
       />
 
       <View style={styles.headerSection}>
