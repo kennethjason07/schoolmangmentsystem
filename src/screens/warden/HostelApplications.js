@@ -26,6 +26,7 @@ const HostelApplications = ({ navigation, route }) => {
   const [selectedApplication, setSelectedApplication] = useState(null);
   const [remarks, setRemarks] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [pendingNewStatus, setPendingNewStatus] = useState(null);
 
   const statusOptions = [
     { key: 'all', label: 'All Applications' },
@@ -75,6 +76,7 @@ const HostelApplications = ({ navigation, route }) => {
 
   const handleStatusChange = (application, newStatus) => {
     setSelectedApplication(application);
+    setPendingNewStatus(newStatus);
     setRemarks('');
     setActionModalVisible(true);
   };
@@ -299,17 +301,28 @@ const HostelApplications = ({ navigation, route }) => {
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <MaterialIcons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
-        <Text style={styles.title}>Hostel Applications</Text>
-        <TouchableOpacity onPress={onRefresh}>
+        <View style={styles.headerTitles}>
+          <Text style={styles.title}>Hostel Applications</Text>
+          <Text style={styles.subtitleText} numberOfLines={1}>
+            Manage submitted, verified, accepted, rejected and waitlisted applications
+          </Text>
+        </View>
+        <TouchableOpacity onPress={onRefresh} accessibilityRole="button" accessibilityLabel="Refresh">
           <MaterialIcons name="refresh" size={24} color="#2196F3" />
         </TouchableOpacity>
       </View>
 
       {/* Status Filter Tabs */}
       <View style={styles.filterContainer}>
+        <View style={styles.filterHeaderRow}>
+          <Text style={styles.filterHeaderTitle}>Filters</Text>
+          <Text style={styles.filterHeaderCount}>{applications.length} total</Text>
+        </View>
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -355,9 +368,9 @@ const HostelApplications = ({ navigation, route }) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>
-              {selectedApplication && 
-                `Update Application - ${selectedApplication.student.name}`
-              }
+              {selectedApplication && (
+                `Update Application - ${selectedApplication.student.name} ${pendingNewStatus ? `(${pendingNewStatus})` : ''}`
+              )}
             </Text>
             
             <TextInput
@@ -379,14 +392,7 @@ const HostelApplications = ({ navigation, route }) => {
               <TouchableOpacity
                 style={[styles.modalButton, styles.confirmButton]}
                 onPress={() => {
-                  // Determine the new status based on current context
-                  const currentStatus = selectedApplication?.status;
-                  let newStatus = 'verified'; // default
-                  
-                  if (currentStatus === 'submitted') {
-                    // Will be set based on button pressed
-                  }
-                  
+                  const newStatus = pendingNewStatus || 'verified';
                   processStatusUpdate(newStatus);
                 }}
                 disabled={processing}
@@ -424,53 +430,84 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 36,
+    paddingBottom: 12,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
   backButton: {
-    marginRight: 16,
+    marginRight: 12,
+    padding: 4,
+    borderRadius: 999,
+  },
+  headerTitles: {
+    flex: 1,
+    marginRight: 12,
   },
   title: {
-    flex: 1,
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#222',
+  },
+  subtitleText: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#666',
   },
   filterContainer: {
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
-  filterTabsContainer: {
+  filterHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingTop: 10,
+  },
+  filterHeaderTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#333',
+  },
+  filterHeaderCount: {
+    fontSize: 12,
+    color: '#666',
+  },
+  filterTabsContainer: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   filterTab: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 8,
     marginRight: 8,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
+    borderRadius: 999,
+    backgroundColor: '#eef2f7',
+    borderWidth: 1,
+    borderColor: '#d7dde5',
   },
   activeFilterTab: {
     backgroundColor: '#2196F3',
+    borderColor: '#2196F3',
   },
   filterTabText: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
+    fontSize: 13,
+    color: '#44546a',
+    fontWeight: '600',
   },
   activeFilterTabText: {
     color: '#fff',
   },
   countBadge: {
-    backgroundColor: '#666',
-    borderRadius: 10,
-    paddingHorizontal: 6,
+    backgroundColor: '#44546a',
+    borderRadius: 999,
+    paddingHorizontal: 8,
     paddingVertical: 2,
     marginLeft: 8,
   },
@@ -480,7 +517,7 @@ const styles = StyleSheet.create({
   countBadgeText: {
     fontSize: 12,
     color: '#fff',
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
   activeCountBadgeText: {
     color: '#2196F3',

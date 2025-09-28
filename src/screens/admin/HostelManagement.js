@@ -445,13 +445,16 @@ const HostelManagement = ({ navigation }) => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📊 Overview</Text>
           <View style={styles.statsGrid}>
-            <HostelStatCard
+            <View style={styles.twoCol}><HostelStatCard
               title="Hostels"
               value={stats.totalHostels.toString()}
               icon="business"
               color="#2196F3"
               subtitle="Active hostels"
               animated={true}
+              size="small"
+              fluid
+              columns={1}
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'hostels',
                 title: 'All Hostels Overview',
@@ -466,14 +469,17 @@ const HostelManagement = ({ navigation }) => {
                   totalOccupied: stats.totalOccupied
                 }
               })}
-            />
-            <HostelStatCard
+            /></View>
+            <View style={styles.twoCol}><HostelStatCard
               title="Capacity"
+              fluid
               value={stats.totalCapacity.toString()}
               icon="people"
               color="#4CAF50"
               subtitle="Total beds"
               animated={true}
+              size="small"
+              columns={1}
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'capacity',
                 title: 'Capacity Analysis',
@@ -492,9 +498,10 @@ const HostelManagement = ({ navigation }) => {
                   utilizationRate: ((stats.totalOccupied / stats.totalCapacity) * 100).toFixed(1)
                 }
               })}
-            />
-            <HostelStatCard
+            /></View>
+            <View style={styles.twoCol}><HostelStatCard
               title="Occupied"
+              fluid
               value={stats.totalOccupied.toString()}
               icon="bed"
               color="#FF9800"
@@ -502,6 +509,8 @@ const HostelManagement = ({ navigation }) => {
               animated={true}
               maxValue={stats.totalCapacity}
               progress={(stats.totalOccupied / stats.totalCapacity) * 100}
+              size="small"
+              columns={1}
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'occupied',
                 title: 'Occupied Beds Details',
@@ -523,8 +532,9 @@ const HostelManagement = ({ navigation }) => {
                 }
               })}
             />
-            <HostelStatCard
+            <View style={styles.twoCol}><HostelStatCard
               title="Available"
+              fluid
               value={stats.availableBeds.toString()}
               icon="home"
               color="#9C27B0"
@@ -532,6 +542,8 @@ const HostelManagement = ({ navigation }) => {
               animated={true}
               maxValue={stats.totalCapacity}
               progress={(stats.availableBeds / stats.totalCapacity) * 100}
+              size="small"
+              columns={1}
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'available',
                 title: 'Available Beds',
@@ -552,76 +564,10 @@ const HostelManagement = ({ navigation }) => {
                   hostelsWithAvailability: hostels.filter(h => h.capacity - h.occupied > 0).length
                 }
               })}
-            />
+            /></View></View>
           </View>
         </View>
 
-        {/* Application Stats */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📝 Applications</Text>
-          <View style={styles.statsGrid}>
-            <HostelStatCard
-              title="Pending"
-              value={stats.pendingApplications.toString()}
-              icon="time"
-              color="#FF9800"
-              subtitle="Applications"
-              animated={true}
-              onPress={() => navigation.navigate('HostelDetailList', {
-                type: 'applications',
-                title: 'Pending Applications',
-                data: applications.filter(a => a.status === 'pending'),
-                icon: 'time',
-                color: '#FF9800'
-              })}
-            />
-            <HostelStatCard
-              title="Approved"
-              value={stats.approvedApplications.toString()}
-              icon="checkmark-circle"
-              color="#4CAF50"
-              subtitle="Applications"
-              animated={true}
-              onPress={() => navigation.navigate('HostelDetailList', {
-                type: 'applications',
-                title: 'Approved Applications',
-                data: applications.filter(a => a.status === 'approved'),
-                icon: 'checkmark-circle',
-                color: '#4CAF50'
-              })}
-            />
-            <HostelStatCard
-              title="Waitlisted"
-              value={stats.waitlistedApplications.toString()}
-              icon="list"
-              color="#2196F3"
-              subtitle="Applications"
-              animated={true}
-              onPress={() => navigation.navigate('HostelDetailList', {
-                type: 'applications',
-                title: 'Waitlisted Applications',
-                data: applications.filter(a => a.status === 'waitlisted'),
-                icon: 'list',
-                color: '#2196F3'
-              })}
-            />
-            <HostelStatCard
-              title="Issues"
-              value={stats.maintenanceIssues.toString()}
-              icon="construct"
-              color="#F44336"
-              subtitle="Maintenance"
-              animated={true}
-              onPress={() => navigation.navigate('HostelDetailList', {
-                type: 'maintenance',
-                title: 'Maintenance Issues',
-                data: maintenanceIssues,
-                icon: 'construct',
-                color: '#F44336'
-              })}
-            />
-          </View>
-        </View>
 
         {/* Management Actions */}
         <View style={styles.section}>
@@ -653,13 +599,8 @@ const HostelManagement = ({ navigation }) => {
           <View style={styles.actionsGrid}>
             <TouchableOpacity
               style={[styles.actionCard, { backgroundColor: '#E3F2FD' }]}
-              onPress={() => navigation.navigate('HostelDetailList', {
-                type: 'applications',
-                title: 'All Applications',
-                data: applications,
-                icon: 'document-text',
-                color: '#2196F3',
-                description: 'View and manage all hostel applications'
+onPress={() => navigation.navigate('HostelApplications', {
+                status: 'all'
               })}
             >
               <View style={[styles.actionIconContainer, { backgroundColor: '#2196F3' }]}>
@@ -680,233 +621,46 @@ const HostelManagement = ({ navigation }) => {
               <Text style={styles.actionSubtext}>Manage issues</Text>
             </TouchableOpacity>
           </View>
+
         </View>
 
-        {/* Hostels Section */}
+        {/* Hostels (Quick Stats) - stat cards under Management Tools */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🏢 Hostels ({hostels.length})</Text>
+          <Text style={styles.sectionTitle}>🏢 Hostels (Quick Stats)</Text>
           {hostels.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="business-outline" size={48} color="#ccc" />
               <Text style={styles.emptyText}>No hostels found</Text>
-              <Text style={styles.emptySubtext}>Add your first hostel to get started</Text>
             </View>
           ) : (
-            hostels.slice(0, 3).map((hostel) => (
-              <TouchableOpacity
-                key={hostel.id}
-                style={styles.hostelCard}
-                onPress={() => navigation.navigate('HostelDetailView', { hostel })}
-                activeOpacity={0.7}
-              >
-                <View style={styles.hostelHeader}>
-                  <Text style={styles.hostelName}>{hostel.name}</Text>
-                  <View style={[styles.statusBadge, { backgroundColor: hostel.status === 'active' ? '#4CAF50' : '#FF9800' }]}>
-                    <Text style={styles.statusText}>{hostel.status}</Text>
-                  </View>
-                </View>
-                <Text style={styles.hostelDescription}>{hostel.description}</Text>
-                <View style={styles.hostelStats}>
-                  <Text style={styles.statText}>Capacity: {hostel.capacity}</Text>
-                  <Text style={styles.statText}>Occupied: {hostel.occupied}</Text>
-                  <Text style={styles.statText}>Available: {hostel.capacity - hostel.occupied}</Text>
-                </View>
-                <View style={styles.hostelCardActions}>
-                  <TouchableOpacity
-                    style={[styles.hostelActionButton, { backgroundColor: '#2196F3' }]}
-                    onPress={() => navigation.navigate('HostelRoomManagement', { hostel })}
-                  >
-                    <Ionicons name="bed" size={14} color="#fff" />
-                    <Text style={styles.hostelActionText}>Manage Rooms</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.hostelActionButton, { backgroundColor: '#4CAF50' }]}
-                    onPress={() => navigation.navigate('HostelDetailView', { hostel })}
-                  >
-                    <Ionicons name="eye" size={14} color="#fff" />
-                    <Text style={styles.hostelActionText}>View Details</Text>
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
-            ))
+            <View>
+              {hostels.slice(0, 4).map((h) => {
+                const capacity = Number(h.capacity || 0);
+                const occupied = Number(h.occupied || 0);
+                const available = Math.max(0, capacity - occupied);
+                const utilization = capacity > 0 ? Math.round((occupied / capacity) * 100) : 0;
+                return (
+                  <HostelStatCard
+                    key={`quick-${h.id}`}
+                    title={h.name}
+                    value={String(capacity)}
+                    icon="business"
+                    color="#2196F3"
+                    subtitle={`Occupied ${occupied} • Available ${available}`}
+                    animated={true}
+                    maxValue={capacity}
+                    progress={utilization}
+                    onPress={() => navigation.navigate('HostelQuickActions', { hostel: h })}
+                  />
+                );
+              })}
+            </View>
           )}
         </View>
 
-        {/* Recent Applications Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📝 Recent Applications ({applications.length})</Text>
-          {applications.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="document-text-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyText}>No applications found</Text>
-            </View>
-          ) : (
-            applications.slice(0, 5).map((application) => (
-              <View key={application.id} style={styles.applicationCard}>
-                <View style={styles.applicationHeader}>
-                  <Text style={styles.studentName}>
-                    {application.students?.first_name} {application.students?.last_name}
-                  </Text>
-                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(application.status) }]}>
-                    <Text style={styles.statusText}>{application.status}</Text>
-                  </View>
-                </View>
-                <Text style={styles.applicationInfo}>
-                  Class: {application.students?.class}-{application.students?.section}
-                </Text>
-                <Text style={styles.applicationInfo}>
-                  Admission No: {application.students?.admission_no}
-                </Text>
-                <Text style={styles.applicationDate}>
-                  Applied: {new Date(application.application_date).toLocaleDateString()}
-                </Text>
-                
-                {application.status === 'pending' && (
-                  <View style={styles.actionButtons}>
-                    <TouchableOpacity
-                      style={[styles.actionButton, { backgroundColor: '#4CAF50' }]}
-                      onPress={() => updateApplicationStatus(application.id, 'approved')}
-                    >
-                      <Text style={styles.actionButtonText}>Approve</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.actionButton, { backgroundColor: '#F44336' }]}
-                      onPress={() => updateApplicationStatus(application.id, 'rejected')}
-                    >
-                      <Text style={styles.actionButtonText}>Reject</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.actionButton, { backgroundColor: '#2196F3' }]}
-                      onPress={() => updateApplicationStatus(application.id, 'waitlisted')}
-                    >
-                      <Text style={styles.actionButtonText}>Waitlist</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.actionButton, { backgroundColor: '#9C27B0' }]}
-                      onPress={() => {
-                        // Start allocation process
-                        navigation.navigate('HostelDetailList', {
-                          type: 'hostels',
-                          title: 'Select Hostel for Allocation',
-                          data: hostels,
-                          icon: 'business',
-                          color: '#2196F3',
-                          description: `Select a hostel for ${application.students?.first_name} ${application.students?.last_name}`,
-                          allocationContext: {
-                            student: application.students,
-                            applicationId: application.id
-                          }
-                        });
-                      }}
-                    >
-                      <Text style={styles.actionButtonText}>Allocate</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            ))
-          )}
-        </View>
 
-        {/* Current Allocations Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🛏️ Current Allocations ({allocations.length})</Text>
-          {allocations.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="bed-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyText}>No allocations found</Text>
-            </View>
-          ) : (
-            allocations.slice(0, 5).map((allocation) => (
-              <View key={allocation.id} style={styles.allocationCard}>
-                <View style={styles.allocationHeader}>
-                  <Text style={styles.studentName}>
-                    {allocation.students?.first_name} {allocation.students?.last_name}
-                  </Text>
-                  <Text style={styles.allocationDate}>
-                    {new Date(allocation.allocation_date).toLocaleDateString()}
-                  </Text>
-                </View>
-                <Text style={styles.allocationInfo}>
-                  Hostel: {allocation.hostels?.name}
-                </Text>
-                <Text style={styles.allocationInfo}>
-                  Room: {allocation.hostel_rooms?.room_number}, Bed: {allocation.hostel_beds?.bed_number}
-                </Text>
-                <Text style={styles.allocationInfo}>
-                  Monthly Rent: ₹{allocation.monthly_rent}
-                </Text>
-              </View>
-            ))
-          )}
-        </View>
 
-        {/* Maintenance Issues Section */}
-        {maintenanceIssues.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>🔧 Maintenance Issues ({maintenanceIssues.length})</Text>
-            {maintenanceIssues.slice(0, 3).map((issue) => (
-              <View key={issue.id} style={styles.maintenanceCard}>
-                <View style={styles.maintenanceHeader}>
-                  <Text style={styles.maintenanceTitle}>{issue.issue_type}</Text>
-                  <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(issue.priority) }]}>
-                    <Text style={styles.statusText}>{issue.priority}</Text>
-                  </View>
-                </View>
-                <Text style={styles.maintenanceDescription}>{issue.description}</Text>
-                <Text style={styles.maintenanceInfo}>
-                  Hostel: {issue.hostels?.name}
-                </Text>
-                <Text style={styles.maintenanceDate}>
-                  Reported: {new Date(issue.reported_date).toLocaleDateString()}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
       </ScrollView>
-
-      {/* Bottom Navigation Bar */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => navigation.navigate('HostelManagement')}
-        >
-          <Ionicons name="home" size={24} color="#2196F3" />
-          <Text style={styles.navText}>Dashboard</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => navigation.navigate('HostelStudentManagement')}
-        >
-          <Ionicons name="people" size={24} color="#666" />
-          <Text style={styles.navText}>Students</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => navigation.navigate('HostelDetailList', {
-            type: 'applications',
-            title: 'All Applications',
-            data: applications,
-            icon: 'document-text',
-            color: '#2196F3',
-            description: 'View and manage all hostel applications'
-          })}
-        >
-          <Ionicons name="document-text" size={24} color="#666" />
-          <Text style={styles.navText}>Applications</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => navigation.navigate('HostelMaintenanceManagement', { hostel: hostels[0] || { name: 'All Hostels', id: 'all' } })}
-        >
-          <Ionicons name="construct" size={24} color="#666" />
-          <Text style={styles.navText}>Maintenance</Text>
-        </TouchableOpacity>
-      </View>
 
       {/* Add Hostel Modal */}
       <Modal
@@ -1033,10 +787,15 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   statsGrid: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 12,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     paddingHorizontal: 16,
+  },
+  twoCol: {
+    width: '100%',
+    marginBottom: 12,
   },
   section: {
     backgroundColor: '#fff',

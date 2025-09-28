@@ -44,6 +44,7 @@ import DebugBadge from '../../components/DebugBadge';
 import NotificationTester from '../../components/NotificationTester';
 import universalNotificationService from '../../services/UniversalNotificationService';
 import { getTenantIdByEmail } from '../../utils/getTenantByEmail';
+import { runAllParentDashboardTenantTests, quickTenantCheck } from '../../utils/parentDashboardTenantTests';
 
 const ParentDashboard = ({ navigation }) => {
   const { user } = useAuth();
@@ -78,12 +79,10 @@ const ParentDashboard = ({ navigation }) => {
     // Add global test functions for development debugging
     if (typeof window !== 'undefined') {
       window.runParentDashboardTenantTests = async () => {
-        const { runAllParentDashboardTenantTests } = await import('../../utils/parentDashboardTenantTests');
         return await runAllParentDashboardTenantTests();
       };
       
       window.quickTenantCheck = async () => {
-        const { quickTenantCheck } = await import('../../utils/parentDashboardTenantTests');
         return await quickTenantCheck();
       };
       

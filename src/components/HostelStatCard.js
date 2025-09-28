@@ -21,7 +21,9 @@ const HostelStatCard = ({
   maxValue, // For calculating progress
   animated = true, // Enable/disable animations
   variant = 'hostel', // Always use hostel variant
-  size = 'medium' // 'small', 'medium', 'large'
+  size = 'medium', // 'small', 'medium', 'large'
+  columns = 1, // number of columns to fit into (1 or 2)
+  fluid = false, // if true, take full container width without computing
 }) => {
   const { userType } = useAuth();
   const [isHovered, setIsHovered] = useState(false);
@@ -73,14 +75,31 @@ const HostelStatCard = ({
   
   // Get card size styles optimized for hostel management
   const getCardSize = () => {
-    const cardWidth = width - 64; // Full width minus margins and padding for centering
+    // Compute width based on desired columns
+    if (fluid) {
+      switch (size) {
+        case 'small':
+          return { minHeight: 110, padding: 14, width: '100%' };
+        case 'large':
+          return { minHeight: 180, padding: 24, width: '100%' };
+        default:
+          return { minHeight: 150, padding: 18, width: '100%' };
+      }
+    }
+
+    const horizontalPadding = 64; // approximate page side paddings/margins
+    const gap = 12; // space between cards
+    const cardWidth = columns === 2
+      ? Math.floor((width - horizontalPadding - gap) / 2)
+      : (width - horizontalPadding);
+
     switch (size) {
       case 'small':
-        return { minHeight: 120, padding: 16, width: cardWidth };
+        return { minHeight: 110, padding: 14, width: cardWidth };
       case 'large':
         return { minHeight: 180, padding: 24, width: cardWidth };
       default:
-        return { minHeight: 160, padding: 20, width: cardWidth };
+        return { minHeight: 150, padding: 18, width: cardWidth };
     }
   };
   
@@ -114,7 +133,9 @@ const HostelStatCard = ({
           ]}
         >
           {/* Background decorative elements */}
-          <View style={[styles.decorativeCircle, { backgroundColor: `${color}08` }]} />
+          {size !== 'small' && (
+            <View style={[styles.decorativeCircle, { backgroundColor: `${color}08` }]} />
+          )}
           
           <View style={styles.header}>
             <View style={styles.titleContainer}>
@@ -124,9 +145,9 @@ const HostelStatCard = ({
                   size === 'small' && styles.titleSmall,
                   size === 'large' && styles.titleLarge
                 ]}
-                numberOfLines={2}
+                numberOfLines={1}
                 adjustsFontSizeToFit={true}
-                minimumFontScale={0.85}
+                minimumFontScale={0.9}
               >
                 {title}
               </Text>
@@ -147,7 +168,7 @@ const HostelStatCard = ({
             <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>
               <Ionicons 
                 name={icon} 
-                size={size === 'large' ? 28 : size === 'small' ? 22 : 24} 
+                size={size === 'large' ? 28 : size === 'small' ? 26 : 24} 
                 color={color} 
               />
             </View>
@@ -155,11 +176,21 @@ const HostelStatCard = ({
 
           <View style={styles.content}>
             {animated && !loading && !isNaN(value) ? (
-              <Animated.Text style={[styles.value, { color }, size === 'large' && styles.valueLarge]}>
+              <Animated.Text style={[
+                styles.value,
+                { color },
+                size === 'large' && styles.valueLarge,
+                size === 'small' && styles.valueSmall,
+              ]}>
                 {countAnim._value?.toFixed(0) || value}
               </Animated.Text>
             ) : (
-              <Text style={[styles.value, { color }, size === 'large' && styles.valueLarge]}>
+              <Text style={[
+                styles.value,
+                { color },
+                size === 'large' && styles.valueLarge,
+                size === 'small' && styles.valueSmall,
+              ]}>
                 {loading ? (
                   <View style={styles.loadingContainer}>
                     <View style={[styles.loadingDot, { backgroundColor: color }]} />
@@ -314,7 +345,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     minHeight: 160,
     position: 'relative',
-    alignSelf: 'center',
+    alignSelf: 'stretch',
     overflow: 'visible',
     ...Theme.Shadows.lg,
   },
@@ -356,8 +387,8 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   titleSmall: {
-    fontSize: Theme.Typography.sizes.xs,
-    lineHeight: 14,
+    fontSize: Theme.Typography.sizes.base,
+    lineHeight: 18,
   },
   titleLarge: {
     fontSize: Theme.Typography.sizes.base,
@@ -402,6 +433,11 @@ const styles = StyleSheet.create({
   valueLarge: {
     fontSize: Theme.Typography.sizes['2xl'],
     lineHeight: 28,
+  },
+  valueSmall: {
+    fontSize: Theme.Typography.sizes.lg,
+    lineHeight: 20,
+    fontWeight: Theme.Typography.weights.bold,
   },
   loadingContainer: {
     flexDirection: 'row',

@@ -492,6 +492,19 @@ export default function AppNavigator() {
                 <Stack.Screen name="HostelMaintenanceManagement" component={HostelMaintenanceManagement} />
                 <Stack.Screen name="HostelStudentManagement" component={HostelStudentManagement} />
                 <Stack.Screen name="HostelApplications" component={HostelApplications} />
+                <Stack.Screen name="HostelsOverview" component={require('../screens/admin/HostelsOverview').default} />
+                <Stack.Screen name="HostelQuickActions" component={require('../screens/admin/HostelQuickActions').default} />
+                {/* Placeholder detail/allocation routes used by Applications screen */}
+                <Stack.Screen 
+                  name="ApplicationDetails" 
+                  component={WardenDashboard} 
+                  options={{ title: 'Application Details', headerShown: true }}
+                />
+                <Stack.Screen 
+                  name="BedAllocation" 
+                  component={WardenDashboard} 
+                  options={{ title: 'Allocate Bed', headerShown: true }}
+                />
               </>
             )}
             {userType === 'teacher' && (

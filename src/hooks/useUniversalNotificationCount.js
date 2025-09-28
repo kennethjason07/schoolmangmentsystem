@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../utils/AuthContext';
 import universalNotificationService from '../services/UniversalNotificationService';
+import { getCachedTenantId } from '../utils/tenantHelpers';
 
 /**
  * Custom hook for universal notification counts
@@ -63,8 +64,7 @@ export const useUniversalNotificationCount = (options = {}) => {
 
     try {
       // 🚀 ENHANCED: Add tenant readiness check to prevent race conditions
-      // Import getCachedTenantId to check if tenant is ready
-      const { getCachedTenantId } = await import('../utils/tenantHelpers');
+      // Use statically imported getCachedTenantId to check if tenant is ready
       const tenantId = getCachedTenantId();
       
       if (!tenantId && !force) {

@@ -11,7 +11,8 @@ import {
   getUserTenantFilteredNotifications, 
   getTenantFilteredUnreadCount,
   markTenantNotificationAsRead,
-  getCurrentTenantId 
+  getCurrentTenantId,
+  getTenantFilteredNotifications 
 } from '../utils/tenantNotificationFilter';
 
 /**
@@ -212,9 +213,7 @@ export const useAdminTenantNotifications = (options = {}) => {
 
       console.log('📊 [useAdminTenantNotifications] Loading admin notifications');
 
-      // Import here to avoid circular dependencies
-      const { getTenantFilteredNotifications } = await import('../utils/tenantNotificationFilter');
-      
+      // Use statically imported helper to avoid dynamic import issues
       const result = await getTenantFilteredNotifications({
         type,
         status,

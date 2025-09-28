@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Dimensions,
 } from 'react-native';
+import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 
