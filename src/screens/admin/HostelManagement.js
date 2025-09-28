@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
-import StatCard from '../../components/StatCard';
+import HostelStatCard from '../../components/HostelStatCard';
 import { supabase } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
@@ -416,60 +416,112 @@ const HostelManagement = ({ navigation }) => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📊 Overview</Text>
           <View style={styles.statsGrid}>
-            <StatCard
+            <HostelStatCard
               title="Hostels"
               value={stats.totalHostels.toString()}
               icon="business"
               color="#2196F3"
               subtitle="Active hostels"
+              animated={true}
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'hostels',
-                title: 'All Hostels',
+                title: 'All Hostels Overview',
                 data: hostels,
                 icon: 'business',
-                color: '#2196F3'
+                color: '#2196F3',
+                description: 'Complete list of all hostel facilities',
+                stats: {
+                  total: stats.totalHostels,
+                  active: hostels.filter(h => h.status === 'active').length,
+                  totalCapacity: stats.totalCapacity,
+                  totalOccupied: stats.totalOccupied
+                }
               })}
             />
-            <StatCard
+            <HostelStatCard
               title="Capacity"
               value={stats.totalCapacity.toString()}
               icon="people"
               color="#4CAF50"
               subtitle="Total beds"
+              animated={true}
               onPress={() => navigation.navigate('HostelDetailList', {
-                type: 'hostels',
-                title: 'Capacity Details',
-                data: hostels,
+                type: 'capacity',
+                title: 'Capacity Analysis',
+                data: hostels.map(hostel => ({
+                  ...hostel,
+                  utilizationRate: ((hostel.occupied / hostel.capacity) * 100).toFixed(1),
+                  availableSpace: hostel.capacity - hostel.occupied
+                })),
                 icon: 'people',
-                color: '#4CAF50'
+                color: '#4CAF50',
+                description: 'Detailed capacity utilization across all hostels',
+                stats: {
+                  totalCapacity: stats.totalCapacity,
+                  totalOccupied: stats.totalOccupied,
+                  totalAvailable: stats.availableBeds,
+                  utilizationRate: ((stats.totalOccupied / stats.totalCapacity) * 100).toFixed(1)
+                }
               })}
             />
-            <StatCard
+            <HostelStatCard
               title="Occupied"
               value={stats.totalOccupied.toString()}
               icon="bed"
               color="#FF9800"
               subtitle="Currently occupied"
+              animated={true}
+              maxValue={stats.totalCapacity}
+              progress={(stats.totalOccupied / stats.totalCapacity) * 100}
               onPress={() => navigation.navigate('HostelDetailList', {
-                type: 'allocations',
-                title: 'Occupied Beds',
-                data: allocations,
+                type: 'occupied',
+                title: 'Occupied Beds Details',
+                data: allocations.map(allocation => ({
+                  ...allocation,
+                  occupancyDate: allocation.allocation_date,
+                  studentInfo: `${allocation.students?.first_name} ${allocation.students?.last_name}`,
+                  locationInfo: `${allocation.hostels?.name} - ${allocation.hostel_rooms?.room_number}`,
+                  bedInfo: allocation.hostel_beds?.bed_number
+                })),
                 icon: 'bed',
-                color: '#FF9800'
+                color: '#FF9800',
+                description: 'Currently occupied beds and resident details',
+                stats: {
+                  totalOccupied: stats.totalOccupied,
+                  totalCapacity: stats.totalCapacity,
+                  occupancyRate: ((stats.totalOccupied / stats.totalCapacity) * 100).toFixed(1),
+                  totalRevenue: allocations.reduce((sum, a) => sum + (a.monthly_rent || 0), 0)
+                }
               })}
             />
-            <StatCard
+            <HostelStatCard
               title="Available"
               value={stats.availableBeds.toString()}
               icon="home"
               color="#9C27B0"
               subtitle="Available beds"
+              animated={true}
+              maxValue={stats.totalCapacity}
+              progress={(stats.availableBeds / stats.totalCapacity) * 100}
               onPress={() => navigation.navigate('HostelDetailList', {
-                type: 'hostels',
+                type: 'available',
                 title: 'Available Beds',
-                data: hostels.filter(h => h.capacity - h.occupied > 0),
+                data: hostels
+                  .filter(h => h.capacity - h.occupied > 0)
+                  .map(hostel => ({
+                    ...hostel,
+                    availableBeds: hostel.capacity - hostel.occupied,
+                    availabilityRate: (((hostel.capacity - hostel.occupied) / hostel.capacity) * 100).toFixed(1)
+                  })),
                 icon: 'home',
-                color: '#9C27B0'
+                color: '#9C27B0',
+                description: 'Available beds across all hostels',
+                stats: {
+                  totalAvailable: stats.availableBeds,
+                  totalCapacity: stats.totalCapacity,
+                  availabilityRate: ((stats.availableBeds / stats.totalCapacity) * 100).toFixed(1),
+                  hostelsWithAvailability: hostels.filter(h => h.capacity - h.occupied > 0).length
+                }
               })}
             />
           </View>
@@ -479,12 +531,13 @@ const HostelManagement = ({ navigation }) => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📝 Applications</Text>
           <View style={styles.statsGrid}>
-            <StatCard
+            <HostelStatCard
               title="Pending"
               value={stats.pendingApplications.toString()}
               icon="time"
               color="#FF9800"
               subtitle="Applications"
+              animated={true}
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'applications',
                 title: 'Pending Applications',
@@ -493,12 +546,13 @@ const HostelManagement = ({ navigation }) => {
                 color: '#FF9800'
               })}
             />
-            <StatCard
+            <HostelStatCard
               title="Approved"
               value={stats.approvedApplications.toString()}
               icon="checkmark-circle"
               color="#4CAF50"
               subtitle="Applications"
+              animated={true}
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'applications',
                 title: 'Approved Applications',
@@ -507,12 +561,13 @@ const HostelManagement = ({ navigation }) => {
                 color: '#4CAF50'
               })}
             />
-            <StatCard
+            <HostelStatCard
               title="Waitlisted"
               value={stats.waitlistedApplications.toString()}
               icon="list"
               color="#2196F3"
               subtitle="Applications"
+              animated={true}
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'applications',
                 title: 'Waitlisted Applications',
@@ -521,12 +576,13 @@ const HostelManagement = ({ navigation }) => {
                 color: '#2196F3'
               })}
             />
-            <StatCard
+            <HostelStatCard
               title="Issues"
               value={stats.maintenanceIssues.toString()}
               icon="construct"
               color="#F44336"
               subtitle="Maintenance"
+              animated={true}
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'maintenance',
                 title: 'Maintenance Issues',
