@@ -73,14 +73,14 @@ const HostelStatCard = ({
   
   // Get card size styles optimized for hostel management
   const getCardSize = () => {
-    const cardWidth = (width - 48) / 2; // Account for margins and padding
+    const cardWidth = width - 64; // Full width minus margins and padding for centering
     switch (size) {
       case 'small':
         return { minHeight: 120, padding: 16, width: cardWidth };
       case 'large':
-        return { minHeight: 160, padding: 20, width: cardWidth };
+        return { minHeight: 180, padding: 24, width: cardWidth };
       default:
-        return { minHeight: 140, padding: 18, width: cardWidth };
+        return { minHeight: 160, padding: 20, width: cardWidth };
     }
   };
   
@@ -147,7 +147,7 @@ const HostelStatCard = ({
             <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>
               <Ionicons 
                 name={icon} 
-                size={size === 'large' ? 24 : size === 'small' ? 18 : 20} 
+                size={size === 'large' ? 28 : size === 'small' ? 22 : 24} 
                 color={color} 
               />
             </View>
@@ -310,13 +310,13 @@ const styles = StyleSheet.create({
     borderRadius: Theme.BorderRadius.xl,
     padding: Theme.Spacing.lg,
     marginVertical: Theme.Spacing.sm,
-    marginHorizontal: Theme.Spacing.xs,
+    marginHorizontal: 0,
     borderLeftWidth: 4,
-    minHeight: 140,
+    minHeight: 160,
     position: 'relative',
-    flex: 1,
+    alignSelf: 'center',
     overflow: 'visible',
-    ...Theme.Shadows.md,
+    ...Theme.Shadows.lg,
   },
   cardPressed: {
     ...Theme.Shadows.sm,
@@ -342,14 +342,14 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     flex: 1,
     paddingRight: Theme.Spacing.sm,
-    maxWidth: '70%',
+    maxWidth: '75%',
   },
   title: {
-    fontSize: Theme.Typography.sizes.sm,
+    fontSize: Theme.Typography.sizes.base,
     color: Colors.text,
     fontWeight: Theme.Typography.weights.bold,
     flexShrink: 1,
-    lineHeight: 18,
+    lineHeight: 20,
     marginBottom: Theme.Spacing.xs,
     textAlign: 'left',
     includeFontPadding: false,
@@ -379,8 +379,8 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
   iconContainer: {
-    width: 36,
-    height: 36,
+    width: 48,
+    height: 48,
     borderRadius: Theme.BorderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',

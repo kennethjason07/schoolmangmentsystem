@@ -594,9 +594,9 @@ const HostelManagement = ({ navigation }) => {
           </View>
         </View>
 
-        {/* Quick Actions */}
+        {/* Management Actions */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⚡ Quick Actions</Text>
+          <Text style={styles.sectionTitle}>⚙️ Management Tools</Text>
           <View style={styles.actionsGrid}>
             <TouchableOpacity
               style={[styles.actionCard, { backgroundColor: '#E8F5E8' }]}
@@ -608,15 +608,47 @@ const HostelManagement = ({ navigation }) => {
               <Text style={styles.actionText}>Add Hostel</Text>
               <Text style={styles.actionSubtext}>Create new hostel</Text>
             </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.actionCard, { backgroundColor: '#FFF3E0' }]}
+              onPress={() => navigation.navigate('HostelStudentManagement')}
+            >
+              <View style={[styles.actionIconContainer, { backgroundColor: '#FF9800' }]}>
+                <Ionicons name="people" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionText}>Manage Students</Text>
+              <Text style={styles.actionSubtext}>Add & assign students</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.actionsGrid}>
             <TouchableOpacity
               style={[styles.actionCard, { backgroundColor: '#E3F2FD' }]}
-              onPress={() => navigation.navigate('HostelApplications')}
+              onPress={() => navigation.navigate('HostelDetailList', {
+                type: 'applications',
+                title: 'All Applications',
+                data: applications,
+                icon: 'document-text',
+                color: '#2196F3',
+                description: 'View and manage all hostel applications'
+              })}
             >
               <View style={[styles.actionIconContainer, { backgroundColor: '#2196F3' }]}>
                 <Ionicons name="document-text" size={24} color="#fff" />
               </View>
-              <Text style={styles.actionText}>View Applications</Text>
-              <Text style={styles.actionSubtext}>Review student applications</Text>
+              <Text style={styles.actionText}>Applications</Text>
+              <Text style={styles.actionSubtext}>Review applications</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.actionCard, { backgroundColor: '#FFEBEE' }]}
+              onPress={() => navigation.navigate('HostelMaintenanceManagement', { hostel: hostels[0] || { name: 'All Hostels', id: 'all' } })}
+            >
+              <View style={[styles.actionIconContainer, { backgroundColor: '#F44336' }]}>
+                <Ionicons name="construct" size={24} color="#fff" />
+              </View>
+              <Text style={styles.actionText}>Maintenance</Text>
+              <Text style={styles.actionSubtext}>Manage issues</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -650,9 +682,21 @@ const HostelManagement = ({ navigation }) => {
                   <Text style={styles.statText}>Occupied: {hostel.occupied}</Text>
                   <Text style={styles.statText}>Available: {hostel.capacity - hostel.occupied}</Text>
                 </View>
-                <View style={styles.viewDetailsContainer}>
-                  <Ionicons name="chevron-forward" size={16} color="#2196F3" />
-                  <Text style={styles.viewDetailsText}>View Details</Text>
+                <View style={styles.hostelCardActions}>
+                  <TouchableOpacity
+                    style={[styles.hostelActionButton, { backgroundColor: '#2196F3' }]}
+                    onPress={() => navigation.navigate('HostelRoomManagement', { hostel })}
+                  >
+                    <Ionicons name="bed" size={14} color="#fff" />
+                    <Text style={styles.hostelActionText}>Manage Rooms</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.hostelActionButton, { backgroundColor: '#4CAF50' }]}
+                    onPress={() => navigation.navigate('HostelDetailView', { hostel })}
+                  >
+                    <Ionicons name="eye" size={14} color="#fff" />
+                    <Text style={styles.hostelActionText}>View Details</Text>
+                  </TouchableOpacity>
                 </View>
               </TouchableOpacity>
             ))
@@ -898,10 +942,10 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
   },
   section: {
     backgroundColor: '#fff',
@@ -914,6 +958,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
+    alignItems: 'stretch',
   },
   sectionTitle: {
     fontSize: 20,
@@ -1004,18 +1049,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#888',
   },
-  viewDetailsContainer: {
+  hostelCardActions: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginTop: 8,
-    paddingTop: 8,
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
+    gap: 8,
   },
-  viewDetailsText: {
-    fontSize: 12,
-    color: '#2196F3',
+  hostelActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  hostelActionText: {
+    fontSize: 11,
+    color: '#fff',
     fontWeight: '600',
     marginLeft: 4,
   },

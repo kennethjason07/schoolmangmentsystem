@@ -15,6 +15,10 @@ import HostelApplications from '../screens/warden/HostelApplications';
 import HostelManagement from '../screens/admin/HostelManagement';
 import HostelDetailList from '../screens/admin/HostelDetailList';
 import HostelDetailView from '../screens/admin/HostelDetailView';
+import HostelRoomManagement from '../screens/admin/HostelRoomManagement';
+import HostelBedManagement from '../screens/admin/HostelBedManagement';
+import HostelMaintenanceManagement from '../screens/admin/HostelMaintenanceManagement';
+import HostelStudentManagement from '../screens/admin/HostelStudentManagement';
 import SignupScreen from '../screens/auth/SignupScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 import LoadingScreen from '../screens/LoadingScreen';
@@ -483,6 +487,10 @@ export default function AppNavigator() {
                 <Stack.Screen name="HostelManagement" component={HostelManagement} />
                 <Stack.Screen name="HostelDetailList" component={HostelDetailList} />
                 <Stack.Screen name="HostelDetailView" component={HostelDetailView} />
+                <Stack.Screen name="HostelRoomManagement" component={HostelRoomManagement} />
+                <Stack.Screen name="HostelBedManagement" component={HostelBedManagement} />
+                <Stack.Screen name="HostelMaintenanceManagement" component={HostelMaintenanceManagement} />
+                <Stack.Screen name="HostelStudentManagement" component={HostelStudentManagement} />
                 <Stack.Screen name="HostelApplications" component={HostelApplications} />
               </>
             )}
