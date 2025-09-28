@@ -99,6 +99,53 @@ CREATE TABLE public.expense_categories (
   CONSTRAINT expense_categories_pkey PRIMARY KEY (id),
   CONSTRAINT expense_categories_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
+CREATE TABLE public.facial_recognition_events (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  event_type text NOT NULL CHECK (event_type = ANY (ARRAY['enrollment'::text, 'recognition_attempt'::text, 'recognition_success'::text, 'recognition_failure'::text])),
+  person_id uuid,
+  person_type text CHECK (person_type = ANY (ARRAY['student'::text, 'teacher'::text, 'unknown'::text])),
+  matched_template_id uuid,
+  confidence_score numeric CHECK (confidence_score >= 0.0 AND confidence_score <= 1.0),
+  recognition_method text DEFAULT 'camera'::text CHECK (recognition_method = ANY (ARRAY['camera'::text, 'uploaded_image'::text, 'batch_process'::text])),
+  input_image_url text,
+  recognition_duration_ms integer,
+  device_info jsonb,
+  location_info jsonb,
+  error_message text,
+  performed_by uuid,
+  performed_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+  ip_address inet,
+  user_agent text,
+  session_id text,
+  created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+  tenant_id uuid NOT NULL,
+  CONSTRAINT facial_recognition_events_pkey PRIMARY KEY (id),
+  CONSTRAINT facial_recognition_events_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT facial_recognition_events_matched_template_fkey FOREIGN KEY (matched_template_id) REFERENCES public.facial_templates(id),
+  CONSTRAINT facial_recognition_events_performed_by_fkey FOREIGN KEY (performed_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.facial_templates (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  person_id uuid NOT NULL,
+  person_type text NOT NULL CHECK (person_type = ANY (ARRAY['student'::text, 'teacher'::text])),
+  template_name text NOT NULL DEFAULT 'primary'::text,
+  face_encoding bytea,
+  face_image_url text,
+  confidence_threshold numeric DEFAULT 0.8 CHECK (confidence_threshold >= 0.0 AND confidence_threshold <= 1.0),
+  is_active boolean DEFAULT true,
+  enrollment_method text DEFAULT 'manual'::text CHECK (enrollment_method = ANY (ARRAY['manual'::text, 'bulk_upload'::text, 'auto_capture'::text])),
+  enrolled_by uuid,
+  enrollment_date timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+  last_used timestamp with time zone,
+  usage_count integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+  tenant_id uuid NOT NULL,
+  azure_person_id text,
+  CONSTRAINT facial_templates_pkey PRIMARY KEY (id),
+  CONSTRAINT facial_templates_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT facial_templates_enrolled_by_fkey FOREIGN KEY (enrolled_by) REFERENCES public.users(id)
+);
 CREATE TABLE public.fee_structure (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   academic_year text NOT NULL,
@@ -379,11 +426,18 @@ CREATE TABLE public.student_attendance (
   marked_by uuid,
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   tenant_id uuid NOT NULL,
+  verification_method text DEFAULT 'manual'::text CHECK (verification_method = ANY (ARRAY['manual'::text, 'facial_recognition'::text, 'hybrid'::text])),
+  recognition_event_id uuid,
+  recognition_confidence numeric CHECK (recognition_confidence >= 0.0 AND recognition_confidence <= 1.0),
+  recognition_duration_ms integer,
+  backup_verification text,
+  verification_notes text,
   CONSTRAINT student_attendance_pkey PRIMARY KEY (id),
   CONSTRAINT student_attendance_class_id_fkey FOREIGN KEY (class_id) REFERENCES public.classes(id),
   CONSTRAINT student_attendance_marked_by_fkey FOREIGN KEY (marked_by) REFERENCES public.users(id),
   CONSTRAINT student_attendance_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
-  CONSTRAINT student_attendance_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id)
+  CONSTRAINT student_attendance_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id),
+  CONSTRAINT student_attendance_recognition_event_fkey FOREIGN KEY (recognition_event_id) REFERENCES public.facial_recognition_events(id)
 );
 CREATE TABLE public.student_discounts (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -489,10 +543,17 @@ CREATE TABLE public.teacher_attendance (
   marked_by uuid,
   created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
   tenant_id uuid NOT NULL,
+  verification_method text DEFAULT 'manual'::text CHECK (verification_method = ANY (ARRAY['manual'::text, 'facial_recognition'::text, 'hybrid'::text])),
+  recognition_event_id uuid,
+  recognition_confidence numeric CHECK (recognition_confidence >= 0.0 AND recognition_confidence <= 1.0),
+  recognition_duration_ms integer,
+  backup_verification text,
+  verification_notes text,
   CONSTRAINT teacher_attendance_pkey PRIMARY KEY (id),
   CONSTRAINT teacher_attendance_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES public.teachers(id),
   CONSTRAINT teacher_attendance_marked_by_fkey FOREIGN KEY (marked_by) REFERENCES public.users(id),
-  CONSTRAINT teacher_attendance_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
+  CONSTRAINT teacher_attendance_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT teacher_attendance_recognition_event_fkey FOREIGN KEY (recognition_event_id) REFERENCES public.facial_recognition_events(id)
 );
 CREATE TABLE public.teacher_leave_balance (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

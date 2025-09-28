@@ -35,6 +35,8 @@ import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificat
 import useNavigateWithStatePreservation from '../../components/ui/SafeNavigate';
 import { useTenantFeatures } from '../../hooks/useTenantFeatures';
 import { getFeatureForQuickAction } from '../../constants/featureMapping';
+import FaceEnrollmentModal from '../../components/FacialRecognition/FaceEnrollmentModal';
+import FaceRecognitionService from '../../services/FaceRecognitionService';
 
 const { width } = Dimensions.get('window');
 
@@ -105,6 +107,13 @@ const AdminDashboard = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [schoolDetails, setSchoolDetails] = useState(null);
+  
+  // Facial Recognition state
+  const [faceEnrollmentModal, setFaceEnrollmentModal] = useState({
+    visible: false,
+    person: null
+  });
+  const [faceStats, setFaceStats] = useState(null);
 
   // Safe navigation hook to prevent state loss
   const navigateSafely = useNavigateWithStatePreservation();
@@ -469,7 +478,8 @@ const AdminDashboard = ({ navigation }) => {
       try {
         await Promise.all([
           loadDashboardData(),
-          loadChartData()
+          loadChartData(),
+          loadFaceRecognitionStats()
         ]);
         console.log('✅ [AdminDashboard] Dashboard initialization completed');
       } catch (error) {
@@ -526,6 +536,22 @@ const AdminDashboard = ({ navigation }) => {
         console.log('🔄 [AdminDashboard] Events changed, refreshing dashboard');
         loadDashboardData();
       })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'facial_templates'
+      }, () => {
+        console.log('🔄 [AdminDashboard] Facial templates changed, refreshing stats');
+        loadFaceRecognitionStats();
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'facial_recognition_events'
+      }, () => {
+        console.log('🔄 [AdminDashboard] Facial recognition events changed, refreshing stats');
+        loadFaceRecognitionStats();
+      })
       .subscribe();
 
     return () => {
@@ -540,7 +566,8 @@ const AdminDashboard = ({ navigation }) => {
     try {
       await Promise.all([
         loadDashboardData(),
-        loadChartData()
+        loadChartData(),
+        loadFaceRecognitionStats()
       ]);
       // Universal notification system automatically handles refresh
     } catch (error) {
@@ -559,6 +586,8 @@ const AdminDashboard = ({ navigation }) => {
     { title: 'Leave Management', icon: 'calendar-outline', color: '#4CAF50', screen: 'LeaveManagement' }, // Stack screen
     { title: 'Subjects Timetable', icon: 'calendar', color: '#607D8B', screen: 'SubjectsTimetable' }, // Stack screen
     { title: 'Attendance', icon: 'checkmark-circle', color: '#009688', screen: 'AttendanceManagement' }, // Stack screen
+    { title: 'Face Enrollment', icon: 'person-add', color: '#2196F3', screen: 'FaceEnrollment' }, // Stack screen
+    { title: 'Face Attendance', icon: 'camera', color: '#4CAF50', screen: 'FaceAttendance' }, // Stack screen
     { title: 'Fee Management', icon: 'card', color: '#9C27B0', screen: 'FeeManagement' }, // Stack screen
     { title: 'Stationary Management', icon: 'cube-outline', color: '#FF5722', screen: 'StationaryManagement' }, // Stack screen
     { title: 'Expense Management', icon: 'wallet', color: '#F44336', screen: 'ExpenseManagement' }, // Stack screen
@@ -577,6 +606,25 @@ const AdminDashboard = ({ navigation }) => {
   ]);
 
   // Load chart data
+  // Load facial recognition statistics
+  const loadFaceRecognitionStats = async () => {
+    try {
+      const tenantId = getCachedTenantId();
+      if (!tenantId) {
+        console.warn('⚠️ [AdminDashboard] No tenant ID for face recognition stats');
+        return;
+      }
+      
+      console.log('📊 [AdminDashboard] Loading face recognition stats...');
+      const stats = await FaceRecognitionService.getRecognitionStats(tenantId);
+      setFaceStats(stats);
+      console.log('✅ [AdminDashboard] Face recognition stats loaded:', stats);
+    } catch (error) {
+      console.error('❌ [AdminDashboard] Failed to load face recognition stats:', error);
+      // Fail silently for optional feature
+    }
+  };
+
   const loadChartData = async () => {
     try {
       // 🚀 FIXED: Enhanced tenant validation for chart data

@@ -48,7 +48,8 @@ import AutoGrading from '../screens/admin/AutoGrading';
 import PendingUPIPayments from '../screens/admin/PendingUPIPayments';
 import PaymentVerificationScreen from '../screens/PaymentVerificationScreen';
 import TestPaymentVerificationNavigation from '../screens/TestPaymentVerificationNavigation';
-
+import FaceEnrollmentScreen from '../screens/admin/FaceEnrollmentScreen';
+import FaceAttendanceScreen from '../screens/admin/FaceAttendanceScreen';
 
 import FeeClassDetails from '../screens/admin/FeeClassDetails';
 import ClassStudentDetails from '../screens/admin/ClassStudentDetails';
@@ -498,6 +499,16 @@ export default function AppNavigator() {
                 <Stack.Screen name="EduCartoonAI" component={EduCartoonAI} />
                 <Stack.Screen name="StudentDetails" component={StudentDetails} />
                 <Stack.Screen name="StudentList" component={StudentList} />
+                <Stack.Screen 
+                  name="FaceEnrollment" 
+                  component={FaceEnrollmentScreen}
+                  options={{ title: 'Face Enrollment' }}
+                />
+                <Stack.Screen 
+                  name="FaceAttendance" 
+                  component={FaceAttendanceScreen}
+                  options={{ title: 'Face Attendance' }}
+                />
               </>
             )}
             {userType === 'teacher' && (
@@ -516,6 +527,11 @@ export default function AppNavigator() {
                 <Stack.Screen name="Settings" component={SettingsScreen} />
                 <Stack.Screen name="NotificationSettings" component={NotificationSettings} />
                 <Stack.Screen name="EduCartoonAI" component={EduCartoonAI} />
+                <Stack.Screen 
+                  name="FaceAttendance" 
+                  component={FaceAttendanceScreen}
+                  options={{ title: 'Face Attendance' }}
+                />
               </>
             )}
             {userType === 'parent' && (
