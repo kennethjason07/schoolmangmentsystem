@@ -11,6 +11,8 @@ import {
   Modal,
   TextInput,
   Dimensions,
+  Platform,
+  SafeAreaView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRoute } from '@react-navigation/native';
@@ -413,7 +415,7 @@ const HostelManagement = ({ navigation }) => {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <Header 
         title="Hostel Management" 
         onBackPress={() => navigation.goBack()}
@@ -422,24 +424,12 @@ const HostelManagement = ({ navigation }) => {
 
       <ScrollView
         style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {/* Demo Banner */}
-        <View style={styles.demoBanner}>
-          <Ionicons name="code" size={16} color="#FF9800" />
-          <Text style={styles.demoText}>Frontend Demo Mode - Sample Data</Text>
-        </View>
 
-        {/* Header Section */}
-        <View style={styles.headerSection}>
-          <View style={styles.titleContainer}>
-            <Ionicons name="bed" size={28} color="#2196F3" />
-            <Text style={styles.mainTitle}>Hostel Management</Text>
-          </View>
-          <Text style={styles.subtitle}>Manage hostels, applications, and bed allocations</Text>
-        </View>
 
         {/* Stats Overview */}
         <View style={styles.section}>
@@ -452,6 +442,7 @@ const HostelManagement = ({ navigation }) => {
               color="#2196F3"
               subtitle="Active hostels"
               animated={true}
+              size="small"
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'hostels',
                 title: 'All Hostels Overview',
@@ -474,6 +465,7 @@ const HostelManagement = ({ navigation }) => {
               color="#4CAF50"
               subtitle="Total beds"
               animated={true}
+              size="small"
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'capacity',
                 title: 'Capacity Analysis',
@@ -500,6 +492,7 @@ const HostelManagement = ({ navigation }) => {
               color="#FF9800"
               subtitle="Currently occupied"
               animated={true}
+              size="small"
               maxValue={stats.totalCapacity}
               progress={(stats.totalOccupied / stats.totalCapacity) * 100}
               onPress={() => navigation.navigate('HostelDetailList', {
@@ -530,6 +523,7 @@ const HostelManagement = ({ navigation }) => {
               color="#9C27B0"
               subtitle="Available beds"
               animated={true}
+              size="small"
               maxValue={stats.totalCapacity}
               progress={(stats.availableBeds / stats.totalCapacity) * 100}
               onPress={() => navigation.navigate('HostelDetailList', {
@@ -567,6 +561,7 @@ const HostelManagement = ({ navigation }) => {
               color="#FF9800"
               subtitle="Applications"
               animated={true}
+              size="small"
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'applications',
                 title: 'Pending Applications',
@@ -582,6 +577,7 @@ const HostelManagement = ({ navigation }) => {
               color="#4CAF50"
               subtitle="Applications"
               animated={true}
+              size="small"
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'applications',
                 title: 'Approved Applications',
@@ -597,6 +593,7 @@ const HostelManagement = ({ navigation }) => {
               color="#2196F3"
               subtitle="Applications"
               animated={true}
+              size="small"
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'applications',
                 title: 'Waitlisted Applications',
@@ -612,6 +609,7 @@ const HostelManagement = ({ navigation }) => {
               color="#F44336"
               subtitle="Maintenance"
               animated={true}
+              size="small"
               onPress={() => navigation.navigate('HostelDetailList', {
                 type: 'maintenance',
                 title: 'Maintenance Issues',
@@ -866,47 +864,6 @@ const HostelManagement = ({ navigation }) => {
         )}
       </ScrollView>
 
-      {/* Bottom Navigation Bar */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => navigation.navigate('HostelManagement')}
-        >
-          <Ionicons name="home" size={24} color="#2196F3" />
-          <Text style={styles.navText}>Dashboard</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => navigation.navigate('HostelStudentManagement')}
-        >
-          <Ionicons name="people" size={24} color="#666" />
-          <Text style={styles.navText}>Students</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => navigation.navigate('HostelDetailList', {
-            type: 'applications',
-            title: 'All Applications',
-            data: applications,
-            icon: 'document-text',
-            color: '#2196F3',
-            description: 'View and manage all hostel applications'
-          })}
-        >
-          <Ionicons name="document-text" size={24} color="#666" />
-          <Text style={styles.navText}>Applications</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => navigation.navigate('HostelMaintenanceManagement', { hostel: hostels[0] || { name: 'All Hostels', id: 'all' } })}
-        >
-          <Ionicons name="construct" size={24} color="#666" />
-          <Text style={styles.navText}>Maintenance</Text>
-        </TouchableOpacity>
-      </View>
 
       {/* Add Hostel Modal */}
       <Modal
@@ -967,7 +924,7 @@ const HostelManagement = ({ navigation }) => {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -990,52 +947,13 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
-  demoBanner: {
-    backgroundColor: '#FFF3E0',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#FFE0B2',
-  },
-  demoText: {
-    marginLeft: 8,
-    fontSize: 14,
-    color: '#F57C00',
-    fontWeight: '600',
-  },
-  headerSection: {
-    backgroundColor: '#fff',
-    padding: 20,
-    marginBottom: 8,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  mainTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginLeft: 12,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    lineHeight: 22,
+  scrollContent: {
+    paddingTop: Platform.OS === 'ios' ? 20 : 24,
+    paddingBottom: 24,
   },
   statsGrid: {
     flexDirection: 'column',
     alignItems: 'center',
-    gap: 12,
     paddingHorizontal: 16,
   },
   section: {
@@ -1060,10 +978,10 @@ const styles = StyleSheet.create({
   actionsGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 12,
+    paddingHorizontal: 8,
+    marginBottom: 12,
   },
   actionCard: {
-    flex: 1,
     alignItems: 'center',
     padding: 20,
     borderRadius: 12,
@@ -1074,6 +992,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
+    width: '48%',
+    marginHorizontal: 4,
+    marginBottom: 12,
   },
   actionIconContainer: {
     width: 48,
@@ -1205,18 +1126,24 @@ const styles = StyleSheet.create({
   },
   actionButtons: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 8,
+    justifyContent: Platform.OS === 'web' ? 'space-between' : 'space-around',
+    marginTop: 12,
+    flexWrap: 'wrap',
+    paddingHorizontal: Platform.OS === 'web' ? 0 : 8,
   },
   actionButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: Platform.OS === 'web' ? 16 : 12,
+    paddingVertical: Platform.OS === 'web' ? 8 : 10,
     borderRadius: 6,
-    minWidth: 80,
+    minWidth: Platform.OS === 'web' ? 80 : 70,
+    marginHorizontal: Platform.OS === 'web' ? 6 : 4,
+    marginBottom: 8,
+    width: Platform.OS === 'web' ? '48%' : '22%',
+    alignItems: 'center',
   },
   actionButtonText: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: Platform.OS === 'web' ? 12 : 11,
     fontWeight: 'bold',
     textAlign: 'center',
   },
@@ -1382,33 +1309,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
-  },
-  // Bottom Navigation Styles
-  bottomNav: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  navItem: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-  },
-  navText: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-    fontWeight: '500',
   },
 });
 

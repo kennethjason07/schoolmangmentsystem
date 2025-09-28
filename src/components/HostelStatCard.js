@@ -76,11 +76,23 @@ const HostelStatCard = ({
     const cardWidth = width - 64; // Full width minus margins and padding for centering
     switch (size) {
       case 'small':
-        return { minHeight: 120, padding: 16, width: cardWidth };
+        return { 
+          minHeight: Platform.OS === 'web' ? 120 : 180, 
+          padding: Platform.OS === 'web' ? 16 : 22, 
+          width: cardWidth 
+        };
       case 'large':
-        return { minHeight: 180, padding: 24, width: cardWidth };
+        return { 
+          minHeight: Platform.OS === 'web' ? 180 : 200, 
+          padding: Platform.OS === 'web' ? 24 : 26, 
+          width: cardWidth 
+        };
       default:
-        return { minHeight: 160, padding: 20, width: cardWidth };
+        return { 
+          minHeight: Platform.OS === 'web' ? 160 : 180, 
+          padding: Platform.OS === 'web' ? 20 : 22, 
+          width: cardWidth 
+        };
     }
   };
   
@@ -309,10 +321,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderRadius: Theme.BorderRadius.xl,
     padding: Theme.Spacing.lg,
-    marginVertical: Theme.Spacing.sm,
+    marginVertical: Platform.OS === 'web' ? Theme.Spacing.md : Theme.Spacing.lg,
     marginHorizontal: 0,
     borderLeftWidth: 4,
-    minHeight: 160,
+    minHeight: Platform.OS === 'web' ? 160 : 220,
     position: 'relative',
     alignSelf: 'center',
     overflow: 'visible',
@@ -334,8 +346,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: Theme.Spacing.sm,
-    minHeight: 45,
+    marginBottom: Theme.Spacing.xs,
+    minHeight: 36,
   },
   titleContainer: {
     flexDirection: 'column',
@@ -345,12 +357,12 @@ const styles = StyleSheet.create({
     maxWidth: '75%',
   },
   title: {
-    fontSize: Theme.Typography.sizes.base,
+    fontSize: Platform.OS === 'web' ? Theme.Typography.sizes['2xl'] : Theme.Typography.sizes['4xl'],
     color: Colors.text,
     fontWeight: Theme.Typography.weights.bold,
     flexShrink: 1,
-    lineHeight: 20,
-    marginBottom: Theme.Spacing.xs,
+    lineHeight: Platform.OS === 'web' ? 26 : 34,
+    marginBottom: Platform.OS === 'web' ? 2 : 4,
     textAlign: 'left',
     includeFontPadding: false,
     textAlignVertical: 'top',
@@ -392,11 +404,11 @@ const styles = StyleSheet.create({
     paddingTop: Theme.Spacing.xs,
   },
   value: {
-    fontSize: Theme.Typography.sizes.xl,
+    fontSize: Platform.OS === 'web' ? Theme.Typography.sizes['4xl'] : Theme.Typography.sizes['6xl'],
     fontWeight: Theme.Typography.weights.extrabold,
-    marginBottom: Theme.Spacing.xs,
-    letterSpacing: -0.2,
-    lineHeight: 22,
+    marginBottom: Platform.OS === 'web' ? 2 : 4,
+    letterSpacing: -0.5,
+    lineHeight: Platform.OS === 'web' ? 34 : 42,
     includeFontPadding: false,
   },
   valueLarge: {
@@ -416,9 +428,9 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   subtitle: {
-    fontSize: Theme.Typography.sizes.xs,
+    fontSize: Platform.OS === 'web' ? Theme.Typography.sizes.base : Theme.Typography.sizes.xl,
     color: Colors.textSecondary,
-    lineHeight: 14,
+    lineHeight: Platform.OS === 'web' ? 18 : 22,
     fontWeight: Theme.Typography.weights.medium,
     opacity: 0.8,
     includeFontPadding: false,
