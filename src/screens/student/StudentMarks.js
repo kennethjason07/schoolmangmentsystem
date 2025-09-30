@@ -4,6 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LineChart } from 'react-native-chart-kit';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
+import { generateUnifiedReceiptHTML } from '../../utils/unifiedReceiptTemplate';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { 
@@ -75,10 +77,15 @@ export default function StudentMarks({ navigation }) {
   const fetchSchoolDetails = async () => {
     try {
       const { data, error } = await dbHelpers.getSchoolDetails();
-      
-      if (schoolQuery.data && !schoolQuery.error) {
-        setSchoolDetails(schoolQuery.data);
-        console.log('✅ Enhanced tenant-aware school details loaded');
+
+      if (error) {
+        console.error('Error fetching school details:', error);
+        return;
+      }
+
+      if (data) {
+        setSchoolDetails(data);
+        console.log('✅ School details loaded');
       }
     } catch (err) {
       console.error('Error fetching school details:', err);
@@ -421,16 +428,85 @@ export default function StudentMarks({ navigation }) {
     }
   };
 
-  // Download Report Card Function
+  // Download Report Card Function - Using SAME robust approach as fee receipts
   const downloadReportCard = async () => {
     try {
-      // Get school information from dynamic schoolDetails or fallback
-      const schoolInfo = {
-        name: schoolDetails?.name || "ABC School",
-        address: schoolDetails?.address || "123 Education Street, Learning City",
-        phone: schoolDetails?.phone || "+1 (555) 123-4567",
-        email: schoolDetails?.email || "info@abcschool.edu"
+      console.log('📊 Generating report card with unified receipt template approach...');
+      
+      // Ensure we have fresh school details; fetch if not loaded yet
+      let effectiveSchoolDetails = schoolDetails;
+      if (!effectiveSchoolDetails) {
+        try {
+          const { data, error } = await dbHelpers.getSchoolDetails();
+          if (!error && data) {
+            effectiveSchoolDetails = data;
+            setSchoolDetails(data);
+          }
+        } catch (e) {
+          console.log('downloadReportCard: fallback fetch school details failed:', e?.message);
+        }
+      }
+
+      console.log('🏫 School details for report card:', effectiveSchoolDetails);
+      console.log('👤 Student info:', studentData);
+      
+      // Prepare receipt data for the unified template (for logo handling)
+      const receiptData = {
+        student_name: studentData?.name || 'Student Name',
+        class_name: studentData?.classes?.class_name || 'N/A',
+        student_admission_no: studentData?.roll_no || 'N/A',
+        section: studentData?.classes?.section || '',
+        receipt_no: `RC-${Date.now()}`,
+        payment_date_formatted: new Date().toLocaleDateString(),
+        fee_component: 'Report Card',
+        payment_mode: 'Academic Report',
+        amount_paid: 0 // Not applicable for report card
       };
+      
+      const schoolDetailsForTemplate = {
+        name: effectiveSchoolDetails?.name || 'School Management System',
+        address: effectiveSchoolDetails?.address || 'School Address',
+        logo_url: effectiveSchoolDetails?.logo_url || effectiveSchoolDetails?.logoUrl
+      };
+      
+      // Generate the base receipt HTML using the SAME robust logo handling as fee receipts
+      let baseHtml;
+      try {
+        // This uses the EXACT SAME logo loading logic as fee receipts:
+        // - URL validation with isValidImageUrl
+        // - HTTP HEAD request testing for accessibility  
+        // - Automatic fallback to profiles and school-assets buckets
+        // - Enhanced loaders with loadSchoolLogoEnhanced and loadLogoWithFallbacks
+        // - Proper logo embedding in HTML with <img> tags
+        baseHtml = await generateUnifiedReceiptHTML(receiptData, schoolDetailsForTemplate, schoolDetailsForTemplate?.logo_url);
+        console.log('✅ Generated base HTML with robust logo loading from unified template');
+        console.log('🔧 This uses the SAME logo handling approach as fee receipts:');
+        console.log('   - Validates logo URLs with isValidImageUrl()');
+        console.log('   - Tests URL accessibility with HTTP HEAD requests');
+        console.log('   - Tries profiles bucket, then school-assets bucket as fallbacks');
+        console.log('   - Uses enhanced loaders as final fallback');
+        console.log('   - Embeds logos directly in HTML as <img> tags for reliable PDF rendering');
+      } catch (templateError) {
+        console.error('❌ Template generation failed, using fallback:', templateError);
+        baseHtml = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                .header { text-align: center; margin-bottom: 20px; }
+              </style>
+            </head>
+            <body>
+              <div class="header">
+                <h1>${schoolDetailsForTemplate.name}</h1>
+                <h2>Report Card</h2>
+                <p>Student: ${studentData?.name}</p>
+              </div>
+            </body>
+          </html>
+        `;
+      }
 
       // Calculate overall grade
       const overallGrade = getLetterGrade(stats.average);
@@ -459,406 +535,117 @@ export default function StudentMarks({ navigation }) {
         };
       });
 
-      // Create beautiful HTML report card
-      const htmlContent = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Student Report Card</title>
-          <style>
-            * {
-              margin: 0;
-              padding: 0;
-              box-sizing: border-box;
-            }
-
-            body {
-              font-family: 'Arial', sans-serif;
-              line-height: 1.6;
-              color: #333;
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              min-height: 100vh;
-              padding: 20px;
-            }
-
-            .report-card {
-              max-width: 800px;
-              margin: 0 auto;
-              background: white;
-              border-radius: 20px;
-              box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-              overflow: hidden;
-            }
-
-            .header {
-              background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
-              color: white;
-              padding: 15px;
-              text-align: center;
-              position: relative;
-            }
-
-            .header::before {
-              content: '';
-              position: absolute;
-              top: 0;
-              left: 0;
-              right: 0;
-              bottom: 0;
-              background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="75" cy="75" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="50" cy="10" r="0.5" fill="rgba(255,255,255,0.1)"/><circle cx="10" cy="60" r="0.5" fill="rgba(255,255,255,0.1)"/><circle cx="90" cy="40" r="0.5" fill="rgba(255,255,255,0.1)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
-              opacity: 0.3;
-            }
-
-            .school-logo {
-              width: 50px;
-              height: 50px;
-              background: rgba(255,255,255,0.2);
-              border-radius: 50%;
-              margin: 0 auto 10px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              font-size: 24px;
-              font-weight: bold;
-              position: relative;
-              z-index: 1;
-            }
-
-            .school-name {
-              font-size: 20px;
-              font-weight: bold;
-              margin-bottom: 3px;
-              position: relative;
-              z-index: 1;
-            }
-
-            .school-details {
-              font-size: 12px;
-              opacity: 0.9;
-              position: relative;
-              z-index: 1;
-            }
-
-            .student-info {
-              padding: 15px;
-              background: #f8f9fa;
-              border-bottom: 2px solid #e9ecef;
-            }
-
-            .student-card {
-              display: flex;
-              align-items: center;
-              gap: 20px;
-            }
-
-            .student-avatar {
-              width: 60px;
-              height: 60px;
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              border-radius: 50%;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              color: white;
-              font-size: 24px;
-              font-weight: bold;
-              box-shadow: 0 5px 10px rgba(0,0,0,0.1);
-              flex-shrink: 0;
-            }
-
-            .student-details {
-              flex: 1;
-            }
-
-            .student-details h2 {
-              font-size: 24px;
-              color: #1976d2;
-              margin-bottom: 10px;
-              margin-top: 0;
-            }
-
-            .student-meta {
-              display: grid;
-              grid-template-columns: repeat(2, 1fr);
-              gap: 10px;
-              font-size: 14px;
-              color: #666;
-            }
-
-            .overall-performance {
-              padding: 30px;
-              text-align: center;
-              background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            }
-
-            .grade-circle {
-              width: 120px;
-              height: 120px;
-              border-radius: 50%;
-              background: ${gradeColor};
-              color: white;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: center;
-              margin: 0 auto 20px;
-              box-shadow: 0 15px 30px rgba(0,0,0,0.2);
-              position: relative;
-            }
-
-            .grade-circle::before {
-              content: '';
-              position: absolute;
-              top: -5px;
-              left: -5px;
-              right: -5px;
-              bottom: -5px;
-              border-radius: 50%;
-              background: linear-gradient(45deg, transparent, rgba(255,255,255,0.3), transparent);
-            }
-
-            .grade-letter {
-              font-size: 36px;
-              font-weight: bold;
-            }
-
-            .grade-percentage {
-              font-size: 18px;
-              opacity: 0.9;
-            }
-
-            .performance-stats {
-              display: grid;
-              grid-template-columns: repeat(3, 1fr);
-              gap: 20px;
-              margin-top: 20px;
-            }
-
-            .stat-item {
-              text-align: center;
-              padding: 15px;
-              background: white;
-              border-radius: 10px;
-              box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-            }
-
-            .stat-value {
-              font-size: 24px;
-              font-weight: bold;
-              color: #1976d2;
-            }
-
-            .stat-label {
-              font-size: 12px;
-              color: #666;
-              margin-top: 5px;
-            }
-
-            .performance-stats {
-              display: grid;
-              grid-template-columns: repeat(3, 1fr);
-              gap: 20px;
-              margin-top: 20px;
-            }
-
-            .stat-item {
-              text-align: center;
-              padding: 15px;
-              background: white;
-              border-radius: 10px;
-              box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-            }
-
-            .stat-value {
-              font-size: 24px;
-              font-weight: bold;
-              color: #1976d2;
-            }
-
-            .stat-label {
-              font-size: 12px;
-              color: #666;
-              margin-top: 5px;
-            }
-
-            .section-title {
-              font-size: 20px;
-              font-weight: bold;
-              color: #1976d2;
-              margin-bottom: 20px;
-              text-align: center;
-            }
-
-            .exams-section {
-              padding: 15px;
-              background: #f8f9fa;
-            }
-
-            .exam-table {
-              width: 100%;
-              border-collapse: collapse;
-              background: white;
-              border-radius: 10px;
-              overflow: hidden;
-              box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-            }
-
-            .exam-table th {
-              background: #1976d2;
-              color: white;
-              padding: 8px 10px;
-              text-align: left;
-              font-weight: bold;
-              font-size: 14px;
-            }
-
-            .exam-table td {
-              padding: 6px 10px;
-              border-bottom: 1px solid #e9ecef;
-              font-size: 13px;
-            }
-
-            .exam-table tr:last-child td {
-              border-bottom: none;
-            }
-
-            .exam-table tr:nth-child(even) {
-              background: #f8f9fa;
-            }
-
-            .grade-badge {
-              padding: 4px 12px;
-              border-radius: 15px;
-              color: white;
-              font-weight: bold;
-              font-size: 12px;
-            }
-
-            .footer {
-              padding: 10px 15px;
-              background: #1976d2;
-              color: white;
-              text-align: center;
-            }
-
-            .footer-text {
-              font-size: 12px;
-              opacity: 0.9;
-            }
-
-            .print-date {
-              margin-top: 5px;
-              font-size: 10px;
-              opacity: 0.7;
-            }
-
-            @media print {
-              body {
-                background: white;
-                padding: 0;
-              }
-
-              .report-card {
-                box-shadow: none;
-                border-radius: 0;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="report-card">
-            <!-- Header -->
-            <div class="header">
-              <div class="school-logo">🎓</div>
-              <div class="school-name">${schoolInfo.name}</div>
-              <div class="school-details">
-                ${schoolInfo.address}<br>
-                ${schoolInfo.phone}
-              </div>
+      // Build report card content to replace receipt content
+      const reportCardContent = `
+        <div class="report-card-section">
+          <h2 style="color:#1976d2; text-align: center; margin: 20px 0;">📋 Academic Report Card</h2>
+          
+          <!-- Overall Performance Card -->
+          <div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 30px; text-align: center; border-radius: 16px; margin: 20px 0;">
+            <div style="width: 120px; height: 120px; border-radius: 50%; background: ${gradeColor}; color: white; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; margin: 0 auto 20px; box-shadow: 0 15px 30px rgba(0,0,0,0.2); position: relative;">
+              <div style="font-size: 36px; font-weight: bold;">${overallGrade}</div>
+              <div style="font-size: 18px; opacity: 0.9;">${stats.average}%</div>
             </div>
-
-            <!-- Student Information -->
-            <div class="student-info">
-              <div class="student-card">
-                <div class="student-avatar">
-                  ${studentData?.name ? studentData.name.charAt(0).toUpperCase() : 'S'}
-                </div>
-                <div class="student-details">
-                  <h2>${studentData?.name || 'Student Name'}</h2>
-                  <div class="student-meta">
-                    <div><strong>Class:</strong> ${studentData?.classes?.class_name || 'N/A'}</div>
-                    <div><strong>Section:</strong> ${studentData?.classes?.section || 'N/A'}</div>
-                    <div><strong>DOB:</strong> ${studentData?.dob ? new Date(studentData.dob).toLocaleDateString() : 'N/A'}</div>
-                    <div><strong>Academic Year:</strong> ${new Date().getFullYear()}</div>
-                  </div>
-                </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 20px;">
+              <div style="text-align: center; padding: 15px; background: white; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1);">
+                <div style="font-size: 24px; font-weight: bold; color: #1976d2;">${stats.highest}%</div>
+                <div style="font-size: 12px; color: #666; margin-top: 5px;">Highest Score</div>
               </div>
-            </div>
-
-
-
-
-
-            <!-- Detailed Exam Results -->
-            <div class="exams-section">
-              <h3 class="section-title">📋 Detailed Exam Results</h3>
-              <table class="exam-table">
-                <thead>
-                  <tr>
-                    <th>Exam</th>
-                    <th>Subject</th>
-                    <th>Marks Obtained</th>
-                    <th>Total Marks</th>
-                    <th>Percentage</th>
-                    <th>Grade</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${marksData.map(mark => `
-                    <tr>
-                      <td>${mark.examName}</td>
-                      <td>${mark.subject}</td>
-                      <td>${mark.marksObtained}</td>
-                      <td>${mark.totalMarks}</td>
-                      <td>${mark.percentage}%</td>
-                      <td>
-                        <span class="grade-badge" style="background-color: ${getGradeColor(mark.percentage)}">
-                          ${mark.grade}
-                        </span>
-                      </td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
-
-            <!-- Footer -->
-            <div class="footer">
-              <div class="footer-text">
-                This report card is generated electronically and contains confidential student information.
+              <div style="text-align: center; padding: 15px; background: white; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1);">
+                <div style="font-size: 24px; font-weight: bold; color: #1976d2;">${stats.average}%</div>
+                <div style="font-size: 12px; color: #666; margin-top: 5px;">Average</div>
               </div>
-              <div class="print-date">
-                Generated on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
+              <div style="text-align: center; padding: 15px; background: white; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1);">
+                <div style="font-size: 24px; font-weight: bold; color: #1976d2;">${stats.totalExams}</div>
+                <div style="font-size: 12px; color: #666; margin-top: 5px;">Total Exams</div>
               </div>
             </div>
           </div>
-        </body>
-        </html>
+          
+          <!-- Detailed Exam Results Table -->
+          <div style="margin-top: 20px;">
+            <h3 style="color:#1976d2; margin-bottom: 20px; text-align: center;">📊 Detailed Exam Results</h3>
+            <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 5px 15px rgba(0,0,0,0.1);">
+              <thead>
+                <tr style="background: #1976d2; color: white;">
+                  <th style="padding: 8px 10px; text-align: left; font-weight: bold; font-size: 14px;">Exam</th>
+                  <th style="padding: 8px 10px; text-align: left; font-weight: bold; font-size: 14px;">Subject</th>
+                  <th style="padding: 8px 10px; text-align: left; font-weight: bold; font-size: 14px;">Marks</th>
+                  <th style="padding: 8px 10px; text-align: left; font-weight: bold; font-size: 14px;">Total</th>
+                  <th style="padding: 8px 10px; text-align: left; font-weight: bold; font-size: 14px;">%</th>
+                  <th style="padding: 8px 10px; text-align: left; font-weight: bold; font-size: 14px;">Grade</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${marksData.map((mark, index) => `
+                  <tr style="${index % 2 === 0 ? 'background: #f8f9fa;' : 'background: white;'}">
+                    <td style="padding: 6px 10px; border-bottom: 1px solid #e9ecef; font-size: 13px;">${mark.examName}</td>
+                    <td style="padding: 6px 10px; border-bottom: 1px solid #e9ecef; font-size: 13px;">${mark.subject}</td>
+                    <td style="padding: 6px 10px; border-bottom: 1px solid #e9ecef; font-size: 13px;">${mark.marksObtained}</td>
+                    <td style="padding: 6px 10px; border-bottom: 1px solid #e9ecef; font-size: 13px;">${mark.totalMarks}</td>
+                    <td style="padding: 6px 10px; border-bottom: 1px solid #e9ecef; font-size: 13px;">${mark.percentage}%</td>
+                    <td style="padding: 6px 10px; border-bottom: 1px solid #e9ecef; font-size: 13px;">
+                      <span style="padding: 4px 12px; border-radius: 15px; background-color: ${getGradeColor(mark.percentage)}; color: white; font-weight: bold; font-size: 12px;">
+                        ${mark.grade}
+                      </span>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
       `;
 
-      // Generate PDF
+      // Replace the receipt content with report card content in the base HTML
+      const htmlContent = baseHtml
+        .replace(/<title>.*?<\/title>/, '<title>Student Report Card</title>')
+        .replace(/FEE RECEIPT/g, 'STUDENT REPORT CARD')
+        .replace(/ATTENDANCE REPORT/g, 'STUDENT REPORT CARD')
+        // Replace the entire receipt-content area up to either amount section or footer
+        .replace(/<div class=\"receipt-content\">[\s\S]*?(?=<div class=\"amount-separator\"|<div class=\"receipt-footer\">)/, reportCardContent)
+        // Remove any amount separator and amount section if present
+        .replace(/<div class=\"amount-separator\">[\s\S]*?<\/div>/, '')
+        .replace(/<div class=\"receipt-amount-section\">[\s\S]*?<\/div>/, '')
+        // Remove fee-specific rows if any remain
+        .replace(/<div class=\"receipt-row\">[\s\S]*?Fee Type:[\s\S]*?<\/div>\s*/g, '')
+        .replace(/<div class=\"receipt-row\">[\s\S]*?Payment Mode:[\s\S]*?<\/div>\s*/g, '')
+        // Remove any remaining amount displays
+        .replace(/₹\d+\.\d+/g, '')
+        .replace(/Amount\s*Paid:?[\s\S]*?₹[\d,\.]+/gi, '')
+        .replace(/<[^>]*>\s*₹\s*0+\.0+\s*<\/[^>]*>/g, '')
+        // Clean up empty elements
+        .replace(/<div[^>]*>\s*<\/div>/g, '')
+        .replace(/<span[^>]*>\s*<\/span>/g, '');
+
+      console.log('✅ Generated report card HTML with robust logo loading from unified template');
+      
+      // Normalize page size and print styles to avoid awkward page breaks
+      const normalizedHtml = htmlContent
+        // Ensure @page uses A4 portrait with comfortable margins
+        .replace(/@page\s*{[\s\S]*?}/, '@page { size: A4 portrait; margin: 12mm; }')
+        // Inject print-friendly CSS to avoid splitting tables/sections across pages
+        .replace('</head>', `<style>
+          html, body { width: 100%; }
+          .receipt-container { width: 100%; max-width: 100%; height: auto; max-height: none; }
+          .receipt-content, .report-card-section { page-break-inside: auto; break-inside: auto; }
+          table { page-break-inside: avoid; break-inside: avoid; width: 100%; }
+          thead { display: table-header-group; }
+          tfoot { display: table-footer-group; }
+          tbody, tr, td, th { page-break-inside: avoid; break-inside: avoid; }
+          img { max-width: 100%; height: auto; }
+          /* Prevent content from being cut off */
+          .report-card-section > * { page-break-inside: avoid; }
+          /* Ensure tables don't break badly */
+          table tr { page-break-inside: avoid; }
+        </style></head>`);
+
+      console.log('🖨️ Applied PDF normalization to prevent content splitting across pages');
+      
+      // Generate PDF using the normalized HTML
       const { uri } = await Print.printToFileAsync({
-        html: htmlContent,
-        width: 612,
-        height: 792,
-        margins: {
-          left: 20,
-          top: 20,
-          right: 20,
-          bottom: 20,
-        },
+        html: normalizedHtml
       });
 
       // Share the PDF

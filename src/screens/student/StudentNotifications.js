@@ -53,28 +53,36 @@ const StudentNotifications = ({ navigation }) => {
   // Utility function to format date from yyyy-mm-dd to dd-mm-yyyy
   const formatDateToDDMMYYYY = (dateString) => {
     if (!dateString) return '';
-    
+
     try {
+      let normalized = dateString;
+      // If timestamp lacks timezone info, treat it as UTC to avoid local offset drift
+      // e.g., '2025-09-30 14:19:58.688156' -> '2025-09-30T14:19:58.688156Z'
+      if (typeof dateString === 'string') {
+        const hasTZ = /[zZ]|[+-]\d{2}:?\d{2}$/.test(dateString);
+        if (!hasTZ) {
+          normalized = dateString.replace(' ', 'T') + 'Z';
+        }
+      }
+
       let date;
-      if (dateString.includes('T')) {
-        // Handle full datetime string
-        date = new Date(dateString);
-      } else if (dateString.includes('-') && dateString.split('-').length === 3) {
-        // Handle date-only string
-        const [year, month, day] = dateString.split('-');
+      if (normalized.includes('T')) {
+        date = new Date(normalized);
+      } else if (normalized.includes('-') && normalized.split('-').length === 3) {
+        const [year, month, day] = normalized.split('-');
         date = new Date(year, month - 1, day);
       } else {
-        date = new Date(dateString);
+        date = new Date(normalized);
       }
-      
+
       if (isNaN(date.getTime())) {
         return dateString; // Return original if parsing fails
       }
-      
+
       const day = String(date.getDate()).padStart(2, '0');
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const year = date.getFullYear();
-      
+
       return `${day}-${month}-${year}`;
     } catch (error) {
       console.warn('Error formatting date:', dateString, error);
@@ -129,7 +137,7 @@ const StudentNotifications = ({ navigation }) => {
           is_read,
           id,
           tenant_id,
-          created_at,
+          sent_at,
           notifications(
             id,
             message,
@@ -149,7 +157,7 @@ const StudentNotifications = ({ navigation }) => {
         .eq('tenant_id', tenantId)
         .eq('recipient_id', user.id)
         .eq('recipient_type', 'Student')
-        .order('created_at', { ascending: false })
+        .order('sent_at', { ascending: false })
         .limit(50);
       
       if (recipientError) {
@@ -162,13 +170,13 @@ const StudentNotifications = ({ navigation }) => {
         ...record.notifications,
         recipientId: record.id,
         is_read_from_recipient: record.is_read,
-        recipient_created_at: record.created_at
+        recipient_sent_at: record.sent_at
       })).filter(n => n && n.id) || [];
       
       // Ensure newest first by notification timestamp, fallback to recipient record timestamp
       notificationsData.sort((a, b) => {
-        const aTime = new Date(a.created_at || a.recipient_created_at || 0).getTime();
-        const bTime = new Date(b.created_at || b.recipient_created_at || 0).getTime();
+        const aTime = new Date(a.created_at || a.recipient_sent_at || 0).getTime();
+        const bTime = new Date(b.created_at || b.recipient_sent_at || 0).getTime();
         return bTime - aTime;
       });
       
@@ -176,6 +184,60 @@ const StudentNotifications = ({ navigation }) => {
       console.log(`✅ [STUDENT NOTIFICATIONS] Found ${notificationsData?.length || 0} notifications for student ${user.id}`);
 
       if (!notificationsData || notificationsData.length === 0) {
+        console.log('🔍 [STUDENT NOTIFICATIONS] No recipient records found, checking for recent notifications that should include this student...');
+        
+        // Fallback: Check for recent notifications that should include students but don't have recipient records
+        const { data: recentNotifications, error: recentError } = await supabase
+          .from('notifications')
+          .select('id, type, message, created_at, delivery_status, delivery_mode, tenant_id')
+          .eq('tenant_id', tenantId)
+          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()) // Last 24 hours
+          .order('created_at', { ascending: false })
+          .limit(10);
+          
+        if (!recentError && recentNotifications?.length > 0) {
+          console.log(`🔍 [STUDENT NOTIFICATIONS] Found ${recentNotifications.length} recent notifications, checking for missing recipients...`);
+          
+          // Check which notifications are missing recipient records for this student
+          const missingRecipients = [];
+          for (const notification of recentNotifications) {
+            const { data: existingRecipient } = await supabase
+              .from('notification_recipients')
+              .select('id')
+              .eq('notification_id', notification.id)
+              .eq('recipient_id', user.id)
+              .eq('recipient_type', 'Student')
+              .single();
+              
+            if (!existingRecipient) {
+              missingRecipients.push({
+                notification_id: notification.id,
+                recipient_id: user.id,
+                recipient_type: 'Student',
+                is_read: false,
+                delivery_status: 'Sent',
+                tenant_id: tenantId
+              });
+            }
+          }
+          
+          if (missingRecipients.length > 0) {
+            console.log(`🔧 [STUDENT NOTIFICATIONS] Auto-creating ${missingRecipients.length} missing recipient records...`);
+            
+            const { error: insertError } = await supabase
+              .from('notification_recipients')
+              .insert(missingRecipients);
+              
+            if (!insertError) {
+              console.log(`✅ [STUDENT NOTIFICATIONS] Successfully created ${missingRecipients.length} missing recipient records`);
+              // Retry the original fetch now that we have recipient records
+              return fetchNotifications();
+            } else {
+              console.error(`❌ [STUDENT NOTIFICATIONS] Failed to create missing recipients:`, insertError);
+            }
+          }
+        }
+        
         console.log('No notifications found for this student, showing empty list');
         setNotifications([]);
         return;
@@ -395,7 +457,7 @@ const StudentNotifications = ({ navigation }) => {
           displayType: getFriendlyType(notification.type || 'General'),
           created_at: notification.created_at,
           read: notification.is_read_from_recipient || readRecord?.is_read || false,
-          date: notification.created_at,
+          date: notification.recipient_sent_at || notification.sent_at || notification.created_at,
           important: notification.type === 'Urgent' || notification.type === 'Exam',
           recipientId: readRecord?.id || null,
           delivery_status: notification.delivery_status,

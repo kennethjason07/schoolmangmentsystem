@@ -494,7 +494,7 @@ const NotificationManagement = () => {
       
       const { data: users, error: usersError } = await supabase
         .from('users')
-        .select('id, role_id, email, full_name')
+        .select('id, role_id, email, full_name, linked_student_id, linked_parent_of')
         .eq('tenant_id', tenantId);
       
       console.log('💾 [NOTIF_CREATE] Users query result:');
@@ -527,22 +527,30 @@ const NotificationManagement = () => {
         console.log('💾 [NOTIF_CREATE] No users found for tenant:', tenantId);
       }
       
-      // Map role names to role_ids based on typical school management system structure
-      const roleMap = {
-        'admin': 1,
-        'student': 2,
-        'parent': 3,
-        'teacher': 4
-      };
+      // Resolve role IDs dynamically from roles table for this tenant (do not assume fixed IDs)
+      const { data: roleRows, error: rolesError } = await supabase
+        .from('roles')
+        .select('id, role_name')
+        .eq('tenant_id', tenantId);
       
-      console.log('💾 [NOTIF_CREATE] Role mapping:', roleMap);
+      if (rolesError) {
+        console.warn('⚠️ [NOTIF_CREATE] Failed to load roles; proceeding with linked_* heuristics:', rolesError.message);
+      }
       
-      // Get role_ids for selected roles
-      const selectedRoleIds = createForm.selectedRoles.map(role => roleMap[role]).filter(Boolean);
-      console.log('💾 [NOTIF_CREATE] Selected role IDs:', selectedRoleIds);
+      const roleNameToId = {};
+      (roleRows || []).forEach(r => {
+        if (r.role_name) roleNameToId[r.role_name.toLowerCase()] = r.id;
+      });
+      const studentRoleId = roleNameToId['student'] || null;
+      const parentRoleId = roleNameToId['parent'] || null;
+      console.log('💾 [NOTIF_CREATE] Resolved role IDs from DB:', { studentRoleId, parentRoleId, roleNameToId });
+      
+      // Determine which recipient types were selected in the UI
+      const selectedStudent = createForm.selectedRoles.includes('student');
+      const selectedParent = createForm.selectedRoles.includes('parent');
       
       // Step 3: Create recipients based on selected roles
-      // Note: Database only supports 'Student' and 'Parent' in notification_recipients table
+      // Database supports only 'Student' and 'Parent' in notification_recipients table
       const supportedRoles = createForm.selectedRoles.filter(role => role === 'student' || role === 'parent');
       const unsupportedRoles = createForm.selectedRoles.filter(role => role === 'teacher' || role === 'admin');
       
@@ -550,16 +558,27 @@ const NotificationManagement = () => {
       console.log('   - Supported roles:', supportedRoles);
       console.log('   - Unsupported roles:', unsupportedRoles);
       
-      const filteredUsers = users?.filter(user => selectedRoleIds.includes(user.role_id)) || [];
-      console.log('💾 [NOTIF_CREATE] Users matching selected roles:', filteredUsers.length);
+      // Select users by either matching role_id OR presence of linked_* fields as a robust fallback
+      const filteredUsers = (users || []).filter(user => {
+        const isStudentUser = selectedStudent && (
+          (studentRoleId && user.role_id === studentRoleId) || !!user.linked_student_id
+        );
+        const isParentUser = selectedParent && (
+          (parentRoleId && user.role_id === parentRoleId) || !!user.linked_parent_of
+        );
+        return isStudentUser || isParentUser;
+      });
+      console.log('💾 [NOTIF_CREATE] Users matching selected roles/links:', filteredUsers.length);
       
       const recipients = filteredUsers
         .map(user => {
-          // Map role_id back to recipient_type (only Student and Parent are valid in notification_recipients)
+          // Determine recipient_type using linked_* first, then role mapping
           let recipientType = null;
-          if (user.role_id === 3) recipientType = 'Parent';
-          else if (user.role_id === 2) recipientType = 'Student';
-          // Teachers (role_id 4) and Admins (role_id 1) are not supported in notification_recipients table
+          if (selectedStudent && (user.linked_student_id || (studentRoleId && user.role_id === studentRoleId))) {
+            recipientType = 'Student';
+          } else if (selectedParent && (user.linked_parent_of || (parentRoleId && user.role_id === parentRoleId))) {
+            recipientType = 'Parent';
+          }
           
           console.log(`💾 [NOTIF_CREATE] Mapping user ${user.email} (role ${user.role_id}) -> ${recipientType}`);
           
@@ -590,20 +609,39 @@ const NotificationManagement = () => {
       // Step 4: Insert into notification_recipients table
       if (recipients.length > 0) {
         console.log('💾 [NOTIF_CREATE] Inserting recipients into notification_recipients table...');
-        const { data: recipientsResult, error: recipientsError } = await supabase
-          .from('notification_recipients')
-          .insert(recipients)
-          .select();
         
-        console.log('💾 [NOTIF_CREATE] Recipients insertion result:');
-        console.log('   - Success:', !!recipientsResult);
-        console.log('   - Recipients created:', recipientsResult?.length || 0);
-        console.log('   - Error:', recipientsError?.message || 'None');
-        console.log('   - Error code:', recipientsError?.code || 'None');
+        // Insert in batches to avoid timeout issues
+        const batchSize = 50;
+        let allRecipientsCreated = [];
         
-        if (recipientsError) {
-          console.error('❌ [NOTIF_CREATE] Error creating recipients:', recipientsError);
-          throw recipientsError;
+        for (let i = 0; i < recipients.length; i += batchSize) {
+          const batch = recipients.slice(i, i + batchSize);
+          console.log(`💾 [NOTIF_CREATE] Inserting batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(recipients.length/batchSize)} (${batch.length} recipients)`);
+          
+          const { data: batchResult, error: batchError } = await supabase
+            .from('notification_recipients')
+            .insert(batch)
+            .select();
+          
+          if (batchError) {
+            console.error('❌ [NOTIF_CREATE] Error creating recipient batch:', batchError);
+            throw batchError;
+          }
+          
+          allRecipientsCreated.push(...(batchResult || []));
+          
+          // Small delay between batches to avoid overwhelming the database
+          if (i + batchSize < recipients.length) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        }
+        
+        console.log('💾 [NOTIF_CREATE] All recipients insertion completed:');
+        console.log('   - Total recipients created:', allRecipientsCreated.length);
+        console.log('   - Expected recipients:', recipients.length);
+        
+        if (allRecipientsCreated.length !== recipients.length) {
+          throw new Error(`Recipient creation mismatch: expected ${recipients.length}, created ${allRecipientsCreated.length}`);
         }
       } else {
         console.log('💾 [NOTIF_CREATE] No valid recipients to create - all selected roles are unsupported');
