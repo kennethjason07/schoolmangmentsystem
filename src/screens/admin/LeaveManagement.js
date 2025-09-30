@@ -101,25 +101,12 @@ const LeaveManagement = ({ navigation }) => {
   const logDebugInfo = async () => {
     try {
       console.log('🧪 [ADMIN_LEAVE] === ENHANCED TENANT DEBUG INFO ===');
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
       console.log('🧪 [ADMIN_LEAVE] Debug Summary:');
-      console.log('   - Session exists:', !!session?.session);
-      console.log('   - Session user:', session?.session?.user?.email || 'None');
-      console.log('   - Session error:', sessionError?.message || 'None');
       console.log('   - Tenant ID (cached):', tenantId || 'NONE');
       console.log('   - Tenant ready:', isReady);
       console.log('   - Tenant loading:', tenantLoading);
       console.log('   - Tenant name:', tenantName || 'NONE');
       console.log('   - Tenant error:', tenantError || 'None');
-      
-      // Test enhanced tenant database access
-      if (isReady && tenantId) {
-        const { data: countData, error: countError } = await tenantDatabase.read('leave_applications', {}, 'COUNT(*)');
-        console.log('   - Enhanced tenant query result:', countData?.length || 0);
-        console.log('   - Enhanced tenant error:', countError?.message || 'None');
-      }
-      
       console.log('🧪 [ADMIN_LEAVE] === END ENHANCED DEBUG INFO ===');
     } catch (error) {
       console.error('🧪 [ADMIN_LEAVE] Enhanced debug info error:', error.message);
@@ -144,111 +131,105 @@ const LeaveManagement = ({ navigation }) => {
 
   const loadLeaveApplications = async () => {
     const startTime = performance.now();
-    let timeoutId;
-    
+
     try {
       console.log('🚀 LeaveManagement: Starting enhanced tenant data load...');
-      
-      // ⏰ Set timeout protection
-      timeoutId = setTimeout(() => {
-        console.warn('⚠️ LeaveManagement: Load timeout (10s)');
-        throw new Error('Loading timeout - please check your connection');
-      }, 10000);
-      
-      // Wait for tenant context to be ready
+
+      // Ensure tenant context is ready
       if (tenantLoading || !isReady) {
-        console.log('🔄 [ENHANCED-TENANT] Tenant context not ready, waiting...');
-        setLoading(false);
+        console.log('🔄 [ENHANCED-TENANT] Tenant context not ready, skipping load');
         return;
       }
-      
       if (tenantError) {
         console.error('❌ [ENHANCED-TENANT] Tenant error detected:', tenantError);
-        Alert.alert('Tenant Error', tenantError);
-        setLoading(false);
+        Alert.alert('Tenant Error', String(tenantError));
         return;
       }
-      
-      // Check current session (simplified)
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (!session) {
-        console.log('❌ [ADMIN_LEAVE] No active session found');
-        Alert.alert('Authentication Error', 'Please log in to view leave applications.');
-        return;
-      }
-      
-      console.log('🏢 LeaveManagement: Using enhanced tenant system, tenant ID:', tenantId || 'Parent/No Tenant Required');
 
-      console.log('📄 LeaveManagement: Using enhanced tenant database query...');
-      
-      // 🚀 Use enhanced tenant database helper
+      console.log('🏢 LeaveManagement: Using enhanced tenant system, tenant ID:', tenantId || 'NONE');
+
+      // Narrowed projection and optional server-side filters
+      const selectColumns = `
+        id, teacher_id, leave_type, start_date, end_date, reason, status,
+        applied_date, reviewed_at, admin_remarks, replacement_teacher_id, replacement_notes, total_days,
+        teacher:teachers!leave_applications_teacher_id_fkey(id, name),
+        applied_by_user:users!leave_applications_applied_by_fkey(id, full_name),
+        reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name),
+        replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
+      `;
+
+      // Build server-side filters (optional)
+      const baseFilters = {};
+      // Status from advanced or quick filters
+      if (advancedFilters?.status && advancedFilters.status !== 'All') {
+        baseFilters.status = advancedFilters.status;
+      } else if (activeQuickFilters?.includes('pending')) {
+        baseFilters.status = 'Pending';
+      } else if (activeQuickFilters?.includes('approved')) {
+        baseFilters.status = 'Approved';
+      } else if (activeQuickFilters?.includes('rejected')) {
+        baseFilters.status = 'Rejected';
+      }
+      // Leave type from advanced filters
+      if (advancedFilters?.leaveType && advancedFilters.leaveType !== 'all') {
+        baseFilters.leave_type = advancedFilters.leaveType;
+      }
+
+      const optionFilters = {};
+      // Duration to date range (based on start_date)
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      const setRange = (start, end) => {
+        optionFilters.start_date = { gte: fmt(start), lte: fmt(end) };
+      };
+
+      if (advancedFilters?.duration && advancedFilters.duration !== 'all') {
+        if (advancedFilters.duration === 'thisWeek') {
+          const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+          const endOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (6 - now.getDay()));
+          setRange(startOfWeek, endOfWeek);
+        } else if (advancedFilters.duration === 'thisMonth') {
+          const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+          const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+          setRange(startOfMonth, endOfMonth);
+        } else if (advancedFilters.duration === 'lastMonth') {
+          const startLast = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          const endLast = new Date(now.getFullYear(), now.getMonth(), 0);
+          setRange(startLast, endLast);
+        } else if (advancedFilters.duration === 'thisYear') {
+          const startYear = new Date(now.getFullYear(), 0, 1);
+          const endYear = new Date(now.getFullYear(), 11, 31);
+          setRange(startYear, endYear);
+        }
+      } else if (activeQuickFilters?.includes('thisWeek')) {
+        const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+        const endOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (6 - now.getDay()));
+        setRange(startOfWeek, endOfWeek);
+      }
+
       const { data, error } = await tenantDatabase.read(
         'leave_applications',
-        {},
-        `
-          *,
-          teacher:teachers!leave_applications_teacher_id_fkey(id, name),
-          applied_by_user:users!leave_applications_applied_by_fkey(id, full_name),
-          reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name),
-          replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
-        `
+        baseFilters,
+        selectColumns,
+        { orderBy: { column: 'applied_date', ascending: false }, filters: optionFilters }
       );
 
-      console.log('📊 [ADMIN_LEAVE] Enhanced tenant query result:');
-      console.log('   - Applications found:', data?.length || 0);
-      console.log('   - Error:', error?.message || 'None');
-      console.log('   - Error code:', error?.code || 'None');
-      
-      if (data && data.length > 0) {
-        console.log('📄 [ADMIN_LEAVE] Sample application structure:', data[0]);
-      }
-      
       if (error) {
         console.error('❌ [ADMIN_LEAVE] Enhanced tenant query error:', error);
-        
-        // Check if it's an RLS error
-        if (error.code === '42501') {
-          console.log('🔒 [ADMIN_LEAVE] RLS blocking leave applications access');
-          Alert.alert(
-            'Database Access Issue',
-            'Unable to load leave applications due to database permissions. Please contact your administrator.',
-            [
-              { text: 'OK' },
-              { text: 'Retry', onPress: loadLeaveApplications }
-            ]
-          );
-          return;
-        }
-        
-        Alert.alert(
-          'Loading Error',
-          'Failed to load leave applications. Please check your internet connection and try again.'
-        );
+        Alert.alert('Loading Error', 'Failed to load leave applications. Please try again.');
         throw error;
       }
-      
-      clearTimeout(timeoutId);
-      
-      console.log(`✅ LeaveManagement: Successfully loaded ${data?.length || 0} leave applications using enhanced tenant system`);
+
+      console.log(`✅ LeaveManagement: Loaded ${data?.length || 0} applications`);
       setLeaveApplications(data || []);
-      
-      // 📊 Performance monitoring
+
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
-      console.log(`✅ LeaveManagement: Enhanced tenant data loaded in ${loadTime}ms`);
-      
-      if (loadTime > 2000) {
-        console.warn('⚠️ LeaveManagement: Slow loading (>2s). Check network.');
-      } else {
-        console.log('🚀 LeaveManagement: Fast enhanced tenant loading achieved!');
-      }
-      
+      console.log(`✅ LeaveManagement: Data loaded in ${loadTime}ms`);
     } catch (error) {
-      clearTimeout(timeoutId);
-      console.error('❌ LeaveManagement: Enhanced tenant load failed:', error.message);
+      console.error('❌ LeaveManagement: Load failed:', error.message);
       Alert.alert('Error', error.message || 'Failed to load leave applications');
-    } finally {
-      clearTimeout(timeoutId);
     }
   };
 
@@ -256,57 +237,30 @@ const LeaveManagement = ({ navigation }) => {
     try {
       console.log('🚀 LeaveManagement: Loading teachers with enhanced tenant system...');
       
-      // Wait for tenant context
       if (!isReady) {
         console.log('🔄 LeaveManagement loadTeachers: Tenant context not ready');
         setTeachers([]);
         return;
       }
-      
       if (tenantError) {
         console.error('❌ LeaveManagement loadTeachers: Tenant error:', tenantError);
         setTeachers([]);
         return;
       }
-      
-      console.log('📊 LeaveManagement: Using enhanced tenant database for teachers...');
-      
-      // 🚀 Use enhanced tenant database helper
+
       const { data, error } = await tenantDatabase.read(
         'teachers',
         {},
-        'id, name, tenant_id' // Include tenant_id for debugging
+        'id, name'
       );
-      
-      console.log('📄 LeaveManagement: Enhanced teachers query result:');
-      console.log('   - Teachers found:', data?.length || 0);
-      console.log('   - Error:', error?.message || 'None');
-      
-      if (data && data.length > 0) {
-        console.log('   - Sample teacher:', data[0]);
-        // Check tenant_id distribution for debugging
-        const tenantDistribution = data.reduce((acc, teacher) => {
-          const tid = teacher.tenant_id || 'null';
-          acc[tid] = (acc[tid] || 0) + 1;
-          return acc;
-        }, {});
-        console.log('   - Enhanced query tenant ID distribution:', tenantDistribution);
-      }
 
       if (error) throw error;
-      
-      // Map teachers to only include UI-needed fields
-      const teachersForUI = (data || []).map(teacher => ({
-        id: teacher.id,
-        name: teacher.name
-      }));
-      
-      setTeachers(teachersForUI);
-      console.log(`✅ LeaveManagement: Successfully loaded ${teachersForUI.length} teachers using enhanced tenant system`);
-      
+
+      setTeachers((data || []).map(t => ({ id: t.id, name: t.name })));
+      console.log(`✅ LeaveManagement: Loaded ${(data || []).length} teachers`);
     } catch (error) {
       console.error('❌ LeaveManagement: Enhanced tenant teachers load error:', error.message);
-      setTeachers([]); // Set empty array as fallback
+      setTeachers([]);
     }
   };
 
@@ -538,25 +492,43 @@ const LeaveManagement = ({ navigation }) => {
             `Auto-approved: Leave created by admin on your behalf`,
             user.id
           );
-          
-          if (notificationResult.success) {
-            console.log('✅ Auto-approval notification sent to teacher successfully');
-          } else {
+          if (!notificationResult.success) {
             console.error('❌ Failed to send auto-approval notification:', notificationResult.error);
           }
         } catch (notificationError) {
           console.error('❌ Error sending auto-approval notification:', notificationError);
-          // Don't fail the entire operation if notification fails
         }
-        
         Alert.alert('Success', `Leave application added and automatically approved! The teacher has been notified.`);
       } else {
         Alert.alert('Success', 'Leave application added successfully and is pending review.');
       }
-      
+
+      // Optimistically update UI without reloading
+      const teacherObj = teachers.find(t => t.id === newLeaveForm.teacher_id) || null;
+      const replacementObj = teachers.find(t => t.id === newLeaveForm.replacement_teacher_id) || null;
+      const optimisticApp = {
+        id: newLeaveApplication.id,
+        teacher_id: newLeaveForm.teacher_id,
+        leave_type: newLeaveForm.leave_type,
+        start_date: format(startDate, 'yyyy-MM-dd'),
+        end_date: format(endDate, 'yyyy-MM-dd'),
+        reason: newLeaveForm.reason.trim(),
+        replacement_teacher_id: newLeaveForm.replacement_teacher_id || null,
+        replacement_notes: newLeaveForm.replacement_notes?.trim() || null,
+        applied_by: user.id,
+        applied_date: new Date().toISOString().split('T')[0],
+        status: shouldAutoApprove ? 'Approved' : 'Pending',
+        reviewed_by: shouldAutoApprove ? user.id : null,
+        reviewed_at: shouldAutoApprove ? new Date().toISOString() : null,
+        admin_remarks: shouldAutoApprove ? `Auto-approved: Leave created by admin (${user.email}) on behalf of teacher` : null,
+        total_days: totalDays,
+        teacher: teacherObj ? { id: teacherObj.id, name: teacherObj.name } : null,
+        replacement_teacher: replacementObj ? { id: replacementObj.id, name: replacementObj.name } : null,
+      };
+      setLeaveApplications(prev => [optimisticApp, ...(prev || [])]);
+
       setShowAddLeaveModal(false);
       resetAddLeaveForm();
-      await loadLeaveApplications();
       
     } catch (error) {
       console.error('Error adding leave:', error);
@@ -646,10 +618,27 @@ const LeaveManagement = ({ navigation }) => {
       }
 
       Alert.alert('Success', `Leave application ${reviewForm.status.toLowerCase()} successfully`);
+
+      // Optimistically update UI without reloading
+      setLeaveApplications(prev => (prev || []).map(app => {
+        if (app.id !== selectedLeave.id) return app;
+        const replacementObj = teachers.find(t => t.id === reviewForm.replacement_teacher_id) || null;
+        return {
+          ...app,
+          status: reviewForm.status,
+          reviewed_by: user.id,
+          reviewed_at: new Date().toISOString(),
+          admin_remarks: reviewForm.admin_remarks.trim(),
+          replacement_teacher_id: reviewForm.replacement_teacher_id || null,
+          replacement_notes: reviewForm.replacement_notes.trim() || null,
+          reviewed_by_user: { id: user.id, full_name: user.email },
+          replacement_teacher: replacementObj ? { id: replacementObj.id, name: replacementObj.name } : null,
+        };
+      }));
+
       setShowReviewModal(false);
       setSelectedLeave(null);
       resetReviewForm();
-      await loadLeaveApplications();
     } catch (error) {
       console.error('Error reviewing leave:', error);
       Alert.alert('Error', 'Failed to review leave application');

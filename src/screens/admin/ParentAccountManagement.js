@@ -67,93 +67,79 @@ const ParentAccountManagement = ({ navigation }) => {
 
   const loadStudents = async () => {
     const startTime = performance.now();
-    let timeoutId;
-    
+
     try {
-      console.log('🚀 ParentAccountManagement: Starting data load...');
+      console.log('🚀 ParentAccountManagement: Starting data load...', { searchQuery, selectedClass });
       setLoading(true);
-      
-      // ⏰ Set timeout protection
-      timeoutId = setTimeout(() => {
-        console.warn('⚠️ ParentAccountManagement: Load timeout (10s)');
-        throw new Error('Loading timeout - please check your connection');
-      }, 10000);
-      
-      // 🔍 Validate tenant context
-      console.log('📋 ParentAccountManagement: Current tenant ID:', tenantId);
-      
-      if (!isReady || !tenantId) {
-        // For parent management, we can proceed without strict tenant context
-        console.log('⚠️ ParentAccountManagement: Proceeding without strict tenant context for parent operations');
-      }
-      
-      if (tenantError) {
-        console.log('⚠️ ParentAccountManagement: Tenant error, but continuing for parent operations');
-      }
-      
-      // Test auth connection
+
+      // Test auth connection (light)
       await dbHelpers.testAuthConnection();
-      
-      // 🏃‍♂️ Fast parallel data fetching
-      console.log('📊 ParentAccountManagement: Fetching data in parallel...');
-      
-      // For parent operations, we don't strictly require tenant filtering
+
+      // Base queries
       const classesQuery = supabase
         .from(TABLES.CLASSES)
         .select('id, class_name, section');
-      
+
       const studentsQuery = supabase
         .from(TABLES.STUDENTS)
         .select(`
           *,
           classes(id, class_name, section)
         `);
-      
+
       const accountsQuery = supabase
         .from(TABLES.USERS)
         .select('id, email, linked_parent_of, role_id, full_name')
         .not('linked_parent_of', 'is', null);
-      
+
       const parentsQuery = supabase
         .from(TABLES.PARENTS)
         .select('id, name, relation, phone, email, student_id');
-      
-      // Only apply tenant filtering if tenantId is available
+
+      // Tenant filter
       if (tenantId) {
         classesQuery.eq('tenant_id', tenantId);
         studentsQuery.eq('tenant_id', tenantId);
         accountsQuery.eq('tenant_id', tenantId);
         parentsQuery.eq('tenant_id', tenantId);
       }
-      
+
+      // Class filter
+      if (selectedClass && selectedClass !== 'all') {
+        studentsQuery.eq('class_id', selectedClass);
+      }
+
+      // Server-side search
+      if (searchQuery && searchQuery.trim()) {
+        const q = `%${searchQuery.trim()}%`;
+        studentsQuery.or(`name.ilike.${q},admission_no.ilike.${q},roll_no.ilike.${q}`);
+        accountsQuery.ilike('email', q);
+        parentsQuery.or(`name.ilike.${q},email.ilike.${q}`);
+      }
+
       const [classesResult, studentsResult, accountsResult, parentRecordsResult] = await Promise.all([
         classesQuery,
         studentsQuery,
         accountsQuery,
         parentsQuery
       ]);
-      
+
       if (classesResult.error) throw classesResult.error;
       if (studentsResult.error) throw studentsResult.error;
       if (accountsResult.error) throw accountsResult.error;
       if (parentRecordsResult.error) throw parentRecordsResult.error;
-      
-      clearTimeout(timeoutId);
-      
-      // ✅ Set data immediately
+
       const classesData = classesResult.data || [];
       const studentsData = studentsResult.data || [];
       const existingAccounts = accountsResult.data || [];
       const parentRecords = parentRecordsResult.data || [];
-      
+
       setClasses(classesData);
-      
-      // Map students with their comprehensive parent status
+
       const studentsWithParentAccountStatus = studentsData.map(student => {
         const hasParentAccount = existingAccounts.some(account => account.linked_parent_of === student.id);
         const parentAccountInfo = existingAccounts.find(account => account.linked_parent_of === student.id);
-        
-        // Get all parent records for this student and filter out placeholder names
+
         const allParentRecords = parentRecords.filter(parent => 
           parent.student_id === student.id && 
           parent.name &&
@@ -164,24 +150,17 @@ const ParentAccountManagement = ({ navigation }) => {
           !parent.name.toLowerCase().includes('test') &&
           !parent.name.toLowerCase().includes('sample')
         ) || [];
-        
+
         const hasParentRecord = allParentRecords.length > 0;
-        const parentRecordInfo = allParentRecords[0]; // Get first valid parent record
-        
-        // Get father and mother specifically
+        const parentRecordInfo = allParentRecords[0];
         const fatherRecord = allParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'father');
         const motherRecord = allParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'mother');
         const guardianRecord = allParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'guardian');
 
-        // Determine overall status
         let parentStatus = 'none';
-        if (hasParentAccount && hasParentRecord) {
-          parentStatus = 'complete'; // Both login account and parent record exist
-        } else if (hasParentAccount && !hasParentRecord) {
-          parentStatus = 'account_only'; // Only login account exists
-        } else if (!hasParentAccount && hasParentRecord) {
-          parentStatus = 'record_only'; // Only parent record exists
-        }
+        if (hasParentAccount && hasParentRecord) parentStatus = 'complete';
+        else if (hasParentAccount && !hasParentRecord) parentStatus = 'account_only';
+        else if (!hasParentAccount && hasParentRecord) parentStatus = 'record_only';
 
         return {
           ...student,
@@ -196,28 +175,16 @@ const ParentAccountManagement = ({ navigation }) => {
           parentStatus
         };
       });
-      
+
       setStudents(studentsWithParentAccountStatus);
-      
-      console.log(`✅ ParentAccountManagement: Loaded ${classesData.length} classes, ${studentsWithParentAccountStatus.length} students`);
-      
-      // 📊 Performance monitoring
+
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
       console.log(`✅ ParentAccountManagement: Data loaded in ${loadTime}ms`);
-      
-      if (loadTime > 2000) {
-        console.warn('⚠️ ParentAccountManagement: Slow loading (>2s). Check network.');
-      } else {
-        console.log('🚀 ParentAccountManagement: Fast loading achieved!');
-      }
-      
     } catch (error) {
-      clearTimeout(timeoutId);
       console.error('❌ ParentAccountManagement: Failed to load data:', error.message);
       Alert.alert('Error', error.message || 'Failed to load students');
     } finally {
-      clearTimeout(timeoutId);
       setLoading(false);
       setRefreshing(false);
     }
@@ -339,25 +306,29 @@ const ParentAccountManagement = ({ navigation }) => {
 
       console.log('Parent account created successfully:', accountData);
 
-      // Verify the account was created by checking both tables
-      const { data: verifyUser } = await supabase
-        .from(TABLES.USERS)
-        .select('id, email, full_name')
-        .eq('linked_parent_of', selectedStudent.id)
-        .single();
+      // Optimistically update UI
+      const optimisticParentRecord = accountData?.parentRecord || {
+        id: 'temp',
+        name: accountForm.full_name,
+        relation: accountForm.relation,
+        phone: accountForm.phone,
+        email: accountForm.email,
+        student_id: selectedStudent.id
+      };
 
-      const { data: verifyParent } = await supabase
-        .from(TABLES.PARENTS)
-        .select('id, name, relation, email')
-        .eq('student_id', selectedStudent.id)
-        .single();
-
-      console.log('Verification - User found in database:', verifyUser);
-      console.log('Verification - Parent record found in database:', verifyParent);
-
-      const userVerified = !!verifyUser;
-      const parentVerified = !!verifyParent;
-      const fullyVerified = userVerified && parentVerified;
+      setStudents(prev => prev.map(s => {
+        if (s.id !== selectedStudent.id) return s;
+        const updatedAll = [...(s.allParentRecords || []), optimisticParentRecord];
+        return {
+          ...s,
+          hasParentAccount: true,
+          hasParentRecord: true,
+          parentAccountInfo: { email: accountForm.email, full_name: accountForm.full_name },
+          parentRecordInfo: updatedAll[0],
+          allParentRecords: updatedAll,
+          parentStatus: 'complete'
+        };
+      }));
 
       // Close modal and reset form first
       setModalVisible(false);
@@ -376,7 +347,7 @@ const ParentAccountManagement = ({ navigation }) => {
       // Then show success alert
       Alert.alert(
         'Success',
-        `✅ Parent account created successfully for ${selectedStudent.name}!
+        `✅ Parent account created successfully for ${selectedStudent?.name || 'Student'}!
 
 📧 Email: ${accountForm.email}
 🔑 Password: ${accountForm.password}
@@ -419,8 +390,23 @@ ${fullyVerified ? '✅ Both login account and parent record verified' : userVeri
         Alert.alert('Error', `Failed to link parent account: ${linkError.message || linkError}`);
         return;
       }
+
+      // Optimistically update linked student
+      setStudents(prev => prev.map(s => {
+        if (s.id !== studentId) return s;
+        const updatedAll = [...(s.allParentRecords || []), linkResult.parentRecord];
+        return {
+          ...s,
+          hasParentAccount: true,
+          hasParentRecord: true,
+          parentAccountInfo: linkResult.parentUser ? { email: linkResult.parentUser.email, full_name: linkResult.parentUser.full_name } : s.parentAccountInfo,
+          parentRecordInfo: updatedAll[0],
+          allParentRecords: updatedAll,
+          parentStatus: 'complete'
+        };
+      }));
       
-      console.log('Parent account linked successfully:', linkResult);
+      
       
       // Close modal and reset form
       setModalVisible(false);

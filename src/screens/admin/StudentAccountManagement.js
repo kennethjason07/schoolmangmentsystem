@@ -51,108 +51,69 @@ const StudentAccountManagement = ({ navigation }) => {
 
   useEffect(() => {
     if (isReady && tenantId) {
-      loadStudents();
+      loadStudents(searchQuery, selectedClass);
     }
   }, [isReady, tenantId]);
 
-  const loadStudents = async () => {
+  const loadStudents = async (query = '', classFilter = 'all') => {
     const startTime = performance.now();
-    let timeoutId;
-    
+
     try {
-      console.log('🚀 StudentAccountManagement: Starting data load...');
+      console.log('🚀 StudentAccountManagement: Starting data load...', { query, classFilter });
       setLoading(true);
-      
-      // ⏰ Set timeout protection
-      timeoutId = setTimeout(() => {
-        console.warn('⚠️ StudentAccountManagement: Load timeout (10s)');
-        throw new Error('Loading timeout - please check your connection');
-      }, 10000);
-      
+
       // 🔍 Validate tenant context
       console.log('📋 StudentAccountManagement: Current tenant ID:', tenantId);
-      
       if (!isReady || !tenantId) {
         throw new Error('Tenant context not ready. Please wait and try again.');
       }
-      
       if (tenantError) {
         throw new Error(tenantError.message || 'Tenant initialization error');
       }
-      
-      // Test auth connection
-      await dbHelpers.testAuthConnection();
-      
-      // 🏃‍♂️ Fast parallel data fetching
-      console.log('📊 StudentAccountManagement: Fetching data in parallel...');
-      
-      const [classesResult, studentsResult, accountsResult] = await Promise.all([
+
+      // Fetch classes (lightweight) and students with server-side search and account linkage
+      const [classesResult, studentsResult] = await Promise.all([
         supabase
           .from(TABLES.CLASSES)
           .select('id, class_name, section')
           .eq('tenant_id', tenantId)
           .order('class_name'),
-        supabase
-          .from(TABLES.STUDENTS)
-          .select(`
-            *,
-            classes(id, class_name, section),
-            parents:parent_id(id, name, phone, email)
-          `)
-          .eq('tenant_id', tenantId)
-          .order('name'),
-        supabase
-          .from(TABLES.USERS)
-          .select('id, email, linked_student_id, role_id, full_name')
-          .not('linked_student_id', 'is', null)
+        dbHelpers.getStudents({
+          includeUserDetails: true,
+          includeClass: true,
+          pageSize: 100,
+          page: 0,
+          searchQuery: query,
+          classId: classFilter !== 'all' ? classFilter : null
+        })
       ]);
-      
+
       if (classesResult.error) throw classesResult.error;
       if (studentsResult.error) throw studentsResult.error;
-      if (accountsResult.error) throw accountsResult.error;
-      
-      clearTimeout(timeoutId);
-      
-      // ✅ Set data immediately
+
       const classesData = classesResult.data || [];
       const studentsData = studentsResult.data || [];
-      const existingAccounts = accountsResult.data || [];
-      
+
       setClasses(classesData);
-      
-      // Map students with their account status
+
+      // Map account status from users array
       const studentsWithAccountStatus = studentsData.map(student => {
-        const hasAccount = existingAccounts.some(account => account.linked_student_id === student.id);
-        const accountInfo = existingAccounts.find(account => account.linked_student_id === student.id);
-        
-        return {
-          ...student,
-          hasAccount,
-          accountInfo
-        };
+        const hasAccount = Array.isArray(student.users) && student.users.length > 0;
+        const accountInfo = hasAccount ? student.users[0] : null;
+        return { ...student, hasAccount, accountInfo };
       });
-      
+
       setStudents(studentsWithAccountStatus);
-      
+
       console.log(`✅ StudentAccountManagement: Loaded ${classesData.length} classes, ${studentsWithAccountStatus.length} students`);
-      
-      // 📊 Performance monitoring
+
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
       console.log(`✅ StudentAccountManagement: Data loaded in ${loadTime}ms`);
-      
-      if (loadTime > 2000) {
-        console.warn('⚠️ StudentAccountManagement: Slow loading (>2s). Check network.');
-      } else {
-        console.log('🚀 StudentAccountManagement: Fast loading achieved!');
-      }
-      
     } catch (error) {
-      clearTimeout(timeoutId);
       console.error('❌ StudentAccountManagement: Failed to load data:', error.message);
       Alert.alert('Error', error.message || 'Failed to load students');
     } finally {
-      clearTimeout(timeoutId);
       setLoading(false);
       setRefreshing(false);
     }
@@ -160,7 +121,12 @@ const StudentAccountManagement = ({ navigation }) => {
 
   const onRefresh = () => {
     setRefreshing(true);
-    loadStudents();
+    loadStudents(searchQuery, selectedClass);
+  };
+
+  const handleSearch = (query) => {
+    setSearchQuery(query);
+    loadStudents(query, selectedClass);
   };
 
   const generatePassword = () => {
@@ -245,14 +211,14 @@ const StudentAccountManagement = ({ navigation }) => {
 
       console.log('Student account created successfully:', accountData);
 
-      // Verify the account was created by checking the users table
-      const { data: verifyUser } = await supabase
-        .from(TABLES.USERS)
-        .select('id, email, full_name')
-        .eq('linked_student_id', selectedStudent.id)
-        .single();
-
-      console.log('Verification - User found in database:', verifyUser);
+      // Optimistically update UI
+      if (accountData?.userProfile && selectedStudent?.id) {
+        setStudents(prev => prev.map(s => (
+          s.id === selectedStudent.id
+            ? { ...s, hasAccount: true, accountInfo: accountData.userProfile, users: [accountData.userProfile] }
+            : s
+        )));
+      }
 
       // Close modal and reset form first
       setModalVisible(false);
@@ -268,7 +234,7 @@ const StudentAccountManagement = ({ navigation }) => {
       // Then show success alert
       Alert.alert(
         'Success',
-        `✅ Login account created successfully for ${selectedStudent.name}!
+        `✅ Login account created successfully for ${selectedStudent?.name || 'Student'}!
 
 📧 Email: ${accountForm.email}
 🔑 Password: ${accountForm.password}

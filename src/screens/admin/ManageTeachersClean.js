@@ -109,108 +109,84 @@ const ManageTeachers = ({ navigation, route }) => {
 
   }, [form.classes, subjects]);
   
-  // Function to load data using enhanced tenant system with pagination
+  // Function to load data using tenant system with server-side pagination
   const loadData = async (page = 0, isRefresh = false) => {
     const startTime = performance.now();
-    
+    const offset = page * PAGE_SIZE;
+
     // Only show full loading for initial load or refresh
     if (isRefresh || page === 0) {
       setLoading(true);
     }
     setError(null);
-    
+
     try {
       const tenantId = getTenantId();
-      console.log(`🏢 ManageTeachers: Loading page ${page} for tenant:`, tenantId);
-      
+      console.log(`🏢 ManageTeachers: Loading page ${page} (offset ${offset}) for tenant:`, tenantId);
+
       if (!tenantId) {
         console.error('❌ ManageTeachers: No tenant ID available');
         setError('No tenant context available. Please contact administrator.');
         setLoading(false);
         return;
       }
-      
-      console.log('🚀 ManageTeachers: Loading teachers with enhanced tenant system:', tenantId);
-      
-      // 🚀 Use enhanced tenant database for teachers (select only needed columns)
-      const { data: teachersData, error: teachersError } = await tenantDatabase.read(
-        'teachers', 
-        {}, 
-        'id, name, phone, qualification, salary_amount, is_class_teacher'
-      );
-      
-      console.log('🏢 ManageTeachers: Teachers query result:', {
-        success: !teachersError,
-        count: teachersData?.length || 0,
-        error: teachersError?.message || 'none'
-      });
-      
+
+      // Teachers: server-side pagination via range and count
+      const { data: teachersData, error: teachersError, count } = await supabase
+        .from('teachers')
+        .select('id, name, phone, qualification, salary_amount, is_class_teacher', { count: 'exact' })
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + PAGE_SIZE - 1);
+
       if (teachersError) {
         console.error('❌ ManageTeachers: Error loading teachers:', teachersError);
         throw new Error(`Failed to load teachers: ${teachersError.message}`);
       }
-      
-      // 🚀 Enhanced: Direct parallel queries using tenantDatabase
-      console.log('🏢 ManageTeachers: Fetching classes and subjects...');
-      const [classesResult, subjectsResult] = await Promise.all([
-        tenantDatabase.read('classes', {}, 'id, class_name, section, class_teacher_id'),
-        tenantDatabase.read('subjects', {}, 'id, name, class_id')
-      ]);
-      
-      // Get classes and subjects data from the parallel queries
-      const { data: classesData, error: classesError } = classesResult;
-      const { data: subjectsData, error: subjectsError } = subjectsResult;
-      
-      if (classesError) {
-        console.warn('⚠️ ManageTeachers: Failed to load classes:', classesError.message);
-      } else {
-        setClasses(classesData || []);
-        console.log(`✅ ManageTeachers: Loaded ${(classesData || []).length} classes`);
-      }
-      
-      if (subjectsError) {
-        console.warn('⚠️ ManageTeachers: Failed to load subjects:', subjectsError.message);
-      } else {
-        setSubjects(subjectsData || []);
-        console.log(`✅ ManageTeachers: Loaded ${(subjectsData || []).length} subjects`);
-      }
-      
-      // Set pagination info
-      setHasMoreTeachers((teachersData?.length || 0) === PAGE_SIZE);
-      setCurrentPage(page);
-      
-      // Update teachers list based on whether this is initial load or pagination
+
+      // Classes and subjects: fetch only on first page or refresh (they change rarely)
+      let classesData = classes;
+      let subjectsData = subjects;
       if (page === 0 || isRefresh) {
-        // Initial load or refresh - replace all teachers
-        setTeachers((teachersData || []).map(teacher => ({
-          ...teacher,
-          subjects: [], // Will load on-demand when editing
-          classes: []   // Will load on-demand when editing  
-        })));
-        setTotalTeachers((teachersData || []).length);
-      } else {
-        // Pagination - append to existing teachers
-        setTeachers(prev => [...prev, ...(teachersData || []).map(teacher => ({
-          ...teacher,
-          subjects: [],
-          classes: []
-        }))]);
-        setTotalTeachers(prev => prev + (teachersData || []).length);
+        console.log('🏢 ManageTeachers: Fetching classes and subjects (first page or refresh)...');
+        const [classesResult, subjectsResult] = await Promise.all([
+          tenantDatabase.read('classes', {}, 'id, class_name, section, class_teacher_id'),
+          tenantDatabase.read('subjects', {}, 'id, name, class_id')
+        ]);
+        const { data: cData, error: classesError } = classesResult;
+        const { data: sData, error: subjectsError } = subjectsResult;
+        if (!classesError) {
+          classesData = cData || [];
+          setClasses(classesData);
+        } else {
+          console.warn('⚠️ ManageTeachers: Failed to load classes:', classesError.message);
+        }
+        if (!subjectsError) {
+          subjectsData = sData || [];
+          setSubjects(subjectsData);
+        } else {
+          console.warn('⚠️ ManageTeachers: Failed to load subjects:', subjectsError.message);
+        }
       }
-      
-      // Simple logging
-      console.log('📋 ManageTeachers: Data loaded successfully:', {
-        teachers: (teachersData || []).length,
-        classes: classesData?.length || 0,
-        subjects: subjectsData?.length || 0,
-        tenantId
-      });
-      
-      // 📊 Performance monitoring
+
+      // Pagination info
+      const received = teachersData?.length || 0;
+      const total = typeof count === 'number' ? count : (page === 0 ? received : totalTeachers);
+      setTotalTeachers(total);
+      setHasMoreTeachers(offset + received < total);
+      setCurrentPage(page);
+
+      // Update teacher list
+      if (page === 0 || isRefresh) {
+        setTeachers((teachersData || []).map(t => ({ ...t, subjects: [], classes: [] })));
+      } else {
+        setTeachers(prev => [...prev, ...(teachersData || []).map(t => ({ ...t, subjects: [], classes: [] }))]);
+      }
+
+      // Logging
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
-      console.log(`✅ ManageTeachers: Page ${page} loaded in ${loadTime}ms - ${(teachersData || []).length} teachers`);
-      
+      console.log(`✅ ManageTeachers: Page ${page} loaded in ${loadTime}ms - received ${received}/${total}`);
     } catch (err) {
       const endTime = performance.now();
       const loadTime = Math.round(endTime - startTime);
@@ -222,10 +198,11 @@ const ManageTeachers = ({ navigation, route }) => {
   };
 
   
-  // Handle load more teachers (simple version without pagination)
+  // Handle load more teachers
   const loadMoreTeachers = async () => {
-    // Disabled pagination for now - we load all teachers at once
-    console.log('🏢 ManageTeachers: Load more called but pagination disabled');
+    if (loading || refreshing || searchQuery) return;
+    if (!hasMoreTeachers) return;
+    await loadData(currentPage + 1, false);
   };
 
   // Removed section-loading API calls. Sections are derived from classes state when needed.
@@ -636,6 +613,8 @@ const ManageTeachers = ({ navigation, route }) => {
   // Pull to refresh
   const onRefresh = async () => {
     setRefreshing(true);
+    setCurrentPage(0);
+    setHasMoreTeachers(false);
     await loadData(0, true);
     setRefreshing(false);
   };

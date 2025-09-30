@@ -51,49 +51,18 @@ const TeacherAccountManagement = ({ navigation }) => {
     }
   }, [isReady, tenantId]);
 
-  // Filter teachers based on search query
+  // Keep filteredTeachers in sync with teachers when not actively searching
   useEffect(() => {
-    console.log('🔍 Search effect triggered:', {
-      searchQuery: `"${searchQuery}"`,
-      teachersCount: teachers.length,
-      queryLength: searchQuery.length
-    });
-    
     if (!searchQuery.trim()) {
-      console.log('🔄 No search query, showing all teachers');
       setFilteredTeachers(teachers);
-    } else {
-      console.log('🔍 Filtering teachers by query:', searchQuery);
-      const filtered = teachers.filter(teacher => {
-        const nameMatch = teacher.name.toLowerCase().includes(searchQuery.toLowerCase());
-        const qualificationMatch = teacher.qualification?.toLowerCase().includes(searchQuery.toLowerCase());
-        const emailMatch = teacher.users && teacher.users.length > 0 && 
-          teacher.users[0].email?.toLowerCase().includes(searchQuery.toLowerCase());
-        
-        const matches = nameMatch || qualificationMatch || emailMatch;
-        
-        if (matches) {
-          console.log('✅ Teacher matches search:', {
-            name: teacher.name,
-            nameMatch,
-            qualificationMatch,
-            emailMatch,
-            userEmail: teacher.users?.[0]?.email
-          });
-        }
-        
-        return matches;
-      });
-      
-      console.log(`📊 Filtered ${filtered.length} out of ${teachers.length} teachers`);
-      setFilteredTeachers(filtered);
     }
-  }, [searchQuery, teachers]);
+  }, [teachers, searchQuery]);
 
   const handleSearch = (query) => {
     console.log('📝 handleSearch called with:', `"${query}"`);
-    console.log('🕰️ Call stack:', new Error().stack);
     setSearchQuery(query);
+    // Trigger server-side search as the query changes
+    loadTeachers(query);
   };
 
   const clearSearch = () => {
@@ -101,20 +70,13 @@ const TeacherAccountManagement = ({ navigation }) => {
     setSearchQuery('');
   };
 
-  const loadTeachers = async () => {
+  const loadTeachers = async (query = '') => {
     const startTime = performance.now();
-    let timeoutId;
-    
+
     try {
-      console.log('🚀 TeacherAccountManagement: Starting data load...');
+      console.log('🚀 TeacherAccountManagement: Starting data load...', { query });
       setLoading(true);
-      
-      // ⏰ Set timeout protection
-      timeoutId = setTimeout(() => {
-        console.warn('⚠️ TeacherAccountManagement: Load timeout (10s)');
-        throw new Error('Loading timeout - please check your connection');
-      }, 10000);
-      
+
       // 🔍 Enhanced tenant validation
       console.log('🏢 TeacherAccountManagement: Tenant validation:', {
         isReady,
@@ -135,20 +97,19 @@ const TeacherAccountManagement = ({ navigation }) => {
         throw new Error(tenantError.message || 'Tenant initialization error');
       }
       
-      // 🏃‍♂️ Enhanced data fetching with proper options
+      // 🏃‍♂️ Enhanced data fetching with optional server-side search
       console.log('📊 TeacherAccountManagement: Fetching teachers with user details...');
       const { data, error } = await dbHelpers.getTeachers({ 
         includeUserDetails: true, // Include user details for account management
         pageSize: 100, // Get more teachers at once for better UX
-        page: 0
+        page: 0,
+        searchQuery: query
       });
       
       if (error) {
         console.error('❌ TeacherAccountManagement: Database error:', error);
         throw error;
       }
-      
-      clearTimeout(timeoutId);
       
       // ✅ Enhanced data processing
       const teachersData = data || [];
@@ -160,7 +121,14 @@ const TeacherAccountManagement = ({ navigation }) => {
       })));
       
       setTeachers(teachersData);
-      setFilteredTeachers(teachersData);
+      
+      // If no active search query, keep filteredTeachers in sync with teachers
+      if (!query || !query.trim()) {
+        setFilteredTeachers(teachersData);
+      } else {
+        // When query is present, the server already filtered; show data as-is
+        setFilteredTeachers(teachersData);
+      }
       
       // 📊 Enhanced statistics
       const teachersWithAccounts = teachersData.filter(t => t.users && t.users.length > 0).length;
@@ -182,18 +150,16 @@ const TeacherAccountManagement = ({ navigation }) => {
       }
       
     } catch (error) {
-      clearTimeout(timeoutId);
       console.error('❌ TeacherAccountManagement: Failed to load data:', error.message);
       Alert.alert('Error', error.message || 'Failed to load teachers');
     } finally {
-      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadTeachers();
+    await loadTeachers(searchQuery);
     setRefreshing(false);
   };
 
@@ -268,7 +234,17 @@ const TeacherAccountManagement = ({ navigation }) => {
 
       if (error) throw error;
 
-      // Close modal and reset form first
+      // Optimistically update UI with the newly linked account
+      if (data?.userProfile && selectedTeacher?.id) {
+        setTeachers(prev => prev.map(t => (
+          t.id === selectedTeacher.id ? { ...t, users: [data.userProfile] } : t
+        )));
+        setFilteredTeachers(prev => prev.map(t => (
+          t.id === selectedTeacher.id ? { ...t, users: [data.userProfile] } : t
+        )));
+      }
+
+      // Close modal and reset form
       setModalVisible(false);
       setSelectedTeacher(null);
       setAccountForm({
@@ -283,7 +259,7 @@ const TeacherAccountManagement = ({ navigation }) => {
       
       // Clear search query to prevent auto-filtering by email
       console.log('🎆 Account created successfully, clearing search query');
-      setSearchQuery(''); // ✅ This fixes the auto-search issue!
+      setSearchQuery('');
 
       // Then show success alert
       Alert.alert(

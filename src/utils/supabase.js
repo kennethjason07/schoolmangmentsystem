@@ -933,75 +933,128 @@ export const dbHelpers = {
     }
   },
 
-  // Teacher management - Optimized for better performance
+  // Teacher management - Optimized for better performance with optional search
   async getTeachers(options = {}) {
     try {
       const {
         pageSize = 50,
         page = 0,
         includeUserDetails = false,
-        selectColumns = 'id,name,phone,qualification,salary_amount,age,address,tenant_id,created_at,salary_type,is_class_teacher,assigned_class_id'
+        selectColumns = 'id,name,phone,qualification,salary_amount,age,address,tenant_id,created_at,salary_type,is_class_teacher,assigned_class_id',
+        searchQuery = '',
+        searchByEmail = true
       } = options;
 
       // Get current tenant ID for filtering
       const tenantId = await tenantHelpers.getCurrentTenantId();
       console.log('🔍 getTeachers: Current tenant ID:', tenantId);
-      
-      let query = supabase
+
+      // Base query for teachers
+      let baseQuery = supabase
         .from(TABLES.TEACHERS)
-        .select(selectColumns)
-        .order('name', { ascending: true });
-      
-      // Add tenant filtering
+        .select(selectColumns);
+
       if (tenantId) {
-        query = query.eq('tenant_id', tenantId);
+        baseQuery = baseQuery.eq('tenant_id', tenantId);
       }
-      
+
+      let teachersQuery = baseQuery.order('name', { ascending: true });
+
+      // Optional server-side search
+      if (searchQuery && searchQuery.trim()) {
+        const q = searchQuery.trim();
+        const ilikeQ = `%${q}%`;
+        console.log('🔎 getTeachers: Applying server-side search for:', q);
+
+        // Find teacher IDs that match teacher fields
+        let teacherIdFilter = baseQuery;
+        const teacherOrFilter = `name.ilike.${ilikeQ},qualification.ilike.${ilikeQ},phone.ilike.${ilikeQ}`;
+        teacherIdFilter = teacherIdFilter.select('id');
+        teacherIdFilter = teacherIdFilter.or(teacherOrFilter);
+
+        const { data: teacherIdRows, error: teacherIdError } = await teacherIdFilter;
+        if (teacherIdError) {
+          console.warn('⚠️ getTeachers: Teacher field search failed:', teacherIdError.message);
+        }
+        const idsFromTeacherFields = (teacherIdRows || []).map(r => r.id);
+
+        // Optionally include matches by user email
+        let idsFromUsers = [];
+        if (includeUserDetails && searchByEmail) {
+          let usersQuery = supabase
+            .from(TABLES.USERS)
+            .select('linked_teacher_id')
+            .not('linked_teacher_id', 'is', null)
+            .ilike('email', ilikeQ);
+          if (tenantId) {
+            usersQuery = usersQuery.eq('tenant_id', tenantId);
+          }
+          const { data: userRows, error: usersError } = await usersQuery;
+          if (usersError) {
+            console.warn('⚠️ getTeachers: User email search failed:', usersError.message);
+          }
+          idsFromUsers = (userRows || [])
+            .filter(u => !!u.linked_teacher_id)
+            .map(u => u.linked_teacher_id);
+        }
+
+        const filteredIds = Array.from(new Set([...(idsFromTeacherFields || []), ...(idsFromUsers || [])]));
+        console.log('🔎 getTeachers: Filtered teacher IDs count:', filteredIds.length);
+
+        if (filteredIds.length === 0) {
+          return { data: [], error: null };
+        }
+
+        teachersQuery = baseQuery
+          .in('id', filteredIds)
+          .order('name', { ascending: true });
+      }
+
       // Add pagination
       if (pageSize && pageSize > 0) {
         const start = page * pageSize;
         const end = start + pageSize - 1;
-        query = query.range(start, end);
+        teachersQuery = teachersQuery.range(start, end);
       }
-      
-      const { data: teachersData, error } = await query;
+
+      const { data: teachersData, error } = await teachersQuery;
       console.log('📋 getTeachers: Teachers query result:', {
         success: !error,
         count: teachersData?.length || 0,
         includeUserDetails,
         error: error?.message
       });
-      
+
       if (error) {
         return { data: null, error };
       }
-      
+
       // Optionally fetch linked user details only when needed
       if (includeUserDetails && teachersData && teachersData.length > 0) {
         const teacherIds = teachersData.map(teacher => teacher.id);
         console.log('👥 getTeachers: Fetching user details for teacher IDs:', teacherIds);
-        
+
         // Add tenant filtering to users query as well
         let usersQuery = supabase
           .from(TABLES.USERS)
           .select('id, email, full_name, phone, linked_teacher_id, tenant_id')
           .in('linked_teacher_id', teacherIds)
           .not('linked_teacher_id', 'is', null);
-          
+
         // Add tenant filtering for users if available
         if (tenantId) {
           usersQuery = usersQuery.eq('tenant_id', tenantId);
         }
-        
+
         const { data: usersData, error: usersError } = await usersQuery;
-        
+
         console.log('👤 getTeachers: Users query result:', {
           success: !usersError,
           count: usersData?.length || 0,
           error: usersError?.message,
           foundUsers: usersData?.map(u => ({ email: u.email, linkedTeacherId: u.linked_teacher_id }))
         });
-        
+
         if (!usersError && usersData) {
           // Map user data to teachers
           const usersLookup = {};
@@ -1010,15 +1063,15 @@ export const dbHelpers = {
               usersLookup[user.linked_teacher_id] = user;
             }
           });
-          
+
           console.log('🔗 getTeachers: Users lookup created:', Object.keys(usersLookup));
-          
+
           // Enhance teachers with user data - fix the structure expected by UI
           teachersData.forEach(teacher => {
             const linkedUser = usersLookup[teacher.id];
             // The UI expects teacher.users to be an array, not a single object
             teacher.users = linkedUser ? [linkedUser] : [];
-            
+
             console.log(`👨‍🏫 Teacher ${teacher.name}: ${linkedUser ? 'HAS ACCOUNT' : 'NO ACCOUNT'} (${linkedUser?.email || 'none'})`);
           });
         } else {
@@ -1035,10 +1088,135 @@ export const dbHelpers = {
           });
         }
       }
-      
+
       return { data: teachersData || [], error: null };
     } catch (error) {
       console.error('❌ Error in getTeachers:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Student management - Optimized with optional search and user linking
+  async getStudents(options = {}) {
+    try {
+      const {
+        pageSize = 50,
+        page = 0,
+        includeUserDetails = false,
+        includeClass = true,
+        selectColumns = 'id,name,admission_no,roll_no,class_id,tenant_id,created_at',
+        searchQuery = '',
+        searchByEmail = true,
+        classId = null
+      } = options;
+
+      const tenantId = await tenantHelpers.getCurrentTenantId();
+      console.log('🔍 getStudents: Current tenant ID:', tenantId);
+
+      // Build select with optional class join
+      const baseSelect = includeClass
+        ? `${selectColumns},classes(id,class_name,section)`
+        : selectColumns;
+
+      let baseQuery = supabase
+        .from(TABLES.STUDENTS)
+        .select(baseSelect);
+
+      if (tenantId) {
+        baseQuery = baseQuery.eq('tenant_id', tenantId);
+      }
+
+      if (classId) {
+        baseQuery = baseQuery.eq('class_id', classId);
+      }
+
+      let studentsQuery = baseQuery.order('name', { ascending: true });
+
+      // Optional server-side search
+      if (searchQuery && searchQuery.trim()) {
+        const q = searchQuery.trim();
+        const ilikeQ = `%${q}%`;
+        console.log('🔎 getStudents: Applying server-side search for:', q);
+
+        // Search student fields
+        let idsFromStudentFields = [];
+        let studentIdFilter = supabase
+          .from(TABLES.STUDENTS)
+          .select('id');
+        if (tenantId) studentIdFilter = studentIdFilter.eq('tenant_id', tenantId);
+        if (classId) studentIdFilter = studentIdFilter.eq('class_id', classId);
+        studentIdFilter = studentIdFilter.or(`name.ilike.${ilikeQ},admission_no.ilike.${ilikeQ},roll_no.ilike.${ilikeQ}`);
+        const { data: studentIdRows, error: studentIdError } = await studentIdFilter;
+        if (studentIdError) {
+          console.warn('⚠️ getStudents: Student field search failed:', studentIdError.message);
+        }
+        idsFromStudentFields = (studentIdRows || []).map(r => r.id);
+
+        // Optionally search by user email linked to student
+        let idsFromUsers = [];
+        if (includeUserDetails && searchByEmail) {
+          let usersQuery = supabase
+            .from(TABLES.USERS)
+            .select('linked_student_id')
+            .not('linked_student_id', 'is', null)
+            .ilike('email', ilikeQ);
+          if (tenantId) usersQuery = usersQuery.eq('tenant_id', tenantId);
+          const { data: userRows, error: usersError } = await usersQuery;
+          if (usersError) {
+            console.warn('⚠️ getStudents: User email search failed:', usersError.message);
+          }
+          idsFromUsers = (userRows || []).map(u => u.linked_student_id).filter(Boolean);
+        }
+
+        const filteredIds = Array.from(new Set([...(idsFromStudentFields || []), ...(idsFromUsers || [])]));
+        console.log('🔎 getStudents: Filtered student IDs count:', filteredIds.length);
+
+        if (filteredIds.length === 0) {
+          return { data: [], error: null };
+        }
+
+        studentsQuery = baseQuery
+          .in('id', filteredIds)
+          .order('name', { ascending: true });
+      }
+
+      // Pagination
+      if (pageSize && pageSize > 0) {
+        const start = page * pageSize;
+        const end = start + pageSize - 1;
+        studentsQuery = studentsQuery.range(start, end);
+      }
+
+      const { data: studentsData, error } = await studentsQuery;
+      if (error) return { data: null, error };
+
+      // Optionally fetch linked user details for students
+      if (includeUserDetails && studentsData && studentsData.length > 0) {
+        const studentIds = studentsData.map(s => s.id);
+        let usersQuery = supabase
+          .from(TABLES.USERS)
+          .select('id, email, full_name, phone, linked_student_id, tenant_id')
+          .in('linked_student_id', studentIds)
+          .not('linked_student_id', 'is', null);
+        if (tenantId) usersQuery = usersQuery.eq('tenant_id', tenantId);
+        const { data: usersData, error: usersError } = await usersQuery;
+        if (!usersError && usersData) {
+          const lookup = {};
+          usersData.forEach(u => { if (u.linked_student_id) lookup[u.linked_student_id] = u; });
+          studentsData.forEach(s => {
+            const linkedUser = lookup[s.id];
+            s.users = linkedUser ? [linkedUser] : [];
+          });
+        } else if (studentsData) {
+          studentsData.forEach(s => { s.users = []; });
+        }
+      } else if (studentsData) {
+        studentsData.forEach(s => { s.users = []; });
+      }
+
+      return { data: studentsData || [], error: null };
+    } catch (error) {
+      console.error('❌ Error in getStudents:', error);
       return { data: null, error };
     }
   },
