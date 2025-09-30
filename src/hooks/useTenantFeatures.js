@@ -39,7 +39,7 @@ export const useTenantFeatures = () => {
   // Load user features from database
   useEffect(() => {
     const loadUserFeatures = async () => {
-      if (!user?.id || !isReady) {
+      if (!user?.id) {
         return;
       }
       
@@ -73,7 +73,7 @@ export const useTenantFeatures = () => {
     };
     
     loadUserFeatures();
-  }, [user?.id, isReady]);
+  }, [user?.id]);
 
   /**
    * Check if a specific feature is enabled for the current user
@@ -101,14 +101,15 @@ export const useTenantFeatures = () => {
 
     // 🌟 CHECK FOR FEATURES-ALL FIRST
     // If user has features-all enabled, grant access to all regular features
-    const hasFeaturesAll = userFeatures[FEATURES.FEATURES_ALL] === true;
+    const normalizeTrue = (v) => v === true || v === 'true' || v === 1;
+    const hasFeaturesAll = normalizeTrue(userFeatures[FEATURES.FEATURES_ALL]);
     if (hasFeaturesAll && !isFeaturesAll(featureKey)) {
       console.log(`🌟 useTenantFeatures: User has 'features-all' permission, granting access to '${featureKey}' for user ${user.email}`);
       return true;
     }
 
     // Check if feature is explicitly enabled for this user
-    const hasAccess = userFeatures[featureKey] === true;
+    const hasAccess = normalizeTrue(userFeatures[featureKey]);
     
     console.log(`🔍 useTenantFeatures: Feature '${featureKey}' access: ${hasAccess ? 'GRANTED' : 'DENIED'} for user ${user.email}`);
     

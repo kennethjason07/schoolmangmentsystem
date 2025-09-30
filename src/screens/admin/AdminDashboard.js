@@ -110,7 +110,7 @@ const AdminDashboard = ({ navigation }) => {
   const navigateSafely = useNavigateWithStatePreservation();
   
   // Feature access hook for quick action protection
-  const { hasFeature, debugFeatureAccess } = useTenantFeatures();
+  const { hasFeature, loading: featuresLoading, isReady: featuresReady, debugFeatureAccess } = useTenantFeatures();
   
   // Feature-protected navigation handler
   const navigateWithFeatureCheck = (actionTitle, screenName, actionFunction = null) => {
@@ -1315,41 +1315,47 @@ const AdminDashboard = ({ navigation }) => {
         {/* Quick Actions */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.quickActionsGrid}>
-            {quickActions.map((action, index) => {
-              const featureKey = getFeatureForQuickAction(action.title);
-              const hasAccess = !featureKey || hasFeature(featureKey);
-              
-              return (
-                <TouchableOpacity
-                  key={index}
-                  style={[
-                    styles.quickActionCard,
-                    !hasAccess && styles.quickActionCardDisabled
-                  ]}
-                  onPress={() => {
-                    navigateWithFeatureCheck(
-                      action.title, 
-                      action.screen, 
-                      action.action
-                    );
-                  }}
-                >
-                <View style={styles.actionIconContainer}>
-                  <View style={[styles.actionIcon, { backgroundColor: action.color }]}>
-                    <Ionicons name={action.icon} size={24} color="#fff" />
-                  </View>
-                  {action.banner && (
-                    <View style={styles.bannerContainer}>
-                      <Text style={styles.bannerText}>{action.banner}</Text>
+          {!featuresReady ? (
+            <View style={{ paddingVertical: 8 }}>
+              <Text style={{ color: '#666' }}>Loading permissions…</Text>
+            </View>
+          ) : (
+            <View style={styles.quickActionsGrid}>
+              {quickActions.map((action, index) => {
+                const featureKey = getFeatureForQuickAction(action.title);
+                const hasAccess = !featureKey || hasFeature(featureKey);
+                
+                return (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.quickActionCard,
+                      !hasAccess && styles.quickActionCardDisabled
+                    ]}
+                    onPress={() => {
+                      navigateWithFeatureCheck(
+                        action.title, 
+                        action.screen, 
+                        action.action
+                      );
+                    }}
+                  >
+                  <View style={styles.actionIconContainer}>
+                    <View style={[styles.actionIcon, { backgroundColor: action.color }]}>
+                      <Ionicons name={action.icon} size={24} color="#fff" />
                     </View>
-                  )}
-                </View>
-                <Text style={[styles.actionTitle, !hasAccess && styles.actionTitleDisabled]}>{action.title}</Text>
-              </TouchableOpacity>
-              );
-            })}
-          </View>
+                    {action.banner && (
+                      <View style={styles.bannerContainer}>
+                        <Text style={styles.bannerText}>{action.banner}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={[styles.actionTitle, !hasAccess && styles.actionTitleDisabled]}>{action.title}</Text>
+                </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
         </View>
 
 
