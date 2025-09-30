@@ -88,6 +88,15 @@ const ExpenseManagement = ({ navigation }) => {
   const [budgetData, setBudgetData] = useState({});
   const [allExpenses, setAllExpenses] = useState([]); // Local state for all expenses
   
+  // Pagination state for monthly/yearly
+  const PAGE_SIZE = 25;
+  const [monthlyPage, setMonthlyPage] = useState(0);
+  const [monthlyHasMore, setMonthlyHasMore] = useState(true);
+  const [monthlyLoadingPage, setMonthlyLoadingPage] = useState(false);
+  const [yearlyPage, setYearlyPage] = useState(0);
+  const [yearlyHasMore, setYearlyHasMore] = useState(true);
+  const [yearlyLoadingPage, setYearlyLoadingPage] = useState(false);
+  
   // View Control
   const [activeTab, setActiveTab] = useState('monthly'); // 'monthly' or 'yearly'
   
@@ -141,11 +150,18 @@ const ExpenseManagement = ({ navigation }) => {
     setLoading(true);
     
     try {
-      await Promise.all([
-        loadExpenses(),
-        loadCategories()
-      ]);
-      console.log('✅ ExpenseManagement: All data loaded successfully');
+      // Always load categories (narrow projection)
+      await loadCategories();
+
+      // Reset paging for active tab and load first page lazily
+      if (activeTab === 'monthly') {
+        setMonthlyPage(0); setMonthlyHasMore(true);
+        await loadMonthlyExpensesPage(0, true);
+      } else {
+        setYearlyPage(0); setYearlyHasMore(true);
+        await loadYearlyExpensesPage(0, true);
+      }
+      console.log('✅ ExpenseManagement: Data loaded successfully for tab:', activeTab);
     } catch (error) {
       console.error('❌ ExpenseManagement: Error loading data:', error);
       Alert.alert('Error', `Failed to load data: ${error.message}`);
@@ -154,75 +170,101 @@ const ExpenseManagement = ({ navigation }) => {
     }
   };
 
-  const loadExpenses = async () => {
+  // RPC stub for totals (optional). If it fails, fallback to local sum of loaded page data
+  const fetchTotalByWindow = async (startDate, endDate) => {
     try {
-      // Get date range for selected month
+      const { data, error } = await supabase.rpc('expense_total_by_window', {
+        start_date: startDate,
+        end_date: endDate
+      });
+      if (!error && typeof data === 'number') return data;
+    } catch (e) {
+      // ignore
+    }
+    return null; // caller will fallback
+  };
+
+  const loadMonthlyExpensesPage = async (pageNumber = 0, replace = false) => {
+    try {
       const monthStart = format(startOfMonth(selectedMonth), 'yyyy-MM-dd');
       const monthEnd = format(endOfMonth(selectedMonth), 'yyyy-MM-dd');
-      console.log('📅 Date range:', { monthStart, monthEnd });
-      
-      console.log('🔍 Loading monthly expenses via enhanced tenant database');
-      // Load monthly expenses with date filtering
-      const { data: monthlyExpenses, error: monthlyError } = await supabase
+      const tId = getCachedTenantId();
+      const from = pageNumber * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      const { data, error } = await supabase
         .from('school_expenses')
-        .select('*')
-        .eq('tenant_id', getCachedTenantId())
+        .select('id, title, amount, category, description, expense_date, created_at')
+        .eq('tenant_id', tId)
         .gte('expense_date', monthStart)
-        .lte('expense_date', monthEnd);
-      
-      if (monthlyError) throw monthlyError;
-      
-      console.log('📦 Loaded monthly expenses:', monthlyExpenses?.length, 'items');
-      setExpenses(monthlyExpenses || []);
-      
-      // Calculate monthly total
-      const monthlySum = (monthlyExpenses || []).reduce((sum, expense) => sum + (expense.amount || 0), 0);
-      setMonthlyTotal(monthlySum);
-      console.log('💰 Monthly total:', monthlySum);
-      
-      // Get yearly expenses
+        .lte('expense_date', monthEnd)
+        .order('expense_date', { ascending: false })
+        .range(from, to);
+      if (error) throw error;
+
+      const hasMore = (data?.length || 0) === PAGE_SIZE;
+      setMonthlyHasMore(hasMore);
+      setMonthlyPage(pageNumber);
+      if (replace) setExpenses(data || []);
+      else setExpenses(prev => ([...(prev || []), ...(data || [])]));
+
+      // Try server total; fallback to partial page sum
+      const serverTotal = await fetchTotalByWindow(monthStart, monthEnd);
+      setMonthlyTotal(serverTotal != null ? serverTotal : (data || []).reduce((s, e) => s + (e.amount || 0), replace ? 0 : monthlyTotal));
+
+      // Update category stats using currently loaded arrays
+      if (expenseCategories.length > 0) {
+        const monthlySrc = replace ? (data || []) : ([...(expenses || []), ...(data || [])]);
+        calculateCategoryStats(monthlySrc, yearlyExpenses || []);
+      }
+    } catch (error) {
+      console.error('❌ Error loading monthly expenses page:', error);
+      if (replace) setExpenses([]);
+    }
+  };
+
+  const loadYearlyExpensesPage = async (pageNumber = 0, replace = false) => {
+    try {
       const currentYear = selectedMonth.getFullYear();
       const yearStart = `${currentYear}-01-01`;
       const yearEnd = `${currentYear}-12-31`;
-      console.log('📅 Fetching yearly expenses for:', { yearStart, yearEnd });
-      
-      console.log('🔍 Loading yearly expenses via enhanced tenant database');
-      const { data: yearlyExpenses, error: yearlyError } = await supabase
+      const tId = getCachedTenantId();
+      const from = pageNumber * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      const { data, error } = await supabase
         .from('school_expenses')
-        .select('*')
-        .eq('tenant_id', getCachedTenantId())
+        .select('id, title, amount, category, description, expense_date, created_at')
+        .eq('tenant_id', tId)
         .gte('expense_date', yearStart)
-        .lte('expense_date', yearEnd);
-      
-      if (yearlyError) {
-        console.error('❌ Error fetching yearly expenses:', yearlyError);
-        setYearlyExpenses([]);
-        setYearlyTotal(0);
-      } else {
-        const yearlySum = (yearlyExpenses || []).reduce((sum, expense) => sum + (expense.amount || 0), 0);
-        setYearlyTotal(yearlySum);
-        setYearlyExpenses(yearlyExpenses || []);
-        console.log('📊 Yearly total:', yearlySum, 'from', yearlyExpenses?.length || 0, 'expenses');
-      }
-      
-      // Calculate category breakdown after loading expenses and categories
+        .lte('expense_date', yearEnd)
+        .order('expense_date', { ascending: false })
+        .range(from, to);
+      if (error) throw error;
+
+      const hasMore = (data?.length || 0) === PAGE_SIZE;
+      setYearlyHasMore(hasMore);
+      setYearlyPage(pageNumber);
+      if (replace) setYearlyExpenses(data || []);
+      else setYearlyExpenses(prev => ([...(prev || []), ...(data || [])]));
+
+      const serverTotal = await fetchTotalByWindow(yearStart, yearEnd);
+      setYearlyTotal(serverTotal != null ? serverTotal : (data || []).reduce((s, e) => s + (e.amount || 0), replace ? 0 : yearlyTotal));
+
       if (expenseCategories.length > 0) {
-        calculateCategoryStats(monthlyExpenses || [], yearlyExpenses || []);
+        const yearlySrc = replace ? (data || []) : ([...(yearlyExpenses || []), ...(data || [])]);
+        calculateCategoryStats(expenses || [], yearlySrc);
       }
-      
     } catch (error) {
-      console.error('❌ Error loading expenses:', error);
-      setExpenses([]);
-      setYearlyExpenses([]);
-      setMonthlyTotal(0);
-      setYearlyTotal(0);
+      console.error('❌ Error loading yearly expenses page:', error);
+      if (replace) setYearlyExpenses([]);
     }
   };
 
   const loadCategories = async () => {
     try {
       console.log('🏷️ Loading expense categories via enhanced tenant database');
-      const { data: categoriesData, error } = await tenantDatabase.read('expense_categories', {}, '*');
+      const { data: categoriesData, error } = await tenantDatabase.read('expense_categories', {}, 'id, name, monthly_budget');
       
       if (error) throw error;
       
@@ -333,7 +375,7 @@ const ExpenseManagement = ({ navigation }) => {
         initializeTenantHelpers(tenantId);
         loadExpenseData();
       }
-    }, [tenantId, isReady, tenantLoading, tenantError, selectedMonth])
+    }, [tenantId, isReady, tenantLoading, tenantError, selectedMonth, activeTab])
   );
   
   // Recalculate category breakdown when categories or expenses change
@@ -346,7 +388,15 @@ const ExpenseManagement = ({ navigation }) => {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadExpenseData();
+    // Refresh only active tab window and categories
+    await loadCategories();
+    if (activeTab === 'monthly') {
+      setMonthlyPage(0); setMonthlyHasMore(true);
+      await loadMonthlyExpensesPage(0, true);
+    } else {
+      setYearlyPage(0); setYearlyHasMore(true);
+      await loadYearlyExpensesPage(0, true);
+    }
     setRefreshing(false);
   };
 
@@ -396,21 +446,47 @@ const ExpenseManagement = ({ navigation }) => {
 
       if (editExpenseIndex !== null) {
         // Update existing expense using Enhanced Tenant System
-        const expenseId = expenses[editExpenseIndex].id;
+        const expenseId = expenses[editExpenseIndex]?.id;
         const { error } = await tenantDatabase.update('school_expenses', expenseId, expenseData);
-
         if (error) throw error;
         console.log('✅ Expense updated successfully:', expenseId);
+
+        // Optimistic update in current window if applicable
+        const inMonth = activeTab === 'monthly' && expenseData.expense_date >= format(startOfMonth(selectedMonth), 'yyyy-MM-dd') && expenseData.expense_date <= format(endOfMonth(selectedMonth), 'yyyy-MM-dd');
+        const currentYear = selectedMonth.getFullYear();
+        const inYear = activeTab === 'yearly' && expenseData.expense_date >= `${currentYear}-01-01` && expenseData.expense_date <= `${currentYear}-12-31`;
+        if (inMonth) {
+          setExpenses(prev => prev.map((e, i) => i === editExpenseIndex ? { ...e, ...expenseData } : e));
+        } else if (inYear) {
+          setYearlyExpenses(prev => prev.map((e, i) => i === editExpenseIndex ? { ...e, ...expenseData } : e));
+        }
       } else {
         // Create new expense using Enhanced Tenant System
         const { data, error } = await tenantDatabase.create('school_expenses', expenseData);
-
         if (error) throw error;
         console.log('✅ Expense created successfully:', data?.id);
+
+        // Optimistic prepend to current window
+        const newExpense = { id: data?.id || `temp-${Date.now()}`, ...expenseData };
+        const inMonth = activeTab === 'monthly' && expenseData.expense_date >= format(startOfMonth(selectedMonth), 'yyyy-MM-dd') && expenseData.expense_date <= format(endOfMonth(selectedMonth), 'yyyy-MM-dd');
+        const currentYear = selectedMonth.getFullYear();
+        const inYear = activeTab === 'yearly' && expenseData.expense_date >= `${currentYear}-01-01` && expenseData.expense_date <= `${currentYear}-12-31`;
+        if (inMonth) {
+          setExpenses(prev => [newExpense, ...(prev || [])]);
+          setMonthlyTotal(prev => prev + (newExpense.amount || 0));
+        } else if (inYear) {
+          setYearlyExpenses(prev => [newExpense, ...(prev || [])]);
+          setYearlyTotal(prev => prev + (newExpense.amount || 0));
+        }
       }
 
-      // Refresh the data
-      await loadExpenseData();
+      // Background refresh for active window only
+      if (activeTab === 'monthly') {
+        await loadMonthlyExpensesPage(0, true);
+      } else {
+        await loadYearlyExpensesPage(0, true);
+      }
+
       setIsExpenseModalVisible(false);
       Alert.alert('Success', 'Expense saved successfully!');
     } catch (error) {
@@ -440,7 +516,20 @@ const ExpenseManagement = ({ navigation }) => {
               if (error) throw error;
               
               console.log('✅ Expense deleted successfully:', expenseId);
-              await loadExpenseData();
+
+              // Optimistic removal from current window
+              if (activeTab === 'monthly') {
+                const removed = expenses.find(e => e.id === expenseId);
+                setExpenses(prev => prev.filter(e => e.id !== expenseId));
+                if (removed) setMonthlyTotal(prev => Math.max(0, prev - (removed.amount || 0)));
+                await loadMonthlyExpensesPage(0, true);
+              } else {
+                const removed = yearlyExpenses.find(e => e.id === expenseId);
+                setYearlyExpenses(prev => prev.filter(e => e.id !== expenseId));
+                if (removed) setYearlyTotal(prev => Math.max(0, prev - (removed.amount || 0)));
+                await loadYearlyExpensesPage(0, true);
+              }
+
               Alert.alert('Success', 'Expense deleted successfully!');
             } catch (error) {
               console.error('Error deleting expense:', error);
@@ -798,18 +887,11 @@ const ExpenseManagement = ({ navigation }) => {
         // Create new category - check for existing first
         console.log('➕ ExpenseManagement: Creating new category:', databaseCategoryData.name);
         
-        // Check if category already exists for this tenant
-        const { data: existingCategories, error: checkError } = await tenantDatabase.read('expense_categories', {}, '*');
-        
-        if (!checkError && existingCategories) {
-          const existingCategory = existingCategories.find(cat => 
-            cat.name.toLowerCase().trim() === databaseCategoryData.name.toLowerCase().trim()
-          );
-          
-          if (existingCategory) {
-            Alert.alert('Error', 'A category with this name already exists for your organization. Please choose a different name.');
-            return;
-          }
+        // Check if category already exists for this tenant (simplified)
+        const { data: existingCategory, error: checkError } = await tenantDatabase.read('expense_categories', { name: databaseCategoryData.name }, 'id');
+        if (!checkError && Array.isArray(existingCategory) && existingCategory.length > 0) {
+          Alert.alert('Error', 'A category with this name already exists for your organization. Please choose a different name.');
+          return;
         }
         
         const { data, error } = await tenantDatabase.create('expense_categories', databaseCategoryData);
@@ -1104,6 +1186,28 @@ const ExpenseManagement = ({ navigation }) => {
                 <Text style={styles.addFirstButtonText}>Add First Expense</Text>
               </TouchableOpacity>
             </View>
+          )}
+
+          {/* Load more button for pagination */}
+          {(activeTab === 'monthly' ? monthlyHasMore : yearlyHasMore) && (
+            <TouchableOpacity
+              onPress={async () => {
+                if (activeTab === 'monthly') {
+                  if (!monthlyLoadingPage) {
+                    setMonthlyLoadingPage(true);
+                    try { await loadMonthlyExpensesPage(monthlyPage + 1, false); } finally { setMonthlyLoadingPage(false); }
+                  }
+                } else {
+                  if (!yearlyLoadingPage) {
+                    setYearlyLoadingPage(true);
+                    try { await loadYearlyExpensesPage(yearlyPage + 1, false); } finally { setYearlyLoadingPage(false); }
+                  }
+                }
+              }}
+              style={{ alignSelf: 'center', marginTop: 12, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#2196F3', borderRadius: 8 }}
+            >
+              <Text style={{ color: '#fff' }}>{(activeTab === 'monthly' ? monthlyLoadingPage : yearlyLoadingPage) ? 'Loading...' : 'Load more'}</Text>
+            </TouchableOpacity>
           )}
         </View>
         </ScrollView>

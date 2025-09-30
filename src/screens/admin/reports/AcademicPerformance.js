@@ -73,17 +73,39 @@ const AcademicPerformance = ({ navigation }) => {
     classRankings: [],
   });
 
+  // Pagination for marks
+  const PAGE_SIZE = 100;
+  const [marksPage, setMarksPage] = useState(0);
+  const [marksHasMore, setMarksHasMore] = useState(true);
+  const [marksLoadingPage, setMarksLoadingPage] = useState(false);
+  const filterDebounceRef = useRef(null);
+
   const academicYears = ['2024-25', '2023-24', '2022-23'];
 
   useEffect(() => {
     loadInitialData();
   }, []);
 
+  // Debounced filter handling; reload subjects/exams on class/year change
   useEffect(() => {
-    if (!loading) {
-      loadAcademicData();
-    }
-  }, [selectedClass, selectedSubject, selectedExam, selectedAcademicYear]);
+    if (loading) return;
+    // If class or year changed, reload dependent datasets (subjects, exams)
+    (async () => {
+      await Promise.all([loadSubjects(), loadExams()]);
+      setMarksPage(0); setMarksHasMore(true);
+      await loadAcademicData(true);
+    })();
+  }, [selectedClass, selectedAcademicYear]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
+    filterDebounceRef.current = setTimeout(async () => {
+      setMarksPage(0); setMarksHasMore(true);
+      await loadAcademicData(true);
+    }, 250);
+    return () => filterDebounceRef.current && clearTimeout(filterDebounceRef.current);
+  }, [selectedSubject, selectedExam]);
 
   const loadInitialData = async () => {
     setLoading(true);
@@ -106,7 +128,7 @@ const AcademicPerformance = ({ navigation }) => {
     try {
       const { data, error } = await supabase
         .from(TABLES.CLASSES)
-        .select('*')
+        .select('id, class_name, section, academic_year')
         .eq('academic_year', selectedAcademicYear)
         .order('class_name');
 
@@ -121,7 +143,7 @@ const AcademicPerformance = ({ navigation }) => {
     try {
       let query = supabase
         .from(TABLES.SUBJECTS)
-        .select('*')
+        .select('id, name, class_id, academic_year')
         .eq('academic_year', selectedAcademicYear)
         .order('name');
 
@@ -141,7 +163,7 @@ const AcademicPerformance = ({ navigation }) => {
     try {
       let query = supabase
         .from(TABLES.EXAMS)
-        .select('*')
+        .select('id, name, class_id, start_date, academic_year')
         .eq('academic_year', selectedAcademicYear)
         .order('start_date', { ascending: false });
 
@@ -157,40 +179,54 @@ const AcademicPerformance = ({ navigation }) => {
     }
   };
 
-  const loadAcademicData = async () => {
+  const loadAcademicData = async (replace = false) => {
     try {
+      await loadMarksPage(replace ? 0 : marksPage, replace);
+    } catch (error) {
+      console.error('Error loading academic data:', error);
+    }
+  };
+
+  const loadMarksPage = async (pageNumber = 0, replace = false) => {
+    try {
+      const from = pageNumber * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
       let query = supabase
         .from(TABLES.MARKS)
         .select(`
-          *,
-          students(id, name, admission_no, class_id),
-          exams(id, name, class_id),
+          id, student_id, subject_id, exam_id, marks_obtained, max_marks, created_at,
+          students!inner(id, name, admission_no, class_id),
+          exams(id, name, class_id, academic_year),
           subjects(id, name)
-        `);
+        `)
+        .order('created_at', { ascending: false })
+        .range(from, to);
 
-      // Apply filters
-      if (selectedExam !== 'All') {
-        query = query.eq('exam_id', selectedExam);
-      }
-      if (selectedSubject !== 'All') {
-        query = query.eq('subject_id', selectedSubject);
-      }
+      // Filters
+      if (selectedExam !== 'All') query = query.eq('exam_id', selectedExam);
+      if (selectedSubject !== 'All') query = query.eq('subject_id', selectedSubject);
+      if (selectedClass !== 'All') query = query.eq('students.class_id', selectedClass);
+      // Filter by academic year via exams join
+      if (selectedAcademicYear) query = query.eq('exams.academic_year', selectedAcademicYear);
 
       const { data, error } = await query;
       if (error) throw error;
 
-      // Filter by class if selected
-      let filteredData = data || [];
-      if (selectedClass !== 'All') {
-        filteredData = filteredData.filter(mark => 
-          mark.students?.class_id === selectedClass
-        );
-      }
+      const hasMore = (data?.length || 0) === PAGE_SIZE;
+      setMarksHasMore(hasMore);
+      setMarksPage(pageNumber);
 
-      setMarksData(filteredData);
-      calculateStatistics(filteredData);
+      const newData = data || [];
+      if (replace) setMarksData(newData);
+      else setMarksData(prev => ([...(prev || []), ...newData]));
+
+      // Recompute statistics based on loaded subset
+      const source = replace ? newData : ([...(marksData || []), ...newData]);
+      calculateStatistics(source);
     } catch (error) {
-      console.error('Error loading academic data:', error);
+      if (replace) setMarksData([]);
+      console.error('Error loading marks page:', error);
     }
   };
 
@@ -318,7 +354,8 @@ const AcademicPerformance = ({ navigation }) => {
     setRefreshing(true);
     // Cycle through refresh colors for better UX
     setCurrentRefreshColor((prev) => (prev + 1) % refreshColors.length);
-    await loadAcademicData();
+    setMarksPage(0); setMarksHasMore(true);
+    await loadAcademicData(true);
     setRefreshing(false);
   };
 
@@ -583,8 +620,8 @@ const AcademicPerformance = ({ navigation }) => {
             />
           }
         >
-        {/* Quick Navigation */}
-        <QuickNavigation />
+        {/* Quick Navigation (web only) */}
+        {isWeb && <QuickNavigation />}
         {/* Filters Section */}
         <View style={styles.filtersSection}>
           <Text style={styles.sectionTitle}>Filters</Text>
@@ -825,6 +862,21 @@ const AcademicPerformance = ({ navigation }) => {
               </View>
             ))}
           </View>
+        )}
+
+        {/* Load more marks data */}
+        {marksHasMore && (
+          <TouchableOpacity
+            onPress={async () => {
+              if (!marksLoadingPage) {
+                setMarksLoadingPage(true);
+                try { await loadMarksPage(marksPage + 1, false); } finally { setMarksLoadingPage(false); }
+              }
+            }}
+            style={{ alignSelf: 'center', marginTop: 12, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#2196F3', borderRadius: 8 }}
+          >
+            <Text style={{ color: '#fff' }}>{marksLoadingPage ? 'Loading...' : 'Load more'}</Text>
+          </TouchableOpacity>
         )}
 
         {/* Export Section */}

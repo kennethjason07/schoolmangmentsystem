@@ -346,7 +346,7 @@ const TakeAttendanceOptimized = () => {
         event: '*',
         schema: 'public',
         table: TABLES.STUDENT_ATTENDANCE,
-        filter: `class_id=eq.${selectedClass}`
+        filter: `class_id=eq.${selectedClass},date=eq.${selectedDate}`
       }, (payload) => {
         debug('⚡ [REAL-TIME] Attendance update received');
         
@@ -464,29 +464,13 @@ const TakeAttendanceOptimized = () => {
         tenant_id: tenantId
       }));
 
-      // Batch delete and insert operation
-      const studentIds = attendanceRecords.map(record => record.student_id);
-      
-      // Delete existing records
-      const { error: deleteError } = await supabase
+      // Upsert records in a single operation using composite conflict target
+      const { error: upsertError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
-        .delete()
-        .eq('date', selectedDate)
-        .eq('class_id', selectedClass)
-        .eq('tenant_id', tenantId)
-        .in('student_id', studentIds);
+        .upsert(attendanceRecords, { onConflict: 'student_id,date,tenant_id' });
         
-      if (deleteError) {
-        throw new Error(`Failed to delete existing records: ${deleteError.message}`);
-      }
-      
-      // Insert new records
-      const { error: insertError } = await supabase
-        .from(TABLES.STUDENT_ATTENDANCE)
-        .insert(attendanceRecords);
-        
-      if (insertError) {
-        throw new Error(`Failed to insert new records: ${insertError.message}`);
+      if (upsertError) {
+        throw new Error(`Failed to save attendance: ${upsertError.message}`);
       }
 
       // Update cache

@@ -80,6 +80,13 @@ const FeeCollection = ({ navigation }) => {
     recentPayments: [],
   });
 
+  // Recent payments pagination
+  const RECENT_PAGE_SIZE = 50;
+  const [recentPayments, setRecentPayments] = useState([]);
+  const [recentPage, setRecentPage] = useState(0);
+  const [recentHasMore, setRecentHasMore] = useState(true);
+  const [recentLoadingPage, setRecentLoadingPage] = useState(false);
+
   const academicYears = ['2024-25', '2023-24', '2022-23'];
   const paymentStatuses = ['All', 'Paid', 'Pending', 'Partial'];
   const dateRangeOptions = [
@@ -134,22 +141,28 @@ const FeeCollection = ({ navigation }) => {
     }
   }, [isReady]);
 
+  // Debounced filter handling for date range and payment status (no reload of students/fee structure)
+  const filterDebounceRef = useRef(null);
+
+  // Reload students and fee structure only when class or academic year changes
   useEffect(() => {
-    if (isReady && !loading) {
-      // Reload students and fee structure when class or academic year changes
-      if (selectedClass || selectedAcademicYear) {
-        console.log('🔄 Class or academic year changed, reloading data...');
-        Promise.all([
-          loadStudents(),
-          loadFeeStructure()
-        ]).then(() => {
-          loadFeeData();
-        });
-      } else {
-        loadFeeData();
-      }
-    }
-  }, [isReady, selectedClass, selectedAcademicYear, selectedPaymentStatus, selectedDateRange, startDate, endDate, loading]);
+    if (!isReady || loading) return;
+    console.log('🔄 Class or academic year changed, reloading supporting data...');
+    Promise.all([loadStudents(), loadFeeStructure()])
+      .then(() => loadFeeData())
+      .catch(() => loadFeeData());
+  }, [isReady, selectedClass, selectedAcademicYear]);
+
+  // Debounced reload when only date range or payment status changes
+  useEffect(() => {
+    if (!isReady || loading) return;
+    if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
+    filterDebounceRef.current = setTimeout(() => {
+      console.log('⏱️ Debounced filter change, reloading fee data...');
+      loadFeeData();
+    }, 300);
+    return () => filterDebounceRef.current && clearTimeout(filterDebounceRef.current);
+  }, [selectedPaymentStatus, selectedDateRange, startDate, endDate]);
 
   const loadInitialData = async () => {
     setLoading(true);
@@ -327,103 +340,125 @@ const FeeCollection = ({ navigation }) => {
     return { start, end };
   };
 
+  const fetchCollectedTotalByFilters = async (tenantId, academicYear, classId, start, end) => {
+    try {
+      const params = {
+        p_tenant_id: tenantId,
+        p_academic_year: academicYear,
+        p_class_id: classId,
+        p_start_date: start ? start.toISOString().split('T')[0] : null,
+        p_end_date: end ? end.toISOString().split('T')[0] : null,
+      };
+      const { data, error } = await supabase.rpc('fee_collection_total_by_filters', params);
+      if (!error && typeof data === 'number') return data;
+    } catch (e) {
+      // ignore RPC errors, fallback will apply
+    }
+    return null;
+  };
+
+  const loadRecentPaymentsPage = async (pageNumber = 0, replace = false) => {
+    try {
+      const tenantId = getCachedTenantId();
+      const { start, end } = getDateRange();
+      const from = pageNumber * RECENT_PAGE_SIZE;
+      const to = from + RECENT_PAGE_SIZE - 1;
+
+      let query = supabase
+        .from(TABLES.STUDENT_FEES)
+        .select(`
+          id, student_id, fee_component, amount_paid, payment_date, payment_mode, academic_year,
+          students(id, name, admission_no, class_id, classes(class_name, section))
+        `)
+        .eq('tenant_id', tenantId)
+        .eq('academic_year', selectedAcademicYear)
+        .order('payment_date', { ascending: false })
+        .range(from, to);
+
+      if (selectedDateRange !== 'all' && start && end) {
+        query = query.gte('payment_date', start.toISOString().split('T')[0])
+                     .lte('payment_date', end.toISOString().split('T')[0]);
+      }
+      if (selectedClass !== 'All') {
+        query = query.eq('students.class_id', selectedClass);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      const hasMore = (data?.length || 0) === RECENT_PAGE_SIZE;
+      setRecentHasMore(hasMore);
+      setRecentPage(pageNumber);
+      if (replace) setRecentPayments(data || []);
+      else setRecentPayments(prev => ([...(prev || []), ...(data || [])]));
+    } catch (err) {
+      if (replace) setRecentPayments([]);
+    }
+  };
+
   const loadFeeData = async () => {
     try {
       console.log('🚀 Starting ENHANCED loadFeeData...');
       
-      // Validate tenant access using ENHANCED_TENANT_SYSTEM
+      // Validate tenant access
       const validation = validateTenantAccess();
       if (!validation.valid) {
         console.error('❌ Fee Data: Tenant validation failed:', validation.error);
         return;
       }
 
-      console.log('📅 Current filter state:', { 
-        selectedDateRange, 
-        selectedAcademicYear,
-        selectedClass,
-        selectedPaymentStatus 
-      });
-      
-      // Use ENHANCED_TENANT_SYSTEM approach - simple and reliable
-      
-      // Build base filters for tenantDatabase.read
-      let filters = {};
-      
-      // Always filter by academic year
-      if (selectedAcademicYear) {
-        filters.academic_year = selectedAcademicYear;
-      }
-      
-      console.log('🚀 Using tenantDatabase.read with filters:', filters);
-      console.log('📍 Selected class for fee data:', selectedClass === 'All' ? 'All Classes' : selectedClass);
-      
-      // Use tenantDatabase helper as per ENHANCED_TENANT_SYSTEM guidelines
-      const { data: allFeeData, error } = await tenantDatabase.read(
-        TABLES.STUDENT_FEES,
-        filters,
-        '*'
-      );
-      
-      if (error) {
-        console.error('❌ Fee data loading error:', error);
-        throw error;
-      }
-      
-      // Filter by selected class if not 'All'
-      let data = allFeeData || [];
-      if (selectedClass !== 'All' && students && students.length > 0) {
-        const classStudentIds = students.map(s => s.id);
-        data = data.filter(fee => classStudentIds.includes(fee.student_id));
-        console.log('🏫 Filtered fee data by class students:', data.length, 'records');
-      }
-      console.log('✅ ENHANCED: Loaded fee records:', data?.length || 0);
-      
-      // Show sample data for debugging
-      if (data && data.length > 0) {
-        console.log('💰 Sample fee record:', data[0]);
-        const totalAmount = data.reduce((sum, fee) => sum + (parseFloat(fee.amount_paid) || 0), 0);
-        console.log('💰 Total amount from loaded data:', totalAmount);
-      } else {
-        console.log('⚠️ No fee data found with tenantDatabase - trying AdminDashboard approach...');
-        
-        // Fallback: Use exact same approach as AdminDashboard
-        try {
-          const tenantId = getCachedTenantId();
-          console.log('🔄 Fallback: Using direct supabase query like AdminDashboard');
-          
-          const fallbackQuery = await supabase
-            .from(TABLES.STUDENT_FEES)
-            .select('amount_paid, payment_date, id')
-            .eq('tenant_id', tenantId);
-            
-          console.log('🔄 Fallback query result:', fallbackQuery.data?.length || 0, 'records');
-          
-          if (fallbackQuery.data && fallbackQuery.data.length > 0) {
-            console.log('✅ Fallback: Found data with direct query!');
-            console.log('💰 Fallback sample:', fallbackQuery.data[0]);
-            const fallbackTotal = fallbackQuery.data.reduce((sum, fee) => sum + (parseFloat(fee.amount_paid) || 0), 0);
-            console.log('💰 Fallback total amount:', fallbackTotal);
-            
-            // Use the fallback data
-            setFeeData(fallbackQuery.data);
-            calculateStatistics(fallbackQuery.data);
-            return; // Exit early with working data
-          }
-        } catch (fallbackError) {
-          console.error('❌ Fallback query failed:', fallbackError);
-        }
+      const tenantId = getCachedTenantId();
+      const { start, end } = getDateRange();
+
+      // Build base query with narrow projection and joins for class info
+      let query = supabase
+        .from(TABLES.STUDENT_FEES)
+        .select(`
+          id, student_id, fee_component, amount_paid, payment_date, payment_mode, academic_year,
+          students!inner(id, name, admission_no, class_id, classes(class_name, section))
+        `)
+        .eq('tenant_id', tenantId)
+        .eq('academic_year', selectedAcademicYear)
+        .order('payment_date', { ascending: false });
+
+      // Server-side date filter (skip if 'all')
+      if (selectedDateRange !== 'all' && start && end) {
+        query = query.gte('payment_date', start.toISOString().split('T')[0])
+                     .lte('payment_date', end.toISOString().split('T')[0]);
       }
 
+      // Server-side class filter
+      if (selectedClass !== 'All') {
+        query = query.eq('students.class_id', selectedClass);
+      }
+
+      // Note: Payment status server-side filter omitted unless a status column exists
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      console.log('✅ ENHANCED: Loaded fee records:', data?.length || 0);
       setFeeData(data || []);
-      calculateStatistics(data || []);
+
+      // Server aggregate for total collected (optional)
+      const serverCollected = await fetchCollectedTotalByFilters(
+        tenantId,
+        selectedAcademicYear,
+        selectedClass !== 'All' ? selectedClass : null,
+        selectedDateRange !== 'all' ? start : null,
+        selectedDateRange !== 'all' ? end : null
+      );
+
+      calculateStatistics(data || [], serverCollected != null ? { totalCollected: serverCollected } : undefined);
+
+      // Load first page of recent payments
+      await loadRecentPaymentsPage(0, true);
     } catch (error) {
       console.error('❌ ENHANCED: Error loading fee data:', error);
       Alert.alert('Error', `Failed to load fee data: ${error.message}`);
     }
   };
 
-  const calculateStatistics = (data) => {
+  const calculateStatistics = (data, overrides) => {
     console.log('📊 ENHANCED: Calculating statistics for fee data:', data?.length || 0, 'records');
     console.log('🏫 Students count:', students?.length || 0);
     console.log('📋 Fee structure count:', feeStructureData?.length || 0);
@@ -434,7 +469,7 @@ const FeeCollection = ({ navigation }) => {
     }
     
     // Calculate total collected - use primary field name
-    const totalCollected = data.reduce((sum, fee) => {
+    let totalCollected = data.reduce((sum, fee) => {
       // Use amount_paid as primary field (standard field name)
       const amount = parseFloat(fee.amount_paid) || 0;
       
@@ -445,6 +480,10 @@ const FeeCollection = ({ navigation }) => {
       return sum + amount;
     }, 0);
     
+    // Apply override from server aggregate if available
+    if (overrides && typeof overrides.totalCollected === 'number') {
+      totalCollected = overrides.totalCollected;
+    }
     console.log('💰 Total Collected Amount:', totalCollected);
 
     // 🚀 ENHANCED: Calculate expected amount properly (per student basis with discounts)
@@ -812,8 +851,8 @@ const FeeCollection = ({ navigation }) => {
             />
           }
         >
-        {/* Quick Navigation */}
-        <QuickNavigation />
+        {/* Quick Navigation (web only) */}
+        {isWeb && <QuickNavigation />}
         
         {/* Tenant Info Banner */}
         {tenantName && (
@@ -823,21 +862,6 @@ const FeeCollection = ({ navigation }) => {
           </View>
         )}
         
-        {/* Debug: Force All Time Button */}
-        {__DEV__ && (
-          <View style={{ margin: 16, padding: 10, backgroundColor: '#fff3cd', borderRadius: 8 }}>
-            <Text style={{ fontSize: 12, color: '#856404', marginBottom: 8 }}>Debug: Current Date Range: {selectedDateRange}</Text>
-            <TouchableOpacity 
-              style={{ backgroundColor: '#007bff', padding: 8, borderRadius: 4 }}
-              onPress={() => {
-                console.log('🔄 Forcing All Time selection...');
-                setSelectedDateRange('all');
-              }}
-            >
-              <Text style={{ color: 'white', fontSize: 12, textAlign: 'center' }}>Force All Time</Text>
-            </TouchableOpacity>
-          </View>
-        )}
         {/* Filters Section */}
         <View style={styles.filtersSection}>
           <Text style={styles.sectionTitle}>Filters</Text>
@@ -1108,7 +1132,7 @@ const FeeCollection = ({ navigation }) => {
           </View>
 
           <FlatList
-            data={stats.recentPayments}
+            data={recentPayments}
             keyExtractor={(item) => `${item.id}`}
             renderItem={renderPaymentRecord}
             scrollEnabled={false}
@@ -1121,6 +1145,21 @@ const FeeCollection = ({ navigation }) => {
                   Try adjusting your filters or date range
                 </Text>
               </View>
+            }
+            ListFooterComponent={
+              recentHasMore ? (
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (!recentLoadingPage) {
+                      setRecentLoadingPage(true);
+                      try { await loadRecentPaymentsPage(recentPage + 1, false); } finally { setRecentLoadingPage(false); }
+                    }
+                  }}
+                  style={{ marginTop: 12, alignSelf: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#2196F3', borderRadius: 6 }}
+                >
+                  <Text style={{ color: '#fff' }}>{recentLoadingPage ? 'Loading...' : 'Load more'}</Text>
+                </TouchableOpacity>
+              ) : null
             }
           />
         </View>

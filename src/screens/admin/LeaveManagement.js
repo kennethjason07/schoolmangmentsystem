@@ -97,6 +97,77 @@ const LeaveManagement = ({ navigation }) => {
     // Automatic debug info logging
     logDebugInfo();
   }, []);
+
+  // Realtime subscription for leave applications filtered by tenant_id
+  useEffect(() => {
+    if (!isReady || !tenantId) return;
+
+    console.log('📡 Subscribing to realtime leave_applications for tenant:', tenantId);
+    const channel = supabase
+      .channel(`admin-leave-applications-${tenantId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'leave_applications', filter: `tenant_id=eq.${tenantId}` },
+        (payload) => {
+          try {
+            const { eventType, new: newRow, old: oldRow } = payload;
+            console.log('📡 Realtime event:', eventType, newRow?.id || oldRow?.id);
+
+            setLeaveApplications((prev) => {
+              let list = Array.isArray(prev) ? [...prev] : [];
+              if (eventType === 'INSERT' && newRow) {
+                const teacherObj = teachers.find(t => t.id === newRow.teacher_id) || null;
+                const replacementObj = teachers.find(t => t.id === newRow.replacement_teacher_id) || null;
+                const start = newRow.start_date ? new Date(newRow.start_date) : null;
+                const end = newRow.end_date ? new Date(newRow.end_date) : null;
+                const totalDays = newRow.total_days ?? (start && end ? (Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1) : undefined);
+
+                const enriched = {
+                  ...newRow,
+                  total_days: totalDays,
+                  teacher: teacherObj ? { id: teacherObj.id, name: teacherObj.name } : undefined,
+                  replacement_teacher: replacementObj ? { id: replacementObj.id, name: replacementObj.name } : undefined,
+                };
+                list = list.filter(a => a.id !== newRow.id);
+                return [enriched, ...list];
+              }
+
+              if (eventType === 'UPDATE' && newRow) {
+                const idx = list.findIndex(a => a.id === newRow.id);
+                const teacherObj = teachers.find(t => t.id === newRow.teacher_id) || null;
+                const replacementObj = teachers.find(t => t.id === newRow.replacement_teacher_id) || null;
+                const merged = {
+                  ...(idx >= 0 ? list[idx] : {}),
+                  ...newRow,
+                  teacher: teacherObj ? { id: teacherObj.id, name: teacherObj.name } : (idx >= 0 ? list[idx].teacher : undefined),
+                  replacement_teacher: replacementObj ? { id: replacementObj.id, name: replacementObj.name } : (idx >= 0 ? list[idx].replacement_teacher : undefined),
+                };
+                if (idx >= 0) {
+                  list[idx] = merged;
+                } else {
+                  list.unshift(merged);
+                }
+                return [...list];
+              }
+
+              if (eventType === 'DELETE' && oldRow) {
+                return list.filter(a => a.id !== oldRow.id);
+              }
+
+              return list;
+            });
+          } catch (err) {
+            console.error('Realtime update error:', err);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      console.log('📡 Unsubscribing realtime leave_applications channel for tenant:', tenantId);
+      supabase.removeChannel(channel);
+    };
+  }, [isReady, tenantId, teachers]);
   
   const logDebugInfo = async () => {
     try {

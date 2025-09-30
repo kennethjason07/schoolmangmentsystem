@@ -1223,6 +1223,13 @@ export const dbHelpers = {
 
   async getTeacherByUserId(userId) {
     try {
+      // Validate userId early to avoid 22P02 errors when null/invalid
+      const isUuid = (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+      if (!userId || typeof userId !== 'string' || userId === 'null' || userId === 'undefined' || !isUuid(userId)) {
+        console.error('❌ getTeacherByUserId: Invalid userId provided:', userId);
+        return { data: null, error: new Error('Invalid user identifier') };
+      }
+
       // Get current tenant ID for filtering
       const tenantId = await tenantHelpers.getCurrentTenantId();
       

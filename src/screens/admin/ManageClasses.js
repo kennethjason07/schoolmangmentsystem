@@ -59,6 +59,13 @@ const ManageClasses = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
+  // Pagination state
+  const PAGE_SIZE = 20;
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingPage, setLoadingPage] = useState(false);
+  const [initialLoaded, setInitialLoaded] = useState(false);
+
   // 🛡️ Enhanced tenant validation function
   const validateTenantAccessLocal = () => {
     if (!isReady) {
@@ -133,82 +140,24 @@ const ManageClasses = ({ navigation }) => {
         throw new Error(`Tenant validation failed: ${validation.error}`);
       }
       
-      // 🚀 ENHANCED: Parallel loading using tenantDatabase helpers
-      console.log('🏢 ManageClasses: Fetching classes and teachers using enhanced helpers...');
-      
-      const [classesResult, teachersResult] = await Promise.all([
-        tenantDatabase.read(TABLES.CLASSES, {}, '*'),
-        tenantDatabase.read(TABLES.TEACHERS, {}, '*')
-      ]);
-      
-      const { data: classData, error: classError } = classesResult;
+      // Fetch teachers once (narrow projection)
+      console.log('🏢 ManageClasses: Fetching teachers...');
+      const teachersResult = await tenantDatabase.read(TABLES.TEACHERS, {}, 'id, name');
       const { data: teacherData, error: teacherError } = teachersResult;
-      
-      if (classError) {
-        console.error('❌ ManageClasses: Classes query failed:', classError.message);
-        throw new Error(`Failed to load classes: ${classError.message}`);
-      }
-      
       if (teacherError) {
         console.error('❌ ManageClasses: Teachers query failed:', teacherError.message);
         throw new Error(`Failed to load teachers: ${teacherError.message}`);
       }
-      
-      console.log('🏢 ManageClasses: Basic data loaded:', {
-        classes: classData?.length || 0,
-        teachers: teacherData?.length || 0
-      });
-      
-      // 🚀 ENHANCED: Load student and subject counts for each class
-      console.log('📊 ManageClasses: Loading student and subject counts using enhanced helpers...');
-      
-      const classesWithCounts = await Promise.all((classData || []).map(async (cls) => {
-        try {
-          // Get student count for this class using tenantDatabase
-          const { data: studentsData, error: studentsError } = await tenantDatabase.read(
-            TABLES.STUDENTS,
-            { class_id: cls.id },
-            'id'
-          );
-          
-          // Get subjects count for this class using tenantDatabase
-          const { data: subjectsData, error: subjectsError } = await tenantDatabase.read(
-            TABLES.SUBJECTS,
-            { class_id: cls.id },
-            'id'
-          );
-          
-          if (studentsError) {
-            console.warn(`Warning: Could not load student count for class ${cls.class_name}:`, studentsError.message);
-          }
-          
-          if (subjectsError) {
-            console.warn(`Warning: Could not load subject count for class ${cls.class_name}:`, subjectsError.message);
-          }
-          
-          return {
-            ...cls,
-            students_count: studentsData?.length || 0,
-            subjects_count: subjectsData?.length || 0
-          };
-        } catch (error) {
-          console.warn(`Error loading counts for class ${cls.class_name}:`, error.message);
-          return {
-            ...cls,
-            students_count: 0,
-            subjects_count: 0
-          };
-        }
-      }));
-      
-      console.log('📊 ManageClasses: Counts loaded for all classes');
-      
-      // Set data with actual counts
-      setClasses(classesWithCounts);
       setTeachers(teacherData || []);
+
+      // Reset pagination state and load first page of classes
+      setClasses([]);
+      setPage(0);
+      setHasMore(true);
+      await loadClassesPage(0, true);
       
       console.log('📊 ManageClasses: Data loaded successfully:', {
-        classes: classesWithCounts.length,
+        classes: (Array.isArray(classes) ? classes.length : 0),
         teachers: teacherData?.length || 0,
         tenantId
       });
@@ -231,6 +180,74 @@ const ManageClasses = ({ navigation }) => {
     } finally {
       clearTimeout(timeoutId);
       setLoading(false);
+    }
+  };
+
+  // Load one page of classes with counts
+  const loadClassesPage = async (pageNumber = 0, replace = false) => {
+    const from = pageNumber * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    const cachedTenantId = getCachedTenantId();
+    if (!cachedTenantId) throw new Error('No tenant ID available for pagination');
+
+    setLoadingPage(true);
+    try {
+      // Fetch one page of classes
+      const { data: classPage, error: classError } = await supabase
+        .from(TABLES.CLASSES)
+        .select('id, class_name, section, academic_year, class_teacher_id')
+        .eq('tenant_id', cachedTenantId)
+        .order('class_name', { ascending: true })
+        .range(from, to);
+
+      if (classError) throw classError;
+
+      const pageHasMore = (classPage?.length || 0) === PAGE_SIZE;
+      setHasMore(pageHasMore);
+
+      const classIds = (classPage || []).map(c => c.id);
+      let classesWithCounts = classPage || [];
+
+      if (classIds.length > 0) {
+        // Fetch students and subjects for just these classes to compute counts
+        const [studentsRes, subjectsRes] = await Promise.all([
+          supabase.from(TABLES.STUDENTS).select('id, class_id').eq('tenant_id', cachedTenantId).in('class_id', classIds),
+          supabase.from(TABLES.SUBJECTS).select('id, class_id').eq('tenant_id', cachedTenantId).in('class_id', classIds),
+        ]);
+
+        if (studentsRes.error) console.warn('Warning: Student count query failed:', studentsRes.error.message);
+        if (subjectsRes.error) console.warn('Warning: Subject count query failed:', subjectsRes.error.message);
+
+        const students = studentsRes.data || [];
+        const subjects = subjectsRes.data || [];
+
+        const studentCounts = new Map();
+        for (const s of students) {
+          if (!s.class_id) continue;
+          studentCounts.set(s.class_id, (studentCounts.get(s.class_id) || 0) + 1);
+        }
+        const subjectCounts = new Map();
+        for (const sub of subjects) {
+          if (!sub.class_id) continue;
+          subjectCounts.set(sub.class_id, (subjectCounts.get(sub.class_id) || 0) + 1);
+        }
+
+        classesWithCounts = (classPage || []).map(cls => ({
+          ...cls,
+          students_count: studentCounts.get(cls.id) || 0,
+          subjects_count: subjectCounts.get(cls.id) || 0,
+        }));
+      }
+
+      if (replace) {
+        setClasses(classesWithCounts);
+      } else {
+        setClasses(prev => [...(prev || []), ...classesWithCounts]);
+      }
+      setPage(pageNumber);
+      setInitialLoaded(true);
+    } finally {
+      setLoadingPage(false);
     }
   };
 
@@ -707,7 +724,9 @@ const ManageClasses = ({ navigation }) => {
       const { data: subjectsData, error: subjectsError } = await supabase
         .from(TABLES.SUBJECTS)
         .select(`
-          *,
+          id,
+          name,
+          is_optional,
           teacher_subjects(
             teachers(
               id,
@@ -745,7 +764,11 @@ const ManageClasses = ({ navigation }) => {
   const onRefresh = async () => {
     try {
       setRefreshing(true);
-      await loadAllData();
+      // Reset and reload the first page (teachers are already cached in state)
+      setClasses([]);
+      setPage(0);
+      setHasMore(true);
+      await loadClassesPage(0, true);
     } finally {
       setRefreshing(false);
     }
@@ -1083,6 +1106,12 @@ const ManageClasses = ({ navigation }) => {
           removeClippedSubviews={Platform.OS !== 'web'}
           refreshing={refreshing}
           onRefresh={onRefresh}
+          onEndReachedThreshold={0.2}
+          onEndReached={() => {
+            if (!loadingPage && hasMore) {
+              loadClassesPage(page + 1, false);
+            }
+          }}
           getItemLayout={Platform.OS === 'web' ? undefined : (data, index) => ({
             length: 200, // Approximate item height for class cards
             offset: 200 * index,
@@ -1094,6 +1123,13 @@ const ManageClasses = ({ navigation }) => {
               <Text style={styles.emptyText}>No classes found</Text>
               <Text style={styles.emptySubtext}>Add your first class to get started</Text>
             </View>
+          }
+          ListFooterComponent={
+            loadingPage ? (
+              <View style={{ paddingVertical: 24 }}>
+                <ActivityIndicator size="small" color="#2196F3" />
+              </View>
+            ) : null
           }
         />
       )}

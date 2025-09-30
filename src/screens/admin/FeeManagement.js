@@ -277,8 +277,25 @@ const FeeManagement = () => {
       }
     }
   };
-  
 
+  // Debounced refresh helper to coalesce rapid refreshes
+  const debouncedRefreshRef = useRef(null);
+  const debouncedRefreshWithCacheClear = () => {
+    try {
+      if (debouncedRefreshRef.current) {
+        clearTimeout(debouncedRefreshRef.current);
+      }
+      debouncedRefreshRef.current = setTimeout(() => {
+        // Fire and forget; underlying function handles loading states
+        refreshWithCacheClear();
+      }, 400);
+    } catch (e) {
+      // Fallback to immediate refresh if something goes wrong
+      refreshWithCacheClear();
+    }
+  };
+  
+  
   // Load data when enhanced tenant system is ready (once)
   const hasInitiallyLoaded = useRef(false);
   useEffect(() => {
@@ -294,6 +311,161 @@ const FeeManagement = () => {
 
   // Remove the tab change effect as it's causing continuous refreshing
   // The useFocusEffect and pull-to-refresh should be sufficient for real-time updates
+
+  // Real-time subscription for student_fees
+  const paymentsChannelRef = useRef(null);
+  useEffect(() => {
+    let channel;
+    let cancelled = false;
+
+    const setupRealtime = async () => {
+      try {
+        if (!checkTenantReady()) return;
+        const tId = await getEffectiveTenantId();
+        if (!tId) return;
+
+        // Cleanup any existing channel before creating a new one
+        if (paymentsChannelRef.current) {
+          try { supabase.removeChannel(paymentsChannelRef.current); } catch (e) {}
+          paymentsChannelRef.current = null;
+        }
+
+        channel = supabase
+          .channel(`student_fees-tenant-${tId}`)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'student_fees', filter: `tenant_id=eq.${tId}` },
+            (payload) => {
+              try {
+                const { eventType, new: newRow, old: oldRow } = payload;
+                if (eventType === 'INSERT' && newRow) {
+                  const studentMeta = students.find(s => s.id === newRow.student_id);
+                  const studentName = studentMeta?.name || 'Unknown Student';
+                  const studentClassId = studentMeta?.class_id;
+                  const enriched = {
+                    ...newRow,
+                    students: { full_name: studentName }
+                  };
+                  // Determine if student had payments before (approximate with current state)
+                  const hadPaymentsBefore = (payments || []).some(p => p.student_id === newRow.student_id);
+                  // Remove matching optimistic temp entries and prepend
+                  setPayments(prev => {
+                    const next = (prev || []).filter(p => {
+                      const isTemp = String(p.id || '').startsWith('temp-');
+                      return !(isTemp && p.student_id === newRow.student_id && Number(p.amount_paid) === Number(newRow.amount_paid) && p.payment_date === newRow.payment_date);
+                    });
+                    return [enriched, ...next];
+                  });
+                  setPaymentSummary(prev => ({
+                    ...prev,
+                    totalCollected: (prev?.totalCollected || 0) + Number(newRow.amount_paid || 0),
+                    totalOutstanding: Math.max(0, (prev?.totalOutstanding || 0) - Number(newRow.amount_paid || 0))
+                  }));
+                  // Incrementally update class-wise stats
+                  if (studentClassId) {
+                    const delta = Number(newRow.amount_paid || 0);
+                    setClassPaymentStats(prev => (prev || []).map(cls => {
+                      if (cls.classId !== studentClassId) return cls;
+                      const updatedTotalPaid = (cls.totalPaid || 0) + delta;
+                      const updatedOutstanding = Math.max(0, (cls.totalExpectedFees || 0) - updatedTotalPaid);
+                      const updatedCollectionRate = (cls.totalExpectedFees || 0) > 0
+                        ? Math.round((updatedTotalPaid / cls.totalExpectedFees) * 10000) / 100
+                        : 0;
+                      return {
+                        ...cls,
+                        totalPaid: updatedTotalPaid,
+                        outstanding: updatedOutstanding,
+                        collectionRate: updatedCollectionRate,
+                        studentsWithPayments: cls.studentsWithPayments + (hadPaymentsBefore ? 0 : 1),
+                        studentsWithoutPayments: Math.max(0, cls.studentsWithoutPayments - (hadPaymentsBefore ? 0 : 1))
+                      };
+                    }));
+                  }
+                } else if (eventType === 'UPDATE' && newRow && oldRow) {
+                  const delta = Number(newRow.amount_paid || 0) - Number(oldRow.amount_paid || 0);
+                  const studentMeta = students.find(s => s.id === newRow.student_id);
+                  const studentClassId = studentMeta?.class_id;
+                  setPayments(prev => (prev || []).map(p => p.id === newRow.id ? { ...p, ...newRow, students: p.students } : p));
+                  if (delta !== 0) {
+                    setPaymentSummary(prev => ({
+                      ...prev,
+                      totalCollected: (prev?.totalCollected || 0) + delta,
+                      totalOutstanding: Math.max(0, (prev?.totalOutstanding || 0) - delta)
+                    }));
+                    if (studentClassId) {
+                      setClassPaymentStats(prev => (prev || []).map(cls => {
+                        if (cls.classId !== studentClassId) return cls;
+                        const updatedTotalPaid = (cls.totalPaid || 0) + delta;
+                        const updatedOutstanding = Math.max(0, (cls.totalExpectedFees || 0) - updatedTotalPaid);
+                        const updatedCollectionRate = (cls.totalExpectedFees || 0) > 0
+                          ? Math.round((updatedTotalPaid / cls.totalExpectedFees) * 10000) / 100
+                          : 0;
+                        return {
+                          ...cls,
+                          totalPaid: updatedTotalPaid,
+                          outstanding: updatedOutstanding,
+                          collectionRate: updatedCollectionRate
+                        };
+                      }));
+                    }
+                  }
+                } else if (eventType === 'DELETE' && oldRow) {
+                  const hasOtherPayments = (payments || []).some(p => p.student_id === oldRow.student_id && p.id !== oldRow.id);
+                  const studentMeta = students.find(s => s.id === oldRow.student_id);
+                  const studentClassId = studentMeta?.class_id;
+                  setPayments(prev => (prev || []).filter(p => p.id !== oldRow.id));
+                  setPaymentSummary(prev => ({
+                    ...prev,
+                    totalCollected: Math.max(0, (prev?.totalCollected || 0) - Number(oldRow.amount_paid || 0)),
+                    totalOutstanding: (prev?.totalOutstanding || 0) + Number(oldRow.amount_paid || 0)
+                  }));
+                  if (studentClassId) {
+                    const delta = -Number(oldRow.amount_paid || 0);
+                    setClassPaymentStats(prev => (prev || []).map(cls => {
+                      if (cls.classId !== studentClassId) return cls;
+                      const updatedTotalPaid = Math.max(0, (cls.totalPaid || 0) + delta);
+                      const updatedOutstanding = Math.max(0, (cls.totalExpectedFees || 0) - updatedTotalPaid);
+                      const updatedCollectionRate = (cls.totalExpectedFees || 0) > 0
+                        ? Math.round((updatedTotalPaid / cls.totalExpectedFees) * 10000) / 100
+                        : 0;
+                      const lostPayer = !hasOtherPayments ? 1 : 0;
+                      return {
+                        ...cls,
+                        totalPaid: updatedTotalPaid,
+                        outstanding: updatedOutstanding,
+                        collectionRate: updatedCollectionRate,
+                        studentsWithPayments: Math.max(0, cls.studentsWithPayments - lostPayer),
+                        studentsWithoutPayments: cls.studentsWithoutPayments + lostPayer
+                      };
+                    }));
+                  }
+                }
+              } catch (e) {
+                console.warn('Realtime payments handler error:', e?.message);
+              }
+            }
+          )
+          .subscribe();
+
+        paymentsChannelRef.current = channel;
+      } catch (e) {
+        console.warn('Failed to setup realtime payments subscription:', e?.message);
+      }
+    };
+
+    setupRealtime();
+
+    return () => {
+      cancelled = true;
+      if (paymentsChannelRef.current) {
+        try { supabase.removeChannel(paymentsChannelRef.current); } catch (e) {}
+        paymentsChannelRef.current = null;
+      }
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch (e) {}
+      }
+    };
+  }, [tenantId, isReady]);
 
   const isLoadingRef = useRef(false);
   const loadAllData = async () => {
@@ -815,7 +987,27 @@ const FeeManagement = () => {
 
       if (error) throw error;
 
-      await refreshWithCacheClear();
+      // Optimistic update of fee in local state
+      setFeeStructures(prev => prev.map(cls => {
+        if (cls.classId !== classId) return cls;
+        return {
+          ...cls,
+          fees: (cls.fees || []).map(f => (
+            f.id === feeId
+              ? {
+                  ...f,
+                  type: fee.type,
+                  amount: fee.amount,
+                  due_date: fee.dueDate ? new Date(fee.dueDate).toISOString().split('T')[0] : null,
+                  description: fee.description ?? f.description
+                }
+              : f
+          ))
+        };
+      }));
+
+      // Debounced background refresh
+      debouncedRefreshWithCacheClear();
       setFeeModal({ visible: false, classId: '', fee: { type: '', amount: '', dueDate: '', description: '' } });
       setEditFeeId(null);
       Alert.alert('Success', 'Fee updated successfully');
@@ -866,7 +1058,7 @@ const FeeManagement = () => {
           fee_component: feeStructure.fee_component,
           academic_year: feeStructure.academic_year
         },
-        '*'
+        'amount_paid'
       );
         
       if (checkError) {
@@ -900,8 +1092,26 @@ const FeeManagement = () => {
 
       if (insertError) throw insertError;
 
-      // Clear cache and refresh data
-      await refreshWithCacheClear();
+      // Optimistic UI update: prepend new payment and update summary
+      const optimisticPayment = {
+        id: `temp-${Date.now()}`,
+        student_id: studentId,
+        fee_component: feeStructure.fee_component,
+        amount_paid: amountPaid,
+        payment_date: paymentDate.toISOString().split('T')[0], // Date only
+        payment_mode: 'Cash',
+        academic_year: feeStructure.academic_year,
+        students: { full_name: selectedStudent?.name || (students.find(s => s.id === studentId)?.name) || 'Unknown Student' }
+      };
+      setPayments(prev => [optimisticPayment, ...(prev || [])]);
+      setPaymentSummary(prev => ({
+        ...prev,
+        totalCollected: (prev?.totalCollected || 0) + amountPaid,
+        totalOutstanding: Math.max(0, (prev?.totalOutstanding || 0) - amountPaid)
+      }));
+
+      // Debounced background refresh
+      debouncedRefreshWithCacheClear();
       Alert.alert('Success', 'Payment recorded successfully');
       setPaymentModal(false);
       setSelectedStudent(null);
@@ -1021,13 +1231,25 @@ const FeeManagement = () => {
     
     try {
       setPaymentLoading(true);
-      
-      // Check if there are any student fees associated with this fee component
+
+      // Fetch canonical fee structure fields to avoid mismatches
+      const { data: fsData, error: fsError } = await tenantDatabase.read(
+        'fee_structure',
+        { id: fee.id },
+        'fee_component, academic_year'
+      );
+      if (fsError) throw fsError;
+      const fs = fsData?.[0];
+      if (!fs) {
+        throw new Error('Fee structure not found');
+      }
+
+      // Check if there are any student fees associated with this fee component and academic year
       const { data: associatedFees, error: checkError } = await tenantDatabase.read(
         'student_fees',
         {
-          fee_component: fee.fee_component || fee.type || 'Unknown',
-          academic_year: fee.academic_year || '2024-25'
+          fee_component: fs.fee_component,
+          academic_year: fs.academic_year
         },
         'id'
       );
@@ -1047,8 +1269,14 @@ const FeeManagement = () => {
 
       if (error) throw error;
 
-      // Clear cache and refresh data
-      await refreshWithCacheClear();
+      // Optimistic UI: remove fee locally
+      setFeeStructures(prev => prev.map(cls => ({
+        ...cls,
+        fees: (cls.fees || []).filter(f => f.id !== fee.id)
+      })));
+
+      // Debounced background refresh
+      debouncedRefreshWithCacheClear();
       Alert.alert('Success', 'Fee deleted successfully');
 
     } catch (error) {
@@ -1112,8 +1340,22 @@ const FeeManagement = () => {
 
       if (error) throw error;
 
-      // Clear cache and reload data after successful operation
-      await refreshWithCacheClear();
+      // Optimistic UI: append new fee(s) to selected classes locally
+      setFeeStructures(prev => prev.map(cls => {
+        if (!selectedClassIds.includes(cls.classId)) return cls;
+        const newFee = {
+          id: `temp-${cls.classId}-${Date.now()}`,
+          type: newFeeStructure.type.trim(),
+          amount: amountValue,
+          due_date: format(new Date(newFeeStructure.dueDate), 'yyyy-MM-dd'),
+          description: newFeeStructure.type.trim(),
+          academic_year: newFeeStructure.academicYear.trim()
+        };
+        return { ...cls, fees: [ ...(cls.fees || []), newFee ] };
+      }));
+
+      // Debounced background refresh
+      debouncedRefreshWithCacheClear();
       
       setFeeStructureModal(false);
       setSelectedClassIds([]);

@@ -19,7 +19,7 @@ import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
-import { useTenantAccess } from '../../utils/tenantHelpers';
+import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
 import { format } from 'date-fns';
 import * as Animatable from 'react-native-animatable';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
@@ -84,13 +84,23 @@ const AttendanceManagement = () => {
       
       console.log('🚀 AttendanceManagement.loadAllData: Starting with tenant_id:', tenantId);
 
-      // Load classes
-      const { data: classData, error: classError } = await dbHelpers.getClasses();
+      // Load classes (narrow projection)
+      const { data: classData, error: classError } = await tenantDatabase.read(
+        'classes',
+        {},
+        'id, class_name, section',
+        { orderBy: { column: 'class_name', ascending: true } }
+      );
       if (classError) throw classError;
       setClasses(classData || []);
 
-      // Load teachers
-      const { data: teachersData, error: teachersError } = await dbHelpers.getTeachers();
+      // Load teachers (narrow projection)
+      const { data: teachersData, error: teachersError } = await tenantDatabase.read(
+        'teachers',
+        {},
+        'id, name',
+        { orderBy: { column: 'name', ascending: true } }
+      );
       if (teachersError) throw teachersError;
       setTeachers(teachersData || []);
       
@@ -105,7 +115,10 @@ const AttendanceManagement = () => {
   };
 
   // Load students for selected class
-  const loadStudentsForClass = async (classId) => {
+  // Cache students per class to avoid refetch
+  const studentsCacheRef = useRef(new Map());
+
+  const loadStudentsForClass = async (classId, forceRefresh = false) => {
     try {
       if (!classId || classId === '' || classId === null) {
         setStudentsForClass([]);
@@ -120,7 +133,22 @@ const AttendanceManagement = () => {
       }
 
       console.log('📋 loadStudentsForClass - using tenantId:', tenantId, 'for classId:', classId);
-      const { data: studentsData, error } = await dbHelpers.getStudentsByClass(classId);
+
+      // Serve from cache if available and not forcing refresh
+      if (!forceRefresh && studentsCacheRef.current.has(classId)) {
+        const cached = studentsCacheRef.current.get(classId);
+        setStudentsForClass(cached);
+        console.log('🗃️ Using cached students for class:', classId, '(count:', cached.length, ')');
+        return;
+      }
+
+      // Fetch with narrow projection
+      const { data: studentsData, error } = await tenantDatabase.read(
+        'students',
+        { class_id: classId },
+        'id, name, admission_no',
+        { orderBy: { column: 'admission_no', ascending: true } }
+      );
 
       if (error) {
         console.error('Error loading students:', error);
@@ -128,7 +156,11 @@ const AttendanceManagement = () => {
       }
 
       console.log('Loaded students for class:', studentsData?.length || 0);
-      setStudentsForClass(studentsData || []);
+
+      // Cache and set
+      const result = studentsData || [];
+      studentsCacheRef.current.set(classId, result);
+      setStudentsForClass(result);
 
     } catch (error) {
       console.error('Error loading students for class:', error);

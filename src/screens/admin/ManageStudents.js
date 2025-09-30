@@ -39,6 +39,13 @@ const ManageStudents = () => {
   const [selectedGender, setSelectedGender] = useState('All');
   const [selectedAcademicYear, setSelectedAcademicYear] = useState('All');
 
+  // Pagination state
+  const PAGE_SIZE = 25;
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingPage, setLoadingPage] = useState(false);
+  const [resolvedTenantId, setResolvedTenantId] = useState(null);
+
   // Modal states
   const [modalVisible, setModalVisible] = useState(false);
   const [viewModalVisible, setViewModalVisible] = useState(false);
@@ -95,18 +102,35 @@ const ManageStudents = () => {
   }, []);
 
   useEffect(() => {
-    loadAllData();
+    // Reset paging on filter changes and reload
+    const reload = async () => {
+      setPage(0);
+      setHasMore(true);
+      await loadAllData();
+    };
+    reload();
   }, [selectedClass, selectedSection, selectedGender, selectedAcademicYear]);
 
   // Load all data
   const loadAllData = async () => {
     setLoading(true);
     try {
-      await Promise.all([
-        loadStudents(),
-        loadClasses(),
-        loadParents()
-      ]);
+      // Resolve tenant once
+      const tenantResult = await getCurrentUserTenantByEmail();
+      if (!tenantResult.success) {
+        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      }
+      const tenantId = tenantResult.data.tenant.id;
+      setResolvedTenantId(tenantId);
+
+      // Load classes with narrow projection
+      await loadClasses(tenantId);
+
+      // Reset student list and load first page
+      setStudents([]);
+      setPage(0);
+      setHasMore(true);
+      await loadStudentsPage(0, true, tenantId);
     } catch (error) {
       if (Platform.OS === 'web') {
         window.alert('Error: Failed to load data');
@@ -121,47 +145,76 @@ const ManageStudents = () => {
   // Refresh data
   const onRefresh = async () => {
     setRefreshing(true);
+    setPage(0);
+    setHasMore(true);
     await loadAllData();
     setRefreshing(false);
   };
 
-  // Load students with full details - OPTIMIZED VERSION
-  const loadStudents = async () => {
+  // Load one page of students with full details - with server-side filters and pagination
+  const loadStudentsPage = async (pageNumber = 0, replace = false, tenantIdParam = null) => {
     const startTime = performance.now(); // 📊 Performance monitoring
     try {
-      console.log('🚀 Loading students with optimized query...');
-      
-      // Get current tenant for proper filtering
-      const tenantResult = await getCurrentUserTenantByEmail();
-      
-      if (!tenantResult.success) {
-        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
+      console.log('🚀 Loading students page with server-side filters...');
+      const tenantId = tenantIdParam || resolvedTenantId;
+      if (!tenantId) throw new Error('Tenant not resolved');
+
+      // Determine class IDs based on selected class/section filters
+      let classIdsFilter = null;
+      if (selectedClass !== 'All' || selectedSection !== 'All') {
+        const matching = classes.filter(cls => {
+          const matchName = selectedClass === 'All' || cls.class_name === selectedClass;
+          const matchSection = selectedSection === 'All' || cls.section === selectedSection;
+          return matchName && matchSection;
+        }).map(cls => cls.id);
+        classIdsFilter = matching.length > 0 ? matching : [-1]; // -1 to ensure no match if none
       }
-      
-      const tenantId = tenantResult.data.tenant.id;
-      console.log('🏢 Loading students for tenant:', tenantResult.data.tenant.name);
-      
-      // Use a single JOIN query to get all student data with related information including profile photos
-      const { data: studentsData, error } = await supabase
+
+      const from = pageNumber * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      // Base students query with narrow projection
+      let studentsQuery = supabase
         .from(TABLES.STUDENTS)
         .select(`
-          *,
-          classes:class_id (
+          id,
+          name,
+          admission_no,
+          roll_no,
+          gender,
+          academic_year,
+          class_id,
+          created_at,
+          classes:class_id(
             id,
             class_name,
             section
           )
         `)
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false });
+        .eq('tenant_id', tenantId);
 
-      console.log('📸 Fetching student profile photos from users table...');
-      
-      // Get profile photos for all students from users table
+      if (classIdsFilter) {
+        studentsQuery = studentsQuery.in('class_id', classIdsFilter);
+      }
+      if (selectedGender !== 'All') {
+        studentsQuery = studentsQuery.eq('gender', selectedGender);
+      }
+      if (selectedAcademicYear !== 'All') {
+        studentsQuery = studentsQuery.eq('academic_year', selectedAcademicYear);
+      }
+
+      studentsQuery = studentsQuery
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+      const { data: studentsData, error } = await studentsQuery;
+
+      console.log('📸 Fetching student profile photos (page)...');
+      const pageStudentIds = studentsData?.map(s => s.id) || [];
       const { data: userProfileData, error: profileError } = await supabase
         .from(TABLES.USERS)
         .select('linked_student_id, profile_url')
-        .in('linked_student_id', studentsData?.map(s => s.id) || [])
+        .in('linked_student_id', pageStudentIds)
         .not('linked_student_id', 'is', null);
       
       console.log('📸 Profile photos query result:', {
@@ -186,7 +239,8 @@ const ManageStudents = () => {
       }
 
       if (!studentsData || studentsData.length === 0) {
-        setStudents([]);
+        if (replace) setStudents([]);
+        setHasMore(false);
         setStats({
           totalStudents: 0,
           maleStudents: 0,
@@ -234,7 +288,7 @@ const ManageStudents = () => {
         .in('student_id', studentIds);
 
       // Get parent data for all students
-      console.log('🔍 Fetching parent data for all students...');
+      console.log('🔍 Fetching parent data for page students...');
       const { data: allParentsData, error: parentsError } = await supabase
         .from(TABLES.PARENTS)
         .select('student_id, name, phone, email, relation')
@@ -404,7 +458,23 @@ const ManageStudents = () => {
         return a.name.localeCompare(b.name);
       });
 
-      setStudents(sortedStudents);
+      if (replace) {
+        setStudents(sortedStudents);
+      } else {
+        setStudents(prev => {
+          const combined = [...(prev || []), ...sortedStudents];
+          // Deduplicate by id
+          const seen = new Set();
+          return combined.filter(s => {
+            if (seen.has(s.id)) return false;
+            seen.add(s.id);
+            return true;
+          });
+        });
+      }
+
+      setHasMore((studentsData || []).length === PAGE_SIZE);
+      setPage(pageNumber);
 
       // Calculate statistics
       const totalStudents = studentsWithDetails.length;
@@ -443,20 +513,11 @@ const ManageStudents = () => {
   };
 
   // Load classes
-  const loadClasses = async () => {
+  const loadClasses = async (tenantId) => {
     try {
-      // Get current tenant for proper filtering
-      const tenantResult = await getCurrentUserTenantByEmail();
-      
-      if (!tenantResult.success) {
-        throw new Error(`Failed to get tenant: ${tenantResult.error}`);
-      }
-      
-      const tenantId = tenantResult.data.tenant.id;
-      
       const { data: classData, error } = await supabase
         .from(TABLES.CLASSES)
-        .select('*')
+        .select('id, class_name, section, academic_year')
         .eq('tenant_id', tenantId)
         .order('class_name');
 
@@ -1795,6 +1856,17 @@ const ManageStudents = () => {
           nestedScrollEnabled={true}
           overScrollMode="always"
           scrollEventThrottle={16}
+          onEndReachedThreshold={0.2}
+          onEndReached={async () => {
+            if (!loadingPage && hasMore) {
+              setLoadingPage(true);
+              try {
+                await loadStudentsPage(page + 1, false, resolvedTenantId);
+              } finally {
+                setLoadingPage(false);
+              }
+            }
+          }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }

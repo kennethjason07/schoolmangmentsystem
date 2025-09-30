@@ -136,32 +136,13 @@ const TeacherSubjects = ({ navigation }) => {
 
       // 🚀 Enhanced tenant database for class teacher assignments
       console.log('🔍 Loading class teacher assignments for teacher:', teacherData.id, 'using enhanced system');
-      const { data: classTeacherData, error: classTeacherError } = await tenantDatabase.read(
-        'classes',
-        { class_teacher_id: teacherData.id },
-        `
-          id,
-          class_name,
-          section,
-          academic_year,
-          tenant_id
-        `
-      );
-
-      if (classTeacherError) {
-        console.log('Error fetching class teacher data:', classTeacherError);
-      }
-      
-      // 🚀 Enhanced tenant system automatically validates data integrity
-      // Tenant isolation is handled automatically by the system
-
-      // Process and organize the data
+      // Process and organize the data (derive class-teacher status from subject classes)
       const processedSubjects = subjectAssignments
         .filter(assignment => assignment.subjects && assignment.subjects.classes)
         .map(assignment => {
           const subject = assignment.subjects;
           const classInfo = subject.classes;
-          const isClassTeacher = classTeacherData?.some(ct => ct.id === classInfo.id) || false;
+          const isClassTeacher = classInfo?.class_teacher_id === teacherData.id;
 
           return {
             id: assignment.id,
@@ -180,7 +161,7 @@ const TeacherSubjects = ({ navigation }) => {
 
       // Calculate stats
       const uniqueClasses = new Set(processedSubjects.map(s => s.classId));
-      const classTeacherCount = classTeacherData?.length || 0;
+      const classTeacherCount = processedSubjects.filter(s => s.isClassTeacher).length;
 
       setStats({
         totalSubjects: processedSubjects.length,

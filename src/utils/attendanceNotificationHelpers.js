@@ -150,20 +150,34 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
   try {
     console.log('🚀 Creating attendance notification for student:', studentId, 'on:', attendanceDate);
     
-    // Get teacher info to get tenant_id
-    const { data: teacherUser, error: teacherUserError } = await supabase
-      .from(TABLES.USERS)
-      .select('tenant_id')
-      .eq('id', markedBy)
-      .single();
-    
-    if (teacherUserError || !teacherUser) {
-      console.error('Error fetching teacher user data:', teacherUserError);
-      return {
-        success: false,
-        error: 'Could not get teacher tenant information',
-        recipientCount: 0
-      };
+    // If tenantId is provided, skip teacher user lookup. Otherwise, try to derive from markedBy.
+    const isUuid = (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+    if (!tenantId) {
+      if (!markedBy || !isUuid(markedBy)) {
+        console.error('Error fetching teacher user data: invalid markedBy user id:', markedBy);
+        return {
+          success: false,
+          error: 'Invalid user context for notification sender',
+          recipientCount: 0
+        };
+      }
+
+      // Get teacher info to get tenant_id
+      const { data: teacherUser, error: teacherUserError } = await supabase
+        .from(TABLES.USERS)
+        .select('tenant_id')
+        .eq('id', markedBy)
+        .single();
+      
+      if (teacherUserError || !teacherUser) {
+        console.error('Error fetching teacher user data:', teacherUserError);
+        return {
+          success: false,
+          error: 'Could not get teacher tenant information',
+          recipientCount: 0
+        };
+      }
+      tenantId = teacherUser.tenant_id;
     }
     
     // Find parent users for this student
@@ -307,23 +321,35 @@ export const createBulkAttendanceNotifications = async (absentStudents, markedBy
     console.log(`🚀 Creating bulk attendance notifications for ${absentStudents.length} absent students`);
     
     // Get tenant_id if not provided
-    if (!tenantId) {
-      // Try to get tenant_id from the first student's record or current user
-      try {
-        const { data: userData, error: userError } = await supabase
-          .from(TABLES.USERS)
-          .select('tenant_id')
-          .eq('id', markedBy)
-          .single();
-        
-        if (!userError && userData?.tenant_id) {
-          tenantId = userData.tenant_id;
-          console.log(`📋 Using tenant_id from user: ${tenantId}`);
+  if (!tenantId) {
+      // Try to get tenant_id from the absent record first
+      const fromRecord = absentStudents?.[0]?.tenant_id;
+      if (fromRecord) {
+        tenantId = fromRecord;
+        console.log(`📋 Using tenant_id from absent record: ${tenantId}`);
+      } else {
+        // Fallback to current user if valid
+        const isUuid = (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+        if (markedBy && isUuid(markedBy)) {
+          try {
+            const { data: userData, error: userError } = await supabase
+              .from(TABLES.USERS)
+              .select('tenant_id')
+              .eq('id', markedBy)
+              .single();
+            
+              if (!userError && userData?.tenant_id) {
+                tenantId = userData.tenant_id;
+                console.log(`📋 Using tenant_id from user: ${tenantId}`);
+              } else {
+                console.warn('⚠️ Could not get tenant_id from user, notifications may fail');
+              }
+          } catch (error) {
+            console.warn('⚠️ Error getting tenant_id:', error.message);
+          }
         } else {
-          console.warn('⚠️ Could not get tenant_id from user, notifications may fail');
+          console.warn('⚠️ No valid markedBy provided to derive tenant_id; notifications may be skipped');
         }
-      } catch (error) {
-        console.warn('⚠️ Error getting tenant_id:', error.message);
       }
     }
     

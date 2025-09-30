@@ -29,6 +29,12 @@ const StudentList = ({ route, navigation }) => {
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredStudents, setFilteredStudents] = useState([]);
+
+  // Pagination state
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingPage, setLoadingPage] = useState(false);
   
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -36,8 +42,8 @@ const StudentList = ({ route, navigation }) => {
   const scrollTopOpacity = useRef(new Animated.Value(0)).current;
 
   // Move fetchStudents outside useEffect to make it reusable
-  const fetchStudents = async () => {
-    setLoading(true);
+  const fetchStudents = async (pageNumber = 0, replace = true) => {
+    if (replace) setLoading(true);
     setError(null);
     try {
       console.log('StudentList: Received classId:', classId);
@@ -49,16 +55,29 @@ const StudentList = ({ route, navigation }) => {
         return;
       }
       
-      // Get students by class ID - using direct Supabase query
-      const { data, error } = await supabase
+      const from = pageNumber * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      // Build query with narrow projection and server-side search on name
+      let query = supabase
         .from('students')
         .select(`
-          *,
+          id,
+          name,
+          roll_no,
+          class_id,
           classes(class_name, section),
-          parents:parent_id(name, phone, email)
+          parents:parent_id(name, phone)
         `)
         .eq('class_id', classId)
-        .order('roll_no', { ascending: true });
+        .order('roll_no', { ascending: true })
+        .range(from, to);
+
+      if (searchQuery && searchQuery.trim().length > 0) {
+        query = query.ilike('name', `%${searchQuery}%`);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         console.error('StudentList: Supabase error:', error);
@@ -72,8 +91,14 @@ const StudentList = ({ route, navigation }) => {
         console.log('StudentList: First student:', data[0]);
       }
       
-      setStudents(data || []);
-      setFilteredStudents(data || []);
+      if (replace) {
+        setStudents(data || []);
+      } else {
+        setStudents(prev => [ ...(prev || []), ...(data || []) ]);
+      }
+      setFilteredStudents(prev => replace ? (data || []) : ([...(prev || []), ...(data || [])]));
+      setHasMore((data?.length || 0) === PAGE_SIZE);
+      setPage(pageNumber);
       
       // Animate content in
       Animated.timing(fadeAnim, {
@@ -96,29 +121,25 @@ const StudentList = ({ route, navigation }) => {
     console.log('StudentList: route.params:', route.params);
     console.log('StudentList: classId from params:', classId);
     
-    fetchStudents();
+    fetchStudents(0, true);
   }, [classId]);
 
   // Refresh handler
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchStudents();
+    setPage(0);
+    setHasMore(true);
+    await fetchStudents(0, true);
     setRefreshing(false);
   };
 
   // Search functionality
-  const handleSearch = (query) => {
+  const handleSearch = async (query) => {
     setSearchQuery(query);
-    if (query.trim() === '') {
-      setFilteredStudents(students);
-    } else {
-      const filtered = students.filter(student => 
-        student.name.toLowerCase().includes(query.toLowerCase()) ||
-        student.roll_no?.toString().includes(query) ||
-        student.parents?.name?.toLowerCase().includes(query.toLowerCase())
-      );
-      setFilteredStudents(filtered);
-    }
+    // Server-side search by name; reset paging
+    setPage(0);
+    setHasMore(true);
+    await fetchStudents(0, true);
   };
   
   // Scroll event handler
@@ -291,7 +312,27 @@ const StudentList = ({ route, navigation }) => {
           {/* Students List */}
           <Animated.View style={[styles.studentsContainer, { opacity: fadeAnim }]}>
             {filteredStudents.length > 0 ? (
-              filteredStudents.map((student, index) => renderStudent(student, index))
+              <>
+                {filteredStudents.map((student, index) => renderStudent(student, index))}
+                {/* Load more button for pagination */}
+                {hasMore && (
+                  <TouchableOpacity
+                    onPress={async () => {
+                      if (!loadingPage) {
+                        setLoadingPage(true);
+                        try {
+                          await fetchStudents(page + 1, false);
+                        } finally {
+                          setLoadingPage(false);
+                        }
+                      }
+                    }}
+                    style={{ marginTop: 12, alignSelf: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#2196F3', borderRadius: 6 }}
+                  >
+                    <Text style={{ color: '#fff' }}>{loadingPage ? 'Loading...' : 'Load more'}</Text>
+                  </TouchableOpacity>
+                )}
+              </>
             ) : (
               <View style={styles.emptyContainer}>
                 <Ionicons name="people" size={64} color="#ccc" />

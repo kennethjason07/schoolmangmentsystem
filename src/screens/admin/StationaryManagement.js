@@ -78,6 +78,15 @@ const StationaryManagement = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   
+  // Pagination state
+  const PAGE_SIZE = 25;
+  const [itemsPage, setItemsPage] = useState(0);
+  const [itemsHasMore, setItemsHasMore] = useState(true);
+  const [itemsLoadingPage, setItemsLoadingPage] = useState(false);
+  const [purchasesPage, setPurchasesPage] = useState(0);
+  const [purchasesHasMore, setPurchasesHasMore] = useState(true);
+  const [purchasesLoadingPage, setPurchasesLoadingPage] = useState(false);
+  
   // Data states
   const [items, setItems] = useState([]);
   const [purchases, setPurchases] = useState([]);
@@ -138,8 +147,64 @@ const StationaryManagement = ({ navigation }) => {
     }, [tenantId, isReady, tenantLoading, tenantError])
   );
   
-  
+  // Realtime subscription for purchases (optional live updates)
+  const purchasesChannelRef = React.useRef(null);
+  useEffect(() => {
+    if (!checkTenantReady()) return;
+    const tId = getCachedTenantId();
+    if (!tId) return;
 
+    // Cleanup any existing channel
+    if (purchasesChannelRef.current) {
+      try { supabase.removeChannel(purchasesChannelRef.current); } catch (e) {}
+      purchasesChannelRef.current = null;
+    }
+
+    const channel = supabase
+      .channel(`stationary_purchases-tenant-${tId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'stationary_purchases', filter: `tenant_id=eq.${tId}` },
+        (payload) => {
+          try {
+            const newRow = payload.new;
+            // Only include if within current date range
+            if (newRow && newRow.payment_date >= dateRange.start && newRow.payment_date <= dateRange.end) {
+              const enriched = {
+                ...newRow,
+                students: newRow.students || null,
+                stationary_items: newRow.stationary_items || null,
+              };
+              // Remove optimistic temp duplicates if any
+              setPurchases(prev => {
+                const next = (prev || []).filter(p => !(String(p.id || '').startsWith('temp-') && p.receipt_number === newRow.receipt_number));
+                return [enriched, ...next];
+              });
+              // Increment analytics optimistically
+              setAnalytics(prev => ({
+                ...prev,
+                totalRevenue: (prev.totalRevenue || 0) + (parseFloat(newRow.total_amount) || 0),
+                totalQuantitySold: (prev.totalQuantitySold || 0) + (parseInt(newRow.quantity) || 0),
+                totalTransactions: (prev.totalTransactions || 0) + 1,
+              }));
+            }
+          } catch (e) {
+            console.warn('Realtime purchase handler error:', e?.message);
+          }
+        }
+      )
+      .subscribe();
+
+    purchasesChannelRef.current = channel;
+    return () => {
+      if (purchasesChannelRef.current) {
+        try { supabase.removeChannel(purchasesChannelRef.current); } catch (e) {}
+        purchasesChannelRef.current = null;
+      }
+    };
+  }, [tenantId, isReady, dateRange.start, dateRange.end]);
+  
+  
   const loadData = async () => {
     if (!checkTenantReady()) {
       console.log('⚠️ StationaryManagement: Cannot load data - tenant not ready');
@@ -150,9 +215,13 @@ const StationaryManagement = ({ navigation }) => {
     setLoading(true);
     
     try {
+      // Reset and load first pages with server-side filters
+      setItems([]); setItemsPage(0); setItemsHasMore(true);
+      setPurchases([]); setPurchasesPage(0); setPurchasesHasMore(true);
+
       await Promise.all([
-        loadItems(),
-        loadPurchases(),
+        loadItemsPage(0, true),
+        loadPurchasesPage(0, true),
         loadClasses(),
         loadSchoolDetails(),
         loadAnalytics()
@@ -166,51 +235,69 @@ const StationaryManagement = ({ navigation }) => {
     }
   };
 
-  const loadItems = async () => {
+  const loadItemsPage = async (pageNumber = 0, replace = false) => {
     try {
-      console.log('🔍 Loading stationary items via enhanced tenant database');
-      const { data: itemsData, error } = await tenantDatabase.read('stationary_items', {}, '*');
-      
+      console.log('🔍 Loading stationary items (paged)');
+      const tId = getCachedTenantId();
+      const from = pageNumber * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      const { data, error } = await supabase
+        .from('stationary_items')
+        .select('id, name, description, fee_amount, is_active, created_at')
+        .eq('tenant_id', tId)
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
       if (error) throw error;
-      
-      console.log('📦 Loaded items:', itemsData?.length, 'items');
-      setItems(itemsData || []);
+
+      const hasMore = (data?.length || 0) === PAGE_SIZE;
+      setItemsHasMore(hasMore);
+      setItemsPage(pageNumber);
+      if (replace) setItems(data || []);
+      else setItems(prev => ([...(prev || []), ...(data || [])]));
+
+      console.log('📦 Loaded items page:', data?.length || 0);
     } catch (error) {
       console.error('❌ Error loading items:', error);
-      setItems([]);
+      if (replace) setItems([]);
     }
   };
 
-  const loadPurchases = async () => {
+  const loadPurchasesPage = async (pageNumber = 0, replace = false) => {
     try {
-      console.log('🔍 Loading purchases via enhanced tenant database, date range:', dateRange);
-      
-      // Build date filter conditions
-      const filters = {};
-      
-      const { data: purchasesData, error } = await tenantDatabase.read(
-        'stationary_purchases',
-        filters,
-        `*, 
-         students(id, name, admission_no),
-         stationary_items(id, name, description)`
-      );
-      
+      console.log('🔍 Loading purchases (paged) with server-side date filters:', dateRange);
+      const tId = getCachedTenantId();
+      const from = pageNumber * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      let query = supabase
+        .from('stationary_purchases')
+        .select(`
+          id, student_id, class_id, item_id, quantity, unit_price, total_amount,
+          payment_date, payment_mode, receipt_number, remarks,
+          students(id, name, admission_no),
+          stationary_items(id, name, description)
+        `)
+        .eq('tenant_id', tId)
+        .gte('payment_date', dateRange.start)
+        .lte('payment_date', dateRange.end)
+        .order('payment_date', { ascending: false })
+        .range(from, to);
+
+      const { data, error } = await query;
       if (error) throw error;
-      
-      // Filter by date range on client side if needed
-      const filteredPurchases = purchasesData?.filter(purchase => {
-        const purchaseDate = purchase.payment_date || purchase.purchase_date;
-        if (!purchaseDate) return true;
-        
-        return purchaseDate >= dateRange.start && purchaseDate <= dateRange.end;
-      }) || [];
-      
-      console.log('📄 Loaded purchases:', filteredPurchases?.length, 'purchases');
-      setPurchases(filteredPurchases);
+
+      const hasMore = (data?.length || 0) === PAGE_SIZE;
+      setPurchasesHasMore(hasMore);
+      setPurchasesPage(pageNumber);
+      if (replace) setPurchases(data || []);
+      else setPurchases(prev => ([...(prev || []), ...(data || [])]));
+
+      console.log('📄 Loaded purchases page:', data?.length || 0);
     } catch (error) {
       console.error('❌ Error loading purchases:', error);
-      setPurchases([]);
+      if (replace) setPurchases([]);
     }
   };
 
@@ -439,28 +526,35 @@ const StationaryManagement = ({ navigation }) => {
       const selectedStudent = students.find(s => s.id === feeModal.payment.student_id);
       const totalAmount = calculateTotal();
 
-      // Record each selected item as a separate purchase
-      const purchases = await Promise.all(
-        feeModal.payment.selected_items.map(async item => {
-          const receiptNumber = await generateReceiptNumber();
-          const purchaseData = {
-            student_id: feeModal.payment.student_id,
-            class_id: feeModal.payment.class_id,
-            item_id: item.id,
-            quantity: item.quantity,
-            unit_price: item.fee_amount,
-            total_amount: item.fee_amount * item.quantity,
-            payment_date: format(new Date(), 'yyyy-MM-dd'),
-            payment_mode: feeModal.payment.payment_mode,
-            remarks: feeModal.payment.remarks || '',
-            receipt_number: receiptNumber
-          };
-          
-          const { data, error } = await tenantDatabase.create('stationary_purchases', purchaseData);
-          if (error) throw error;
-          return { ...data, receipt_number: receiptNumber };
-        })
+      // Prepare batched purchases
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const purchasesArray = await Promise.all(
+        feeModal.payment.selected_items.map(async (item) => ({
+          student_id: feeModal.payment.student_id,
+          class_id: feeModal.payment.class_id,
+          item_id: item.id,
+          quantity: item.quantity,
+          unit_price: item.fee_amount,
+          total_amount: item.fee_amount * item.quantity,
+          payment_date: today,
+          payment_mode: feeModal.payment.payment_mode,
+          remarks: feeModal.payment.remarks || '',
+          receipt_number: await generateReceiptNumber()
+        }))
       );
+
+      // Batch insert
+      const { error: createManyError } = await tenantDatabase.createMany('stationary_purchases', purchasesArray);
+      if (createManyError) throw createManyError;
+
+      // Optimistic UI: prepend purchases
+      const optimistic = purchasesArray.map(p => ({
+        id: `temp-${p.receipt_number}`,
+        ...p,
+        students: { id: selectedStudent?.id, name: selectedStudent?.name, admission_no: selectedStudent?.admission_no },
+        stationary_items: { id: p.item_id, name: (items.find(i => i.id === p.item_id)?.name) || 'Item', description: (items.find(i => i.id === p.item_id)?.description) || '' }
+      }));
+      setPurchases(prev => [ ...optimistic, ...(prev || []) ]);
 
       // Create consolidated receipt data
       const receiptData = {
@@ -481,7 +575,11 @@ const StationaryManagement = ({ navigation }) => {
       
       resetFeeModal();
       
-      loadData();
+      // Debounced background refresh: reload first pages
+      setTimeout(() => {
+        loadPurchasesPage(0, true);
+        loadAnalytics();
+      }, 300);
     } catch (error) {
       console.error('Error recording payment:', error);
       Alert.alert('Error', 'Failed to record payment. Please try again.');
@@ -765,7 +863,7 @@ const StationaryManagement = ({ navigation }) => {
     if (!receiptModal.receipt) return;
 
     try {
-      const htmlContent = generateReceiptHTML(receiptModal.receipt);
+      const htmlContent = await generateReceiptHTML(receiptModal.receipt);
       
       const { uri } = await Print.printToFileAsync({
         html: htmlContent,
@@ -995,6 +1093,22 @@ const StationaryManagement = ({ navigation }) => {
         style={styles.scrollContainer}
         WebkitOverflowScrolling="touch"
         scrollEnabled={Platform.OS !== 'web'}
+        onEndReachedThreshold={0.2}
+        onEndReached={async () => {
+          if (!itemsLoadingPage && itemsHasMore) {
+            setItemsLoadingPage(true);
+            try {
+              await loadItemsPage(itemsPage + 1, false);
+            } finally {
+              setItemsLoadingPage(false);
+            }
+          }
+        }}
+        ListFooterComponent={itemsLoadingPage ? (
+          <View style={{ paddingVertical: 16 }}>
+            <ActivityIndicator size="small" color="#2196F3" />
+          </View>
+        ) : null}
       />
     </View>
   );
@@ -1028,6 +1142,22 @@ const StationaryManagement = ({ navigation }) => {
         style={styles.scrollContainer}
         WebkitOverflowScrolling="touch"
         scrollEnabled={Platform.OS !== 'web'}
+        onEndReachedThreshold={0.2}
+        onEndReached={async () => {
+          if (!purchasesLoadingPage && purchasesHasMore) {
+            setPurchasesLoadingPage(true);
+            try {
+              await loadPurchasesPage(purchasesPage + 1, false);
+            } finally {
+              setPurchasesLoadingPage(false);
+            }
+          }
+        }}
+        ListFooterComponent={purchasesLoadingPage ? (
+          <View style={{ paddingVertical: 16 }}>
+            <ActivityIndicator size="small" color="#2196F3" />
+          </View>
+        ) : null}
       />
     </View>
   );

@@ -34,10 +34,10 @@ const StudentAttendanceScreen = ({ navigation, route }) => {
     try {
       setLoading(true);
       
-      // Get daily attendance records
+      // Get daily attendance records (narrow projection)
       const { data: dailyData, error: dailyError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
-        .select('*')
+        .select('date, status')
         .eq('student_id', student.id)
         .order('date');
 
@@ -100,11 +100,12 @@ const StudentAttendanceScreen = ({ navigation, route }) => {
     loadAttendanceData();
 
     const subscription = supabase
-      .channel('attendance-updates')
+      .channel(`attendance-updates-${student.id}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
-        table: TABLES.STUDENT_ATTENDANCE
+        table: TABLES.STUDENT_ATTENDANCE,
+        filter: `student_id=eq.${student.id}`
       }, () => {
         loadAttendanceData();
       })
