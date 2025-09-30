@@ -102,6 +102,8 @@ const AdminDashboard = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stats, setStats] = useState([]);
+  const [monthlyCollection, setMonthlyCollection] = useState(0);
+  const refreshTimerRef = useRef(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [schoolDetails, setSchoolDetails] = useState(null);
@@ -149,146 +151,104 @@ const AdminDashboard = ({ navigation }) => {
     try {
       setLoading(true);
       setError(null);
-      
-      // 🚀 FIXED: Enhanced auth and tenant validation for web refresh
-      
-      // Wait for user authentication to be ready
+
       if (!user || !user.id || !user.email) {
-        
         if (retryCount < 3) {
-          // Retry after a short delay
           setTimeout(() => {
             loadDashboardData(retryCount + 1);
-          }, 1000 * (retryCount + 1)); // Progressive delay
+          }, 1000 * (retryCount + 1));
           return;
-        } else {
-          throw new Error('User authentication not ready. Please refresh the page or log in again.');
         }
-      }
-      
-      // Get current tenant for proper filtering with enhanced error handling
-      
-      let tenantResult;
-      try {
-        tenantResult = await getCurrentUserTenantByEmail();
-      } catch (tenantError) {
-        console.error('❌ [AdminDashboard] Tenant lookup error:', tenantError);
-        throw new Error(`Failed to resolve tenant context: ${tenantError.message}. Please ensure you're logged in with the correct account.`);
-      }
-      
-      if (!tenantResult || !tenantResult.success) {
-        console.error('❌ [AdminDashboard] Tenant resolution failed:', tenantResult?.error);
-        throw new Error(`Failed to get tenant: ${tenantResult?.error || 'Unknown tenant error'}. Please check your account setup.`);
-      }
-      
-      if (!tenantResult.data?.tenant?.id) {
-        console.error('❌ [AdminDashboard] Invalid tenant data:', tenantResult.data);
-        throw new Error('Invalid tenant data received. Please contact support.');
-      }
-      
-      const tenantId = tenantResult.data.tenant.id;
-      const tenantName = tenantResult.data.tenant.name;
-
-      // Load school details
-      const { data: schoolData, error: schoolError } = await dbHelpers.getSchoolDetails();
-      setSchoolDetails(schoolData);
-
-      // Load students count with gender breakdown
-      const { data: studentsData, error: studentError, count: studentCount } = await supabase
-        .from('students')
-        .select('id, gender', { count: 'exact' })
-        .eq('tenant_id', tenantId);
-
-      if (studentError) {
-        console.error('Error loading students:', studentError);
+        throw new Error('User authentication not ready. Please refresh the page or log in again.');
       }
 
-      // Load teachers count with improved error handling
-      let teacherCount = 0;
-      try {
-        const { data: teachersData, error: teacherError, count } = await supabase
-          .from('teachers')
-          .select('id', { count: 'exact' })
-          .eq('tenant_id', tenantId);
-
-        if (teacherError) {
-          console.error('Error loading teachers:', teacherError);
-          // If RLS is blocking access due to JWT issues, set count to 0
-          if (teacherError.message?.includes('permission denied') || 
-              teacherError.message?.includes('access denied') ||
-              teacherError.message?.includes('tenant')) {
-            teacherCount = 0;
-          } else {
-            // For other errors, also default to 0 but log the issue
-            console.error('🔍 Unexpected teacher query error:', teacherError);
-            teacherCount = 0;
-          }
-        } else {
-          teacherCount = count || 0;
+      // Resolve tenant via hook/cached value
+      let tenantId = typeof getTenantId === 'function' ? getTenantId() : null;
+      if (!tenantId) {
+        tenantId = typeof getCachedTenantId === 'function' ? getCachedTenantId() : null;
+      }
+      if (!tenantId) {
+        if (!isReady && retryCount < 3) {
+          setTimeout(() => loadDashboardData(retryCount + 1), 1000 * (retryCount + 1));
+          return;
         }
-      } catch (teacherErr) {
-        console.error('💥 Critical error loading teachers:', teacherErr);
-        teacherCount = 0;
+        throw new Error('Unable to determine tenant context. Please log out and log back in.');
       }
 
-      // Load today's student attendance
-      const today = format(new Date(), 'yyyy-MM-dd');
-      const { data: studentAttendance, error: attendanceError } = await supabase
-        .from('student_attendance')
-        .select('id, status')
-        .eq('date', today)
-        .eq('tenant_id', tenantId);
-
-      if (attendanceError) {
-        console.error('Error loading attendance:', attendanceError);
-      }
-
-      // Load classes count
-      const { data: classesData, error: classesError, count: classesCount } = await supabase
-        .from('classes')
-        .select('id', { count: 'exact' })
-        .eq('tenant_id', tenantId);
-
-      if (classesError) {
-        console.error('Error loading classes:', classesError);
-      }
-
-      // Load fee collection data for current month
       const now = new Date();
+      const today = format(now, 'yyyy-MM-dd');
       const currentMonth = format(now, 'yyyy-MM');
       const nextMonth = format(addMonths(now, 1), 'yyyy-MM');
-      const { data: feeData, error: feeError } = await supabase
-        .from('student_fees')
-        .select('amount_paid')
-        .eq('tenant_id', tenantId)
-        .gte('payment_date', `${currentMonth}-01`)
-        .lt('payment_date', `${nextMonth}-01`);
 
-      if (feeError) {
-        console.error('Error loading fees:', feeError);
-      }
+      // Fetch all required resources in parallel
+      const [
+        schoolRes,
+        studentsRes,
+        teachersRes,
+        attendanceRes,
+        classesRes,
+        monthlyFeesRes,
+        eventsRes,
+        recentStudentsRes,
+        recentFeesRes,
+      ] = await Promise.all([
+        dbHelpers.getSchoolDetails(),
+        supabase.from('students').select('gender', { count: 'exact' }).eq('tenant_id', tenantId),
+        supabase.from('teachers').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+        supabase.from('student_attendance').select('status').eq('date', today).eq('tenant_id', tenantId),
+        supabase.from('classes').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+        supabase
+          .from('student_fees')
+          .select('amount_paid')
+          .eq('tenant_id', tenantId)
+          .gte('payment_date', `${currentMonth}-01`)
+          .lt('payment_date', `${nextMonth}-01`),
+        supabase
+          .from('events')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .gte('event_date', today)
+          .order('event_date', { ascending: true })
+          .limit(10),
+        supabase
+          .from('students')
+          .select('name, created_at')
+          .eq('tenant_id', tenantId)
+          .order('created_at', { ascending: false })
+          .limit(3),
+        supabase
+          .from('student_fees')
+          .select('amount_paid, payment_date, students(name)')
+          .eq('tenant_id', tenantId)
+          .order('payment_date', { ascending: false })
+          .limit(3),
+      ]);
 
-      // Calculate statistics
-      const totalStudents = studentCount || 0;
-      const totalTeachers = teacherCount || 0;
-      const totalClasses = classesCount || 0;
+      // School details
+      setSchoolDetails(schoolRes.data || null);
 
-      // Calculate attendance percentage
-      const presentToday = studentAttendance?.filter(att => att.status === 'Present').length || 0;
+      // Counts and derived values
+      const totalStudents = studentsRes.count || 0;
+      const totalTeachers = teachersRes.count || 0; // head:true, count available
+      const totalClasses = classesRes.count || 0;   // head:true, count available
+      const presentToday = (attendanceRes.data || []).filter(att => att.status === 'Present').length;
       const attendancePercentage = totalStudents > 0 ? Math.round((presentToday / totalStudents) * 100) : 0;
 
-      // Calculate fee collection for current month
-      const monthlyFeeCollection = feeData?.reduce((sum, fee) => sum + (fee.amount_paid || 0), 0) || 0;
+      // Monthly fees
+      const monthlyFeeCollectionValue = (monthlyFeesRes.data || []).reduce((sum, fee) => sum + (fee.amount_paid || 0), 0);
+      setMonthlyCollection(monthlyFeeCollectionValue);
 
-      // Update stats
+      // Stats block
+      const maleCount = (studentsRes.data || []).filter(s => s.gender === 'Male').length;
+      const femaleCount = (studentsRes.data || []).filter(s => s.gender === 'Female').length;
       setStats([
         {
           title: 'Total Students',
           value: totalStudents.toLocaleString(),
           icon: 'people',
           color: '#2196F3',
-          subtitle: `${studentsData?.filter(s => s.gender === 'Male').length || 0} Male, ${studentsData?.filter(s => s.gender === 'Female').length || 0} Female`,
-          trend: 0
+          subtitle: `${maleCount} Male, ${femaleCount} Female`,
+          trend: 0,
         },
         {
           title: 'Total Teachers',
@@ -296,7 +256,7 @@ const AdminDashboard = ({ navigation }) => {
           icon: 'person',
           color: '#4CAF50',
           subtitle: `${totalClasses} Classes`,
-          trend: 0
+          trend: 0,
         },
         {
           title: 'Attendance Today',
@@ -304,106 +264,71 @@ const AdminDashboard = ({ navigation }) => {
           icon: 'checkmark-circle',
           color: '#FF9800',
           subtitle: `${presentToday} of ${totalStudents} present`,
-          trend: 0
+          trend: 0,
         },
         {
           title: 'Monthly Fees',
-          value: `₹${(monthlyFeeCollection / 100000).toFixed(1)}L`,
+          value: `₹${(monthlyFeeCollectionValue / 100000).toFixed(1)}L`,
           icon: 'card',
           color: '#9C27B0',
           subtitle: `Collected this month`,
-          trend: 0
-        }
+          trend: 0,
+        },
       ]);
 
-
-      // Load upcoming events from events table only
-      const { data: eventsData, error: eventsError } = await supabase
-        .from('events')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .gte('event_date', format(new Date(), 'yyyy-MM-dd'))
-        .order('event_date', { ascending: true })
-        .limit(10);
-
-      if (eventsData && !eventsError) {
-        setEvents(eventsData.map(event => {
-          const { icon, color } = getEventDisplayProps(event.event_type || 'Event', event.title || '');
-          return {
-            id: event.id,
-            type: event.event_type || 'Event',
-            title: event.title,
-            date: formatDateToDisplay(event.event_date), // Convert YYYY-MM-DD to DD-MM-YYYY for display
-            icon: icon,
-            color: color
-          };
-        }));
-      } else if (eventsError && eventsError.code !== '42P01') {
-        console.error('Error loading events:', eventsError);
-        // Set empty events array if there's an error or no events
+      // Events
+      if (eventsRes.data && !eventsRes.error) {
+        setEvents(
+          eventsRes.data.map(event => {
+            const { icon, color } = getEventDisplayProps(event.event_type || 'Event', event.title || '');
+            return {
+              id: event.id,
+              type: event.event_type || 'Event',
+              title: event.title,
+              date: formatDateToDisplay(event.event_date),
+              icon,
+              color,
+            };
+          })
+        );
+      } else if (eventsRes.error && eventsRes.error.code !== '42P01') {
+        console.error('Error loading events:', eventsRes.error);
         setEvents([]);
       } else {
-        // Set empty events array if events table doesn't exist
         setEvents([]);
       }
 
-      // Load recent activities from various sources
+      // Recent activities
       const recentActivities = [];
-
-      // Recent student registrations
-      const { data: recentStudents, error: studentsActivityError } = await supabase
-        .from('students')
-        .select('name, created_at')
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false })
-        .limit(3);
-
-      if (recentStudents && !studentsActivityError) {
-        recentStudents.forEach(student => {
+      if (recentStudentsRes.data && !recentStudentsRes.error) {
+        recentStudentsRes.data.forEach(student => {
           recentActivities.push({
             text: `New student registered: ${student.name}`,
             time: format(new Date(student.created_at), 'PPp'),
-            icon: 'person-add'
+            icon: 'person-add',
           });
         });
       }
-
-      // Recent fee payments
-      const { data: recentFees, error: feesActivityError } = await supabase
-        .from('student_fees')
-        .select('amount_paid, payment_date, students(name)')
-        .eq('tenant_id', tenantId)
-        .order('payment_date', { ascending: false })
-        .limit(3);
-
-      if (recentFees && !feesActivityError) {
-        recentFees.forEach(fee => {
+      if (recentFeesRes.data && !recentFeesRes.error) {
+        recentFeesRes.data.forEach(fee => {
           recentActivities.push({
             text: `Fee payment received: ₹${fee.amount_paid} from ${fee.students?.name}`,
             time: format(new Date(fee.payment_date), 'PPp'),
-            icon: 'card'
+            icon: 'card',
           });
         });
       }
-
-      // Sort activities by time and take latest 5
       recentActivities.sort((a, b) => new Date(b.time) - new Date(a.time));
       setActivities(recentActivities.slice(0, 5));
-
     } catch (error) {
       console.error('🏠 [AdminDashboard] Error loading dashboard data:', error);
-      
-      // 🚀 FIXED: Enhanced error handling with specific error types
       let errorMessage = 'Failed to load dashboard data';
       let shouldRetry = false;
-      
       if (error.message.includes('User authentication not ready')) {
         errorMessage = 'Authentication is loading. Please wait...';
         shouldRetry = true;
-      } else if (error.message.includes('Failed to resolve tenant')) {
+      } else if (error.message.includes('Unable to determine tenant')) {
         errorMessage = 'Unable to determine your school context. Please log out and log back in.';
-      } else if (error.message.includes('Failed to get tenant')) {
-        errorMessage = 'School context error. Please verify your account is properly configured.';
       } else if (error.message.includes('JWT') || error.message.includes('session')) {
         errorMessage = 'Session expired. Please refresh the page or log in again.';
         shouldRetry = true;
@@ -413,17 +338,11 @@ const AdminDashboard = ({ navigation }) => {
         errorMessage = 'Network connection error. Please check your internet and try again.';
         shouldRetry = true;
       } else {
-        // Use the original error message if it's descriptive
         errorMessage = error.message.length > 10 ? error.message : 'Failed to load dashboard data';
       }
-      
       setError(errorMessage);
-      
-      // Auto-retry for certain error types on web
       if (shouldRetry && Platform.OS === 'web' && retryCount < 2) {
-        setTimeout(() => {
-          loadDashboardData(retryCount + 1);
-        }, 2000);
+        setTimeout(() => loadDashboardData(retryCount + 1), 2000);
         return;
       }
     } finally {
@@ -441,10 +360,8 @@ const AdminDashboard = ({ navigation }) => {
     
     const initializeDashboard = async () => {
       try {
-        await Promise.all([
-          loadDashboardData(),
-          loadChartData()
-        ]);
+        await loadDashboardData();
+        await loadChartData({ reuseMonthlyFromDashboard: true });
       } catch (error) {
         console.error('❌ [AdminDashboard] Dashboard initialization failed:', error);
       }
@@ -452,51 +369,36 @@ const AdminDashboard = ({ navigation }) => {
 
     initializeDashboard();
 
-    // Subscribe to Supabase real-time updates for multiple tables
+    // Debounced refresh helper
+    const scheduleRefresh = () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
+      refreshTimerRef.current = setTimeout(async () => {
+        await loadDashboardData();
+        await loadChartData({ reuseMonthlyFromDashboard: true });
+      }, 500);
+    };
+
+    // Subscribe to Supabase real-time updates with tenant filter
+    let tenantForFilter = typeof getTenantId === 'function' ? getTenantId() : null;
+    if (!tenantForFilter) tenantForFilter = typeof getCachedTenantId === 'function' ? getCachedTenantId() : null;
+
     const subscription = supabase
       .channel('dashboard-updates')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'students'
-      }, () => {
-        loadDashboardData();
-        loadChartData();
-      })
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'student_attendance'
-      }, () => {
-        loadDashboardData();
-        loadChartData();
-      })
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'student_fees'
-      }, () => {
-        loadDashboardData();
-        loadChartData();
-      })
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'exams'
-      }, () => {
-        loadDashboardData();
-      })
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'events'
-      }, () => {
-        loadDashboardData();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'students', filter: tenantForFilter ? `tenant_id=eq.${tenantForFilter}` : undefined }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'student_attendance', filter: tenantForFilter ? `tenant_id=eq.${tenantForFilter}` : undefined }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'student_fees', filter: tenantForFilter ? `tenant_id=eq.${tenantForFilter}` : undefined }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'exams', filter: tenantForFilter ? `tenant_id=eq.${tenantForFilter}` : undefined }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events', filter: tenantForFilter ? `tenant_id=eq.${tenantForFilter}` : undefined }, scheduleRefresh)
       .subscribe();
 
     return () => {
       subscription.unsubscribe();
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
     };
   }, [user?.id, user?.email]); // 🚀 FIXED: Added proper dependencies
 
@@ -504,11 +406,8 @@ const AdminDashboard = ({ navigation }) => {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      await Promise.all([
-        loadDashboardData(),
-        loadChartData()
-      ]);
-      // Universal notification system automatically handles refresh
+      await loadDashboardData();
+      await loadChartData({ reuseMonthlyFromDashboard: true });
     } catch (error) {
       console.error('Error refreshing dashboard:', error);
     } finally {
@@ -543,44 +442,36 @@ const AdminDashboard = ({ navigation }) => {
   ]);
 
   // Load chart data
-  const loadChartData = async () => {
+  const loadChartData = async ({ reuseMonthlyFromDashboard = false, collectedOverride = null } = {}) => {
     try {
-      // 🚀 FIXED: Enhanced tenant validation for chart data
       if (!user || !user.id || !user.email) {
         return;
       }
-      
-      // Get current tenant for proper filtering
-      
-      let tenantResult;
-      try {
-        tenantResult = await getCurrentUserTenantByEmail();
-      } catch (tenantError) {
-        console.error('❌ [AdminDashboard] Chart data tenant lookup error:', tenantError);
-        return; // Fail silently for chart data
+
+      let tenantId = typeof getTenantId === 'function' ? getTenantId() : null;
+      if (!tenantId) {
+        tenantId = typeof getCachedTenantId === 'function' ? getCachedTenantId() : null;
       }
-      
-      if (!tenantResult || !tenantResult.success) {
-        console.error('❌ [AdminDashboard] Failed to get tenant for chart data:', tenantResult?.error);
-        return; // Fail silently for chart data
+      if (!tenantId) return;
+
+      let collected;
+      if (reuseMonthlyFromDashboard && (collectedOverride !== null || monthlyCollection !== null)) {
+        collected = collectedOverride !== null ? collectedOverride : monthlyCollection;
+      } else {
+        const currentMonth = format(new Date(), 'yyyy-MM');
+        const { data: feeData } = await supabase
+          .from('student_fees')
+          .select('amount_paid')
+          .eq('tenant_id', tenantId)
+          .gte('payment_date', `${currentMonth}-01`);
+        collected = feeData?.reduce((sum, fee) => sum + (fee.amount_paid || 0), 0) || 0;
       }
-      
-      const tenantId = tenantResult.data.tenant.id;
-      
-      // Load fee collection data
-      const currentMonth = format(new Date(), 'yyyy-MM');
-      const { data: feeData } = await supabase
-        .from('student_fees')
-        .select('amount_paid')
-        .eq('tenant_id', tenantId)
-        .gte('payment_date', `${currentMonth}-01`);
 
       const { data: feeStructureData } = await supabase
         .from('fee_structure')
         .select('amount')
         .eq('tenant_id', tenantId);
 
-      const collected = feeData?.reduce((sum, fee) => sum + (fee.amount_paid || 0), 0) || 0;
       const totalDue = feeStructureData?.reduce((sum, fee) => sum + (fee.amount || 0), 0) || 0;
       const due = Math.max(0, totalDue - collected);
 
@@ -588,12 +479,10 @@ const AdminDashboard = ({ navigation }) => {
         { name: 'Collected', population: collected, color: '#4CAF50', legendFontColor: '#333', legendFontSize: 14 },
         { name: 'Due', population: due, color: '#F44336', legendFontColor: '#333', legendFontSize: 14 },
       ]);
-
     } catch (error) {
       console.error('Error loading chart data:', error);
     }
   };
-
   const chartConfig = {
     backgroundColor: '#ffffff',
     backgroundGradientFrom: '#ffffff',
@@ -649,17 +538,10 @@ const AdminDashboard = ({ navigation }) => {
   const loadClasses = async () => {
     try {
       setLoadingClasses(true);
-      
-      // Get current tenant for proper filtering
-      const tenantResult = await getCurrentUserTenantByEmail();
-      
-      if (!tenantResult.success) {
-        console.error('Failed to get tenant for classes:', tenantResult.error);
-        return;
-      }
-      
-      const tenantId = tenantResult.data.tenant.id;
-      
+      let tenantId = typeof getTenantId === 'function' ? getTenantId() : null;
+      if (!tenantId) tenantId = typeof getCachedTenantId === 'function' ? getCachedTenantId() : null;
+      if (!tenantId) return;
+
       const { data: classesData, error } = await supabase
         .from('classes')
         .select('id, class_name, section')
@@ -822,17 +704,10 @@ const AdminDashboard = ({ navigation }) => {
     try {
       setSavingEvent(true);
       
-      // 🚀 SIMPLIFIED: Get tenant ID with simple fallback
-      let currentTenantId;
-      try {
-        const tenantResult = await getCurrentUserTenantByEmail();
-        if (tenantResult?.success && tenantResult.data?.tenant?.id) {
-          currentTenantId = tenantResult.data.tenant.id;
-        } else {
-          throw new Error('No tenant available');
-        }
-      } catch (tenantError) {
-        console.error('🏢 Tenant error:', tenantError);
+      // Tenant ID from hook/cached
+      let currentTenantId = typeof getTenantId === 'function' ? getTenantId() : null;
+      if (!currentTenantId) currentTenantId = typeof getCachedTenantId === 'function' ? getCachedTenantId() : null;
+      if (!currentTenantId) {
         throw new Error('Unable to get tenant context. Please refresh and try again.');
       }
       
@@ -872,6 +747,7 @@ const AdminDashboard = ({ navigation }) => {
         throw new Error(`Failed to create event: ${error.message}`);
       }
       
+      
 
       // 🚀 SIMPLIFIED: Update local events list immediately
       const newEvent = {
@@ -890,7 +766,7 @@ const AdminDashboard = ({ navigation }) => {
       setIsEventModalVisible(false);
       setShowEventTypePicker(false);
       
-      const successMsg = `Event "${eventInput.title}" created successfully!`;
+      const successMsg = `Event \"${eventInput.title}\" created successfully!`;
       if (Platform.OS === 'web') {
         window.alert(successMsg);
       } else {
@@ -910,7 +786,6 @@ const AdminDashboard = ({ navigation }) => {
       setSavingEvent(false);
     }
   };
-
   const deleteEvent = async (eventItem) => {
     // 🚀 FIXED: Web-compatible confirmation dialog (same pattern as ManageClasses)
     const confirmDelete = Platform.OS === 'web' 
@@ -932,26 +807,9 @@ const AdminDashboard = ({ navigation }) => {
     
     try {
       
-      // 🚀 FIXED: Enhanced tenant validation with fallback to cached tenant
-      let currentTenantId = getTenantId();
-      
-      // If the new tenant system isn't ready, try the cached tenant ID
-      if (!currentTenantId) {
-        currentTenantId = getCachedTenantId();
-      }
-      
-      // If still no tenant ID, try to get it from the old system as fallback
-      if (!currentTenantId) {
-        try {
-          const tenantResult = await getCurrentUserTenantByEmail();
-          if (tenantResult?.success && tenantResult.data?.tenant?.id) {
-            currentTenantId = tenantResult.data.tenant.id;
-          }
-        } catch (fallbackError) {
-          console.error('🏢 Tenant fallback failed:', fallbackError);
-        }
-      }
-      
+      // Tenant id via hook or cached
+      let currentTenantId = typeof getTenantId === 'function' ? getTenantId() : null;
+      if (!currentTenantId) currentTenantId = typeof getCachedTenantId === 'function' ? getCachedTenantId() : null;
       if (!currentTenantId) {
         throw new Error('Unable to determine tenant context. Please refresh the page and try again.');
       }

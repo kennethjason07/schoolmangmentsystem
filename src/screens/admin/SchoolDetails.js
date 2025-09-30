@@ -71,10 +71,10 @@ const SchoolDetails = ({ navigation }) => {
 
   useEffect(() => {
     // 🚀 ENHANCED: Only load data when tenant is ready
-    if (isReady) {
-      loadSchoolDetails();
-      loadUpiSettings();
-    }
+    if (!isReady) return;
+    (async () => {
+      await Promise.all([loadSchoolDetails(), loadUpiSettings()]);
+    })();
   }, [isReady]);
 
   const loadSchoolDetails = async () => {
@@ -244,25 +244,9 @@ const SchoolDetails = ({ navigation }) => {
       console.log('Image type:', imageAsset.type || 'unknown');
       console.log('🚀 Enhanced tenant context - Tenant Name:', tenantName);
 
-      // Step 1: Check authentication status
-      console.log('Step 1: Checking authentication...');
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      console.log('Current user:', user?.id || 'Not authenticated');
-      console.log('Auth error:', authError);
-      
-      if (!user) {
+      // Step 1: Use current authenticated user from context for naming only
+      if (!user || !user.id) {
         throw new Error('User not authenticated. Please log in again.');
-      }
-
-      // Step 2: Test basic Supabase connection
-      console.log('Step 2: Testing Supabase connection...');
-      try {
-        const { data: testData, error: testError } = await supabase
-          .from('school_details')
-          .select('count', { count: 'exact', head: true });
-        console.log('Connection test result:', { testData, testError });
-      } catch (testErr) {
-        console.log('Connection test failed:', testErr);
       }
 
       // Step 3: Skip bucket checking - we know profiles bucket exists (used by profile pictures)
@@ -360,68 +344,47 @@ const SchoolDetails = ({ navigation }) => {
       console.log('Step 8: Updating state with new URL...');
       handleInputChange('logo_url', publicUrl);
       
-      // Step 9: Save the new logo URL to database with retry mechanism
+      // Step 9: Save the new logo URL to database with retry mechanism (single upsert)
       console.log('Step 9: Saving new logo URL to database...');
-      
       const saveToDatabase = async (retryCount = 0) => {
         const MAX_RETRIES = 3;
         const RETRY_DELAY = 1000; // 1 second
-        
         try {
-          const updatedSchoolData = { ...schoolData, logo_url: publicUrl };
-          console.log('Updating database with:', updatedSchoolData, `(Attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
-          
-          // 🚀 ENHANCED: Use tenant database for saving
-          const { data: existing } = await tenantDatabase.read('school_details');
-          
-          let saveResult;
-          if (existing && existing.length > 0) {
-            // Update existing record
-            saveResult = await tenantDatabase.update('school_details', existing[0].id, updatedSchoolData);
-          } else {
-            // Create new record
-            saveResult = await tenantDatabase.create('school_details', updatedSchoolData);
+          const tenantId = getTenantId();
+          if (!tenantId) throw new Error('No tenant context available');
+          const upsertPayload = { ...schoolData, logo_url: publicUrl, tenant_id: tenantId };
+          console.log('Upserting school_details with:', upsertPayload, `(Attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
+          // Fallback pattern for environments without unique tenant_id:
+          // Try update by tenant_id, otherwise insert
+          const { data: updatedRows, error: updateError } = await supabase
+            .from('school_details')
+            .update(upsertPayload)
+            .eq('tenant_id', tenantId)
+            .select();
+          if (updateError) throw updateError;
+          if (updatedRows && updatedRows.length > 0) {
+            setSchoolData(updatedRows[0]);
+            return updatedRows[0];
           }
-          
-          const { data: saveData, error: saveError } = saveResult;
-          
-          if (saveError) {
-            console.error(`Failed to save logo URL to database (attempt ${retryCount + 1}):`, saveError);
-            
-            // Check if this is a timeout or connection error that we can retry
-            if ((saveError.message?.includes('timeout') || 
-                 saveError.message?.includes('network') ||
-                 saveError.message?.includes('connection')) && 
-                retryCount < MAX_RETRIES) {
-              
-              console.log(`Retrying database save in ${RETRY_DELAY}ms...`);
-              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-              return await saveToDatabase(retryCount + 1);
-            }
-            
-            throw new Error('Failed to save logo URL: ' + saveError.message);
-          }
-          
-          console.log('Logo URL saved to database successfully:', saveData);
-          
-          // Update local state with saved data
-          if (saveData) {
-            setSchoolData(saveData);
-            console.log('Local state updated with saved data:', saveData);
-          }
-          
-          return saveData;
+          const { data: insertedRows, error: insertError } = await supabase
+            .from('school_details')
+            .insert(upsertPayload)
+            .select();
+          if (insertError) throw insertError;
+          const saved = insertedRows && insertedRows[0] ? insertedRows[0] : null;
+          if (saved) setSchoolData(saved);
+          return saved;
         } catch (dbError) {
-          if (retryCount < MAX_RETRIES && 
-              (dbError.message?.includes('timeout') || 
-               dbError.message?.includes('network') ||
-               dbError.message?.includes('connection'))) {
-            
+          if (
+            retryCount < MAX_RETRIES &&
+            (dbError.message?.includes('timeout') ||
+              dbError.message?.includes('network') ||
+              dbError.message?.includes('connection'))
+          ) {
             console.log(`Retrying database save due to error: ${dbError.message}`);
-            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
             return await saveToDatabase(retryCount + 1);
           }
-          
           throw dbError;
         }
       };
@@ -435,11 +398,7 @@ const SchoolDetails = ({ navigation }) => {
         return;
       }
       
-      // Step 10: Force component refresh to ensure UI updates
-      console.log('Step 10: Reloading school details to refresh UI...');
-      setTimeout(() => {
-        loadSchoolDetails();
-      }, 500);
+      // Step 10: Local state already updated; skip reloading to avoid extra network calls
       
       console.log('=== Upload completed successfully! ===');
       Alert.alert('Success', 'Logo uploaded successfully!');
@@ -575,113 +534,49 @@ const SchoolDetails = ({ navigation }) => {
     const clearFromDatabase = async (retryCount = 0) => {
       const MAX_RETRIES = 3;
       const RETRY_DELAY = 1000; // 1 second
-      
       try {
-        console.log(`Clearing logo from database (attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
-        const updatedSchoolData = { ...schoolData, logo_url: '' };
-        
-        // Use tenant database to update
-        console.log('🗑️ Reading existing school details...');
-        const { data: existing } = await tenantDatabase.read('school_details');
-        console.log('🗑️ Existing school details:', existing);
-        
-        if (existing && existing.length > 0) {
-          console.log('🗑️ Updating existing record with ID:', existing[0].id);
-          console.log('🗑️ Update data:', updatedSchoolData);
-          
-          // Try both tenantDatabase and direct supabase update
-          let saveResult;
-          try {
-            saveResult = await tenantDatabase.update('school_details', existing[0].id, updatedSchoolData);
-            console.log('🗑️ Tenant database update result:', saveResult);
-          } catch (tenantError) {
-            console.log('🗑️ Tenant database update failed, trying direct update:', tenantError);
-            
-            // Fallback to direct supabase update
-            const { data: directData, error: directError } = await supabase
-              .from('school_details')
-              .update(updatedSchoolData)
-              .eq('id', existing[0].id)
-              .select()
-              .single();
-            
-            saveResult = { data: directData, error: directError };
-            console.log('🗑️ Direct supabase update result:', saveResult);
-          }
-          
-          const { data: saveData, error: saveError } = saveResult;
-          console.log('🗑️ Final update result:', { saveData, saveError });
-                  
-          if (saveError) {
-            console.error(`Failed to clear logo (attempt ${retryCount + 1}):`, saveError);
-            
-            // Check if this is a timeout or connection error that we can retry
-            if ((saveError.message?.includes('timeout') || 
-                 saveError.message?.includes('network') ||
-                 saveError.message?.includes('connection')) && 
-                retryCount < MAX_RETRIES) {
-              
-              console.log(`Retrying logo clear in ${RETRY_DELAY}ms...`);
-              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-              return await clearFromDatabase(retryCount + 1);
-            }
-            
-            throw new Error('Failed to clear logo: ' + saveError.message);
-          }
-          
-          console.log('Logo cleared from database successfully');
-          console.log('Updated data from database:', saveData);
-          
-          // Update local state immediately
-          const clearedData = { ...saveData, logo_url: '' };
-          setSchoolData(clearedData);
-          console.log('Local state updated with cleared logo:', clearedData);
-          
-          return clearedData;
-        } else {
-          throw new Error('No school details found to update');
-        }
+        const tenantId = getTenantId();
+        if (!tenantId) throw new Error('No tenant context available');
+        console.log(`Clearing logo for tenant ${tenantId} (attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
+        const { data: saveData, error: saveError } = await supabase
+          .from('school_details')
+          .update({ logo_url: '' })
+          .eq('tenant_id', tenantId)
+          .select()
+          .single();
+        if (saveError) throw saveError;
+        const clearedData = saveData ? { ...saveData, logo_url: '' } : { ...schoolData, logo_url: '' };
+        setSchoolData(clearedData);
+        return clearedData;
       } catch (dbError) {
-        if (retryCount < MAX_RETRIES && 
-            (dbError.message?.includes('timeout') || 
-             dbError.message?.includes('network') ||
-             dbError.message?.includes('connection'))) {
-          
+        if (
+          retryCount < MAX_RETRIES &&
+          (dbError.message?.includes('timeout') ||
+            dbError.message?.includes('network') ||
+            dbError.message?.includes('connection'))
+        ) {
           console.log(`Retrying logo clear due to error: ${dbError.message}`);
-          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
           return await clearFromDatabase(retryCount + 1);
         }
-        
         throw dbError;
       }
     };
-    
+
     try {
       console.log('🗑️ Starting clear logo process...');
       setClearingLogo(true);
-      
       const result = await clearFromDatabase();
       console.log('🗑️ Clear logo process completed successfully:', result);
-      
       Alert.alert('Success', 'Logo cleared successfully!');
-      
-      // Reload school details to refresh UI
-      console.log('🗑️ Reloading school details to refresh UI...');
-      setTimeout(() => {
-        loadSchoolDetails();
-      }, 500);
     } catch (error) {
       console.error('Error clearing logo after all retries:', error);
       Alert.alert(
-        'Error', 
+        'Error',
         'Failed to clear logo. This might be due to a connection issue. Please check your internet connection and try again.',
         [
           { text: 'OK', style: 'default' },
-          {
-            text: 'Retry',
-            style: 'default',
-            onPress: () => clearLogo() // Retry the entire operation
-          }
+          { text: 'Retry', style: 'default', onPress: () => clearLogo() }
         ]
       );
     } finally {
@@ -768,26 +663,21 @@ const SchoolDetails = ({ navigation }) => {
         Alert.alert('Error', 'UPI ID is required');
         return;
       }
-      
       if (!validateUpiId(upiFormData.upi_id)) {
         Alert.alert('Error', 'Please enter a valid UPI ID (e.g., user@bank)');
         return;
       }
-      
       if (!upiFormData.upi_name.trim()) {
         Alert.alert('Error', 'UPI name is required');
         return;
       }
-      
       setUpiLoading(true);
-      
       // 🚀 ENHANCED: Use cached tenant ID
       const tenantId = getTenantId();
       if (!tenantId) {
         Alert.alert('Error', 'No tenant context available');
         return;
       }
-      
       const upiData = {
         tenant_id: tenantId,
         upi_id: upiFormData.upi_id.trim(),
@@ -796,9 +686,7 @@ const SchoolDetails = ({ navigation }) => {
         is_primary: upiFormData.is_primary,
         is_active: true,
       };
-      
       let result;
-      
       if (editingUpi) {
         // Update existing UPI setting
         result = await supabase
@@ -822,20 +710,21 @@ const SchoolDetails = ({ navigation }) => {
           .select()
           .single();
       }
-      
       const { data, error } = result;
-      
       if (error) {
         console.error('Error saving UPI setting:', error);
         Alert.alert('Error', 'Failed to save UPI setting: ' + error.message);
         return;
       }
-      
-      console.log('UPI setting saved:', data);
+      // Optimistic update instead of reloading
       setShowUpiModal(false);
-      await loadUpiSettings();
+      setUpiSettings(prev => {
+        if (editingUpi) {
+          return prev.map(u => (u.id === editingUpi.id ? data : u));
+        }
+        return [data, ...prev];
+      });
       Alert.alert('Success', editingUpi ? 'UPI setting updated successfully!' : 'UPI setting added successfully!');
-      
     } catch (error) {
       console.error('Exception saving UPI setting:', error);
       Alert.alert('Error', 'Failed to save UPI setting. Please try again.');
@@ -876,7 +765,8 @@ const SchoolDetails = ({ navigation }) => {
                 return;
               }
               
-              await loadUpiSettings();
+              // Optimistic update instead of reload
+              setUpiSettings(prev => prev.filter(u => u.id !== upiSetting.id));
               Alert.alert('Success', 'UPI setting deleted successfully!');
               
             } catch (error) {
@@ -923,7 +813,8 @@ const SchoolDetails = ({ navigation }) => {
         return;
       }
       
-      await loadUpiSettings();
+      // Optimistic update: set this as primary, unset others
+      setUpiSettings(prev => prev.map(u => ({ ...u, is_primary: u.id === upiSetting.id })));
       Alert.alert('Success', `"${upiSetting.upi_name}" is now set as the primary UPI ID.`);
       
     } catch (error) {
@@ -937,78 +828,44 @@ const SchoolDetails = ({ navigation }) => {
   const saveSchoolDetails = async () => {
     try {
       setSaving(true);
-
       // Validate required fields
       if (!schoolData.name.trim()) {
         Alert.alert('Error', 'School/College name is required');
         return;
       }
+      console.log('🚀 SchoolDetails: Saving school data (upsert)...');
+      const tenantId = getTenantId();
+      if (!tenantId) throw new Error('No tenant context available');
+      const payload = { ...schoolData, tenant_id: tenantId };
+      // Fallback pattern for environments without a unique tenant_id constraint:
+      // 1) Try update by tenant_id
+      // 2) If no row updated, insert
+      const { data: updatedRows, error: updateError } = await supabase
+        .from('school_details')
+        .update(payload)
+        .eq('tenant_id', tenantId)
+        .select();
+      if (updateError) throw updateError;
 
-      console.log('🚀 SchoolDetails: Saving school data with enhanced tenant system...');
-      console.log('🚀 SchoolDetails: Tenant:', tenantName);
-      console.log('🚀 SchoolDetails: Data to save:', schoolData);
-      
-      // 🚀 ENHANCED: Check if school details record exists
-      const { data: existing } = await tenantDatabase.read('school_details');
-      
-      let result;
-      if (existing && existing.length > 0) {
-        // Update existing record
-        console.log('🚀 Updating existing school details...');
-        result = await tenantDatabase.update('school_details', existing[0].id, schoolData);
+      if (updatedRows && updatedRows.length > 0) {
+        setSchoolData(updatedRows[0]);
       } else {
-        // Create new record
-        console.log('🚀 Creating new school details record...');
-        result = await tenantDatabase.create('school_details', schoolData);
-      }
-      
-      const { data, error } = result;
-      console.log('🚀 SchoolDetails: Enhanced save result:', { 
-        hasData: !!data, 
-        error: error?.message,
-        operation: existing?.length > 0 ? 'update' : 'create'
-      });
-
-      if (error) {
-        console.error('❌ Save error details:', error);
-        throw error;
+        const { data: insertedRows, error: insertError } = await supabase
+          .from('school_details')
+          .insert(payload)
+          .select();
+        if (insertError) throw insertError;
+        if (insertedRows && insertedRows.length > 0) setSchoolData(insertedRows[0]);
       }
 
-      if (data) {
-        setSchoolData(data);
-        console.log('✅ School details saved successfully for tenant:', tenantName);
-      }
-      
-      // Show success message and navigate back to dashboard
-      Alert.alert(
-        'Success', 
-        'School details saved successfully!',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Navigate back to dashboard
-              navigation.goBack();
-            }
-          }
-        ]
-      );
+      Alert.alert('Success', 'School details saved successfully!', [
+        { text: 'OK', onPress: () => navigation.goBack() }
+      ]);
     } catch (error) {
       console.error('❌ Save exception:', error);
-      // Show error message and navigate back to dashboard
-      Alert.alert(
-        'Error', 
-        'Failed to save school details: ' + (error.message || error),
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Navigate back to dashboard even on error
-              navigation.goBack();
-            }
-          }
-        ]
-      );
+      Alert.alert('Error', 'Failed to save school details: ' + (error.message || error), [
+        { text: 'OK', onPress: () => navigation.goBack() }
+      ]);
     } finally {
       setSaving(false);
     }

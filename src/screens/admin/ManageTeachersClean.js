@@ -104,12 +104,8 @@ const ManageTeachers = ({ navigation, route }) => {
       setForm(prevForm => ({ ...prevForm, subjects: validSubjects }));
     }
 
-    // Load sections for all selected classes
-    if (form.classes.length > 0) {
-      loadSectionsForClasses(form.classes);
-    } else {
-      setSections([]);
-    }
+    // Sections can be derived from classes in state; no extra API calls needed
+    setSections([]);
 
   }, [form.classes, subjects]);
   
@@ -136,12 +132,11 @@ const ManageTeachers = ({ navigation, route }) => {
       
       console.log('🚀 ManageTeachers: Loading teachers with enhanced tenant system:', tenantId);
       
-      // 🚀 Use enhanced tenant database for teachers
+      // 🚀 Use enhanced tenant database for teachers (select only needed columns)
       const { data: teachersData, error: teachersError } = await tenantDatabase.read(
         'teachers', 
         {}, 
-        '*',
-        { orderBy: { column: 'created_at', ascending: false } }
+        'id, name, phone, qualification, salary_amount, is_class_teacher'
       );
       
       console.log('🏢 ManageTeachers: Teachers query result:', {
@@ -158,8 +153,8 @@ const ManageTeachers = ({ navigation, route }) => {
       // 🚀 Enhanced: Direct parallel queries using tenantDatabase
       console.log('🏢 ManageTeachers: Fetching classes and subjects...');
       const [classesResult, subjectsResult] = await Promise.all([
-        tenantDatabase.read('classes', {}, '*', { orderBy: { column: 'class_name', ascending: true } }),
-        tenantDatabase.read('subjects', {}, '*', { orderBy: { column: 'name', ascending: true } })
+        tenantDatabase.read('classes', {}, 'id, class_name, section, class_teacher_id'),
+        tenantDatabase.read('subjects', {}, 'id, name, class_id')
       ]);
       
       // Get classes and subjects data from the parallel queries
@@ -233,60 +228,7 @@ const ManageTeachers = ({ navigation, route }) => {
     console.log('🏢 ManageTeachers: Load more called but pagination disabled');
   };
 
-  const loadSections = async (classId) => {
-    // 🚀 Enhanced: Use enhanced tenant database
-    const { data, error } = await tenantDatabase.read(
-      'classes',
-      { id: classId },
-      'section'
-    );
-    if (error) {
-      return;
-    }
-    setSections(data?.map(item => ({ id: item.section, section_name: item.section })) || []);
-  };
-
-  const loadSectionsForClasses = async (classIds) => {
-    if (!classIds || classIds.length === 0) {
-      setSections([]);
-      return;
-    }
-    
-    try {
-      // 🚀 Enhanced: Use getTenantId from enhanced tenant system
-      const tenantId = getTenantId();
-      if (!tenantId) {
-        console.warn('🏢 ManageTeachers: No tenant context for loading sections');
-        setSections([]);
-        return;
-      }
-      
-      // 🚀 Use enhanced tenant database for sections
-      const { data, error } = await tenantDatabase.read(
-        'classes',
-        { id: { in: classIds } },
-        'section',
-        { filters: { section: { not: null } } }
-      );
-      
-      if (error) {
-        console.warn('🏢 ManageTeachers: Error loading sections:', error.message);
-        setSections([]);
-        return;
-      }
-      
-      // Extract unique sections
-      const uniqueSections = [...new Set((data || []).map(item => item.section))]
-        .filter(section => section && section.trim() !== '')
-        .map(section => ({ id: section, section_name: section }));
-      
-      setSections(uniqueSections);
-      console.log('🏢 ManageTeachers: Loaded', uniqueSections.length, 'unique sections');
-    } catch (error) {
-      console.warn('🏢 ManageTeachers: Error in loadSectionsForClasses:', error.message);
-      setSections([]);
-    }
-  };
+  // Removed section-loading API calls. Sections are derived from classes state when needed.
 
   // Multi-select logic
   const toggleSelect = (arr, value) => arr.includes(value) ? arr.filter(v => v !== value) : [...arr, value];
@@ -301,67 +243,27 @@ const ManageTeachers = ({ navigation, route }) => {
     setSelectedTeacher(teacher);
 
     try {
-      // 🚀 Enhanced: Fetch current teacher's subject and class assignments using tenant database
+      // Lightweight fetch: just the subject IDs for this teacher
       const { data: teacherSubjects, error: tsError } = await tenantDatabase.read(
         'teacher_subjects',
         { teacher_id: teacher.id },
-        `*,
-         subjects(
-           id,
-           name,
-           class_id,
-           academic_year,
-           is_optional,
-           classes(
-             class_name,
-             section
-           )
-         )`
+        'subject_id'
       );
-      
       if (tsError) throw tsError;
 
-      // 🚀 Enhanced: Fetch direct class teacher assignments using tenant database
-      const { data: directClassAssignments, error: dcError } = await tenantDatabase.read(
-        'classes',
-        { class_teacher_id: teacher.id },
-        'id'
-      );
-      
-      if (dcError) {
-        console.warn('Error loading direct class assignments:', dcError);
-      }
+      // Subject IDs
+      const subjectIds = (teacherSubjects || []).map(ts => ts.subject_id);
 
-      // Extract subject and class IDs from teacher assignments
-      const subjectIds = [];
-      const classIds = new Set(); // Use Set to avoid duplicates
-      const sections = {};
-
-      // Add classes from subject assignments
-      teacherSubjects?.forEach(ts => {
-        if (ts.subject_id) {
-          subjectIds.push(ts.subject_id);
-        }
-        // Get class ID from the subject's class_id
-        if (ts.subjects?.class_id) {
-          classIds.add(ts.subjects.class_id);
-        }
-      });
-
-      // Add direct class teacher assignments
-      directClassAssignments?.forEach(assignment => {
-        classIds.add(assignment.id);
-      });
-
-      const finalClassIds = Array.from(classIds);
-
-      console.log('Teacher assignments loaded:', {
-        subjectIds,
-        classIds: finalClassIds,
-        directClassAssignments,
-        teacherSubjects,
-        teacher: teacher.name
-      });
+      // Derive class IDs from:
+      // - classes already in memory where this teacher is class teacher
+      // - plus classes that correspond to the teacher's subject assignments
+      const directClassIds = (classes || [])
+        .filter(c => c.class_teacher_id === teacher.id)
+        .map(c => c.id);
+      const subjectClassIds = (subjects || [])
+        .filter(s => subjectIds.includes(s.id))
+        .map(s => s.class_id);
+      const finalClassIds = Array.from(new Set([...directClassIds, ...subjectClassIds]));
 
       const formData = {
         name: teacher.name,
@@ -372,10 +274,9 @@ const ManageTeachers = ({ navigation, route }) => {
         classes: finalClassIds,
         salary: teacher.salary_amount ? String(teacher.salary_amount) : '',
         qualification: teacher.qualification,
-        sections: sections,
+        sections: {},
       };
 
-      console.log('Setting form data:', formData);
       setForm(formData);
     } catch (error) {
       console.error('Error loading teacher assignments:', error);
@@ -512,127 +413,63 @@ const ManageTeachers = ({ navigation, route }) => {
       console.log('Saving assignments for teacher:', teacherId);
       console.log('Form data:', { subjects: form.subjects, classes: form.classes, sections: form.sections });
 
-      // 🚀 Enhanced: Get tenant ID from enhanced system
       const tenantId = getTenantId();
       if (!tenantId) {
         throw new Error('No tenant context available for assignments');
       }
-      
-      console.log('🏢 ManageTeachers: Assignment validation passed');
 
-      // 1. Handle subject assignments first
-      // Get all existing subject assignments for this teacher using enhanced tenant database
-      const { data: existingAssignments, error: fetchError } = await tenantDatabase.read(
+      // 1) Subject assignments: delete existing then insert selected (no prior read)
+      const { error: deleteError } = await tenantDatabase.delete(
         'teacher_subjects',
-        { teacher_id: teacherId },
-        '*'
+        { teacher_id: teacherId }
       );
-      if (fetchError) {
-        console.error('Failed to fetch existing assignments:', fetchError);
-        throw new Error('Failed to fetch existing assignments');
+      if (deleteError) {
+        console.error('Failed to delete existing assignments:', deleteError);
+        throw new Error('Failed to update assignments');
       }
 
-      console.log('Existing subject assignments:', existingAssignments);
-
-      // Delete existing subject assignments
-      if (existingAssignments.length > 0) {
-        const { error: deleteError } = await tenantDatabase.delete(
-          'teacher_subjects',
-          { teacher_id: teacherId }
-        );
-        if (deleteError) {
-          console.error('Failed to delete assignments:', deleteError);
-          throw new Error('Failed to update assignments');
-        }
-        console.log('Deleted existing subject assignments');
-      }
-
-      // Create new assignments for selected subjects
-      const assignments = form.subjects.map(subjectId => ({
-        teacher_id: teacherId,
-        subject_id: subjectId,
-      }));
-
-      console.log('New subject assignments to insert:', assignments);
-
-      // Insert new subject assignments if there are any
+      const assignments = form.subjects.map(subjectId => ({ teacher_id: teacherId, subject_id: subjectId }));
       if (assignments.length > 0) {
-        const { data: insertedData, error: insertError } = await tenantDatabase.create(
-          'teacher_subjects',
-          assignments
-        );
+        const { error: insertError } = await tenantDatabase.create('teacher_subjects', assignments);
         if (insertError) {
           console.error('Failed to create assignments:', insertError);
           throw new Error('Failed to create assignments');
         }
-        console.log('Successfully inserted subject assignments:', insertedData);
-      } else {
-        console.log('No subjects selected, no subject assignments to insert');
       }
 
-      // 2. Handle direct class teacher assignments
-      // First, remove this teacher from all existing class teacher assignments
-      const { data: currentClassTeacherAssignments } = await tenantDatabase.read(
-        'classes',
-        { class_teacher_id: teacherId },
-        'id, class_name'
-      );
-
-      console.log('Current class teacher assignments:', currentClassTeacherAssignments);
-
-      // Remove this teacher from all classes where they were class teacher
-      if (currentClassTeacherAssignments && currentClassTeacherAssignments.length > 0) {
-        const { error: removeError } = await tenantDatabase.update(
-          'classes',
-          { class_teacher_id: teacherId },
-          { class_teacher_id: null }
-        );
-        if (removeError) {
-          console.error('Failed to remove from class teacher assignments:', removeError);
-          console.warn('Could not remove previous class teacher assignments');
-        } else {
-          console.log('Removed teacher from previous class teacher assignments');
-        }
+      // 2) Class teacher assignments: clear previous, then bulk-assign using in(...)
+      const { error: clearError } = await supabase
+        .from('classes')
+        .update({ class_teacher_id: null })
+        .eq('tenant_id', tenantId)
+        .eq('class_teacher_id', teacherId);
+      if (clearError) {
+        console.warn('Could not clear previous class teacher assignments:', clearError.message);
       }
 
-      // Now assign this teacher to the selected classes
       if (form.classes.length > 0) {
-        console.log('Assigning teacher to classes:', form.classes);
-        
-        // Update each selected class to have this teacher as class_teacher_id
-        for (const classId of form.classes) {
-          const { error: assignError } = await tenantDatabase.update(
-            'classes',
-            { id: classId },
-            { class_teacher_id: teacherId }
-          );
-          
-          if (assignError) {
-            console.error(`Failed to assign teacher to class ${classId}:`, assignError);
-            console.warn(`Could not assign teacher to class ${classId}`);
-          } else {
-            console.log(`Successfully assigned teacher to class ${classId}`);
-          }
+        const { error: bulkAssignError } = await supabase
+          .from('classes')
+          .update({ class_teacher_id: teacherId })
+          .eq('tenant_id', tenantId)
+          .in('id', form.classes);
+        if (bulkAssignError) {
+          console.warn('Bulk assign to classes failed:', bulkAssignError.message);
         }
       }
 
-      // 3. Update teacher's is_class_teacher flag
+      // 3) Update teacher flag
       const { error: updateTeacherError } = await tenantDatabase.update(
         'teachers',
         { id: teacherId },
         { is_class_teacher: form.classes.length > 0 }
       );
-      
       if (updateTeacherError) {
-        console.error('Failed to update teacher class teacher flag:', updateTeacherError);
-        console.warn('Could not update teacher\'s class teacher status');
-      } else {
-        console.log('Updated teacher class teacher status:', form.classes.length > 0);
+        console.warn("Could not update teacher's class teacher status:", updateTeacherError.message);
       }
-      
     } catch (err) {
       console.error('Error handling assignments:', err);
-      throw err; // Re-throw to be caught by the caller
+      throw err;
     }
   };
   const handleDelete = async (teacher) => {
@@ -794,6 +631,13 @@ const ManageTeachers = ({ navigation, route }) => {
         }
       ]
     );
+  };
+
+  // Pull to refresh
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadData(0, true);
+    setRefreshing(false);
   };
 
   // Enhanced filtering and sorting - simplified for performance
