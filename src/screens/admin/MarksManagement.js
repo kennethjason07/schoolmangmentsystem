@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, Platform, Alert, ActivityIndicator, Share } from 'react-native';
 import Header from '../../components/Header';
 import { Picker } from '@react-native-picker/picker';
@@ -6,8 +6,18 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Print from 'expo-print';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
+import useDataCache from '../../hooks/useDataCache';
+import { debounce } from '../../utils/debounce';
+import { batchReplace, batchUpsert } from '../../utils/batchOperations';
 
 const MarksManagement = () => {
+  // Initialize cache for reducing API calls
+  const cache = useDataCache(10 * 60 * 1000); // 10 minute cache
+  
+  // Cache user validation for session
+  const [validatedUser, setValidatedUser] = useState(null);
+  const [userValidated, setUserValidated] = useState(false);
+  
   const [loading, setLoading] = useState(true);
   const [classes, setClasses] = useState([]);
   const [sections, setSections] = useState([]);
@@ -32,30 +42,68 @@ const MarksManagement = () => {
     loadAllData();
   }, []);
 
+  // Create debounced functions to prevent excessive API calls
+  const debouncedLoadMarks = useMemo(
+    () => debounce(() => {
+      if (selectedClass && selectedSection && selectedSubject && examDate) {
+        loadMarks();
+      }
+    }, 500),
+    [selectedClass, selectedSection, selectedSubject, examDate]
+  );
+  
+  const debouncedLoadMarksHistory = useMemo(
+    () => debounce(() => {
+      if (selectedClass && selectedSection && selectedSubject && examDate) {
+        loadMarksHistory();
+      }
+    }, 700), // Slightly longer delay for history
+    [selectedClass, selectedSection, selectedSubject, examDate]
+  );
+  
   useEffect(() => {
     if (selectedClass && selectedSection && selectedSubject && examDate) {
-      loadMarks();
-      loadMarksHistory();
+      debouncedLoadMarks();
+      debouncedLoadMarksHistory();
     }
-  }, [selectedClass, selectedSection, selectedSubject, examDate]);
+  }, [selectedClass, selectedSection, selectedSubject, examDate, debouncedLoadMarks, debouncedLoadMarksHistory]);
 
   const loadAllData = async () => {
     try {
-      // Load classes
-      const { data: classData, error: classError } = await dbHelpers.getClasses();
-      if (classError) throw classError;
-      setClasses(classData);
+      // Check cache first for classes
+      const cachedClasses = cache.get('classes');
+      let classData;
+      
+      if (cachedClasses) {
+        console.log('📦 Using cached classes data');
+        classData = cachedClasses;
+        setClasses(classData);
+      } else {
+        const { data, error: classError } = await dbHelpers.getClasses();
+        if (classError) throw classError;
+        classData = data;
+        cache.set('classes', classData);
+        setClasses(classData);
+      }
 
       // Extract unique sections from classData
       const uniqueSections = [...new Set(classData.map(cls => cls.section).filter(s => s))];
-      setSections(uniqueSections); // Store as simple array
+      setSections(uniqueSections);
 
-      // Load subjects
-      const { data: subjectData, error: subjectError } = await supabase
-        .from('subjects')
-        .select('*');
-      if (subjectError) throw subjectError;
-      setSubjects(subjectData);
+      // Check cache for subjects
+      const cachedSubjects = cache.get('subjects');
+      
+      if (cachedSubjects) {
+        console.log('📦 Using cached subjects data');
+        setSubjects(cachedSubjects);
+      } else {
+        const { data: subjectData, error: subjectError } = await supabase
+          .from('subjects')
+          .select('*');
+        if (subjectError) throw subjectError;
+        cache.set('subjects', subjectData);
+        setSubjects(subjectData);
+      }
 
       // Load students (initially empty)
       setStudents([]);
@@ -69,6 +117,15 @@ const MarksManagement = () => {
 
   const loadMarksHistory = async () => {
     try {
+      const cacheKey = `marks_history_${selectedClass}_${selectedSubject}_${selectedExamType}`;
+      const cachedHistory = cache.get(cacheKey);
+      
+      if (cachedHistory) {
+        console.log('📦 Using cached marks history');
+        setMarksHistory(cachedHistory);
+        return;
+      }
+      
       const { data, error } = await supabase
         .from('marks')
         .select('*')
@@ -79,6 +136,7 @@ const MarksManagement = () => {
 
       if (error) throw error;
       setMarksHistory(data || []);
+      cache.set(cacheKey, data || []);
     } catch (error) {
       console.error('Error loading marks history:', error);
     }
@@ -86,14 +144,62 @@ const MarksManagement = () => {
 
   const loadStudents = async (classId, section) => {
     try {
-      const { data, error } = await dbHelpers.getStudentsByClass(classId, section);
-      if (error) throw error;
-      setStudents(data);
+      // Check cache for students
+      const cacheKey = `students_${classId}_${section || 'all'}`;
+      const cachedStudents = cache.get(cacheKey);
+      
+      if (cachedStudents) {
+        console.log('📦 Using cached students data');
+        setStudents(cachedStudents);
+      } else {
+        const { data, error } = await dbHelpers.getStudentsByClass(classId, section);
+        if (error) throw error;
+        cache.set(cacheKey, data);
+        setStudents(data);
+      }
     } catch (error) {
       console.error('Error loading students:', error);
       Alert.alert('Error', 'Failed to load students');
     }
   };
+  
+  // Cache user validation for session to avoid redundant API calls
+  const validateUserOnce = useCallback(async () => {
+    if (userValidated) {
+      return validatedUser;
+    }
+    
+    try {
+      const { getCurrentUserId } = require('../../utils/supabase');
+      const currentUserId = await getCurrentUserId();
+      
+      if (!currentUserId) {
+        setUserValidated(true);
+        setValidatedUser(null);
+        return null;
+      }
+      
+      const { data: currentUser } = await supabase
+        .from(TABLES.USERS)
+        .select('tenant_id')
+        .eq('id', currentUserId)
+        .single();
+      
+      const result = {
+        userId: currentUserId,
+        tenantId: currentUser?.tenant_id
+      };
+      
+      setValidatedUser(result);
+      setUserValidated(true);
+      return result;
+    } catch (error) {
+      console.error('Error validating user:', error);
+      setUserValidated(true);
+      setValidatedUser(null);
+      return null;
+    }
+  }, [userValidated, validatedUser]);
 
   // Format date as dd-mm-yyyy
   const formatDateDMY = (date) => {
@@ -120,35 +226,14 @@ const MarksManagement = () => {
         return;
       }
 
-      // Get current user's tenant_id for RLS policy compliance
-      const { getCurrentUserId } = require('../../utils/supabase');
-      const currentUserId = await getCurrentUserId();
+      // Use cached user validation to avoid redundant API calls
+      const userInfo = await validateUserOnce();
       
-      if (!currentUserId) {
+      if (!userInfo || !userInfo.tenantId) {
         throw new Error('User authentication required');
       }
-      
-      const { data: currentUser } = await supabase
-        .from(TABLES.USERS)
-        .select('tenant_id')
-        .eq('id', currentUserId)
-        .single();
-      
-      const userTenantId = currentUser?.tenant_id;
-      
-      if (!userTenantId) {
-        throw new Error('User tenant information not found');
-      }
 
-      // Delete existing marks for this class/subject/date
-      await supabase
-        .from('marks')
-        .delete()
-        .eq('class_id', selectedClass)
-        .eq('subject_id', selectedSubject)
-        .eq('exam_date', examDateStr);
-
-      // Insert new marks
+      // Prepare records for batch operation
       const records = Object.entries(marks).map(([studentId, mark]) => ({
         class_id: selectedClass,
         student_id: studentId,
@@ -156,15 +241,35 @@ const MarksManagement = () => {
         exam_date: examDateStr,
         mark: parseInt(mark),
         exam_type: selectedExamType,
-        tenant_id: userTenantId
+        tenant_id: userInfo.tenantId
       }));
 
-      await supabase
-        .from('marks')
-        .insert(records);
+      if (records.length === 0) {
+        Alert.alert('Error', 'No marks to save');
+        return;
+      }
+
+      // Use batch replace operation (delete existing + insert new in one operation)
+      const whereCondition = {
+        class_id: selectedClass,
+        subject_id: selectedSubject,
+        exam_date: examDateStr,
+        tenant_id: userInfo.tenantId
+      };
+      
+      console.log('📦 Using batch replace for marks:', records.length, 'records');
+      const { error } = await batchReplace('marks', whereCondition, records);
+      
+      if (error) {
+        throw error;
+      }
 
       Alert.alert('Success', 'Marks saved successfully!');
       setEditMode({});
+      
+      // Invalidate relevant cache entries
+      cache.invalidate(`marks_${selectedClass}_${selectedSubject}_${examDateStr}`);
+      
     } catch (error) {
       console.error('Error saving marks:', error);
       Alert.alert('Error', 'Failed to save marks');
@@ -238,6 +343,15 @@ const MarksManagement = () => {
   const loadMarks = async () => {
     try {
       const examDateStr = formatDateDMY(examDate);
+      const cacheKey = `marks_${selectedClass}_${selectedSubject}_${examDateStr}`;
+      const cachedMarks = cache.get(cacheKey);
+      
+      if (cachedMarks) {
+        console.log('📦 Using cached marks data');
+        setMarks(cachedMarks);
+        return;
+      }
+      
       const { data, error } = await supabase
         .from('marks')
         .select('*')
@@ -252,6 +366,7 @@ const MarksManagement = () => {
         marksData[record.student_id] = record.mark;
       });
       setMarks(marksData);
+      cache.set(cacheKey, marksData);
     } catch (error) {
       console.error('Error loading marks:', error);
       Alert.alert('Error', 'Failed to load marks');
