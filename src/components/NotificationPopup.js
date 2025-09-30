@@ -83,25 +83,26 @@ const NotificationPopup = ({
         throw new Error('No tenant ID available');
       }
 
-      // Build query based on user type
-      let query = supabase
-        .from(TABLES.NOTIFICATIONS)
-        .select('*')
-        .eq('tenant_id', tenantId);
-
-      // Add user-specific filters
-      if (userType === 'Student' && user?.linked_student_id) {
-        query = query.eq('student_id', user.linked_student_id);
-      } else if (userType === 'Parent' && user?.linked_student_id) {
-        query = query.eq('student_id', user.linked_student_id);
-      } else if (userType === 'Teacher' && user?.id) {
-        query = query.eq('teacher_id', user.id);
-      } else if (userType === 'Admin') {
-        query = query.is('student_id', null).is('teacher_id', null);
-      }
-
-      const { data, error } = await query
-        .order('created_at', { ascending: false })
+      // Use notification_recipients table to get user-specific notifications
+      // This is the correct approach since notifications table doesn't have student_id/teacher_id columns
+      const { data, error } = await supabase
+        .from('notification_recipients')
+        .select(`
+          id,
+          is_read,
+          read_at,
+          tenant_id,
+          notifications!inner (
+            id,
+            type,
+            message,
+            created_at,
+            tenant_id
+          )
+        `)
+        .eq('recipient_id', user.id)
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false, foreignTable: 'notifications' })
         .limit(50);
 
       if (error) {
@@ -110,7 +111,26 @@ const NotificationPopup = ({
         return;
       }
 
-      setNotifications(data || []);
+      // Transform the notification_recipients data to match expected format
+      const transformedNotifications = (data || []).map(recipient => {
+        const notification = recipient.notifications;
+        const rawMessage = notification?.message || '';
+        const computedTitle = rawMessage
+          ? (rawMessage.length > 50 ? rawMessage.substring(0, 50) + '...' : rawMessage)
+          : 'Notification';
+        return {
+          id: notification.id,
+          title: computedTitle,
+          message: rawMessage,
+          type: notification.type || 'general',
+          created_at: notification.created_at,
+          is_read: recipient.is_read,
+          read_at: recipient.read_at,
+          recipientId: recipient.id // Store recipient ID for marking as read
+        };
+      });
+
+      setNotifications(transformedNotifications);
     } catch (err) {
       console.error('Notification fetch error:', err);
       setError('Failed to load notifications');
@@ -162,17 +182,24 @@ const NotificationPopup = ({
         return;
       }
       
-      // For non-parent users, use the old system
+      // For non-parent users, update notification_recipients table
       const tenantId = await getUserTenantId();
       if (!tenantId) return;
 
+      // Find the notification in the current list to get recipient ID
+      const notification = notifications.find(n => n.id === notificationId);
+      if (!notification || !notification.recipientId) {
+        console.warn('Could not find recipient ID for notification:', notificationId);
+        return;
+      }
+
       const { error } = await supabase
-        .from(TABLES.NOTIFICATIONS)
+        .from('notification_recipients')
         .update({ 
           is_read: true,
           read_at: new Date().toISOString()
         })
-        .eq('id', notificationId)
+        .eq('id', notification.recipientId)
         .eq('tenant_id', tenantId);
 
       if (error) {
@@ -205,15 +232,19 @@ const NotificationPopup = ({
       const unreadNotifications = notifications.filter(n => !n.is_read);
       if (unreadNotifications.length === 0) return;
 
-      const notificationIds = unreadNotifications.map(n => n.id);
+      const recipientIds = unreadNotifications.map(n => n.recipientId).filter(Boolean);
+      if (recipientIds.length === 0) {
+        console.warn('No recipient IDs found for unread notifications');
+        return;
+      }
 
       const { error } = await supabase
-        .from(TABLES.NOTIFICATIONS)
+        .from('notification_recipients')
         .update({ 
           is_read: true,
           read_at: new Date().toISOString()
         })
-        .in('id', notificationIds)
+        .in('id', recipientIds)
         .eq('tenant_id', tenantId);
 
       if (error) {

@@ -4,6 +4,8 @@ import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
+import { generateUnifiedReceiptHTML } from '../../utils/unifiedReceiptTemplate';
 import { LineChart } from 'react-native-chart-kit';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
@@ -308,7 +310,7 @@ export default function StudentAttendanceMarks({ route, navigation }) {
         class: student.classes?.class_name || 'N/A',
         rollNo: student.roll_no || 'N/A',
         section: student.classes?.section || '',
-        profilePicUrl: '',
+        profilePicUrl: student.profile_pic_url || student.avatar_url || '',
         admissionNo: student.admission_no || 'N/A',
         dob: student.dob ? formatDateForDisplay(student.dob) : 'N/A',
         gender: student.gender || 'N/A',
@@ -935,11 +937,16 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                       <View style={styles.unifiedIconContainer}>
                         <Ionicons name="analytics" size={20} color="#2196F3" />
                       </View>
-                      <View>
+                      <View style={{ flex: 1, overflow: 'hidden' }}>
                         <Text style={styles.unifiedCardTitle}>
                           {showOverallAttendance ? 'Overall Attendance' : 'Monthly Attendance'}
                         </Text>
-                        <Text style={styles.unifiedCardSubtitle}>
+                        <Text 
+                          key={`subtitle-${showOverallAttendance ? 'overall' : 'monthly'}-${selectedMonth}`}
+                          style={styles.unifiedCardSubtitle}
+                          numberOfLines={2}
+                          ellipsizeMode="tail"
+                        >
                           {showOverallAttendance
                             ? `All time • ${allPresentCount} of ${allRecords.length} days`
                             : `${formatMonthYearForDisplay(selectedMonth)} • ${stats.present} of ${total} days`
@@ -947,7 +954,10 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                         </Text>
                       </View>
                     </View>
-                    <View style={styles.unifiedPercentageBadge}>
+                    <View 
+                      key={`percentage-${showOverallAttendance ? 'overall' : 'monthly'}`}
+                      style={styles.unifiedPercentageBadge}
+                    >
                       <Text style={styles.unifiedPercentageText}>
                         {barPercent}%
                       </Text>
@@ -973,9 +983,9 @@ export default function StudentAttendanceMarks({ route, navigation }) {
                   </View>
 
                   <View style={styles.unifiedBottomSection}>
-                    <View style={styles.unifiedStatsRow}>
+                    <View key={`stats-${showOverallAttendance ? 'overall' : 'monthly'}`} style={styles.unifiedStatsRow}>
                       <View style={styles.unifiedStatItem}>
-                        <Text style={styles.unifiedStatNumber}>{total}</Text>
+                        <Text style={styles.unifiedStatNumber}>{showOverallAttendance ? allRecords.length : total}</Text>
                         <Text style={styles.unifiedStatLabel}>Total Days</Text>
                       </View>
                       <View style={styles.unifiedStatItem}>
@@ -1415,90 +1425,178 @@ export default function StudentAttendanceMarks({ route, navigation }) {
               </View>
               {/* Download Button */}
               <TouchableOpacity style={styles.downloadBtn} onPress={async () => {
-                function getCalendarTableHtml(month, year, attendanceData) {
-                  const firstDay = new Date(year, month, 1);
-                  const lastDay = new Date(year, month + 1, 0);
-                  const startWeekday = firstDay.getDay();
-                  const daysInMonth = lastDay.getDate();
-                  let html = '<table class="calendar-table"><tr>';
-                  ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => {
-                    html += `<th>${d}</th>`;
-                  });
-                  html += '</tr><tr>';
-                  for (let i = 0; i < startWeekday; i++) html += '<td></td>';
-                  for (let day = 1; day <= daysInMonth; day++) {
-                    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-                    const status = attendanceData[dateStr];
-                    let bg = '';
-                    if (status === 'present') bg = 'background:#4CAF50;color:#fff;';
-                    else if (status === 'absent') bg = 'background:#F44336;color:#fff;';
-                    else if (status === 'late') bg = 'background:#FF9800;color:#fff;';
-                    else if (status === 'excused') bg = 'background:#9C27B0;color:#fff;';
-                    html += `<td style="${bg}">${day}</td>`;
-                    if ((startWeekday + day) % 7 === 0) html += '</tr><tr>';
-                  }
-                  html += '</tr></table>';
-                  return html;
-                }
-                const calendarHtml = getCalendarTableHtml(month - 1, year, attendanceData);
-                const barChartHtml = `
-                  <div style="display:flex;justify-content:space-around;margin:18px 0 8px 0;">
-                    <div style="text-align:center;"><div style="height:${stats.present*2}px;width:24px;background:#4CAF50;margin-bottom:4px;"></div><div style="font-size:13px;">Present</div></div>
-                    <div style="text-align:center;"><div style="height:${stats.absent*2}px;width:24px;background:#F44336;margin-bottom:4px;"></div><div style="font-size:13px;">Absent</div></div>
-                    <div style="text-align:center;"><div style="height:${stats.late*2}px;width:24px;background:#FF9800;margin-bottom:4px;"></div><div style="font-size:13px;">Late</div></div>
-                    <div style="text-align:center;"><div style="height:${stats.excused*2}px;width:24px;background:#9C27B0;margin-bottom:4px;"></div><div style="font-size:13px;">Excused</div></div>
-                  </div>
-                `;
-
-                const htmlContent = `
-                  <html>
-                    <head>
-                      <style>
-                        body { font-family: Arial, sans-serif; margin: 20px; }
-                        .school-header { display: flex; align-items: center; margin-bottom: 16px; }
-                        .school-logo { width: 60px; height: 60px; border-radius: 8px; margin-right: 16px; background: #eee; display: inline-block; }
-                        .student-info { display: flex; align-items: center; margin-bottom: 16px; }
-                        .profile-pic { width: 60px; height: 60px; border-radius: 30px; background: #eee; margin-right: 16px; display: flex; align-items: center; justify-content: center; }
-                        .profile-placeholder { width: 60px; height: 60px; border-radius: 30px; background: #ccc; }
-                        .student-details { font-size: 15px; color: #333; }
-                        .student-name { font-size: 20px; font-weight: bold; color: #1976d2; margin-bottom: 2px; }
-                        .calendar-table { border-collapse: collapse; width: 100%; margin-top: 16px; }
-                        .calendar-table th, .calendar-table td { width: 40px; height: 40px; text-align: center; border: 1px solid #ddd; }
-                        .calendar-table th { background: #f5f5f5; color: #1976d2; }
-                      </style>
-                    </head>
-                    <body>
-                      <div class="school-header">
-                        <div class="school-logo"></div>
-                        <div>
-                          <h1 style="margin:0;">${schoolInfo.name}</h1>
-                          <p style="margin:0;">${schoolInfo.address}</p>
-                        </div>
-                      </div>
-                      <div class="student-info">
-                        <div class="profile-pic"><div class="profile-placeholder"></div></div>
-                        <div class="student-details">
-                          <div class="student-name">${studentInfo?.name}</div>
-                          <div>Class: ${studentInfo?.class} &nbsp; Roll No: ${studentInfo?.rollNo}</div>
-                          <div>Section: ${studentInfo?.section}</div>
-                        </div>
-                      </div>
-                      <h2 style="color:#1976d2;">Attendance Calendar</h2>
-                      ${calendarHtml}
-                      <h2 style="color:#1976d2;">Attendance Stats</h2>
-                      <div style="font-size:16px;margin-bottom:8px;">Present: <b>${stats.present}</b> &nbsp; Absent: <b>${stats.absent}</b> &nbsp; Late: <b>${stats.late}</b> &nbsp; Excused: <b>${stats.excused}</b> &nbsp; Attendance %: <b>${percentage}%</b></div>
-                      ${barChartHtml}
-                    </body>
-                  </html>
-                `;
                 try {
-                  const { uri } = await Print.printToFileAsync({ html: htmlContent });
+                  // Prepare receipt data in the format expected by unifiedReceiptTemplate
+                  const receiptData = {
+                    student_name: studentInfo?.name || 'Student Name',
+                    class_name: studentInfo?.class || 'N/A',
+                    student_admission_no: studentInfo?.rollNo || 'N/A',
+                    section: studentInfo?.section || '',
+                    receipt_no: `ATT-${Date.now()}`,
+                    payment_date_formatted: new Date().toLocaleDateString(),
+                    fee_component: 'Attendance Report',
+                    payment_mode: 'Generated Report',
+                    amount_paid: 0 // Not applicable for attendance
+                  };
+                  
+                  const schoolDetails = {
+                    name: schoolInfo?.name || 'School Management System',
+                    address: schoolInfo?.address || 'School Address',
+                    logo_url: schoolInfo?.logoUrl || schoolInfo?.logo_url
+                  };
+                  
+                  // Use the EXACT SAME robust image handling as the fee receipt system
+                  console.log('📊 Generating attendance report with unified receipt template approach...');
+                  console.log('🏫 School details for attendance PDF:', schoolDetails);
+                  console.log('👤 Student info:', studentInfo);
+                  
+                  // Generate the base receipt HTML using the proven template system with SAME logo handling
+                  let baseHtml;
+                  try {
+                    // Use generateUnifiedReceiptHTML with the SAME logo loading logic as fee receipts
+                    // This function handles:
+                    // - URL validation with isValidImageUrl
+                    // - HTTP HEAD request testing for accessibility  
+                    // - Automatic fallback to profiles and school-assets buckets
+                    // - Enhanced loaders with loadSchoolLogoEnhanced and loadLogoWithFallbacks
+                    // - Proper logo embedding in HTML with <img> tags
+                    baseHtml = await generateUnifiedReceiptHTML(receiptData, schoolDetails, schoolDetails?.logo_url);
+                  console.log('✅ Generated base HTML with robust logo loading from unified template');
+                  console.log('🔧 This uses the SAME logo handling approach as fee receipts:');
+                  console.log('   - Validates logo URLs with isValidImageUrl()');
+                  console.log('   - Tests URL accessibility with HTTP HEAD requests');
+                  console.log('   - Tries profiles bucket, then school-assets bucket as fallbacks');
+                  console.log('   - Uses enhanced loaders as final fallback');
+                  console.log('   - Embeds logos directly in HTML as <img> tags for reliable PDF rendering');
+                  } catch (templateError) {
+                    console.error('❌ Template generation failed, using fallback:', templateError);
+                    // Fallback to simple HTML if template fails
+                    baseHtml = `
+                      <!DOCTYPE html>
+                      <html>
+                        <head>
+                          <style>
+                            body { font-family: Arial, sans-serif; margin: 20px; }
+                            .header { text-align: center; margin-bottom: 20px; }
+                          </style>
+                        </head>
+                        <body>
+                          <div class="header">
+                            <h1>${schoolDetails.name}</h1>
+                            <h2>Attendance Report</h2>
+                            <p>Student: ${studentInfo?.name}</p>
+                          </div>
+                        </body>
+                      </html>
+                    `;
+                  }
+                  
+                  // Now customize the HTML for attendance-specific content
+                  const calendarHtml = (() => {
+                    const firstDay = new Date(year, month - 1, 1);
+                    const lastDay = new Date(year, month, 0);
+                    const startWeekday = firstDay.getDay();
+                    const daysInMonth = lastDay.getDate();
+                    let html = '<table class="calendar-table" style="border-collapse: collapse; width: 100%; margin-top: 16px;"><tr>';
+                    ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => {
+                      html += `<th style="background: #f5f5f5; color: #1976d2; padding: 8px; border: 1px solid #ddd;">${d}</th>`;
+                    });
+                    html += '</tr><tr>';
+                    for (let i = 0; i < startWeekday; i++) html += '<td style="border: 1px solid #ddd; width: 40px; height: 40px; text-align: center;"></td>';
+                    for (let day = 1; day <= daysInMonth; day++) {
+                      const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                      const status = attendanceData[dateStr];
+                      let bg = 'background: #fff;';
+                      if (status === 'present') bg = 'background:#4CAF50;color:#fff;';
+                      else if (status === 'absent') bg = 'background:#F44336;color:#fff;';
+                      else if (status === 'late') bg = 'background:#FF9800;color:#fff;';
+                      else if (status === 'excused') bg = 'background:#9C27B0;color:#fff;';
+                      html += `<td style="${bg} border: 1px solid #ddd; width: 40px; height: 40px; text-align: center; padding: 8px;">${day}</td>`;
+                      if ((startWeekday + day) % 7 === 0) html += '</tr><tr>';
+                    }
+                    html += '</tr></table>';
+                    return html;
+                  })();
+
+                  const attendanceStatsHtml = `
+                    <div style="margin-top: 20px;">
+                      <h2 style="color:#1976d2; margin-bottom: 16px;">📊 Attendance Summary for ${formatMonthYearForDisplay(selectedMonth)}</h2>
+                      <div style="display: flex; justify-content: space-around; margin: 18px 0 8px 0; background: #f8f9fa; padding: 16px; border-radius: 8px;">
+                        <div style="text-align: center;"><div style="height: ${Math.max(stats.present * 3, 10)}px; width: 30px; background: #4CAF50; margin: 0 auto 8px; border-radius: 4px;"></div><div style="font-size: 14px; font-weight: bold;">${stats.present}</div><div style="font-size: 12px; color: #666;">Present</div></div>
+                        <div style="text-align: center;"><div style="height: ${Math.max(stats.absent * 3, 10)}px; width: 30px; background: #F44336; margin: 0 auto 8px; border-radius: 4px;"></div><div style="font-size: 14px; font-weight: bold;">${stats.absent}</div><div style="font-size: 12px; color: #666;">Absent</div></div>
+                        <div style="text-align: center;"><div style="height: ${Math.max(stats.late * 3, 10)}px; width: 30px; background: #FF9800; margin: 0 auto 8px; border-radius: 4px;"></div><div style="font-size: 14px; font-weight: bold;">${stats.late}</div><div style="font-size: 12px; color: #666;">Late</div></div>
+                        <div style="text-align: center;"><div style="height: ${Math.max(stats.excused * 3, 10)}px; width: 30px; background: #9C27B0; margin: 0 auto 8px; border-radius: 4px;"></div><div style="font-size: 14px; font-weight: bold;">${stats.excused}</div><div style="font-size: 12px; color: #666;">Excused</div></div>
+                      </div>
+                      <div style="text-align: center; font-size: 18px; margin: 16px 0; padding: 12px; background: ${percentage >= 75 ? '#E8F5E8' : percentage >= 60 ? '#FFF3E0' : '#FFEBEE'}; border-radius: 8px; border-left: 4px solid ${percentage >= 75 ? '#4CAF50' : percentage >= 60 ? '#FF9800' : '#F44336'};">
+                        <strong>Overall Attendance: ${percentage}%</strong>
+                        <div style="font-size: 14px; color: #666; margin-top: 4px;">Present: ${stats.present} days | Total: ${total} days</div>
+                      </div>
+                    </div>
+                  `;
+                  
+                  // Replace the receipt content with attendance-specific content
+                  // Build the attendance content block to replace the receipt content
+                  const attendanceBlock = `
+                    <div class=\"receipt-content\">
+                      <h2 style=\"color:#1976d2; text-align: center; margin: 20px 0;\">📅 ${formatMonthYearForDisplay(selectedMonth)} Calendar</h2>
+                      ${calendarHtml}
+                      ${attendanceStatsHtml}
+                    </div>
+                  `;
+
+                  // Replace only the receipt content block, strip fee-specific sections and rows
+                  const attendanceHtml = baseHtml
+                    .replace(/<title>.*?<\/title>/, '<title>Attendance Report</title>')
+                    .replace(/FEE RECEIPT/g, 'ATTENDANCE REPORT')
+                    // Replace the entire receipt-content area up to either amount section or footer
+                    .replace(/<div class=\"receipt-content\">[\s\S]*?(?=<div class=\"amount-separator\"|<div class=\"receipt-footer\">)/, attendanceBlock)
+                    // Remove any amount separator and amount section if present
+                    .replace(/<div class=\"amount-separator\">[\s\S]*?<\/div>/, '')
+                    .replace(/<div class=\"receipt-amount-section\">[\s\S]*?<\/div>/, '')
+                    // Extra safety: remove fee-specific rows if any remain
+                    .replace(/<div class=\"receipt-row\">[\s\S]*?Fee Type:[\s\S]*?<\/div>\s*/g, '')
+                    .replace(/<div class=\"receipt-row\">[\s\S]*?Payment Mode:[\s\S]*?<\/div>\s*/g, '')
+                    // Remove any remaining amount displays (₹0.00, 0.00, Amount Paid, etc.)
+                    .replace(/₹\d+\.\d+/g, '')
+                    .replace(/\b\d+\.\d+\b/g, '')
+                    .replace(/Amount\s*Paid:?[\s\S]*?₹[\d,\.]+/gi, '')
+                    .replace(/<[^>]*>\s*₹\s*0+\.0+\s*<\/[^>]*>/g, '')
+                    .replace(/\s*₹\s*0+\.0+\s*/g, '')
+                    .replace(/\b0+\.0+\b/g, '')
+                    .replace(/Amount:\s*<[^>]*>\s*₹\s*0+\.0+\s*<\/[^>]*>/gi, '')  
+                    // Clean up any empty rows or sections that might remain
+                    .replace(/<div[^>]*>\s*<\/div>/g, '')
+                    .replace(/<span[^>]*>\s*<\/span>/g, '');
+
+                  // Normalize page size and print styles to avoid half-page breaks
+                  const normalizedHtml = attendanceHtml
+                    // Ensure @page uses A4 portrait with comfortable margins
+                    .replace(/@page\s*{[\s\S]*?}/, '@page { size: A4 portrait; margin: 12mm; }')
+                    // Inject print-friendly CSS to avoid awkward page breaks, especially for tables
+                    .replace('</head>', `<style>
+                      html, body { width: 100%; }
+                      .receipt-container { width: 100%; max-width: 100%; height: auto; max-height: none; }
+                      .receipt-content { page-break-inside: auto; }
+                      table { page-break-inside: avoid; }
+                      thead, tbody, tr, td { page-break-inside: avoid; }
+                      img { max-width: 100%; height: auto; }
+                    </style></head>`);
+
+                  console.log('✅ Generated attendance HTML with unified template approach');
+                  
+                  const { uri } = await Print.printToFileAsync({ 
+                    html: normalizedHtml
+                  });
+                  
                   await Sharing.shareAsync(uri, {
                     mimeType: 'application/pdf',
                     dialogTitle: 'Share Attendance Report',
+                    UTI: 'com.adobe.pdf'
                   });
+                  
                 } catch (error) {
-                  Alert.alert('Failed to generate PDF', error.message);
+                  console.error('❌ Attendance PDF generation failed:', error);
+                  Alert.alert('Error', `Failed to generate attendance report: ${error.message}`);
                 }
               }}>
                 <Ionicons name="download" size={18} color="#fff" />
@@ -1675,6 +1773,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     flex: 1,
+    overflow: 'hidden',
   },
   unifiedIconContainer: {
     width: 36,
@@ -1696,6 +1795,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     lineHeight: 18,
+    flexWrap: 'wrap',
+    overflow: 'hidden',
   },
   unifiedPercentageBadge: {
     backgroundColor: '#2196F3',

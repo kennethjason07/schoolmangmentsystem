@@ -49,19 +49,6 @@ const StudentDashboard = ({ navigation }) => {
   const [studentProfile, setStudentProfile] = useState(null);
   const [fallbackTenantId, setFallbackTenantId] = useState(null);
   
-  // 🚀 ENHANCED TENANT SYSTEM - Tenant validation helper
-  const validateTenantAccess = () => {
-    if (!isReady) {
-      return { valid: false, error: 'Tenant context not ready' };
-    }
-    
-    const tenantId = getCachedTenantId();
-    if (!tenantId) {
-      return { valid: false, error: 'No tenant ID available' };
-    }
-    
-    return { valid: true, tenantId };
-  };
   const [summary, setSummary] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -448,6 +435,7 @@ const StudentDashboard = ({ navigation }) => {
           is_read,
           read_at,
           tenant_id,
+          created_at,
           notifications!inner (
             id,
             message,
@@ -461,7 +449,7 @@ const StudentDashboard = ({ navigation }) => {
         `)
         .eq('recipient_id', user.id)
         .eq('recipient_type', 'Student')
-        .order('created_at', { ascending: false, foreignTable: 'notifications' })
+        .order('created_at', { ascending: false })
         .limit(10);
       
       if (notifError && notifError.code !== '42P01') {
@@ -519,6 +507,13 @@ const StudentDashboard = ({ navigation }) => {
       });
 
       // Transform notifications for dashboard display
+      // Sort client-side by notification timestamp to ensure newest first
+      filteredNotifications.sort((a, b) => {
+        const aTime = new Date(a.notifications?.created_at || a.created_at || 0).getTime();
+        const bTime = new Date(b.notifications?.created_at || b.created_at || 0).getTime();
+        return bTime - aTime;
+      });
+
       const transformedNotifications = filteredNotifications.map(notification => {
         const notif = notification.notifications;
         return {
@@ -627,8 +622,8 @@ const StudentDashboard = ({ navigation }) => {
         return;
       }
       
-      const tenantId = validation.tenantId;
-      console.log('🚀 Enhanced tenant system: Using cached tenant ID:', tenantId);
+      const tenantIdToUse = effectiveTenantId;
+      console.log('🚀 Enhanced tenant system: Using tenant ID:', tenantIdToUse);
 
       // Get school details
       const { data: schoolData } = await dbHelpers.getSchoolDetails();
