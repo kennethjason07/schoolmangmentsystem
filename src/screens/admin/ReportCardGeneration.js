@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,8 @@ import { supabase } from '../../utils/supabase';
 import ReportCardModal from '../../components/ReportCardModal';
 import { useTenantAccess } from '../../utils/tenantHelpers';
 import { useAuth } from '../../utils/AuthContext';
+import useDataCache from '../../hooks/useDataCache';
+import { debounce } from '../../utils/debounce';
 
 const isWeb = Platform.OS === 'web';
 
@@ -35,6 +37,9 @@ const ReportCardGeneration = ({ navigation }) => {
     tenantName, 
     error: tenantError 
   } = useTenantAccess();
+  
+  // Initialize cache for reducing API calls
+  const cache = useDataCache(10 * 60 * 1000); // 10 minute cache
   
   // Dynamic responsive state that updates on resize
   const [dimensions, setDimensions] = useState(() => {
@@ -78,7 +83,8 @@ const ReportCardGeneration = ({ navigation }) => {
       tenantId: tenantId || 'NULL',
       isReady,
       tenantLoading,
-      userEmail: user?.email || 'NULL'
+      userEmail: user?.email || 'NULL',
+      cacheStats: cache.stats()
     });
     
     // Only load data when tenant and user are available
@@ -91,11 +97,25 @@ const ReportCardGeneration = ({ navigation }) => {
     }
   }, [tenantId, user, isReady, tenantLoading, tenantError]);
 
+  // Create debounced version of loadStudents to prevent rapid API calls
+  const debouncedLoadStudents = useMemo(
+    () => debounce((classId) => {
+      if (classId) {
+        loadStudents(classId);
+      } else {
+        setStudents([]);
+      }
+    }, 300), // 300ms delay
+    [tenantId] // Re-create if tenantId changes
+  );
+
   useEffect(() => {
     if (selectedClass && selectedExam) {
-      loadStudents();
+      debouncedLoadStudents(selectedClass);
+    } else if (!selectedClass) {
+      setStudents([]);
     }
-  }, [selectedClass, selectedExam]);
+  }, [selectedClass, selectedExam, debouncedLoadStudents]);
 
   const loadInitialData = async () => {
     try {
@@ -119,6 +139,16 @@ const ReportCardGeneration = ({ navigation }) => {
         return;
       }
       
+      // Check cache first
+      const cacheKey = `classes_${tenantId}`;
+      const cachedClasses = cache.get(cacheKey);
+      
+      if (cachedClasses) {
+        console.log('📦 Using cached classes data');
+        setClasses(cachedClasses);
+        return;
+      }
+      
       const { data, error } = await supabase
         .from('classes')
         .select('*')
@@ -131,6 +161,9 @@ const ReportCardGeneration = ({ navigation }) => {
       }
       
       console.log('✅ ReportCardGeneration: Loaded', data?.length || 0, 'classes for tenant');
+      
+      // Cache the result
+      cache.set(cacheKey, data || []);
       setClasses(data || []);
     } catch (error) {
       console.error('Error loading classes:', error);
@@ -145,6 +178,16 @@ const ReportCardGeneration = ({ navigation }) => {
       if (!tenantId) {
         console.warn('📋 ReportCardGeneration: No tenantId available for exams');
         setExams([]);
+        return;
+      }
+      
+      // Check cache first
+      const cacheKey = `exams_${tenantId}`;
+      const cachedExams = cache.get(cacheKey);
+      
+      if (cachedExams) {
+        console.log('📦 Using cached exams data');
+        setExams(cachedExams);
         return;
       }
       
@@ -176,6 +219,9 @@ const ReportCardGeneration = ({ navigation }) => {
       }
       
       console.log('✅ ReportCardGeneration: Loaded', data?.length || 0, 'exams for tenant');
+      
+      // Cache the result
+      cache.set(cacheKey, data || []);
       setExams(data || []);
     } catch (error) {
       console.error('Error loading exams:', error);
@@ -183,9 +229,9 @@ const ReportCardGeneration = ({ navigation }) => {
     }
   };
 
-  const loadStudents = async () => {
+  const loadStudents = async (classId = selectedClass) => {
     try {
-      console.log('👨‍🎓 ReportCardGeneration: Loading students for class:', selectedClass, 'tenant:', tenantId);
+      console.log('👨‍🎓 ReportCardGeneration: Loading students for class:', classId, 'tenant:', tenantId);
       
       if (!tenantId) {
         console.warn('👨‍🎓 ReportCardGeneration: No tenantId available for students');
@@ -193,9 +239,19 @@ const ReportCardGeneration = ({ navigation }) => {
         return;
       }
       
-      if (!selectedClass) {
+      if (!classId) {
         console.warn('👨‍🎓 ReportCardGeneration: No class selected for students');
         setStudents([]);
+        return;
+      }
+      
+      // Check cache first
+      const cacheKey = `students_${tenantId}_${classId}`;
+      const cachedStudents = cache.get(cacheKey);
+      
+      if (cachedStudents) {
+        console.log('📦 Using cached students data');
+        setStudents(cachedStudents);
         return;
       }
       
@@ -214,7 +270,7 @@ const ReportCardGeneration = ({ navigation }) => {
             email
           )
         `)
-        .eq('class_id', selectedClass)
+        .eq('class_id', classId)
         .eq('tenant_id', tenantId)
         .order('roll_no', { ascending: true });
 
@@ -224,6 +280,9 @@ const ReportCardGeneration = ({ navigation }) => {
       }
       
       console.log('✅ ReportCardGeneration: Loaded', data?.length || 0, 'students for class');
+      
+      // Cache the result
+      cache.set(cacheKey, data || []);
       setStudents(data || []);
     } catch (error) {
       console.error('Error loading students:', error);
@@ -233,6 +292,16 @@ const ReportCardGeneration = ({ navigation }) => {
 
   const onRefresh = async () => {
     setRefreshing(true);
+    
+    // Clear relevant cache entries to force fresh data
+    if (tenantId) {
+      cache.invalidate(`classes_${tenantId}`);
+      cache.invalidate(`exams_${tenantId}`);
+      if (selectedClass) {
+        cache.invalidate(`students_${tenantId}_${selectedClass}`);
+      }
+    }
+    
     await loadInitialData();
     if (selectedClass && selectedExam) {
       await loadStudents();
@@ -412,13 +481,15 @@ const ReportCardGeneration = ({ navigation }) => {
       borderColor: '#ddd',
       borderRadius: 6,
       backgroundColor: '#f8f9fa',
-      minHeight: 48,            // Increased for better vertical space
+      minHeight: 56,            // Increased height for better text visibility
       justifyContent: 'center', // Ensure content vertically centered
-      paddingHorizontal: 8,     // Add some horizontal padding
+      paddingHorizontal: 12,    // Increased horizontal padding
+      paddingVertical: 4,       // Add vertical padding
     },
     compactPicker: {
-      height: 48,               // Match container height to avoid clipping
-      fontSize: 14,
+      height: 56,               // Increased height to match container
+      fontSize: 16,             // Increased font size for better readability
+      color: '#333',            // Darker text color
     },
     quickStatsRow: {
       flexDirection: 'row',
