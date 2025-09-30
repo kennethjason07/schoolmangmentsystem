@@ -21,7 +21,6 @@ const AdminDashboard = ({ navigation }) => {
         <TouchableOpacity 
           style={styles.button}
           onPress={() => {
-            console.log('🎯 Navigation to SchoolDetails pressed');
             navigation.navigate('SchoolDetails');
           }}
         >

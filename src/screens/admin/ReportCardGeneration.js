@@ -412,10 +412,12 @@ const ReportCardGeneration = ({ navigation }) => {
       borderColor: '#ddd',
       borderRadius: 6,
       backgroundColor: '#f8f9fa',
-      minHeight: 40,
+      minHeight: 48,            // Increased for better vertical space
+      justifyContent: 'center', // Ensure content vertically centered
+      paddingHorizontal: 8,     // Add some horizontal padding
     },
     compactPicker: {
-      height: 40,
+      height: 48,               // Match container height to avoid clipping
       fontSize: 14,
     },
     quickStatsRow: {

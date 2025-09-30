@@ -151,22 +151,13 @@ const AdminDashboard = ({ navigation }) => {
       setError(null);
       
       // 🚀 FIXED: Enhanced auth and tenant validation for web refresh
-      console.log('🔄 [AdminDashboard] Starting data load, retry count:', retryCount);
-      console.log('🔄 [AdminDashboard] User state:', { 
-        hasUser: !!user, 
-        userId: user?.id, 
-        userEmail: user?.email,
-        platform: Platform.OS
-      });
       
       // Wait for user authentication to be ready
       if (!user || !user.id || !user.email) {
-        console.warn('⚠️ [AdminDashboard] User not ready, delaying load...');
         
         if (retryCount < 3) {
           // Retry after a short delay
           setTimeout(() => {
-            console.log('🔄 [AdminDashboard] Retrying dashboard load...');
             loadDashboardData(retryCount + 1);
           }, 1000 * (retryCount + 1)); // Progressive delay
           return;
@@ -176,7 +167,6 @@ const AdminDashboard = ({ navigation }) => {
       }
       
       // Get current tenant for proper filtering with enhanced error handling
-      console.log('🏢 [AdminDashboard] Attempting to get tenant for user:', user.email);
       
       let tenantResult;
       try {
@@ -198,11 +188,6 @@ const AdminDashboard = ({ navigation }) => {
       
       const tenantId = tenantResult.data.tenant.id;
       const tenantName = tenantResult.data.tenant.name;
-      console.log('✅ [AdminDashboard] Successfully resolved tenant:', { 
-        tenantId, 
-        tenantName,
-        userEmail: user.email 
-      });
 
       // Load school details
       const { data: schoolData, error: schoolError } = await dbHelpers.getSchoolDetails();
@@ -232,7 +217,6 @@ const AdminDashboard = ({ navigation }) => {
           if (teacherError.message?.includes('permission denied') || 
               teacherError.message?.includes('access denied') ||
               teacherError.message?.includes('tenant')) {
-            console.log('💡 Teacher count blocked by RLS - user may need to re-authenticate');
             teacherCount = 0;
           } else {
             // For other errors, also default to 0 but log the issue
@@ -434,11 +418,9 @@ const AdminDashboard = ({ navigation }) => {
       }
       
       setError(errorMessage);
-      console.log('🏠 [AdminDashboard] Set error state:', errorMessage);
       
       // Auto-retry for certain error types on web
       if (shouldRetry && Platform.OS === 'web' && retryCount < 2) {
-        console.log('🔄 [AdminDashboard] Auto-retrying due to recoverable error...');
         setTimeout(() => {
           loadDashboardData(retryCount + 1);
         }, 2000);
@@ -446,32 +428,23 @@ const AdminDashboard = ({ navigation }) => {
       }
     } finally {
       setLoading(false);
-      console.log('🏠 [AdminDashboard] Set loading to false');
     }
   };
 
   useEffect(() => {
     // 🚀 FIXED: Wait for user authentication before loading dashboard
-    console.log('🔄 [AdminDashboard] useEffect triggered, user state:', { 
-      hasUser: !!user, 
-      userId: user?.id,
-      userEmail: user?.email 
-    });
     
     // Don't initialize dashboard if user isn't ready
     if (!user || !user.id || !user.email) {
-      console.log('⚠️ [AdminDashboard] User not ready, skipping dashboard initialization');
       return;
     }
     
     const initializeDashboard = async () => {
-      console.log('🚀 [AdminDashboard] Initializing dashboard for user:', user.email);
       try {
         await Promise.all([
           loadDashboardData(),
           loadChartData()
         ]);
-        console.log('✅ [AdminDashboard] Dashboard initialization completed');
       } catch (error) {
         console.error('❌ [AdminDashboard] Dashboard initialization failed:', error);
       }
@@ -480,7 +453,6 @@ const AdminDashboard = ({ navigation }) => {
     initializeDashboard();
 
     // Subscribe to Supabase real-time updates for multiple tables
-    console.log('🔌 [AdminDashboard] Setting up real-time subscriptions');
     const subscription = supabase
       .channel('dashboard-updates')
       .on('postgres_changes', {
@@ -488,7 +460,6 @@ const AdminDashboard = ({ navigation }) => {
         schema: 'public',
         table: 'students'
       }, () => {
-        console.log('🔄 [AdminDashboard] Students table changed, refreshing dashboard');
         loadDashboardData();
         loadChartData();
       })
@@ -497,7 +468,6 @@ const AdminDashboard = ({ navigation }) => {
         schema: 'public',
         table: 'student_attendance'
       }, () => {
-        console.log('🔄 [AdminDashboard] Student attendance changed, refreshing dashboard');
         loadDashboardData();
         loadChartData();
       })
@@ -506,7 +476,6 @@ const AdminDashboard = ({ navigation }) => {
         schema: 'public',
         table: 'student_fees'
       }, () => {
-        console.log('🔄 [AdminDashboard] Student fees changed, refreshing dashboard');
         loadDashboardData();
         loadChartData();
       })
@@ -515,7 +484,6 @@ const AdminDashboard = ({ navigation }) => {
         schema: 'public',
         table: 'exams'
       }, () => {
-        console.log('🔄 [AdminDashboard] Exams changed, refreshing dashboard');
         loadDashboardData();
       })
       .on('postgres_changes', {
@@ -523,13 +491,11 @@ const AdminDashboard = ({ navigation }) => {
         schema: 'public',
         table: 'events'
       }, () => {
-        console.log('🔄 [AdminDashboard] Events changed, refreshing dashboard');
         loadDashboardData();
       })
       .subscribe();
 
     return () => {
-      console.log('🧽 [AdminDashboard] Cleaning up real-time subscriptions');
       subscription.unsubscribe();
     };
   }, [user?.id, user?.email]); // 🚀 FIXED: Added proper dependencies
@@ -581,12 +547,10 @@ const AdminDashboard = ({ navigation }) => {
     try {
       // 🚀 FIXED: Enhanced tenant validation for chart data
       if (!user || !user.id || !user.email) {
-        console.warn('⚠️ [AdminDashboard] User not ready for chart data load');
         return;
       }
       
       // Get current tenant for proper filtering
-      console.log('📈 [AdminDashboard] Loading chart data for user:', user.email);
       
       let tenantResult;
       try {
@@ -602,7 +566,6 @@ const AdminDashboard = ({ navigation }) => {
       }
       
       const tenantId = tenantResult.data.tenant.id;
-      console.log('✅ [AdminDashboard] Loading chart data for tenant:', tenantResult.data.tenant.name);
       
       // Load fee collection data
       const currentMonth = format(new Date(), 'yyyy-MM');
@@ -676,7 +639,6 @@ const AdminDashboard = ({ navigation }) => {
   // Debug eventInput changes (simplified)
   useEffect(() => {
     if (eventInput.date) {
-      console.log('📅 Event date set to:', eventInput.date);
     }
   }, [eventInput.date]);
   const [savingEvent, setSavingEvent] = useState(false);
@@ -723,7 +685,6 @@ const AdminDashboard = ({ navigation }) => {
   // Function to ensure events table exists with proper schema
   const checkEventsTable = async () => {
     try {
-      console.log('🔥 Checking events table existence...');
       
       // Just try to select from the table - if it fails, we'll know the table doesn't exist
       const { data, error } = await supabase
@@ -732,17 +693,6 @@ const AdminDashboard = ({ navigation }) => {
         .limit(1);
       
       if (error && error.code === '42P01') {
-        console.log('🔥 Events table does not exist. Table should be created via migration or Supabase dashboard.');
-        console.log('🔥 Expected table schema:');
-        console.log('🔥 - id: UUID (primary key)');
-        console.log('🔥 - title: text');
-        console.log('🔥 - description: text');
-        console.log('🔥 - event_date: date');
-        console.log('🔥 - event_type: text');
-        console.log('🔥 - is_school_wide: boolean');
-        console.log('🔥 - status: text');
-        console.log('🔥 - created_at: timestamp');
-        console.log('🔥 - updated_at: timestamp');
         return false;
       }
       
@@ -752,7 +702,6 @@ const AdminDashboard = ({ navigation }) => {
         return false;
       }
       
-      console.log('🔥 Events table exists and is accessible');
       return true;
     } catch (error) {
       console.error('🔥 Error checking events table:', error);
@@ -761,13 +710,9 @@ const AdminDashboard = ({ navigation }) => {
   };
 
   const openAddEventModal = async () => {
-    console.log('🔧 === OPENING ADD EVENT MODAL ===');
-    console.log('🔧 Current isEventModalVisible state:', isEventModalVisible);
-    console.log('🔧 Current eventInput state:', eventInput);
     
     // Prevent multiple modal opens and avoid resetting eventInput if modal is already open
     if (isEventModalVisible) {
-      console.log('🔧 Modal is already open, skipping reset');
       return;
     }
     
@@ -776,7 +721,6 @@ const AdminDashboard = ({ navigation }) => {
       // Check if events table exists first with better error handling
       const tableExists = await checkEventsTable();
       if (!tableExists) {
-        console.log('🔧 Events table does not exist, showing fallback modal');
         // Show a simple fallback modal for adding events without database
         Alert.alert(
           'Events Feature', 
@@ -818,24 +762,16 @@ const AdminDashboard = ({ navigation }) => {
         isSchoolWide: true,
         selectedClasses: [] 
       };
-      console.log('🔧 Setting new event input:', newEventInput);
       setEventInput(newEventInput);
       
       setEditEventIndex(null);
-      console.log('🔧 Reset edit index to null');
       
-      console.log('🔧 Loading classes...');
       loadClasses(); // Load classes when opening modal
       
-      console.log('🔧 Setting modal visibility to true');
       setIsEventModalVisible(true);
       
       // Verify state was set
-      setTimeout(() => {
-        console.log('🔧 Modal visibility after timeout:', isEventModalVisible);
-      }, 100);
       
-      console.log('🔧 === ADD EVENT MODAL OPEN COMPLETE ===');
     } catch (error) {
       console.error('🔧 Error opening add event modal:', error);
       Alert.alert('Error', 'Failed to open event creation form. Please try again.');
@@ -856,12 +792,9 @@ const AdminDashboard = ({ navigation }) => {
 
 
   const saveEvent = async () => {
-    console.log('🏢 SaveEvent called - SIMPLIFIED VERSION');
-    console.log('🏢 Event input data:', eventInput);
     
     // Prevent double-clicking
     if (savingEvent) {
-      console.log('🏢 Already saving event, ignoring request');
       return;
     }
     
@@ -888,7 +821,6 @@ const AdminDashboard = ({ navigation }) => {
 
     try {
       setSavingEvent(true);
-      console.log('🏢 Starting SIMPLIFIED save operation...');
       
       // 🚀 SIMPLIFIED: Get tenant ID with simple fallback
       let currentTenantId;
@@ -896,7 +828,6 @@ const AdminDashboard = ({ navigation }) => {
         const tenantResult = await getCurrentUserTenantByEmail();
         if (tenantResult?.success && tenantResult.data?.tenant?.id) {
           currentTenantId = tenantResult.data.tenant.id;
-          console.log('🏢 Got tenant ID:', currentTenantId);
         } else {
           throw new Error('No tenant available');
         }
@@ -913,7 +844,6 @@ const AdminDashboard = ({ navigation }) => {
         formattedDate = getCurrentDateString();
       }
       
-      console.log('🏢 Using date:', formattedDate);
       
       // 🚀 SIMPLIFIED: Create event data
       const eventData = {
@@ -930,7 +860,6 @@ const AdminDashboard = ({ navigation }) => {
         eventData.created_by = user.id;
       }
       
-      console.log('🏢 Event data:', eventData);
       
       // 🚀 SIMPLIFIED: Direct database insert (no complex update logic)
       const { data, error } = await supabase
@@ -943,7 +872,6 @@ const AdminDashboard = ({ navigation }) => {
         throw new Error(`Failed to create event: ${error.message}`);
       }
       
-      console.log('🏢 Event created successfully:', data);
 
       // 🚀 SIMPLIFIED: Update local events list immediately
       const newEvent = {
@@ -980,7 +908,6 @@ const AdminDashboard = ({ navigation }) => {
       }
     } finally {
       setSavingEvent(false);
-      console.log('🔥 Save event operation completed');
     }
   };
 
@@ -1000,30 +927,25 @@ const AdminDashboard = ({ navigation }) => {
         });
     
     if (!confirmDelete) {
-      console.log('❌ User cancelled event deletion');
       return;
     }
     
     try {
-      console.log(`🗑️ Starting deletion process for event: ${eventItem.title} (ID: ${eventItem.id})`);
       
       // 🚀 FIXED: Enhanced tenant validation with fallback to cached tenant
       let currentTenantId = getTenantId();
       
       // If the new tenant system isn't ready, try the cached tenant ID
       if (!currentTenantId) {
-        console.log('🏢 Primary tenant ID not available, trying cached tenant ID...');
         currentTenantId = getCachedTenantId();
       }
       
       // If still no tenant ID, try to get it from the old system as fallback
       if (!currentTenantId) {
-        console.log('🏢 Cached tenant ID not available, trying tenant resolution fallback...');
         try {
           const tenantResult = await getCurrentUserTenantByEmail();
           if (tenantResult?.success && tenantResult.data?.tenant?.id) {
             currentTenantId = tenantResult.data.tenant.id;
-            console.log('🏢 Fallback tenant ID resolved:', currentTenantId);
           }
         } catch (fallbackError) {
           console.error('🏢 Tenant fallback failed:', fallbackError);
@@ -1034,7 +956,6 @@ const AdminDashboard = ({ navigation }) => {
         throw new Error('Unable to determine tenant context. Please refresh the page and try again.');
       }
       
-      console.log('🏢 Using tenant ID for event deletion:', currentTenantId);
       
       // Use direct Supabase call with explicit tenant validation as fallback
       const { error } = await supabase
@@ -1048,12 +969,10 @@ const AdminDashboard = ({ navigation }) => {
         throw new Error(`Failed to delete event: ${error.message}`);
       }
       
-      console.log('✓ Event deleted from database');
       
       // 🚀 FIXED: Update local state immediately for better UX
       setEvents(prevEvents => {
         const updatedEvents = prevEvents.filter(e => e.id !== eventItem.id);
-        console.log(`🔄 Updated local state: removed event ${eventItem.title}, remaining: ${updatedEvents.length}`);
         return updatedEvents;
       });
       
@@ -1065,7 +984,6 @@ const AdminDashboard = ({ navigation }) => {
         Alert.alert('Success', successMsg);
       }
       
-      console.log(`✅ Event deletion completed successfully: ${eventItem.title}`);
       
     } catch (error) {
       console.error('❌ Error deleting event:', error);
@@ -1091,10 +1009,7 @@ const AdminDashboard = ({ navigation }) => {
   // Use universal notification system for consistent, real-time badge updates
   const { totalCount, notificationCount, messageCount } = useUniversalNotificationCount({
     autoRefresh: true,
-    realTime: true,
-    onCountChange: (counts) => {
-      console.log('🔔 [AdminDashboard] Notification counts updated:', counts);
-    }
+    realTime: true
   });
   
   // Use the total count for admin badge (includes messages + notifications)
@@ -1128,10 +1043,8 @@ const AdminDashboard = ({ navigation }) => {
     if (Platform.OS === 'web') {
       const confirmDelete = window.confirm('Are you sure you want to delete this activity?');
       if (confirmDelete) {
-        console.log('🗑️ Deleting activity at index:', idx);
         setActivities(prevActivities => {
           const updatedActivities = prevActivities.filter((_, i) => i !== idx);
-          console.log(`🔄 Updated activities: removed item, remaining: ${updatedActivities.length}`);
           return updatedActivities;
         });
       }
@@ -1145,11 +1058,9 @@ const AdminDashboard = ({ navigation }) => {
           { 
             text: 'Delete', 
             style: 'destructive', 
-            onPress: () => {
-              console.log('🗑️ Deleting activity at index:', idx);
+              onPress: () => {
               setActivities(prevActivities => {
                 const updatedActivities = prevActivities.filter((_, i) => i !== idx);
-                console.log(`🔄 Updated activities: removed item, remaining: ${updatedActivities.length}`);
                 return updatedActivities;
               });
             }
@@ -1179,7 +1090,6 @@ const AdminDashboard = ({ navigation }) => {
           <Ionicons name="alert-circle" size={48} color="#dc3545" />
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity style={styles.retryButton} onPress={async () => {
-            console.log('🔄 [AdminDashboard] Manual retry button pressed');
             setError(null);
             setLoading(true);
             
@@ -1188,7 +1098,6 @@ const AdminDashboard = ({ navigation }) => {
                 loadDashboardData(0), // Reset retry count
                 loadChartData()
               ]);
-              console.log('✅ [AdminDashboard] Manual retry completed successfully');
             } catch (error) {
               console.error('❌ [AdminDashboard] Manual retry failed:', error);
               // Error will be set by loadDashboardData
@@ -1366,15 +1275,11 @@ const AdminDashboard = ({ navigation }) => {
             <TouchableOpacity 
               style={styles.addButton} 
               onPress={() => {
-                console.log('🔧 Direct Add Event button pressed');
-                console.log('🔧 Current state - isEventModalVisible:', isEventModalVisible);
-                console.log('🔧 Button touch detected, calling openAddEventModal');
                 
                 // Prevent multiple modal opens
                 if (!isEventModalVisible) {
                   openAddEventModal();
                 } else {
-                  console.log('🔧 Modal already open, ignoring button press');
                 }
               }}
               activeOpacity={0.7}
@@ -1405,7 +1310,6 @@ const AdminDashboard = ({ navigation }) => {
                   onPress={(e) => {
                     if (e && e.stopPropagation) e.stopPropagation();
                     if (e && e.preventDefault) e.preventDefault();
-                    console.log('🔄 Delete button clicked for event:', item.title);
                     deleteEvent(item);
                   }}
                   style={Platform.OS === 'web' && { cursor: 'pointer' }}
@@ -1472,7 +1376,6 @@ const AdminDashboard = ({ navigation }) => {
                   onPress={(e) => {
                     if (e && e.stopPropagation) e.stopPropagation();
                     if (e && e.preventDefault) e.preventDefault();
-                    console.log('🔄 Delete activity button clicked for index:', index);
                     deleteActivity(index);
                   }}
                   style={[
@@ -1515,7 +1418,6 @@ const AdminDashboard = ({ navigation }) => {
               </View>
               <TouchableOpacity 
                 onPress={() => {
-                  console.log('🔧 Close button pressed');
                   setIsEventModalVisible(false);
                   setShowEventTypePicker(false); // Close dropdown when modal closes
                   setShowEventDatePicker(false); // Close date picker when modal closes
@@ -1757,7 +1659,6 @@ const AdminDashboard = ({ navigation }) => {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 20, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
               <TouchableOpacity 
                 onPress={() => {
-                  console.log('🔧 Cancel button pressed');
                   setIsEventModalVisible(false);
                   setShowEventTypePicker(false); // Close dropdown when modal closes
                   setShowEventDatePicker(false); // Close date picker when modal closes
@@ -1777,7 +1678,6 @@ const AdminDashboard = ({ navigation }) => {
               </TouchableOpacity>
               <TouchableOpacity 
                 onPress={() => {
-                  console.log('🔧 Save button pressed');
                   if (eventInput.title.trim()) {
                     saveEvent();
                   } else {

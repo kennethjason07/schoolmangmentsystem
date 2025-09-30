@@ -19,7 +19,7 @@ import Header from '../../components/Header';
 import { useNavigation } from '@react-navigation/native';
 import CrossPlatformDatePicker from '../../components/CrossPlatformDatePicker';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
+import { supabase, dbHelpers, TABLES, getUserTenantId } from '../../utils/supabase';
 import { format, parseISO } from 'date-fns';
 import { CrossPlatformPieChart, CrossPlatformBarChart } from '../../components/CrossPlatformChart';
 import { formatCurrency } from '../../utils/helpers';
@@ -44,6 +44,7 @@ import {
   sortClassStatsByClass,
   sortClassesNaturally
 } from '../../utils/classSortingUtils';
+
 
 const FeeManagement = () => {
   const navigation = useNavigation();
@@ -160,6 +161,19 @@ const FeeManagement = () => {
     return `₹${parseFloat(amount).toFixed(2)}`;
   };
 
+  // Helper to resolve a robust tenantId (prefers live auth on mobile)
+  const getEffectiveTenantId = async () => {
+    try {
+      if (Platform.OS !== 'web') {
+        const resolved = await getUserTenantId();
+        if (resolved) return resolved;
+      }
+    } catch (e) {
+      console.warn('FeeManagement: getEffectiveTenantId fallback to context tenantId due to error:', e?.message);
+    }
+    return tenantId;
+  };
+
   // Helper function to calculate total fees for a student
   // 🚀 OPTIMIZED fee statistics calculation - Lightning fast
   const calculateFeeStats = async () => {
@@ -170,13 +184,14 @@ const FeeManagement = () => {
     }
 
     try {
-      console.log('🔍 FeeManagement: Calculating fee stats (OPTIMIZED) for tenant:', tenantId);
+      const tId = await getEffectiveTenantId();
+      console.log('🔍 FeeManagement: Calculating fee stats (OPTIMIZED) for tenant:', tId);
       
       // 🚀 ULTRA-FAST: Single query with aggregation
       const { data: statsData, error: statsError } = await supabase
         .from('fee_structure')
         .select('amount')
-        .eq('tenant_id', tenantId);
+        .eq('tenant_id', tId);
       
       if (statsError) throw statsError;
       
@@ -184,7 +199,7 @@ const FeeManagement = () => {
       const { data: paymentsData, error: paymentsError } = await supabase
         .from('student_fees')
         .select('amount_paid, student_id')
-        .eq('tenant_id', tenantId);
+        .eq('tenant_id', tId);
       
       if (paymentsError) throw paymentsError;
       
@@ -192,18 +207,19 @@ const FeeManagement = () => {
       const { count: studentCount, error: studentsError } = await supabase
         .from('students')
         .select('*', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId);
+        .eq('tenant_id', tId);
       
       if (studentsError) throw studentsError;
+      
       
       // ⚡ Lightning-fast in-memory calculations
       const totalDue = (statsData || []).reduce((sum, fee) => sum + Number(fee.amount), 0);
       const totalPaid = (paymentsData || []).reduce((sum, payment) => sum + Number(payment.amount_paid || 0), 0);
       
+      // 🚀 ULTRA-FAST: Single query for student count
       // Fast set-based calculation for pending students
       const studentsWithPayments = new Set((paymentsData || []).map(fee => fee.student_id));
       const pendingStudents = (studentCount || 0) - studentsWithPayments.size;
-
       console.log('FeeManagement - OPTIMIZED Fee Stats - Total Paid Amount:', totalPaid);
       setFeeStats({ totalDue, totalPaid, pendingStudents });
       
@@ -338,6 +354,11 @@ const FeeManagement = () => {
     
     // 🔥 OPTIMIZED APPROACH: Use parallel queries instead of complex joins
     const batchStartTime = performance.now();
+
+    const tId = await getEffectiveTenantId();
+    if (!tId) {
+      throw new Error('Tenant context not available for fee loading');
+    }
     
     // Execute optimized parallel queries for maximum compatibility
     const [
@@ -351,32 +372,32 @@ const FeeManagement = () => {
       supabase
         .from('classes')
         .select('id, class_name, section, academic_year')
-        .eq('tenant_id', tenantId),
+        .eq('tenant_id', tId),
       
       // Students query  
       supabase
         .from('students')
         .select('id, name, admission_no, academic_year, class_id')
-        .eq('tenant_id', tenantId),
+        .eq('tenant_id', tId),
       
       // Fee structures query with discount information
       supabase
         .from('fee_structure')
         .select('id, class_id, student_id, fee_component, amount, base_amount, due_date, academic_year, discount_applied')
-        .eq('tenant_id', tenantId),
+        .eq('tenant_id', tId),
       
       // Payments query
       supabase
         .from('student_fees')
         .select('id, student_id, fee_component, amount_paid, payment_date, payment_mode, academic_year')
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', tId)
         .order('payment_date', { ascending: false }),
       
       // Student discounts query
       supabase
         .from('student_discounts')
         .select('id, student_id, class_id, academic_year, discount_type, discount_value, fee_component, is_active')
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', tId)
         .eq('is_active', true)
     ]);
     
