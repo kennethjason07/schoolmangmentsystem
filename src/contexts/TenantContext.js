@@ -95,6 +95,49 @@ export const TenantProvider = ({ children }) => {
     
     console.log('🚀 TenantProvider: useEffect setup complete');
   }, []);
+  
+  // 🚀 ENHANCED: Auto-initialize tenant when user authenticates
+  useEffect(() => {
+    const checkUserAndInitializeTenant = async () => {
+      // Only proceed if we haven't initialized tenant yet
+      if (tenantInitialized) {
+        return;
+      }
+      
+      try {
+        // Check if user is authenticated
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        
+        if (!authError && user) {
+          console.log('🚀 TenantContext: User authenticated, triggering tenant initialization:', user.email);
+          
+          // Auto-initialize tenant using email-based lookup
+          await loadTenantFromStorage();
+        }
+      } catch (error) {
+        // Silent error - we don't want to break the app if this fails
+        console.warn('⚠️ TenantContext: Error during auto-initialization:', error);
+      }
+    };
+    
+    // Check for authenticated user and initialize if needed
+    checkUserAndInitializeTenant();
+    
+    // Also listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user && !tenantInitialized) {
+        console.log('🚀 TenantContext: User signed in, auto-initializing tenant:', session.user.email);
+        await loadTenantFromStorage();
+      } else if (event === 'SIGNED_OUT') {
+        console.log('🚀 TenantContext: User signed out, clearing tenant data');
+        await clearTenant();
+      }
+    });
+    
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, [tenantInitialized]);
 
   // 🚀 ENHANCED: Get cached tenant ID (most reliable method)
   const getCachedTenantId = () => {
@@ -274,22 +317,34 @@ export const TenantProvider = ({ children }) => {
           setError(result.error);
           setCurrentTenant(null);
         }
-      } else {
-        console.log('✅ TenantContext: Successfully loaded tenant via email:', {
-          id: result.data.tenant.id,
-          name: result.data.tenant.name,
-          email: result.data.userRecord.email,
-          status: result.data.tenant.status
-        });
-        
-        // Set the tenant in context
-        setCurrentTenant(result.data.tenant);
-        
-        // Cache the tenant ID
-        await AsyncStorage.setItem('currentTenantId', result.data.tenant.id);
-        
-        console.log('🎉 TenantContext: Email-based tenant loading completed successfully!');
-      }
+        } else {
+          console.log('✅ TenantContext: Successfully loaded tenant via email:', {
+            id: result.data.tenant.id,
+            name: result.data.tenant.name,
+            email: result.data.userRecord.email,
+            status: result.data.tenant.status
+          });
+          
+          // Set the tenant in context
+          setCurrentTenant(result.data.tenant);
+          
+          // 🚀 ENHANCED: Mark tenant as initialized and cache the ID
+          setCachedTenantId(result.data.tenant.id);
+          setTenantInitialized(true);
+          
+          // 🚀 ENHANCED: Initialize tenant helpers for global access
+          try {
+            initializeTenantHelpers(result.data.tenant.id);
+            console.log('🚀 TenantContext: Tenant helpers initialized successfully');
+          } catch (helperError) {
+            console.warn('⚠️ TenantContext: Error initializing tenant helpers:', helperError);
+          }
+          
+          // Cache the tenant ID in storage
+          await AsyncStorage.setItem('currentTenantId', result.data.tenant.id);
+          
+          console.log('🎉 TenantContext: Email-based tenant loading completed successfully!');
+        }
       
     } catch (error) {
       console.error('❌ TenantContext: Email-based tenant loading failed:', error);

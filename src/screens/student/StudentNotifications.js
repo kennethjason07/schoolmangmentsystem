@@ -92,18 +92,19 @@ const StudentNotifications = ({ navigation }) => {
       console.log('User ID:', user.id);
       console.log('Linked Student ID:', user.linked_student_id);
 
-      // Validate tenant access before proceeding
-      const tenantValidation = await validateTenantAccess(user.id, tenantId);
-      if (!tenantValidation.isValid) {
-        console.error('❌ Student notifications tenant validation failed:', tenantValidation.error);
-        Alert.alert('Access Denied', TENANT_ERROR_MESSAGES.INVALID_TENANT_ACCESS);
+      // Validate tenant context is ready
+      if (!isReady || !tenantId) {
+        console.log('⚠️ Tenant context not ready, skipping fetch');
         return;
       }
       
+      console.log('✅ Using tenant ID:', tenantId);
+      
       // Get student details to filter notifications properly with tenant-aware query
-      const tenantStudentQuery = createTenantQuery(supabase.from(TABLES.STUDENTS), tenantId);
-      const { data: studentData, error: studentError } = await tenantStudentQuery
+      const { data: studentData, error: studentError } = await supabase
+        .from(TABLES.STUDENTS)
         .select('id, class_id, classes(id, class_name, section), tenant_id')
+        .eq('tenant_id', tenantId)
         .eq('id', user.linked_student_id)
         .single();
         
@@ -121,13 +122,14 @@ const StudentNotifications = ({ navigation }) => {
       
       // Fetch notifications that are specifically for this student with tenant-aware query
       // This includes notifications that have recipients records for this user
-      const tenantNotificationQuery = createTenantQuery(supabase.from('notification_recipients'), tenantId);
-      const { data: recipientRecords, error: recipientError } = await tenantNotificationQuery
+      const { data: recipientRecords, error: recipientError } = await supabase
+        .from('notification_recipients')
         .select(`
           notification_id,
           is_read,
           id,
           tenant_id,
+          created_at,
           notifications(
             id,
             message,
@@ -144,9 +146,10 @@ const StudentNotifications = ({ navigation }) => {
             )
           )
         `)
+        .eq('tenant_id', tenantId)
         .eq('recipient_id', user.id)
         .eq('recipient_type', 'Student')
-        .order('notifications.created_at', { ascending: false, foreignTable: 'notifications' })
+        .order('created_at', { ascending: false })
         .limit(50);
       
       if (recipientError) {
@@ -155,11 +158,19 @@ const StudentNotifications = ({ navigation }) => {
       }
       
       // Extract notification data from recipient records
-      const notificationsData = recipientRecords?.map(record => ({
+      let notificationsData = recipientRecords?.map(record => ({
         ...record.notifications,
         recipientId: record.id,
-        is_read_from_recipient: record.is_read
+        is_read_from_recipient: record.is_read,
+        recipient_created_at: record.created_at
       })).filter(n => n && n.id) || [];
+      
+      // Ensure newest first by notification timestamp, fallback to recipient record timestamp
+      notificationsData.sort((a, b) => {
+        const aTime = new Date(a.created_at || a.recipient_created_at || 0).getTime();
+        const bTime = new Date(b.created_at || b.recipient_created_at || 0).getTime();
+        return bTime - aTime;
+      });
       
 
       console.log(`✅ [STUDENT NOTIFICATIONS] Found ${notificationsData?.length || 0} notifications for student ${user.id}`);
@@ -223,8 +234,7 @@ const StudentNotifications = ({ navigation }) => {
         if (missingRecords.length > 0) {
           console.log(`📝 Creating recipient records for ${missingRecords.length} notifications`);
           
-          // Get tenant_id for the record
-          const tenantId = await getUserTenantId();
+          // Use tenant_id from context
           if (!tenantId) {
             console.error('Cannot create recipient records: tenant_id is null');
             return;
@@ -406,18 +416,18 @@ const StudentNotifications = ({ navigation }) => {
   };
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id && isReady) {
       fetchNotifications();
     }
-  }, [user?.id]);
+  }, [user?.id, isReady]);
 
   // Add focus effect to refresh data when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      if (user?.id) {
+      if (user?.id && isReady) {
         fetchNotifications();
       }
-    }, [user?.id])
+    }, [user?.id, isReady])
   );
 
   // Real-time subscription effect
@@ -488,8 +498,7 @@ const markAsRead = async (id) => {
         // Create new recipient record
         console.log('Creating new recipient record');
         
-        // Get tenant_id for the record
-        const tenantId = await getUserTenantId();
+        // Use tenant_id from context
         if (!tenantId) {
           console.error('Cannot create recipient record: tenant_id is null');
           throw new Error('Tenant ID not available');
