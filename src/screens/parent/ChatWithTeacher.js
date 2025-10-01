@@ -1575,9 +1575,6 @@ const ChatWithTeacher = () => {
                     )}
                     
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 4, opacity: deletingMessageId === item.id ? 0.3 : 1 }}>
-                      <Text style={styles.messageTime}>
-                        {item.timestamp || formatToLocalTime(item.sent_at)}
-                      </Text>
                       {(item.sender === 'parent' || item.sender_id === user.id) && (
                         <View style={{ marginLeft: 6 }}>
                           {item.failed ? (

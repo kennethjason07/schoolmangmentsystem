@@ -2184,7 +2184,6 @@ const TeacherChat = () => {
                       <Text style={styles.messageText}>{item.message || item.text}</Text>
                     )}
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 4 }}>
-                      <Text style={styles.messageTime}>{formatToLocalTime(item.sent_at)}</Text>
                       {item.sender_id === user.id && (
                         <View style={{ marginLeft: 6 }}>
                           {item.failed ? (
