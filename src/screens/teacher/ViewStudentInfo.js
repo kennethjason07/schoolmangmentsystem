@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity, Modal, ScrollView, Button, Platform, Animated, Easing, Pressable, ActivityIndicator, Alert, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Header from '../../components/Header';
@@ -32,13 +32,72 @@ const ViewStudentInfo = () => {
     totalStudents: 0
   });
 
-  // Fetch teacher's students
-  const fetchStudents = async () => {
+  // 🚀 OPTIMIZATION: Smart caching system
+  const [cachedData, setCachedData] = useState({
+    teacher: null,
+    classes: null,
+    students: null,
+    studentStats: {}, // key: studentId, value: stats
+    lastFetch: {}
+  });
+  const cacheRef = useRef(cachedData);
+  
+  // Cache configuration
+  const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+  const STATS_CACHE_DURATION = 2 * 60 * 1000; // 2 minutes for student stats
+  
+  // 🚀 OPTIMIZATION: Cache utility functions
+  const isCacheValid = useCallback((key, customDuration) => {
+    const duration = customDuration || CACHE_DURATION;
+    const lastFetch = cachedData.lastFetch[key];
+    if (!lastFetch) return false;
+    return (Date.now() - lastFetch) < duration;
+  }, [cachedData.lastFetch]);
+  
+  const updateCache = useCallback((updates) => {
+    const now = Date.now();
+    setCachedData(prev => {
+      const newData = {
+        ...prev,
+        ...updates,
+        lastFetch: {
+          ...prev.lastFetch,
+          ...Object.keys(updates).reduce((acc, key) => ({
+            ...acc,
+            [key]: now
+          }), {})
+        }
+      };
+      cacheRef.current = newData;
+      return newData;
+    });
+  }, []);
+  
+  const loadFromCache = useCallback(() => {
+    if (cachedData.students && isCacheValid('students')) {
+      console.log('💾 CACHE HIT: Using cached student data');
+      setStudents(cachedData.students);
+      setFilteredStudents(cachedData.students);
+      setClasses(cachedData.classes || ['All']);
+      return true;
+    }
+    return false;
+  }, [cachedData, isCacheValid]);
+
+  // 🚀 OPTIMIZATION: Enhanced fetchStudents with caching and single query
+  const fetchStudents = async (forceRefresh = false) => {
     try {
+      // Check cache first unless forcing refresh
+      if (!forceRefresh && loadFromCache()) {
+        setLoading(false);
+        return;
+      }
+      
       setLoading(true);
       setError(null);
+      const startTime = Date.now();
 
-      console.log('ViewStudentInfo: Starting fetch with user ID:', user?.id);
+      console.log('🚀 ViewStudentInfo: Starting optimized fetch with user ID:', user?.id);
 
       if (!user?.id) {
         throw new Error('User not logged in');
@@ -147,36 +206,54 @@ const ViewStudentInfo = () => {
 
       console.log('ViewStudentInfo: All unique classes:', uniqueClassesArray);
 
-      // Optimized single query to get students with their parent information
-      const studentPromises = uniqueClassesArray.map(classInfo => {
-        console.log('ViewStudentInfo: Fetching students with parents for class:', classInfo.id, `(${classInfo.type})`);
-        return supabase
-          .from(TABLES.STUDENTS)
-          .select(`
+      // 🚀 OPTIMIZATION: Single query instead of N+1 queries
+      console.log('🚀 OPTIMIZATION: Using single query for all classes instead of', uniqueClassesArray.length, 'separate queries');
+      
+      const classIds = uniqueClassesArray.map(c => c.id);
+      const { data: allStudentsData, error: studentsError } = await supabase
+        .from(TABLES.STUDENTS)
+        .select(`
+          id,
+          name,
+          roll_no,
+          address,
+          dob,
+          gender,
+          admission_no,
+          academic_year,
+          class_id,
+          classes(class_name, section),
+          parents!parents_student_id_fkey(
             id,
             name,
-            roll_no,
-            address,
-            dob,
-            gender,
-            admission_no,
-            academic_year,
-            classes(class_name, section),
-            parents!parents_student_id_fkey(
-              id,
-              name,
-              phone,
-              email,
-              relation
-            )
-          `)
-          .eq('class_id', classInfo.id)
-          .order('roll_no')
-          .then(result => ({ ...result, classInfo }));
+            phone,
+            email,
+            relation
+          )
+        `)
+        .in('class_id', classIds)
+        .order('roll_no');
+        
+      if (studentsError) {
+        console.error('❌ Error in single student query:', studentsError);
+        throw studentsError;
+      }
+      
+      console.log('🚀 Single query result: Found', allStudentsData?.length || 0, 'students across', classIds.length, 'classes');
+      
+      // Group students by class for processing
+      const studentResults = [];
+      uniqueClassesArray.forEach(classInfo => {
+        const classStudents = allStudentsData.filter(student => student.class_id === classInfo.id);
+        if (classStudents.length > 0) {
+          studentResults.push({
+            data: classStudents,
+            classInfo: classInfo
+          });
+        }
       });
-
-      const studentResults = await Promise.all(studentPromises);
-      console.log('ViewStudentInfo: Student results with parents:', studentResults);
+      
+      console.log('ViewStudentInfo: Organized student results:', studentResults.length, 'class groups');
 
       // Process all students and their parent information
       const allStudents = [];
@@ -291,8 +368,17 @@ const ViewStudentInfo = () => {
 
       console.log('ViewStudentInfo: Final unique students:', uniqueStudents.length);
       console.log('ViewStudentInfo: Students with parent info:', uniqueStudents.filter(s => s.parents).length);
+      
+      // 🚀 OPTIMIZATION: Cache the results
+      const classNames = ['All', ...uniqueClassNames];
+      updateCache({
+        students: uniqueStudents,
+        classes: classNames
+      });
+      
       setStudents(uniqueStudents);
       setFilteredStudents(uniqueStudents);
+      setClasses(classNames);
 
       // Update teacher statistics
       setTeacherStats({
@@ -300,7 +386,9 @@ const ViewStudentInfo = () => {
         subjectTeacherCount,
         totalStudents: uniqueStudents.length
       });
-
+      
+      const endTime = Date.now();
+      console.log(`✅ OPTIMIZATION: ViewStudentInfo data loaded in ${endTime - startTime}ms`);
       console.log('ViewStudentInfo: Teacher Stats - Class Teacher:', classTeacherCount, 'Subject Teacher:', subjectTeacherCount, 'Total Students:', uniqueStudents.length);
 
     } catch (err) {
@@ -311,40 +399,71 @@ const ViewStudentInfo = () => {
     }
   };
 
-  // Fetch student statistics
+  // 🚀 OPTIMIZATION: Cached student statistics
   const fetchStudentStats = async (studentId) => {
     try {
-      // Get attendance statistics
-      const { data: attendanceData, error: attendanceError } = await supabase
-        .from(TABLES.STUDENT_ATTENDANCE)
-        .select('*')
-        .eq('student_id', studentId);
+      // Check cache first
+      const statsKey = `stats_${studentId}`;
+      if (cachedData.studentStats[studentId] && isCacheValid(statsKey, STATS_CACHE_DURATION)) {
+        console.log(`💾 CACHE HIT: Using cached stats for student ${studentId}`);
+        return cachedData.studentStats[studentId];
+      }
+      
+      console.log(`🚀 FETCH: Loading fresh stats for student ${studentId}`);
+      const statsStartTime = Date.now();
+      
+      // 🚀 OPTIMIZATION: Parallel fetch of attendance and marks
+      const [attendanceResult, marksResult] = await Promise.all([
+        supabase
+          .from(TABLES.STUDENT_ATTENDANCE)
+          .select('status')
+          .eq('student_id', studentId),
+        supabase
+          .from(TABLES.MARKS)
+          .select('marks_obtained')
+          .eq('student_id', studentId)
+      ]);
+      
+      const { data: attendanceData, error: attendanceError } = attendanceResult;
 
       if (attendanceError) throw attendanceError;
+      
+      const { data: marksData, error: marksError } = marksResult;
+      if (marksError) throw marksError;
 
       const totalDays = attendanceData.length;
       const presentDays = attendanceData.filter(a => a.status === 'Present').length;
       const attendancePercentage = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
-
-      // Get marks statistics
-      const { data: marksData, error: marksError } = await supabase
-        .from(TABLES.MARKS)
-        .select('*')
-        .eq('student_id', studentId);
-
-      if (marksError) throw marksError;
 
       const totalMarks = marksData.length;
       const averageMarks = totalMarks > 0 
         ? Math.round(marksData.reduce((sum, m) => sum + (m.marks_obtained || 0), 0) / totalMarks)
         : 0;
 
-      return {
+      const stats = {
         attendance: attendancePercentage,
         marks: averageMarks,
         attendanceHistory: attendanceData.slice(-4).map(a => a.status === 'Present' ? 100 : 0),
         marksHistory: marksData.slice(-4).map(m => m.marks_obtained || 0)
       };
+      
+      // 🚀 OPTIMIZATION: Cache the statistics
+      setCachedData(prev => ({
+        ...prev,
+        studentStats: {
+          ...prev.studentStats,
+          [studentId]: stats
+        },
+        lastFetch: {
+          ...prev.lastFetch,
+          [`stats_${studentId}`]: Date.now()
+        }
+      }));
+      
+      const statsEndTime = Date.now();
+      console.log(`✅ OPTIMIZATION: Student stats loaded in ${statsEndTime - statsStartTime}ms`);
+      
+      return stats;
 
     } catch (err) {
       console.error('Error fetching student stats:', err);
@@ -361,11 +480,12 @@ const ViewStudentInfo = () => {
     fetchStudents();
   }, []);
 
-  // Pull-to-refresh handler
+  // 🚀 OPTIMIZATION: Enhanced pull-to-refresh with force refresh
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      await fetchStudents();
+      console.log('🔄 REFRESH: Force refreshing all data');
+      await fetchStudents(true); // Force refresh to bypass cache
     } catch (error) {
       console.error('Error refreshing students:', error);
     } finally {

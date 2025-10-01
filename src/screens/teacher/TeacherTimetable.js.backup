@@ -224,12 +224,6 @@ const TeacherTimetable = ({ navigation }) => {
   // 🚀 OPTIMIZATION: Main data loading function with parallel API calls and caching
   const loadData = async (forceRefresh = false) => {
     try {
-      // Prevent concurrent loading
-      if (loading && !forceRefresh) {
-        console.log('⏳ LOAD: Already loading, skipping redundant call');
-        return;
-      }
-      
       // Check cache first (unless force refresh)
       if (!forceRefresh && isCacheValid()) {
         loadFromCache();
@@ -238,7 +232,6 @@ const TeacherTimetable = ({ navigation }) => {
         return;
       }
       
-      console.log(`🚀 LOAD: Starting data load (force: ${forceRefresh})`);
       setLoading(true);
       
       // 🚀 ENHANCED: Validate tenant access using new helper
@@ -363,55 +356,31 @@ const TeacherTimetable = ({ navigation }) => {
   // 🚀 OPTIMIZATION: Prefetch data in background
   const prefetchData = useCallback(async () => {
     try {
-      const cacheInfo = getCacheInfo();
-      
-      // Only prefetch if:
-      // 1. Not currently loading
-      // 2. Cache is invalid OR will expire soon (within 20% of duration)
-      // 3. We have tenant and user ready
-      if (!loading && isReady && user?.id) {
-        const shouldPrefetch = !cacheInfo.valid || 
-          (cacheInfo.valid && cacheInfo.age > CACHE_DURATION * 0.8);
-          
-        if (shouldPrefetch) {
-          console.log(`🚀 PREFETCH: Background refresh needed (cache age: ${cacheInfo.age}s, status: ${cacheInfo.status})`);
-          await loadData(false); // Don't force refresh, respect cache if still valid
-        } else {
-          console.log(`💾 PREFETCH: Skipped - cache still fresh (age: ${cacheInfo.age}s)`);
-        }
-      } else {
-        console.log('⏸️ PREFETCH: Skipped - conditions not met');
+      console.log('🚀 PREFETCH: Starting background data prefetch...');
+      // Only prefetch if cache is invalid and we're not already loading
+      if (!loading && !isCacheValid()) {
+        await loadData(false); // Use cache if available
       }
     } catch (error) {
       console.error('❌ PREFETCH: Error in background prefetch:', error);
       // Silently fail prefetch to not interrupt user experience
     }
-  }, [loading, isReady, user?.id, getCacheInfo]);
+  }, [loading, isCacheValid]);
   
   // 🚀 OPTIMIZATION: Enhanced useEffect with prefetching
   useEffect(() => {
     if (isReady && user?.id) {
       console.log('🚀 Enhanced: Tenant and user ready, loading timetable data...');
+      loadData();
       
-      // Only load if we don't have valid cache
-      if (!isCacheValid()) {
-        loadData();
-      } else {
-        console.log('💾 FAST START: Using existing valid cache');
-        loadFromCache();
-      }
+      // Set up prefetch timer for future loads
+      const prefetchTimer = setTimeout(() => {
+        prefetchData();
+      }, PREFETCH_DELAY);
       
-      // Set up prefetch timer for future loads (only if cache will expire soon)
-      const cacheInfo = getCacheInfo();
-      if (cacheInfo.valid && cacheInfo.age > CACHE_DURATION * 0.8) { // 80% of cache duration
-        const prefetchTimer = setTimeout(() => {
-          prefetchData();
-        }, PREFETCH_DELAY);
-        
-        return () => clearTimeout(prefetchTimer);
-      }
+      return () => clearTimeout(prefetchTimer);
     }
-  }, [isReady, user?.id]); // Removed prefetchData dependency to prevent loops
+  }, [isReady, user?.id, prefetchData]);
 
   const getDayNameFromDate = (date) => {
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
