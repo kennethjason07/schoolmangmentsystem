@@ -69,14 +69,10 @@ class HostelService {
    */
   async getHostels() {
     try {
+      // Use plain select to avoid PGRST200 issues when relationships aren't declared
       const { data, error } = await supabase
         .from('hostels')
-        .select(`
-          *,
-          warden:users(id, full_name, email, phone),
-          rooms_count:rooms(count),
-          total_beds:rooms(beds(count))
-        `)
+        .select('*')
         .eq('tenant_id', this.tenantId)
         .eq('is_active', true)
         .order('name');
@@ -743,15 +739,10 @@ class HostelService {
    */
   async getMaintenanceLogs(hostelId = null) {
     try {
+      // Avoid relational selects to prevent PGRST200 when FKs aren't registered
       let query = supabase
         .from('hostel_maintenance_logs')
-        .select(`
-          *,
-          hostel:hostels(name),
-          room:rooms(room_number),
-          reported_by:users!reported_by(full_name),
-          assigned_to:users!assigned_to(full_name)
-        `)
+        .select('*')
         .eq('tenant_id', this.tenantId);
 
       if (hostelId) {

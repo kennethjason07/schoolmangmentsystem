@@ -134,7 +134,7 @@ const HostelApplications = ({ navigation, route }) => {
   const renderApplication = ({ item }) => (
     <TouchableOpacity 
       style={styles.applicationCard}
-      onPress={() => navigation.navigate('ApplicationDetails', { applicationId: item.id })}
+      onPress={() => navigation.navigate('ApplicationDetails', { application: item })}
     >
       <View style={styles.applicationHeader}>
         <View style={styles.studentInfo}>

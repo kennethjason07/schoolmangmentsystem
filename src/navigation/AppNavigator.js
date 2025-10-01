@@ -495,11 +495,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="HostelsOverview" component={require('../screens/admin/HostelsOverview').default} />
                 <Stack.Screen name="HostelQuickActions" component={require('../screens/admin/HostelQuickActions').default} />
                 {/* Placeholder detail/allocation routes used by Applications screen */}
-                <Stack.Screen 
-                  name="ApplicationDetails" 
-                  component={WardenDashboard} 
-                  options={{ title: 'Application Details', headerShown: true }}
-                />
+                <Stack.Screen name="ApplicationDetails" component={require('../screens/admin/HostelApplicationDetails').default} />
                 <Stack.Screen 
                   name="BedAllocation" 
                   component={WardenDashboard} 

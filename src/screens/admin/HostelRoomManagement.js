@@ -401,17 +401,27 @@ const HostelRoomManagement = ({ navigation, route }) => {
   );
 
   const RoomModal = ({ visible, onClose, onSubmit, title, isEdit = false }) => (
-    <Modal visible={visible} transparent animationType="slide">
+    <Modal 
+      visible={visible} 
+      transparent 
+      animationType="slide"
+      onRequestClose={() => { /* prevent accidental back-closing while typing */ }}
+    >
       <View style={styles.modalContainer}>
         <View style={styles.modalContent}>
           <Text style={styles.modalTitle}>{title}</Text>
           
-          <ScrollView style={styles.modalForm}>
+          <ScrollView style={styles.modalForm} keyboardShouldPersistTaps="always">
             <TextInput
               style={styles.input}
               placeholder="Room Number *"
               value={roomData.room_number}
               onChangeText={(text) => setRoomData(prev => ({ ...prev, room_number: text }))}
+              autoCorrect={false}
+              autoCapitalize="none"
+              blurOnSubmit={false}
+              keyboardType="default"
+              returnKeyType="done"
             />
             
             <TextInput
@@ -420,8 +430,10 @@ const HostelRoomManagement = ({ navigation, route }) => {
               value={roomData.floor}
               onChangeText={(text) => setRoomData(prev => ({ ...prev, floor: text }))}
               keyboardType="numeric"
+              autoCorrect={false}
+              blurOnSubmit={false}
+              returnKeyType="next"
             />
-            
             <View style={styles.pickerContainer}>
               <Text style={styles.pickerLabel}>Room Type</Text>
               <Picker
@@ -448,16 +460,20 @@ const HostelRoomManagement = ({ navigation, route }) => {
               value={roomData.capacity}
               onChangeText={(text) => setRoomData(prev => ({ ...prev, capacity: text }))}
               keyboardType="numeric"
+              autoCorrect={false}
+              blurOnSubmit={false}
+              returnKeyType="next"
             />
-            
             <TextInput
               style={styles.input}
               placeholder="Rent per Bed *"
               value={roomData.rent_per_bed}
               onChangeText={(text) => setRoomData(prev => ({ ...prev, rent_per_bed: text }))}
               keyboardType="numeric"
+              autoCorrect={false}
+              blurOnSubmit={false}
+              returnKeyType="done"
             />
-            
             <TextInput
               style={[styles.input, styles.textArea]}
               placeholder="Description"
@@ -465,8 +481,9 @@ const HostelRoomManagement = ({ navigation, route }) => {
               onChangeText={(text) => setRoomData(prev => ({ ...prev, description: text }))}
               multiline
               numberOfLines={3}
+              autoCorrect={false}
+              blurOnSubmit={false}
             />
-            
             <TextInput
               style={[styles.input, styles.textArea]}
               placeholder="Amenities (comma separated)"
@@ -474,7 +491,10 @@ const HostelRoomManagement = ({ navigation, route }) => {
               onChangeText={(text) => setRoomData(prev => ({ ...prev, amenities: text }))}
               multiline
               numberOfLines={2}
+              autoCorrect={false}
+              blurOnSubmit={false}
             />
+
           </ScrollView>
 
           <View style={styles.modalActions}>

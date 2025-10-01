@@ -19,6 +19,7 @@ import HostelStatCard from '../../components/HostelStatCard';
 import { supabase } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import HostelService from '../../services/HostelService';
 
 const { width } = Dimensions.get('window');
 
@@ -55,8 +56,8 @@ const HostelManagement = ({ navigation }) => {
   });
 
   useEffect(() => {
-    // Load mock data for frontend demo
-    loadMockData();
+    // Attempt live data load; fallback to mock data if tables missing
+    loadDashboardData();
     
     // Check if we have an allocation context from navigation
     if (route.params?.allocationContext) {
@@ -287,9 +288,180 @@ const HostelManagement = ({ navigation }) => {
   };
 
   const loadDashboardData = async () => {
-    // This will be used later when connecting to backend
-    // For now, just call loadMockData
-    await loadMockData();
+    setLoading(true);
+    try {
+      // Derive tenant
+      const tenantResult = await getCurrentUserTenantByEmail();
+      if (!tenantResult.success) throw new Error(`Failed to resolve tenant: ${tenantResult.error || 'unknown'}`);
+      const tenantId = tenantResult.data.tenant.id;
+
+      // Configure service
+      HostelService.setTenantId(tenantId);
+
+      // Parallel load: hostels, occupancy, applications, allocations, maintenance
+      const hostelsQ = HostelService.getHostels();
+      const occupancyQ = HostelService.getOccupancyReport(null);
+      const appsQ = HostelService.getApplications({});
+
+      // Direct allocation query (service does not expose a list method)
+      const allocationsQ = supabase
+        .from('bed_allocations')
+        .select(`
+          id, created_at, monthly_rent, status,
+          student:students(id, name, class_id),
+          bed:beds(
+            id, bed_label,
+            room:rooms(id, room_number, hostel:hostels(id, name))
+          )
+        `)
+        .eq('tenant_id', tenantId)
+        .in('status', ['pending_acceptance','active']);
+
+      const maintenanceQ = HostelService.getMaintenanceLogs(null);
+
+      const [hostelsRes, occRes, appsRes, allocationsRes, maintRes] = await Promise.all([
+        hostelsQ, occupancyQ, appsQ, allocationsQ, maintenanceQ
+      ]);
+
+      // If occupancy view failed, compute fallback from beds/rooms
+      let occ = occRes.success ? (occRes.data || []) : [];
+      if (!occRes.success) {
+        try {
+          const { data: allBeds = [] } = await supabase
+            .from('beds')
+            .select('id, status, room_id')
+            .eq('tenant_id', tenantId);
+          const roomIds = [...new Set(allBeds.map(b => b.room_id).filter(Boolean))];
+          let roomsMap = new Map();
+          if (roomIds.length) {
+            const { data: rooms = [] } = await supabase
+              .from('rooms')
+              .select('id, hostel_id')
+              .in('id', roomIds);
+            roomsMap = new Map(rooms.map(r => [r.id, r]));
+          }
+          const occByHostelId = new Map();
+          for (const b of allBeds) {
+            const room = roomsMap.get(b.room_id);
+            const hId = room?.hostel_id;
+            if (!hId) continue;
+            if (!occByHostelId.has(hId)) occByHostelId.set(hId, 0);
+            if (b.status === 'occupied') occByHostelId.set(hId, occByHostelId.get(hId) + 1);
+          }
+          occ = Array.from(occByHostelId.entries()).map(([hostel_id, total_occupied]) => ({
+            tenant_id: tenantId,
+            hostel_id,
+            total_occupied
+          }));
+        } catch (e) {
+          console.warn('[HostelManagement] Occupancy fallback failed:', e?.message);
+          occ = [];
+        }
+      }
+
+      // Hostels
+      const liveHostels = (hostelsRes.success ? (hostelsRes.data || []) : []).map(h => ({
+        id: h.id,
+        name: h.name,
+        description: h.description,
+        capacity: Number(h.capacity || 0),
+        occupied: 0, // will compute from occupancy
+        status: h.is_active ? 'active' : 'inactive',
+        contact_phone: h.contact_phone || null,
+      }));
+
+      // Occupancy
+      const occByHostel = new Map(occ.map(o => [o.hostel_id, o]));
+      const withOcc = liveHostels.map(h => {
+        const o = occByHostel.get(h.id);
+        return {
+          ...h,
+          occupied: Number(o?.total_occupied || 0)
+        };
+      });
+
+      // Applications
+      const liveApplications = appsRes.success ? (appsRes.data || []) : [];
+
+      // Allocations
+      const allocationsData = allocationsRes.error ? [] : (allocationsRes.data || []);
+
+      // Manual enrichment without relying on FK relationships
+      const bedIds = [...new Set(allocationsData.map(a => a.bed?.id || a.bed_id).filter(Boolean))];
+      let bedsMap = new Map();
+      if (bedIds.length) {
+        const { data: bedsRows = [] } = await supabase
+          .from('beds')
+          .select('id, bed_label, room_id')
+          .in('id', bedIds);
+        bedsMap = new Map(bedsRows.map(b => [b.id, b]));
+      }
+      const roomIds2 = [...new Set(Array.from(bedsMap.values()).map(b => b.room_id).filter(Boolean))];
+      let roomsMap2 = new Map();
+      if (roomIds2.length) {
+        const { data: roomRows = [] } = await supabase
+          .from('rooms')
+          .select('id, room_number, hostel_id')
+          .in('id', roomIds2);
+        roomsMap2 = new Map(roomRows.map(r => [r.id, r]));
+      }
+      const hostelIds = [...new Set(Array.from(roomsMap2.values()).map(r => r.hostel_id).filter(Boolean))];
+      let hostelsMap2 = new Map();
+      if (hostelIds.length) {
+        const { data: hostelRows = [] } = await supabase
+          .from('hostels')
+          .select('id, name')
+          .in('id', hostelIds);
+        hostelsMap2 = new Map(hostelRows.map(h => [h.id, h]));
+      }
+
+      const liveAllocations = allocationsData.map(a => {
+        // Try nested value, otherwise use manual map
+        const bedId = a.bed?.id || a.bed_id;
+        const bed = a.bed || bedsMap.get(bedId);
+        const room = (a.bed?.room) || (bed ? roomsMap2.get(bed.room_id) : null);
+        const hostel = (a.bed?.room?.hostel) || (room ? hostelsMap2.get(room.hostel_id) : null);
+        return {
+          id: a.id,
+          allocation_date: a.created_at,
+          monthly_rent: a.monthly_rent || 0,
+          students: { name: a.student?.name || 'Student' },
+          hostels: { name: hostel?.name || 'Hostel' },
+          hostel_rooms: { room_number: room?.room_number || '-' },
+          hostel_beds: { bed_number: bed?.bed_label || '-' }
+        };
+      });
+
+      // Maintenance
+      const liveMaintenance = maintRes.success ? (maintRes.data || []) : [];
+
+      // Stats
+      const totalHostels = withOcc.length;
+      const totalCapacity = withOcc.reduce((s, h) => s + (h.capacity || 0), 0);
+      const totalOccupied = withOcc.reduce((s, h) => s + (h.occupied || 0), 0);
+      const availableBeds = Math.max(totalCapacity - totalOccupied, 0);
+
+      const statsComputed = {
+        totalHostels,
+        totalCapacity,
+        totalOccupied,
+        availableBeds,
+        pendingApplications: liveApplications.filter(a => a.status === 'submitted').length,
+        approvedApplications: liveApplications.filter(a => a.status === 'accepted').length,
+        waitlistedApplications: liveApplications.filter(a => a.status === 'waitlisted').length,
+        maintenanceIssues: liveMaintenance.length,
+      };
+
+      setHostels(withOcc);
+      setApplications(liveApplications);
+      setAllocations(liveAllocations);
+      setMaintenanceIssues(liveMaintenance);
+      setStats(statsComputed);
+      setLoading(false);
+    } catch (err) {
+      console.warn('[HostelManagement] Live load failed, falling back to demo:', err?.message);
+      await loadMockData();
+    }
   };
 
   // Database functions removed for frontend demo
@@ -308,37 +480,47 @@ const HostelManagement = ({ navigation }) => {
         return;
       }
 
-      // Add hostel to mock data
-      const newHostel = {
-        id: Date.now().toString(),
+      const payload = {
         name: newHostelData.name.trim(),
-        description: newHostelData.description.trim(),
-        capacity: parseInt(newHostelData.capacity),
-        occupied: 0,
-        status: 'active',
-        contact_phone: newHostelData.contact_phone.trim()
+        description: newHostelData.description?.trim() || null,
+        hostel_type: newHostelData.type || 'mixed',
+        capacity: parseInt(newHostelData.capacity, 10) || 0,
+        is_active: true,
+        contact_phone: newHostelData.contact_phone?.trim() || null,
       };
 
-      setHostels(prev => [...prev, newHostel]);
-      
-      // Update stats
+      const res = await HostelService.createHostel(payload);
+
+      if (!res.success) {
+        // If table missing or any failure, inform user rather than silently acting like success
+        const msg = res.error || 'Failed to add hostel';
+        Alert.alert('Error', msg.includes('42P01') ? 'Backend hostel tables not found. Please run hostel schema migrations.' : msg);
+        return;
+      }
+
+      const saved = res.data;
+      const appended = {
+        id: saved.id,
+        name: saved.name,
+        description: saved.description,
+        capacity: Number(saved.capacity || 0),
+        occupied: 0,
+        status: saved.is_active ? 'active' : 'inactive',
+        contact_phone: saved.contact_phone || null,
+      };
+
+      setHostels(prev => [...prev, appended]);
+
       setStats(prev => ({
         ...prev,
         totalHostels: prev.totalHostels + 1,
-        totalCapacity: prev.totalCapacity + newHostel.capacity,
-        availableBeds: prev.availableBeds + newHostel.capacity
+        totalCapacity: prev.totalCapacity + appended.capacity,
+        availableBeds: prev.availableBeds + appended.capacity,
       }));
 
-      Alert.alert('Success', 'Hostel added successfully (Demo Mode)');
+      Alert.alert('Success', 'Hostel added successfully');
       setAddHostelModalVisible(false);
-      setNewHostelData({
-        name: '',
-        description: '',
-        type: 'mixed',
-        capacity: '',
-        contact_phone: ''
-      });
-
+      setNewHostelData({ name: '', description: '', type: 'mixed', capacity: '', contact_phone: '' });
     } catch (error) {
       console.error('Error adding hostel:', error);
       Alert.alert('Error', 'Failed to add hostel. Please try again.');

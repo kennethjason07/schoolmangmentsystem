@@ -337,13 +337,26 @@ const HostelMaintenanceManagement = ({ navigation, route }) => {
       <View style={styles.modalContainer}>
         <ScrollView contentContainerStyle={styles.modalScrollContent}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{title}</Text>
+            <View style={styles.modalHeaderRow}>
+              <TouchableOpacity
+                style={styles.modalBackButton}
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Back"
+              >
+                <Ionicons name="arrow-back" size={22} color="#333" />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>{title}</Text>
+              <View style={{ width: 22 }} />
+            </View>
             
-            <TextInput
               style={styles.input}
               placeholder="Issue Title *"
               value={issueData.title}
               onChangeText={(text) => setIssueData(prev => ({ ...prev, title: text }))}
+              autoCorrect={false}
+              autoCapitalize="none"
+              blurOnSubmit={false}
             />
             
             <TextInput
@@ -353,8 +366,8 @@ const HostelMaintenanceManagement = ({ navigation, route }) => {
               onChangeText={(text) => setIssueData(prev => ({ ...prev, description: text }))}
               multiline
               numberOfLines={4}
+              autoCorrect={false}
             />
-            
             <TextInput
               style={styles.input}
               placeholder="Location (e.g., Room A101, First Floor)"
@@ -437,12 +450,9 @@ const HostelMaintenanceManagement = ({ navigation, route }) => {
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={[styles.modalButton, { backgroundColor: '#f0f0f0' }]}
-                onPress={() => {
-                  onClose();
-                  resetForm();
-                }}
+                onPress={resetForm}
               >
-                <Text style={[styles.modalButtonText, { color: '#333' }]}>Cancel</Text>
+                <Text style={[styles.modalButtonText, { color: '#333' }]}>Clear</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, { backgroundColor: '#2196F3' }]}
@@ -779,12 +789,23 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 500,
   },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  modalBackButton: {
+    padding: 6,
+    borderRadius: 999,
+  },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 20,
+    marginBottom: 8,
     textAlign: 'center',
     color: '#333',
+    flex: 1,
   },
   input: {
     borderWidth: 1,

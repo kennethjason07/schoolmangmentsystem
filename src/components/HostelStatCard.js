@@ -182,23 +182,25 @@ const HostelStatCard = ({
                 size === 'large' && styles.valueLarge,
                 size === 'small' && styles.valueSmall,
               ]}>
-                {countAnim._value?.toFixed(0) || value}
+                {countAnim._value?.toFixed(0) || String(value)}
               </Animated.Text>
             ) : (
-              <Text style={[
-                styles.value,
-                { color },
-                size === 'large' && styles.valueLarge,
-                size === 'small' && styles.valueSmall,
-              ]}>
-                {loading ? (
-                  <View style={styles.loadingContainer}>
-                    <View style={[styles.loadingDot, { backgroundColor: color }]} />
-                    <View style={[styles.loadingDot, { backgroundColor: color }]} />
-                    <View style={[styles.loadingDot, { backgroundColor: color }]} />
-                  </View>
-                ) : value}
-              </Text>
+              loading ? (
+                <View style={styles.loadingContainer}>
+                  <View style={[styles.loadingDot, { backgroundColor: color }]} />
+                  <View style={[styles.loadingDot, { backgroundColor: color }]} />
+                  <View style={[styles.loadingDot, { backgroundColor: color }]} />
+                </View>
+              ) : (
+                <Text style={[
+                  styles.value,
+                  { color },
+                  size === 'large' && styles.valueLarge,
+                  size === 'small' && styles.valueSmall,
+                ]}>
+                  {String(value)}
+                </Text>
+              )
             )}
             
             {subtitle && (
