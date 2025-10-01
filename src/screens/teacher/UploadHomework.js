@@ -20,6 +20,13 @@ const UploadHomework = () => {
   const [homework, setHomework] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Realtime throttle
+  const refreshTimerRef = React.useRef(null);
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
   const [students, setStudents] = useState([]);
@@ -39,6 +46,7 @@ const UploadHomework = () => {
   const [showImageViewer, setShowImageViewer] = useState(false);
   const { user } = useAuth();
   const tenantAccess = useTenantAccess();
+  const [effectiveTenantId, setEffectiveTenantId] = useState(null);
   
   // Helper function to validate tenant readiness and get effective tenant ID
   const validateTenantReadiness = async () => {
@@ -60,20 +68,22 @@ const UploadHomework = () => {
     }
     
     // Get effective tenant ID
-    const effectiveTenantId = await getCachedTenantId();
-    if (!effectiveTenantId) {
+    const tId = await getCachedTenantId();
+    if (!tId) {
       console.log('❌ [UploadHomework] No effective tenant ID available');
       return { success: false, reason: 'NO_TENANT_ID' };
     }
     
+    if (!effectiveTenantId) setEffectiveTenantId(tId);
+    
     console.log('✅ [UploadHomework] Tenant validation successful:', {
-      effectiveTenantId,
+      effectiveTenantId: tId,
       currentTenant: tenantAccess.currentTenant?.id
     });
     
     return { 
       success: true, 
-      effectiveTenantId,
+      effectiveTenantId: tId,
       tenantContext: tenantAccess.currentTenant
     };
   };
@@ -109,7 +119,8 @@ const UploadHomework = () => {
           id,
           linked_teacher_id,
           email,
-          full_name
+          full_name,
+          teacher:teachers!users_linked_teacher_id_fkey(id, name)
         `
       ).eq('id', user.id);
       
@@ -128,33 +139,9 @@ const UploadHomework = () => {
       
       const linkedTeacherId = userData[0].linked_teacher_id;
       console.log('✅ [UploadHomework] Found linked teacher ID:', linkedTeacherId);
-      
-      // Now get teacher info using the linked teacher ID
-      const teacherQuery = createTenantQuery(
-        effectiveTenantId,
-        TABLES.TEACHERS
-      ).eq('id', linkedTeacherId);
-      
-      console.log('🔍 [UploadHomework] Fetching teacher data with tenant query');
-      const { data: fetchedTeacherData, error: teacherError } = await teacherQuery;
-
-      if (teacherError) {
-        console.error('❌ [UploadHomework] Error fetching teacher:', teacherError);
-        throw teacherError;
-      }
-      
-      if (!fetchedTeacherData || fetchedTeacherData.length === 0) {
-        console.error('❌ [UploadHomework] No teacher found for user:', user.id);
-        throw new Error('Teacher not found');
-      }
-      
-      const teacherRecord = fetchedTeacherData[0];
-      console.log('✅ [UploadHomework] Teacher data fetched:', { 
-        id: teacherRecord.id, 
-        name: teacherRecord.name,
-        tenantId: teacherRecord.tenant_id
-      });
-
+      // Use linked_teacher_id directly; optional teacher name from joined user
+      const teacherRecord = { id: linkedTeacherId, name: userData[0]?.teacher?.name || userData[0]?.full_name };
+      console.log('✅ [UploadHomework] Teacher data resolved:', { id: teacherRecord.id, name: teacherRecord.name });
       setTeacherData(teacherRecord);
 
       // Get assigned classes and subjects with tenant awareness
@@ -205,28 +192,27 @@ const UploadHomework = () => {
         }
       });
 
-      // Get students for each class with tenant awareness
-      for (const [classKey, classData] of classMap) {
-        const studentsQuery = createTenantQuery(
+      // Bulk fetch students for all assigned classes
+      const classIds = Array.from(classMap.keys());
+      let studentsByClass = new Map();
+      if (classIds.length > 0) {
+        const { data: studentsData, error: studentsError } = await createTenantQuery(
           effectiveTenantId,
           TABLES.STUDENTS,
-          `
-            id,
-            name,
-            roll_no
-          `
-        ).eq('class_id', classData.classId).order('roll_no');
-        
-        console.log('🔍 [UploadHomework] Fetching students for class:', classData.classId);
-        const { data: studentsData, error: studentsError } = await studentsQuery;
-
+          `id, name, roll_no, class_id`
+        ).in('class_id', classIds).order('roll_no');
         if (studentsError) {
           console.error('❌ [UploadHomework] Error fetching students:', studentsError);
           throw studentsError;
         }
-        
-        console.log('✅ [UploadHomework] Students fetched for class', classData.classId, ':', studentsData?.length || 0);
-        classData.students = studentsData || [];
+        (studentsData || []).forEach(s => {
+          if (!studentsByClass.has(s.class_id)) studentsByClass.set(s.class_id, []);
+          studentsByClass.get(s.class_id).push({ id: s.id, name: s.name, roll_no: s.roll_no });
+        });
+      }
+
+      for (const [classKey, classData] of classMap) {
+        classData.students = studentsByClass.get(classKey) || [];
       }
 
       setClasses(Array.from(classMap.values()));
@@ -240,7 +226,7 @@ const UploadHomework = () => {
   };
 
   // Fetch homework assignments
-  const fetchHomework = async () => {
+  const fetchHomework = async (opts = { reset: false, pageOverride: null }) => {
     try {
       console.log('🔎 [UploadHomework] fetchHomework - Starting homework fetch');
       
@@ -259,15 +245,23 @@ const UploadHomework = () => {
       const { effectiveTenantId } = tenantValidation;
       console.log('✅ [UploadHomework] Using effective tenant ID for homework:', effectiveTenantId);
       
+      const currentPage = (opts && typeof opts.pageOverride === 'number') ? opts.pageOverride : (opts.reset ? 1 : page);
+      const limit = pageSize;
+      const from = (currentPage - 1) * limit;
+      const to = from + limit - 1;
+
       const homeworkQuery = createTenantQuery(
         effectiveTenantId,
         TABLES.HOMEWORKS,
         `
-          *,
+          id, title, description, instructions, due_date, class_id, subject_id, created_at,
+          assigned_students, files,
           classes(id, class_name, section),
           subjects(id, name)
         `
-      ).order('created_at', { ascending: false });
+      )
+        .order('created_at', { ascending: false })
+        .range(from, to);
       
       console.log('🔍 [UploadHomework] Fetching homework with tenant query');
       const { data: homeworkData, error: homeworkError } = await homeworkQuery;
@@ -285,9 +279,24 @@ const UploadHomework = () => {
       
       console.log('✅ [UploadHomework] Homework data fetched:', {
         count: homeworkData?.length || 0,
-        tenantId: effectiveTenantId
+        tenantId: effectiveTenantId,
+        page: currentPage
       });
-      setHomework(homeworkData || []);
+
+      if (opts.reset) {
+        setHomework(homeworkData || []);
+        setPage(1);
+      } else {
+        setHomework(prev => [...prev, ...(homeworkData || [])]);
+      }
+
+      // Update hasMore based on result size
+      setHasMore((homeworkData?.length || 0) === limit);
+
+      // If reset, set page to 1 else keep
+      if (opts.reset) {
+        setPage(1);
+      }
 
     } catch (err) {
       console.error('❌ [UploadHomework] Error fetching homework:', err);
@@ -297,7 +306,7 @@ const UploadHomework = () => {
 
   useEffect(() => {
     fetchTeacherData();
-    fetchHomework();
+    fetchHomework({ reset: true });
   }, []);
 
   const handleClassSelect = (classId) => {
@@ -513,24 +522,39 @@ const UploadHomework = () => {
 
       let error;
 
+      let upsertData = null;
       if (editingHomework) {
         // Update existing homework with tenant awareness
         console.log('🔄 [UploadHomework] Updating existing homework:', editingHomework.id);
-        const { error: updateError } = await supabase
+        const { data: updatedRows, error: updateError } = await supabase
           .from(TABLES.HOMEWORKS)
           .update(homeworkData)
           .eq('id', editingHomework.id)
-          .eq('tenant_id', effectiveTenantId);
-        
+          .eq('tenant_id', effectiveTenantId)
+          .select(`
+            id, title, description, instructions, due_date, class_id, subject_id, created_at,
+            assigned_students, files,
+            classes(id, class_name, section),
+            subjects(id, name)
+          `)
+          .maybeSingle();
         error = updateError;
+        upsertData = updatedRows || null;
       } else {
         // Create new homework with tenant awareness
         console.log('➕ [UploadHomework] Creating new homework');
-        const { error: insertError } = await supabase
+        const { data: insertedRows, error: insertError } = await supabase
           .from(TABLES.HOMEWORKS)
-          .insert(homeworkData);
-        
+          .insert(homeworkData)
+          .select(`
+            id, title, description, instructions, due_date, class_id, subject_id, created_at,
+            assigned_students, files,
+            classes(id, class_name, section),
+            subjects(id, name)
+          `)
+          .maybeSingle();
         error = insertError;
+        upsertData = insertedRows || null;
       }
 
       if (error) {
@@ -547,6 +571,16 @@ const UploadHomework = () => {
       
       Alert.alert('Success', successMessage);
 
+      // Optimistically update local list
+      if (upsertData) {
+        setHomework(prev => {
+          if (editingHomework) {
+            return prev.map(h => (h.id === upsertData.id ? upsertData : h));
+          }
+          return [upsertData, ...prev];
+        });
+      }
+
       // Reset form
       setHomeworkTitle('');
       setHomeworkDescription('');
@@ -556,8 +590,8 @@ const UploadHomework = () => {
       setEditingHomework(null);
       setShowModal(false);
 
-      // Refresh homework list
-      await fetchHomework();
+      // Background refresh (non-blocking reset)
+      fetchHomework({ reset: true });
 
     } catch (err) {
       Alert.alert('Error', err.message);
@@ -640,7 +674,10 @@ const UploadHomework = () => {
               
               console.log('✅ [UploadHomework] Homework deleted successfully:', homeworkId);
               Alert.alert('Success', 'Homework deleted successfully!');
-              await fetchHomework();
+              // Optimistically remove from local list
+              setHomework(prev => prev.filter(h => h.id !== homeworkId));
+              // Background refresh reset
+              fetchHomework({ reset: true });
 
             } catch (err) {
               console.error('❌ [UploadHomework] Error deleting homework:', err);
@@ -728,13 +765,39 @@ const UploadHomework = () => {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      await fetchHomework();
+      // Reset pagination and reload
+      setHomework([]);
+      setPage(1);
+      setHasMore(true);
+      await fetchHomework({ reset: true });
     } catch (error) {
       console.error('Error refreshing homework:', error);
     } finally {
       setRefreshing(false);
     }
   };
+
+  // Realtime: subscribe to homework changes and throttle refresh
+  useEffect(() => {
+    if (!effectiveTenantId) return;
+    const ch = supabase
+      .channel('homeworks-teacher')
+      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.HOMEWORKS, filter: `tenant_id=eq.${effectiveTenantId}` }, () => {
+        if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = setTimeout(() => {
+          // Reset and refetch first page
+          setHomework([]);
+          setPage(1);
+          setHasMore(true);
+          fetchHomework({ reset: true });
+        }, 600);
+      })
+      .subscribe();
+    return () => {
+      try { ch.unsubscribe(); } catch (e) {}
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, [effectiveTenantId]);
 
   if (loading) {
     return (
@@ -965,7 +1028,8 @@ const UploadHomework = () => {
               {homework.length === 0 ? (
                 <Text style={styles.noHomeworkText}>No homework assignments yet</Text>
               ) : (
-                homework.map(hw => (
+                <>
+                  {homework.map(hw => (
                   <View key={hw.id} style={styles.homeworkCard}>
                     <View style={styles.homeworkHeader}>
                       <Text style={styles.homeworkTitle}>{hw.title}</Text>
@@ -1025,7 +1089,36 @@ const UploadHomework = () => {
                       </Text>
                     </View>
                   </View>
-                ))
+                ))}
+                  {hasMore && (
+                    <View style={{ marginTop: 12 }}>
+                      <TouchableOpacity
+                        style={[styles.uploadButton, loadingMore && { opacity: 0.6 }]}
+                        onPress={async () => {
+                          if (loadingMore || !hasMore) return;
+                          try {
+                            setLoadingMore(true);
+                            const nextPage = page + 1;
+                            await fetchHomework({ reset: false, pageOverride: nextPage });
+                            setPage(nextPage);
+                          } finally {
+                            setLoadingMore(false);
+                          }
+                        }}
+                        disabled={loadingMore}
+                      >
+                        {loadingMore ? (
+                          <ActivityIndicator color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons name="download" size={20} color="#fff" />
+                            <Text style={styles.uploadButtonText}>Load More</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </>
               )}
             </View>
           </>
@@ -1183,9 +1276,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minHeight: 60,
+    justifyContent: 'center',
   },
   picker: {
-    height: 50,
+    height: 56,
   },
   // Enhanced Student Selection Card Layout
   studentSelectionCard: {

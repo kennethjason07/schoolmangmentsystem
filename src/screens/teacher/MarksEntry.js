@@ -34,7 +34,9 @@ export default function MarksEntry({ navigation }) {
   const [students, setStudents] = useState([]);
   const [marks, setMarks] = useState({});
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [error, setError] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const { user } = useAuth();
 
   // Debounce helper for realtime
@@ -185,6 +187,8 @@ export default function MarksEntry({ navigation }) {
         schema: 'public',
         table: TABLES.MARKS
       }, () => {
+        // Avoid refresh during save to prevent flicker and 0s
+        if (savingRef.current) return;
         // Only refresh marks for the active selection; avoid refetching teacher/classes
         if (selectedClass && selectedExam && selectedSubject) {
           requestMarksRefresh(() => loadExistingMarks(selectedClass, selectedSubject, selectedExam));
@@ -258,6 +262,8 @@ export default function MarksEntry({ navigation }) {
   
   // Load existing marks for the selected class, subject, and exam
   const loadExistingMarks = async (classId, subjectId, examId) => {
+    // Avoid overwriting UI during active save
+    if (savingRef.current) return;
     if (!classId || !subjectId || !examId) {
       // Clear marks if any required parameter is missing
       setMarks({});
@@ -414,6 +420,7 @@ export default function MarksEntry({ navigation }) {
 
     try {
       setSaving(true);
+      savingRef.current = true;
 
       // Prepare marks data with grade calculation
       const tenantId = getCachedTenantId();
@@ -474,13 +481,31 @@ export default function MarksEntry({ navigation }) {
       // Show simple success message
       Alert.alert('Success', 'Marks saved successfully!');
       
-      setMarks({});
+      // Keep current entries visible; schedule a background refresh after DB settle to avoid blank window
+      setTimeout(() => {
+        if (selectedClass && selectedSubject && selectedExam) {
+          loadExistingMarks(selectedClass, selectedSubject, selectedExam);
+        }
+      }, 1200);
+
+      // Force full page refresh on web to guarantee consistency
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        setTimeout(() => {
+          try { window.location.reload(); } catch (e) {}
+        }, 100);
+      } else {
+        // On native, remount the component subtree by bumping a key
+        setTimeout(() => {
+          setRefreshKey(prev => prev + 1);
+        }, 100);
+      }
       
     } catch (err) {
       Alert.alert('Error', err.message);
       console.error('Error saving marks:', err);
     } finally {
       setSaving(false);
+      savingRef.current = false;
     }
   };
 
@@ -511,7 +536,7 @@ export default function MarksEntry({ navigation }) {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} key={refreshKey}>
       <Header title="Marks Entry" showBack={true} />
       <KeyboardAvoidingView 
         style={styles.keyboardAvoidingView}
