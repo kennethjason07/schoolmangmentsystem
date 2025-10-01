@@ -29,6 +29,10 @@ const TeacherChat = () => {
   const [students, setStudents] = useState([]);
   const [selectedContact, setSelectedContact] = useState(null); // Can be parent or student
   const [messages, setMessages] = useState([]);
+  // Cached context for reducing redundant calls
+  const [tenantId, setTenantId] = useState(null);
+  const [teacherId, setTeacherId] = useState(null);
+  const MESSAGE_PAGE_SIZE = 50;
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -309,94 +313,256 @@ const TeacherChat = () => {
     }
   };
 
-  // Fetch both parents and students data
+  // Initialize chat data in one pass: tenant -> teacher -> students -> related users
   const fetchData = async () => {
     setLoading(true);
     setTenantLoading(true);
     setError(null);
-    
-    if (DEBUG_MODE) {
-      console.log('💬 === TEACHER CHAT DEBUG ===');
-      console.log('🔍 Debug Mode: ENABLED');
-      console.log('👨‍🏫 Teacher User ID:', user?.id);
-      console.log('⏰ Fetch Time:', new Date().toISOString());
-      console.log('🏢 Enhanced Tenant Info:', {
-        isReady: tenantAccess.isReady,
-        isLoading: tenantAccess.isLoading,
-        currentTenant: tenantAccess.currentTenant?.id,
-        tenantName: tenantAccess.currentTenant?.name
-      });
-      
-      setDebugInfo(prev => ({
-        ...prev,
-        tenantContext: {
-          user_id: user?.id,
-          is_ready: tenantAccess.isReady,
-          is_loading: tenantAccess.isLoading,
-          current_tenant: tenantAccess.currentTenant?.id,
-          tenant_name: tenantAccess.currentTenant?.name,
-          fetch_time: new Date().toISOString()
-        }
-      }));
-    }
-    
+
     try {
-      console.log('🚀 [TeacherChat] fetchData - Starting with enhanced tenant validation');
-      
-      // Validate tenant readiness
+      // 1) Tenant readiness (cached)
       const tenantValidation = await validateTenantReadiness();
       if (!tenantValidation.success) {
-        console.log('⚠️ [TeacherChat] Tenant not ready:', tenantValidation.reason);
         if (tenantValidation.reason === 'TENANT_NOT_READY') {
-          // Don't throw error, just wait for tenant to be ready
           setLoading(false);
           setTenantLoading(false);
           return;
         }
         throw new Error('Tenant validation failed: ' + tenantValidation.reason);
       }
-      
-      const { effectiveTenantId } = tenantValidation;
-      console.log('✅ [TeacherChat] Using effective tenant ID:', effectiveTenantId);
-      
-      if (DEBUG_MODE) {
-        console.log('🔄 Starting enhanced tenant-aware data fetch for teacher chat...');
-        setDebugInfo(prev => ({
-          ...prev,
-          dataFetchStatus: {
-            started_at: new Date().toISOString(),
-            effective_tenant_id: effectiveTenantId,
-            parents_fetch: 'starting',
-            students_fetch: 'starting',
-            unread_counts_fetch: 'starting'
-          }
-        }));
-        setTenantLoading(false); // Tenant context resolved
+      const effectiveTenantId = tenantValidation.effectiveTenantId;
+      setTenantId(effectiveTenantId);
+
+      // 2) Resolve teacherId once
+      const { data: userInfo } = await createTenantQuery(
+        effectiveTenantId,
+        TABLES.USERS,
+        'linked_teacher_id'
+      ).eq('id', user.id);
+      const uRecord = Array.isArray(userInfo) ? userInfo?.[0] : userInfo;
+      if (!uRecord?.linked_teacher_id) {
+        throw new Error('Teacher information not found. Please contact administrator.');
       }
-      
-      await Promise.all([
-        fetchParents(),
-        fetchStudents(),
-        fetchUnreadCounts()
+      setTeacherId(uRecord.linked_teacher_id);
+
+      // 3) Fetch students (class + subject) in parallel, once
+      const [classStudentResult, subjectStudentResult] = await Promise.all([
+        createTenantQuery(
+          effectiveTenantId,
+          TABLES.STUDENTS,
+          `
+            id,
+            name,
+            roll_no,
+            class_id,
+            classes!inner (
+              id,
+              class_name,
+              section,
+              class_teacher_id
+            )
+          `
+        ).eq('classes.class_teacher_id', uRecord.linked_teacher_id),
+        createTenantQuery(
+          effectiveTenantId,
+          TABLES.TEACHER_SUBJECTS,
+          `
+            subjects!inner (
+              id,
+              name,
+              classes!inner (
+                id,
+                class_name,
+                section,
+                students!inner (
+                  id,
+                  name,
+                  roll_no
+                )
+              )
+            )
+          `
+        ).eq('teacher_id', uRecord.linked_teacher_id)
       ]);
-      
-      if (DEBUG_MODE) {
-        console.log('✅ Teacher chat data fetch completed!');
-        setDebugInfo(prev => ({
-          ...prev,
-          dataFetchStatus: {
-            ...prev.dataFetchStatus,
-            completed_at: new Date().toISOString(),
-            parents_fetch: 'completed',
-            students_fetch: 'completed',
-            unread_counts_fetch: 'completed'
+
+      // 4) Build unique studentIds
+      const studentIdSet = new Set();
+      (classStudentResult.data || []).forEach(s => studentIdSet.add(s.id));
+      (subjectStudentResult.data || []).forEach(ts => {
+        (ts.subjects?.classes?.students || []).forEach(s => studentIdSet.add(s.id));
+      });
+      const studentIds = Array.from(studentIdSet);
+
+      // 5) Fetch only related parent and student user accounts
+      const [parentUsersRes, studentUsersRes] = studentIds.length > 0
+        ? await Promise.all([
+            createTenantQuery(
+              effectiveTenantId,
+              TABLES.USERS,
+              'id, email, full_name, linked_parent_of'
+            ).in('linked_parent_of', studentIds),
+            createTenantQuery(
+              effectiveTenantId,
+              TABLES.USERS,
+              'id, email, full_name, linked_student_id'
+            ).in('linked_student_id', studentIds)
+          ])
+        : [{ data: [] }, { data: [] }];
+
+      // 6) Build maps
+      const parentUserMap = new Map();
+      (parentUsersRes.data || []).forEach(u => {
+        if (u.linked_parent_of) {
+          parentUserMap.set(u.linked_parent_of, {
+            id: u.id,
+            name: u.full_name || u.email,
+            email: u.email,
+            canMessage: true
+          });
+        }
+      });
+      const studentUserMap = new Map();
+      (studentUsersRes.data || []).forEach(u => {
+        if (u.linked_student_id) {
+          studentUserMap.set(u.linked_student_id, u);
+        }
+      });
+
+      // 7) Build parents list (unique by parent user)
+      const uniqueParents = [];
+      const seenParentIds = new Set();
+      // class parents
+      (classStudentResult.data || []).forEach(student => {
+        const p = parentUserMap.get(student.id);
+        if (p && !seenParentIds.has(p.id)) {
+          uniqueParents.push({
+            id: p.id,
+            name: p.name,
+            email: p.email,
+            students: [{
+              id: student.id,
+              name: student.name,
+              roll_no: student.roll_no,
+              class: `${student.classes.class_name} ${student.classes.section}`
+            }],
+            role: 'class_parent',
+            canMessage: true
+          });
+          seenParentIds.add(p.id);
+        } else if (p) {
+          const existing = uniqueParents.find(x => x.id === p.id);
+          if (existing) {
+            existing.students.push({
+              id: student.id,
+              name: student.name,
+              roll_no: student.roll_no,
+              class: `${student.classes.class_name} ${student.classes.section}`
+            });
           }
-        }));
-      }
+        }
+      });
+      // subject parents
+      (subjectStudentResult.data || []).forEach(ts => {
+        const className = ts.subjects?.classes?.class_name;
+        const section = ts.subjects?.classes?.section;
+        const subjectName = ts.subjects?.name;
+        (ts.subjects?.classes?.students || []).forEach(student => {
+          const p = parentUserMap.get(student.id);
+          if (p && !seenParentIds.has(p.id)) {
+            uniqueParents.push({
+              id: p.id,
+              name: p.name,
+              email: p.email,
+              students: [{
+                id: student.id,
+                name: student.name,
+                roll_no: student.roll_no,
+                class: `${className} ${section}`,
+                subject: subjectName
+              }],
+              role: 'subject_parent',
+              canMessage: true
+            });
+            seenParentIds.add(p.id);
+          } else if (p) {
+            const existing = uniqueParents.find(x => x.id === p.id);
+            if (existing) {
+              const exists = existing.students.some(s => s.id === student.id);
+              if (!exists) {
+                existing.students.push({
+                  id: student.id,
+                  name: student.name,
+                  roll_no: student.roll_no,
+                  class: `${className} ${section}`,
+                  subject: subjectName
+                });
+              }
+            }
+          }
+        });
+      });
+
+      // 8) Build students list (unique by student id)
+      const uniqueStudents = [];
+      const seenStudentIds = new Set();
+      (classStudentResult.data || []).forEach(student => {
+        if (!seenStudentIds.has(student.id)) {
+          const stuUser = studentUserMap.get(student.id);
+          const canMessage = !!stuUser;
+          uniqueStudents.push({
+            id: student.id,
+            name: student.name,
+            roll_no: student.roll_no,
+            email: canMessage ? stuUser.email : null,
+            phone: student.phone || null,
+            class: `${student.classes.class_name} ${student.classes.section}`,
+            role: 'class_student',
+            canMessage,
+            userId: canMessage ? stuUser.id : null
+          });
+          seenStudentIds.add(student.id);
+        }
+      });
+      (subjectStudentResult.data || []).forEach(ts => {
+        const className = ts.subjects?.classes?.class_name;
+        const section = ts.subjects?.classes?.section;
+        const subjectName = ts.subjects?.name;
+        (ts.subjects?.classes?.students || []).forEach(student => {
+          if (!seenStudentIds.has(student.id)) {
+            const stuUser = studentUserMap.get(student.id);
+            const canMessage = !!stuUser;
+            uniqueStudents.push({
+              id: student.id,
+              name: student.name,
+              roll_no: student.roll_no,
+              email: canMessage ? stuUser.email : null,
+              phone: student.phone || null,
+              class: `${className} ${section}`,
+              subject: subjectName,
+              role: 'subject_student',
+              canMessage,
+              userId: canMessage ? stuUser.id : null
+            });
+            seenStudentIds.add(student.id);
+          } else {
+            const existing = uniqueStudents.find(s => s.id === student.id);
+            if (existing && !existing.subject) {
+              existing.subject = subjectName;
+            }
+          }
+        });
+      });
+
+      setParents(uniqueParents);
+      setStudents(uniqueStudents);
+
+      // 9) Fetch unread counts once
+      await fetchUnreadCounts();
     } catch (err) {
       console.error('Error fetching data:', err);
       setError(err.message);
     } finally {
+      setTenantLoading(false);
       setLoading(false);
     }
   };
@@ -797,19 +963,20 @@ const TeacherChat = () => {
       }
       setError(null);
       
-      // Validate tenant readiness
-      const tenantValidation = await validateTenantReadiness();
-      if (!tenantValidation.success) {
-        console.log('⚠️ [TeacherChat] Tenant not ready for messages fetch:', tenantValidation.reason);
-        if (tenantValidation.reason === 'TENANT_NOT_READY') {
-          // Don't throw error, just use empty array
-          setMessages([]);
-          return;
+      // Use cached tenantId if available
+      let effectiveTenantId = tenantId;
+      if (!effectiveTenantId) {
+        const tenantValidation = await validateTenantReadiness();
+        if (!tenantValidation.success) {
+          if (tenantValidation.reason === 'TENANT_NOT_READY') {
+            setMessages([]);
+            return;
+          }
+          throw new Error('Tenant validation failed: ' + tenantValidation.reason);
         }
-        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
+        effectiveTenantId = tenantValidation.effectiveTenantId;
+        setTenantId(effectiveTenantId);
       }
-      
-      const { effectiveTenantId } = tenantValidation;
       console.log('✅ [TeacherChat] Using effective tenant ID for messages:', effectiveTenantId);
 
       // Get the contact's user ID
@@ -821,12 +988,13 @@ const TeacherChat = () => {
         let msgs = null;
         let msgError = null;
         
-        // Method 1: Tenant-aware OR query (preferred)
+        // Method 1: Tenant-aware OR query (preferred) with pagination (last 50)
         const query1 = await createTenantQuery(
           effectiveTenantId,
           TABLES.MESSAGES
         ).or(`(sender_id.eq.${user.id},receiver_id.eq.${contactUserId}),(sender_id.eq.${contactUserId},receiver_id.eq.${user.id})`)
-         .order('sent_at', { ascending: true });
+         .order('sent_at', { ascending: false })
+         .range(0, MESSAGE_PAGE_SIZE - 1);
           
         if (!query1.error) {
           msgs = query1.data;
@@ -862,11 +1030,15 @@ const TeacherChat = () => {
           throw msgError;
         }
         
-        const formattedMessages = (msgs || []).map(msg => ({
-          ...msg,
-          id: msg.id || msg.created_at || Date.now().toString(),
-          message_type: msg.message_type || 'text'
-        }));
+        // For descending fetch, reverse to display ascending
+        const formattedMessages = (msgs || [])
+          .slice()
+          .reverse()
+          .map(msg => ({
+            ...msg,
+            id: msg.id || msg.created_at || Date.now().toString(),
+            message_type: msg.message_type || 'text'
+          }));
         
         setMessages(formattedMessages);
         
