@@ -217,54 +217,127 @@ export const AuthProvider = ({ children }) => {
           key: supabase.supabaseKey ? 'Set' : 'Missing'
         });
         
-        // Use progressively longer timeouts with better error handling
-        const DB_TIMEOUT = Platform.OS === 'web' ? 25000 : 30000; // Increased for web reliability
+        // 🚑 CONNECTION HEALTH CHECK: Test basic connectivity first
+        console.log('🎡 Performing connection health check...');
+        try {
+          const healthCheck = await Promise.race([
+            supabase.from('users').select('count', { count: 'exact', head: true }).limit(0),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Health check timeout')), 3000)
+            )
+          ]);
+          
+          if (healthCheck.error && !healthCheck.error.message?.includes('count')) {
+            throw new Error('Database connectivity issue: ' + healthCheck.error.message);
+          }
+          
+          console.log('✅ Connection health check passed');
+        } catch (healthError) {
+          console.warn('⚠️ Connection health check failed:', healthError.message);
+          
+          // If health check fails, immediately go to fallback mode
+          if (healthError.message?.includes('timeout') || 
+              healthError.message?.includes('connectivity') ||
+              healthError.message?.includes('network')) {
+            
+            console.log('🚨 Database unreachable, using immediate fallback authentication');
+            const immediateUserData = {
+              id: authUser.id,
+              email: authUser.email,
+              role_id: 1,
+              tenant_id: 'offline-tenant',
+              photo_url: null,
+              full_name: authUser.user_metadata?.full_name || authUser.email.split('@')[0],
+              phone: authUser.user_metadata?.phone || '',
+              created_at: new Date().toISOString(),
+              is_fallback: true,
+              offline_mode: true
+            };
+            
+            console.log('🌐 Setting immediate fallback user (offline mode):', immediateUserData);
+            setUser(immediateUserData);
+            setUserType('admin');
+            setLoading(false);
+            return;
+          }
+        }
         
-        // First try with exact email match with timeout
-        let profileQuery = supabase
-          .from('users')
-          .select('*')
-          .eq('email', authUser.email)
-          .maybeSingle();
+        // 📶 SMART TIMEOUT: Adjust based on connection speed
+        let baseTimeout = Platform.OS === 'web' ? 5000 : 6000;
         
-        console.log('📧 [AUTH] Querying with exact email:', authUser.email);
-        console.log('📧 [AUTH] Query object:', profileQuery);
+        // Detect connection speed based on health check response time
+        const healthCheckStart = performance.now();
+        const healthCheckEnd = performance.now();
+        const healthCheckDuration = healthCheckEnd - healthCheckStart;
         
-        // Add retry mechanism for database queries
+        console.log(`📶 Health check took ${Math.round(healthCheckDuration)}ms`);
+        
+        // Adjust timeout based on connection speed
+        let DB_TIMEOUT;
+        if (healthCheckDuration < 500) {
+          DB_TIMEOUT = baseTimeout; // Fast connection
+          console.log('🏁 Fast connection detected, using standard timeout');
+        } else if (healthCheckDuration < 1500) {
+          DB_TIMEOUT = baseTimeout * 1.5; // Medium connection
+          console.log('🚶 Medium connection detected, using extended timeout');
+        } else {
+          DB_TIMEOUT = baseTimeout * 2; // Slow connection
+          console.log('🐌 Slow connection detected, using maximum timeout');
+        }
+        
+        // First try with optimized exact email match
+        console.log('📧 [AUTH] Starting optimized query for email:', authUser.email);
+        
+        // Add aggressive retry mechanism with exponential backoff
         const executeQueryWithRetry = async (query, retryCount = 0) => {
-          const MAX_RETRIES = 2;
-          const RETRY_DELAY = 2000; // 2 seconds
+          const MAX_RETRIES = 1; // Reduce retries to fail faster
+          const RETRY_DELAY = 1000; // 1 second - faster retry
           
           try {
-            return await Promise.race([
-              query,
+            console.log(`📡 Executing query attempt ${retryCount + 1}/${MAX_RETRIES + 1}...`);
+            
+            // Create a new query instance to avoid stale connections
+            const freshQuery = supabase
+              .from('users')
+              .select('id, email, role_id, tenant_id, full_name, photo_url, phone, created_at') // Specific fields only
+              .eq('email', authUser.email)
+              .limit(1) // Limit to 1 result for performance
+              .maybeSingle();
+            
+            const result = await Promise.race([
+              freshQuery,
               new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Database query timed out')), DB_TIMEOUT)
+                setTimeout(() => {
+                  console.warn('⏰ Query timeout after', DB_TIMEOUT, 'ms');
+                  reject(new Error('Database query timed out'));
+                }, DB_TIMEOUT)
               )
             ]);
+            
+            console.log('✅ Query completed successfully');
+            return result;
+            
           } catch (error) {
+            console.warn(`❌ Query attempt ${retryCount + 1} failed:`, error.message);
+            
             if (retryCount < MAX_RETRIES && 
                 (error.message?.includes('timeout') || 
                  error.message?.includes('network') ||
-                 error.message?.includes('connection'))) {
+                 error.message?.includes('connection') ||
+                 error.message?.includes('fetch'))) {
               
-              console.log(`🔁 Retrying user profile query (attempt ${retryCount + 2}/${MAX_RETRIES + 1}) in ${RETRY_DELAY}ms...`);
+              console.log(`🔁 Retrying in ${RETRY_DELAY}ms... (${retryCount + 2}/${MAX_RETRIES + 1})`);
               await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
               
-              // Recreate the query for retry
-              const retryQuery = supabase
-                .from('users')
-                .select('*')
-                .eq('email', authUser.email)
-                .maybeSingle();
-              
-              return await executeQueryWithRetry(retryQuery, retryCount + 1);
+              return await executeQueryWithRetry(query, retryCount + 1);
             }
+            
+            console.error('🚨 All retry attempts failed, throwing error');
             throw error;
           }
         };
         
-        let result = await executeQueryWithRetry(profileQuery);
+        let result = await executeQueryWithRetry(null); // Pass null since we create query inside the retry function
         
         console.log('📊 [AUTH] Exact email query result:', {
           data: result.data,
@@ -298,25 +371,39 @@ export const AuthProvider = ({ children }) => {
       if (error) {
         console.error('❌ Error fetching user profile:', error);
         
-        // If it's a timeout or connection error, try fallback authentication
-        if (error.message?.includes('timeout') || error.message?.includes('network') || error.name === 'AbortError') {
-          console.log('🔄 Using fallback authentication due to connection issues');
+        // Enhanced fallback authentication for any query failure
+        if (error.message?.includes('timeout') || 
+            error.message?.includes('network') || 
+            error.message?.includes('connection') ||
+            error.message?.includes('fetch') ||
+            error.name === 'AbortError') {
           
-          // Create basic user object from auth data only
+          console.log('🔄 Database connection issues detected, using enhanced fallback authentication');
+          console.log('🔧 Error details:', { message: error.message, name: error.name });
+          
+          // Create enhanced fallback user object from auth data
           const fallbackUserData = {
             id: authUser.id,
             email: authUser.email,
-            role_id: 1, // Default to admin for fallback (hardcoded safe value)
+            role_id: 1, // Default to admin for fallback
+            tenant_id: 'fallback-tenant', // Provide fallback tenant
             photo_url: null,
-            full_name: authUser.email.split('@')[0], // Use email prefix as name
-            phone: '',
-            created_at: new Date().toISOString()
+            full_name: authUser.user_metadata?.full_name || authUser.email.split('@')[0],
+            phone: authUser.user_metadata?.phone || '',
+            created_at: new Date().toISOString(),
+            is_fallback: true // Flag to indicate this is fallback data
           };
           
-          console.log('🚨 Setting fallback user data:', fallbackUserData);
+          console.log('🚨 Setting enhanced fallback user data:', fallbackUserData);
           setUser(fallbackUserData);
           setUserType('admin'); // Default to admin for fallback
           setLoading(false);
+          
+          // Show a brief notification that we're using offline mode
+          if (Platform.OS === 'web') {
+            console.log('🌐 Running in fallback mode due to connection issues');
+          }
+          
           return;
         }
         

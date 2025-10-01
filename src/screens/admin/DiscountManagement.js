@@ -29,7 +29,7 @@ console.log('🕰️ DISCOUNT MANAGEMENT - Load time:', new Date().toISOString()
 const DiscountManagement = ({ navigation, route }) => {
   // Get navigation parameters
   const params = route.params || {};
-  const { classId, className, studentId, studentName } = params;
+  const { classId, className, studentId, studentName, returnScreen, returnParams } = params;
   
   // Get tenant context
   const { tenantId } = useTenant();
@@ -205,8 +205,27 @@ const DiscountManagement = ({ navigation, route }) => {
           console.error('❌ Update Error:', error);
           throw error;
         }
+        
         console.log('✅ Discount updated successfully');
-        Alert.alert('Success', 'Fee concession updated successfully');
+        Alert.alert(
+          'Success', 
+          'Fee concession updated successfully',
+          [{
+            text: 'OK',
+            onPress: () => {
+              // Trigger navigation back with refresh if coming from ClassStudentDetails
+              if (returnScreen === 'ClassStudentDetails' && returnParams) {
+                console.log('🔄 Navigating back to ClassStudentDetails after update...');
+                navigation.navigate(returnScreen, {
+                  ...returnParams,
+                  shouldRefresh: true,
+                  concessionUpdated: true,
+                  timestamp: Date.now()
+                });
+              }
+            }
+          }]
+        );
       } else {
         console.log('➕ Creating new discount...');
         
@@ -249,12 +268,36 @@ const DiscountManagement = ({ navigation, route }) => {
         
         console.log('✅ Discount created successfully:', createdDiscount);
         
+        // 🚀 DYNAMIC UPDATE: Trigger parent screen refresh after discount creation
+        const handleSuccessAndNavigation = () => {
+          // If we came from ClassStudentDetails, navigate back with refresh params
+          if (returnScreen === 'ClassStudentDetails' && returnParams) {
+            console.log('🔄 Navigating back to ClassStudentDetails with refresh params...');
+            navigation.navigate(returnScreen, {
+              ...returnParams,
+              shouldRefresh: true,
+              concessionUpdated: true,
+              timestamp: Date.now() // Force param change to trigger useFocusEffect
+            });
+          }
+        };
+        
         // Show distribution popup if multiple records were created
         if (distributionDetails && distributionDetails.distribution && distributionDetails.distribution.length > 1) {
           setDistributionData(distributionDetails);
           setDistributionModalVisible(true);
+          
+          // Store the navigation callback to trigger after distribution modal closes
+          setDistributionData(prev => ({ ...prev, onClose: handleSuccessAndNavigation }));
         } else {
-          Alert.alert('Success', `Fee concession of ₹${parseFloat(formData.discountValue)} applied successfully to student. The discount will be reflected in fee calculations.`);
+          Alert.alert(
+            'Success', 
+            `Fee concession of ₹${parseFloat(formData.discountValue)} applied successfully to student. The discount will be reflected in fee calculations.`,
+            [{
+              text: 'OK',
+              onPress: handleSuccessAndNavigation
+            }]
+          );
         }
       }
 
@@ -384,14 +427,31 @@ const DiscountManagement = ({ navigation, route }) => {
       console.log('🔄 Refreshing discount data from server after successful delete...');
       loadStudentDiscounts();
       
+      // 🚀 DYNAMIC UPDATE: Trigger parent screen refresh after discount deletion
+      const handleDeleteSuccessAndNavigation = () => {
+        if (returnScreen === 'ClassStudentDetails' && returnParams) {
+          console.log('🔄 Navigating back to ClassStudentDetails after delete...');
+          navigation.navigate(returnScreen, {
+            ...returnParams,
+            shouldRefresh: true,
+            concessionUpdated: true,
+            timestamp: Date.now()
+          });
+        }
+      };
+      
       // Platform-aware success message
       if (Platform.OS === 'web') {
         window.alert('Success: Fee concession deleted successfully. The changes have been applied.');
+        handleDeleteSuccessAndNavigation();
       } else {
         Alert.alert(
           'Success', 
           'Fee concession deleted successfully. The changes have been applied.',
-          [{ text: 'OK' }]
+          [{
+            text: 'OK',
+            onPress: handleDeleteSuccessAndNavigation
+          }]
         );
       }
       
@@ -688,7 +748,13 @@ const DiscountManagement = ({ navigation, route }) => {
               style={[styles.modalButton, styles.saveButton]}
               onPress={() => {
                 setDistributionModalVisible(false);
-                Alert.alert('Success', 'Fee concessions have been applied successfully!');
+                
+                // Execute the stored navigation callback if it exists
+                if (distributionData?.onClose) {
+                  distributionData.onClose();
+                } else {
+                  Alert.alert('Success', 'Fee concessions have been applied successfully!');
+                }
               }}
             >
               <Text style={styles.saveButtonText}>Got it!</Text>
@@ -715,7 +781,14 @@ const DiscountManagement = ({ navigation, route }) => {
     <View style={styles.container}>
       <Header 
         title={studentName ? `${studentName} - Fee Concession` : "Fee Concession"} 
-        showBack={true} 
+        showBack={true}
+        rightIcon={studentName ? "refresh" : undefined}
+        rightIconOnPress={studentName ? () => {
+          console.log('🔄 Manual refresh triggered...');
+          setRefreshing(true);
+          loadStudentDiscounts().finally(() => setRefreshing(false));
+        } : undefined}
+        rightIconTitle={studentName ? "Refresh Concessions" : undefined}
       />
       
       {/* Content */}

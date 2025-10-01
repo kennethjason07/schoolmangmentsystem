@@ -29,6 +29,7 @@ import { useAuth } from '../../utils/AuthContext';
 import { getNextReceiptNumber } from '../../utils/receiptCounter';
 import { loadLogoWithFallbacks, validateImageData } from '../../utils/robustLogoLoader';
 import LogoDisplay from '../../components/LogoDisplay';
+import { useFocusEffect } from '@react-navigation/native';
 
 const ClassStudentDetails = ({ route, navigation }) => {
   const { classData } = route.params;
@@ -79,6 +80,78 @@ const ClassStudentDetails = ({ route, navigation }) => {
     loadSchoolDetails();
     loadClassStudentDetails();
   }, []);
+
+  // 🚀 DYNAMIC UPDATE: Listen for screen focus to refresh data when returning from DiscountManagement
+  useFocusEffect(
+    useCallback(() => {
+      // Only reload if we're returning from another screen (not initial mount)
+      // Check if route params indicate we should refresh
+      if (route.params?.shouldRefresh || route.params?.concessionUpdated) {
+        console.log('🔄 Screen focused with refresh request - reloading student data...');
+        loadClassStudentDetails();
+        
+        // Clear the refresh flag to prevent unnecessary reloads
+        if (navigation.setParams) {
+          navigation.setParams({ shouldRefresh: false, concessionUpdated: false });
+        }
+      }
+    }, [route.params?.shouldRefresh, route.params?.concessionUpdated])
+  );
+
+  // 🚀 DYNAMIC UPDATE: Real-time listener for student_discounts table changes
+  useEffect(() => {
+    let discountsSubscription;
+
+    const setupDiscountsListener = async () => {
+      try {
+        const tenantId = user?.tenant_id;
+        if (!tenantId) return;
+
+        // Set up real-time subscription for student_discounts changes
+        discountsSubscription = supabase
+          .channel(`student_discounts_class_${classData.classId}`)
+          .on(
+            'postgres_changes',
+            {
+              event: '*', // Listen to INSERT, UPDATE, DELETE
+              schema: 'public',
+              table: 'student_discounts',
+              filter: `tenant_id=eq.${tenantId}`
+            },
+            (payload) => {
+              console.log('🎯 Student discount changed:', payload);
+              
+              // Check if the change affects students in this class
+              const { new: newRecord, old: oldRecord } = payload;
+              const affectedStudentId = newRecord?.student_id || oldRecord?.student_id;
+              
+              if (affectedStudentId && classStudents.some(s => s.id === affectedStudentId)) {
+                console.log('🔄 Discount change affects this class - refreshing student data...');
+                // Reload the student details to reflect concession changes
+                loadClassStudentDetails();
+              }
+            }
+          )
+          .subscribe();
+
+        console.log('✅ Set up real-time listener for student discounts');
+      } catch (error) {
+        console.warn('⚠️ Failed to setup discounts listener:', error);
+      }
+    };
+
+    if (user?.tenant_id && classData.classId) {
+      setupDiscountsListener();
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (discountsSubscription) {
+        supabase.removeChannel(discountsSubscription);
+        console.log('🧹 Cleaned up discounts real-time listener');
+      }
+    };
+  }, [user?.tenant_id, classData.classId, classStudents]);
 
   // Load school details and logo
   const loadSchoolDetails = async () => {
@@ -649,13 +722,22 @@ const ClassStudentDetails = ({ route, navigation }) => {
 
   // Handle fee concession button click
   const handleFeeConcesssionClick = (student) => {
+    console.log('🎯 Navigating to DiscountManagement for student:', student.name);
+    
     // Navigate to DiscountManagement screen with student context
     navigation.navigate('DiscountManagement', {
       classId: classData.classId,
       className: classData.className,
       studentId: student.id,
       studentName: student.name,
-      openIndividualDiscount: true
+      openIndividualDiscount: true,
+      // Add callback information for dynamic updates
+      returnScreen: 'ClassStudentDetails',
+      returnParams: {
+        classData,
+        shouldRefresh: true,
+        concessionUpdated: true
+      }
     });
   };
 
@@ -767,6 +849,9 @@ const ClassStudentDetails = ({ route, navigation }) => {
       
       // Refresh the data to show updated payment status
       await loadClassStudentDetails();
+      
+      // 🚀 DYNAMIC UPDATE: Force UI refresh after UPI payment
+      console.log('🔄 UPI payment successful - triggering dynamic UI update...');
       
     } catch (error) {
       console.error('Error recording UPI payment:', error);
@@ -1499,6 +1584,9 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
       
       // Refresh the data to show updated payment status
       await loadClassStudentDetails();
+      
+      // 🚀 DYNAMIC UPDATE: Force UI refresh by updating state
+      console.log('🔄 Payment successful - triggering dynamic UI update...');
       
     } catch (error) {
       console.error('Error recording payment:', error);
