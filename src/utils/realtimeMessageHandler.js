@@ -58,66 +58,88 @@ export class RealtimeMessageHandler {
     console.log('🚀 Starting enhanced real-time subscription for channel:', channelName);
     console.log('🔗 User IDs:', { userId: safeUserId, contactUserId: safeContactId });
     
+    const isForCurrentChat = (msg) => {
+      if (!msg) return false;
+      return (
+        (msg.sender_id === userId && msg.receiver_id === contactUserId) ||
+        (msg.sender_id === contactUserId && msg.receiver_id === userId)
+      );
+    };
+
     this.subscription = this.supabase
       .channel(channelName)
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
+      // INSERT: messages sent by me (filter by sender only; narrow in callback)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
         table: this.messagesTable,
-        filter: `sender_id=eq.${userId},receiver_id=eq.${contactUserId}`
+        filter: `sender_id=eq.${userId}`
       }, (payload) => {
+        const message = payload.new;
+        if (!isForCurrentChat(message)) return;
         console.log('📨 Real-time INSERT (sent):', payload);
-        this.isRealtimeConnected = true; // Mark real-time as working
+        this.isRealtimeConnected = true;
         this.handleRealtimeMessage(payload, onMessageUpdate, 'sent');
       })
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
+      // INSERT: messages received by me (filter by receiver only; narrow in callback)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
         table: this.messagesTable,
-        filter: `sender_id=eq.${contactUserId},receiver_id=eq.${userId}`
+        filter: `receiver_id=eq.${userId}`
       }, (payload) => {
+        const message = payload.new;
+        if (!isForCurrentChat(message)) return;
         console.log('📨 Real-time INSERT (received):', payload);
-        this.isRealtimeConnected = true; // Mark real-time as working
+        this.isRealtimeConnected = true;
         this.handleRealtimeMessage(payload, onMessageUpdate, 'received');
       })
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
+      // UPDATE: updates on my sent messages
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
         table: this.messagesTable,
-        filter: `sender_id=eq.${userId},receiver_id=eq.${contactUserId}`
+        filter: `sender_id=eq.${userId}`
       }, (payload) => {
+        const message = payload.new;
+        if (!isForCurrentChat(message)) return;
         console.log('📝 Real-time UPDATE (sent):', payload);
-        this.isRealtimeConnected = true; // Mark real-time as working
+        this.isRealtimeConnected = true;
         this.handleRealtimeMessage(payload, onMessageUpdate, 'updated');
       })
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
+      // UPDATE: updates on messages I receive
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
         table: this.messagesTable,
-        filter: `sender_id=eq.${contactUserId},receiver_id=eq.${userId}`
+        filter: `receiver_id=eq.${userId}`
       }, (payload) => {
+        const message = payload.new;
+        if (!isForCurrentChat(message)) return;
         console.log('📝 Real-time UPDATE (received):', payload);
-        this.isRealtimeConnected = true; // Mark real-time as working
+        this.isRealtimeConnected = true;
         this.handleRealtimeMessage(payload, onMessageUpdate, 'updated');
       })
-      .on('postgres_changes', { 
-        event: 'DELETE', 
-        schema: 'public', 
+      // DELETE: receive all deletes, filter in callback
+      .on('postgres_changes', {
+        event: 'DELETE',
+        schema: 'public',
         table: this.messagesTable
       }, (payload) => {
+        const message = payload.old;
+        if (!isForCurrentChat(message)) return;
         console.log('🗑️ Real-time DELETE:', payload);
-        this.isRealtimeConnected = true; // Mark real-time as working
+        this.isRealtimeConnected = true;
         this.handleRealtimeMessage(payload, onMessageUpdate, 'deleted');
       })
       .subscribe((status, err) => {
-        console.log('📡 Subscription status:', status);
+        console.log('📡 Subscription status:', status, err || '');
         if (status === 'SUBSCRIBED') {
           console.log('✅ Real-time subscription established!');
           this.isRealtimeConnected = true;
-          // Stop aggressive polling when real-time is working
           this.stopPolling();
-        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-          console.log('❌ Real-time connection failed, starting polling fallback');
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.log('❌ Real-time connection issue, starting polling fallback');
           this.isRealtimeConnected = false;
           this.startPolling();
         }
