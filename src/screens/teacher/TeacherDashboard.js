@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, FlatList, TouchableOpacity, TextInput, Alert, ActivityIndicator, RefreshControl, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Header from '../../components/Header';
 import { LineChart } from 'react-native-chart-kit';
 import { Dimensions } from 'react-native';
@@ -84,6 +85,71 @@ const [teacherProfile, setTeacherProfile] = useState(null);
   
   // Global refresh hook for cross-screen refresh functionality
   const { registerRefreshCallback, triggerScreenRefresh } = useGlobalRefresh();
+  
+  // Snapshot cache constants
+  const DASHBOARD_CACHE_VERSION = 1;
+  const DASHBOARD_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+  const initialFetchStartedRef = useRef(false);
+  const hydratedFromCacheRef = useRef(false);
+  
+  const getDashboardCacheKey = () => {
+    const userId = user?.id || 'anon';
+    const tenantId = getCachedTenantId() || 'no-tenant';
+    const mode = useDirectTeacherAuth ? 'teacher' : 'tenant';
+    return `dashboard:teacher:${mode}:${tenantId}:${userId}:v${DASHBOARD_CACHE_VERSION}`;
+  };
+  
+  const loadDashboardSnapshot = async () => {
+    try {
+      const key = getDashboardCacheKey();
+      let raw = await AsyncStorage.getItem(key);
+      // Fallback: if no snapshot under current key, try last used key pointer
+      if (!raw) {
+        const userId = user?.id || 'anon';
+        const pointerKey = `dashboard:teacher:lastKey:${userId}`;
+        const lastKey = await AsyncStorage.getItem(pointerKey);
+        if (lastKey) {
+          raw = await AsyncStorage.getItem(lastKey);
+        }
+      }
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed?.timestamp) return null;
+      if (Date.now() - parsed.timestamp > DASHBOARD_CACHE_TTL_MS) return null;
+      return parsed.snapshot || null;
+    } catch (e) {
+      console.log('⚠️ Failed to load dashboard snapshot:', e?.message);
+      return null;
+    }
+  };
+  
+  const saveDashboardSnapshot = async (snapshot) => {
+    try {
+      const key = getDashboardCacheKey();
+      const payload = JSON.stringify({ version: DASHBOARD_CACHE_VERSION, timestamp: Date.now(), snapshot });
+      await AsyncStorage.setItem(key, payload);
+      // Save a pointer to the last used key to enable early hydration before tenant/mode are ready
+      const userId = user?.id || 'anon';
+      const pointerKey = `dashboard:teacher:lastKey:${userId}`;
+      await AsyncStorage.setItem(pointerKey, key);
+    } catch (e) {
+      console.log('⚠️ Failed to save dashboard snapshot:', e?.message);
+    }
+  };
+  
+  // Debounced dashboard refresh to coalesce realtime updates
+  const refreshPendingRef = useRef(false);
+  const refreshTimerRef = useRef(null);
+  const requestDashboardRefresh = () => {
+    if (refreshPendingRef.current) {
+      clearTimeout(refreshTimerRef.current);
+    }
+    refreshPendingRef.current = true;
+    refreshTimerRef.current = setTimeout(() => {
+      refreshPendingRef.current = false;
+      fetchDashboardData();
+    }, 500);
+  };
   
   // 👨‍🏫 Add debug utilities for development
   if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
@@ -386,6 +452,23 @@ const fetchDashboardDataWithDirectAuth = async () => {
       console.log('✅ [TEACHER AUTH] Teacher profile loaded (NO TENANT):', profileResult.profile.name);
     }
     
+    // Try to fetch school details if tenant context is available (for banner)
+    try {
+      const tenantIdForSchool = getCachedTenantId();
+      if (tenantIdForSchool) {
+        const schoolRes = await createTenantQuery(
+          tenantIdForSchool,
+          TABLES.SCHOOL_DETAILS,
+          'id, name, type, logo_url'
+        ).limit(1);
+        if (schoolRes?.data && schoolRes.data.length > 0) {
+          setSchoolDetails(schoolRes.data[0]);
+        }
+      }
+    } catch (e) {
+      console.log('⚠️ [TEACHER AUTH] Failed to fetch school details for banner:', e?.message);
+    }
+    
     // Get teacher assignments (classes and subjects) - declare variables outside
     let classMap = {};
     let subjectsSet = new Set();
@@ -551,6 +634,21 @@ const fetchDashboardDataWithDirectAuth = async () => {
       console.log('🎉 [TEACHER AUTH] Dashboard data loaded successfully with direct authentication (NO TENANT)');
     }
     
+    // Return a snapshot for caching to avoid relying on async state
+    return {
+      teacherStats: statsData,
+      schedule: todaySchedule,
+      assignedClasses: classMap,
+      notifications: [],
+      personalTasks: [],
+      adminTaskList: [],
+      upcomingEvents: [],
+      announcements: [],
+      recentActivities: [],
+      schoolDetails: schoolDetails,
+      teacherProfile: profileResult.profile,
+      analytics: { attendanceRate, marksDistribution: [] }
+    };
   } catch (error) {
     console.error('📜 [TEACHER AUTH] Error fetching dashboard data:', error);
     throw error;
@@ -558,7 +656,8 @@ const fetchDashboardDataWithDirectAuth = async () => {
 };
 
   // 🚀 ENHANCED: Fetch all dashboard data with dual authentication system
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (options = {}) => {
+    const { suppressLoading = false } = options;
     const DEBUG_PERFORMANCE = false; // Set to true to see performance metrics
     const startTime = performance.now();
     
@@ -608,7 +707,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
     }
     
     try {
-      setLoading(true);
+      if (!suppressLoading) setLoading(true);
       setError(null);
       
       // 👨‍🏫 Check if we should use direct teacher authentication (BYPASS TENANT SYSTEM)
@@ -617,7 +716,11 @@ const fetchDashboardDataWithDirectAuth = async () => {
           console.log('👨‍🏫 [TEACHER AUTH] Using direct teacher authentication mode (NO TENANT REQUIRED)');
         }
         try {
-          await fetchDashboardDataWithDirectAuth();
+          const snapshot = await fetchDashboardDataWithDirectAuth();
+
+          // Save snapshot for direct auth mode using returned data (not state)
+          await saveDashboardSnapshot(snapshot);
+
           setLoading(false);
           
           if (DEBUG_TEACHER_AUTH) {
@@ -742,7 +845,8 @@ const fetchDashboardDataWithDirectAuth = async () => {
         tenantDatabase.read(TABLES.TEACHER_SUBJECTS, 
           { teacher_id: teacher.id },
           `
-            *,
+            id,
+            subject_id,
             subjects(
               name,
               class_id,
@@ -763,12 +867,12 @@ const fetchDashboardDataWithDirectAuth = async () => {
         ),
           
         // 🚀 ENHANCED: Get notifications using createTenantQuery for complex operations
-        createTenantQuery(tenantId, TABLES.NOTIFICATIONS, '*')
+        createTenantQuery(tenantId, TABLES.NOTIFICATIONS, 'id, message, created_at, type')
           .order('created_at', { ascending: false })
           .limit(5),
           
         // 🚀 ENHANCED: Get personal tasks using createTenantQuery with multiple filters
-        createTenantQuery(tenantId, TABLES.PERSONAL_TASKS, '*', { 
+        createTenantQuery(tenantId, TABLES.PERSONAL_TASKS, 'id, task_title, task_description, task_type, priority, due_date, status, created_at', { 
           user_id: user.id, 
           status: 'pending' 
         })
@@ -918,22 +1022,23 @@ const fetchDashboardDataWithDirectAuth = async () => {
           .order('priority', { ascending: false })
           .order('due_date', { ascending: true }),
           
-        // 🚀 ENHANCED: Get events using tenantDatabase with client-side filtering
-        tenantDatabase.read('events', { status: 'Active' }, '*')
+        // 🚀 ENHANCED: Get events using server-side filtering, ordering, and limiting
+        createTenantQuery(
+          tenantId,
+          'events',
+          'id, title, event_date, start_time, event_type, icon, color, location, organizer',
+          { status: 'Active' }
+        )
+          .gte('event_date', new Date().toISOString().split('T')[0])
+          .order('event_date', { ascending: true })
+          .limit(5)
       ]);
 
-      // 🚀 ENHANCED: Process events data with client-side filtering and sorting
+      // 🚀 ENHANCED: Process events data (already filtered, ordered, limited server-side)
       const eventsData = eventsResponse.data || [];
-      const todayDate = new Date().toISOString().split('T')[0];
-      
-      // Filter and sort events client-side for better performance
-      const filteredEvents = eventsData
-        .filter(event => event.event_date >= todayDate)
-        .sort((a, b) => new Date(a.event_date) - new Date(b.event_date))
-        .slice(0, 5);
       
       // Map events with minimal processing
-      const mappedEvents = filteredEvents.map(event => {
+      const mappedEvents = eventsData.map(event => {
         return {
           id: event.id,
           type: event.event_type || 'Event',
@@ -949,8 +1054,10 @@ const fetchDashboardDataWithDirectAuth = async () => {
         };
       });
       
-      // Set upcoming events directly
-      setUpcomingEvents(mappedEvents.slice(0, 5));
+      // Set upcoming events directly (already limited to 5)
+      setUpcomingEvents(mappedEvents);
+      // Keep a local reference for stats update
+      const eventsForStats = mappedEvents;
       // Process admin tasks from parallel fetch
       const adminTasksData = adminTasksResponse.data || [];
       const adminTasksError = adminTasksResponse.error;
@@ -1093,27 +1200,24 @@ const fetchDashboardDataWithDirectAuth = async () => {
           const progressiveUniqueStudentIds = new Set();
           
           if (uniqueClassIds.length > 0) {
-            // Process each class individually to get accurate counts
-            for (const classId of uniqueClassIds) {
-              try {
-                const { data: classStudents, error: classError } = await tenantDatabase.read(
-                  TABLES.STUDENTS,
-                  { class_id: classId },
-                  'id, name, class_id'
-                );
-                
-                if (!classError && classStudents) {
-                  console.log(`✅ [PROGRESSIVE] Found ${classStudents.length} students in class ${classId}`);
-                  classStudents.forEach(student => {
-                    progressiveUniqueStudentIds.add(student.id);
-                  });
-                  progressiveTotalStudents += classStudents.length;
-                } else {
-                  console.log(`❌ [PROGRESSIVE] Error fetching students for class ${classId}:`, classError);
-                }
-              } catch (classQueryError) {
-                console.log(`❌ [PROGRESSIVE] Query error for class ${classId}:`, classQueryError);
+            try {
+              const studentsQuery = createTenantQuery(
+                tenantId,
+                TABLES.STUDENTS,
+                'id, class_id'
+              ).in('class_id', uniqueClassIds);
+              const { data: students, error: studentsError } = await studentsQuery;
+              if (!studentsError && students) {
+                console.log(`✅ [PROGRESSIVE] Found ${students.length} students across classes:`, uniqueClassIds);
+                students.forEach(s => {
+                  progressiveUniqueStudentIds.add(s.id);
+                });
+                progressiveTotalStudents = progressiveUniqueStudentIds.size;
+              } else {
+                console.log('❌ [PROGRESSIVE] Error fetching students:', studentsError);
               }
+            } catch (studentsQueryError) {
+              console.log('❌ [PROGRESSIVE] Query error fetching students:', studentsQueryError);
             }
           } else {
             console.log('⚠️ [PROGRESSIVE] No class assignments found for teacher');
@@ -1122,31 +1226,8 @@ const fetchDashboardDataWithDirectAuth = async () => {
           const uniqueStudentCount = progressiveUniqueStudentIds.size;
           console.log('📊 [PROGRESSIVE] Final student count - Total:', progressiveTotalStudents, 'Unique:', uniqueStudentCount);
           
-          // 🚀 PROGRESSIVE: Get current events data using enhanced tenant system
-          let currentEventsForStats = [];
-          try {
-            const todayDateForStats = new Date().toISOString().split('T')[0];
-            const eventsStart = performance.now();
-            const { data: statsEventsData } = await tenantDatabase.read(
-              'events',
-              { status: 'Active' },
-              '*'
-            );
-            if (DEBUG_PERFORMANCE) {
-              console.log('📊 [PERF] Progressive events query took:', (performance.now() - eventsStart).toFixed(2), 'ms');
-            }
-            
-            // Filter and sort events client-side for better performance
-            currentEventsForStats = (statsEventsData || [])
-              .filter(event => event.event_date >= todayDateForStats)
-              .sort((a, b) => new Date(a.event_date) - new Date(b.event_date))
-              .slice(0, 5);
-              
-            console.log('🚀 Progressive: Using current events for stats calculation:', currentEventsForStats.length);
-          } catch (error) {
-            console.log('❌ Error fetching events progressively:', error);
-            currentEventsForStats = [];
-          }
+          // 🚀 PROGRESSIVE: Use already-fetched events for stats calculation
+          const currentEventsForStats = eventsForStats;
 
           // Update teacher stats with final data
           console.log('✅ [PROGRESSIVE] Updating stat cards with student count:', uniqueStudentCount);
@@ -1208,6 +1289,79 @@ const fetchDashboardDataWithDirectAuth = async () => {
               }
             }
           ]);
+
+          // Save snapshot again after progressive enhancement
+          try {
+            await saveDashboardSnapshot({
+              teacherStats: [
+                {
+                  title: 'My Students',
+                  value: (uniqueStudentCount || 0).toString(),
+                  icon: 'people',
+                  color: '#2196F3',
+                  subtitle: `Across ${uniqueClasses || 0} class${(uniqueClasses || 0) !== 1 ? 'es' : ''}`,
+                  trend: 0,
+                  onPress: () => navigation?.navigate('ViewStudentInfo')
+                },
+                {
+                  title: 'My Subjects',
+                  value: (totalSubjects || 0).toString(),
+                  icon: 'book',
+                  color: '#4CAF50',
+                  subtitle: `${uniqueClasses || 0} class${(uniqueClasses || 0) !== 1 ? 'es' : ''} assigned`,
+                  trend: 0,
+                  onPress: () => navigation?.navigate('TeacherSubjects')
+                },
+                {
+                  title: 'Today\'s Classes',
+                  value: (todayClasses || 0).toString(),
+                  icon: 'time',
+                  color: '#FF9800',
+                  subtitle: (() => {
+                    if (schedule?.length === 0) return 'No classes today';
+                    const nextClass = getNextClass(schedule);
+                    if (!nextClass) return 'No more classes today';
+                    const formattedTime = formatTimeForDisplay(nextClass.start_time);
+                    return `Next: ${formattedTime}`;
+                  })(),
+                  trend: 0,
+                  onPress: () => navigation?.navigate('TeacherTimetable')
+                },
+                {
+                  title: 'Upcoming Events',
+                  value: (currentEventsForStats?.length || 0).toString(),
+                  icon: 'calendar',
+                  color: (currentEventsForStats?.length || 0) > 0 ? '#E91E63' : '#9E9E9E',
+                  subtitle: (currentEventsForStats?.length || 0) > 0 ?
+                    `Next: ${currentEventsForStats[0]?.title || 'Event'}` :
+                    'No events scheduled',
+                  trend: (currentEventsForStats?.filter(e => e.event_type === 'Exam')?.length || 0) > 0 ? 1 : 0,
+                  onPress: () => {
+                    Alert.alert(
+                      'Upcoming Events',
+                      (currentEventsForStats?.length || 0) > 0 ?
+                        currentEventsForStats.map(e => `• ${e.title} (${new Date(e.event_date).toLocaleDateString('en-GB')})`).join('\n') :
+                        'No upcoming events scheduled.',
+                      [{ text: 'OK' }]
+                    );
+                  }
+                }
+              ],
+              schedule,
+              assignedClasses,
+              notifications,
+              personalTasks,
+              adminTaskList,
+              upcomingEvents: currentEventsForStats,
+              announcements,
+              recentActivities,
+              schoolDetails,
+              teacherProfile,
+              analytics
+            });
+          } catch (e) {
+            console.log('⚠️ Failed to save progressive snapshot:', e?.message);
+          }
           
           console.log('✅ Progressive teacher stats updated with', currentEventsForStats.length, 'events');
           if (DEBUG_PERFORMANCE) {
@@ -1235,6 +1389,90 @@ const fetchDashboardDataWithDirectAuth = async () => {
         console.log('📊 [PERF] TeacherDashboard: Loading failed after:', totalTime.toFixed(2), 'ms');
       }
       setError(err.message);
+      // Save snapshot after successful tenant-based load (pre-progressive update) using local variables
+      try {
+        const snapshotPre = {
+          teacherStats: [
+            {
+              title: 'My Students',
+              value: '...',
+              icon: 'people',
+              color: '#2196F3',
+              subtitle: 'Loading...',
+              trend: 0,
+              isLoading: true
+            },
+            {
+              title: 'My Subjects',
+              value: (assignedSubjects?.length || 0).toString(),
+              icon: 'book',
+              color: '#4CAF50',
+              subtitle: `${Object.keys(classMap || {}).length || 0} class${(Object.keys(classMap || {}).length || 0) !== 1 ? 'es' : ''} assigned`,
+              trend: 0
+            },
+            {
+              title: "Today's Classes",
+              value: (timetableResponse?.data?.length || 0).toString(),
+              icon: 'time',
+              color: '#FF9800',
+              subtitle: (() => {
+                const processedSchedule = (timetableResponse?.data || []).map(entry => ({
+                  id: entry.id,
+                  subject: entry.subjects?.name || 'Unknown Subject',
+                  class: entry.classes ? `${entry.classes.class_name} ${entry.classes.section}` : 'Unknown Class',
+                  start_time: entry.start_time,
+                  end_time: entry.end_time,
+                  period_number: entry.period_number,
+                  day_of_week: entry.day_of_week,
+                  academic_year: entry.academic_year
+                }));
+                if (processedSchedule.length === 0) return 'No classes today';
+                const next = getNextClass(processedSchedule);
+                if (!next) return 'No more classes today';
+                return `Next: ${formatTimeForDisplay(next.start_time)}`;
+              })(),
+              trend: 0
+            },
+            {
+              title: 'Upcoming Events',
+              value: ((mappedEvents || []).length || 0).toString(),
+              icon: 'calendar',
+              color: ((mappedEvents || []).length || 0) > 0 ? '#E91E63' : '#9E9E9E',
+              subtitle: ((mappedEvents || []).length || 0) > 0 ? `Next: ${mappedEvents[0]?.title || 'Event'}` : 'No events scheduled',
+              trend: ((mappedEvents || []).filter(e => e.type === 'Exam')?.length || 0) > 0 ? 1 : 0
+            }
+          ],
+          schedule: (timetableResponse?.data || []).map(entry => ({
+            id: entry.id,
+            subject: entry.subjects?.name || 'Unknown Subject',
+            class: entry.classes ? `${entry.classes.class_name} ${entry.classes.section}` : 'Unknown Class',
+            start_time: entry.start_time,
+            end_time: entry.end_time,
+            period_number: entry.period_number,
+            day_of_week: entry.day_of_week,
+            academic_year: entry.academic_year
+          })),
+          assignedClasses: classMap,
+          notifications: notificationsData,
+          personalTasks: personalTasksData?.slice(0, 3) || [],
+          adminTaskList: currentAdminTasks?.slice(0, 3) || [],
+          upcomingEvents: mappedEvents,
+          announcements: notificationsData?.slice(0, 3) || [],
+          recentActivities,
+          schoolDetails: schoolData,
+          teacherProfile: teacher,
+          analytics: { attendanceRate: 92, marksDistribution: [
+            { label: 'Excellent', value: 45 },
+            { label: 'Good', value: 30 },
+            { label: 'Average', value: 20 },
+            { label: 'Poor', value: 5 }
+          ]}
+        };
+        await saveDashboardSnapshot(snapshotPre);
+      } catch (e) {
+        console.log('⚠️ Failed to save snapshot after load:', e?.message);
+      }
+
       setLoading(false);
       console.error('Error fetching dashboard data:', err);
     }
@@ -1246,7 +1484,10 @@ const fetchDashboardDataWithDirectAuth = async () => {
       if (useDirectTeacherAuth) {
         // Direct teacher authentication is ready (NO TENANT REQUIRED)
         console.log('👨‍🏫 Enhanced: Direct teacher auth ready, loading dashboard data (NO TENANT)...');
-        fetchDashboardData();
+        if (!initialFetchStartedRef.current) {
+          initialFetchStartedRef.current = true;
+          fetchDashboardData();
+        }
       } else if (isReady) {
         // Tenant-based authentication is ready (for non-teachers)
         console.log('🎆 Enhanced: Tenant-based auth ready, loading dashboard data...');
@@ -1262,7 +1503,10 @@ const fetchDashboardDataWithDirectAuth = async () => {
   useEffect(() => {
     if (user?.id && teacherAuthChecked && !useDirectTeacherAuth && isReady) {
       console.log('🚀 Enhanced: Tenant ready for non-teacher user, loading dashboard data...');
-      fetchDashboardData();
+      if (!initialFetchStartedRef.current) {
+        initialFetchStartedRef.current = true;
+        fetchDashboardData();
+      }
     }
   }, [user?.id, teacherAuthChecked, useDirectTeacherAuth, isReady]);
   
@@ -1282,7 +1526,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
       }, () => {
         // Refresh dashboard data when personal tasks change
         console.log('🔄 Personal tasks changed, refreshing dashboard...');
-        fetchDashboardData();
+        requestDashboardRefresh();
       })
       .on('postgres_changes', {
         event: '*',
@@ -1291,7 +1535,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
       }, () => {
         // Refresh dashboard data when admin tasks change
         console.log('🔄 Admin tasks changed, refreshing dashboard...');
-        fetchDashboardData();
+        requestDashboardRefresh();
       })
       .on('postgres_changes', {
         event: '*',
@@ -1300,7 +1544,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
       }, () => {
         // Refresh dashboard data when notifications change
         console.log('🔄 Notifications changed, refreshing dashboard...');
-        fetchDashboardData();
+        requestDashboardRefresh();
       })
       .on('postgres_changes', {
         event: '*',
@@ -1309,7 +1553,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
       }, () => {
         // Refresh analytics when attendance changes
         console.log('🔄 Student attendance changed, refreshing dashboard...');
-        fetchDashboardData();
+        requestDashboardRefresh();
       })
       .on('postgres_changes', {
         event: '*',
@@ -1318,7 +1562,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
       }, () => {
         // Refresh analytics when marks change
         console.log('🔄 Marks changed, refreshing dashboard...');
-        fetchDashboardData();
+        requestDashboardRefresh();
       })
       .on('postgres_changes', {
         event: '*',
@@ -1327,7 +1571,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
       }, () => {
         // Refresh dashboard when events change
         console.log('🔄 Events changed, refreshing dashboard...');
-        fetchDashboardData();
+        requestDashboardRefresh();
       })
       .on('postgres_changes', {
         event: '*',
@@ -1336,7 +1580,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
       }, () => {
         // Refresh dashboard when teacher subject assignments change
         console.log('🔄 Teacher subject assignments changed, refreshing dashboard...');
-        fetchDashboardData();
+        requestDashboardRefresh();
       })
       .on('postgres_changes', {
         event: '*',
@@ -1345,7 +1589,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
       }, () => {
         // Refresh dashboard when class teacher assignments change
         console.log('🔄 Class teacher assignments changed, refreshing dashboard...');
-        fetchDashboardData();
+        requestDashboardRefresh();
       })
       .on('postgres_changes', {
         event: '*',
@@ -1353,15 +1597,59 @@ const fetchDashboardDataWithDirectAuth = async () => {
         table: TABLES.TIMETABLE
       }, () => {
         // Refresh dashboard when timetable changes (affects Today's Classes)
-        console.log('🔄 Timetable changed, refreshing dashboard...');
-        fetchDashboardData();
+        console.log("🔄 Timetable changed, refreshing dashboard...");
+        requestDashboardRefresh();
       })
       .subscribe();
 
     return () => {
       dashboardSubscription.unsubscribe();
+      clearTimeout(refreshTimerRef.current);
     };
   }, []);
+  
+  // Hydrate from cached snapshot once and background refresh
+  useEffect(() => {
+    const hydrate = async () => {
+      if (!user?.id) return;
+      // Do not wait for teacher auth check or tenant readiness to show cached UI
+      if (hydratedFromCacheRef.current) return;
+
+      try {
+        const snapshot = await loadDashboardSnapshot();
+        if (snapshot) {
+          console.log('💾 Hydrating teacher dashboard from cache');
+          // Apply snapshot state minimally to avoid flicker
+          snapshot.teacherStats && setTeacherStats(snapshot.teacherStats);
+          snapshot.schedule && setSchedule(snapshot.schedule);
+          snapshot.assignedClasses && setAssignedClasses(snapshot.assignedClasses);
+          snapshot.notifications && setNotifications(snapshot.notifications);
+          snapshot.personalTasks && setPersonalTasks(snapshot.personalTasks);
+          snapshot.adminTaskList && setAdminTaskList(snapshot.adminTaskList);
+          snapshot.upcomingEvents && setUpcomingEvents(snapshot.upcomingEvents);
+          snapshot.announcements && setAnnouncements(snapshot.announcements);
+          snapshot.recentActivities && setRecentActivities(snapshot.recentActivities);
+          snapshot.schoolDetails && setSchoolDetails(snapshot.schoolDetails);
+          snapshot.teacherProfile && setTeacherProfile(snapshot.teacherProfile);
+          snapshot.analytics && setAnalytics(snapshot.analytics);
+
+          setLoading(false);
+
+          // Kick off background refresh without spinner
+          if (!initialFetchStartedRef.current) {
+            initialFetchStartedRef.current = true;
+            fetchDashboardData({ suppressLoading: true });
+          }
+        }
+      } catch (e) {
+        console.log('⚠️ Failed to hydrate dashboard from cache:', e?.message);
+      } finally {
+        hydratedFromCacheRef.current = true;
+      }
+    };
+
+    hydrate();
+  }, [user?.id]);
   
   // 🚀 ENHANCED: Removed redundant useEffect - now handled by tenant-ready useEffect above
 
@@ -2000,44 +2288,42 @@ const fetchDashboardDataWithDirectAuth = async () => {
           <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</Text>
         </View>
 
-        {/* School Details Card - AdminDashboard Style */}
-        {schoolDetails && (
-          <View style={styles.schoolDetailsSection}>
-            {/* Decorative background elements */}
-            <View style={styles.backgroundCircle1} />
-            <View style={styles.backgroundCircle2} />
-            <View style={styles.backgroundPattern} />
-            
-            <View style={styles.welcomeContent}>
-              <View style={styles.schoolHeader}>
-                <LogoDisplay 
-                  logoUrl={schoolDetails?.logo_url} 
-                  onImageError={() => {
-                    console.log('🗓️ Teacher Dashboard - Logo image failed to load, using placeholder');
-                  }}
-                />
-                <View style={styles.schoolInfo}>
-                  <Text style={styles.schoolName}>
-                    {schoolDetails.name || 'Maximus School'}
-                  </Text>
-                  <Text style={styles.schoolType}>
-                    {schoolDetails.type || 'Educational Institution'}
-                  </Text>
-                </View>
-              </View>
-              
-              <View style={styles.dateContainer}>
-                <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.8)" />
-                <Text style={styles.schoolDateText}>{new Date().toLocaleDateString('en-US', {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric'
-                })}</Text>
+        {/* School Details Card - AdminDashboard Style (always render with graceful fallback) */}
+        <View style={styles.schoolDetailsSection}>
+          {/* Decorative background elements */}
+          <View style={styles.backgroundCircle1} />
+          <View style={styles.backgroundCircle2} />
+          <View style={styles.backgroundPattern} />
+          
+          <View style={styles.welcomeContent}>
+            <View style={styles.schoolHeader}>
+              <LogoDisplay 
+                logoUrl={schoolDetails?.logo_url || null} 
+                onImageError={() => {
+                  console.log('🗓️ Teacher Dashboard - Logo image failed to load, using placeholder');
+                }}
+              />
+              <View style={styles.schoolInfo}>
+                <Text style={styles.schoolName}>
+                  {schoolDetails?.name || tenantName || 'Your School'}
+                </Text>
+                <Text style={styles.schoolType}>
+                  {schoolDetails?.type || 'Educational Institution'}
+                </Text>
               </View>
             </View>
+            
+            <View style={styles.dateContainer}>
+              <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.8)" />
+              <Text style={styles.schoolDateText}>{new Date().toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+              })}</Text>
+            </View>
           </View>
-        )}
+        </View>
         {/* Enhanced Stats Cards Section */}
         <View style={styles.statsSection}>
           <View style={styles.statsSectionHeader}>

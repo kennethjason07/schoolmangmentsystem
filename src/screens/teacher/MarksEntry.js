@@ -17,6 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import { getCachedTenantId } from '../../utils/tenantHelpers';
 import { useAuth } from '../../utils/AuthContext';
 import { format } from 'date-fns';
 import * as Animatable from 'react-native-animatable';
@@ -36,6 +37,17 @@ export default function MarksEntry({ navigation }) {
   const [error, setError] = useState(null);
   const { user } = useAuth();
 
+  // Debounce helper for realtime
+  const marksRefreshTimerRef = useRef(null);
+  const requestMarksRefresh = (fn) => {
+    if (marksRefreshTimerRef.current) {
+      clearTimeout(marksRefreshTimerRef.current);
+    }
+    marksRefreshTimerRef.current = setTimeout(() => {
+      fn();
+    }, 500);
+  };
+
   // Load teacher's assigned classes and subjects
   const loadTeacherData = async () => {
     try {
@@ -47,17 +59,18 @@ export default function MarksEntry({ navigation }) {
 
       if (teacherError || !teacherData) throw new Error('Teacher not found');
 
-      // Get assigned classes and subjects
+      // Get assigned classes and subjects (narrow projection)
       const { data: assignedData, error: assignedError } = await supabase
         .from(TABLES.TEACHER_SUBJECTS)
         .select(`
-          *,
+          subject_id,
           subjects(
-            id, 
+            id,
             name,
+            class_id,
             classes(
-              id, 
-              class_name, 
+              id,
+              class_name,
               section
             )
           )
@@ -68,115 +81,87 @@ export default function MarksEntry({ navigation }) {
 
       // Organize data by class
       const classMap = new Map();
-      
       assignedData.forEach(assignment => {
-        // Now the class data is nested under subjects
-        const classData = assignment.subjects?.classes;
-        if (!classData) return; // Skip if no class data
-        
-        const classKey = classData.id;
-        
+        const cls = assignment.subjects?.classes;
+        if (!cls) return;
+        const classKey = cls.id;
         if (!classMap.has(classKey)) {
           classMap.set(classKey, {
-            id: classData.id,
-            name: `${classData.class_name} - ${classData.section}`,
-            classId: classData.id,
+            id: cls.id,
+            name: `${cls.class_name} - ${cls.section}`,
+            classId: cls.id,
             subjects: [],
             students: []
           });
         }
-        
         const classDataMap = classMap.get(classKey);
         if (!classDataMap.subjects.find(s => s.id === assignment.subjects.id)) {
-          classDataMap.subjects.push({
-            id: assignment.subjects.id,
-            name: assignment.subjects.name
-          });
+          classDataMap.subjects.push({ id: assignment.subjects.id, name: assignment.subjects.name });
         }
       });
 
-      // Get students for each class with parent information
-      for (const [classKey, classData] of classMap) {
+      // Bulk fetch students for all assigned classes
+      const classIds = Array.from(classMap.keys());
+      let allStudents = [];
+      let parentRecords = [];
+      if (classIds.length > 0) {
         const { data: studentsData, error: studentsError } = await supabase
           .from(TABLES.STUDENTS)
           .select(`
             id,
             name,
             roll_no,
-            parent_id,
+            class_id,
             classes(class_name, section)
           `)
-          .eq('class_id', classData.classId)
+          .in('class_id', classIds)
           .order('roll_no');
-
         if (studentsError) throw studentsError;
-        
-        // Get parent records separately for this class (same approach as admin screen)
-        const studentIds = (studentsData || []).map(s => s.id);
-        const { data: parentRecords, error: parentRecordsError } = await supabase
-          .from(TABLES.PARENTS)
-          .select('id, name, relation, phone, email, student_id')
-          .in('student_id', studentIds);
+        allStudents = studentsData || [];
 
-        if (parentRecordsError) {
-          console.error('Error loading parent records:', parentRecordsError);
+        const studentIds = allStudents.map(s => s.id);
+        if (studentIds.length > 0) {
+          const { data: parentsData, error: parentError } = await supabase
+            .from(TABLES.PARENTS)
+            .select('id, name, relation, phone, email, student_id')
+            .in('student_id', studentIds);
+          if (parentError) console.warn('Parents fetch error:', parentError);
+          parentRecords = parentsData || [];
         }
-        
-        // Process students data to include parent information
-        const processedStudents = (studentsData || []).map(student => {
-          // Find parent records for this student and filter out placeholder names
-          const studentParentRecords = (parentRecords || []).filter(parent => 
-            parent.student_id === student.id && 
-            parent.name &&
-            parent.name.trim() !== '' &&
-            parent.name.toLowerCase() !== 'n/a' &&
-            !parent.name.toLowerCase().includes('placeholder') &&
-            !parent.name.toLowerCase().includes('test') &&
-            !parent.name.toLowerCase().includes('sample')
-          );
-          
-          // Get the first valid parent record
-          const primaryParent = studentParentRecords[0];
-          
-          // Get father, mother, guardian specifically
-          const fatherRecord = studentParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'father');
-          const motherRecord = studentParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'mother');
-          const guardianRecord = studentParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'guardian');
-          
-          // Determine which parent info to show (priority: Father > Mother > Guardian > Any)
-          // Always prioritize Father if available
-          let displayParent;
-          if (fatherRecord) {
-            displayParent = fatherRecord;
-          } else if (motherRecord) {
-            displayParent = motherRecord;
-          } else if (guardianRecord) {
-            displayParent = guardianRecord;
-          } else {
-            displayParent = primaryParent;
-          }
-          
-          return {
-            ...student,
-            parentName: displayParent?.name || 'No Parent Info',
-            parentEmail: displayParent?.email || null,
-            parentPhone: displayParent?.phone || null,
-            parentRelation: displayParent?.relation || null,
-            allParentRecords: studentParentRecords,
-            fatherRecord,
-            motherRecord,
-            guardianRecord
-          };
-        });
-        
-        classData.students = processedStudents;
-        
-        console.log(`✅ Loaded ${processedStudents.length} students for class ${classData.name}`);
-        console.log('Students with parent info:', processedStudents.map(s => ({
-          name: s.name,
-          parentName: s.parentName,
-          parentEmail: s.parentEmail
-        })));
+      }
+
+      // Merge students+parents into classMap once
+      const processedByClass = new Map();
+      allStudents.forEach(student => {
+        const studentParentRecords = parentRecords.filter(parent =>
+          parent.student_id === student.id &&
+          parent.name && parent.name.trim() !== '' &&
+          parent.name.toLowerCase() !== 'n/a' &&
+          !parent.name.toLowerCase().includes('placeholder') &&
+          !parent.name.toLowerCase().includes('test') &&
+          !parent.name.toLowerCase().includes('sample')
+        );
+        const fatherRecord = studentParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'father');
+        const motherRecord = studentParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'mother');
+        const guardianRecord = studentParentRecords.find(p => p.relation && p.relation.toLowerCase() === 'guardian');
+        const primaryParent = fatherRecord || motherRecord || guardianRecord || studentParentRecords[0];
+        const enriched = {
+          ...student,
+          parentName: primaryParent?.name || 'No Parent Info',
+          parentEmail: primaryParent?.email || null,
+          parentPhone: primaryParent?.phone || null,
+          parentRelation: primaryParent?.relation || null,
+          allParentRecords: studentParentRecords,
+          fatherRecord,
+          motherRecord,
+          guardianRecord
+        };
+        if (!processedByClass.has(student.class_id)) processedByClass.set(student.class_id, []);
+        processedByClass.get(student.class_id).push(enriched);
+      });
+
+      for (const [classKey, classData] of classMap) {
+        classData.students = processedByClass.get(classKey) || [];
       }
 
       setClasses(Array.from(classMap.values()));
@@ -200,16 +185,16 @@ export default function MarksEntry({ navigation }) {
         schema: 'public',
         table: TABLES.MARKS
       }, () => {
-        loadTeacherData();
-        // Reload marks if class, exam, and subject are already selected
+        // Only refresh marks for the active selection; avoid refetching teacher/classes
         if (selectedClass && selectedExam && selectedSubject) {
-          loadExistingMarks(selectedClass, selectedSubject, selectedExam);
+          requestMarksRefresh(() => loadExistingMarks(selectedClass, selectedSubject, selectedExam));
         }
       })
       .subscribe();
 
     return () => {
       subscription.unsubscribe();
+      clearTimeout(marksRefreshTimerRef.current);
     };
   }, []);
 
@@ -430,21 +415,8 @@ export default function MarksEntry({ navigation }) {
     try {
       setSaving(true);
 
-      // Get current user's tenant_id for RLS policy compliance
-      const { data: currentUser } = await supabase
-        .from(TABLES.USERS)
-        .select('tenant_id')
-        .eq('id', user.id)
-        .single();
-      
-      const userTenantId = currentUser?.tenant_id;
-      
-      if (!userTenantId) {
-        throw new Error('User tenant information not found');
-      }
-
       // Prepare marks data with grade calculation
-      // Note: tenant_id will be automatically handled by RLS triggers
+      const tenantId = getCachedTenantId();
       const marksData = studentsWithMarks.map(student => {
         const marksObtained = parseInt(marks[student.id]);
         const maxMarks = selectedExamData.max_marks || 100; // Use exam's max_marks
@@ -457,45 +429,28 @@ export default function MarksEntry({ navigation }) {
           marks_obtained: marksObtained,
           max_marks: maxMarks, // Store exam's max_marks
           grade: grade,
-          remarks: selectedExamData.name
-          // tenant_id will be automatically set by RLS trigger
+          remarks: selectedExamData.name,
+          ...(tenantId ? { tenant_id: tenantId } : {})
         };
       });
 
-      // Since marks table doesn't have a unique constraint (per schema.txt),
-      // we need to manually handle upsert logic
-      for (const markData of marksData) {
-        // First, try to find existing record
-        const { data: existingMark } = await supabase
+      // Since marks table has no unique constraint, replace pattern: delete then insert
+      const studentIdsToReplace = studentsWithMarks.map(s => s.id);
+      if (studentIdsToReplace.length > 0) {
+        // Delete existing marks for these students for this exam+subject
+        const { error: deleteError } = await supabase
           .from(TABLES.MARKS)
-          .select('id')
-          .eq('student_id', markData.student_id)
-          .eq('exam_id', markData.exam_id)
-          .eq('subject_id', markData.subject_id)
-          .single();
+          .delete()
+          .eq('exam_id', selectedExam)
+          .eq('subject_id', selectedSubject)
+          .in('student_id', studentIdsToReplace);
+        if (deleteError) throw deleteError;
 
-        if (existingMark) {
-          // Update existing record
-          const { error: updateError } = await supabase
-            .from(TABLES.MARKS)
-            .update({
-              marks_obtained: markData.marks_obtained,
-              max_marks: markData.max_marks,
-              grade: markData.grade,
-              remarks: markData.remarks,
-              tenant_id: markData.tenant_id
-            })
-            .eq('id', existingMark.id);
-
-          if (updateError) throw updateError;
-        } else {
-          // Insert new record
-          const { error: insertError } = await supabase
-            .from(TABLES.MARKS)
-            .insert(markData);
-
-          if (insertError) throw insertError;
-        }
+        // Bulk insert new marks
+        const { error: insertError } = await supabase
+          .from(TABLES.MARKS)
+          .insert(marksData);
+        if (insertError) throw insertError;
       }
 
       console.log('✅ Marks saved successfully, triggering parent notifications...');

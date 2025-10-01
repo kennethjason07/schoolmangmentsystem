@@ -297,9 +297,9 @@ export const AuthProvider = ({ children }) => {
             console.log(`📡 Executing query attempt ${retryCount + 1}/${MAX_RETRIES + 1}...`);
             
             // Create a new query instance to avoid stale connections
-            const freshQuery = supabase
+              const freshQuery = supabase
               .from('users')
-              .select('id, email, role_id, tenant_id, full_name, photo_url, phone, created_at') // Specific fields only
+              .select('id, email, role_id, tenant_id, full_name, profile_url, phone, created_at') // Specific fields only
               .eq('email', authUser.email)
               .limit(1) // Limit to 1 result for performance
               .maybeSingle();
@@ -508,7 +508,8 @@ export const AuthProvider = ({ children }) => {
         email: authUser.email,
         role_id: userProfile?.role_id || null,
         tenant_id: userProfile?.tenant_id || null,
-        photo_url: userProfile?.photo_url || null,
+        profile_url: userProfile?.profile_url || null,
+        photo_url: userProfile?.profile_url || null,
         full_name: userProfile?.full_name || '',
         phone: userProfile?.phone || '',
         created_at: userProfile?.created_at || new Date().toISOString(),
@@ -719,7 +720,8 @@ export const AuthProvider = ({ children }) => {
         email: user.email,
         role_id: userProfile.role_id,
         tenant_id: userProfile.tenant_id,
-        photo_url: userProfile?.photo_url || null,
+        profile_url: userProfile?.profile_url || null,
+        photo_url: userProfile?.profile_url || null,
         full_name: userProfile?.full_name || '',
         phone: userProfile?.phone || '',
         created_at: userProfile?.created_at || new Date().toISOString(),
