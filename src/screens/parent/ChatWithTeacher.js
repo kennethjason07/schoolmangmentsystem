@@ -1442,60 +1442,6 @@ const ChatWithTeacher = () => {
                 color={selectedTeacher.phone ? "#4CAF50" : "#ccc"} 
               />
             </TouchableOpacity>
-            
-            {/* Real-time Test Button */}
-            <TouchableOpacity 
-              style={styles.testButton}
-              onPress={() => {
-                Alert.alert(
-                  'Real-time Test',
-                  'Choose a test to run:',
-                  [
-                    {
-                      text: 'Basic Test',
-                      onPress: () => {
-                        // Clean up any previous test
-                        if (realtimeTestCleanup) {
-                          realtimeTestCleanup();
-                        }
-                        // Start basic real-time test
-                        const cleanup = testRealtimeConnection(user.id);
-                        setRealtimeTestCleanup(cleanup);
-                      }
-                    },
-                    {
-                      text: 'Filtered Test',
-                      onPress: () => {
-                        // Clean up any previous test
-                        if (realtimeTestCleanup) {
-                          realtimeTestCleanup();
-                        }
-                        // Start filtered real-time test
-                        const cleanup = testUserFilteredConnection(user.id);
-                        setRealtimeTestCleanup(cleanup);
-                      }
-                    },
-                    {
-                      text: 'Insert Test Message',
-                      onPress: async () => {
-                        try {
-                          await insertTestMessage(user.id);
-                          Alert.alert('Success', 'Test message inserted! Check console for real-time events.');
-                        } catch (error) {
-                          Alert.alert('Error', 'Failed to insert test message: ' + error.message);
-                        }
-                      }
-                    },
-                    {
-                      text: 'Cancel',
-                      style: 'cancel'
-                    }
-                  ]
-                );
-              }}
-            >
-              <Ionicons name="bug" size={18} color="#ff9800" />
-            </TouchableOpacity>
           </View>
           
           <FlatList

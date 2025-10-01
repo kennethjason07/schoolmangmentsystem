@@ -56,6 +56,9 @@ const ParentDashboard = ({ navigation }) => {
   } = useTenantAccess();
   const { selectedStudent, hasMultipleStudents, availableStudents, loading: studentLoading } = useSelectedStudent();
   const [studentData, setStudentData] = useState(null);
+  // Declare parent auth flags before any effect uses them to avoid TDZ errors
+  const [useDirectParentAuth, setUseDirectParentAuth] = useState(false);
+  const [parentAuthChecked, setParentAuthChecked] = useState(false);
   
   // Enhanced tenant debugging following EMAIL_BASED_TENANT_SYSTEM.md
   const DEBUG_MODE = process.env.NODE_ENV === 'development';
@@ -155,8 +158,18 @@ const ParentDashboard = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [schoolDetails, setSchoolDetails] = useState(null);
-  const [useDirectParentAuth, setUseDirectParentAuth] = useState(false);
-  const [parentAuthChecked, setParentAuthChecked] = useState(false);
+
+  // Early guard: if there are no linked students, redirect to StudentSelection
+  useEffect(() => {
+    if (parentAuthChecked && !studentLoading && (!availableStudents || availableStudents.length === 0)) {
+      console.log('ParentDashboard - No linked students detected. Redirecting to StudentSelection.');
+      try {
+        navigation.replace('StudentSelection');
+      } catch (e) {
+        navigation.navigate('StudentSelection');
+      }
+    }
+  }, [parentAuthChecked, studentLoading, availableStudents?.length]);
 
   // Academic year helper to align with FeePayment logic and avoid hard-coding
   const getCurrentAcademicYear = () => {
@@ -2181,6 +2194,12 @@ const ParentDashboard = ({ navigation }) => {
 
   useEffect(() => {
     const fetchDashboardData = async () => {
+      // Skip data loading entirely if no students are linked
+      if (!studentLoading && (!availableStudents || availableStudents.length === 0)) {
+        console.log('ParentDashboard - Skipping data fetch due to no linked students');
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError(null);
       try {
