@@ -15,6 +15,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Animatable from 'react-native-animatable';
 import { useAuth } from '../../utils/AuthContext';
 import { useSelectedStudent } from '../../contexts/SelectedStudentContext';
+import Header from '../../components/Header';
+import { supabase } from '../../utils/supabase';
 
 const StudentSelectionScreen = ({ navigation }) => {
   const { user } = useAuth();
@@ -58,6 +60,14 @@ const StudentSelectionScreen = ({ navigation }) => {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.container}>
+          <Header 
+            title="Select Your Child" 
+            showBack={true}
+            onBack={() => {
+              if (navigation.canGoBack()) navigation.goBack();
+              else navigation.replace('Login');
+            }}
+          />
           <LinearGradient
             colors={['#667eea', '#764ba2']}
             style={styles.gradient}
@@ -76,6 +86,14 @@ const StudentSelectionScreen = ({ navigation }) => {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.container}>
+          <Header 
+            title="Select Your Child" 
+            showBack={true}
+            onBack={() => {
+              if (navigation.canGoBack()) navigation.goBack();
+              else navigation.replace('Login');
+            }}
+          />
           <LinearGradient
             colors={['#667eea', '#764ba2']}
             style={styles.gradient}
@@ -92,6 +110,34 @@ const StudentSelectionScreen = ({ navigation }) => {
               >
                 <Text style={styles.contactButtonText}>Contact School</Text>
               </TouchableOpacity>
+              <View style={{ height: 12 }} />
+              <TouchableOpacity
+                style={[styles.contactButton, { backgroundColor: 'rgba(255,255,255,0.25)' }]}
+                onPress={async () => {
+                  try {
+                    // Retry fetching students
+                    if (typeof refreshStudents === 'function') {
+                      refreshStudents();
+                    }
+                  } catch (_) {}
+                }}
+              >
+                <Text style={styles.contactButtonText}>Retry</Text>
+              </TouchableOpacity>
+              <View style={{ height: 12 }} />
+              <TouchableOpacity
+                style={[styles.contactButton, { backgroundColor: 'rgba(244, 67, 54, 0.9)', borderColor: 'rgba(255,255,255,0.3)' }]}
+                onPress={async () => {
+                  try {
+                    await supabase.auth.signOut();
+                    navigation.replace('Login');
+                  } catch (e) {
+                    navigation.replace('Login');
+                  }
+                }}
+              >
+                <Text style={[styles.contactButtonText, { fontWeight: '700' }]}>Logout</Text>
+              </TouchableOpacity>
             </View>
           </LinearGradient>
         </View>
@@ -102,6 +148,14 @@ const StudentSelectionScreen = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.container}>
+        <Header 
+          title="Select Your Child" 
+          showBack={true}
+          onBack={() => {
+            if (navigation.canGoBack()) navigation.goBack();
+            else navigation.replace('ParentTabs');
+          }}
+        />
         <LinearGradient
           colors={['#667eea', '#764ba2']}
           style={styles.gradient}

@@ -525,11 +525,11 @@ export default function AppNavigator() {
 
             {userType === 'parent' && (
               <>
-                <Stack.Screen name="ParentTabs" component={ParentTabNavigator} />
                 <Stack.Screen 
-                  name="StudentSelectionScreen" 
+                  name="StudentSelection" 
                   component={LazyScreens.withLazyLoading(LazyScreens.StudentSelectionScreen, 'Student Selection')} 
                 />
+                <Stack.Screen name="ParentTabs" component={ParentTabNavigator} />
                 <Stack.Screen 
                   name="ParentViewHomework" 
                   component={LazyScreens.withLazyLoading(LazyScreens.ParentViewHomework, 'Parent View Homework')} 
