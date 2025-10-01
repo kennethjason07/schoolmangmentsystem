@@ -21,6 +21,7 @@ import { runBucketDiagnostics, formatBucketDiagnosticResults } from '../../utils
 import { runSimpleNetworkTest, formatSimpleNetworkResults } from '../../utils/simpleNetworkTest';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { getGlobalMessageHandler } from '../../utils/realtimeMessageHandler';
+import TypingDots from '../../components/TypingDots';
 import { getCachedTenantId } from '../../utils/tenantHelpers';
 
 const StudentChatWithTeacher = () => {
@@ -1872,9 +1873,6 @@ const StudentChatWithTeacher = () => {
             <View style={styles.chatHeaderInfo}>
               <Text style={styles.chatHeaderName} numberOfLines={1}>{selectedTeacher.name}</Text>
               <Text style={styles.chatHeaderSubject} numberOfLines={1}>{selectedTeacher.subject}</Text>
-              {isContactTyping && (
-                <Text style={[styles.chatHeaderSubject, { color: '#1976d2', marginTop: 2 }]}>Typing…</Text>
-              )}
             </View>
             <TouchableOpacity onPress={handleCall} style={styles.callButton}>
               <Ionicons name="call" size={24} color="#4CAF50" />
@@ -1910,6 +1908,15 @@ const StudentChatWithTeacher = () => {
                 }, 200);
               }
             }}
+            ListFooterComponent={() => (
+              isContactTyping ? (
+                <View style={[styles.messageRow, styles.messageLeft]}>
+                  <View style={[styles.messageBubble, styles.bubbleTeacher]}>
+                    <TypingDots dotColor="#1976d2" bubbleColor="rgba(25,118,210,0.12)" />
+                  </View>
+                </View>
+              ) : null
+            )}
             renderItem={({ item }) => (
               <TouchableOpacity 
                 onLongPress={() => {

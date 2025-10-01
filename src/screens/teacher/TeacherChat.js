@@ -14,6 +14,7 @@ import { formatToLocalTime, debugTimestamp } from '../../utils/timeUtils';
 import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from '../../utils/chatFileUpload';
 import { handleFileView, formatFileSize as formatFileSizeDisplay, getFileTypeColor } from '../../utils/fileViewer';
 import ImageViewer from '../../components/ImageViewer';
+import TypingDots from '../../components/TypingDots';
 import { getGlobalMessageHandler } from '../../utils/realtimeMessageHandler';
 import universalNotificationService from '../../services/UniversalNotificationService';
 
@@ -2040,9 +2041,6 @@ const TeacherChat = () => {
                   `Roll: ${selectedContact.roll_no} • ${selectedContact.class}`
                 }
               </Text>
-              {isContactTyping && (
-                <Text style={[styles.contactSubInfo, { color: '#1976d2', marginTop: 2 }]}>Typing…</Text>
-              )}
             </View>
           </View>
           <View style={{ flex: 1 }}>
@@ -2076,6 +2074,15 @@ const TeacherChat = () => {
                   }, 200);
                 }
               }}
+              ListFooterComponent={() => (
+                isContactTyping ? (
+                  <View style={[styles.messageRow, styles.messageLeft]}>
+                    <View style={[styles.messageBubble, styles.bubbleParent]}>
+                      <TypingDots dotColor="#1976d2" bubbleColor="rgba(25,118,210,0.12)" />
+                    </View>
+                  </View>
+                ) : null
+              )}
               renderItem={({ item }) => {
                 // Debug logging
                 console.log('🔍 Rendering message:', {

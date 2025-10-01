@@ -17,6 +17,7 @@ import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from
 import { badgeNotifier } from '../../utils/badgeNotifier';
 import { testRealtimeConnection, testUserFilteredConnection, insertTestMessage } from '../../utils/testRealtime';
 import ImageViewer from '../../components/ImageViewer';
+import TypingDots from '../../components/TypingDots';
 import { useParentAuth } from '../../hooks/useParentAuth'; // Import parent auth hook
 import { getTeacherUserId } from './teacherUserIdHelper'; // Import teacher user ID helper
 import ChatBadgeDebugger from '../../utils/chatBadgeDebugger'; // Import chat badge debugger
@@ -1447,9 +1448,6 @@ const ChatWithTeacher = () => {
               <Text style={[styles.chatHeaderSubject, { fontSize: 14, color: '#666' }]}>
                 {selectedTeacher.subject}
               </Text>
-              {isContactTyping && (
-                <Text style={[styles.chatHeaderSubject, { color: '#1976d2', marginTop: 2 }]}>Typing…</Text>
-              )}
             </View>
             {/* Call Button in Chat Header */}
             <TouchableOpacity
@@ -1609,6 +1607,15 @@ const ChatWithTeacher = () => {
                 }
               }, 50);
             }}
+            ListFooterComponent={() => (
+              isContactTyping ? (
+                <View style={[styles.messageRow, styles.messageLeft]}>
+                  <View style={[styles.messageBubble, styles.bubbleTeacher]}>
+                    <TypingDots dotColor="#1976d2" bubbleColor="rgba(25,118,210,0.12)" />
+                  </View>
+                </View>
+              ) : null
+            )}
           />
           
           <View style={styles.inputRow}>
