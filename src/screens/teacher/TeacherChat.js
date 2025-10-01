@@ -48,6 +48,13 @@ const TeacherChat = () => {
   const flatListRef = useRef(null);
   const badgeSubscriptionRef = useRef(null);
   
+  // Typing indicator state and refs
+  const [isContactTyping, setIsContactTyping] = useState(false);
+  const typingChannelRef = useRef(null);
+  const typingDebounceRef = useRef(null);
+  const typingIndicatorTimeoutRef = useRef(null);
+  const lastTypingSentRef = useRef(0);
+  
   // Debug state variables
   const [tenantLoading, setTenantLoading] = useState(true);
   const [debugInfo, setDebugInfo] = useState({
@@ -1087,6 +1094,41 @@ const TeacherChat = () => {
   // Real-time subscription for messages using optimistic UI
   const messageHandler = getGlobalMessageHandler(supabase, TABLES.MESSAGES);
   
+  // Send typing signal with debounce
+  const handleTypingSignal = () => {
+    if (!selectedContact) return;
+    const now = Date.now();
+    const contactUserId = selectedContact.userId || selectedContact.id;
+
+    // Throttle typing events to at most once per 800ms
+    if (now - (lastTypingSentRef.current || 0) >= 800) {
+      lastTypingSentRef.current = now;
+      try {
+        typingChannelRef.current?.send({
+          type: 'broadcast',
+          event: 'typing',
+          payload: { sender_id: user.id, receiver_id: contactUserId }
+        });
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    // Always (re)start stop_typing timer after user input inactivity
+    if (typingDebounceRef.current) clearTimeout(typingDebounceRef.current);
+    typingDebounceRef.current = setTimeout(() => {
+      try {
+        typingChannelRef.current?.send({
+          type: 'broadcast',
+          event: 'stop_typing',
+          payload: { sender_id: user.id, receiver_id: contactUserId }
+        });
+      } catch (e) {
+        // ignore
+      }
+    }, 1200);
+  };
+  
   useEffect(() => {
     if (!selectedContact) return;
     
@@ -1143,6 +1185,52 @@ const TeacherChat = () => {
     };
   }, [selectedContact, user.id, messageHandler, markMessagesAsRead]);
 
+  // Typing indicator broadcast channel
+  useEffect(() => {
+    if (!selectedContact) return;
+
+    const myId = String(user.id);
+    const contactId = String(selectedContact.userId || selectedContact.id);
+    const sorted = [myId, contactId].sort();
+    const channelName = `chat-typing-${sorted[0]}-${sorted[1]}`;
+
+    // Cleanup any existing channel
+    if (typingChannelRef.current) {
+      try { typingChannelRef.current.unsubscribe(); } catch (e) {}
+      typingChannelRef.current = null;
+    }
+
+    const channel = supabase.channel(channelName);
+    typingChannelRef.current = channel;
+
+    channel
+      .on('broadcast', { event: 'typing' }, (payload) => {
+        const sender = payload?.payload?.sender_id;
+        if (sender && sender !== user.id) {
+          setIsContactTyping(true);
+          if (typingIndicatorTimeoutRef.current) clearTimeout(typingIndicatorTimeoutRef.current);
+          typingIndicatorTimeoutRef.current = setTimeout(() => setIsContactTyping(false), 2000);
+        }
+      })
+      .on('broadcast', { event: 'stop_typing' }, (payload) => {
+        const sender = payload?.payload?.sender_id;
+        if (sender && sender !== user.id) {
+          setIsContactTyping(false);
+        }
+      })
+      .subscribe((status) => {
+        // optional: log status
+      });
+
+    return () => {
+      try { channel.unsubscribe(); } catch (e) {}
+      typingChannelRef.current = null;
+      setIsContactTyping(false);
+      if (typingIndicatorTimeoutRef.current) clearTimeout(typingIndicatorTimeoutRef.current);
+      if (typingDebounceRef.current) clearTimeout(typingDebounceRef.current);
+    };
+  }, [selectedContact, user.id]);
+
   // Send a message with optimistic UI
   const handleSend = async () => {
     if (!input.trim() || !selectedContact || sending) return;
@@ -1156,13 +1244,21 @@ const TeacherChat = () => {
     setSending(true);
     
     try {
-      // Prepare message data for the handler
+      // Ensure tenant context is ready and include tenant_id in message for RLS compliance
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        throw new Error('Tenant context not ready. Please try again.');
+      }
+      const { effectiveTenantId } = tenantValidation;
+
+      // Prepare message data for the handler (include tenant_id)
       const messageData = {
         sender_id: user.id,
         receiver_id: contactUserId,
         student_id: studentId,
         message: messageText,
-        message_type: 'text'
+        message_type: 'text',
+        tenant_id: effectiveTenantId
       };
       
       // Use the message handler for optimistic UI and reliable sending
@@ -1908,6 +2004,9 @@ const TeacherChat = () => {
                   `Roll: ${selectedContact.roll_no} • ${selectedContact.class}`
                 }
               </Text>
+              {isContactTyping && (
+                <Text style={[styles.contactSubInfo, { color: '#1976d2', marginTop: 2 }]}>Typing…</Text>
+              )}
             </View>
           </View>
           <View style={{ flex: 1 }}>
@@ -2070,7 +2169,7 @@ const TeacherChat = () => {
               style={styles.input}
               placeholder="Type a message..."
               value={input}
-              onChangeText={setInput}
+              onChangeText={(text) => { setInput(text); handleTypingSignal(); }}
               onSubmitEditing={handleSend}
               returnKeyType="send"
               editable={!sending}

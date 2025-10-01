@@ -9,6 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES } from '../../utils/supabase';
+import { getCachedTenantId } from '../../utils/tenantHelpers';
 import { getGlobalMessageHandler } from '../../utils/realtimeMessageHandler';
 import { useMessageStatus, getUnreadCountFromSender } from '../../utils/useMessageStatus';
 import { formatToLocalTime } from '../../utils/timeUtils';
@@ -552,13 +553,29 @@ const ChatWithTeacher = () => {
         throw new Error('Teacher user account not found. Please contact admin to ensure teacher has a user account.');
       }
 
+      // Determine tenant_id for RLS
+      let tenantId = getCachedTenantId();
+      if (!tenantId) {
+        // Fallback: fetch from users table
+        const { data: currentUserData } = await supabase
+          .from(TABLES.USERS)
+          .select('tenant_id')
+          .eq('id', user.id)
+          .single();
+        tenantId = currentUserData?.tenant_id;
+        if (!tenantId) {
+          throw new Error('Tenant context not available. Please try again.');
+        }
+      }
+
       // Prepare message data for the handler
       const messageData = {
         sender_id: user.id,
         receiver_id: teacherUserId,
         student_id: parentStudent.id,
         message: messageText,
-        message_type: 'text'
+        message_type: 'text',
+        tenant_id: tenantId
       };
       
       // Use the message handler for optimistic UI and reliable sending

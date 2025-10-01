@@ -21,6 +21,7 @@ import { runBucketDiagnostics, formatBucketDiagnosticResults } from '../../utils
 import { runSimpleNetworkTest, formatSimpleNetworkResults } from '../../utils/simpleNetworkTest';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { getGlobalMessageHandler } from '../../utils/realtimeMessageHandler';
+import { getCachedTenantId } from '../../utils/tenantHelpers';
 
 const StudentChatWithTeacher = () => {
   const { user } = useAuth();
@@ -918,14 +919,29 @@ const StudentChatWithTeacher = () => {
         throw new Error('Student profile not found');
       }
       
-      // Prepare message data for the handler (let trigger handle tenant_id)
+      // Determine tenant_id for RLS
+      let tenantId = getCachedTenantId();
+      if (!tenantId) {
+        // Fallback to user record lookup
+        const { data: currentUserData } = await supabase
+          .from(TABLES.USERS)
+          .select('tenant_id')
+          .eq('id', user.id)
+          .single();
+        tenantId = currentUserData?.tenant_id;
+        if (!tenantId) {
+          throw new Error('Tenant context not available. Please try again.');
+        }
+      }
+
+      // Prepare message data for the handler (include tenant_id)
       const messageData = {
         sender_id: user.id,
         receiver_id: teacherUserId,
         student_id: student.id,
         message: messageText,
-        message_type: 'text'
-        // tenant_id will be automatically set by the trigger
+        message_type: 'text',
+        tenant_id: tenantId
       };
       
       // Add optimistic message immediately for better UX
