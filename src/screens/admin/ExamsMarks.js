@@ -141,6 +141,17 @@ const getGradeColor = (grade) => {
 const ExamsMarks = () => {
   const navigation = useNavigation();
   const { user } = useAuth();
+  const safeGoBack = React.useCallback(() => {
+    try {
+      if (navigation?.canGoBack && navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        navigation.navigate('AdminTabs');
+      }
+    } catch (e) {
+      try { navigation.navigate('AdminTabs'); } catch (err) {}
+    }
+  }, [navigation]);
   const tenantAccess = useTenantAccess();
   
   // Initialize cache for reducing API calls
@@ -754,6 +765,147 @@ const ExamsMarks = () => {
     }));
   }, []);
 
+  // Delete exam (schema.txt: exams and marks tables)
+const handleDeleteExam = (exam) => {
+    console.log('🗑️ handleDeleteExam called with exam:', exam);
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(`Are you sure you want to delete "${exam.name}"?\n\nThis will also delete all marks associated with this exam.`);
+      if (!confirmed) return;
+      (async () => {
+        setLoading(true);
+        try {
+          const tenantValidation = await validateTenantReadiness();
+          if (!tenantValidation.success) {
+            if (window && window.alert) window.alert('Error: System not ready. Please try again.');
+            return;
+          }
+          const { effectiveTenantId } = tenantValidation;
+          const { error: marksError } = await createTenantQuery(effectiveTenantId, 'marks', '*')
+            .delete()
+            .eq('exam_id', exam.id);
+          if (marksError) throw new Error(`Failed to delete marks: ${marksError.message}`);
+          const { error: examError } = await createTenantQuery(effectiveTenantId, 'exams', '*')
+            .delete()
+            .eq('id', exam.id);
+          if (examError) throw new Error(`Failed to delete exam: ${examError.message}`);
+          setExams(prev => prev.filter(e => e.id !== exam.id));
+          setMarks(prev => prev.filter(m => m.exam_id !== exam.id));
+          cache.invalidate('exams');
+          cache.invalidate('marks');
+          await Promise.all([loadExams(), loadMarks()]);
+          if (window && window.alert) window.alert('Success: Exam deleted successfully.');
+        } catch (err) {
+          console.error('Delete error (web):', err);
+          if (window && window.alert) window.alert(`Deletion Failed: ${err.message}`);
+        } finally {
+          setLoading(false);
+        }
+      })();
+      return;
+    }
+    Alert.alert(
+      'Delete Exam',
+      `Are you sure you want to delete "${exam.name}"?\n\nThis will also delete all marks associated with this exam.`,
+      [
+        { 
+          text: 'Cancel',
+          style: 'cancel',
+          onPress: () => console.log('User cancelled exam deletion')
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            // Show loading immediately
+            setLoading(true);
+            
+            try {
+              console.log('🔄 Starting exam deletion process for:', exam.id);
+              
+              // Validate tenant readiness
+              const tenantValidation = await validateTenantReadiness();
+              if (!tenantValidation.success) {
+                console.log('⚠️ [ExamsMarks] Tenant not ready for exam deletion:', tenantValidation.reason);
+                Alert.alert('Error', 'System not ready. Please try again.');
+                return;
+              }
+              
+              const { effectiveTenantId } = tenantValidation;
+              console.log('✅ [ExamsMarks] Using effective tenant ID for exam deletion:', effectiveTenantId);
+
+              // Step 1: Delete associated marks first
+              console.log('🔄 Deleting marks for exam ID:', exam.id);
+              const marksQuery = createTenantQuery(effectiveTenantId, 'marks', '*')
+                .delete()
+                .eq('exam_id', exam.id);
+
+              const { error: marksError } = await marksQuery;
+
+              if (marksError) {
+                console.error('❌ Error deleting marks:', marksError);
+                throw new Error(`Failed to delete marks: ${marksError.message}`);
+              }
+              console.log('✅ Marks deleted successfully');
+
+              // Step 2: Delete the exam
+              console.log('🔄 Deleting exam with ID:', exam.id);
+              const examQuery = createTenantQuery(effectiveTenantId, 'exams', '*')
+                .delete()
+                .eq('id', exam.id);
+
+              const { error: examError } = await examQuery;
+
+              if (examError) {
+                console.error('❌ Error deleting exam:', examError);
+                throw new Error(`Failed to delete exam: ${examError.message}`);
+              }
+              console.log('✅ Exam deleted successfully');
+
+              // Step 3: Update local state immediately for instant UI feedback
+              console.log('🔄 Updating local state...');
+              setExams(prevExams => {
+                const updatedExams = prevExams.filter(e => e.id !== exam.id);
+                console.log('✅ Local state updated. Remaining exams:', updatedExams.length);
+                return updatedExams;
+              });
+
+              // Also update marks state to remove deleted marks
+              setMarks(prevMarks => {
+                const updatedMarks = prevMarks.filter(m => m.exam_id !== exam.id);
+                console.log('✅ Marks state updated. Remaining marks:', updatedMarks.length);
+                return updatedMarks;
+              });
+
+              // Step 4: Show success message
+              Alert.alert('Success', `Exam "${exam.name}" has been deleted successfully.`);
+
+              // Step 5: Invalidate and selectively refresh relevant caches
+              console.log('🔄 Invalidating caches and refreshing relevant data...');
+              cache.invalidate('exams');
+              cache.invalidate('marks');
+              
+              // Refresh only exams and marks instead of all data
+              await Promise.all([
+                loadExams(),
+                loadMarks()
+              ]);
+              console.log('✅ Selective data refresh completed');
+
+            } catch (error) {
+              console.error('❌ Error in deletion process:', error);
+              Alert.alert(
+                'Deletion Failed', 
+                `Could not delete the exam: ${error.message}\n\nPlease try again or contact support if the problem persists.`
+              );
+            } finally {
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
   // Render exam item with memoized performance optimizations
   const renderExamItem = useCallback(({ item: exam }) => {
     // Use memoized stats for better performance
@@ -842,7 +994,7 @@ const ExamsMarks = () => {
   if (tenantAccess.error) {
     return (
       <View style={styles.container}>
-        <Header title="Exams & Marks" navigation={navigation} showBack={true} />
+<Header title="Exams & Marks" navigation={navigation} showBack={true} onBack={safeGoBack} />
         <View style={styles.loading}>
           <Text style={styles.loadingText}>Access Error: {tenantAccess.error}</Text>
         </View>
@@ -854,7 +1006,7 @@ const ExamsMarks = () => {
   if (tenantAccess.isLoading || loading) {
     return (
       <View style={styles.container}>
-        <Header title="Exams & Marks" navigation={navigation} showBack={true} />
+<Header title="Exams & Marks" navigation={navigation} showBack={true} onBack={safeGoBack} />
         <View style={styles.loading}>
           <ActivityIndicator size="large" color="#2196F3" />
           <Text style={styles.loadingText}>Initializing tenant access...</Text>
@@ -1023,111 +1175,6 @@ const ExamsMarks = () => {
     }
   };
 
-  // Delete exam (schema.txt: exams and marks tables)
-  const handleDeleteExam = (exam) => {
-    console.log('🗑️ handleDeleteExam called with exam:', exam);
-    Alert.alert(
-      'Delete Exam',
-      `Are you sure you want to delete "${exam.name}"?\n\nThis will also delete all marks associated with this exam.`,
-      [
-        { 
-          text: 'Cancel',
-          style: 'cancel',
-          onPress: () => console.log('User cancelled exam deletion')
-        },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            // Show loading immediately
-            setLoading(true);
-            
-            try {
-              console.log('🔄 Starting exam deletion process for:', exam.id);
-              
-              // Validate tenant readiness
-              const tenantValidation = await validateTenantReadiness();
-              if (!tenantValidation.success) {
-                console.log('⚠️ [ExamsMarks] Tenant not ready for exam deletion:', tenantValidation.reason);
-                Alert.alert('Error', 'System not ready. Please try again.');
-                return;
-              }
-              
-              const { effectiveTenantId } = tenantValidation;
-              console.log('✅ [ExamsMarks] Using effective tenant ID for exam deletion:', effectiveTenantId);
-
-              // Step 1: Delete associated marks first
-              console.log('🔄 Deleting marks for exam ID:', exam.id);
-              const marksQuery = createTenantQuery(effectiveTenantId, 'marks', '*')
-                .delete()
-                .eq('exam_id', exam.id);
-
-              const { error: marksError } = await marksQuery;
-
-              if (marksError) {
-                console.error('❌ Error deleting marks:', marksError);
-                throw new Error(`Failed to delete marks: ${marksError.message}`);
-              }
-              console.log('✅ Marks deleted successfully');
-
-              // Step 2: Delete the exam
-              console.log('🔄 Deleting exam with ID:', exam.id);
-              const examQuery = createTenantQuery(effectiveTenantId, 'exams', '*')
-                .delete()
-                .eq('id', exam.id);
-
-              const { error: examError } = await examQuery;
-
-              if (examError) {
-                console.error('❌ Error deleting exam:', examError);
-                throw new Error(`Failed to delete exam: ${examError.message}`);
-              }
-              console.log('✅ Exam deleted successfully');
-
-              // Step 3: Update local state immediately for instant UI feedback
-              console.log('🔄 Updating local state...');
-              setExams(prevExams => {
-                const updatedExams = prevExams.filter(e => e.id !== exam.id);
-                console.log('✅ Local state updated. Remaining exams:', updatedExams.length);
-                return updatedExams;
-              });
-
-              // Also update marks state to remove deleted marks
-              setMarks(prevMarks => {
-                const updatedMarks = prevMarks.filter(m => m.exam_id !== exam.id);
-                console.log('✅ Marks state updated. Remaining marks:', updatedMarks.length);
-                return updatedMarks;
-              });
-
-              // Step 4: Show success message
-              Alert.alert('Success', `Exam "${exam.name}" has been deleted successfully.`);
-
-              // Step 5: Invalidate and selectively refresh relevant caches
-              console.log('🔄 Invalidating caches and refreshing relevant data...');
-              cache.invalidate('exams');
-              cache.invalidate('marks');
-              
-              // Refresh only exams and marks instead of all data
-              await Promise.all([
-                loadExams(),
-                loadMarks()
-              ]);
-              console.log('✅ Selective data refresh completed');
-
-            } catch (error) {
-              console.error('❌ Error in deletion process:', error);
-              Alert.alert(
-                'Deletion Failed', 
-                `Could not delete the exam: ${error.message}\n\nPlease try again or contact support if the problem persists.`
-              );
-            } finally {
-              setLoading(false);
-            }
-          }
-        }
-      ]
-    );
-  };
 
   // Enhanced Save marks with web compatibility and detailed debugging
   const handleBulkSaveMarks = async () => {
@@ -2143,7 +2190,7 @@ const ExamsMarks = () => {
   if (loading) {
     return (
       <View style={styles.container}>
-        <Header title="Exams & Marks" showBack={true} onBack={() => navigation.goBack()} />
+<Header title="Exams & Marks" showBack={true} onBack={safeGoBack} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2196F3" />
           <Text style={styles.loadingText}>
@@ -2162,7 +2209,7 @@ const ExamsMarks = () => {
   // ✅ Main component render
   return (
     <View style={styles.container}>
-      <Header title="Exams & Marks" showBack={true} onBack={() => navigation.goBack()} />
+<Header title="Exams & Marks" showBack={true} onBack={safeGoBack} />
 
       <View style={styles.scrollWrapper}>
         <FlatList

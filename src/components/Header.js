@@ -11,7 +11,7 @@ import NotificationBellBadge from './NotificationBellBadge';
 import DebugBadge from './DebugBadge';
 import universalNotificationService from '../services/UniversalNotificationService';
 
-const Header = ({ title, showBack = false, showProfile = true, showNotifications = false, onProfilePress, onNotificationsPress, unreadCount = 0, rightComponent }) => {
+const Header = ({ title, showBack = false, onBack, showProfile = true, showNotifications = false, onProfilePress, onNotificationsPress, unreadCount = 0, rightComponent }) => {
   const navigation = useNavigation();
   const { user: authUser, userType } = useAuth();
   const [userProfileUrl, setUserProfileUrl] = useState(null);
@@ -80,8 +80,8 @@ const Header = ({ title, showBack = false, showProfile = true, showNotifications
   return (
     <View style={styles.header}>
       <View style={styles.leftSection}>
-        {showBack && navigation.canGoBack() && (
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        {(showBack || navigation.canGoBack()) && (
+          <TouchableOpacity onPress={() => { try { if (typeof onBack === 'function') { onBack(); } else { navigation.goBack(); } } catch (e) { try { navigation.goBack(); } catch (err) {} } }} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#333" />
           </TouchableOpacity>
         )}
