@@ -12,11 +12,6 @@ import { useTenantAccess, tenantDatabase, createTenantQuery, getCachedTenantId }
 import { useMessageStatus } from '../../utils/useMessageStatus';
 import { formatToLocalTime, debugTimestamp } from '../../utils/timeUtils';
 import { uploadChatFile, formatFileSize, getFileIcon, isSupportedFileType } from '../../utils/chatFileUpload';
-import { runCompleteDiagnostics } from '../../utils/storageDiagnostics';
-import { runDirectStorageTest } from '../../utils/directStorageTest';
-import { runNetworkDiagnostics, formatNetworkDiagnosticResults } from '../../utils/networkDiagnostics';
-import { runBucketDiagnostics, formatBucketDiagnosticResults } from '../../utils/bucketDiagnostics';
-import { runSimpleNetworkTest, formatSimpleNetworkResults } from '../../utils/simpleNetworkTest';
 import { handleFileView, formatFileSize as formatFileSizeDisplay, getFileTypeColor } from '../../utils/fileViewer';
 import ImageViewer from '../../components/ImageViewer';
 import { getGlobalMessageHandler } from '../../utils/realtimeMessageHandler';
@@ -1950,110 +1945,6 @@ const TeacherChat = () => {
                   <Ionicons name="document" size={24} color="#fff" />
                 </View>
                 <Text style={styles.attachmentText}>Document</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runCompleteDiagnostics().then(results => {
-                  console.log('🔍 Storage Diagnostics Results:', results);
-                  const summary = results.summary;
-                  Alert.alert(
-                    'Storage Diagnostics', 
-                    `Overall Health: ${summary.overallHealth ? '✅ Good' : '❌ Issues Found'}\n\n` +
-                    `Critical Issues: ${summary.criticalIssues.length}\n` +
-                    `${summary.criticalIssues.join('\n')}\n\n` +
-                    `Recommendations:\n${summary.recommendations.join('\n')}`,
-                    [{ text: 'OK' }]
-                  );
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#FF9800' }]}>
-                  <Ionicons name="bug" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Diagnose</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runDirectStorageTest().then(results => {
-                  console.log('🔬 Direct Storage Test Results:', results);
-                  const { success, message, details } = results;
-                  Alert.alert(
-                    'Direct Storage Test', 
-                    `Result: ${success ? '✅ Success' : '❌ Failed'}\n\n` +
-                    `Message: ${message}\n\n` +
-                    (details ? `Details:\n${details}` : ''),
-                    [{ text: 'OK' }]
-                  );
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#9C27B0' }]}>
-                  <Ionicons name="flask" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Direct Test</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runNetworkDiagnostics().then(results => {
-                  console.log('🌐 Network Diagnostics Results:', results);
-                  const formattedResults = formatNetworkDiagnosticResults(results);
-                  Alert.alert(
-                    'Network Diagnostics', 
-                    formattedResults,
-                    [{ text: 'OK' }]
-                  );
-                }).catch(error => {
-                  console.error('Network diagnostics error:', error);
-                  Alert.alert('Network Diagnostics', 'Failed to run network diagnostics: ' + error.message);
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#607D8B' }]}>
-                  <Ionicons name="wifi" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Network</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runBucketDiagnostics().then(results => {
-                  console.log('🪣 Bucket Diagnostics Results:', results);
-                  const formattedResults = formatBucketDiagnosticResults(results);
-                  Alert.alert(
-                    'Bucket Diagnostics', 
-                    formattedResults,
-                    [{ text: 'OK' }]
-                  );
-                }).catch(error => {
-                  console.error('Bucket diagnostics error:', error);
-                  Alert.alert('Bucket Diagnostics', 'Failed to run bucket diagnostics: ' + error.message);
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#795548' }]}>
-                  <Ionicons name="server" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Buckets</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.attachmentOption} onPress={() => {
-                setShowAttachmentMenu(false);
-                runSimpleNetworkTest().then(results => {
-                  console.log('🌐 Simple Network Test Results:', results);
-                  const formattedResults = formatSimpleNetworkResults(results);
-                  Alert.alert(
-                    'Network Test', 
-                    formattedResults,
-                    [{ text: 'OK' }]
-                  );
-                }).catch(error => {
-                  console.error('Simple network test error:', error);
-                  Alert.alert('Network Test', 'Failed to run network test: ' + error.message);
-                });
-              }}>
-                <View style={[styles.attachmentIcon, { backgroundColor: '#4CAF50' }]}>
-                  <Ionicons name="pulse" size={24} color="#fff" />
-                </View>
-                <Text style={styles.attachmentText}>Net Test</Text>
               </TouchableOpacity>
             </ScrollView>
           </Animatable.View>

@@ -310,7 +310,8 @@ const PushNotificationManager = ({ visible, onClose }) => {
       // Prepare push notifications
       const pushNotifications = tokens.map(tokenRecord => ({
         to: tokenRecord.token,
-        sound: isUrgent ? 'urgent_tone.wav' : 'notification_tone.wav',
+        // Use default sound on iOS; Android sound is controlled by channel
+        sound: 'default',
         title: title.trim(),
         body: message.trim(),
         data: {
@@ -327,7 +328,7 @@ const PushNotificationManager = ({ visible, onClose }) => {
           color: isUrgent ? '#F44336' : '#2196F3',
         },
         ios: {
-          sound: isUrgent ? 'urgent_tone.wav' : 'notification_tone.wav',
+          sound: 'default',
           badge: 1,
           categoryId: isUrgent ? 'URGENT' : 'GENERAL',
         },

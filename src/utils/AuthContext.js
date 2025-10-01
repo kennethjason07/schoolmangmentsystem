@@ -5,6 +5,7 @@ import { supabase, authHelpers, dbHelpers } from './supabase';
 import supabaseService from '../services/SupabaseServiceFixed';
 import { AuthFix } from './authFix';
 import { navigationService } from '../services/NavigationService';
+import pushNotificationService from '../services/PushNotificationService';
 
 const AuthContext = createContext({});
 
@@ -141,6 +142,16 @@ export const AuthProvider = ({ children }) => {
             
             // Clear auth state and let AppNavigator handle navigation
             // This ensures Login screen is available in navigation automatically
+            // Deactivate push tokens for the previous user
+            try {
+              const prevUserId = currentSession?.user?.id || null;
+              if (prevUserId) {
+                await pushNotificationService.deactivateTokens(prevUserId);
+              }
+            } catch (e) {
+              console.warn('⚠️ Failed to deactivate push tokens on sign out:', e?.message);
+            }
+
             setUser(null);
             setUserType(null);
             isSigningInRef.current = false;
@@ -527,6 +538,16 @@ export const AuthProvider = ({ children }) => {
 
       setUser(userData);
       setUserType(roleName);
+
+      // Initialize push notifications (Android channels + token) for admin and teacher
+      try {
+        if (roleName === 'admin' || roleName === 'teacher') {
+          await pushNotificationService.initialize(userData.id, roleName);
+        }
+      } catch (e) {
+        console.warn('⚠️ Push notification init failed:', e?.message);
+      }
+
       setLoading(false); // Ensure loading is false after successful auth state update
       console.log('✅ Auth state updated successfully');
     } catch (error) {

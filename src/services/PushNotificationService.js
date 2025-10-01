@@ -129,7 +129,8 @@ class PushNotificationService {
       name: 'Chat Messages',
       description: 'New messages from teachers, parents, and students',
       importance: Notifications.AndroidImportance.HIGH,
-      sound: 'message_tone.wav', // Custom sound file
+      // Use bundled custom sound (Android): place file in android/app/src/main/res/raw as vidya_setu_message.mp3
+      sound: 'vidya_setu_message',
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#2196F3',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
@@ -140,7 +141,8 @@ class PushNotificationService {
       name: 'School Notifications',
       description: 'Important school updates, exam alerts, attendance notifications',
       importance: Notifications.AndroidImportance.HIGH,
-      sound: 'notification_tone.wav', // Custom sound file
+      // Use bundled custom sound (Android): place file in android/app/src/main/res/raw as vidya_setu_notification.mp3
+      sound: 'vidya_setu_notification',
       vibrationPattern: [0, 500, 250, 500],
       lightColor: '#FF5722',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
@@ -386,7 +388,8 @@ class PushNotificationService {
       // Prepare notification payload
       const notifications = tokens.map(tokenRecord => ({
         to: tokenRecord.token,
-        sound,
+        // iOS sound; Android sound is determined by the channel
+        sound: sound || 'default',
         title,
         body,
         data: {
