@@ -624,15 +624,11 @@ export class UniversalNotificationService {
     try {
       console.log(`🔊 [UniversalNotificationService] Broadcasting message read:`, { userId, senderId });
       
-      const channel = supabase.channel(`universal-message-update-${Date.now()}` , { config: { private: true } });
-      await channel.subscribe((status) => {
-        console.log(`📡 Message read broadcast channel status:`, status);
-      });
+      const channel = supabase.channel('universal-message-update', { config: { private: true } });
+      await channel.subscribe();
       
-      // Wait a moment for subscription to be fully established
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      const broadcastPayload = {
+      // Broadcast read event on a stable topic so listeners can receive it
+      await channel.send({
         type: 'broadcast',
         event: 'message-read',
         payload: {
@@ -640,28 +636,17 @@ export class UniversalNotificationService {
           sender_id: senderId,
           timestamp: new Date().toISOString()
         }
-      };
-      
-      console.log(`📤 Sending message read broadcast:`, broadcastPayload);
-      await channel.send(broadcastPayload);
+      });
       
       // Clear cache immediately for this user
-      console.log(`🧹 Clearing cache for user:`, userId);
       this.cache.forEach((value, key) => {
         if (key.startsWith(userId)) {
-          console.log(`🗑️ Clearing cache key:`, key);
           this.cache.delete(key);
         }
       });
       
-      // Wait a moment before unsubscribing to ensure broadcast is sent
-      setTimeout(() => {
-        try {
-          channel.unsubscribe();
-        } catch (unsubError) {
-          console.warn('Error unsubscribing from message read channel:', unsubError);
-        }
-      }, 200);
+      // Unsubscribe (fire-and-forget)
+      setTimeout(() => { try { channel.unsubscribe(); } catch (e) {} }, 200);
       
       console.log(`✅ [UniversalNotificationService] Message read broadcast completed successfully`);
     } catch (error) {

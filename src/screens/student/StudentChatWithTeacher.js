@@ -1078,10 +1078,17 @@ const StudentChatWithTeacher = () => {
         pending: false
       };
       
-      console.log('✅ Message confirmed, replacing optimistic:', { tempId, confirmedMessage });
-      setMessages(prev => prev.map(msg => 
-        msg.id === tempId ? confirmedMessage : msg
-      ));
+      console.log('✅ Message confirmed, merging state without duplicates:', { tempId, confirmedMessage });
+      setMessages(prev => {
+        // Remove the temp optimistic item
+        const withoutTemp = prev.filter(m => m.id !== tempId);
+        // Remove any existing item with the same confirmed id (realtime INSERT may have already added it)
+        const withoutDup = withoutTemp.filter(m => m.id !== confirmedMessage.id);
+        const merged = [...withoutDup, confirmedMessage].sort((a, b) =>
+          new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+        );
+        return merged;
+      });
       
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -1401,15 +1408,19 @@ const StudentChatWithTeacher = () => {
             
           if (!sendError && insertedMsg?.[0]) {
             // Replace temp message with actual message
-            setMessages(prev => prev.map(msg => 
-              msg.id === tempMsg.id
-                ? {
-                    ...insertedMsg[0],
-                    timestamp: formatToLocalTime(insertedMsg[0].sent_at),
-                    sender: 'student'
-                  }
-                : msg
-            ));
+            setMessages(prev => {
+              const formatted = {
+                ...insertedMsg[0],
+                timestamp: formatToLocalTime(insertedMsg[0].sent_at),
+                sender: 'student'
+              };
+              const withoutTemp = prev.filter(m => m.id !== tempMsg.id);
+              const withoutDup = withoutTemp.filter(m => m.id !== formatted.id);
+              const merged = [...withoutDup, formatted].sort((a, b) =>
+                new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+              );
+              return merged;
+            });
             
             // Scroll to bottom
             setTimeout(() => {
@@ -1523,15 +1534,19 @@ const StudentChatWithTeacher = () => {
             
           if (!sendError && insertedMsg?.[0]) {
             // Replace temp message with actual message
-            setMessages(prev => prev.map(msg => 
-              msg.id === tempMsg.id
-                ? {
-                    ...insertedMsg[0],
-                    timestamp: formatToLocalTime(insertedMsg[0].sent_at),
-                    sender: 'student'
-                  }
-                : msg
-            ));
+            setMessages(prev => {
+              const formatted = {
+                ...insertedMsg[0],
+                timestamp: formatToLocalTime(insertedMsg[0].sent_at),
+                sender: 'student'
+              };
+              const withoutTemp = prev.filter(m => m.id !== tempMsg.id);
+              const withoutDup = withoutTemp.filter(m => m.id !== formatted.id);
+              const merged = [...withoutDup, formatted].sort((a, b) =>
+                new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+              );
+              return merged;
+            });
             
             // Scroll to bottom
             setTimeout(() => {

@@ -457,85 +457,35 @@ const ChatWithTeacher = () => {
       teacherName: selectedTeacher.name
     });
     
-    // Setup real-time subscription with message updates using the same pattern as TeacherChat.js
-    const subscription = messageHandler.startSubscription(
-      user.id,
-      selectedTeacher.userId,
-      (message, eventType) => {
-        console.log('📨 Parent Chat - Real-time message update:', { message, eventType });
-        
-        if (eventType === 'sent' || eventType === 'received' || eventType === 'updated') {
-          // Update messages state
-          setMessages(prev => {
-            // Remove any existing message with the same ID
-            const filtered = prev.filter(m => m.id !== message.id);
-            // Add the new/updated message and sort by timestamp
-            const formattedMessage = {
-              ...message,
-              text: message.message,
-              timestamp: formatToLocalTime(message.sent_at),
-              sender: message.sender_id === user.id ? 'parent' : 'teacher'
-            };
-            const updated = [...filtered, formattedMessage].sort((a, b) => 
-              new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
-            );
-            return updated;
-          });
-          
-          // Mark messages as read if they're from the teacher
-          if (message.sender_id === selectedTeacher.userId && !message.is_read) {
-            console.log('📖 Parent Chat: Marking message as read in real-time handler');
-            markMessagesAsRead(selectedTeacher.userId).then((result) => {
-              if (result?.success) {
-                console.log('✅ Parent Chat: Messages marked as read successfully, notifying badge system');
-                badgeNotifier.notifyMessagesRead(user.id, selectedTeacher.userId);
-              } else {
-                console.log('❌ Parent Chat: Failed to mark messages as read:', result?.error);
-              }
-            });
-            
-            setUnreadCounts(prev => {
-              const updated = { ...prev };
-              delete updated[selectedTeacher.userId];
-              return updated;
-            });
-          }
-          
-          // Auto-scroll to bottom on new messages
-          setTimeout(() => {
-            try {
-              if (flatListRef.current?.scrollToEnd) {
-                flatListRef.current.scrollToEnd({ animated: true });
-              }
-            } catch (error) {
-              // Silently handle scroll error
-            }
-          }, 100);
-        } else if (eventType === 'deleted') {
-          // Remove deleted message
-          setMessages(prev => prev.filter(m => m.id !== message.id));
-        }
-        
-        // Update unread counts if message is from teacher to parent (not in current chat)
-        if (message.sender_id !== user.id && message.receiver_id === user.id) {
-          console.log('📬 Parent Chat: Updating unread count for sender:', message.sender_id);
-          setUnreadCounts(prev => {
-            const newCount = (prev[message.sender_id] || 0) + 1;
-            console.log(`📊 Parent Chat: Teacher ${message.sender_id} unread count: ${prev[message.sender_id] || 0} -> ${newCount}`);
-            return {
-              ...prev,
-              [message.sender_id]: newCount
-            };
-          });
-        }
-      }
-    );
-
-    // Backup direct Postgres Changes subscription to ensure read-update delivery
+    // Single per-chat channel for INSERT+UPDATE+DELETE; messageHandler used for send only
     const sorted = [String(user.id), String(selectedTeacher.userId)].sort();
-    const directChannel = supabase.channel(`messages-${sorted[0]}-${sorted[1]}`);
-    directChannel
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLES.MESSAGES }, (payload) => {
+    const channel = supabase.channel(`chat:messages:${sorted[0]}:${sorted[1]}`);
+
+    const handleUpsert = (raw) => {
+      const message = raw;
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.id !== message.id);
+        const formatted = {
+          ...message,
+          text: message.message,
+          timestamp: formatToLocalTime(message.sent_at),
+          sender: message.sender_id === user.id ? 'parent' : 'teacher'
+        };
+        const updated = [...filtered, formatted].sort((a, b) =>
+          new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+        );
+        return updated;
+      });
+      if (message.sender_id === selectedTeacher.userId && !message.is_read) {
+        markMessagesAsRead(selectedTeacher.userId).then(() => {
+          setUnreadCounts(prev => { const u = { ...prev }; delete u[selectedTeacher.userId]; return u; });
+        });
+      }
+      setTimeout(() => { try { flatListRef.current?.scrollToEnd?.({ animated: true }); } catch (e) {} }, 100);
+    };
+
+    channel
+      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.MESSAGES }, (payload) => {
         const msg = payload.new || payload.old;
         if (!msg) return;
         const relevant = (
@@ -544,29 +494,51 @@ const ChatWithTeacher = () => {
         );
         if (!relevant) return;
 
-        const message = payload.new || payload.old;
-        const eventType = payload.eventType?.toLowerCase() === 'delete' ? 'deleted' : (payload.eventType?.toLowerCase() === 'update' ? 'updated' : 'received');
-        setMessages(prev => {
-          const filtered = prev.filter(m => m.id !== message.id);
-          const formatted = eventType === 'deleted' ? null : {
-            ...message,
-            text: message.message,
-            timestamp: formatToLocalTime(message.sent_at),
-            sender: message.sender_id === user.id ? 'parent' : 'teacher'
-          };
-          const updated = formatted ? [...filtered, formatted].sort((a, b) =>
-            new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
-          ) : filtered;
-          return updated;
-        });
+        if (payload.eventType === 'DELETE') {
+          setMessages(prev => prev.filter(m => m.id !== msg.id));
+        } else {
+          handleUpsert(payload.new);
+        }
+      })
+      .subscribe((status) => { console.log('📡 ParentChat messages channel status:', status); });
+
+    // Also listen to global 'message-read' broadcast for instant ticks
+    const readChannel = supabase.channel('universal-message-update', { config: { private: true } });
+    readChannel
+      .on('broadcast', { event: 'message-read' }, (payload) => {
+        const p = payload?.payload;
+        if (!p) return;
+        if (p.sender_id === user.id && selectedTeacher.userId === p.user_id) {
+          setMessages(prev => prev.map(m => (m.sender_id === user.id && m.receiver_id === p.user_id && !m.is_read) ? { ...m, is_read: true } : m));
+        }
       })
       .subscribe();
-    
+
+    // Fallback polling via global handler
+    const fallbackSub = messageHandler.startSubscription(
+      user.id,
+      selectedTeacher.userId,
+      (message, eventType) => {
+        const msg = message;
+        if (!msg?.id) return;
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.id !== msg.id);
+          const updated = eventType === 'deleted' ? filtered : [...filtered, msg].sort((a, b) =>
+            new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+          );
+          return updated;
+        });
+      }
+    );
+
     return () => {
+      try { channel.unsubscribe(); } catch (e) {}
+      try { readChannel.unsubscribe(); } catch (e) {}
+      try { supabase.removeChannel?.(channel); } catch (e) {}
+      try { supabase.removeChannel?.(readChannel); } catch (e) {}
       messageHandler.stopSubscription();
-      try { directChannel.unsubscribe(); } catch (e) {}
     };
-  }, [selectedTeacher?.userId, user.id, messageHandler, markMessagesAsRead]);
+  }, [selectedTeacher?.userId, user.id, markMessagesAsRead]);
 
   // Reset teacher selection and messages on screen focus with parent-aware initialization
   useFocusEffect(
@@ -722,15 +694,22 @@ const ChatWithTeacher = () => {
         },
         // Confirmed callback
         (tempId, confirmedMessage) => {
-          console.log('✅ Parent Chat - Message confirmed, replacing optimistic:', { tempId, confirmedMessage });
-          setMessages(prev => prev.map(msg => 
-            msg.id === tempId ? {
+          console.log('✅ Parent Chat - Message confirmed, merging state without duplicates:', { tempId, confirmedMessage });
+          setMessages(prev => {
+            const formatted = {
               ...confirmedMessage,
               text: confirmedMessage.message,
               timestamp: formatToLocalTime(confirmedMessage.sent_at),
               sender: 'parent'
-            } : msg
-          ));
+            };
+            // Remove the temp optimistic item and any duplicate with same confirmed id (in case realtime already added it)
+            const withoutTemp = prev.filter(m => m.id !== tempId);
+            const withoutDup = withoutTemp.filter(m => m.id !== confirmedMessage.id);
+            const merged = [...withoutDup, formatted].sort((a, b) =>
+              new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+            );
+            return merged;
+          });
           
           // Notify badge system that a new message was sent (for the receiver)
           badgeNotifier.notifyNewMessage(teacherUserId, user.id);
@@ -868,15 +847,20 @@ const ChatWithTeacher = () => {
             
           if (!sendError && insertedMsg?.[0]) {
             // Replace temp message with actual message
-            setMessages(prev => prev.map(msg => 
-              msg.id === tempMsg.id
-                ? {
-                    ...insertedMsg[0],
-                    timestamp: formatToLocalTime(insertedMsg[0].sent_at),
-                    sender: 'parent'
-                  }
-                : msg
-            ));
+            setMessages(prev => {
+              const formatted = {
+                ...insertedMsg[0],
+                timestamp: formatToLocalTime(insertedMsg[0].sent_at),
+                sender: 'parent'
+              };
+              // Remove temp and any duplicate that realtime may have already added
+              const withoutTemp = prev.filter(m => m.id !== tempMsg.id);
+              const withoutDup = withoutTemp.filter(m => m.id !== formatted.id);
+              const merged = [...withoutDup, formatted].sort((a, b) =>
+                new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+              );
+              return merged;
+            });
             
             // Scroll to bottom
             setTimeout(() => {
@@ -980,15 +964,20 @@ const ChatWithTeacher = () => {
             
           if (!sendError && insertedMsg?.[0]) {
             // Replace temp message with actual message
-            setMessages(prev => prev.map(msg => 
-              msg.id === tempMsg.id
-                ? {
-                    ...insertedMsg[0],
-                    timestamp: formatToLocalTime(insertedMsg[0].sent_at),
-                    sender: 'parent'
-                  }
-                : msg
-            ));
+            setMessages(prev => {
+              const formatted = {
+                ...insertedMsg[0],
+                timestamp: formatToLocalTime(insertedMsg[0].sent_at),
+                sender: 'parent'
+              };
+              // Remove temp and any duplicate that realtime may have already added
+              const withoutTemp = prev.filter(m => m.id !== tempMsg.id);
+              const withoutDup = withoutTemp.filter(m => m.id !== formatted.id);
+              const merged = [...withoutDup, formatted].sort((a, b) =>
+                new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+              );
+              return merged;
+            });
             
             // Scroll to bottom
             setTimeout(() => {

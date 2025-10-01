@@ -1129,73 +1129,38 @@ const TeacherChat = () => {
     }, 1200);
   };
   
+  // Messages realtime channel
   useEffect(() => {
     if (!selectedContact) return;
-    
-    const contactUserId = selectedContact.userId || selectedContact.id;
-    
-    // Setup primary real-time subscription with message updates
-    const subscription = messageHandler.startSubscription(
-      user.id,
-      contactUserId,
-      (message, eventType) => {
-        console.log('📨 Real-time message update:', { message, eventType });
-        
-        if (eventType === 'sent' || eventType === 'received' || eventType === 'updated') {
-          // Update messages state
-          setMessages(prev => {
-            const filtered = prev.filter(m => m.id !== message.id);
-            const updated = [...filtered, message].sort((a, b) => 
-              new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
-            );
-            return updated;
-          });
-          
-          // Mark messages as read if they're from the contact
-          if (message.sender_id === contactUserId && !message.is_read) {
-            markMessagesAsRead(contactUserId);
-            setUnreadCounts(prev => {
-              const updated = { ...prev };
-              delete updated[contactUserId];
-              return updated;
-            });
-          }
-          
-          setTimeout(() => {
-            try {
-              if (flatListRef.current?.scrollToEnd) {
-                flatListRef.current.scrollToEnd({ animated: true });
-              }
-            } catch (error) {}
-          }, 100);
-        } else if (eventType === 'deleted') {
-          setMessages(prev => prev.filter(m => m.id !== message.id));
-        }
-      }
-    );
 
-    // Backup direct subscription (dedupe by id) in case Realtime filter misbehaves
+    const contactUserId = selectedContact.userId || selectedContact.id;
     const sorted = [String(user.id), String(contactUserId)].sort();
-    const directChannel = supabase.channel(`messages-${sorted[0]}-${sorted[1]}`);
-    directChannel
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLES.MESSAGES }, (payload) => {
-        const msg = payload.new;
-        if (!msg) return;
-        const relevant = (
-          (msg.sender_id === user.id && msg.receiver_id === contactUserId) ||
-          (msg.sender_id === contactUserId && msg.receiver_id === user.id)
+    const channel = supabase.channel(`chat:messages:${sorted[0]}:${sorted[1]}`);
+
+    const handleUpsert = (raw) => {
+      const message = raw;
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.id !== message.id);
+        const updated = [...filtered, message].sort((a, b) =>
+          new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
         );
-        if (!relevant) return;
-        const message = payload.new;
-        setMessages(prev => {
-          const filtered = prev.filter(m => m.id !== message.id);
-          const updated = [...filtered, message].sort((a, b) =>
-            new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
-          );
+        return updated;
+      });
+      if (message.sender_id === contactUserId && !message.is_read) {
+        markMessagesAsRead(contactUserId);
+        setUnreadCounts(prev => {
+          const updated = { ...prev };
+          delete updated[contactUserId];
           return updated;
         });
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLES.MESSAGES }, (payload) => {
+      }
+      setTimeout(() => {
+        try { flatListRef.current?.scrollToEnd?.({ animated: true }); } catch (e) {}
+      }, 100);
+    };
+
+    channel
+      .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.MESSAGES }, (payload) => {
         const msg = payload.new || payload.old;
         if (!msg) return;
         const relevant = (
@@ -1203,24 +1168,47 @@ const TeacherChat = () => {
           (msg.sender_id === contactUserId && msg.receiver_id === user.id)
         );
         if (!relevant) return;
+        if (payload.eventType === 'DELETE') {
+          setMessages(prev => prev.filter(m => m.id !== msg.id));
+        } else {
+          handleUpsert(payload.new);
+        }
+      })
+      .subscribe((status) => { console.log('📡 TeacherChat messages channel status:', status); });
 
-        const eventType = payload.eventType?.toLowerCase() === 'delete' ? 'deleted' : (payload.eventType?.toLowerCase() === 'update' ? 'updated' : 'received');
-        const message = payload.new || payload.old;
-        setMessages(prev => {
-          const filtered = prev.filter(m => m.id !== message.id);
-          const updated = eventType === 'deleted' ? filtered : [...filtered, message].sort((a, b) =>
-            new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
-          );
-          return updated;
-        });
+    return () => {
+      try { channel.unsubscribe(); } catch (e) {}
+      try { supabase.removeChannel?.(channel); } catch (e) {}
+      messageHandler.stopSubscription();
+    };
+  }, [selectedContact, user.id]);
+
+  // Read-receipt broadcast channel (flip ticks instantly)
+  useEffect(() => {
+    if (!selectedContact) return;
+
+    const readChannel = supabase.channel('universal-message-update', { config: { private: true } });
+    readChannel
+      .on('broadcast', { event: 'message-read' }, (payload) => {
+        const p = payload?.payload;
+        if (!p) return;
+        // If I am the sender and my contact marked as read
+        if (p.sender_id === user.id && (selectedContact.userId || selectedContact.id) === p.user_id) {
+          setMessages(prev => prev.map(m => {
+            if (m.sender_id === user.id && (m.receiver_id === p.user_id) && !m.is_read) {
+              return { ...m, is_read: true };
+            }
+            return m;
+          }));
+        }
       })
       .subscribe();
-    
+
     return () => {
-      messageHandler.stopSubscription();
-      try { directChannel.unsubscribe(); } catch (e) {}
+      try { readChannel.unsubscribe(); } catch (e) {}
+      try { supabase.removeChannel?.(readChannel); } catch (e) {}
     };
-  }, [selectedContact, user.id, messageHandler, markMessagesAsRead]);
+  }, [selectedContact, user.id]);
 
   // Typing indicator broadcast channel
   useEffect(() => {
@@ -1328,10 +1316,17 @@ const TeacherChat = () => {
         },
         // Confirmed callback
         (tempId, confirmedMessage) => {
-          console.log('✅ Message confirmed, replacing optimistic:', { tempId, confirmedMessage });
-          setMessages(prev => prev.map(msg => 
-            msg.id === tempId ? confirmedMessage : msg
-          ));
+          console.log('✅ Message confirmed, merging state without duplicates:', { tempId, confirmedMessage });
+          setMessages(prev => {
+            // Remove the temp optimistic item
+            const withoutTemp = prev.filter(m => m.id !== tempId);
+            // Remove any existing item with the same confirmed id (realtime INSERT may have already added it)
+            const withoutDup = withoutTemp.filter(m => m.id !== confirmedMessage.id);
+            const merged = [...withoutDup, confirmedMessage].sort((a, b) =>
+              new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+            );
+            return merged;
+          });
         },
         // Error callback
         (tempId, failedMessage, error) => {
