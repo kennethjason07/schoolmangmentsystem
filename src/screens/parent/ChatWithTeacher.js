@@ -530,9 +530,41 @@ const ChatWithTeacher = () => {
         }
       }
     );
+
+    // Backup direct Postgres Changes subscription to ensure read-update delivery
+    const sorted = [String(user.id), String(selectedTeacher.userId)].sort();
+    const directChannel = supabase.channel(`messages-${sorted[0]}-${sorted[1]}`);
+    directChannel
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLES.MESSAGES }, (payload) => {
+        const msg = payload.new || payload.old;
+        if (!msg) return;
+        const relevant = (
+          (msg.sender_id === user.id && msg.receiver_id === selectedTeacher.userId) ||
+          (msg.sender_id === selectedTeacher.userId && msg.receiver_id === user.id)
+        );
+        if (!relevant) return;
+
+        const message = payload.new || payload.old;
+        const eventType = payload.eventType?.toLowerCase() === 'delete' ? 'deleted' : (payload.eventType?.toLowerCase() === 'update' ? 'updated' : 'received');
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.id !== message.id);
+          const formatted = eventType === 'deleted' ? null : {
+            ...message,
+            text: message.message,
+            timestamp: formatToLocalTime(message.sent_at),
+            sender: message.sender_id === user.id ? 'parent' : 'teacher'
+          };
+          const updated = formatted ? [...filtered, formatted].sort((a, b) =>
+            new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+          ) : filtered;
+          return updated;
+        });
+      })
+      .subscribe();
     
     return () => {
       messageHandler.stopSubscription();
+      try { directChannel.unsubscribe(); } catch (e) {}
     };
   }, [selectedTeacher?.userId, user.id, messageHandler, markMessagesAsRead]);
 

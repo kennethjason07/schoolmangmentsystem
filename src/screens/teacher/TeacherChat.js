@@ -1134,7 +1134,7 @@ const TeacherChat = () => {
     
     const contactUserId = selectedContact.userId || selectedContact.id;
     
-    // Setup real-time subscription with message updates
+    // Setup primary real-time subscription with message updates
     const subscription = messageHandler.startSubscription(
       user.id,
       contactUserId,
@@ -1144,9 +1144,7 @@ const TeacherChat = () => {
         if (eventType === 'sent' || eventType === 'received' || eventType === 'updated') {
           // Update messages state
           setMessages(prev => {
-            // Remove any existing message with the same ID
             const filtered = prev.filter(m => m.id !== message.id);
-            // Add the new/updated message and sort by timestamp
             const updated = [...filtered, message].sort((a, b) => 
               new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
             );
@@ -1163,25 +1161,64 @@ const TeacherChat = () => {
             });
           }
           
-          // Auto-scroll to bottom on new messages
           setTimeout(() => {
             try {
               if (flatListRef.current?.scrollToEnd) {
                 flatListRef.current.scrollToEnd({ animated: true });
               }
-            } catch (error) {
-              // Silently handle scroll error
-            }
+            } catch (error) {}
           }, 100);
         } else if (eventType === 'deleted') {
-          // Remove deleted message
           setMessages(prev => prev.filter(m => m.id !== message.id));
         }
       }
     );
+
+    // Backup direct subscription (dedupe by id) in case Realtime filter misbehaves
+    const sorted = [String(user.id), String(contactUserId)].sort();
+    const directChannel = supabase.channel(`messages-${sorted[0]}-${sorted[1]}`);
+    directChannel
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLES.MESSAGES }, (payload) => {
+        const msg = payload.new;
+        if (!msg) return;
+        const relevant = (
+          (msg.sender_id === user.id && msg.receiver_id === contactUserId) ||
+          (msg.sender_id === contactUserId && msg.receiver_id === user.id)
+        );
+        if (!relevant) return;
+        const message = payload.new;
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.id !== message.id);
+          const updated = [...filtered, message].sort((a, b) =>
+            new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+          );
+          return updated;
+        });
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLES.MESSAGES }, (payload) => {
+        const msg = payload.new || payload.old;
+        if (!msg) return;
+        const relevant = (
+          (msg.sender_id === user.id && msg.receiver_id === contactUserId) ||
+          (msg.sender_id === contactUserId && msg.receiver_id === user.id)
+        );
+        if (!relevant) return;
+
+        const eventType = payload.eventType?.toLowerCase() === 'delete' ? 'deleted' : (payload.eventType?.toLowerCase() === 'update' ? 'updated' : 'received');
+        const message = payload.new || payload.old;
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.id !== message.id);
+          const updated = eventType === 'deleted' ? filtered : [...filtered, message].sort((a, b) =>
+            new Date(a.sent_at || a.created_at) - new Date(b.sent_at || b.created_at)
+          );
+          return updated;
+        });
+      })
+      .subscribe();
     
     return () => {
       messageHandler.stopSubscription();
+      try { directChannel.unsubscribe(); } catch (e) {}
     };
   }, [selectedContact, user.id, messageHandler, markMessagesAsRead]);
 
