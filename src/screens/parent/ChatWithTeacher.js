@@ -62,6 +62,9 @@ const ChatWithTeacher = () => {
   const typingIndicatorTimeoutRef = useRef(null);
   const lastTypingSentRef = useRef(0);
   
+  // Real-time badge subscription ref (per-teacher unread counts)
+  const badgeSubscriptionRef = useRef(null);
+  
   // Add debug state for parent troubleshooting
   const [debugInfo, setDebugInfo] = useState({
     parentContext: null,
@@ -557,6 +560,42 @@ const ChatWithTeacher = () => {
       }
     }, [user, parentLoading, parentStudents])
   );
+
+  // Global realtime subscription to keep per-teacher unread badges fresh
+  useEffect(() => {
+    if (!user?.id) return;
+
+    // Clean previous
+    if (badgeSubscriptionRef.current) {
+      try { badgeSubscriptionRef.current.unsubscribe(); } catch (e) {}
+      badgeSubscriptionRef.current = null;
+    }
+
+    const channelName = `parent-badge-${user.id}-${Date.now()}`;
+    const ch = supabase
+      .channel(channelName)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLES.MESSAGES, filter: `receiver_id=eq.${user.id}` }, (payload) => {
+        const sender = payload.new?.sender_id;
+        if (sender && sender !== user.id) {
+          setUnreadCounts(prev => ({ ...prev, [sender]: (prev[sender] || 0) + 1 }));
+        }
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: TABLES.MESSAGES }, (payload) => {
+        if (payload.old?.receiver_id === user.id && payload.old?.sender_id) {
+          // safe refetch for that sender only
+          const sender = payload.old.sender_id;
+          setTimeout(() => fetchUnreadCounts(teachers), 150);
+        }
+      })
+      .subscribe();
+
+    badgeSubscriptionRef.current = ch;
+
+    return () => {
+      try { ch.unsubscribe(); } catch (e) {}
+      badgeSubscriptionRef.current = null;
+    };
+  }, [user?.id]);
 
   // Select a teacher and load chat
   const handleSelectTeacher = async (teacher) => {

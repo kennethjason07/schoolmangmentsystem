@@ -48,6 +48,9 @@ const StudentChatWithTeacher = () => {
   const typingIndicatorTimeoutRef = useRef(null);
   const lastTypingSentRef = useRef(0);
 
+  // Global unread badge subscription for per-teacher counts
+  const badgeSubscriptionRef = useRef(null);
+
   // Pull-to-refresh functionality
   const { refreshing, onRefresh } = usePullToRefresh(async () => {
     await Promise.all([
@@ -300,6 +303,40 @@ const StudentChatWithTeacher = () => {
       }
     }, [selectedTeacher])
   );
+
+  // Global realtime subscription to keep per-teacher unread badges fresh
+  useEffect(() => {
+    if (!user?.id) return;
+
+    // Clean previous
+    if (badgeSubscriptionRef.current) {
+      try { badgeSubscriptionRef.current.unsubscribe(); } catch (e) {}
+      badgeSubscriptionRef.current = null;
+    }
+
+    const channelName = `student-badge-${user.id}-${Date.now()}`;
+    const ch = supabase
+      .channel(channelName)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLES.MESSAGES, filter: `receiver_id=eq.${user.id}` }, (payload) => {
+        const sender = payload.new?.sender_id;
+        if (sender && sender !== user.id) {
+          setUnreadCounts(prev => ({ ...prev, [sender]: (prev[sender] || 0) + 1 }));
+        }
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: TABLES.MESSAGES }, (payload) => {
+        if (payload.old?.receiver_id === user.id && payload.old?.sender_id) {
+          setTimeout(() => fetchUnreadCounts(), 150);
+        }
+      })
+      .subscribe();
+
+    badgeSubscriptionRef.current = ch;
+
+    return () => {
+      try { ch.unsubscribe(); } catch (e) {}
+      badgeSubscriptionRef.current = null;
+    };
+  }, [user?.id]);
 
   // Fetch teachers assigned to the student
   const fetchTeachers = async () => {
