@@ -59,12 +59,10 @@ const TakeAttendance = () => {
   });
   const cacheRef = useRef(cachedData);
   const subscriptionsRef = useRef({});
-  const prefetchTimeoutRef = useRef(null);
   
   // Cache configuration
   const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
   const ATTENDANCE_CACHE_DURATION = 2 * 60 * 1000; // 2 minutes for attendance (more dynamic)
-  const PREFETCH_DELAY = 500; // 500ms delay before prefetching data
   
   // 🚀 OPTIMIZATION: Cache utility functions
   const isCacheValid = useCallback((key, customDuration) => {
@@ -104,63 +102,6 @@ const TakeAttendance = () => {
     setCachedData(emptyCache);
     cacheRef.current = emptyCache;
   }, []);
-  
-  // 🚀 PERFORMANCE: Prefetch data utility function
-  const prefetchData = useCallback(async (classId, date) => {
-    if (!classId || !date) return;
-    
-    // Check if data is already cached and valid
-    const cacheKey = `${classId}-${date}`;
-    if (isCacheValid(`attendance-${cacheKey}`, ATTENDANCE_CACHE_DURATION)) {
-      if (__DEV__) console.log('⚡ PREFETCH: Data already cached for', cacheKey);
-      return;
-    }
-    
-    try {
-      const validation = validateTenantAccess();
-      if (!validation.valid) return;
-      
-      // Prefetch attendance data for the specified class and date
-      const { data: attendanceData } = await createTenantQuery(
-        validation.tenantId,
-        TABLES.STUDENT_ATTENDANCE,
-        'student_id, status',
-        { 
-          date: date,
-          class_id: classId 
-        }
-      );
-      
-      // Update cache with prefetched data
-      if (attendanceData) {
-        const mark = {};
-        attendanceData.forEach(record => {
-          mark[record.student_id] = record.status;
-        });
-        
-        updateCache({
-          [`attendance-${cacheKey}`]: mark
-        });
-        
-        if (__DEV__) console.log('⚡ PREFETCH: Cached attendance data for', cacheKey);
-      }
-    } catch (error) {
-      if (__DEV__) console.warn('⚡ PREFETCH: Failed to prefetch data for', cacheKey, error);
-    }
-  }, [isCacheValid, validateTenantAccess, updateCache]);
-  
-  // 🚀 PERFORMANCE: Schedule prefetching with debouncing
-  const schedulePrefetch = useCallback((classId, date) => {
-    // Clear any existing prefetch timeout
-    if (prefetchTimeoutRef.current) {
-      clearTimeout(prefetchTimeoutRef.current);
-    }
-    
-    // Schedule new prefetch
-    prefetchTimeoutRef.current = setTimeout(() => {
-      prefetchData(classId, date);
-    }, PREFETCH_DELAY);
-  }, [prefetchData]);
   // 🚀 ENHANCED TENANT SYSTEM - Use reliable cached tenant access
   const { 
     getTenantId, 
@@ -199,10 +140,10 @@ const TakeAttendance = () => {
       }
       
       const tenantId = validation.tenantId;
-      if (__DEV__) console.log('🚀 Enhanced tenant system: Using cached tenant ID:', tenantId);
+      console.log('🚀 Enhanced tenant system: Using cached tenant ID:', tenantId);
       
-      // 🚀 PERFORMANCE: Get teacher info using dbHelpers with enhanced validation
-      if (__DEV__) console.log('🔍 Getting teacher info using dbHelpers...');
+      // 🚀 ENHANCED: Get teacher info using dbHelpers with enhanced validation
+      console.log('🔍 Getting teacher info using dbHelpers...');
       const { data: teacherData, error: teacherError } = await dbHelpers.getTeacherByUserId(user.id);
       
       if (teacherError || !teacherData) {
@@ -217,30 +158,24 @@ const TakeAttendance = () => {
       
       const teacher = teacherData;
       setTeacherInfo(teacher);
-      if (__DEV__) console.log('✅ Enhanced: Teacher lookup successful:', teacher.name);
+      console.log('✅ Enhanced: Teacher lookup successful:', teacher.name);
       
-      // 🚀 PERFORMANCE: Parallelize queries for better performance
-      if (__DEV__) console.log('📚 Loading teacher data with parallel queries...');
-      
-      // Run these queries in parallel to save time
-      const [assignedSubjectsResult] = await Promise.all([
-        tenantDatabase.read(
-          TABLES.TEACHER_SUBJECTS,
-          { teacher_id: teacher.id },
-          `
-            *,
-            subjects(
-              id,
-              name,
-              class_id,
-              classes(class_name, id, section)
-            )
-          `
-        )
-      ]);
+      // 🚀 ENHANCED: Get assigned subjects and classes using enhanced tenant system
+      console.log('📚 Loading teacher subjects and classes...');
+      const { data: assignedSubjects, error: subjectsError } = await tenantDatabase.read(
+        TABLES.TEACHER_SUBJECTS,
+        { teacher_id: teacher.id },
+        `
+          *,
+          subjects(
+            id,
+            name,
+            class_id,
+            classes(class_name, id, section)
+          )
+        `
+      );
 
-      const { data: assignedSubjects, error: subjectsError } = assignedSubjectsResult;
-      
       if (subjectsError) {
         console.error('❌ Error fetching assigned subjects:', subjectsError);
         throw subjectsError;
@@ -267,10 +202,8 @@ const TakeAttendance = () => {
       
       setClasses(classList);
       
-      if (__DEV__) {
-        console.log('📊 Found', assignedSubjects.length, 'subject assignments and', classList.length, 'unique classes');
-        console.log('🔍 Classes:', classList.map(c => `${c.class_name} ${c.section}`));
-      }
+      console.log('📊 Found', assignedSubjects.length, 'subject assignments and', classList.length, 'unique classes');
+      console.log('🔍 Classes:', classList.map(c => `${c.class_name} ${c.section}`));
       
       // Only set default selection if no class is currently selected
       if (classList.length > 0 && !selectedClass) {
@@ -278,9 +211,6 @@ const TakeAttendance = () => {
         setViewClass(classList[0].id);
         setSelectedSection(classList[0].section);
         setViewSection(classList[0].section);
-        
-        // 🚀 PERFORMANCE: Prefetch attendance data for default class
-        schedulePrefetch(classList[0].id, selectedDate);
       }
 
     } catch (err) {
@@ -305,12 +235,17 @@ const TakeAttendance = () => {
         throw new Error(validation.error);
       }
       
-      // 🚀 PERFORMANCE: Optimized student query with minimal fields for list view
-      if (__DEV__) console.log('🎫 Enhanced: Loading students for class:', selectedClass);
+      // 🚀 ENHANCED: Get students using tenantDatabase with automatic tenant filtering
+      console.log('🎫 Enhanced: Loading students for class:', selectedClass);
       const { data: studentsData, error: studentsError } = await createTenantQuery(
         validation.tenantId,
         TABLES.STUDENTS,
-        'id, name, admission_no', // Minimal fields for better performance
+        `
+          id,
+          name,
+          admission_no,
+          classes(class_name, section)
+        `,
         { class_id: selectedClass }
       )
         .order('admission_no');
@@ -320,7 +255,7 @@ const TakeAttendance = () => {
         throw studentsError;
       }
       
-      if (__DEV__) console.log('📊 Found', studentsData?.length || 0, 'students in class', selectedClass);
+      console.log('📊 Found', studentsData?.length || 0, 'students in class', selectedClass);
       setStudents(studentsData || []);
 
     } catch (err) {
@@ -337,26 +272,15 @@ const TakeAttendance = () => {
     
     // Skip fetching if user has manually cleared attendance
     if (clearMode) {
-      if (__DEV__) console.log('Clear mode active - skipping attendance fetch');
-      return;
-    }
-    
-    // 🚀 PERFORMANCE: Check cache first
-    const cacheKey = `${selectedClass}-${selectedDate}`;
-    const cachedAttendance = cachedData.attendance[`attendance-${cacheKey}`];
-    if (cachedAttendance && isCacheValid(`attendance-${cacheKey}`, ATTENDANCE_CACHE_DURATION)) {
-      if (__DEV__) console.log('⚡ CACHE HIT: Using cached attendance data for', cacheKey);
-      setAttendanceMark(cachedAttendance);
+      console.log('Clear mode active - skipping attendance fetch');
       return;
     }
     
     try {
-      if (__DEV__) {
-        console.log('🔍 [DEBUG] Enhanced: Fetching existing attendance...');
-        console.log('🔍 [DEBUG] Class ID:', selectedClass);
-        console.log('🔍 [DEBUG] Date:', selectedDate);
-        console.log('🔍 [DEBUG] Student IDs:', students.map(s => s.id));
-      }
+      console.log('🔍 [DEBUG] Enhanced: Fetching existing attendance...');
+      console.log('🔍 [DEBUG] Class ID:', selectedClass);
+      console.log('🔍 [DEBUG] Date:', selectedDate);
+      console.log('🔍 [DEBUG] Student IDs:', students.map(s => s.id));
       
       // 🚀 ENHANCED: Validate tenant access using new helper
       const validation = validateTenantAccess();
@@ -381,25 +305,17 @@ const TakeAttendance = () => {
         return; // Silent return for better UX
       }
 
-      if (__DEV__) {
-        console.log('🔍 [DEBUG] Found attendance records:', attendanceData?.length || 0);
-        console.log('🔍 [DEBUG] Attendance data:', JSON.stringify(attendanceData, null, 2));
-      }
+      console.log('🔍 [DEBUG] Found attendance records:', attendanceData?.length || 0);
+      console.log('🔍 [DEBUG] Attendance data:', JSON.stringify(attendanceData, null, 2));
 
       // Create attendance mark object
       const mark = {};
       attendanceData?.forEach(record => {
         mark[record.student_id] = record.status;
-        if (__DEV__) console.log('🔍 [DEBUG] Mapping student_id', record.student_id, 'to status', record.status);
+        console.log('🔍 [DEBUG] Mapping student_id', record.student_id, 'to status', record.status);
       });
       
-      if (__DEV__) console.log('🔍 [DEBUG] Final attendance mark object:', JSON.stringify(mark, null, 2));
-      
-      // 🚀 PERFORMANCE: Update cache with fetched data
-      updateCache({
-        [`attendance-${cacheKey}`]: mark
-      });
-      
+      console.log('🔍 [DEBUG] Final attendance mark object:', JSON.stringify(mark, null, 2));
       setAttendanceMark(mark);
 
     } catch (err) {
@@ -414,7 +330,7 @@ const TakeAttendance = () => {
     let attendanceSubscription = null;
     
     if (selectedClass && selectedDate) {
-      if (__DEV__) console.log('⚡ [OPTIMIZED] Setting up real-time subscription for attendance updates...');
+      console.log('⚡ [OPTIMIZED] Setting up real-time subscription for attendance updates...');
       attendanceSubscription = supabase
         .channel(`attendance-updates-${selectedClass}-${selectedDate}`)
         .on('postgres_changes', {
@@ -423,10 +339,10 @@ const TakeAttendance = () => {
           table: TABLES.STUDENT_ATTENDANCE,
           filter: `class_id=eq.${selectedClass}`
         }, (payload) => {
-          if (__DEV__) console.log('⚡ [OPTIMIZED] Real-time attendance update received:', payload);
+          console.log('⚡ [OPTIMIZED] Real-time attendance update received:', payload);
           // Only refresh if the update is for current date and class
           if (payload.new?.date === selectedDate || payload.old?.date === selectedDate) {
-            if (__DEV__) console.log('⚡ [OPTIMIZED] Refreshing attendance data due to real-time update');
+            console.log('⚡ [OPTIMIZED] Refreshing attendance data due to real-time update');
             fetchExistingAttendance();
           }
         })
@@ -436,11 +352,7 @@ const TakeAttendance = () => {
     return () => {
       if (attendanceSubscription) {
         attendanceSubscription.unsubscribe();
-        if (__DEV__) console.log('⚡ [OPTIMIZED] Unsubscribed from real-time attendance updates');
-      }
-      // 🚀 PERFORMANCE: Cleanup prefetch timeout
-      if (prefetchTimeoutRef.current) {
-        clearTimeout(prefetchTimeoutRef.current);
+        console.log('⚡ [OPTIMIZED] Unsubscribed from real-time attendance updates');
       }
     };
   }, [selectedClass, selectedDate]); // Re-subscribe when class or date changes
@@ -452,7 +364,7 @@ const TakeAttendance = () => {
     let studentSubscription = null;
     
     if (selectedClass) {
-      if (__DEV__) console.log('⚡ [OPTIMIZED] Setting up real-time subscription for student updates...');
+      console.log('⚡ [OPTIMIZED] Setting up real-time subscription for student updates...');
       studentSubscription = supabase
         .channel(`student-updates-${selectedClass}`)
         .on('postgres_changes', {
@@ -461,10 +373,10 @@ const TakeAttendance = () => {
           table: TABLES.STUDENTS,
           filter: `class_id=eq.${selectedClass}`
         }, (payload) => {
-          if (__DEV__) console.log('⚡ [OPTIMIZED] Real-time student update received:', payload);
+          console.log('⚡ [OPTIMIZED] Real-time student update received:', payload);
           // Only refresh if the update is for current class
           if (payload.new?.class_id === selectedClass || payload.old?.class_id === selectedClass) {
-            if (__DEV__) console.log('⚡ [OPTIMIZED] Refreshing student data due to real-time update');
+            console.log('⚡ [OPTIMIZED] Refreshing student data due to real-time update');
             fetchStudents();
           }
         })
@@ -474,35 +386,20 @@ const TakeAttendance = () => {
     return () => {
       if (studentSubscription) {
         studentSubscription.unsubscribe();
-        if (__DEV__) console.log('⚡ [OPTIMIZED] Unsubscribed from real-time student updates');
+        console.log('⚡ [OPTIMIZED] Unsubscribed from real-time student updates');
       }
     };
   }, [selectedClass]);
 
   useEffect(() => {
     fetchExistingAttendance();
-    
-    // 🚀 PERFORMANCE: Schedule prefetching for next likely interactions
-    if (selectedClass && selectedDate) {
-      // Prefetch data for tomorrow's date
-      const tomorrow = new Date(selectedDate);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const tomorrowStr = tomorrow.toISOString().split('T')[0];
-      schedulePrefetch(selectedClass, tomorrowStr);
-      
-      // Prefetch data for yesterday's date
-      const yesterday = new Date(selectedDate);
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
-      schedulePrefetch(selectedClass, yesterdayStr);
-    }
   }, [selectedClass, selectedSection, selectedDate, students]);
 
   // Reset clear mode when date or class changes
   useEffect(() => {
     if (clearMode) {
       setClearMode(false);
-      if (__DEV__) console.log('Clear mode deactivated - date/class changed');
+      console.log('Clear mode deactivated - date/class changed');
     }
   }, [selectedClass, selectedDate]);
 
@@ -538,7 +435,7 @@ const TakeAttendance = () => {
       }
       
       const tenantId = validation.tenantId;
-      if (__DEV__) console.log('🚀 Enhanced tenant system: Using cached tenant ID for attendance marking:', tenantId);
+      console.log('🚀 Enhanced tenant system: Using cached tenant ID for attendance marking:', tenantId);
 
       // 🚀 ENHANCED: Teacher validation (enhanced system already handles tenant matching)
       if (!teacherInfo?.tenant_id || teacherInfo.tenant_id !== tenantId) {
@@ -557,22 +454,20 @@ const TakeAttendance = () => {
       }));
 
       // 🔍 DEBUG: Log what we're about to submit
-      if (__DEV__) {
-        console.log('🔍 [DEBUG] About to submit attendance records:');
-        console.log('🔍 [DEBUG] Selected Class:', selectedClass);
-        console.log('🔍 [DEBUG] Selected Date:', selectedDate);
-        console.log('🔍 [DEBUG] Tenant ID:', tenantId);
-        console.log('🔍 [DEBUG] Records to submit:', JSON.stringify(attendanceRecords, null, 2));
-        console.log('🔍 [DEBUG] Current attendanceMark state:', JSON.stringify(attendanceMark, null, 2));
-      }
+      console.log('🔍 [DEBUG] About to submit attendance records:');
+      console.log('🔍 [DEBUG] Selected Class:', selectedClass);
+      console.log('🔍 [DEBUG] Selected Date:', selectedDate);
+      console.log('🔍 [DEBUG] Tenant ID:', tenantId);
+      console.log('🔍 [DEBUG] Records to submit:', JSON.stringify(attendanceRecords, null, 2));
+      console.log('🔍 [DEBUG] Current attendanceMark state:', JSON.stringify(attendanceMark, null, 2));
 
       // WORKAROUND: Since there's no unique constraint in the database yet,
       // we'll delete existing records for these students on this date, then insert new ones
-      if (__DEV__) console.log('🔄 [WORKAROUND] Delete existing records then insert new ones (no unique constraint available)');
+      console.log('🔄 [WORKAROUND] Delete existing records then insert new ones (no unique constraint available)');
       
       // Step 1: Delete existing attendance records for these students on this date with proper tenant filtering
       const studentIds = attendanceRecords.map(record => record.student_id);
-      if (__DEV__) console.log('🗑️ [DELETE] Removing existing records for students with tenant filtering:', studentIds);
+      console.log('🗑️ [DELETE] Removing existing records for students with tenant filtering:', studentIds);
       
       const { error: deleteError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
@@ -587,10 +482,10 @@ const TakeAttendance = () => {
         throw new Error(`Failed to delete existing records: ${deleteError.message}`);
       }
       
-      if (__DEV__) console.log('✅ [DELETE] Successfully deleted existing records');
+      console.log('✅ [DELETE] Successfully deleted existing records');
       
       // Step 2: Insert the new attendance records with proper tenant isolation
-      if (__DEV__) console.log('➕ [INSERT] Inserting new attendance records with tenant isolation');
+      console.log('➕ [INSERT] Inserting new attendance records with tenant isolation');
       
       const { error: insertError } = await supabase
         .from(TABLES.STUDENT_ATTENDANCE)
@@ -601,14 +496,14 @@ const TakeAttendance = () => {
         throw new Error(`Failed to insert new records: ${insertError.message}`);
       }
       
-      if (__DEV__) console.log('✅ [INSERT] Successfully inserted new records');
+      console.log('✅ [INSERT] Successfully inserted new records');
 
-      if (__DEV__) console.log('✅ [SUCCESS] Attendance submitted successfully!');
+      console.log('✅ [SUCCESS] Attendance submitted successfully!');
       
       // 🔄 REFRESH: Immediately refresh attendance data to show updated state
-      if (__DEV__) console.log('🔄 [REFRESH] Refreshing attendance data after submission...');
+      console.log('🔄 [REFRESH] Refreshing attendance data after submission...');
       await fetchExistingAttendance();
-      if (__DEV__) console.log('🔄 [REFRESH] Attendance data refreshed!');
+      console.log('🔄 [REFRESH] Attendance data refreshed!');
 
       // Show simple success message
       Alert.alert('Success', 'Attendance saved successfully!');
@@ -616,7 +511,7 @@ const TakeAttendance = () => {
       // Send absence notifications in the background (non-blocking)
       const absentStudents = attendanceRecords.filter(record => record.status === 'Absent');
       if (absentStudents.length > 0) {
-        if (__DEV__) console.log(`📧 Sending absence notifications for ${absentStudents.length} students`);
+        console.log(`📧 Sending absence notifications for ${absentStudents.length} students`);
         // TODO: Add notification sending logic here
       }
       
@@ -645,7 +540,7 @@ const TakeAttendance = () => {
       }
       
       const tenantId = validation.tenantId;
-      if (__DEV__) console.log('🚀 Enhanced tenant system: Using cached tenant ID for view attendance:', tenantId);
+      console.log('🚀 Enhanced tenant system: Using cached tenant ID for view attendance:', tenantId);
       
       // 🚀 ENHANCED: Get students for the view class using createTenantQuery
       const { data: viewStudents } = await createTenantQuery(
@@ -788,7 +683,7 @@ const TakeAttendance = () => {
             
             // Show success message
             Alert.alert('Success', `All ${students.length} students have been marked as Present.`);
-            if (__DEV__) console.log(`✅ Marked all ${students.length} students as Present`);
+            console.log(`✅ Marked all ${students.length} students as Present`);
           }
         }
       ]
@@ -989,7 +884,7 @@ const TakeAttendance = () => {
                   // Reset clear mode when date is changed via picker
                   if (clearMode) {
                     setClearMode(false);
-                    if (__DEV__) console.log('Clear mode deactivated - date changed via picker');
+                    console.log('Clear mode deactivated - date changed via picker');
                   }
                   
                   setSelectedDate(isoDate); 
@@ -1013,11 +908,9 @@ const TakeAttendance = () => {
           {students.length > 0 ? (
             <View style={styles.studentsContainer}>
               <View style={styles.tableHeader}>
-                <View style={[styles.headerCellContainer, styles.headerMainCellContainer, { flex: 3.5 }]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons name="person" size={16} color="#1976d2" style={{ marginRight: 4 }} />
-                    <Text style={styles.headerCell}>Student Details</Text>
-                  </View>
+                <View style={[styles.headerCellContainer, { flex: 3.5 }]}>
+                  <Ionicons name="person" size={16} color="#1976d2" style={{ marginRight: 4 }} />
+                  <Text style={styles.headerCell}>Student Details</Text>
                   <View style={styles.headerButtonsContainer}>
                     <TouchableOpacity 
                       style={styles.markAllPresentButton}
@@ -1050,7 +943,7 @@ const TakeAttendance = () => {
                                   }
                                   
                                   const tenantId = validation.tenantId;
-                                  if (__DEV__) console.log('🚀 Enhanced tenant system: Using cached tenant ID for clear attendance:', tenantId);
+                                  console.log('🚀 Enhanced tenant system: Using cached tenant ID for clear attendance:', tenantId);
                                   
                                   // 🚀 ENHANCED: Delete attendance records from database with tenant filtering
                                   const { error: deleteError } = await supabase
@@ -1071,7 +964,7 @@ const TakeAttendance = () => {
                                   setClearMode(true);
                                   
                                   Alert.alert('Success', 'Attendance records cleared successfully!');
-                                  if (__DEV__) console.log('Attendance records cleared from database and local state with tenant filtering');
+                                  console.log('Attendance records cleared from database and local state with tenant filtering');
                                   
                                 } catch (error) {
                                   console.error('Error clearing attendance:', error);
@@ -1248,7 +1141,7 @@ const TakeAttendance = () => {
                       // Reset clear mode when date is changed via web input
                       if (clearMode) {
                         setClearMode(false);
-                        if (__DEV__) console.log('Clear mode deactivated - date changed via web input');
+                        console.log('Clear mode deactivated - date changed via web input');
                       }
                       setViewDate(e.target.value);
                     }} 
@@ -1426,18 +1319,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 4,
-  },
-  // First header cell (Student Details + action buttons) layout fix
-  headerMainCellContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingRight: 8,
-    ...Platform.select({
-      ios: { flexDirection: 'column', alignItems: 'flex-start' },
-      android: { flexDirection: 'column', alignItems: 'flex-start' },
-      web: {}
-    })
   },
   headerCell: {
     fontWeight: '700',
@@ -1791,14 +1672,7 @@ const styles = StyleSheet.create({
   headerButtonsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 'auto',
-    flexShrink: 0,
-    flexWrap: 'wrap',
-    ...Platform.select({
-      ios: { marginLeft: 0, marginTop: 8 },
-      android: { marginLeft: 0, marginTop: 8 },
-      web: { marginTop: 0 }
-    })
+    marginLeft: 8,
   },
   // Mark All as Present button styles
   markAllPresentButton: {
@@ -1816,11 +1690,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
-    ...Platform.select({
-      ios: { paddingHorizontal: 6, paddingVertical: 3 },
-      android: { paddingHorizontal: 6, paddingVertical: 3 },
-      web: {}
-    })
   },
   markAllPresentButtonText: {
     fontSize: 10,
@@ -1829,11 +1698,6 @@ const styles = StyleSheet.create({
     marginLeft: 3,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    ...Platform.select({
-      ios: { fontSize: 9 },
-      android: { fontSize: 9 },
-      web: {}
-    })
   },
   // Clear button styles
   clearButton: {
@@ -1850,11 +1714,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
-    ...Platform.select({
-      ios: { paddingHorizontal: 6, paddingVertical: 3 },
-      android: { paddingHorizontal: 6, paddingVertical: 3 },
-      web: {}
-    })
   },
   clearButtonText: {
     fontSize: 10,
@@ -1863,11 +1722,6 @@ const styles = StyleSheet.create({
     marginLeft: 3,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    ...Platform.select({
-      ios: { fontSize: 9 },
-      android: { fontSize: 9 },
-      web: {}
-    })
   },
   // Instruction container styles
   instructionContainer: {
