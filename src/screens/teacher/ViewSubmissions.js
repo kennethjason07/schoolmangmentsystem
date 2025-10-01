@@ -31,6 +31,8 @@ const statusLabels = {
 
 const gradeOptions = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'F'];
 
+const PAGE_SIZE = 20;
+
 const formatFileSize = (bytes) => {
   if (!bytes) return '0 Bytes';
   const k = 1024;
@@ -67,7 +69,9 @@ const ViewSubmissions = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const [teacherData, setTeacherData] = useState(null);
+  const [page, setPage] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
 
   // 🚀 ENHANCED: Tenant validation helper
   const validateTenant = async () => {
@@ -98,7 +102,7 @@ const ViewSubmissions = () => {
     console.log('🚀 Tenant ready:', isReady);
     if (user && isReady) {
       console.log('🚀 User and tenant ready, starting enhanced submissions fetch...');
-      fetchSubmissions();
+      fetchSubmissions({ reset: true });
     } else {
       console.log('⚠️ Waiting for user and tenant context...');
     }
@@ -108,13 +112,19 @@ const ViewSubmissions = () => {
     applyFilters();
   }, [submissions, filterStatus, filterType, searchText]);
 
-  const fetchSubmissions = async () => {
+  const fetchSubmissions = async ({ reset = false } = {}) => {
     try {
-      setLoading(true);
+      if (reset) {
+        setLoading(true);
+        setHasMore(true);
+        setPage(0);
+        setSubmissions([]);
+      } else {
+        setLoadingMore(true);
+      }
       setError(null);
 
-      console.log('🚀 === ENHANCED TEACHER SUBMISSIONS FETCH ===');
-      console.log('User ID:', user.id);
+      console.log('🚀 === ENHANCED TEACHER SUBMISSIONS FETCH (BATCHED + PAGINATED) ===', { reset });
 
       // 🚀 ENHANCED: Validate tenant access
       const { valid, tenantId: effectiveTenantId } = await validateTenant();
@@ -124,196 +134,107 @@ const ViewSubmissions = () => {
         return;
       }
 
-      console.log('🚀 Using effective tenant ID:', effectiveTenantId);
+      const currentPage = reset ? 0 : page;
+      const from = currentPage * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
 
-      // Get teacher data using enhanced tenant query via users table
-      const userQuery = createTenantQuery(effectiveTenantId, TABLES.USERS)
+      // 1) Single RLS-scoped submissions query (paginated)
+      const baseQuery = createTenantQuery(effectiveTenantId, 'assignment_submissions')
         .select(`
           id,
-          email,
-          linked_teacher_id,
-          teachers!users_linked_teacher_id_fkey(
+          assignment_id,
+          assignment_type,
+          student_id,
+          submitted_files,
+          status,
+          grade,
+          feedback,
+          submitted_at,
+          students!assignment_submissions_student_id_fkey(
             id,
             name,
-            qualification,
-            phone,
-            address,
-            is_class_teacher,
-            assigned_class_id
+            roll_no,
+            classes(
+              id,
+              class_name,
+              section
+            )
           )
         `)
-        .eq('email', user.email)
-        .single();
+        .order('submitted_at', { ascending: false })
+        .range(from, to);
 
-      const { data: userData, error: userError } = await userQuery;
-      if (userError || !userData || !userData.linked_teacher_id) {
-        console.error('Teacher data error:', userError);
-        throw new Error('Teacher data not found or user not linked to teacher');
+      const { data: subs, error: subsError } = await baseQuery;
+
+      if (subsError) {
+        throw subsError;
       }
 
-      const teacher = userData.teachers;
-      if (!teacher) {
-        throw new Error('Teacher profile not found');
+      // 2) Build unique id sets for details (from current page only)
+      const assignmentIds = [...new Set(subs.filter(s => s.assignment_type === 'assignment').map(s => s.assignment_id))];
+      const homeworkIds = [...new Set(subs.filter(s => s.assignment_type === 'homework').map(s => s.assignment_id))];
+
+      // 3) Batched detail fetches in parallel
+      const [assignmentsRes, homeworksRes] = await Promise.all([
+        assignmentIds.length > 0
+          ? createTenantQuery(effectiveTenantId, TABLES.ASSIGNMENTS)
+              .select('id, title, description, due_date, subjects(name)')
+              .in('id', assignmentIds)
+          : Promise.resolve({ data: [], error: null }),
+        homeworkIds.length > 0
+          ? createTenantQuery(effectiveTenantId, TABLES.HOMEWORKS)
+              .select('id, title, description, due_date, subjects(name)')
+              .in('id', homeworkIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      if (assignmentsRes.error) throw assignmentsRes.error;
+      if (homeworksRes.error) throw homeworksRes.error;
+
+      const assignmentMap = new Map((assignmentsRes.data || []).map(a => [a.id, a]));
+      const homeworkMap = new Map((homeworksRes.data || []).map(h => [h.id, h]));
+
+      // 4) Enrich submissions without per-item requests
+      const pageSubmissions = subs.map(sub => {
+        const detail = sub.assignment_type === 'assignment'
+          ? assignmentMap.get(sub.assignment_id)
+          : homeworkMap.get(sub.assignment_id);
+
+        return {
+          ...sub,
+          assignmentTitle: detail?.title || 'Untitled',
+          assignmentDescription: detail?.description || null,
+          assignmentDueDate: detail?.due_date || null,
+          subjectName: detail?.subjects?.name || 'Unknown Subject',
+          studentName: sub.students?.name || 'Unknown Student',
+          studentRollNo: sub.students?.roll_no || 'N/A',
+          className: sub.students?.classes
+            ? `${sub.students.classes.class_name} ${sub.students.classes.section}`
+            : 'Unknown Class',
+        };
+      });
+
+      console.log('📄 Page fetched:', currentPage, 'items:', pageSubmissions.length);
+
+      if (reset) {
+        setSubmissions(pageSubmissions);
+        setPage(1);
+      } else {
+        setSubmissions(prev => [...prev, ...pageSubmissions]);
+        setPage(currentPage + 1);
       }
 
-      console.log('🚀 Enhanced tenant-aware teacher data:', teacher);
-      setTeacherData(teacher);
-
-      // Get all assignment submissions for this teacher's assignments and homework
-      let allSubmissions = [];
-
-      // Method 1: Get submissions for assignments created by this teacher using enhanced tenant system
-      try {
-        // First get assignment IDs created by this teacher using enhanced tenant query
-        const teacherAssignmentsQuery = createTenantQuery(effectiveTenantId, TABLES.ASSIGNMENTS)
-          .select('id')
-          .eq('assigned_by', teacher.id);
-        
-        const { data: teacherAssignments, error: assignmentsIdError } = await teacherAssignmentsQuery;
-        const assignmentIds = teacherAssignments?.map(a => a.id) || [];
-        
-        if (assignmentsIdError) {
-          console.error('Error fetching teacher assignments:', assignmentsIdError);
-        }
-        
-        if (assignmentIds.length > 0) {
-          // Get assignment submissions using enhanced tenant query
-          const submissionsQuery = createTenantQuery(effectiveTenantId, 'assignment_submissions')
-            .select(`
-              *,
-              students!assignment_submissions_student_id_fkey(
-                id,
-                name,
-                roll_no,
-                classes(
-                  id,
-                  class_name,
-                  section
-                )
-              )
-            `)
-            .eq('assignment_type', 'assignment')
-            .in('assignment_id', assignmentIds)
-            .order('submitted_at', { ascending: false });
-
-          const { data: assignmentSubmissions, error: assignmentError } = await submissionsQuery;
-
-        console.log('Assignment submissions:', assignmentSubmissions, assignmentError);
-
-        if (!assignmentError && assignmentSubmissions) {
-            // Get assignment details for each submission using enhanced tenant system
-            for (const submission of assignmentSubmissions) {
-              const assignmentDetailQuery = createTenantQuery(effectiveTenantId, TABLES.ASSIGNMENTS)
-                .select('title, description, due_date, subjects(name)')
-                .eq('id', submission.assignment_id)
-                .single();
-
-              const { data: assignmentData, error: aError } = await assignmentDetailQuery;
-
-            if (!aError && assignmentData) {
-              allSubmissions.push({
-                ...submission,
-                assignmentTitle: assignmentData.title,
-                assignmentDescription: assignmentData.description,
-                assignmentDueDate: assignmentData.due_date,
-                subjectName: assignmentData.subjects?.name || 'Unknown Subject',
-                studentName: submission.students?.name || 'Unknown Student',
-                studentRollNo: submission.students?.roll_no || 'N/A',
-                className: submission.students?.classes ? 
-                  `${submission.students.classes.class_name} ${submission.students.classes.section}` : 'Unknown Class'
-              });
-            }
-          }
-        } else {
-          console.log('No assignment submissions found or assignment IDs list is empty');
-        }
-      } // Close the if (assignmentIds.length > 0) block
-      } catch (err) {
-        console.error('Error fetching assignment submissions:', err);
-      }
-
-      // Method 2: Get submissions for homework created by this teacher using enhanced tenant system
-      try {
-        // First get homework IDs created by this teacher using enhanced tenant query
-        const teacherHomeworkQuery = createTenantQuery(effectiveTenantId, TABLES.HOMEWORKS)
-          .select('id')
-          .eq('teacher_id', teacher.id);
-        
-        const { data: teacherHomeworks, error: homeworksIdError } = await teacherHomeworkQuery;
-        const homeworkIds = teacherHomeworks?.map(h => h.id) || [];
-        
-        if (homeworksIdError) {
-          console.error('Error fetching teacher homeworks:', homeworksIdError);
-        }
-        
-        if (homeworkIds.length > 0) {
-          // Get homework submissions using enhanced tenant query
-          const homeworkSubmissionsQuery = createTenantQuery(effectiveTenantId, 'assignment_submissions')
-            .select(`
-              *,
-              students!assignment_submissions_student_id_fkey(
-                id,
-                name,
-                roll_no,
-                classes(
-                  id,
-                  class_name,
-                  section
-                )
-              )
-            `)
-            .eq('assignment_type', 'homework')
-            .in('assignment_id', homeworkIds)
-            .order('submitted_at', { ascending: false });
-
-          const { data: homeworkSubmissions, error: homeworkError } = await homeworkSubmissionsQuery;
-
-        console.log('Homework submissions:', homeworkSubmissions, homeworkError);
-
-        if (!homeworkError && homeworkSubmissions) {
-            // Get homework details for each submission using enhanced tenant system
-            for (const submission of homeworkSubmissions) {
-              const homeworkDetailQuery = createTenantQuery(effectiveTenantId, TABLES.HOMEWORKS)
-                .select('title, description, due_date, subjects(name)')
-                .eq('id', submission.assignment_id)
-                .single();
-
-              const { data: homeworkData, error: hError } = await homeworkDetailQuery;
-
-            if (!hError && homeworkData) {
-              allSubmissions.push({
-                ...submission,
-                assignmentTitle: homeworkData.title,
-                assignmentDescription: homeworkData.description,
-                assignmentDueDate: homeworkData.due_date,
-                subjectName: homeworkData.subjects?.name || 'Unknown Subject',
-                studentName: submission.students?.name || 'Unknown Student',
-                studentRollNo: submission.students?.roll_no || 'N/A',
-                className: submission.students?.classes ? 
-                  `${submission.students.classes.class_name} ${submission.students.classes.section}` : 'Unknown Class'
-              });
-            }
-          }
-        } else {
-          console.log('No homework submissions found or homework IDs list is empty');
-        }
-      } // Close the if (homeworkIds.length > 0) block
-      } catch (err) {
-        console.error('Error fetching homework submissions:', err);
-      }
-
-      // Sort all submissions by submitted date (newest first)
-      allSubmissions.sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
-
-      console.log('Final submissions list:', allSubmissions.length);
-      setSubmissions(allSubmissions);
+      setHasMore(pageSubmissions.length === PAGE_SIZE);
 
     } catch (err) {
-      console.error('Submissions fetch error:', err);
+      console.error('Submissions fetch error (batched/paginated):', err);
       setError(err.message);
-      setSubmissions([]);
+      if (reset) {
+        setSubmissions([]);
+      }
     } finally {
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
     }
   };
@@ -414,7 +335,13 @@ const ViewSubmissions = () => {
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchSubmissions();
+    fetchSubmissions({ reset: true });
+  };
+
+  const handleEndReached = () => {
+    if (!loadingMore && hasMore && !loading && filteredSubmissions.length > 0) {
+      fetchSubmissions();
+    }
   };
 
   const handleOpenFile = (file) => {
@@ -603,7 +530,7 @@ const ViewSubmissions = () => {
               <Text style={styles.tenantErrorText}>Status: {isReady ? 'Ready' : 'Not Ready'}</Text>
             </View>
           )}
-          <TouchableOpacity style={styles.retryButton} onPress={fetchSubmissions}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => fetchSubmissions({ reset: true })}>
             <Ionicons name="refresh" size={20} color="#fff" style={{ marginRight: 8 }} />
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
@@ -697,6 +624,19 @@ const ViewSubmissions = () => {
           contentContainerStyle={styles.listContainer}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1976d2']} />
+          }
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={{ paddingVertical: 16 }}>
+                <ActivityIndicator size="small" color="#1976d2" />
+              </View>
+            ) : !hasMore && submissions.length > 0 ? (
+              <View style={{ paddingVertical: 12, alignItems: 'center' }}>
+                <Text style={{ color: '#999', fontSize: 12 }}>No more submissions</Text>
+              </View>
+            ) : null
           }
           showsVerticalScrollIndicator={false}
         />
