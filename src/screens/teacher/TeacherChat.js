@@ -999,7 +999,7 @@ const TeacherChat = () => {
         const query1 = await createTenantQuery(
           effectiveTenantId,
           TABLES.MESSAGES
-        ).or(`(sender_id.eq.${user.id},receiver_id.eq.${contactUserId}),(sender_id.eq.${contactUserId},receiver_id.eq.${user.id})`)
+        ).or(`and(sender_id.eq.${user.id},receiver_id.eq.${contactUserId}),and(sender_id.eq.${contactUserId},receiver_id.eq.${user.id})`)
          .order('sent_at', { ascending: false })
          .range(0, MESSAGE_PAGE_SIZE - 1);
           
@@ -1192,15 +1192,18 @@ const TeacherChat = () => {
     const myId = String(user.id);
     const contactId = String(selectedContact.userId || selectedContact.id);
     const sorted = [myId, contactId].sort();
-    const channelName = `chat-typing-${sorted[0]}-${sorted[1]}`;
+    // Follow docs naming convention: scope:id:entity
+    const channelName = `chat:typing:${sorted[0]}:${sorted[1]}`;
 
     // Cleanup any existing channel
     if (typingChannelRef.current) {
       try { typingChannelRef.current.unsubscribe(); } catch (e) {}
+      try { supabase.removeChannel?.(typingChannelRef.current); } catch (e) {}
       typingChannelRef.current = null;
     }
 
-    const channel = supabase.channel(channelName);
+    // For production, consider config: { config: { private: true } } and set Realtime auth policies
+    const channel = supabase.channel(channelName, { config: { private: true } });
     typingChannelRef.current = channel;
 
     channel
@@ -1224,6 +1227,7 @@ const TeacherChat = () => {
 
     return () => {
       try { channel.unsubscribe(); } catch (e) {}
+      try { supabase.removeChannel?.(channel); } catch (e) {}
       typingChannelRef.current = null;
       setIsContactTyping(false);
       if (typingIndicatorTimeoutRef.current) clearTimeout(typingIndicatorTimeoutRef.current);
@@ -2147,7 +2151,22 @@ const TeacherChat = () => {
                     {isTextMessage && (
                       <Text style={styles.messageText}>{item.message || item.text}</Text>
                     )}
-                    <Text style={styles.messageTime}>{formatToLocalTime(item.sent_at)}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 4 }}>
+                      <Text style={styles.messageTime}>{formatToLocalTime(item.sent_at)}</Text>
+                      {item.sender_id === user.id && (
+                        <View style={{ marginLeft: 6 }}>
+                          {item.failed ? (
+                            <Ionicons name="alert-circle" size={14} color="#d32f2f" />
+                          ) : item.pending || item.uploading ? (
+                            <Ionicons name="time-outline" size={14} color="#999" />
+                          ) : item.is_read ? (
+                            <Ionicons name="checkmark-done" size={14} color="#1976d2" />
+                          ) : (
+                            <Ionicons name="checkmark" size={14} color="#999" />
+                          )}
+                        </View>
+                      )}
+                    </View>
                   </View>
                 </TouchableOpacity>
                 );

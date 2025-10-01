@@ -54,6 +54,13 @@ const ChatWithTeacher = () => {
   const [selectedImageData, setSelectedImageData] = useState(null);
   const flatListRef = useRef(null);
   
+  // Typing indicator state/refs (private Broadcast)
+  const [isContactTyping, setIsContactTyping] = useState(false);
+  const typingChannelRef = useRef(null);
+  const typingDebounceRef = useRef(null);
+  const typingIndicatorTimeoutRef = useRef(null);
+  const lastTypingSentRef = useRef(0);
+  
   // Add debug state for parent troubleshooting
   const [debugInfo, setDebugInfo] = useState({
     parentContext: null,
@@ -366,6 +373,80 @@ const ChatWithTeacher = () => {
 
   // Set up real-time message subscription using RealtimeMessageHandler
   const messageHandler = getGlobalMessageHandler(supabase, TABLES.MESSAGES);
+  
+  // Send typing signal with debounce (private Broadcast)
+  const handleTypingSignal = () => {
+    if (!selectedTeacher?.userId) return;
+    const now = Date.now();
+
+    // Throttle typing events to at most once per 800ms
+    if (now - (lastTypingSentRef.current || 0) >= 800) {
+      lastTypingSentRef.current = now;
+      try {
+        typingChannelRef.current?.send({
+          type: 'broadcast',
+          event: 'typing',
+          payload: { sender_id: user.id, receiver_id: selectedTeacher.userId }
+        });
+      } catch (e) {}
+    }
+
+    // Always (re)start stop_typing timer after user input inactivity
+    if (typingDebounceRef.current) clearTimeout(typingDebounceRef.current);
+    typingDebounceRef.current = setTimeout(() => {
+      try {
+        typingChannelRef.current?.send({
+          type: 'broadcast',
+          event: 'stop_typing',
+          payload: { sender_id: user.id, receiver_id: selectedTeacher.userId }
+        });
+      } catch (e) {}
+    }, 1200);
+  };
+
+  // Subscribe to private Broadcast typing channel
+  useEffect(() => {
+    if (!selectedTeacher?.userId || !user?.id) return;
+
+    const sorted = [String(user.id), String(selectedTeacher.userId)].sort();
+    const channelName = `chat:typing:${sorted[0]}:${sorted[1]}`;
+
+    // Cleanup any existing
+    if (typingChannelRef.current) {
+      try { typingChannelRef.current.unsubscribe(); } catch (e) {}
+      try { supabase.removeChannel?.(typingChannelRef.current); } catch (e) {}
+      typingChannelRef.current = null;
+    }
+
+    const channel = supabase.channel(channelName, { config: { private: true } });
+    typingChannelRef.current = channel;
+
+    channel
+      .on('broadcast', { event: 'typing' }, (payload) => {
+        const sender = payload?.payload?.sender_id;
+        if (sender && sender !== user.id) {
+          setIsContactTyping(true);
+          if (typingIndicatorTimeoutRef.current) clearTimeout(typingIndicatorTimeoutRef.current);
+          typingIndicatorTimeoutRef.current = setTimeout(() => setIsContactTyping(false), 2000);
+        }
+      })
+      .on('broadcast', { event: 'stop_typing' }, (payload) => {
+        const sender = payload?.payload?.sender_id;
+        if (sender && sender !== user.id) {
+          setIsContactTyping(false);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      try { channel.unsubscribe(); } catch (e) {}
+      try { supabase.removeChannel?.(channel); } catch (e) {}
+      typingChannelRef.current = null;
+      setIsContactTyping(false);
+      if (typingIndicatorTimeoutRef.current) clearTimeout(typingIndicatorTimeoutRef.current);
+      if (typingDebounceRef.current) clearTimeout(typingDebounceRef.current);
+    };
+  }, [selectedTeacher?.userId, user?.id]);
   
   useEffect(() => {
     if (!selectedTeacher || !selectedTeacher.userId) return;
@@ -734,12 +815,24 @@ const ChatWithTeacher = () => {
           parentStudent.id
         );
         
-        if (uploadResult.success) {
-          // Save to database
-          const { data: insertedMsg, error: sendError } = await supabase
-            .from('messages')
-            .insert(uploadResult.messageData)
-            .select();
+          if (uploadResult.success) {
+            // Resolve tenant_id for RLS
+            let tenantId = getCachedTenantId();
+            if (!tenantId) {
+              const { data: currentUserData } = await supabase
+                .from(TABLES.USERS)
+                .select('tenant_id')
+                .eq('id', user.id)
+                .single();
+              tenantId = currentUserData?.tenant_id;
+              if (!tenantId) throw new Error('Tenant context not available. Please try again.');
+            }
+            // Save to database with tenant_id
+            const messageDataWithTenant = { ...uploadResult.messageData, tenant_id: tenantId };
+            const { data: insertedMsg, error: sendError } = await supabase
+              .from('messages')
+              .insert(messageDataWithTenant)
+              .select();
             
           if (!sendError && insertedMsg?.[0]) {
             // Replace temp message with actual message
@@ -835,10 +928,22 @@ const ChatWithTeacher = () => {
         );
         
         if (uploadResult.success) {
-          // Save to database
+          // Resolve tenant_id for RLS
+          let tenantId = getCachedTenantId();
+          if (!tenantId) {
+            const { data: currentUserData } = await supabase
+              .from(TABLES.USERS)
+              .select('tenant_id')
+              .eq('id', user.id)
+              .single();
+            tenantId = currentUserData?.tenant_id;
+            if (!tenantId) throw new Error('Tenant context not available. Please try again.');
+          }
+          // Save to database with tenant_id
+          const messageDataWithTenant = { ...uploadResult.messageData, tenant_id: tenantId };
           const { data: insertedMsg, error: sendError } = await supabase
             .from('messages')
-            .insert(uploadResult.messageData)
+            .insert(messageDataWithTenant)
             .select();
             
           if (!sendError && insertedMsg?.[0]) {
@@ -891,7 +996,19 @@ const ChatWithTeacher = () => {
         throw new Error('Teacher user account not found');
       }
 
-      // Create message with file data
+      // Resolve tenant_id for RLS
+      let tenantId = getCachedTenantId();
+      if (!tenantId) {
+        const { data: currentUserData } = await supabase
+          .from(TABLES.USERS)
+          .select('tenant_id')
+          .eq('id', user.id)
+          .single();
+        tenantId = currentUserData?.tenant_id;
+        if (!tenantId) throw new Error('Tenant context not available. Please try again.');
+      }
+
+      // Create message with file data (include tenant_id)
       const newMsg = {
         sender_id: user.id,
         receiver_id: teacherUserId,
@@ -902,6 +1019,7 @@ const ChatWithTeacher = () => {
         file_name: fileData.file_name,
         file_size: fileData.file_size,
         file_type: fileData.file_type,
+        tenant_id: tenantId,
       };
 
       const { data: insertedMsg, error: sendError } = await supabase
@@ -1308,6 +1426,9 @@ const ChatWithTeacher = () => {
               <Text style={[styles.chatHeaderSubject, { fontSize: 14, color: '#666' }]}>
                 {selectedTeacher.subject}
               </Text>
+              {isContactTyping && (
+                <Text style={[styles.chatHeaderSubject, { color: '#1976d2', marginTop: 2 }]}>Typing…</Text>
+              )}
             </View>
             {/* Call Button in Chat Header */}
             <TouchableOpacity
@@ -1486,9 +1607,24 @@ const ChatWithTeacher = () => {
                       </Text>
                     )}
                     
-                    <Text style={[styles.messageTime, { opacity: deletingMessageId === item.id ? 0.3 : 1 }]}>
-                      {item.timestamp || formatToLocalTime(item.sent_at)}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 4, opacity: deletingMessageId === item.id ? 0.3 : 1 }}>
+                      <Text style={styles.messageTime}>
+                        {item.timestamp || formatToLocalTime(item.sent_at)}
+                      </Text>
+                      {(item.sender === 'parent' || item.sender_id === user.id) && (
+                        <View style={{ marginLeft: 6 }}>
+                          {item.failed ? (
+                            <Ionicons name="alert-circle" size={14} color="#d32f2f" />
+                          ) : item.pending || item.uploading ? (
+                            <Ionicons name="time-outline" size={14} color="#999" />
+                          ) : item.is_read ? (
+                            <Ionicons name="checkmark-done" size={14} color="#1976d2" />
+                          ) : (
+                            <Ionicons name="checkmark" size={14} color="#999" />
+                          )}
+                        </View>
+                      )}
+                    </View>
                   </View>
                 </Animatable.View>
               </TouchableOpacity>
@@ -1519,7 +1655,7 @@ const ChatWithTeacher = () => {
               style={styles.input}
               placeholder="Type a message..."
               value={input}
-              onChangeText={setInput}
+              onChangeText={(text) => { setInput(text); handleTypingSignal(); }}
               onSubmitEditing={handleSend}
               returnKeyType="send"
             />

@@ -331,7 +331,7 @@ export class RealtimeMessageHandler {
       const { data: newMessages, error } = await this.supabase
         .from(this.messagesTable)
         .select('*')
-        .or(`(sender_id.eq.${this.currentUserId},receiver_id.eq.${this.currentContactId}),(sender_id.eq.${this.currentContactId},receiver_id.eq.${this.currentUserId})`)
+        .or(`and(sender_id.eq.${this.currentUserId},receiver_id.eq.${this.currentContactId}),and(sender_id.eq.${this.currentContactId},receiver_id.eq.${this.currentUserId})`)
         .gt('sent_at', sinceTimestamp)
         .order('sent_at', { ascending: true });
       

@@ -484,7 +484,7 @@ export class UniversalNotificationService {
     channels.push(directNotificationChannel);
 
     // Channel 4: Broadcast events for instant updates
-    const broadcastChannel = supabase.channel(`broadcast-${subscriptionKey}-${channelId}`);
+    const broadcastChannel = supabase.channel(`broadcast-${subscriptionKey}-${channelId}`, { config: { private: true } });
     
     // Listen for notification read broadcasts
     broadcastChannel.on('broadcast', { event: 'notification-read' }, (payload) => {
@@ -591,7 +591,7 @@ export class UniversalNotificationService {
    */
   async broadcastNotificationRead(userId, notificationId) {
     try {
-      const channel = supabase.channel('universal-notification-update');
+      const channel = supabase.channel('universal-notification-update', { config: { private: true } });
       await channel.subscribe();
       
       await channel.send({
@@ -624,7 +624,7 @@ export class UniversalNotificationService {
     try {
       console.log(`🔊 [UniversalNotificationService] Broadcasting message read:`, { userId, senderId });
       
-      const channel = supabase.channel(`universal-message-update-${Date.now()}`);
+      const channel = supabase.channel(`universal-message-update-${Date.now()}` , { config: { private: true } });
       await channel.subscribe((status) => {
         console.log(`📡 Message read broadcast channel status:`, status);
       });
@@ -679,7 +679,7 @@ export class UniversalNotificationService {
     try {
       console.log(`📦 [UniversalNotificationService] Broadcasting bulk update:`, { userIds, operation, allUsers });
       
-      const channel = supabase.channel('universal-bulk-update');
+      const channel = supabase.channel('universal-bulk-update', { config: { private: true } });
       await channel.subscribe();
       
       await channel.send({
@@ -721,7 +721,7 @@ export class UniversalNotificationService {
     try {
       console.log(`🔢 [UniversalNotificationService] Broadcasting direct count update for ${userId}:`, counts);
       
-      const channel = supabase.channel('universal-count-update');
+      const channel = supabase.channel('universal-count-update', { config: { private: true } });
       await channel.subscribe();
       
       await channel.send({
@@ -801,7 +801,7 @@ export class UniversalNotificationService {
     try {
       console.log(`🆕 [UniversalNotificationService] Broadcasting new notification to ${userIds.length} users:`, { notificationId, notificationType });
       
-      const channel = supabase.channel('universal-new-notification');
+      const channel = supabase.channel('universal-new-notification', { config: { private: true } });
       await channel.subscribe();
       
       // Send individual broadcasts for each user for precise targeting
