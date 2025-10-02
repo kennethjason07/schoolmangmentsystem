@@ -1558,6 +1558,80 @@ export const exportStudentFeeSummaryAdvanced = async (
   }
 };
 
+// Excel export with one worksheet per class
+export const exportStudentFeeSummaryExcelMultiSheet = async (
+  rows,
+  fileBaseName = 'student_fee_summary_multi'
+) => {
+  try {
+    if (!rows || rows.length === 0) {
+      Alert.alert('No Data', 'No fee summary data available to export.');
+      return false;
+    }
+
+    // Group rows by Class column
+    const byClass = new Map();
+    for (const r of rows) {
+      const cls = (r['Class'] || 'Unknown Class').toString();
+      if (!byClass.has(cls)) byClass.set(cls, []);
+      byClass.get(cls).push(r);
+    }
+
+    // Try to generate a real Excel workbook on web using SheetJS
+    try {
+      const { Platform } = await import('react-native');
+      const isWeb = Platform.OS === 'web';
+      const XLSXModule = await import('xlsx');
+      const XLSX = XLSXModule.default || XLSXModule;
+
+      const wb = XLSX.utils.book_new();
+
+      for (const [cls, classRows] of byClass.entries()) {
+        // Convert to worksheet, ensure header ordering is stable
+        const headers = Object.keys(classRows[0]);
+        const ws = XLSX.utils.json_to_sheet(classRows, { header: headers });
+        // Sheet name constraints: max 31 chars, no []:*?/\\
+        const safeName = cls.replace(/[\[\]:*?/\\]/g, ' ').slice(0, 31) || 'Sheet';
+        XLSX.utils.book_append_sheet(wb, ws, safeName);
+      }
+
+      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const fileName = generateFileName(fileBaseName, 'xlsx');
+
+      if (isWeb) {
+        // Use web saver
+        return await saveFileWeb(wbout, fileName, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      } else {
+        // Native: fallback to CSV bundle if binary save not supported reliably
+        // Build a multi-section CSV
+        let combined = '';
+        for (const [cls, classRows] of byClass.entries()) {
+          combined += `Class: ${cls}\n`;
+          combined += convertToCSV(classRows);
+          combined += `\n\n`;
+        }
+        const csvName = generateFileName(fileBaseName + '_by_class', 'csv');
+        return await saveFile(combined, csvName, 'text/csv');
+      }
+    } catch (xlsxError) {
+      console.warn('Excel generation not available, falling back to CSV:', xlsxError?.message);
+      // Fallback: create a single CSV with grouped sections
+      let combined = '';
+      for (const [cls, classRows] of byClass.entries()) {
+        combined += `Class: ${cls}\n`;
+        combined += convertToCSV(classRows);
+        combined += `\n\n`;
+      }
+      const fileName = generateFileName(fileBaseName + '_by_class', 'csv');
+      return await saveFile(combined, fileName, 'text/csv');
+    }
+  } catch (error) {
+    console.error('Error exporting Excel multi-sheet:', error);
+    Alert.alert('Export Error', 'Failed to export Excel file.');
+    return false;
+  }
+};
+
 // Export rows as a PDF table
 export const exportTableDataPDF = async (rows, title = 'Report', additionalInfo = null) => {
   try {

@@ -45,7 +45,7 @@ import {
   sortClassStatsByClass,
   sortClassesNaturally
 } from '../../utils/classSortingUtils';
-import { exportStudentFeeSummaryAdvanced, exportTableDataPDF, EXPORT_FORMATS } from '../../utils/exportUtils';
+import { exportStudentFeeSummaryAdvanced, exportTableDataPDF, EXPORT_FORMATS, exportStudentFeeSummaryExcelMultiSheet } from '../../utils/exportUtils';
 
 
 const FeeManagement = () => {
@@ -1133,44 +1133,100 @@ const FeeManagement = () => {
   // Download per-student fee summary (CSV)
   // Build per-student rows for export
   const buildFMStudentSummaryRows = async () => {
-    const results = await Promise.all(
-      (students || []).map(async (s) => {
-        try {
-const res = await FeeService.getStudentFeeDetails(s.id, { quiet: true });
-          if (res.success && res.data) {
-            const d = res.data;
+    try {
+      console.log('📥 FeeManagement Export: Building student rows...', {
+        studentsTotal: students?.length || 0
+      });
+const results = await Promise.all(
+        (students || []).map(async (s, idx) => {
+          try {
+            // Avoid passing 'quiet' flag if it triggers runtime issues in some environments
+            const res = await FeeService.getStudentFeeDetails(s.id, { includePaymentHistory: false, includeFeeBreakdown: true });
+            if (res.success && res.data) {
+              const d = res.data;
+              if (idx < 3) {
+                console.log('📥 FeeManagement Export: Sample row', idx, {
+                  student: d.student?.name,
+                  class: d.student?.class_info?.name,
+                  totalDue: d.fees?.totalDue,
+                  totalPaid: d.fees?.totalPaid
+                });
+              }
+              return {
+                'Student Name': d.student?.name || s.name || s.full_name || 'N/A',
+                'Admission No': d.student?.admission_no || s.admission_no || 'N/A',
+                'Roll No': d.student?.roll_no || s.roll_no || 'N/A',
+                'Class': d.student?.class_info ? `${d.student.class_info.name || ''} ${d.student.class_info.section || ''}`.trim() : 'N/A',
+                'Academic Year': d.fees?.academicYear || s.academic_year || 'N/A',
+                'Payment Status': d.fees?.status || 'N/A',
+                'Total Fee (Base)': d.fees?.totalBaseFee ?? 0,
+                'Fee Concession': d.fees?.totalDiscounts ?? 0,
+                'Adjusted Fee': d.fees?.totalDue ?? d.fees?.totalAmount ?? 0,
+                'Amount Paid': d.fees?.totalPaid ?? 0,
+                'Outstanding Fee': d.fees?.totalOutstanding ?? 0,
+              };
+            } else {
+              if (idx < 3) console.log('📥 FeeManagement Export: Skipping student (no data)', s?.id);
+              // Build a minimal fallback row so export still proceeds
+              return {
+                'Student Name': s.name || s.full_name || 'N/A',
+                'Admission No': s.admission_no || 'N/A',
+                'Roll No': s.roll_no || 'N/A',
+                'Class': s.className || s.class_name || 'N/A',
+                'Academic Year': s.academic_year || 'N/A',
+                'Payment Status': 'N/A',
+                'Total Fee (Base)': 0,
+                'Fee Concession': 0,
+                'Adjusted Fee': 0,
+                'Amount Paid': 0,
+                'Outstanding Fee': 0,
+              };
+            }
+          } catch (err) {
+            console.warn('📥 FeeManagement Export: Error building row for', s?.id, err?.message);
+            // Fallback row on error so we don't end up with zero rows
             return {
-              'Student Name': d.student?.name || s.name || s.full_name || 'N/A',
-              'Admission No': d.student?.admission_no || s.admission_no || 'N/A',
-              'Roll No': d.student?.roll_no || s.roll_no || 'N/A',
-              'Class': d.student?.class_info ? `${d.student.class_info.name || ''} ${d.student.class_info.section || ''}`.trim() : 'N/A',
-              'Academic Year': d.fees?.academicYear || s.academic_year || 'N/A',
-              'Payment Status': d.fees?.status || 'N/A',
-              'Total Fee (Base)': d.fees?.totalBaseFee ?? 0,
-              'Fee Concession': d.fees?.totalDiscounts ?? 0,
-              'Adjusted Fee': d.fees?.totalDue ?? d.fees?.totalAmount ?? 0,
-              'Amount Paid': d.fees?.totalPaid ?? 0,
-              'Outstanding Fee': d.fees?.totalOutstanding ?? 0,
+              'Student Name': s.name || s.full_name || 'N/A',
+              'Admission No': s.admission_no || 'N/A',
+              'Roll No': s.roll_no || 'N/A',
+              'Class': s.className || s.class_name || 'N/A',
+              'Academic Year': s.academic_year || 'N/A',
+              'Payment Status': 'N/A',
+              'Total Fee (Base)': 0,
+              'Fee Concession': 0,
+              'Adjusted Fee': 0,
+              'Amount Paid': 0,
+              'Outstanding Fee': 0,
             };
           }
-        } catch (_) {}
-        return null;
-      })
-    );
-    return results.filter(Boolean);
+        })
+      );
+      const rows = results.filter(Boolean);
+      console.log('📥 FeeManagement Export: Built rows', { rowsCount: rows.length });
+      return rows;
+    } catch (e) {
+      console.warn('📥 FeeManagement Export: Failed to build rows', e?.message);
+      return [];
+    }
   };
 
   const handleDownloadStudentSummary = async () => {
+    console.log('📥 FeeManagement: Download button clicked (payments tab)');
     setShowExportModalFM(true);
   };
 
   const handleExportOptionFM = async (format) => {
+    console.log('📥 FeeManagement Export: Export requested', { format });
     try {
       const rows = await buildFMStudentSummaryRows();
-      if (!rows || rows.length === 0) return false;
+      console.log('📥 FeeManagement Export: Rows ready', { rows: rows.length });
+      if (!rows || rows.length === 0) {
+        console.warn('📥 FeeManagement Export: No rows to export');
+        return false;
+      }
       const base = 'fee_management_student_fee_summary';
       let ok = false;
-      if (format === EXPORT_FORMATS.CSV) {
+if (format === EXPORT_FORMATS.CSV) {
         ok = await exportStudentFeeSummaryAdvanced(rows, base, EXPORT_FORMATS.CSV);
       } else if (format === EXPORT_FORMATS.CLIPBOARD) {
         ok = await exportStudentFeeSummaryAdvanced(rows, base, EXPORT_FORMATS.CLIPBOARD);
@@ -1179,9 +1235,13 @@ const res = await FeeService.getStudentFeeDetails(s.id, { quiet: true });
           Students: students?.length || 0,
           Generated: new Date().toLocaleString('en-IN')
         });
+      } else if (format === EXPORT_FORMATS.EXCEL) {
+        ok = await exportStudentFeeSummaryExcelMultiSheet(rows, base);
       }
+      console.log('📥 FeeManagement Export: Export finished', { success: !!ok });
       return !!ok;
     } catch (e) {
+      console.warn('📥 FeeManagement Export: Export failed', e?.message);
       return false;
     } finally {
       setShowExportModalFM(false);
@@ -1766,12 +1826,12 @@ const res = await FeeService.getStudentFeeDetails(s.id, { quiet: true });
       )}
 
       {/* Export Modal */}
-      <ExportModal
+<ExportModal
         visible={showExportModalFM}
         onClose={() => setShowExportModalFM(false)}
         onExport={handleExportOptionFM}
         title="Export Student Fee Summary"
-        availableFormats={[EXPORT_FORMATS.CSV, EXPORT_FORMATS.PDF, EXPORT_FORMATS.CLIPBOARD]}
+        availableFormats={[EXPORT_FORMATS.CSV, EXPORT_FORMATS.EXCEL, EXPORT_FORMATS.PDF, EXPORT_FORMATS.CLIPBOARD]}
       />
 
       {/* Modal for Payment, Fee Edit/Add, and Fee Structure */}

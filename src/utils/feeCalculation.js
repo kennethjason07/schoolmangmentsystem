@@ -151,14 +151,119 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
         .eq('tenant_id', actualTenantId)
         .single();
       
-      if (studentError || !studentData?.class_id) {
-logError('❌ Student lookup error:', studentError);
-        throw new Error(`Could not determine student class ID: ${studentError?.message || 'Student not found'}`);
+      if (studentError || !studentData) {
+        logError('❌ Student lookup error:', studentError);
+        // Fallback: try to infer class_id from student_discounts (schema: class_id NOT NULL)
+        try {
+          const { data: fallbackDiscount, error: discountLookupError } = await supabase
+            .from(TABLES.STUDENT_DISCOUNTS)
+            .select('class_id, academic_year')
+            .eq('student_id', studentId)
+            .eq('tenant_id', actualTenantId)
+            .eq('is_active', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (fallbackDiscount?.class_id) {
+            actualClassId = fallbackDiscount.class_id;
+            studentRecord = { academic_year: fallbackDiscount.academic_year || '2024-25', name: 'Unknown' };
+            console.warn('⚠️ Using class_id from student_discounts as fallback:', actualClassId);
+          } else {
+            console.warn('⚠️ No fallback class_id found for student. Returning zeroed fee data.');
+            return {
+              totalAmount: 0,
+              totalPaid: 0,
+              totalOutstanding: 0,
+              totalBaseFee: 0,
+              totalDiscounts: 0,
+              academicYear: '2024-25',
+              details: [],
+              orphanedPayments: [],
+              totalDue: 0,
+              pendingFees: [],
+              paidFees: [],
+              allFees: [],
+              metadata: {
+                studentId,
+                classId: null,
+                tenantId: actualTenantId,
+                calculatedAt: new Date().toISOString(),
+                hasError: true,
+                errorMessage: 'Could not determine student class ID: Student not found'
+              }
+            };
+          }
+        } catch (fbErr) {
+          console.warn('Fallback class_id lookup failed:', fbErr?.message);
+          return {
+            totalAmount: 0,
+            totalPaid: 0,
+            totalOutstanding: 0,
+            totalBaseFee: 0,
+            totalDiscounts: 0,
+            academicYear: '2024-25',
+            details: [],
+            orphanedPayments: [],
+            totalDue: 0,
+            pendingFees: [],
+            paidFees: [],
+            allFees: [],
+            metadata: {
+              studentId,
+              classId: null,
+              tenantId: actualTenantId,
+              calculatedAt: new Date().toISOString(),
+              hasError: true,
+              errorMessage: 'Could not determine student class ID: Student not found'
+            }
+          };
+        }
+      } else if (!studentData.class_id) {
+        // Student exists but has no class assigned
+        console.warn('⚠️ Student has no class_id assigned. Attempting fallback via student_discounts...');
+        const { data: fallbackDiscount, error: discountLookupError } = await supabase
+          .from(TABLES.STUDENT_DISCOUNTS)
+          .select('class_id, academic_year')
+          .eq('student_id', studentId)
+          .eq('tenant_id', actualTenantId)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (fallbackDiscount?.class_id) {
+          actualClassId = fallbackDiscount.class_id;
+          studentRecord = { academic_year: fallbackDiscount.academic_year || studentData.academic_year || '2024-25', name: studentData.name };
+          console.warn('⚠️ Using class_id from student_discounts as fallback:', actualClassId);
+        } else {
+          console.warn('⚠️ No fallback class_id found. Returning zeroed fee data.');
+          return {
+            totalAmount: 0,
+            totalPaid: 0,
+            totalOutstanding: 0,
+            totalBaseFee: 0,
+            totalDiscounts: 0,
+            academicYear: studentData.academic_year || '2024-25',
+            details: [],
+            orphanedPayments: [],
+            totalDue: 0,
+            pendingFees: [],
+            paidFees: [],
+            allFees: [],
+            metadata: {
+              studentId,
+              classId: null,
+              tenantId: actualTenantId,
+              calculatedAt: new Date().toISOString(),
+              hasError: true,
+              errorMessage: 'Student has no class_id assigned'
+            }
+          };
+        }
+      } else {
+        actualClassId = studentData.class_id;
+        studentRecord = studentData;
+        console.log('✅ Fetched class ID from student record:', actualClassId, 'for student:', studentData.name);
       }
-      
-      actualClassId = studentData.class_id;
-      studentRecord = studentData;
-      console.log('✅ Fetched class ID from student record:', actualClassId, 'for student:', studentData.name);
     } else {
       // Still get student record for academic year info
       const { data: studentData, error: studentError } = await supabase
