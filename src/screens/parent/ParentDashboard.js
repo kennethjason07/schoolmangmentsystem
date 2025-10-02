@@ -63,61 +63,31 @@ const ParentDashboard = ({ navigation }) => {
   // Enhanced tenant debugging following EMAIL_BASED_TENANT_SYSTEM.md
   const DEBUG_MODE = process.env.NODE_ENV === 'development';
   
-  if (DEBUG_MODE) {
-    console.log('🏢 [PARENT DASHBOARD TENANT DEBUG]:', {
-      tenantId: tenantId || 'NO TENANT',
-      tenantName: tenant?.name || 'NO TENANT NAME',
-      tenantStatus: tenant?.status || 'UNKNOWN',
-      tenantLoading: tenantLoading || false,
-      userEmail: user?.email || 'NO USER',
-      hasMultipleStudents,
-      availableStudentsCount: availableStudents?.length || 0,
-      selectedStudent: selectedStudent?.name || 'None',
-      studentLoading,
-      timestamp: new Date().toISOString()
-    });
+  if (DEBUG_MODE && typeof window !== 'undefined') {
+    // Add global test functions for development debugging (silent mode)
+    window.runParentDashboardTenantTests = async () => {
+      const { runAllParentDashboardTenantTests } = await import('../../utils/parentDashboardTenantTests');
+      return await runAllParentDashboardTenantTests();
+    };
     
-    // Add global test functions for development debugging
-    if (typeof window !== 'undefined') {
-      window.runParentDashboardTenantTests = async () => {
-        const { runAllParentDashboardTenantTests } = await import('../../utils/parentDashboardTenantTests');
-        return await runAllParentDashboardTenantTests();
+    window.quickTenantCheck = async () => {
+      const { quickTenantCheck } = await import('../../utils/parentDashboardTenantTests');
+      return await quickTenantCheck();
+    };
+    
+    window.debugTenantContext = () => {
+      return {
+        tenantId,
+        tenant: tenant ? { id: tenant.id, name: tenant.name } : null,
+        tenantLoading,
+        user: user ? { id: user.id, email: user.email } : null,
+        isReady: !tenantLoading && !!tenantId && !!user
       };
-      
-      window.quickTenantCheck = async () => {
-        const { quickTenantCheck } = await import('../../utils/parentDashboardTenantTests');
-        return await quickTenantCheck();
-      };
-      
-      window.debugTenantContext = () => {
-        console.log('🏢 [TENANT DEBUG] Current tenant context state:', {
-          tenantId: tenantId || 'NOT SET',
-          tenant: tenant ? { id: tenant.id, name: tenant.name } : 'NOT SET',
-          tenantLoading: tenantLoading,
-          user: user ? { id: user.id, email: user.email } : 'NOT SET',
-          selectedStudent: selectedStudent ? { id: selectedStudent.id, name: selectedStudent.name } : 'NOT SET',
-          studentLoading: studentLoading
-        });
-        return {
-          tenantId,
-          tenant: tenant ? { id: tenant.id, name: tenant.name } : null,
-          tenantLoading,
-          user: user ? { id: user.id, email: user.email } : null,
-          isReady: !tenantLoading && !!tenantId && !!user
-        };
-      };
-      
-      // Add parent auth test functions
-      window.testParentAuth = testParentAuth;
-      window.quickParentAuthTest = quickParentAuthTest;
-      
-      console.log('🧪 [DEV TOOLS] Added global functions:');
-      console.log('   • window.runParentDashboardTenantTests() - Run full tenant isolation test suite');
-      console.log('   • window.quickTenantCheck() - Quick tenant validation check');
-      console.log('   • window.debugTenantContext() - Debug current tenant context state');
-      console.log('   • window.testParentAuth() - Test direct parent authentication');
-      console.log('   • window.quickParentAuthTest() - Quick parent auth test');
-    }
+    };
+    
+    // Add parent auth test functions
+    window.testParentAuth = testParentAuth;
+    window.quickParentAuthTest = quickParentAuthTest;
   }
   
   // Check if user should use direct parent authentication
@@ -125,21 +95,15 @@ const ParentDashboard = ({ navigation }) => {
     const checkParentAuthMode = async () => {
       if (!user || parentAuthChecked) return;
       
-      console.log('🔍 [PARENT AUTH] Checking if user should use direct parent authentication...');
-      
       try {
         const parentCheck = await isUserParent(user.id);
         
         if (parentCheck.success && parentCheck.isParent) {
-          console.log('✅ [PARENT AUTH] User is a parent, enabling direct authentication mode');
-          console.log('👨‍👩‍👧 [PARENT AUTH] Student count:', parentCheck.studentCount);
           setUseDirectParentAuth(true);
         } else {
-          console.log('⚠️ [PARENT AUTH] User is not a parent or has no accessible students');
           setUseDirectParentAuth(false);
         }
       } catch (error) {
-        console.error('❌ [PARENT AUTH] Error checking parent status:', error);
         setUseDirectParentAuth(false);
       } finally {
         setParentAuthChecked(true);
@@ -162,7 +126,6 @@ const ParentDashboard = ({ navigation }) => {
   // Early guard: if there are no linked students, redirect to StudentSelection
   useEffect(() => {
     if (parentAuthChecked && !studentLoading && (!availableStudents || availableStudents.length === 0)) {
-      console.log('ParentDashboard - No linked students detected. Redirecting to StudentSelection.');
       try {
         navigation.replace('StudentSelection');
       } catch (e) {
@@ -217,7 +180,7 @@ const ParentDashboard = ({ navigation }) => {
       
       return `${day}-${month}-${year}`;
     } catch (error) {
-      console.warn('Error formatting date:', dateString, error);
+      
       return dateString; // Return original if error
     }
   };
@@ -235,15 +198,11 @@ const ParentDashboard = ({ navigation }) => {
     try {
       // Check if we should use direct parent authentication
       if (useDirectParentAuth && selectedStudent) {
-        console.log('👨‍👩‍👧 [PARENT AUTH] Using direct parent authentication for notifications');
-        
         const result = await getStudentNotificationsForParent(user.id, selectedStudent.id);
         
         if (result.success) {
-          console.log('✅ [PARENT AUTH] Successfully loaded notifications:', result.notifications.length);
           setNotifications(result.notifications);
         } else {
-          console.error('❌ [PARENT AUTH] Failed to load notifications:', result.error);
           setNotifications([]);
         }
         return;
@@ -253,7 +212,6 @@ const ParentDashboard = ({ navigation }) => {
       
       // Check if tenant is still loading
       if (tenantLoading) {
-        console.log('🔄 [TENANT-AWARE] Tenant context is loading, skipping notification refresh...');
         return;
       }
       
@@ -262,10 +220,8 @@ const ParentDashboard = ({ navigation }) => {
       if (!tenantId) {
         // Check if user is authenticated first
         if (!user) {
-          console.log('🔄 [TENANT-AWARE] User not authenticated yet, skipping notification refresh...');
           return;
         }
-        console.log('👨‍👩‍👧 Parent dashboard: No tenant context required for parents, proceeding with email-based lookup...');
         
         // Try to get tenant information using email lookup for parents
         try {
@@ -273,26 +229,23 @@ const ParentDashboard = ({ navigation }) => {
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {
-            console.log('✅ Parent dashboard: Found tenant via email lookup:', tenantResult.data.tenant.name);
             // We can proceed with the tenant information if needed, but parents don't require strict tenant filtering
           } else {
-            console.log('⚠️ Parent dashboard: Could not find tenant via email lookup, but proceeding as parent access is more flexible');
+            // Proceeding as parent access is more flexible
           }
         } catch (emailLookupError) {
-          console.log('⚠️ Parent dashboard: Email lookup failed, but proceeding as parent access is more flexible');
+          // Email lookup failed, but proceeding as parent access is more flexible
         }
       } else {
         // If tenantId is available, validate it
         const tenantValidation = await validateTenantAccess(tenantId, user.id, 'Parent Dashboard Notifications');
         if (!tenantValidation.isValid) {
-          console.error('❌ Parent dashboard notification validation failed:', tenantValidation.error);
           setNotifications([]);
           return;
         }
       }
       
       // Fetch notifications without strict tenant filtering for parents
-      console.log('📬 [PARENT-NOTIFICATIONS] Fetching parent notifications...');
       
       // Get parent's student data first
       const { data: parentData, error: parentError } = await supabase
@@ -313,13 +266,11 @@ const ParentDashboard = ({ navigation }) => {
         .single();
 
       if (parentError) {
-        console.error('❌ [PARENT-NOTIFICATIONS] Error fetching parent data:', parentError);
         setNotifications([]);
         return;
       }
 
       if (!parentData?.linked_parent_of) {
-        console.log('⚠️ [PARENT-NOTIFICATIONS] Parent not linked to any student');
         setNotifications([]);
         return;
       }
@@ -348,7 +299,6 @@ const ParentDashboard = ({ navigation }) => {
         .limit(10);
 
       if (notificationsError) {
-        console.error('❌ [PARENT-NOTIFICATIONS] Error fetching notifications:', notificationsError);
         setNotifications([]);
         return;
       }
@@ -368,7 +318,6 @@ const ParentDashboard = ({ navigation }) => {
 
       setNotifications(formattedNotifications);
     } catch (err) {
-      console.error('❌ [PARENT-NOTIFICATIONS] Error refreshing notifications:', err);
       setNotifications([]);
     }
   };
@@ -378,7 +327,6 @@ const ParentDashboard = ({ navigation }) => {
     try {
       // Check if we should use direct parent authentication
       if (useDirectParentAuth && selectedStudent) {
-        console.log('👨‍👩‍👧 [PARENT AUTH] Using direct parent authentication for exams');
         // Direct parent authentication logic here
         return;
       }
@@ -387,7 +335,6 @@ const ParentDashboard = ({ navigation }) => {
       
       // Check if tenant is still loading
       if (tenantLoading) {
-        console.log('🔄 [TENANT-AWARE] Tenant context is loading, skipping exam refresh...');
         return;
       }
       
@@ -396,10 +343,8 @@ const ParentDashboard = ({ navigation }) => {
       if (!tenantId) {
         // Check if user is authenticated first
         if (!user) {
-          console.log('🔄 [TENANT-AWARE] User not authenticated yet, skipping exam refresh...');
           return;
         }
-        console.log('👨‍👩‍👧 Parent dashboard: No tenant context required for parents, proceeding with email-based lookup...');
         
         // Try to get tenant information using email lookup for parents
         try {
@@ -407,26 +352,23 @@ const ParentDashboard = ({ navigation }) => {
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {
-            console.log('✅ Parent dashboard: Found tenant via email lookup:', tenantResult.data.tenant.name);
             // We can proceed with the tenant information if needed, but parents don't require strict tenant filtering
           } else {
-            console.log('⚠️ Parent dashboard: Could not find tenant via email lookup, but proceeding as parent access is more flexible');
+            // Proceeding as parent access is more flexible
           }
         } catch (emailLookupError) {
-          console.log('⚠️ Parent dashboard: Email lookup failed, but proceeding as parent access is more flexible');
+          // Email lookup failed, but proceeding as parent access is more flexible
         }
       } else {
         // If tenantId is available, validate it
         const tenantValidation = await validateTenantAccess(tenantId, user.id, 'Parent Dashboard Exams');
         if (!tenantValidation.isValid) {
-          console.error('❌ Parent dashboard exam validation failed:', tenantValidation.error);
           setExams([]);
           return;
         }
       }
       
       // Fetch exams without strict tenant filtering for parents
-      console.log('📅 [PARENT-EXAMS] Fetching parent exams...');
       
       // Get parent's student data first
       const { data: parentData, error: parentError } = await supabase
@@ -447,13 +389,13 @@ const ParentDashboard = ({ navigation }) => {
         .single();
 
       if (parentError) {
-        console.error('❌ [PARENT-EXAMS] Error fetching parent data:', parentError);
+        
         setExams([]);
         return;
       }
 
       if (!parentData?.linked_parent_of) {
-        console.log('⚠️ [PARENT-EXAMS] Parent not linked to any student');
+        
         setExams([]);
         return;
       }
@@ -480,7 +422,7 @@ const ParentDashboard = ({ navigation }) => {
         .limit(10);
 
       if (examsError) {
-        console.error('❌ [PARENT-EXAMS] Error fetching exams:', examsError);
+        
         setExams([]);
         return;
       }
@@ -500,7 +442,7 @@ const ParentDashboard = ({ navigation }) => {
 
       setExams(formattedExams);
     } catch (err) {
-      console.error('❌ [PARENT-EXAMS] Error refreshing exams:', err);
+      
       setExams([]);
     }
   };
@@ -510,7 +452,7 @@ const ParentDashboard = ({ navigation }) => {
     try {
       // Check if we should use direct parent authentication
       if (useDirectParentAuth && selectedStudent) {
-        console.log('👨‍👩‍👧 [PARENT AUTH] Using direct parent authentication for events');
+        
         // Direct parent authentication logic here
         return;
       }
@@ -519,7 +461,7 @@ const ParentDashboard = ({ navigation }) => {
       
       // Check if tenant is still loading
       if (tenantLoading) {
-        console.log('🔄 [TENANT-AWARE] Tenant context is loading, skipping event refresh...');
+        
         return;
       }
       
@@ -528,10 +470,10 @@ const ParentDashboard = ({ navigation }) => {
       if (!tenantId) {
         // Check if user is authenticated first
         if (!user) {
-          console.log('🔄 [TENANT-AWARE] User not authenticated yet, skipping event refresh...');
+          
           return;
         }
-        console.log('👨‍👩‍👧 Parent dashboard: No tenant context required for parents, proceeding with email-based lookup...');
+        
         
         // Try to get tenant information using email lookup for parents
         try {
@@ -539,26 +481,26 @@ const ParentDashboard = ({ navigation }) => {
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {
-            console.log('✅ Parent dashboard: Found tenant via email lookup:', tenantResult.data.tenant.name);
+            
             // We can proceed with the tenant information if needed, but parents don't require strict tenant filtering
           } else {
-            console.log('⚠️ Parent dashboard: Could not find tenant via email lookup, but proceeding as parent access is more flexible');
+            
           }
         } catch (emailLookupError) {
-          console.log('⚠️ Parent dashboard: Email lookup failed, but proceeding as parent access is more flexible');
+          
         }
       } else {
         // If tenantId is available, validate it
         const tenantValidation = await validateTenantAccess(tenantId, user.id, 'Parent Dashboard Events');
         if (!tenantValidation.isValid) {
-          console.error('❌ Parent dashboard event validation failed:', tenantValidation.error);
+          
           setEvents([]);
           return;
         }
       }
       
       // Fetch events without strict tenant filtering for parents
-      console.log('📅 [PARENT-EVENTS] Fetching parent events...');
+      
       
       // Get parent's student data first
       const { data: parentData, error: parentError } = await supabase
@@ -579,13 +521,13 @@ const ParentDashboard = ({ navigation }) => {
         .single();
 
       if (parentError) {
-        console.error('❌ [PARENT-EVENTS] Error fetching parent data:', parentError);
+        
         setEvents([]);
         return;
       }
 
       if (!parentData?.linked_parent_of) {
-        console.log('⚠️ [PARENT-EVENTS] Parent not linked to any student');
+        
         setEvents([]);
         return;
       }
@@ -610,7 +552,7 @@ const ParentDashboard = ({ navigation }) => {
         .limit(10);
 
       if (eventsError) {
-        console.error('❌ [PARENT-EVENTS] Error fetching events:', eventsError);
+        
         setEvents([]);
         return;
       }
@@ -628,7 +570,7 @@ const ParentDashboard = ({ navigation }) => {
 
       setEvents(formattedEvents);
     } catch (err) {
-      console.error('❌ [PARENT-EVENTS] Error refreshing events:', err);
+      
       setEvents([]);
     }
   };
@@ -638,7 +580,7 @@ const ParentDashboard = ({ navigation }) => {
     try {
       // Check if we should use direct parent authentication
       if (useDirectParentAuth && selectedStudent) {
-        console.log('👨‍👩‍👧 [PARENT AUTH] Using direct parent authentication for attendance');
+        
         // Direct parent authentication logic here
         return;
       }
@@ -647,7 +589,7 @@ const ParentDashboard = ({ navigation }) => {
       
       // Check if tenant is still loading
       if (tenantLoading) {
-        console.log('🔄 [TENANT-AWARE] Tenant context is loading, skipping attendance refresh...');
+        
         return;
       }
       
@@ -656,10 +598,10 @@ const ParentDashboard = ({ navigation }) => {
       if (!tenantId) {
         // Check if user is authenticated first
         if (!user) {
-          console.log('🔄 [TENANT-AWARE] User not authenticated yet, skipping attendance refresh...');
+          
           return;
         }
-        console.log('👨‍👩‍👧 Parent dashboard: No tenant context required for parents, proceeding with email-based lookup...');
+        
         
         // Try to get tenant information using email lookup for parents
         try {
@@ -667,26 +609,26 @@ const ParentDashboard = ({ navigation }) => {
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {
-            console.log('✅ Parent dashboard: Found tenant via email lookup:', tenantResult.data.tenant.name);
+            
             // We can proceed with the tenant information if needed, but parents don't require strict tenant filtering
           } else {
-            console.log('⚠️ Parent dashboard: Could not find tenant via email lookup, but proceeding as parent access is more flexible');
+            
           }
         } catch (emailLookupError) {
-          console.log('⚠️ Parent dashboard: Email lookup failed, but proceeding as parent access is more flexible');
+          
         }
       } else {
         // If tenantId is available, validate it
         const tenantValidation = await validateTenantAccess(tenantId, user.id, 'Parent Dashboard Attendance');
         if (!tenantValidation.isValid) {
-          console.error('❌ Parent dashboard attendance validation failed:', tenantValidation.error);
+          
           setAttendance([]);
           return;
         }
       }
       
       // Fetch attendance without strict tenant filtering for parents
-      console.log('📅 [PARENT-ATTENDANCE] Fetching parent attendance...');
+      
       
       // Get parent's student data first
       const { data: parentData, error: parentError } = await supabase
@@ -707,13 +649,13 @@ const ParentDashboard = ({ navigation }) => {
         .single();
 
       if (parentError) {
-        console.error('❌ [PARENT-ATTENDANCE] Error fetching parent data:', parentError);
+        
         setAttendance([]);
         return;
       }
 
       if (!parentData?.linked_parent_of) {
-        console.log('⚠️ [PARENT-ATTENDANCE] Parent not linked to any student');
+        
         setAttendance([]);
         return;
       }
@@ -736,7 +678,7 @@ const ParentDashboard = ({ navigation }) => {
         .limit(10);
 
       if (attendanceError) {
-        console.error('❌ [PARENT-ATTENDANCE] Error fetching attendance:', attendanceError);
+        
         setAttendance([]);
         return;
       }
@@ -752,7 +694,7 @@ const ParentDashboard = ({ navigation }) => {
 
       setAttendance(formattedAttendance);
     } catch (err) {
-      console.error('❌ [PARENT-ATTENDANCE] Error refreshing attendance:', err);
+      
       setAttendance([]);
     }
   };
@@ -762,7 +704,7 @@ const ParentDashboard = ({ navigation }) => {
     try {
       // Check if we should use direct parent authentication
       if (useDirectParentAuth && selectedStudent) {
-        console.log('👨‍👩‍👧 [PARENT AUTH] Using direct parent authentication for marks');
+        
         // Direct parent authentication logic here
         return;
       }
@@ -771,7 +713,7 @@ const ParentDashboard = ({ navigation }) => {
       
       // Check if tenant is still loading
       if (tenantLoading) {
-        console.log('🔄 [TENANT-AWARE] Tenant context is loading, skipping marks refresh...');
+        
         return;
       }
       
@@ -780,10 +722,10 @@ const ParentDashboard = ({ navigation }) => {
       if (!tenantId) {
         // Check if user is authenticated first
         if (!user) {
-          console.log('🔄 [TENANT-AWARE] User not authenticated yet, skipping marks refresh...');
+          
           return;
         }
-        console.log('👨‍👩‍👧 Parent dashboard: No tenant context required for parents, proceeding with email-based lookup...');
+        
         
         // Try to get tenant information using email lookup for parents
         try {
@@ -791,26 +733,26 @@ const ParentDashboard = ({ navigation }) => {
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {
-            console.log('✅ Parent dashboard: Found tenant via email lookup:', tenantResult.data.tenant.name);
+            
             // We can proceed with the tenant information if needed, but parents don't require strict tenant filtering
           } else {
-            console.log('⚠️ Parent dashboard: Could not find tenant via email lookup, but proceeding as parent access is more flexible');
+            
           }
         } catch (emailLookupError) {
-          console.log('⚠️ Parent dashboard: Email lookup failed, but proceeding as parent access is more flexible');
+          
         }
       } else {
         // If tenantId is available, validate it
         const tenantValidation = await validateTenantAccess(tenantId, user.id, 'Parent Dashboard Marks');
         if (!tenantValidation.isValid) {
-          console.error('❌ Parent dashboard marks validation failed:', tenantValidation.error);
+          
           setMarks([]);
           return;
         }
       }
       
       // Fetch marks without strict tenant filtering for parents
-      console.log('📅 [PARENT-MARKS] Fetching parent marks...');
+      
       
       // Get parent's student data first
       const { data: parentData, error: parentError } = await supabase
@@ -831,13 +773,13 @@ const ParentDashboard = ({ navigation }) => {
         .single();
 
       if (parentError) {
-        console.error('❌ [PARENT-MARKS] Error fetching parent data:', parentError);
+        
         setMarks([]);
         return;
       }
 
       if (!parentData?.linked_parent_of) {
-        console.log('⚠️ [PARENT-MARKS] Parent not linked to any student');
+        
         setMarks([]);
         return;
       }
@@ -861,7 +803,7 @@ const ParentDashboard = ({ navigation }) => {
         .limit(10);
 
       if (marksError) {
-        console.error('❌ [PARENT-MARKS] Error fetching marks:', marksError);
+        
         setMarks([]);
         return;
       }
@@ -878,14 +820,14 @@ const ParentDashboard = ({ navigation }) => {
 
       setMarks(formattedMarks);
     } catch (err) {
-      console.error('❌ [PARENT-MARKS] Error refreshing marks:', err);
+      
       setMarks([]);
     }
   };
 
   // Function to refresh fees - DISABLED: Now using student_fee_summary view consistently
   const refreshFees = async () => {
-    console.log('⚠️ [LEGACY] refreshFees function disabled - now using student_fee_summary view via fetchStudentFees instead');
+    
     // This function is disabled to prevent conflicts with the student_fee_summary view approach
     // All fee data loading now goes through fetchStudentFees which uses student_fee_summary view
     return;
@@ -895,10 +837,10 @@ const ParentDashboard = ({ navigation }) => {
   useEffect(() => {
     if (user && parentAuthChecked) {
       if (useDirectParentAuth && selectedStudent) {
-        console.log('🔄 [PARENT AUTH] Direct auth mode loaded, initializing notifications...');
+        
         refreshNotifications();
       } else if (!useDirectParentAuth && tenantId && !tenantLoading) {
-        console.log('🔄 [TENANT-AWARE] Tenant context loaded, initializing notifications...');
+        
         refreshNotifications();
       }
     }
@@ -909,13 +851,11 @@ const ParentDashboard = ({ navigation }) => {
     React.useCallback(() => {
       if (user && parentAuthChecked) {
         if (useDirectParentAuth && selectedStudent) {
-          console.log('Parent Dashboard - Screen focused, refreshing notifications (direct auth)...');
           refreshNotifications();
         } else if (!useDirectParentAuth && !tenantLoading && tenantId) {
-          console.log('Parent Dashboard - Screen focused, refreshing notifications (tenant auth)...');
           refreshNotifications();
         } else if (!useDirectParentAuth && tenantLoading) {
-          console.log('Parent Dashboard - Screen focused, but tenant is still loading...');
+          
         }
       }
     }, [user, tenantLoading, tenantId, useDirectParentAuth, parentAuthChecked, selectedStudent?.id])
@@ -953,19 +893,19 @@ const ParentDashboard = ({ navigation }) => {
 
   // Effect to refetch data when selected student changes
   useEffect(() => {
-    console.log('ParentDashboard - Selected student changed:', selectedStudent?.name, 'Loading:', studentLoading, 'DirectAuth:', useDirectParentAuth);
+    
     
     if (selectedStudent && !studentLoading && parentAuthChecked) {
       if (useDirectParentAuth) {
         // Use direct parent authentication
-        console.log('ParentDashboard - Fetching data using direct parent authentication for:', selectedStudent.name);
+        
         fetchDashboardDataForStudent(selectedStudent);
       } else if (!tenantLoading && tenantId) {
         // Use tenant-based authentication
-        console.log('ParentDashboard - Fetching data using tenant authentication for:', selectedStudent.name);
+        
         fetchDashboardDataForStudent(selectedStudent);
       } else if (tenantLoading) {
-        console.log('ParentDashboard - Waiting for tenant context to load before fetching student data...');
+        
       }
     }
   }, [selectedStudent?.id, studentLoading, tenantLoading, tenantId, useDirectParentAuth, parentAuthChecked]);
@@ -975,10 +915,10 @@ const ParentDashboard = ({ navigation }) => {
   
   // Force StatCard update function
   const forceStatCardUpdate = () => {
-    console.log('🔄 [FORCE UPDATE] Triggering StatCard re-render, counter:', updateCounter);
+    
     setUpdateCounter(prev => {
       const newCounter = prev + 1;
-      console.log('🔄 [FORCE UPDATE] Counter updated to:', newCounter);
+      
       return newCounter;
     });
   };
@@ -988,7 +928,7 @@ const ParentDashboard = ({ navigation }) => {
     if (!classId) return;
     
     try {
-      console.log('🔄 [REAL-TIME] Fetching updated exams for class:', classId);
+      
       
       const today = new Date().toISOString().split('T')[0];
       const { data: examsData, error: examsError } = await supabase
@@ -1008,15 +948,15 @@ const ParentDashboard = ({ navigation }) => {
         .limit(5);
 
       if (!examsError) {
-        console.log('✅ [REAL-TIME] Updated exams:', examsData?.length || 0);
+        
         setExams(examsData || []);
         // Force StatCard update immediately
         forceStatCardUpdate();
       } else {
-        console.error('❌ [REAL-TIME] Error fetching updated exams:', examsError);
+        
       }
     } catch (err) {
-      console.error('❌ [REAL-TIME] Error in fetchUpcomingExams:', err);
+      
     }
   }, []);
   
@@ -1024,7 +964,7 @@ const ParentDashboard = ({ navigation }) => {
     if (!studentId) return;
     
     try {
-      console.log('🔄 [REAL-TIME] Fetching updated attendance for student:', studentId);
+      
       
       // Multiple strategies to fetch attendance data
       let allAttendanceData = null;
@@ -1129,15 +1069,15 @@ const ParentDashboard = ({ navigation }) => {
           }
         });
         
-        console.log('✅ [REAL-TIME] Updated attendance records:', currentMonthRecords.length);
+        
         setAttendance(currentMonthRecords);
         // Force StatCard update immediately
         forceStatCardUpdate();
       } else {
-        console.error('❌ [REAL-TIME] Error fetching updated attendance:', attendanceError);
+        
       }
     } catch (err) {
-      console.error('❌ [REAL-TIME] Error in fetchStudentAttendance:', err);
+      
     }
   }, []);
   
@@ -1145,7 +1085,7 @@ const ParentDashboard = ({ navigation }) => {
     if (!studentId) return;
     
     try {
-      console.log('🔄 [REAL-TIME] Fetching updated fees for student:', studentId, 'using student_fee_summary view');
+      
       
       // 🎯 Use exact same data source as parent FeePayment for consistency (REAL-TIME)
       const { data: feeData, error: feeError } = await supabase
@@ -1155,9 +1095,9 @@ const ParentDashboard = ({ navigation }) => {
         .single();
 
       if (feeError) {
-        console.error('Parent Dashboard Real-Time - Error loading fee data from view:', feeError);
+        
         if (feeError.code === 'PGRST116') {
-          console.log('Parent Dashboard Real-Time - No fee data found for student');
+          
           setFees([]);
           // Clear view totals as well
           window.parentDashboardFeeViewTotals = null;
@@ -1166,7 +1106,7 @@ const ParentDashboard = ({ navigation }) => {
         throw feeError;
       }
 
-      console.log('Parent Dashboard Real-Time - Fee data loaded from view:', feeData);
+      
       
       // Store view totals globally for dashboard fee distribution summary (REAL-TIME UPDATE)
       window.parentDashboardFeeViewTotals = {
@@ -1176,7 +1116,7 @@ const ParentDashboard = ({ navigation }) => {
         total_base_fees: feeData.total_base_fees,
         total_discounts: feeData.total_discounts
       };
-      console.log('Parent Dashboard Real-Time - Updated view totals for distribution summary:', window.parentDashboardFeeViewTotals);
+      
 
       // Transform fee components from JSON to array format (EXACT SAME AS PARENT FEEPAYMENT)
       const transformedFees = (feeData.fee_components || []).map((component, index) => {
@@ -1223,22 +1163,19 @@ const ParentDashboard = ({ navigation }) => {
         };
       });
       
-      console.log('✅ [REAL-TIME] Updated fees from view:', transformedFees.length);
-      console.log('💰 [REAL-TIME FEE UPDATE] Setting fees state with view data:', transformedFees.map(f => ({ name: f.name, remaining: f.remainingAmount, status: f.status })));
       setFees(transformedFees);
       
       // Force StatCard update immediately
-      console.log('⚡ [REAL-TIME] About to force StatCard update after setting view fees');
+      
       forceStatCardUpdate();
       
       // Additional forced re-render after a short delay to ensure state propagation
       setTimeout(() => {
-        console.log('🔄 [REAL-TIME] Secondary StatCard update (delayed)');
         forceStatCardUpdate();
       }, 50);
       
     } catch (err) {
-      console.error('❌ [REAL-TIME] Error in fetchStudentFees:', err);
+      
     }
   }, []);
 
@@ -1252,15 +1189,10 @@ const ParentDashboard = ({ navigation }) => {
     const setupRealTimeSubscriptions = async () => {
       if (!selectedStudent?.class_id || !selectedStudent?.id) return;
       
-      console.log('🔄 Setting up real-time subscriptions for:', {
-        studentId: selectedStudent.id,
-        classId: selectedStudent.class_id,
-        studentName: selectedStudent.name
-      });
       
       // Subscribe to exams changes
       try {
-        console.log('🔔 Subscribing to exam changes for class:', selectedStudent.class_id);
+        
         examSubscription = supabase
           .channel(`exam-changes-${selectedStudent.class_id}`)
           .on('postgres_changes', {
@@ -1269,19 +1201,19 @@ const ParentDashboard = ({ navigation }) => {
             table: TABLES.EXAMS,
             filter: `class_id=eq.${selectedStudent.class_id}`
           }, (payload) => {
-            console.log('📣 Real-time exam update received:', payload);
+            
             fetchUpcomingExams(selectedStudent.class_id);
           })
           .subscribe((status) => {
-            console.log('📡 Exam subscription status:', status);
+            
           });
       } catch (err) {
-        console.error('❌ Error setting up exam subscription:', err);
+        
       }
       
       // Subscribe to attendance changes
       try {
-        console.log('🔔 Subscribing to attendance changes for student:', selectedStudent.id);
+        
         attendanceSubscription = supabase
           .channel(`attendance-changes-${selectedStudent.id}`)
           .on('postgres_changes', {
@@ -1290,19 +1222,19 @@ const ParentDashboard = ({ navigation }) => {
             table: TABLES.STUDENT_ATTENDANCE,
             filter: `student_id=eq.${selectedStudent.id}`
           }, (payload) => {
-            console.log('📣 Real-time attendance update received:', payload);
+            
             fetchStudentAttendance(selectedStudent.id);
           })
           .subscribe((status) => {
-            console.log('📡 Attendance subscription status:', status);
+            
           });
       } catch (err) {
-        console.error('❌ Error setting up attendance subscription:', err);
+        
       }
       
       // Subscribe to fee payment changes - CRITICAL for immediate StatCard updates
       try {
-        console.log('🔔 [FEE PAYMENT] Subscribing to fee payment changes for student:', selectedStudent.id);
+        
         feeSubscription = supabase
           .channel(`fee-payment-changes-${selectedStudent.id}`)
           .on('postgres_changes', {
@@ -1311,31 +1243,24 @@ const ParentDashboard = ({ navigation }) => {
             table: 'student_fees',
             filter: `student_id=eq.${selectedStudent.id}`
           }, (payload) => {
-            console.log('📣 [FEE PAYMENT] Real-time fee payment update received:', {
-              event: payload.eventType,
-              table: payload.table,
-              new: payload.new,
-              old: payload.old
-            });
             // Immediate fetch to update StatCard optimistically
-            console.log('⚡ [FEE PAYMENT] Immediate fetch to refresh StatCard...');
+            
             fetchStudentFees(selectedStudent.id, selectedStudent.class_id);
             // Follow-up fetch to ensure consistency after DB commit propagation
             setTimeout(() => {
-              console.log('🔁 [FEE PAYMENT] Consistency fetch (200ms later)...');
               fetchStudentFees(selectedStudent.id, selectedStudent.class_id);
             }, 200);
           })
           .subscribe((status) => {
-            console.log('📡 [FEE PAYMENT] Fee payment subscription status:', status);
+            
           });
       } catch (err) {
-        console.error('❌ Error setting up fee payment subscription:', err);
+        
       }
       
       // Subscribe to fee structure changes
       try {
-        console.log('🔔 [FEE STRUCTURE] Subscribing to fee structure changes for class:', selectedStudent.class_id);
+        
         feeStructureSubscription = supabase
           .channel(`fee-structure-changes-${selectedStudent.class_id}`)
           .on('postgres_changes', {
@@ -1344,23 +1269,23 @@ const ParentDashboard = ({ navigation }) => {
             table: 'fee_structure',
             filter: `class_id=eq.${selectedStudent.class_id}`
           }, (payload) => {
-            console.log('📣 [FEE STRUCTURE] Real-time fee structure update received:', payload);
+            
             // Immediate fee data refresh
             setTimeout(() => {
-              console.log('🔄 [FEE STRUCTURE] Triggering immediate fee data refresh...');
+              
               fetchStudentFees(selectedStudent.id, selectedStudent.class_id);
             }, 100);
           })
           .subscribe((status) => {
-            console.log('📡 [FEE STRUCTURE] Fee structure subscription status:', status);
+            
           });
       } catch (err) {
-        console.error('❌ Error setting up fee structure subscription:', err);
+        
       }
 
       // Also subscribe to student-specific fee structure changes
       try {
-        console.log('🔔 [STUDENT FEE STRUCTURE] Subscribing to student-specific fee structure changes for student:', selectedStudent.id);
+        
         const studentFeeStructureSubscription = supabase
           .channel(`student-fee-structure-changes-${selectedStudent.id}`)
           .on('postgres_changes', {
@@ -1369,18 +1294,18 @@ const ParentDashboard = ({ navigation }) => {
             table: 'fee_structure',
             filter: `student_id=eq.${selectedStudent.id}`
           }, (payload) => {
-            console.log('📣 [STUDENT FEE STRUCTURE] Real-time student fee structure update received:', payload);
+            
             // Immediate fee data refresh
             setTimeout(() => {
-              console.log('🔄 [STUDENT FEE STRUCTURE] Triggering immediate fee data refresh...');
+              
               fetchStudentFees(selectedStudent.id, selectedStudent.class_id);
             }, 100);
           })
           .subscribe((status) => {
-            console.log('📡 [STUDENT FEE STRUCTURE] Student fee structure subscription status:', status);
+            
           });
       } catch (err) {
-        console.error('❌ Error setting up student fee structure subscription:', err);
+        
       }
     };
     
@@ -1390,21 +1315,21 @@ const ParentDashboard = ({ navigation }) => {
     
     // Cleanup subscriptions when component unmounts or student changes
     return () => {
-      console.log('🔄 Cleaning up real-time subscriptions for:', selectedStudent?.name);
+      
       if (examSubscription) {
-        console.log('🧹 Removing exam subscription');
+        
         supabase.removeChannel(examSubscription);
       }
       if (attendanceSubscription) {
-        console.log('🧹 Removing attendance subscription');
+        
         supabase.removeChannel(attendanceSubscription);
       }
       if (feeSubscription) {
-        console.log('🧹 Removing fee payment subscription');
+        
         supabase.removeChannel(feeSubscription);
       }
       if (feeStructureSubscription) {
-        console.log('🧹 Removing fee structure subscription');
+        
         supabase.removeChannel(feeStructureSubscription);
       }
     };
@@ -1413,15 +1338,15 @@ const ParentDashboard = ({ navigation }) => {
   // Function to fetch dashboard data using direct parent authentication
   const fetchDashboardDataWithDirectAuth = async (student) => {
     try {
-      console.log('📊 [PARENT AUTH] Fetching dashboard data with direct parent auth for:', student.name);
+      
       
       // Fetch notifications
       const notificationsResult = await getStudentNotificationsForParent(user.id, student.id);
       if (notificationsResult.success) {
         setNotifications(notificationsResult.notifications);
-        console.log('✅ [PARENT AUTH] Loaded notifications:', notificationsResult.notifications.length);
+        
       } else {
-        console.warn('⚠️ [PARENT AUTH] Failed to load notifications:', notificationsResult.error);
+        
         setNotifications([]);
       }
       
@@ -1472,9 +1397,9 @@ const ParentDashboard = ({ navigation }) => {
         });
         
         setAttendance(currentMonthRecords);
-        console.log('✅ [PARENT AUTH] Loaded attendance records:', currentMonthRecords.length);
+        
       } else {
-        console.warn('⚠️ [PARENT AUTH] Failed to load attendance:', attendanceResult.error);
+        
         setAttendance([]);
       }
       
@@ -1499,13 +1424,13 @@ const ParentDashboard = ({ navigation }) => {
         
         if (!examsError) {
           setExams(examsData || []);
-          console.log('✅ [PARENT AUTH] Loaded exams:', examsData?.length || 0);
+          
         } else {
-          console.warn('⚠️ [PARENT AUTH] Failed to load exams:', examsError);
+          
           setExams([]);
         }
       } catch (err) {
-        console.warn('⚠️ [PARENT AUTH] Error fetching exams:', err);
+        
         setExams([]);
       }
       
@@ -1534,13 +1459,13 @@ const ParentDashboard = ({ navigation }) => {
           }));
           
           setEvents(mappedEvents.slice(0, 5));
-          console.log('✅ [PARENT AUTH] Loaded events:', mappedEvents.length);
+          
         } else {
-          console.warn('⚠️ [PARENT AUTH] Failed to load events:', eventsError);
+          
           setEvents([]);
         }
       } catch (err) {
-        console.warn('⚠️ [PARENT AUTH] Error fetching events:', err);
+        
         setEvents([]);
       }
       
@@ -1559,18 +1484,18 @@ const ParentDashboard = ({ navigation }) => {
         
         if (!marksError) {
           setMarks(marksData || []);
-          console.log('✅ [PARENT AUTH] Loaded marks:', marksData?.length || 0);
+          
         } else {
-          console.warn('⚠️ [PARENT AUTH] Failed to load marks:', marksError);
+          
           setMarks([]);
         }
       } catch (err) {
-        console.warn('⚠️ [PARENT AUTH] Error fetching marks:', err);
+        
         setMarks([]);
       }
       
       // Fetch fees - DISABLED: Now using student_fee_summary view consistently
-      console.log('⚠️ [PARENT AUTH] Fee loading disabled in fetchDashboardDataWithDirectAuth - using fetchStudentFees instead');
+      
       // Fee loading is now handled by the main data loading and fetchStudentFees functions
       // which use the student_fee_summary view for consistency
       
@@ -1707,10 +1632,10 @@ const ParentDashboard = ({ navigation }) => {
         });
         
         setFees(transformedFees);
-        console.log('✅ [PARENT AUTH] Loaded fees:', transformedFees.length);
+        
         
       } catch (err) {
-        console.warn('⚠️ [PARENT AUTH] Error fetching fees:', err);
+        
         setFees([]);
       }
       */ // END OF DISABLED OLD FEE LOADING CODE
@@ -1725,12 +1650,12 @@ const ParentDashboard = ({ navigation }) => {
           setSchoolDetails(schoolData.data);
         }
       } catch (err) {
-        console.warn('⚠️ [PARENT AUTH] Error fetching school details:', err);
+        
         setSchoolDetails(null);
       }
       
     } catch (error) {
-      console.error('💥 [PARENT AUTH] Error in fetchDashboardDataWithDirectAuth:', error);
+      
       setError(`Failed to load dashboard data: ${error.message}`);
     } finally {
       setLoading(false);
@@ -1741,12 +1666,12 @@ const ParentDashboard = ({ navigation }) => {
   const fetchDashboardDataForStudent = async (student) => {
     if (!student) return;
     
-    console.log('🔍 [DASHBOARD] Starting dashboard data fetch for student:', student.name);
-    console.log('🔍 [DASHBOARD] Auth mode - Direct Parent:', useDirectParentAuth, 'Tenant Mode:', !useDirectParentAuth);
+    
+    
     
     // Use direct parent authentication if enabled
     if (useDirectParentAuth) {
-      console.log('👨‍👩‍👧 [PARENT AUTH] Using direct parent authentication for dashboard data');
+      
       
       setLoading(true);
       setError(null);
@@ -1756,7 +1681,7 @@ const ParentDashboard = ({ navigation }) => {
         const studentResult = await getStudentForParent(user.id, student.id);
         
         if (!studentResult.success) {
-          console.error('❌ [PARENT AUTH] Failed to verify parent access:', studentResult.error);
+          
           setError(studentResult.error);
           setLoading(false);
           return;
@@ -1764,14 +1689,14 @@ const ParentDashboard = ({ navigation }) => {
         
         // Set the verified student data
         setStudentData(studentResult.student);
-        console.log('✅ [PARENT AUTH] Successfully verified and set student data for:', studentResult.student.name);
+        
         
         // Use direct parent authentication for all data fetching
         await fetchDashboardDataWithDirectAuth(student);
         return;
         
       } catch (error) {
-        console.error('💥 [PARENT AUTH] Error in direct parent authentication:', error);
+        
         setError(`Failed to load student data: ${error.message}`);
         setLoading(false);
         return;
@@ -1782,14 +1707,14 @@ const ParentDashboard = ({ navigation }) => {
     
     // Check if tenant is still loading
     if (tenantLoading) {
-      console.log('🔄 [TENANT-AWARE] Tenant context is loading, delaying dashboard data fetch...');
+      
       setLoading(true);
       return;
     }
     
     if (!tenantId || !tenant) {
-      console.error('❌ [TENANT-AWARE] Cannot fetch dashboard data: No tenant context');
-      console.log('🔍 [DEBUG] Tenant context state:', { tenantId, tenant: !!tenant, tenantLoading, user: !!user });
+      
+      
       setError(TENANT_ERROR_MESSAGES.NO_TENANT);
       setLoading(false);
       return;
@@ -1801,21 +1726,17 @@ const ParentDashboard = ({ navigation }) => {
     try {
       // Validate tenant access
       if (tenantError) {
-        console.error('❌ [TENANT-AWARE] Dashboard data fetch validation failed:', tenantError);
+        
         setError(tenantError);
         setLoading(false);
         return;
       }
       
-      console.log('✅ [TENANT-AWARE] Fetching dashboard data for student:', student.name, 'in tenant:', tenant?.name);
-      console.log('🔍 [TENANT-AWARE] Student profile_url from context:', student.profile_url);
+      
+      
       
       // Validate that student belongs to current tenant
       if (student.tenant_id && student.tenant_id !== tenantId) {
-        console.error('❌ [TENANT-AWARE] Student belongs to different tenant:', {
-          studentTenant: student.tenant_id,
-          currentTenant: tenantId
-        });
         setError(TENANT_ERROR_MESSAGES.WRONG_TENANT_DATA);
         setLoading(false);
         return;
@@ -1833,10 +1754,10 @@ const ParentDashboard = ({ navigation }) => {
       
         // Get upcoming exams for student's class using tenant-aware query
         try {
-          console.log('🔍 [TENANT-AWARE] Fetching upcoming exams for student class ID:', student.class_id);
+          
           
           const today = new Date().toISOString().split('T')[0];
-          console.log('🔍 [TENANT-AWARE] Today date for exam filter:', today);
+          
           
           // Use direct tenant-aware query
           const { data: examsData, error: examsError } = await supabase
@@ -1859,28 +1780,28 @@ const ParentDashboard = ({ navigation }) => {
           // Filter for upcoming dates
           const filteredExamsData = examsData?.filter(exam => exam.start_date >= today) || [];
 
-        console.log('📅 [TENANT-AWARE] Exams query result:', { data: filteredExamsData?.length || 0, error: examsError });
+        
         
         if (filteredExamsData && filteredExamsData.length > 0) {
-          console.log('📋 [TENANT-AWARE] Upcoming exam details:');
+          
           filteredExamsData.forEach((exam, index) => {
-            console.log(`   ${index + 1}. "${exam.name}" - Date: ${exam.start_date}, Tenant: ${exam.tenant_id}`);
+            
           });
         }
 
         if (examsError) {
-          console.error('❌ [TENANT-AWARE] Exams query error:', examsError);
+          
         }
         setExams(filteredExamsData);
       } catch (err) {
-        console.log('Exams fetch error:', err);
+        
         setExams([]);
       }
 
       // Get upcoming events from the events table using tenant-aware query
       try {
         const today = new Date().toISOString().split('T')[0];
-        console.log('🔍 [TENANT-AWARE] Fetching upcoming events from date:', today);
+        
         
         // Use direct tenant-aware query for events
         const { data: allEventsData, error: eventsError } = await supabase
@@ -1894,10 +1815,10 @@ const ParentDashboard = ({ navigation }) => {
         // Filter for upcoming events
         const upcomingEventsData = allEventsData?.filter(event => event.event_date >= today) || [];
           
-        console.log('📅 [TENANT-AWARE] Upcoming events found:', upcomingEventsData?.length || 0);
+        
         
         if (eventsError) {
-          console.error('❌ [TENANT-AWARE] Events query error:', eventsError);
+          
         }
         
         // Map the events to the format expected by the UI
@@ -1915,7 +1836,7 @@ const ParentDashboard = ({ navigation }) => {
         
         setEvents(mappedEvents.slice(0, 5)); // Show top 5 events
       } catch (err) {
-        console.log('❌ Parent Dashboard - Events fetch error:', err);
+        
         setEvents([]);
       }
 
@@ -1926,14 +1847,8 @@ const ParentDashboard = ({ navigation }) => {
       const currentMonthKey = `${year}-${String(month).padStart(2, '0')}`;
 
       try {
-        console.log('🔄 Parent Dashboard - Fetching attendance for student:', student.id, student.name);
-        console.log('🔄 Parent Dashboard - Current month filter:', currentMonthKey);
-        console.log('🔄 Parent Dashboard - Current date debug:', {
-          year,
-          month,
-          fullDate: currentDate.toISOString(),
-          localDate: currentDate.toString()
-        });
+        
+        
 
         // Multiple strategies to fetch attendance data - same as AttendanceSummary.js
         let allAttendanceData = null;
@@ -1941,7 +1856,7 @@ const ParentDashboard = ({ navigation }) => {
         
         // Strategy 1: Try the configured table name
         try {
-          console.log('🔄 Parent Dashboard - TABLES.STUDENT_ATTENDANCE value:', TABLES.STUDENT_ATTENDANCE);
+          
           const { data, error } = await supabase
             .from(TABLES.STUDENT_ATTENDANCE)
             .select(`
@@ -1958,13 +1873,13 @@ const ParentDashboard = ({ navigation }) => {
             
           if (!error) {
             allAttendanceData = data;
-            console.log('✅ Parent Dashboard - Found attendance via TABLES.STUDENT_ATTENDANCE');
+            
           } else {
             attendanceError = error;
-            console.log('❌ Parent Dashboard - TABLES.STUDENT_ATTENDANCE error:', error);
+            
           }
         } catch (err) {
-          console.log('❌ Parent Dashboard - TABLES.STUDENT_ATTENDANCE failed:', err);
+          
           attendanceError = err;
         }
         
@@ -1987,13 +1902,13 @@ const ParentDashboard = ({ navigation }) => {
               
             if (!error) {
               allAttendanceData = data;
-              console.log('✅ Parent Dashboard - Found attendance via student_attendance');
+              
             } else {
               attendanceError = error;
-              console.log('❌ Parent Dashboard - student_attendance error:', error);
+              
             }
           } catch (err) {
-            console.log('❌ Parent Dashboard - student_attendance failed:', err);
+            
             attendanceError = err;
           }
         }
@@ -2020,11 +1935,11 @@ const ParentDashboard = ({ navigation }) => {
                 
               if (!error && data) {
                 allAttendanceData = data;
-                console.log(`✅ Parent Dashboard - Found attendance via ${tableName}`);
+                
                 break;
               }
             } catch (err) {
-              console.log(`❌ Parent Dashboard - ${tableName} failed:`, err);
+              
             }
           }
         }
@@ -2033,14 +1948,11 @@ const ParentDashboard = ({ navigation }) => {
           throw attendanceError;
         }
 
-        console.log('📊 Parent Dashboard - Total attendance records found:', allAttendanceData?.length || 0);
-        console.log('📊 Parent Dashboard - Sample records:', allAttendanceData?.slice(0, 5));
-
         // COMPREHENSIVE date filtering for current month records
         const currentMonthRecords = (allAttendanceData || []).filter(record => {
           // Safety check for valid date format
           if (!record.date || typeof record.date !== 'string') {
-            console.warn('⚠️ Parent Dashboard - Invalid date format:', record.date);
+            
             return false;
           }
           
@@ -2054,7 +1966,7 @@ const ParentDashboard = ({ navigation }) => {
               recordDate = new Date(record.date);
               recordYear = recordDate.getFullYear();
               recordMonth = recordDate.getMonth() + 1;
-              console.log(`🔍 ISO format: ${record.date} -> Year: ${recordYear}, Month: ${recordMonth}`);
+              
             } else if (record.date.includes('-')) {
               // Check if it's YYYY-MM-DD or DD-MM-YYYY
               const parts = record.date.split('-');
@@ -2063,62 +1975,56 @@ const ParentDashboard = ({ navigation }) => {
                   // YYYY-MM-DD format
                   recordYear = parseInt(parts[0], 10);
                   recordMonth = parseInt(parts[1], 10);
-                  console.log(`🔍 YYYY-MM-DD format: ${record.date} -> Year: ${recordYear}, Month: ${recordMonth}`);
+                  
                 } else if (parts[2].length === 4) {
                   // DD-MM-YYYY format
                   recordYear = parseInt(parts[2], 10);
                   recordMonth = parseInt(parts[1], 10);
-                  console.log(`🔍 DD-MM-YYYY format: ${record.date} -> Year: ${recordYear}, Month: ${recordMonth}`);
+                  
                 } else {
-                  console.warn(`⚠️ Ambiguous date format: ${record.date}`);
+                  
                   return false;
                 }
               } else {
-                console.warn(`⚠️ Invalid date parts: ${record.date}`);
+                
                 return false;
               }
             } else {
               // Try to parse as a general date
               recordDate = new Date(record.date);
               if (isNaN(recordDate.getTime())) {
-                console.warn(`⚠️ Unparseable date: ${record.date}`);
+                
                 return false;
               }
               recordYear = recordDate.getFullYear();
               recordMonth = recordDate.getMonth() + 1;
-              console.log(`🔍 General format: ${record.date} -> Year: ${recordYear}, Month: ${recordMonth}`);
+              
             }
             
             // Check if parsing was successful (not NaN)
             if (isNaN(recordYear) || isNaN(recordMonth)) {
-              console.warn(`⚠️ Failed to parse date components: ${record.date} -> Year: ${recordYear}, Month: ${recordMonth}`);
+              
               return false;
             }
             
             const isCurrentMonth = recordYear === year && recordMonth === month;
             
             if (isCurrentMonth) {
-              console.log(`✅ Parent Dashboard - Including record: ${record.date} (${recordYear}-${String(recordMonth).padStart(2, '0')}) - ${record.status}`);
+              // Record matches current month
             } else {
-              console.log(`⏭️ Parent Dashboard - Skipping record: ${record.date} (${recordYear}-${String(recordMonth).padStart(2, '0')}) - Not current month`);
+              // Record doesn't match current month
             }
             
             return isCurrentMonth;
           } catch (err) {
-            console.warn('⚠️ Parent Dashboard - Error processing date:', record.date, err);
+            
             return false;
           }
         });
 
-        console.log('=== PARENT DASHBOARD COMPREHENSIVE CALCULATION ===');
-        console.log('Current month:', currentMonthKey);
-        console.log('Current month records found:', currentMonthRecords.length);
-        console.log('Records details:', currentMonthRecords.map(r => ({
-          date: r.date,
-          status: r.status,
-          marked_by: r.marked_by,
-          created_at: r.created_at
-        })));
+        
+        
+        
         
         // Calculate statistics
         const presentCount = currentMonthRecords.filter(r => r.status === 'Present').length;
@@ -2126,19 +2032,13 @@ const ParentDashboard = ({ navigation }) => {
         const totalDays = currentMonthRecords.length;
         const attendancePercentage = totalDays > 0 ? Math.round((presentCount / totalDays) * 100) : 0;
         
-        console.log('Statistics:', {
-          present: presentCount,
-          absent: absentCount,
-          total: totalDays,
-          percentage: attendancePercentage
-        });
-        console.log('====================================================');
+        
 
         // Use the filtered records
         const attendanceData = currentMonthRecords;
         setAttendance(attendanceData || []);
       } catch (err) {
-        console.log('Attendance fetch error:', err);
+        
         setAttendance([]);
       }
 
@@ -2156,18 +2056,17 @@ const ParentDashboard = ({ navigation }) => {
           .limit(10);
 
         if (marksError && marksError.code !== '42P01') {
-          console.log('Marks error:', marksError);
+          
         }
         setMarks(marksData || []);
       } catch (err) {
-        console.log('Marks fetch error:', err);
+        
         setMarks([]);
       }
 
 
       // Fee loading is now handled by fetchStudentFees function which uses student_fee_summary view
       // This prevents conflicts and ensures consistency with the FeePayment screen
-      console.log('🎯 [PARENT DASHBOARD] Fee loading delegated to fetchStudentFees (student_fee_summary view)');
       // The fetchStudentFees function will be called after the main data loading completes
 
       // Get school details (independent of student)
@@ -2177,7 +2076,7 @@ const ParentDashboard = ({ navigation }) => {
           setSchoolDetails(schoolData.data);
         }
       } catch (err) {
-        console.log('School details fetch error:', err);
+        
         setSchoolDetails(null);
       }
       
@@ -2185,7 +2084,7 @@ const ParentDashboard = ({ navigation }) => {
       await fetchStudentFees(student.id, student.class_id);
       
     } catch (err) {
-      console.error('Error fetching dashboard data for student:', err);
+      
       setError(err.message);
     } finally {
       setLoading(false);
@@ -2196,7 +2095,7 @@ const ParentDashboard = ({ navigation }) => {
     const fetchDashboardData = async () => {
       // Skip data loading entirely if no students are linked
       if (!studentLoading && (!availableStudents || availableStudents.length === 0)) {
-        console.log('ParentDashboard - Skipping data fetch due to no linked students');
+        
         setLoading(false);
         return;
       }
@@ -2204,7 +2103,7 @@ const ParentDashboard = ({ navigation }) => {
       setError(null);
       try {
         // Get parent's student data - improved approach with multiple fallback methods
-        console.log('Parent Dashboard - Starting student data fetch for parent user:', user.id);
+        
         
         let studentDetails = null;
         let studentProfilePhoto = null;
@@ -2212,7 +2111,7 @@ const ParentDashboard = ({ navigation }) => {
         try {
           // Method 1: Check if user has linked_parent_of (new structure)
           if (user.linked_parent_of) {
-            console.log('Parent Dashboard - Method 1: Using linked_parent_of');
+            
             const { data: linkedStudentData, error: linkedStudentError } = await supabase
               .from(TABLES.STUDENTS)
               .select(`
@@ -2223,7 +2122,7 @@ const ParentDashboard = ({ navigation }) => {
               .single();
             
             if (!linkedStudentError && linkedStudentData) {
-              console.log('Parent Dashboard - Successfully fetched linked student:', linkedStudentData.name);
+              
               
               studentDetails = {
                 ...linkedStudentData,
@@ -2250,15 +2149,15 @@ const ParentDashboard = ({ navigation }) => {
                 created_at: linkedStudentData.created_at
               };
             } else {
-              console.error('Parent Dashboard - Error fetching linked student:', linkedStudentError);
+              
             }
           }
           
           // Method 2: SECURE - Only use SelectedStudentContext to get student
           // This prevents showing the wrong student by using the secure context logic
           if (!studentDetails && selectedStudent) {
-            console.log('Parent Dashboard - Method 2: Using SelectedStudentContext selected student');
-            console.log('Parent Dashboard - Selected student from context:', selectedStudent.name);
+            
+            
             
             // Get full student details for the selected student
             const { data: contextStudentData, error: contextStudentError } = await supabase
@@ -2271,7 +2170,7 @@ const ParentDashboard = ({ navigation }) => {
               .single();
             
             if (!contextStudentError && contextStudentData) {
-              console.log('Parent Dashboard - Successfully fetched student from context:', contextStudentData.name);
+              
               
               studentDetails = {
                 ...contextStudentData,
@@ -2299,7 +2198,7 @@ const ParentDashboard = ({ navigation }) => {
                 created_at: contextStudentData.created_at
               };
             } else {
-              console.error('Parent Dashboard - Error fetching student from context:', contextStudentError);
+              
             }
           }
           
@@ -2307,7 +2206,7 @@ const ParentDashboard = ({ navigation }) => {
           // (showing wrong students from different families with same email)
           // We now rely only on secure linked_parent_of and SelectedStudentContext
         } catch (err) {
-          console.error('Parent Dashboard - Error in Method 1:', err);
+          
         }
         
         // Method 4: REMOVED - Incorrect parent_id query was causing security issues
@@ -2316,15 +2215,15 @@ const ParentDashboard = ({ navigation }) => {
         
         // Final fallback: Show error if no student found
         if (!studentDetails) {
-          console.error('Parent Dashboard - No student found using any secure method');
-          console.error('Parent Dashboard - This indicates a data setup issue in the database');
-          console.error('Parent Dashboard - Check that user.linked_parent_of is set correctly');
+          
+          
+          
         }
         
         // After getting student details, fetch the student's profile photo from users table and parent information
         if (studentDetails) {
           try {
-            console.log('Parent Dashboard - Fetching student profile photo for student ID:', studentDetails.id);
+            
             
             // Find the user account linked to this student
             const { data: studentUserData, error: studentUserError } = await supabase
@@ -2334,22 +2233,22 @@ const ParentDashboard = ({ navigation }) => {
               .maybeSingle();
             
             if (!studentUserError && studentUserData) {
-              console.log('Parent Dashboard - Found student user account:', studentUserData.id);
-              console.log('Parent Dashboard - Student profile_url:', studentUserData.profile_url);
+              
+              
               studentProfilePhoto = studentUserData.profile_url;
               
               // Add profile photo to student details
               studentDetails.profile_url = studentUserData.profile_url;
             } else {
-              console.log('Parent Dashboard - No user account found for student or no profile photo:', studentUserError);
+              
             }
           } catch (err) {
-            console.error('Parent Dashboard - Error fetching student profile photo:', err);
+            
           }
           
           // Fetch parent information using the junction table approach
           try {
-            console.log('Parent Dashboard - Fetching parent information using junction table for student ID:', studentDetails.id);
+            
             
             // Method 1: Try the new junction table approach first
             const { data: relationshipsData, error: relationshipsError } = await supabase
@@ -2372,14 +2271,7 @@ const ParentDashboard = ({ navigation }) => {
             let parentDataFound = false;
             
             if (!relationshipsError && relationshipsData && relationshipsData.length > 0) {
-              console.log('🔍 Parent Dashboard - Found parent relationships via junction table:', relationshipsData.length, 'relationships');
-              console.log('📊 Parent Dashboard - Relationship details:', relationshipsData.map(r => ({
-                type: r.relationship_type,
-                name: r.parents?.name,
-                phone: r.parents?.phone,
-                email: r.parents?.email,
-                is_primary: r.is_primary_contact
-              })));
+              
               
               // Process relationships to extract parent information
               let fatherInfo = null;
@@ -2392,14 +2284,6 @@ const ParentDashboard = ({ navigation }) => {
                   const parent = rel.parents;
                   const relation = rel.relationship_type;
                   
-                  console.log('🔄 Processing relationship:', { 
-                    parent_name: parent.name, 
-                    relation: relation, 
-                    phone: parent.phone, 
-                    email: parent.email,
-                    is_primary: rel.is_primary_contact,
-                    is_emergency: rel.is_emergency_contact
-                  });
                   
                   // Skip invalid or placeholder parent names (more lenient filtering)
                   const isValidParentName = parent.name && 
@@ -2426,24 +2310,23 @@ const ParentDashboard = ({ navigation }) => {
                     // Organize by relationship type
                     if (relation === 'Father') {
                       fatherInfo = parentData;
-                      console.log('✅ Found Father:', parent.name);
+                      
                     } else if (relation === 'Mother') {
                       motherInfo = parentData;
-                      console.log('✅ Found Mother:', parent.name);
+                      
                     } else if (relation === 'Guardian') {
                       guardianInfo = parentData;
-                      console.log('✅ Found Guardian:', parent.name);
+                      
                     }
                     
                     // Track primary contact
                     if (rel.is_primary_contact) {
                       primaryContactInfo = parentData;
-                      console.log('📞 Primary Contact:', parent.name, `(${relation})`);
                     }
                     
                     parentDataFound = true;
                   } else {
-                    console.log(`⚠️ Skipping invalid parent name for student ${studentDetails.name}: "${parent.name}"`);
+                    
                   }
                 }
               });
@@ -2483,29 +2366,15 @@ const ParentDashboard = ({ navigation }) => {
                   studentDetails.email = parentInfo.email;
                 }
                 
-                // Log parent details for debugging
-                const parentDetails = [];
-                if (fatherInfo) parentDetails.push(`Father: ${fatherInfo.name}`);
-                if (motherInfo) parentDetails.push(`Mother: ${motherInfo.name}`);
-                if (guardianInfo) parentDetails.push(`Guardian: ${guardianInfo.name}`);
                 
-                console.log('🎉 Parent Dashboard - SUCCESS: Parent data found via junction table:', {
-                  student_name: studentDetails.name,
-                  parent_details: parentDetails.join(', ') || 'No specific relation',
-                  father_name: fatherInfo?.name || 'N/A',
-                  mother_name: motherInfo?.name || 'N/A',
-                  guardian_name: guardianInfo?.name || 'N/A',
-                  primary_phone: parentInfo.phone,
-                  primary_email: parentInfo.email
-                });
               }
             } else {
-              console.log('Parent Dashboard - No relationships found in junction table:', relationshipsError);
+              
             }
             
             // Method 2: Fallback to direct parents table query if junction table fails or no data
             if (!parentDataFound) {
-              console.log('Parent Dashboard - Falling back to direct parents table query...');
+              
               
               // Query parents table using exact schema fields
               const { data: directParentsData, error: directParentsError } = await supabase
@@ -2514,8 +2383,8 @@ const ParentDashboard = ({ navigation }) => {
                 .eq('student_id', studentDetails.id);
               
               if (!directParentsError && directParentsData && directParentsData.length > 0) {
-                console.log('Parent Dashboard - Found parent information via direct query:', directParentsData.length, 'records');
-                console.log('Parent Dashboard - Raw parent data:', directParentsData);
+                
+                
                 
                 // Process all found parents and try to categorize by relation if available
                 let fatherInfo = null;
@@ -2523,13 +2392,13 @@ const ParentDashboard = ({ navigation }) => {
                 let guardianInfo = null;
                 
                 directParentsData.forEach(parent => {
-                  console.log(`\n=== DETAILED PARENT DEBUG ===`);
-                  console.log(`Parent ID: ${parent.id}`);
-                  console.log(`Parent Name: "${parent.name}"`);
-                  console.log(`Parent Relation: "${parent.relation}"`);
-                  console.log(`Parent Phone: "${parent.phone}"`);
-                  console.log(`Parent Email: "${parent.email}"`);
-                  console.log(`Student ID: ${parent.student_id}`);
+                  
+                  
+                  
+                  
+                  
+                  
+                  
                   
                   // Filter out placeholder/invalid parent names (more lenient filtering)
                   const isValidParentName = parent.name && 
@@ -2540,11 +2409,11 @@ const ParentDashboard = ({ navigation }) => {
                     !parent.name.toLowerCase().includes('sample') &&
                     parent.name.toLowerCase() !== 'parent';
                   
-                  console.log(`Valid Parent Name: ${isValidParentName}`);
+                  
                   
                   if (isValidParentName) {
                     const relation = parent.relation ? parent.relation.toLowerCase().trim() : null;
-                    console.log(`Normalized Relation: "${relation}"`);
+                    
                     
                     const parentData = {
                       id: parent.id,
@@ -2554,27 +2423,27 @@ const ParentDashboard = ({ navigation }) => {
                       relation: parent.relation || 'Parent'
                     };
                     
-                    console.log(`Parent Data Created:`, parentData);
+                    
                     
                     // Match case-insensitive relation types
                     if (relation === 'father') {
                       fatherInfo = parentData;
-                      console.log('🎉 ✅ FATHER ASSIGNED:', parent.name);
+                      
                     } else if (relation === 'mother') {
                       motherInfo = parentData;
-                      console.log('🎉 ✅ MOTHER ASSIGNED:', parent.name);
+                      
                     } else if (relation === 'guardian') {
                       guardianInfo = parentData;
-                      console.log('🎉 ✅ GUARDIAN ASSIGNED:', parent.name);
+                      
                     } else {
-                      console.log(`❌ RELATION NOT MATCHED: "${relation}" for parent: ${parent.name}`);
+                      
                     }
                     
                     parentDataFound = true;
                   } else {
-                    console.log(`⚠️ Skipping invalid parent name: "${parent.name}"`);
+                    
                   }
-                  console.log(`=== END PARENT DEBUG ===\n`);
+                  
                 });
                 
                 if (parentDataFound) {
@@ -2602,25 +2471,15 @@ const ParentDashboard = ({ navigation }) => {
                     studentDetails.parent_pin_code = primaryParent.pin_code;
                   }
                   
-                  console.log('🎉 Parent Dashboard - SUCCESS: Parent data found via direct query:', {
-                    student_name: studentDetails.name,
-                    father_name: fatherInfo?.name || 'N/A',
-                    mother_name: motherInfo?.name || 'N/A',
-                    guardian_name: guardianInfo?.name || 'N/A',
-                    parent_phone: primaryParent?.phone,
-                    parent_email: primaryParent?.email,
-                    parent_address: primaryParent?.address || 'Not available',
-                    parent_pin_code: primaryParent?.pin_code || 'Not available'
-                  });
                 }
               } else {
-                console.log('Parent Dashboard - No parent data found via direct query:', directParentsError);
+                
               }
             }
             
             // If still no parent data found, set defaults
             if (!parentDataFound) {
-              console.log('⚠️ Parent Dashboard - No parent information found through any method');
+              
               studentDetails.father_name = 'N/A';
               studentDetails.mother_name = 'N/A';
               studentDetails.guardian_name = 'N/A';
@@ -2634,7 +2493,7 @@ const ParentDashboard = ({ navigation }) => {
               studentDetails.parent_email = 'N/A';
             }
           } catch (err) {
-            console.error('Parent Dashboard - Error fetching parent information:', err);
+            
             // Set default values on error
             studentDetails.father_name = 'N/A';
             studentDetails.mother_name = 'N/A';
@@ -2652,16 +2511,14 @@ const ParentDashboard = ({ navigation }) => {
         
         // If still no student data found, throw error instead of using sample data
         if (!studentDetails) {
-          console.error('Parent Dashboard - No student data found through any method');
+          
           throw new Error(`No student linked to this parent account. Please contact the school administration to link your child's account. User ID: ${user.id}, Email: ${user.email}`);
         }
-        
-        console.log('Parent Dashboard - Final studentDetails:', JSON.stringify(studentDetails, null, 2));
         setStudentData(studentDetails);
 
         // Get notifications for parent
         try {
-          console.log('Fetching notifications for parent:', user.id);
+          
           
           // Get notifications with recipients for this parent
           const { data: notificationsData, error: notificationsError } = await supabase
@@ -2684,7 +2541,7 @@ const ParentDashboard = ({ navigation }) => {
             .limit(10);
 
           if (notificationsError && notificationsError.code !== '42P01') {
-            console.log('Notifications error:', notificationsError);
+            
           } else {
             const mappedNotifications = (notificationsData || []).map(n => {
               // Create proper title and message for absence notifications
@@ -2710,32 +2567,18 @@ const ParentDashboard = ({ navigation }) => {
                 read_at: n.read_at
               };
             });
-            console.log('Initial notifications count:', mappedNotifications.length);
-            console.log('Initial unread notifications count:', mappedNotifications.filter(n => !n.is_read).length);
             setNotifications(mappedNotifications);
           }
         } catch (err) {
-          console.log('Notifications fetch error:', err);
+          
           setNotifications([]);
         }
 
         // Get upcoming exams for student's class (consistent with fetchDashboardDataForStudent)
         try {
-          console.log('🔍 Parent Dashboard (Main) - Fetching upcoming exams for student class ID:', studentDetails.class_id);
-          
           const today = new Date().toISOString().split('T')[0];
-          console.log('🔍 Parent Dashboard (Main) - Today date for exam filter:', today);
-          console.log('🔍 Parent Dashboard (Main) - Current date details:', {
-            fullDate: new Date(),
-            isoString: new Date().toISOString(),
-            splitResult: today,
-            expectedExamDate: '2025-09-08',
-            shouldMatch: today <= '2025-09-08',
-            studentClassId: studentDetails.class_id
-          });
           
           // First, let's see ALL exams for this class without date filtering
-          console.log('🕵️ Parent Dashboard (Main) - DEBUG: Fetching ALL exams for class (no date filter)');
           const { data: allClassExams, error: allExamsError } = await supabase
             .from(TABLES.EXAMS)
             .select(`
@@ -2751,14 +2594,11 @@ const ParentDashboard = ({ navigation }) => {
             .order('start_date', { ascending: true });
             
           if (!allExamsError && allClassExams) {
-            console.log('🕵️ Parent Dashboard (Main) - ALL CLASS EXAMS FOUND:', allClassExams.length);
+            // Process all class exams
             allClassExams.forEach((exam, index) => {
               const examDate = exam.start_date;
               const isUpcoming = examDate >= today;
-              console.log(`   ${index + 1}. "${exam.name}" - Date: ${examDate}, Upcoming: ${isUpcoming}`);
             });
-          } else {
-            console.log('🕵️ Parent Dashboard (Main) - Error fetching all exams:', allExamsError);
           }
           
           const { data: examsData, error: examsError } = await supabase
@@ -2777,29 +2617,26 @@ const ParentDashboard = ({ navigation }) => {
             .order('start_date', { ascending: true })
             .limit(5);
 
-          console.log('📊 Parent Dashboard (Main) - Exams query result:', { examsData, examsError });
-          console.log('📊 Parent Dashboard (Main) - Exams found:', examsData?.length || 0);
-          
           if (examsData && examsData.length > 0) {
-            console.log('📋 Parent Dashboard (Main) - Exam details:');
+            // Process exam details
             examsData.forEach((exam, index) => {
-              console.log(`   ${index + 1}. "${exam.name}" - Date: ${exam.start_date}`);
+              // Process each exam
             });
           }
 
           if (examsError && examsError.code !== '42P01') {
-            console.log('❌ Parent Dashboard (Main) - Exams error:', examsError);
+            // Handle exams error
           }
           setExams(examsData || []);
         } catch (err) {
-          console.log('Exams fetch error:', err);
+          
           setExams([]);
         }
 
         // Get upcoming events from the events table
         try {
           const today = new Date().toISOString().split('T')[0];
-          console.log('🔍 Parent Dashboard - Fetching upcoming events from date:', today);
+          
           
           // Get all upcoming events (today and future) that are active
           const { data: upcomingEventsData, error: eventsError } = await supabase
@@ -2809,16 +2646,15 @@ const ParentDashboard = ({ navigation }) => {
             .gte('event_date', today)
             .order('event_date', { ascending: true });
             
-          console.log('📊 Parent Dashboard - Upcoming events found:', upcomingEventsData?.length || 0);
+          
           if (upcomingEventsData && upcomingEventsData.length > 0) {
-            console.log('📋 Parent Dashboard - Upcoming events details:');
             upcomingEventsData.forEach((event, index) => {
-              console.log(`   ${index + 1}. "${event.title}" - Date: ${event.event_date}, School-wide: ${event.is_school_wide}`);
+              // Process each event
             });
           }
           
           if (eventsError) {
-            console.error('❌ Parent Dashboard - Events query error:', eventsError);
+            
           }
           
           // Map the events to the format expected by the UI
@@ -2834,17 +2670,17 @@ const ParentDashboard = ({ navigation }) => {
             organizer: event.organizer
           }));
           
-          console.log('✅ Parent Dashboard - Mapped events for dashboard:', mappedEvents.length);
+          
           
           if (mappedEvents.length > 0) {
-            console.log('🎉 Parent Dashboard - SUCCESS: Events will be shown on dashboard!');
+            // Events found
           } else {
-            console.log('⚠️  Parent Dashboard - WARNING: No events to show on dashboard!');
+            // No events found
           }
           
           setEvents(mappedEvents.slice(0, 5)); // Show top 5 events
         } catch (err) {
-          console.log('❌ Parent Dashboard - Events fetch error:', err);
+          
           setEvents([]);
         }
 
@@ -2867,13 +2703,12 @@ const ParentDashboard = ({ navigation }) => {
           const currentMonthRecords = (allAttendanceData || []).filter(record => {
             // Safety check for valid date format
             if (!record.date || typeof record.date !== 'string') {
-              console.warn('Invalid date format in attendance record:', record.date);
+              
               return false;
             }
             
             const dateParts = record.date.split('-');
             if (dateParts.length < 2) {
-              console.warn('Date does not contain expected format (YYYY-MM-DD):', record.date);
               return false;
             }
             
@@ -2882,28 +2717,23 @@ const ParentDashboard = ({ navigation }) => {
             
             // Check if parsing was successful (not NaN)
             if (isNaN(recordYear) || isNaN(recordMonth)) {
-              console.warn('Failed to parse date components:', record.date, 'year:', dateParts[0], 'month:', dateParts[1]);
+              
               return false;
             }
             
             return recordYear === year && recordMonth === month;
           });
 
-          console.log('=== PARENT DASHBOARD SIMPLE CALCULATION ===');
-          console.log('Current month:', `${year}-${String(month).padStart(2, '0')}`);
-          console.log('Current month records:', currentMonthRecords.length);
-          console.log('Records:', currentMonthRecords.map(r => `${r.date}: ${r.status}`));
-          console.log('==========================================');
 
           // Use the filtered records
           const attendanceData = currentMonthRecords;
 
           if (attendanceError && attendanceError.code !== '42P01') {
-            console.log('Attendance error:', attendanceError);
+            
           }
           setAttendance(attendanceData || []);
         } catch (err) {
-          console.log('Attendance fetch error:', err);
+          
           setAttendance([]);
         }
 
@@ -2921,19 +2751,19 @@ const ParentDashboard = ({ navigation }) => {
             .limit(10);
 
           if (marksError && marksError.code !== '42P01') {
-            console.log('Marks error:', marksError);
+            
           }
           setMarks(marksData || []);
         } catch (err) {
-          console.log('Marks fetch error:', err);
+          
           setMarks([]);
         }
 
         // Get fee information from fee_structure table (aligned with FeePayment component)
         try {
-          console.log('=== PARENT DASHBOARD FEE DATA FETCH ===');
-          console.log('Student ID:', studentDetails.id);
-          console.log('Using student_fee_summary view for consistency with FeePayment screen');
+          
+          
+          
           
           // 🎯 Use exact same data source as parent FeePayment for consistency
           const { data: feeData, error: feeError } = await supabase
@@ -2943,16 +2773,16 @@ const ParentDashboard = ({ navigation }) => {
             .single();
 
           if (feeError) {
-            console.error('Parent Dashboard - Error loading fee data from view:', feeError);
+            
             if (feeError.code === 'PGRST116') {
-              console.log('Parent Dashboard - No fee data found for student, showing empty state');
+              
               setFees([]);
               return;
             }
             throw feeError;
           }
 
-          console.log('Parent Dashboard - Fee data loaded from view:', feeData);
+          
           
           // Store view totals globally for dashboard fee distribution summary
           window.parentDashboardFeeViewTotals = {
@@ -2962,7 +2792,7 @@ const ParentDashboard = ({ navigation }) => {
             total_base_fees: feeData.total_base_fees,
             total_discounts: feeData.total_discounts
           };
-          console.log('Parent Dashboard - Stored view totals for distribution summary:', window.parentDashboardFeeViewTotals);
+          
 
           // Transform fee components from JSON to array format (EXACT SAME AS PARENT FEEPAYMENT)
           const transformedFees = (feeData.fee_components || []).map((component, index) => {
@@ -3009,18 +2839,11 @@ const ParentDashboard = ({ navigation }) => {
             };
           });
           
-          console.log('Parent Dashboard - Transformed fees from view:', transformedFees.map(f => ({ 
-            name: f.name, 
-            amount: f.amount, 
-            status: f.status,
-            remainingAmount: f.remainingAmount,
-            due_date: f.due_date 
-          })));
-          console.log('=========================================');
+          
           
           setFees(transformedFees || []);
         } catch (err) {
-          console.log('Fee fetch error:', err);
+          
           setFees([]);
         }
 
@@ -3031,12 +2854,12 @@ const ParentDashboard = ({ navigation }) => {
             setSchoolDetails(schoolData.data);
           }
         } catch (err) {
-          console.log('School details fetch error:', err);
+          
           setSchoolDetails(null);
         }
 
       } catch (err) {
-        console.error('Error fetching dashboard data:', err);
+        
         setError(err.message);
         Alert.alert('Error', 'Failed to load dashboard data');
       } finally {
@@ -3058,17 +2881,17 @@ const ParentDashboard = ({ navigation }) => {
     if (!user?.id || !user) return;
     
     try {
-      console.log('🔔 [PARENT DASHBOARD] Refreshing universal notification counts for user:', user.id);
+      
       
       // Use the universal notification service to get accurate counts
       const counts = await universalNotificationService.getUnreadCounts(user.id, 'parent');
       
-      console.log('🔔 [PARENT DASHBOARD] Universal counts received:', counts);
+      
       setUniversalCounts(counts);
       setUnreadCount(counts.totalCount);
       
     } catch (error) {
-      console.error('🔔 [PARENT DASHBOARD] Error fetching universal counts:', error);
+      
       setUniversalCounts({ messageCount: 0, notificationCount: 0, totalCount: 0 });
       setUnreadCount(0);
     }
@@ -3078,7 +2901,7 @@ const ParentDashboard = ({ navigation }) => {
   useEffect(() => {
     if (!user?.id) return;
     
-    console.log('🔔 [PARENT DASHBOARD] Setting up universal notification subscription');
+    
     
     // Initial fetch
     refreshUniversalCounts();
@@ -3088,14 +2911,14 @@ const ParentDashboard = ({ navigation }) => {
       user.id,
       'parent',
       (reason) => {
-        console.log('🔔 [PARENT DASHBOARD] Real-time notification update:', reason);
+        
         // Small delay to ensure database consistency
         setTimeout(refreshUniversalCounts, 100);
       }
     );
     
     return () => {
-      console.log('🔔 [PARENT DASHBOARD] Cleaning up universal notification subscription');
+      
       unsubscribe();
     };
   }, [user?.id, refreshUniversalCounts]);
@@ -3103,10 +2926,6 @@ const ParentDashboard = ({ navigation }) => {
 
   // Calculate attendance percentage with useMemo for better performance and updates
   const attendanceStats = React.useMemo(() => {
-    console.log('🔄 STATCARD UPDATE - Recalculating attendance stats with data:', {
-      attendanceLength: attendance.length,
-      attendanceFirst3: attendance.slice(0, 3).map(a => ({ date: a.date, status: a.status }))
-    });
     
     // Filter out any Sunday records as they shouldn't count in attendance
     const validAttendanceRecords = attendance.filter(record => {
@@ -3132,12 +2951,6 @@ const ParentDashboard = ({ navigation }) => {
     }).length;
     const attendancePercentage = totalRecords > 0 ? Math.round((presentOnlyCount / totalRecords) * 100) : 0;
     
-    console.log('✅ STATCARD UPDATE - Attendance calculation complete:', {
-      totalRecords,
-      presentOnlyCount,
-      absentCount,
-      attendancePercentage
-    });
     
     return {
       totalRecords,
@@ -3150,14 +2963,9 @@ const ParentDashboard = ({ navigation }) => {
 
   // Calculate fee stats with useMemo - EXACTLY matching fee distribution summary calculation
   const feeStats = React.useMemo(() => {
-    console.log('🔄 STATCARD UPDATE - Recalculating fee stats with data:', {
-      feesLength: fees.length,
-      updateCounter: updateCounter,
-      feesSample: fees.slice(0, 3).map(f => ({ name: f.name, status: f.status, amount: f.amount, remainingAmount: f.remainingAmount }))
-    });
     
     if (fees.length === 0) {
-      console.log('✅ STATCARD UPDATE - No fees found');
+      
       return {
         status: '₹0',
         subtitle: '',
@@ -3180,15 +2988,6 @@ const ParentDashboard = ({ navigation }) => {
     // Use same color logic as fee distribution summary
     const color = totalOutstanding > 0 ? '#FF5722' : '#4CAF50';
     
-    console.log('✅ STATCARD UPDATE - Fee calculation complete (matching distribution summary):', {
-      totalOutstanding,
-      formattedOutstanding,
-      color,
-      unpaidCount,
-      partialCount,
-      paidCount
-    });
-    
     return {
       status: formattedOutstanding,
       subtitle: '',
@@ -3203,13 +3002,9 @@ const ParentDashboard = ({ navigation }) => {
 
   // Calculate marks stats with useMemo for better performance and updates
   const marksStats = React.useMemo(() => {
-    console.log('🔄 STATCARD UPDATE - Recalculating marks stats with data:', {
-      marksLength: marks.length,
-      marksSample: marks.slice(0, 3).map(m => ({ subject: m.subjects?.name, obtained: m.marks_obtained, max: m.max_marks }))
-    });
     
     if (marks.length === 0) {
-      console.log('✅ STATCARD UPDATE - No marks found');
+      
       return {
         average: 'No marks',
         subtitle: 'No exams taken',
@@ -3227,7 +3022,7 @@ const ParentDashboard = ({ navigation }) => {
     );
 
     if (validMarks.length === 0) {
-      console.log('✅ STATCARD UPDATE - No valid marks found');
+      
       return {
         average: 'No marks',
         subtitle: 'No valid marks',
@@ -3257,12 +3052,6 @@ const ParentDashboard = ({ navigation }) => {
     else if (avgRecent >= 60) subtitle = 'Average performance';
     else subtitle = 'Needs improvement';
     
-    console.log('✅ STATCARD UPDATE - Marks calculation complete:', {
-      validMarksCount: validMarks.length,
-      averagePercentage,
-      average,
-      subtitle
-    });
     
     return {
       average,
@@ -3273,18 +3062,10 @@ const ParentDashboard = ({ navigation }) => {
 
   // Calculate exam stats with useMemo
   const examStats = React.useMemo(() => {
-    console.log('🔄 STATCARD UPDATE - Recalculating exam stats with data:', {
-      examsLength: exams.length,
-      examsSample: exams.slice(0, 2).map(e => ({ name: e.name, date: e.start_date }))
-    });
     
     const count = String(exams.length);
     const subtitle = exams.length > 0 ? `Next: ${exams[0]?.name || 'TBA'}` : 'No upcoming exams';
     
-    console.log('✅ STATCARD UPDATE - Exam calculation complete:', {
-      count,
-      subtitle
-    });
     
     return {
       count,
@@ -3319,15 +3100,6 @@ const ParentDashboard = ({ navigation }) => {
 
   // Memoized StatCard data to ensure proper updates
   const childStats = React.useMemo(() => {
-    console.log('🔄 STATCARD UPDATE - Creating childStats with current data:', {
-      updateCounter: updateCounter,
-      attendance: attendanceStats.attendancePercentage,
-      fees: feeStats.status,
-      feesFormattedOutstanding: feeStats.formattedOutstanding,
-      feesColor: feeStats.color,
-      marks: marksStats.average,
-      exams: examStats.count
-    });
     
     return [
       {
@@ -3366,13 +3138,6 @@ const ParentDashboard = ({ navigation }) => {
   }, [attendanceStats, feeStats, marksStats, examStats, navigation, updateCounter]); // Add updateCounter to dependencies
 
   // Debug logging for StatCard updates
-  console.log('=== STATCARD UPDATE DEBUG ===');
-  console.log('Attendance data changed, stats:', attendanceStats);
-  console.log('Fee data changed, stats:', feeStats);
-  console.log('Marks data changed, stats:', marksStats);
-  console.log('Exam data changed, stats:', examStats);
-  console.log('Final childStats:', childStats.map(s => ({ title: s.title, value: s.value, subtitle: s.subtitle })));
-  console.log('============================');
 
   // Find the next upcoming event
   const nextEvent = events && events.length > 0 ? events[0] : null;
@@ -3410,11 +3175,6 @@ const ParentDashboard = ({ navigation }) => {
   const markNotificationAsRead = async (notificationRecipientId, notificationId) => {
     if (!notificationRecipientId || !user?.id) return;
     
-    console.log('🔔 [MARK AS READ] Marking notification as read:', {
-      recipientId: notificationRecipientId,
-      notificationId: notificationId,
-      userId: user.id
-    });
     
     try {
       // Update the notification recipient record
@@ -3429,11 +3189,11 @@ const ParentDashboard = ({ navigation }) => {
         .eq('recipient_type', 'Parent');
       
       if (error) {
-        console.error('🔔 [MARK AS READ] Error marking notification as read:', error);
+        
         return;
       }
       
-      console.log('✅ [MARK AS READ] Successfully marked notification as read');
+      
       
       // Update local state to reflect the change immediately
       setNotifications(prevNotifications => 
@@ -3449,7 +3209,7 @@ const ParentDashboard = ({ navigation }) => {
       await refreshUniversalCounts();
       
     } catch (error) {
-      console.error('🔔 [MARK AS READ] Exception marking notification as read:', error);
+      
     }
   };
 
@@ -3577,15 +3337,10 @@ const ParentDashboard = ({ navigation }) => {
   }
 
   // Use student profile photo if available, otherwise fallback to default
-  console.log('🖼️ ParentDashboard - Image Debug:', {
-    studentDataExists: !!studentData,
-    profileUrl: studentData?.profile_url,
-    hasImage: !!studentData?.profile_url
-  });
   
   const studentImage = studentData?.profile_url ? { uri: studentData.profile_url } : require('../../../assets/icon.png');
   
-  console.log('🖼️ ParentDashboard - Final image source:', studentImage);
+  
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>

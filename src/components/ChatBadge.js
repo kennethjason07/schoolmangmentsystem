@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { AppState } from 'react-native';
 import { useAuth } from '../utils/AuthContext';
 import universalNotificationService from '../services/UniversalNotificationService';
+import { supabase, TABLES } from '../utils/supabase';
 
 /**
  * ChatBadge - A specialized badge component that ONLY shows unread message counts
@@ -61,21 +62,38 @@ const ChatBadge = ({
       }
       
       setIsLoading(true);
-      debugLog('Fetching message count for user', { userId: user.id, userType });
-      
-      // Get ONLY the message count, not notifications
-      const messageCountOnly = await universalNotificationService.getUnreadMessageCount(user.id);
-      
-      debugLog('Received message count', messageCountOnly);
-      setMessageCount(messageCountOnly);
-      
-      // Call callback if provided
-      if (onCountChange) {
-        onCountChange(messageCountOnly);
+      debugLog('Fetching message count for user (tenant-aware)', { userId: user.id, userType });
+
+      // Prefer a direct tenant-aware query to avoid stale or cross-tenant counts
+      let tenantId = null;
+      try {
+        const { getCachedTenantId } = await import('../utils/tenantHelpers');
+        tenantId = getCachedTenantId();
+      } catch (e) {}
+
+      let query = supabase
+        .from(TABLES.MESSAGES)
+        .select('id')
+        .eq('receiver_id', user.id)
+        .eq('is_read', false);
+      if (tenantId) query = query.eq('tenant_id', tenantId);
+
+      const { data, error } = await query;
+      if (error) {
+        // Fallback to service if direct query fails
+        const fallback = await universalNotificationService.getUnreadMessageCount(user.id);
+        const safeCount = Math.max(0, Number(fallback) || 0);
+        setMessageCount(safeCount);
+        if (onCountChange) onCountChange(safeCount);
+      } else {
+        const safeCount = Math.max(0, data?.length || 0);
+        setMessageCount(safeCount);
+        if (onCountChange) onCountChange(safeCount);
       }
     } catch (error) {
       debugLog('Error fetching message count', error);
       setMessageCount(0);
+      if (onCountChange) onCountChange(0);
     } finally {
       setIsLoading(false);
     }
@@ -96,30 +114,65 @@ const ChatBadge = ({
     // Initial fetch
     fetchMessageCount();
 
-    // Set up real-time subscription - but only react to message updates
-    const unsubscribe = universalNotificationService.subscribeToUpdates(
+    // 1) Core service subscription (covers broadcasts and other sources)
+    const unsubscribeService = universalNotificationService.subscribeToUpdates(
       user.id, 
       userType, 
       (reason) => {
         debugLog('Received real-time update', reason);
-        
-        // Handle different types of updates with different strategies
         if (reason === 'message_read_broadcast') {
-          // Message read broadcasts should update immediately with no delay
-          debugLog('Message read broadcast - INSTANT refresh');
           fetchMessageCount(true);
-        } else if (reason.includes('message') || reason === 'message_update' || 
-                   reason === 'new_notification_for_user') {
-          debugLog('Received message-related update - quick refresh');
-          // Small delay for other message updates to ensure database consistency
+        } else if (reason.includes('message') || reason === 'message_update') {
           setTimeout(() => fetchMessageCount(true), 50);
-        } else {
-          debugLog('Ignoring non-message update', reason);
         }
       }
     );
 
-    subscriptionRef.current = unsubscribe;
+    // 2) Direct messages channel for instant badge math without a fetch
+    const directChannel = supabase
+      .channel(`chat-badge-direct-${user.id}-${Date.now()}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLES.MESSAGES, filter: `receiver_id=eq.${user.id}` }, (payload) => {
+        debugLog('Direct INSERT for messages', payload.new?.id);
+        // Only count as unread if the new row is actually unread (is_read === false)
+        if (payload.new?.is_read === false) {
+          setMessageCount((prev) => {
+            const next = Math.max(0, (prev || 0) + 1);
+            if (onCountChange) onCountChange(next);
+            return next;
+          });
+        }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLES.MESSAGES, filter: `receiver_id=eq.${user.id}` }, (payload) => {
+        // If a message for me changed from unread->read, decrement
+        if (payload.old?.is_read === false && payload.new?.is_read === true) {
+          debugLog('Direct UPDATE is_read flip -> decrement');
+          setMessageCount((prev) => {
+            const next = Math.max(0, (prev || 0) - 1);
+            if (onCountChange) onCountChange(next);
+            return next;
+          });
+        }
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: TABLES.MESSAGES }, (payload) => {
+        if (payload.old?.receiver_id === user.id && payload.old?.is_read === false) {
+          debugLog('Direct DELETE of unread -> decrement');
+          setMessageCount((prev) => {
+            const next = Math.max(0, (prev || 0) - 1);
+            if (onCountChange) onCountChange(next);
+            return next;
+          });
+        }
+      })
+      .subscribe();
+
+    // Store combined unsubscribe
+    subscriptionRef.current = () => {
+      try { unsubscribeService?.(); } catch (e) {}
+      try { directChannel?.unsubscribe?.(); } catch (e) {}
+    };
+
+    // Force-correct the count after channels are live (protect against stale cache)
+    setTimeout(() => fetchMessageCount(true), 50);
 
     return () => {
       debugLog('Cleaning up message subscription');
@@ -128,7 +181,7 @@ const ChatBadge = ({
         subscriptionRef.current = null;
       }
     };
-  }, [user?.id, userType, fetchMessageCount]);
+  }, [user?.id, userType, fetchMessageCount, onCountChange]);
 
   // Handle app state changes
   useEffect(() => {

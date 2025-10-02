@@ -9,6 +9,7 @@ import { View, ActivityIndicator, Platform } from 'react-native';
 import { useAuth } from '../utils/AuthContext';
 import MessageBadge from '../components/MessageBadge';
 import UniversalNotificationBadge from '../components/UniversalNotificationBadge';
+import ChatBadge from '../components/ChatBadge';
 import InAppNotificationBanner from '../components/InAppNotificationBanner';
 import { navigationRef } from '../services/NavigationService';
 
@@ -107,11 +108,11 @@ function TeacherTabNavigator() {
           
           const icon = <Ionicons name={iconName} size={size} color={color} />;
           
-          if (route.name === 'Chat') {
+if (route.name === 'Chat') {
             return (
               <View style={{ position: 'relative' }}>
                 {icon}
-                <UniversalNotificationBadge />
+                <ChatBadge />
               </View>
             );
           }
@@ -187,11 +188,11 @@ function ParentTabNavigator() {
           
           const icon = <Ionicons name={iconName} size={size} color={color} />;
           
-          if (route.name === 'Chat') {
+if (route.name === 'Chat') {
             return (
               <View style={{ position: 'relative' }}>
                 {icon}
-                <UniversalNotificationBadge />
+                <ChatBadge />
               </View>
             );
           }
@@ -268,11 +269,11 @@ function StudentTabNavigator() {
           
           const icon = <Ionicons name={iconName} size={size} color={color} />;
           
-          if (route.name === 'Chat') {
+if (route.name === 'Chat') {
             return (
               <View style={{ position: 'relative' }}>
                 {icon}
-                <UniversalNotificationBadge />
+                <ChatBadge />
               </View>
             );
           }
