@@ -1126,7 +1126,48 @@ const FeeManagement = () => {
       setPaymentLoading(false);
     }
   };
+  
+  // Delete a payment (transaction) from recent list
+  const handleDeletePayment = async (payment) => {
+    try {
+      if (!payment?.id) {
+        Alert.alert('Error', 'Invalid payment record');
+        return;
+      }
+      const confirmed = await new Promise((resolve) => {
+        Alert.alert(
+          'Delete Payment?',
+          `Student: ${payment.students?.full_name || 'Unknown'}\nAmount: ${formatSafeCurrency(payment.amount_paid)}\nDate: ${formatSafeDate(payment.payment_date)}\n\nThis action cannot be undone.`,
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+          ]
+        );
+      });
+      if (!confirmed) return;
 
+      setPaymentLoading(true);
+      const { error } = await tenantDatabase.delete('student_fees', { id: payment.id });
+      if (error) throw error;
+
+      // Optimistic UI update; realtime will also reconcile
+      setPayments(prev => (prev || []).filter(p => p.id !== payment.id));
+      setPaymentSummary(prev => ({
+        ...prev,
+        totalCollected: Math.max(0, (prev?.totalCollected || 0) - Number(payment.amount_paid || 0)),
+        totalOutstanding: (prev?.totalOutstanding || 0) + Number(payment.amount_paid || 0),
+      }));
+
+      debouncedRefreshWithCacheClear();
+      Alert.alert('Deleted', 'Payment removed successfully.');
+    } catch (e) {
+      console.error('Delete payment error:', e);
+      Alert.alert('Error', e.message || 'Failed to delete payment');
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+  
   // Open fee modal
   const openFeeModal = (classId, fee = null) => {
     if (!classId) {
@@ -1662,6 +1703,14 @@ const FeeManagement = () => {
                             {item.status ? item.status.charAt(0).toUpperCase() + item.status.slice(1) : 'Paid'}
                           </Text>
                         </View>
+                        <TouchableOpacity
+                          style={styles.deletePaymentButton}
+                          onPress={() => handleDeletePayment(item)}
+                          accessibilityLabel="Delete payment"
+                          accessibilityHint="Deletes this payment transaction"
+                        >
+                          <Ionicons name="trash" size={16} color="#F44336" />
+                        </TouchableOpacity>
                       </View>
                     </View>
                   ))}
@@ -2603,6 +2652,12 @@ const styles = StyleSheet.create({
   },
   paymentItemRight: {
     alignItems: 'flex-end',
+  },
+  deletePaymentButton: {
+    marginTop: 6,
+    padding: 6,
+    backgroundColor: '#fde7e7',
+    borderRadius: 6,
   },
   noDataText: {
     textAlign: 'center',
