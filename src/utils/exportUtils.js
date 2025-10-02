@@ -1,4 +1,5 @@
-import * as FileSystem from 'expo-file-system';
+// Use legacy FS API on mobile to avoid SDK 54 runtime throws for write/move
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
@@ -156,7 +157,7 @@ export const convertToHTML = (data, title = 'Report', additionalInfo = null) => 
       <html>
         <head>
           <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
+            body { font-family: Arial, sans-serif; margin: 10px; }
             h1 { color: #333; border-bottom: 2px solid #2196F3; }
           </style>
         </head>
@@ -201,7 +202,7 @@ export const convertToHTML = (data, title = 'Report', additionalInfo = null) => 
         <style>
           body { 
             font-family: Arial, sans-serif; 
-            margin: 20px; 
+            margin: 10px; 
             color: #333;
           }
           h1 { 
@@ -217,12 +218,12 @@ export const convertToHTML = (data, title = 'Report', additionalInfo = null) => 
           table { 
             width: 100%; 
             border-collapse: collapse; 
-            margin-top: 20px;
+            margin-top: 10px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
           }
           th, td { 
             border: 1px solid #ddd; 
-            padding: 12px; 
+            padding: 10px 12px; 
             text-align: left;
           }
           th { 
@@ -276,67 +277,71 @@ export const generateFileName = (baseName, format, includeTimestamp = true) => {
 export const saveFile = async (content, fileName, mimeType = 'text/plain') => {
   console.log('📂 saveFile: Starting file save process', { fileName, mimeType });
   try {
-    // Ensure FileSystem is properly imported and available
-    if (!FileSystem) {
-      console.error('📂 saveFile: FileSystem module is not available');
-      throw new Error('FileSystem module is not available');
-    }
-    
-    console.log('📂 saveFile: FileSystem module is available');
-    console.log('📂 saveFile: Platform is', Platform.OS);
-    
-    // For web platform, use a different approach since file system is limited
+    // For web platform, always use the web path (expo-file-system is not supported)
     if (Platform.OS === 'web') {
       console.log('📂 saveFile: Using web-specific export approach');
       return await saveFileWeb(content, fileName, mimeType);
     }
 
-    // Create file in document directory (no permissions needed)
-    const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+    // Ensure FileSystem is properly imported and available on native
+    if (!FileSystem || !FileSystem.writeAsStringAsync) {
+      console.error('📂 saveFile: FileSystem module is not available or missing write API');
+      throw new Error('FileSystem module is not available');
+    }
+    
+    console.log('📂 saveFile: FileSystem module is available');
+    console.log('📂 saveFile: Platform is', Platform.OS);
+
+    // Create file in app directory (documents or cache)
+    const baseDir = (FileSystem && (FileSystem.documentDirectory || FileSystem.cacheDirectory)) || '';
+    const fileUri = `${baseDir}${fileName}`;
     console.log('📂 saveFile: File URI created', fileUri);
     
     // Ensure content is a string
     const fileContent = typeof content === 'string' ? content : JSON.stringify(content);
     console.log('📂 saveFile: Content prepared, length:', fileContent.length);
     
-    // Write file with explicit UTF8 encoding
+    // Write file with safe encoding options (omit if not available)
     console.log('📂 saveFile: Writing file to device storage...');
-    await FileSystem.writeAsStringAsync(fileUri, fileContent, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
+    const writeOptions = (FileSystem && FileSystem.EncodingType && FileSystem.EncodingType.UTF8)
+      ? { encoding: FileSystem.EncodingType.UTF8 }
+      : undefined;
+    await FileSystem.writeAsStringAsync(fileUri, fileContent, writeOptions);
     console.log('📂 saveFile: File written successfully');
 
-    // Check if sharing is available
-    console.log('📂 saveFile: Checking sharing availability...');
+    // Share first (best UX): lets the user pick Files/Drive/Downloads etc.
     const canShare = await checkSharingAvailability();
-    console.log('📂 saveFile: Sharing available:', canShare);
-
     if (canShare) {
-      // Share the file using native sharing dialog
-      console.log('📂 saveFile: Sharing file...', { fileUri, mimeType });
       await Sharing.shareAsync(fileUri, {
         mimeType,
         dialogTitle: 'Export Report',
         UTI: mimeType,
       });
-      console.log('📂 saveFile: Share dialog shown successfully');
-
-      // Show success message
-      Alert.alert(
-        'Export Successful',
-        `Report exported as ${fileName}. You can share it using the options shown.`,
-        [{ text: 'OK' }]
-      );
-    } else {
-      // Fallback: just show success message with file location
-      console.log('📂 saveFile: Using fallback success message (no sharing)');
-      Alert.alert(
-        'Export Successful',
-        `Report saved as ${fileName} in the app's documents folder.`,
-        [{ text: 'OK' }]
-      );
+      return true;
     }
 
+    // If sharing is not available, offer SAF as a fallback on Android
+    if (Platform.OS === 'android' && FileSystem.StorageAccessFramework) {
+      try {
+        const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+        if (permissions.granted) {
+          const destUri = await FileSystem.StorageAccessFramework.createFileAsync(
+            permissions.directoryUri,
+            fileName,
+            mimeType || 'text/plain'
+          );
+          // Write the content directly to the SAF file (no read step needed)
+          const dataToWrite = typeof content === 'string' ? content : JSON.stringify(content);
+          await FileSystem.writeAsStringAsync(destUri, dataToWrite, writeOptions);
+          Alert.alert('Export Successful', `${fileName} saved to selected folder.`);
+          return true;
+        }
+      } catch (safError) {
+        console.warn('📂 saveFile: SAF flow failed:', safError?.message);
+      }
+    }
+
+    Alert.alert('Export Complete', `Report saved as ${fileName} in the app's documents folder.`);
     return true;
   } catch (error) {
     console.error('📂 saveFile ERROR:', error);
@@ -500,30 +505,30 @@ const generateWebPDF = async (data, additionalInfo, title) => {
     
     console.log('📁 generateWebPDF: PDF document created successfully');
     
-    // Add title
+    // Add title (tighter left margin)
     doc.setFontSize(20);
-    doc.text(title, 20, 20);
+    doc.text(title, 8, 18);
     
     // Add generation date
     doc.setFontSize(12);
-    doc.text(`Generated on: ${new Date().toLocaleDateString('en-IN')}`, 20, 35);
+    doc.text(`Generated on: ${new Date().toLocaleDateString('en-IN')}`, 8, 30);
     
     let yPosition = 50;
     
     // Add summary information if provided
     if (additionalInfo) {
       doc.setFontSize(14);
-      doc.text('Summary', 20, yPosition);
-      yPosition += 10;
+      doc.text('Summary', 8, yPosition);
+      yPosition += 8;
       
       doc.setFontSize(10);
       
       Object.entries(additionalInfo).forEach(([key, value]) => {
-        doc.text(`${key}: ${value}`, 20, yPosition);
+        doc.text(`${key}: ${value}`, 8, yPosition);
         yPosition += 6;
       });
       
-      yPosition += 10;
+      yPosition += 8;
     }
     
     // Add data as simple text if autoTable is not available
@@ -539,6 +544,7 @@ const generateWebPDF = async (data, additionalInfo, title) => {
           head: [headers],
           body: tableData,
           startY: yPosition,
+          margin: { left: 6, right: 6, top: 6 },
           styles: {
             fontSize: 8,
             cellPadding: 2,
@@ -556,14 +562,14 @@ const generateWebPDF = async (data, additionalInfo, title) => {
         console.log('📁 generateWebPDF: autoTable not available, using manual table creation');
         
         doc.setFontSize(12);
-        doc.text(`${title} Data`, 20, yPosition);
-        yPosition += 15;
+        doc.text(`${title} Data`, 8, yPosition);
+        yPosition += 12;
         
         doc.setFontSize(8);
         
         // Add headers
         const headers = Object.keys(data[0]);
-        let xPosition = 20;
+        let xPosition = 8;
         headers.forEach((header, index) => {
           doc.text(header, xPosition, yPosition);
           xPosition += 30; // Adjust spacing
@@ -572,7 +578,7 @@ const generateWebPDF = async (data, additionalInfo, title) => {
         
         // Add data rows
         data.slice(0, 20).forEach((row, rowIndex) => { // Limit to 20 rows to avoid page overflow
-          xPosition = 20;
+          xPosition = 8;
           Object.values(row).forEach((value, colIndex) => {
             doc.text(String(value || ''), xPosition, yPosition);
             xPosition += 30;
@@ -1454,6 +1460,140 @@ export const exportFeeData = async (data, stats, format = EXPORT_FORMATS.CSV) =>
   } catch (error) {
     console.error('Error exporting fee data:', error);
     Alert.alert('Export Error', 'Failed to export fee collection report.');
+    return false;
+  }
+};
+
+// Export per-student fee summary (for Excel/CSV)
+// rows should be an array of objects with keys:
+// {
+//   studentName, admissionNo, className, academicYear,
+//   totalFee, feeConcession, amountPaid, outstandingFee
+// }
+export const exportStudentFeeSummary = async (
+  rows,
+  fileBaseName = 'student_fee_summary',
+  format = EXPORT_FORMATS.CSV
+) => {
+  try {
+    if (!rows || rows.length === 0) {
+      Alert.alert('No Data', 'No fee summary data available to export.');
+      return false;
+    }
+
+    switch (format) {
+      case EXPORT_FORMATS.CSV: {
+        const csvRows = rows.map(r => ({
+          'Student Name': r.studentName || 'N/A',
+          'Admission No': r.admissionNo || 'N/A',
+          'Class': r.className || 'N/A',
+          'Academic Year': r.academicYear || 'N/A',
+          'Total Fee': r.totalFee ?? 0,
+          'Fee Concession': r.feeConcession ?? 0,
+          'Amount Paid': r.amountPaid ?? 0,
+          'Outstanding Fee': r.outstandingFee ?? 0,
+        }));
+        const content = convertToCSV(csvRows);
+        const fileName = generateFileName(fileBaseName, 'csv');
+        const mimeType = 'text/csv';
+        return await saveFile(content, fileName, mimeType);
+      }
+      case EXPORT_FORMATS.CLIPBOARD: {
+        const csvRows = rows.map(r => ({
+          'Student Name': r.studentName || 'N/A',
+          'Admission No': r.admissionNo || 'N/A',
+          'Class': r.className || 'N/A',
+          'Academic Year': r.academicYear || 'N/A',
+          'Total Fee': r.totalFee ?? 0,
+          'Fee Concession': r.feeConcession ?? 0,
+          'Amount Paid': r.amountPaid ?? 0,
+          'Outstanding Fee': r.outstandingFee ?? 0,
+        }));
+        const content = convertToCSV(csvRows);
+        return await copyToClipboard(content, 'Student Fee Summary');
+      }
+      default: {
+        // For now, support CSV/Clipboard which are Excel-friendly
+        Alert.alert('Format Not Supported', 'Only CSV export is supported for fee summaries at the moment.');
+        return false;
+      }
+    }
+  } catch (error) {
+    console.error('Error exporting student fee summary:', error);
+    Alert.alert('Export Error', 'Failed to export student fee summary.');
+    return false;
+  }
+};
+
+// Advanced/raw export: use rows as-is and include all keys as columns
+export const exportStudentFeeSummaryAdvanced = async (
+  rows,
+  fileBaseName = 'student_fee_summary_full',
+  format = EXPORT_FORMATS.CSV
+) => {
+  try {
+    if (!rows || rows.length === 0) {
+      Alert.alert('No Data', 'No fee summary data available to export.');
+      return false;
+    }
+
+    switch (format) {
+      case EXPORT_FORMATS.CSV: {
+        const content = convertToCSV(rows);
+        const fileName = generateFileName(fileBaseName, 'csv');
+        return await saveFile(content, fileName, 'text/csv');
+      }
+      case EXPORT_FORMATS.CLIPBOARD: {
+        const content = convertToCSV(rows);
+        return await copyToClipboard(content, 'Student Fee Summary (Full)');
+      }
+      default:
+        Alert.alert('Format Not Supported', 'Only CSV export is supported for fee summaries at the moment.');
+        return false;
+    }
+  } catch (error) {
+    console.error('Error exporting student fee summary (advanced):', error);
+    Alert.alert('Export Error', 'Failed to export student fee summary.');
+    return false;
+  }
+};
+
+// Export rows as a PDF table
+export const exportTableDataPDF = async (rows, title = 'Report', additionalInfo = null) => {
+  try {
+    const html = convertToHTML(rows, title, additionalInfo);
+
+    // Web: use jsPDF via generateWebPDF if possible, otherwise fall back to HTML download
+    if (Platform.OS === 'web') {
+      try {
+        const ok = await generateWebPDF(rows, additionalInfo, title);
+        if (ok) return true;
+      } catch (e) {
+        console.warn('exportTableDataPDF: web PDF failed, falling back to HTML:', e?.message);
+        const fileName = generateFileName(title.toLowerCase().replace(/\s+/g, '_'), 'html');
+        return await saveFileWeb(html, fileName, 'text/html');
+      }
+      return false;
+    }
+
+    // Native: print to file and share
+    const { uri } = await Print.printToFileAsync({ html, base64: false });
+    const fileName = generateFileName(title.toLowerCase().replace(/\s+/g, '_'), 'pdf');
+    // Share directly from the generated URI; avoid deprecated moveAsync
+    const canShare = await checkSharingAvailability();
+    if (canShare) {
+      await Sharing.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: `${title} (${fileName})`,
+        UTI: 'com.adobe.pdf',
+      });
+      return true;
+    }
+    Alert.alert('Export Complete', `Report generated successfully as ${fileName}`);
+    return true;
+  } catch (error) {
+    console.error('exportTableDataPDF ERROR:', error);
+    Alert.alert('Export Error', 'Failed to generate PDF.');
     return false;
   }
 };

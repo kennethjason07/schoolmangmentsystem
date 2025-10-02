@@ -1,6 +1,11 @@
 import { supabase, TABLES } from './supabase';
 import { getUserTenantId } from './tenantValidation';
 
+// Optional logging suppression for bulk operations (e.g., exports)
+let FEE_CALC_SUPPRESS_LOGS = false;
+export const setFeeCalcLogSuppressed = (v) => { FEE_CALC_SUPPRESS_LOGS = !!v; };
+const logError = (...args) => { if (!FEE_CALC_SUPPRESS_LOGS) console.error(...args); };
+
 /**
  * Helper function to find matching fee component using enhanced fuzzy matching
  * @param {string} paymentComponent - Payment fee component name
@@ -117,6 +122,10 @@ const normalizeAcademicYear = (year) => {
  * @returns {Object} Complete fee calculation data
  */
 export const calculateStudentFees = async (studentId, classId = null, tenantId = null) => {
+  // Hoist variables so they are available in catch as well
+  let actualTenantId = tenantId;
+  let actualClassId = classId;
+  let studentRecord = null;
   
   try {
     console.log('=== Fee Calculation Start ===');
@@ -125,7 +134,6 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
     console.log('Tenant ID (provided):', tenantId);
 
     // Use provided tenantId or fetch from context
-    let actualTenantId = tenantId;
     if (!actualTenantId) {
       actualTenantId = await getUserTenantId();
       if (!actualTenantId) {
@@ -135,8 +143,6 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
     console.log('✅ Using tenant ID:', actualTenantId);
 
     // Step 1: Get student info and class ID if needed
-    let actualClassId = classId;
-    let studentRecord = null;
     if (!actualClassId) {
       const { data: studentData, error: studentError } = await supabase
         .from(TABLES.STUDENTS)
@@ -146,7 +152,7 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
         .single();
       
       if (studentError || !studentData?.class_id) {
-        console.error('❌ Student lookup error:', studentError);
+logError('❌ Student lookup error:', studentError);
         throw new Error(`Could not determine student class ID: ${studentError?.message || 'Student not found'}`);
       }
       
@@ -189,7 +195,7 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
     .order('due_date', { ascending: true });
 
     if (feeStructureError) {
-      console.error('❌ Fee structure error:', feeStructureError);
+logError('❌ Fee structure error:', feeStructureError);
       throw new Error(`Failed to fetch fee structure: ${feeStructureError.message}`);
     }
 
@@ -258,7 +264,7 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
       .order('payment_date', { ascending: false });
 
     if (paymentError) {
-      console.error('❌ Payment fetch error:', paymentError);
+logError('❌ Payment fetch error:', paymentError);
       throw new Error(`Failed to fetch payment data: ${paymentError.message}`);
     }
 
@@ -566,8 +572,8 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
     };
 
   } catch (error) {
-    console.error('❌ ENHANCED Fee calculation error:', error);
-    console.error('🔍 Error details:', {
+logError('❌ ENHANCED Fee calculation error:', error);
+logError('🔍 Error details:', {
       studentId,
       classId,
       tenantId: actualTenantId,
@@ -592,8 +598,8 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
       error: error.message,
       metadata: {
         studentId,
-        classId,
-        tenantId: actualTenantId || 'unknown',
+        classId: actualClassId || classId,
+        tenantId: actualTenantId || tenantId || 'unknown',
         calculatedAt: new Date().toISOString(),
         hasError: true,
         errorMessage: error.message

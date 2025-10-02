@@ -21,6 +21,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import Header from '../../components/Header';
+import ExportModal from '../../components/ExportModal';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { formatCurrency } from '../../utils/helpers';
 import { format } from 'date-fns';
@@ -30,6 +31,7 @@ import { getNextReceiptNumber } from '../../utils/receiptCounter';
 import { loadLogoWithFallbacks, validateImageData } from '../../utils/robustLogoLoader';
 import LogoDisplay from '../../components/LogoDisplay';
 import { useFocusEffect } from '@react-navigation/native';
+import { exportStudentFeeSummaryAdvanced, exportTableDataPDF, EXPORT_FORMATS } from '../../utils/exportUtils';
 
 const ClassStudentDetails = ({ route, navigation }) => {
   const { classData } = route.params;
@@ -48,6 +50,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
   const [paymentDate, setPaymentDate] = useState(new Date());
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMode, setPaymentMode] = useState('Cash');
+  const [showExportModal, setShowExportModal] = useState(false);
   const [paymentRemarks, setPaymentRemarks] = useState('');
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -630,6 +633,66 @@ const ClassStudentDetails = ({ route, navigation }) => {
   const onRefresh = () => {
     setRefreshing(true);
     loadClassStudentDetails();
+  };
+
+  // Download per-student fee summary (CSV)
+  const buildSummaryRows = () => {
+    const currentYear = new Date().getFullYear();
+    const academicYear = `${currentYear}-${String(currentYear + 1).slice(-2)}`;
+    return (classStudents || []).map(s => ({
+      'Student Name': s.name,
+      'Admission No': s.admissionNo || s.admission_no || 'N/A',
+      'Roll No': s.rollNo || s.roll_no || 'N/A',
+      'Class': classData.className,
+      'Academic Year': academicYear,
+      'Payment Status': s.paymentStatus,
+      'Total Fee (Base)': s.totalFeeStructure ?? 0,
+      'Fee Concession': s.totalConcessions ?? 0,
+      'Adjusted Fee': s.adjustedFeeAmount ?? Math.max(0, (s.totalFeeStructure || 0) - (s.totalConcessions || 0)),
+      'Amount Paid': s.totalPaid ?? 0,
+      'Outstanding Fee': s.outstanding ?? 0,
+      'Payment %': s.paymentPercentage ?? 0,
+      'Payments Count': s.paymentCount ?? (s.payments?.length || 0),
+      'Latest Payment Date': s.latestPaymentDate || '',
+      'Latest Payment Mode': s.latestPaymentMode || '',
+    }));
+  };
+
+  const handleDownloadStudentSummary = async () => {
+    try {
+      setShowExportModal(true);
+    } catch (e) {
+      // no-op
+    }
+  };
+
+  const handleExportOption = async (format) => {
+    try {
+      const rows = buildSummaryRows();
+      if (!rows || rows.length === 0) return false;
+
+      const currentYear = new Date().getFullYear();
+      const academicYear = `${currentYear}-${String(currentYear + 1).slice(-2)}`;
+      const base = `class_${classData.className.replace(/\s+/g, '_')}_student_fee_summary_${academicYear}`.toLowerCase();
+
+      let success = false;
+      if (format === EXPORT_FORMATS.CSV) {
+        success = await exportStudentFeeSummaryAdvanced(rows, base, EXPORT_FORMATS.CSV);
+      } else if (format === EXPORT_FORMATS.CLIPBOARD) {
+        success = await exportStudentFeeSummaryAdvanced(rows, base, EXPORT_FORMATS.CLIPBOARD);
+      } else if (format === EXPORT_FORMATS.PDF) {
+        success = await exportTableDataPDF(rows, 'Class Student Fee Summary', {
+          Class: classData.className,
+          Students: classStudents.length,
+          Generated: new Date().toLocaleString('en-IN')
+        });
+      }
+      return !!success;
+    } catch (e) {
+      return false;
+    } finally {
+      setShowExportModal(false);
+    }
   };
 
   // Handle student click to show payment history
@@ -1826,10 +1889,16 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
               <View style={styles.summaryCard}>
                 <View style={styles.summaryHeader}>
                   <Text style={styles.summaryTitle}>Class Overview</Text>
-                  <View style={styles.collectionBadge}>
-                    <Text style={styles.collectionBadgeText}>
-                      {classData.collectionRate}% Collected
-                    </Text>
+                  <View style={{flexDirection:'row', alignItems:'center'}}>
+                    <TouchableOpacity onPress={handleDownloadStudentSummary} style={{ flexDirection:'row', alignItems:'center', borderWidth:1, borderColor:'#2196F3', paddingHorizontal:10, paddingVertical:6, borderRadius:6, backgroundColor:'#E3F2FD', marginRight:8 }}>
+                      <Ionicons name="download" size={16} color="#2196F3" />
+                      <Text style={{ marginLeft:6, color:'#2196F3' }}>Download</Text>
+                    </TouchableOpacity>
+                    <View style={styles.collectionBadge}>
+                      <Text style={styles.collectionBadgeText}>
+                        {classData.collectionRate}% Collected
+                      </Text>
+                    </View>
                   </View>
                 </View>
                 
@@ -1989,10 +2058,16 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
                   <View style={styles.summaryCard}>
                     <View style={styles.summaryHeader}>
                       <Text style={styles.summaryTitle}>Class Overview</Text>
-                      <View style={styles.collectionBadge}>
-                        <Text style={styles.collectionBadgeText}>
-                          {classData.collectionRate}% Collected
-                        </Text>
+                      <View style={{flexDirection:'row', alignItems:'center'}}>
+                        <TouchableOpacity onPress={handleDownloadStudentSummary} style={{ flexDirection:'row', alignItems:'center', borderWidth:1, borderColor:'#2196F3', paddingHorizontal:10, paddingVertical:6, borderRadius:6, backgroundColor:'#E3F2FD', marginRight:8 }}>
+                          <Ionicons name="download" size={16} color="#2196F3" />
+                          <Text style={{ marginLeft:6, color:'#2196F3' }}>Download</Text>
+                        </TouchableOpacity>
+                        <View style={styles.collectionBadge}>
+                          <Text style={styles.collectionBadgeText}>
+                            {classData.collectionRate}% Collected
+                          </Text>
+                        </View>
                       </View>
                     </View>
                     
@@ -2339,6 +2414,15 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
           </TouchableOpacity>
         </Animated.View>
       )}
+
+      {/* Export Modal */}
+      <ExportModal
+        visible={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        onExport={handleExportOption}
+        title="Export Class Student Fee Summary"
+        availableFormats={[EXPORT_FORMATS.CSV, EXPORT_FORMATS.PDF, EXPORT_FORMATS.CLIPBOARD]}
+      />
 
       {/* Student Payment History Modal */}
       <Modal

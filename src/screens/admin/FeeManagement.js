@@ -33,6 +33,7 @@ import FeeService from '../../services/FeeService';
 import { useAuth } from '../../utils/AuthContext';
 import { FeeManagementOptimizer, loadFeeDataInBackground } from '../../utils/feeManagementOptimizations';
 import FeatureGuard from '../../components/FeatureGuard';
+import ExportModal from '../../components/ExportModal';
 import { 
   getOptimizedFeeManagementData, 
   calculateOptimizedClassPaymentStats, 
@@ -44,6 +45,7 @@ import {
   sortClassStatsByClass,
   sortClassesNaturally
 } from '../../utils/classSortingUtils';
+import { exportStudentFeeSummaryAdvanced, exportTableDataPDF, EXPORT_FORMATS } from '../../utils/exportUtils';
 
 
 const FeeManagement = () => {
@@ -106,6 +108,7 @@ const FeeManagement = () => {
     pendingStudents: 0 
   });
   const [optimizedData, setOptimizedData] = useState(null);
+  const [showExportModalFM, setShowExportModalFM] = useState(false);
   const [useOptimizedQueries, setUseOptimizedQueries] = useState(true);
   const [loadingProgress, setLoadingProgress] = useState({ step: 0, message: '' });
   
@@ -1127,6 +1130,64 @@ const FeeManagement = () => {
     }
   };
 
+  // Download per-student fee summary (CSV)
+  // Build per-student rows for export
+  const buildFMStudentSummaryRows = async () => {
+    const results = await Promise.all(
+      (students || []).map(async (s) => {
+        try {
+const res = await FeeService.getStudentFeeDetails(s.id, { quiet: true });
+          if (res.success && res.data) {
+            const d = res.data;
+            return {
+              'Student Name': d.student?.name || s.name || s.full_name || 'N/A',
+              'Admission No': d.student?.admission_no || s.admission_no || 'N/A',
+              'Roll No': d.student?.roll_no || s.roll_no || 'N/A',
+              'Class': d.student?.class_info ? `${d.student.class_info.name || ''} ${d.student.class_info.section || ''}`.trim() : 'N/A',
+              'Academic Year': d.fees?.academicYear || s.academic_year || 'N/A',
+              'Payment Status': d.fees?.status || 'N/A',
+              'Total Fee (Base)': d.fees?.totalBaseFee ?? 0,
+              'Fee Concession': d.fees?.totalDiscounts ?? 0,
+              'Adjusted Fee': d.fees?.totalDue ?? d.fees?.totalAmount ?? 0,
+              'Amount Paid': d.fees?.totalPaid ?? 0,
+              'Outstanding Fee': d.fees?.totalOutstanding ?? 0,
+            };
+          }
+        } catch (_) {}
+        return null;
+      })
+    );
+    return results.filter(Boolean);
+  };
+
+  const handleDownloadStudentSummary = async () => {
+    setShowExportModalFM(true);
+  };
+
+  const handleExportOptionFM = async (format) => {
+    try {
+      const rows = await buildFMStudentSummaryRows();
+      if (!rows || rows.length === 0) return false;
+      const base = 'fee_management_student_fee_summary';
+      let ok = false;
+      if (format === EXPORT_FORMATS.CSV) {
+        ok = await exportStudentFeeSummaryAdvanced(rows, base, EXPORT_FORMATS.CSV);
+      } else if (format === EXPORT_FORMATS.CLIPBOARD) {
+        ok = await exportStudentFeeSummaryAdvanced(rows, base, EXPORT_FORMATS.CLIPBOARD);
+      } else if (format === EXPORT_FORMATS.PDF) {
+        ok = await exportTableDataPDF(rows, 'Fee Management - Student Fee Summary', {
+          Students: students?.length || 0,
+          Generated: new Date().toLocaleString('en-IN')
+        });
+      }
+      return !!ok;
+    } catch (e) {
+      return false;
+    } finally {
+      setShowExportModalFM(false);
+    }
+  };
+
   // Open fee modal
   const openFeeModal = (classId, fee = null) => {
     if (!classId) {
@@ -1550,7 +1611,13 @@ const FeeManagement = () => {
               <View style={styles.paymentsContent}>
                 {/* Payment Summary Cards */}
                 <View style={styles.paymentSummaryContainer}>
-                  <Text style={styles.sectionTitle}>Payment Overview</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <Text style={styles.sectionTitle}>Payment Overview</Text>
+                    <TouchableOpacity onPress={handleDownloadStudentSummary} style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#2196F3', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, backgroundColor: '#E3F2FD' }}>
+                      <Ionicons name="download" size={16} color="#2196F3" />
+                      <Text style={{ marginLeft: 6, color: '#2196F3' }}>Download Student Summary (CSV)</Text>
+                    </TouchableOpacity>
+                  </View>
                   <View style={styles.summaryCardsRow}>
                     <View style={[styles.summaryCard, { backgroundColor: '#4CAF50' }]}>
                       <Text style={styles.summaryCardValue}>{formatSafeCurrency(paymentSummary.totalCollected)}</Text>
@@ -1698,7 +1765,16 @@ const FeeManagement = () => {
         </TouchableOpacity>
       )}
 
-    {/* Modal for Payment, Fee Edit/Add, and Fee Structure */}
+      {/* Export Modal */}
+      <ExportModal
+        visible={showExportModalFM}
+        onClose={() => setShowExportModalFM(false)}
+        onExport={handleExportOptionFM}
+        title="Export Student Fee Summary"
+        availableFormats={[EXPORT_FORMATS.CSV, EXPORT_FORMATS.PDF, EXPORT_FORMATS.CLIPBOARD]}
+      />
+
+      {/* Modal for Payment, Fee Edit/Add, and Fee Structure */}
     <Modal
       animationType="slide"
       transparent={true}

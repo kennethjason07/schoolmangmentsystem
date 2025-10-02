@@ -1,4 +1,4 @@
-import { calculateStudentFees } from '../utils/feeCalculation';
+import { calculateStudentFees, setFeeCalcLogSuppressed } from '../utils/feeCalculation';
 import { supabase, TABLES, getUserTenantId, isValidUUID } from '../utils/supabase';
 
 /**
@@ -25,7 +25,8 @@ class FeeService {
     try {
       console.log('🏦 FeeService: Getting comprehensive fee details for student:', studentId);
       
-      const { includePaymentHistory = true, includeFeeBreakdown = true } = options;
+const { includePaymentHistory = true, includeFeeBreakdown = true, quiet = false } = options;
+      if (quiet) setFeeCalcLogSuppressed(true);
       
       // Step 1: Get basic student info
       const studentInfo = await this._getStudentBasicInfo(studentId);
@@ -145,12 +146,14 @@ class FeeService {
       return { success: true, data: response, error: null };
       
     } catch (error) {
-      console.error('❌ FeeService Error:', error);
+if (!options?.quiet) console.error('❌ FeeService Error:', error);
       return { 
         success: false, 
         data: null, 
         error: error.message || 'Failed to get fee details' 
       };
+    } finally {
+      if (quiet) setFeeCalcLogSuppressed(false);
     }
   }
   

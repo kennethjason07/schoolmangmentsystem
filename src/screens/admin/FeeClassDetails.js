@@ -8,6 +8,7 @@ import { formatCurrency } from '../../utils/helpers';
 import { Ionicons } from '@expo/vector-icons';
 import * as Animatable from 'react-native-animatable';
 import FeeService from '../../services/FeeService';
+import { exportStudentFeeSummary } from '../../utils/exportUtils';
 
 export default function FeeClassDetails() {
   const route = useRoute();
@@ -88,6 +89,44 @@ export default function FeeClassDetails() {
       setLoading(false);
     }
   };
+  const handleDownloadSummary = async () => {
+    try {
+      if (!students || students.length === 0) {
+        return;
+      }
+      // Build per-student fee summary using FeeService
+      const results = await Promise.all(
+        students.map(async (s) => {
+          try {
+            const res = await FeeService.getStudentFeeDetails(s.id);
+            if (res.success && res.data) {
+              const d = res.data;
+              return {
+                studentName: d.student?.name || s.full_name || 'N/A',
+                admissionNo: d.student?.admission_no || s.admission_no || 'N/A',
+                className: d.student?.class_info ? `${d.student.class_info.name || ''} ${d.student.class_info.section || ''}`.trim() : (classInfo ? `${classInfo.class_name} ${classInfo.section || ''}`.trim() : 'N/A'),
+                academicYear: d.fees?.academicYear || s.academic_year || 'N/A',
+                totalFee: d.fees?.totalDue ?? d.fees?.totalAmount ?? 0,
+                feeConcession: d.fees?.totalDiscounts ?? 0,
+                amountPaid: d.fees?.totalPaid ?? 0,
+                outstandingFee: d.fees?.totalOutstanding ?? 0,
+              };
+            }
+          } catch (e) {
+            // ignore individual errors
+          }
+          return null;
+        })
+      );
+
+      const rows = results.filter(Boolean);
+      const base = classInfo ? `class_${classInfo.class_name}_${classInfo.section || ''}_fee_summary` : 'class_fee_summary';
+      await exportStudentFeeSummary(rows, base.replace(/\s+/g, '_').toLowerCase(), 'csv');
+    } catch (e) {
+      // best-effort
+    }
+  };
+
   return (
     <View style={styles.container}>
       <Header 
@@ -127,6 +166,13 @@ export default function FeeClassDetails() {
           <Animatable.View animation="fadeIn" style={styles.contentContainer}>
             {classInfo && <Text style={styles.classDesc}>{classInfo.description || `Class ${classInfo.class_name}`}</Text>}
             
+            <View style={{ alignItems: 'flex-end', marginBottom: 8 }}>
+              <TouchableOpacity onPress={handleDownloadSummary} style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#2196F3', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, backgroundColor: '#E3F2FD' }}>
+                <Ionicons name="download" size={16} color="#2196F3" />
+                <Text style={{ marginLeft: 6, color: '#2196F3' }}>Download Student Summary (CSV)</Text>
+              </TouchableOpacity>
+            </View>
+
             {fee ? (
             <View style={styles.feeHeaderBox}>
               <Text style={styles.feeHeaderTitle}>
