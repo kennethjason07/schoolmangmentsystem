@@ -1,6 +1,11 @@
 import { supabase, TABLES } from './supabase';
 import { getUserTenantId } from './tenantValidation';
 
+// Optional logging suppression for bulk operations (e.g., exports)
+let FEE_CALC_SUPPRESS_LOGS = false;
+export const setFeeCalcLogSuppressed = (v) => { FEE_CALC_SUPPRESS_LOGS = !!v; };
+const logError = (...args) => { if (!FEE_CALC_SUPPRESS_LOGS) console.error(...args); };
+
 /**
  * Helper function to find matching fee component using enhanced fuzzy matching
  * @param {string} paymentComponent - Payment fee component name
@@ -117,6 +122,10 @@ const normalizeAcademicYear = (year) => {
  * @returns {Object} Complete fee calculation data
  */
 export const calculateStudentFees = async (studentId, classId = null, tenantId = null) => {
+  // Hoist variables so they are available in catch as well
+  let actualTenantId = tenantId;
+  let actualClassId = classId;
+  let studentRecord = null;
   
   try {
     console.log('=== Fee Calculation Start ===');
@@ -125,7 +134,6 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
     console.log('Tenant ID (provided):', tenantId);
 
     // Use provided tenantId or fetch from context
-    let actualTenantId = tenantId;
     if (!actualTenantId) {
       actualTenantId = await getUserTenantId();
       if (!actualTenantId) {
@@ -135,8 +143,6 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
     console.log('✅ Using tenant ID:', actualTenantId);
 
     // Step 1: Get student info and class ID if needed
-    let actualClassId = classId;
-    let studentRecord = null;
     if (!actualClassId) {
       const { data: studentData, error: studentError } = await supabase
         .from(TABLES.STUDENTS)
@@ -145,14 +151,119 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
         .eq('tenant_id', actualTenantId)
         .single();
       
-      if (studentError || !studentData?.class_id) {
-        console.error('❌ Student lookup error:', studentError);
-        throw new Error(`Could not determine student class ID: ${studentError?.message || 'Student not found'}`);
+      if (studentError || !studentData) {
+        logError('❌ Student lookup error:', studentError);
+        // Fallback: try to infer class_id from student_discounts (schema: class_id NOT NULL)
+        try {
+          const { data: fallbackDiscount, error: discountLookupError } = await supabase
+            .from(TABLES.STUDENT_DISCOUNTS)
+            .select('class_id, academic_year')
+            .eq('student_id', studentId)
+            .eq('tenant_id', actualTenantId)
+            .eq('is_active', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (fallbackDiscount?.class_id) {
+            actualClassId = fallbackDiscount.class_id;
+            studentRecord = { academic_year: fallbackDiscount.academic_year || '2024-25', name: 'Unknown' };
+            console.warn('⚠️ Using class_id from student_discounts as fallback:', actualClassId);
+          } else {
+            console.warn('⚠️ No fallback class_id found for student. Returning zeroed fee data.');
+            return {
+              totalAmount: 0,
+              totalPaid: 0,
+              totalOutstanding: 0,
+              totalBaseFee: 0,
+              totalDiscounts: 0,
+              academicYear: '2024-25',
+              details: [],
+              orphanedPayments: [],
+              totalDue: 0,
+              pendingFees: [],
+              paidFees: [],
+              allFees: [],
+              metadata: {
+                studentId,
+                classId: null,
+                tenantId: actualTenantId,
+                calculatedAt: new Date().toISOString(),
+                hasError: true,
+                errorMessage: 'Could not determine student class ID: Student not found'
+              }
+            };
+          }
+        } catch (fbErr) {
+          console.warn('Fallback class_id lookup failed:', fbErr?.message);
+          return {
+            totalAmount: 0,
+            totalPaid: 0,
+            totalOutstanding: 0,
+            totalBaseFee: 0,
+            totalDiscounts: 0,
+            academicYear: '2024-25',
+            details: [],
+            orphanedPayments: [],
+            totalDue: 0,
+            pendingFees: [],
+            paidFees: [],
+            allFees: [],
+            metadata: {
+              studentId,
+              classId: null,
+              tenantId: actualTenantId,
+              calculatedAt: new Date().toISOString(),
+              hasError: true,
+              errorMessage: 'Could not determine student class ID: Student not found'
+            }
+          };
+        }
+      } else if (!studentData.class_id) {
+        // Student exists but has no class assigned
+        console.warn('⚠️ Student has no class_id assigned. Attempting fallback via student_discounts...');
+        const { data: fallbackDiscount, error: discountLookupError } = await supabase
+          .from(TABLES.STUDENT_DISCOUNTS)
+          .select('class_id, academic_year')
+          .eq('student_id', studentId)
+          .eq('tenant_id', actualTenantId)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (fallbackDiscount?.class_id) {
+          actualClassId = fallbackDiscount.class_id;
+          studentRecord = { academic_year: fallbackDiscount.academic_year || studentData.academic_year || '2024-25', name: studentData.name };
+          console.warn('⚠️ Using class_id from student_discounts as fallback:', actualClassId);
+        } else {
+          console.warn('⚠️ No fallback class_id found. Returning zeroed fee data.');
+          return {
+            totalAmount: 0,
+            totalPaid: 0,
+            totalOutstanding: 0,
+            totalBaseFee: 0,
+            totalDiscounts: 0,
+            academicYear: studentData.academic_year || '2024-25',
+            details: [],
+            orphanedPayments: [],
+            totalDue: 0,
+            pendingFees: [],
+            paidFees: [],
+            allFees: [],
+            metadata: {
+              studentId,
+              classId: null,
+              tenantId: actualTenantId,
+              calculatedAt: new Date().toISOString(),
+              hasError: true,
+              errorMessage: 'Student has no class_id assigned'
+            }
+          };
+        }
+      } else {
+        actualClassId = studentData.class_id;
+        studentRecord = studentData;
+        console.log('✅ Fetched class ID from student record:', actualClassId, 'for student:', studentData.name);
       }
-      
-      actualClassId = studentData.class_id;
-      studentRecord = studentData;
-      console.log('✅ Fetched class ID from student record:', actualClassId, 'for student:', studentData.name);
     } else {
       // Still get student record for academic year info
       const { data: studentData, error: studentError } = await supabase
@@ -189,7 +300,7 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
     .order('due_date', { ascending: true });
 
     if (feeStructureError) {
-      console.error('❌ Fee structure error:', feeStructureError);
+logError('❌ Fee structure error:', feeStructureError);
       throw new Error(`Failed to fetch fee structure: ${feeStructureError.message}`);
     }
 
@@ -258,7 +369,7 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
       .order('payment_date', { ascending: false });
 
     if (paymentError) {
-      console.error('❌ Payment fetch error:', paymentError);
+logError('❌ Payment fetch error:', paymentError);
       throw new Error(`Failed to fetch payment data: ${paymentError.message}`);
     }
 
@@ -566,8 +677,8 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
     };
 
   } catch (error) {
-    console.error('❌ ENHANCED Fee calculation error:', error);
-    console.error('🔍 Error details:', {
+logError('❌ ENHANCED Fee calculation error:', error);
+logError('🔍 Error details:', {
       studentId,
       classId,
       tenantId: actualTenantId,
@@ -592,8 +703,8 @@ export const calculateStudentFees = async (studentId, classId = null, tenantId =
       error: error.message,
       metadata: {
         studentId,
-        classId,
-        tenantId: actualTenantId || 'unknown',
+        classId: actualClassId || classId,
+        tenantId: actualTenantId || tenantId || 'unknown',
         calculatedAt: new Date().toISOString(),
         hasError: true,
         errorMessage: error.message

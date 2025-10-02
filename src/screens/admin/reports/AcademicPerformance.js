@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -46,7 +46,29 @@ const AcademicPerformance = ({ navigation }) => {
   const [pdfPreviewContent, setPDFPreviewContent] = useState('');
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [showTopPerformersModal, setShowTopPerformersModal] = useState(false);
-  const [selectedAcademicYear, setSelectedAcademicYear] = useState('2024-25');
+  // Determine current academic year dynamically (assumes academic year starts in April)
+  const getCurrentAcademicYear = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth(); // 0 = Jan, 3 = April
+    const startYear = month >= 3 ? year : year - 1;
+    const endYearShort = String(startYear + 1).slice(-2);
+    return `${startYear}-${endYearShort}`;
+  };
+
+  const dynamicAcademicYears = useMemo(() => {
+    // Generate a descending list of academic years: current and last 4 years
+    const list = [];
+    const current = getCurrentAcademicYear();
+    const startYear = parseInt(current.split('-')[0], 10);
+    for (let i = 0; i < 5; i++) {
+      const y = startYear - i;
+      list.push(`${y}-${String(y + 1).slice(-2)}`);
+    }
+    return list;
+  }, []);
+
+  const [selectedAcademicYear, setSelectedAcademicYear] = useState(getCurrentAcademicYear());
   
   // Enhanced scroll functionality
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -80,7 +102,7 @@ const AcademicPerformance = ({ navigation }) => {
   const [marksLoadingPage, setMarksLoadingPage] = useState(false);
   const filterDebounceRef = useRef(null);
 
-  const academicYears = ['2024-25', '2023-24', '2022-23'];
+  const academicYears = dynamicAcademicYears;
 
   useEffect(() => {
     loadInitialData();

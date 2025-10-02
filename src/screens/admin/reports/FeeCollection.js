@@ -19,9 +19,10 @@ import { Picker } from '@react-native-picker/picker';
 import Header from '../../../components/Header';
 import ExportModal from '../../../components/ExportModal';
 import { supabase, TABLES } from '../../../utils/supabase';
-import { exportFeeData, EXPORT_FORMATS } from '../../../utils/exportUtils';
+import { exportFeeData, EXPORT_FORMATS, exportStudentFeeSummary } from '../../../utils/exportUtils';
 import { useTenantAccess, getCachedTenantId, tenantDatabase, createTenantQuery } from '../../../utils/tenantHelpers';
 import { PieChart, BarChart } from 'react-native-chart-kit';
+import FeeService from '../../../services/FeeService';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../../components/CrossPlatformDatePicker';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -732,6 +733,36 @@ const FeeCollection = ({ navigation }) => {
     }
   };
 
+  const handleDownloadStudentSummary = async () => {
+    try {
+      if (!students || students.length === 0) return;
+      const results = await Promise.all(
+        students.map(async (s) => {
+          try {
+            const res = await FeeService.getStudentFeeDetails(s.id);
+            if (res.success && res.data) {
+              const d = res.data;
+              return {
+                studentName: d.student?.name || s.name || 'N/A',
+                admissionNo: d.student?.admission_no || s.admission_no || 'N/A',
+                className: d.student?.class_info ? `${d.student.class_info.name || ''} ${d.student.class_info.section || ''}`.trim() : 'N/A',
+                academicYear: d.fees?.academicYear || selectedAcademicYear || 'N/A',
+                totalFee: d.fees?.totalDue ?? d.fees?.totalAmount ?? 0,
+                feeConcession: d.fees?.totalDiscounts ?? 0,
+                amountPaid: d.fees?.totalPaid ?? 0,
+                outstandingFee: d.fees?.totalOutstanding ?? 0,
+              };
+            }
+          } catch (e) {}
+          return null;
+        })
+      );
+      const rows = results.filter(Boolean);
+      const base = selectedClass === 'All' ? `student_fee_summary_${selectedAcademicYear}` : `class_${selectedClass}_student_fee_summary_${selectedAcademicYear}`;
+      await exportStudentFeeSummary(rows, base, 'csv');
+    } catch (e) {}
+  };
+
   const getPaymentStatusColor = (status) => {
     switch (status) {
       case 'Paid': return '#4CAF50';
@@ -1128,6 +1159,13 @@ const FeeCollection = ({ navigation }) => {
             >
               <Ionicons name="download" size={16} color="#2196F3" />
               <Text style={styles.exportText}>Export</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.exportButton, { marginLeft: 8 }]}
+              onPress={handleDownloadStudentSummary}
+            >
+              <Ionicons name="download" size={16} color="#2196F3" />
+              <Text style={styles.exportText}>Student Summary</Text>
             </TouchableOpacity>
           </View>
 
