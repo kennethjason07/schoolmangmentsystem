@@ -237,7 +237,7 @@ class EnhancedNotificationService {
    * Create bulk notification with recipients (tenant-aware)
    */
   async createBulkNotification(options) {
-    const { type, message, classId, sentBy, recipientTypes = ['Parent'], deliveryMode = 'InApp' } = options;
+    const { type, message, classId = null, sentBy = null, recipientTypes = ['Parent'], deliveryMode = 'InApp' } = options;
 
     try {
       // Get tenant context
@@ -245,37 +245,133 @@ class EnhancedNotificationService {
       if (!tenantContext.success) {
         throw new Error(`Tenant context error: ${tenantContext.error}`);
       }
-      
-      console.log(`📦 [BULK NOTIFICATION] Creating for tenant: ${tenantContext.tenantName}`);
-      
-      // Use database function for bulk creation with tenant context
-      const { data: notificationId, error } = await supabase
-        .rpc('create_bulk_notification', {
-          p_notification_type: type,
-          p_message: message,
-          p_sent_by: sentBy,
-          p_class_id: classId,
-          p_recipient_types: recipientTypes,
-          p_delivery_mode: deliveryMode,
-          p_tenant_id: tenantContext.tenantId
-        });
+      const tenantId = tenantContext.tenantId;
+      const senderId = sentBy || tenantContext.userRecord?.id || null;
 
-      if (error) {
-        throw error;
+      console.log(`📦 [BULK NOTIFICATION] Creating for tenant: ${tenantContext.tenantName} (audience: ${recipientTypes.join(',')}, class: ${classId || 'ALL'})`);
+
+      // Normalize type to a valid enum value
+      // Keep this conservative to match DB: fall back to GRADE_ENTERED if unknown
+      const allowedTypes = ['GRADE_ENTERED','HOMEWORK_UPLOADED'];
+      const notifType = allowedTypes.includes(type) ? type : 'GRADE_ENTERED';
+
+      // 1) Create the main notification row (tenant-aware)
+      const { data: notifInsert, error: notifErr } = await supabase
+        .from(TABLES.NOTIFICATIONS)
+        .insert([
+          {
+            type: notifType,
+            message,
+            delivery_mode: deliveryMode,
+            delivery_status: 'Sent',
+            sent_at: new Date().toISOString(),
+            tenant_id: tenantId,
+            sent_by: senderId,
+            created_at: new Date().toISOString(),
+          },
+        ])
+        .select('id')
+        .single();
+
+      if (notifErr) throw notifErr;
+      const notificationId = notifInsert?.id;
+      if (!notificationId) throw new Error('Failed to create notification');
+
+      // Helper to fetch student IDs for a class
+      const getStudentIdsForClass = async (clsId) => {
+        if (!clsId) return [];
+        const { data, error } = await supabase
+          .from(TABLES.STUDENTS)
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('class_id', clsId);
+        if (error) throw error;
+        return (data || []).map((s) => s.id);
+      };
+
+      // 2) Work out recipients based on audience + scope
+      let targetUserIds = [];
+      const nowIso = new Date().toISOString();
+
+      const addRecipientsForClass = async (clsId) => {
+        const studentIds = await getStudentIdsForClass(clsId);
+        let userFilters = [];
+        // Parents: users.linked_parent_of IN studentIds
+        if (recipientTypes.includes('Parent')) {
+          userFilters.push({ column: 'linked_parent_of', in: studentIds, recipient_type: 'Parent' });
+        }
+        // Students: users.linked_student_id IN studentIds
+        if (recipientTypes.includes('Student')) {
+          userFilters.push({ column: 'linked_student_id', in: studentIds, recipient_type: 'Student' });
+        }
+
+        for (const f of userFilters) {
+          if (f.in.length === 0) continue;
+          const { data: usersList, error: usersErr } = await supabase
+            .from(TABLES.USERS)
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .in(f.column, f.in);
+          if (usersErr) throw usersErr;
+          const recipients = (usersList || []).map((u) => ({ id: u.id, recipient_type: f.recipient_type }));
+          targetUserIds.push(...recipients);
+        }
+      };
+
+      if (classId) {
+        await addRecipientsForClass(classId);
+      } else {
+        // All classes: get all parents/students in tenant
+        if (recipientTypes.includes('Parent')) {
+          const { data: parentsUsers, error: puErr } = await supabase
+            .from(TABLES.USERS)
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .not('linked_parent_of', 'is', null);
+          if (puErr) throw puErr;
+          targetUserIds.push(...(parentsUsers || []).map((u) => ({ id: u.id, recipient_type: 'Parent' })));
+        }
+        if (recipientTypes.includes('Student')) {
+          const { data: studentUsers, error: suErr } = await supabase
+            .from(TABLES.USERS)
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .not('linked_student_id', 'is', null);
+          if (suErr) throw suErr;
+          targetUserIds.push(...(studentUsers || []).map((u) => ({ id: u.id, recipient_type: 'Student' })));
+        }
       }
 
-      return {
-        success: true,
-        notificationId,
-        message: 'Bulk notification created successfully'
-      };
+      // Remove duplicates while preserving recipient_type priority (prefer Parent over Student if same id, though unlikely)
+      const uniqMap = new Map();
+      for (const r of targetUserIds) {
+        if (!uniqMap.has(r.id)) uniqMap.set(r.id, r.recipient_type);
+      }
+      const finalRecipients = Array.from(uniqMap.entries()).map(([uid, rtype]) => ({ uid, rtype }));
+
+      if (finalRecipients.length === 0) {
+        console.warn('⚠️ [BULK NOTIFICATION] No recipients found for the selected scope');
+      }
+
+      // 3) Insert recipients (tenant-aware)
+      if (finalRecipients.length > 0) {
+        const rows = finalRecipients.map((r) => ({
+          notification_id: notificationId,
+          recipient_id: r.uid,
+          recipient_type: r.rtype,
+          delivery_status: 'Sent',
+          sent_at: nowIso,
+          tenant_id: tenantId,
+        }));
+        const { error: recErr } = await supabase.from(TABLES.NOTIFICATION_RECIPIENTS).insert(rows);
+        if (recErr) throw recErr;
+      }
+
+      return { success: true, notificationId, recipientCount: finalRecipients.length };
 
     } catch (error) {
       console.error('❌ [BULK NOTIFICATION] Error:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return { success: false, error: error.message };
     }
   }
 

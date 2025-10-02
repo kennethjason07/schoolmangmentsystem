@@ -13,6 +13,7 @@ import {
   TextInput,
   Platform,
   Animated,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -20,6 +21,7 @@ import Header from '../../../components/Header';
 import ExportModal from '../../../components/ExportModal';
 import { supabase, TABLES } from '../../../utils/supabase';
 import { exportFeeData, EXPORT_FORMATS } from '../../../utils/exportUtils';
+import enhancedNotificationService from '../../../services/enhancedNotificationService';
 import { useTenantAccess, getCachedTenantId, tenantDatabase, createTenantQuery } from '../../../utils/tenantHelpers';
 import { PieChart, BarChart } from 'react-native-chart-kit';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../../components/CrossPlatformDatePicker';
@@ -54,6 +56,14 @@ const FeeCollection = ({ navigation }) => {
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sendingReminders, setSendingReminders] = useState(false);
+
+  // Reminder modal state
+  const [showReminderModal, setShowReminderModal] = useState(false);
+  const [reminderAudience, setReminderAudience] = useState('Parent'); // 'Parent' | 'Student' | 'Both'
+  const [reminderScope, setReminderScope] = useState('all'); // 'all' | 'class'
+  const [reminderClassId, setReminderClassId] = useState(null);
+  const [reminderMessage, setReminderMessage] = useState('');
   
   // Enhanced scroll functionality
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -741,6 +751,92 @@ const FeeCollection = ({ navigation }) => {
     }
   };
 
+  // Prepare default reminder message when stats or selection changes
+  useEffect(() => {
+    const defaultMsg = `Fee payment reminder:\nOutstanding: ${formatCurrency(stats.totalOutstanding)}. Please clear dues at the earliest. Thank you.`;
+    setReminderMessage(defaultMsg);
+    setReminderClassId(selectedClass !== 'All' ? selectedClass : (classes[0]?.id || null));
+  }, [stats.totalOutstanding, selectedClass, classes]);
+
+  // Send fee reminders to parents and students
+  const handleSendReminders = async (options = { skipConfirm: false }) => {
+    try {
+      if (sendingReminders) return;
+
+      // Confirm only if not invoked from modal
+      if (!options.skipConfirm) {
+        const scopeText = selectedClass === 'All' ? 'all classes' : 'the selected class';
+        const confirmed = await new Promise((resolve) => {
+          Alert.alert(
+            'Send Fee Reminders',
+            `This will send a reminder to parents and students for ${scopeText}. Continue?`,
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Send', onPress: () => resolve(true) }
+            ]
+          );
+        });
+        if (!confirmed) return;
+      }
+
+      setSendingReminders(true);
+
+      const message = reminderMessage?.trim() ? reminderMessage : `Fee payment reminder. Outstanding: ${formatCurrency(stats.totalOutstanding)}`;
+      const recipientTypes = reminderAudience === 'Both' ? ['Parent', 'Student'] : [reminderAudience];
+
+      // Determine target classes
+      let targetClassIds = [];
+      if (reminderScope === 'class') {
+        const cid = reminderClassId || (selectedClass !== 'All' ? selectedClass : null);
+        if (cid) targetClassIds = [cid];
+      } else {
+        // all classes
+        if (selectedClass !== 'All') targetClassIds = [selectedClass];
+        else targetClassIds = classes.map(c => c.id).filter(Boolean);
+      }
+
+      // If no class id found, attempt single call with null (some backends allow global)
+      if (targetClassIds.length === 0) {
+        const result = await enhancedNotificationService.createBulkNotification({
+          type: 'GRADE_ENTERED',
+          message,
+          classId: null,
+          recipientTypes,
+          deliveryMode: 'InApp'
+        });
+        if (!result?.success) throw new Error(result?.error || 'Could not send reminders');
+        Alert.alert('Reminders Sent', 'Fee reminders have been queued for delivery.');
+        return true;
+      }
+
+      // Send per-class; count successes
+      let successCount = 0;
+      for (const cid of targetClassIds) {
+        const res = await enhancedNotificationService.createBulkNotification({
+          type: 'GRADE_ENTERED',
+          message,
+          classId: cid,
+          recipientTypes,
+          deliveryMode: 'InApp'
+        });
+        if (res?.success) successCount += 1;
+      }
+
+      if (successCount > 0) {
+        Alert.alert('Reminders Sent', `Fee reminders queued for ${successCount} class(es).`);
+        return true;
+      } else {
+        throw new Error('No reminders could be queued');
+      }
+    } catch (e) {
+      console.error('Send reminders error:', e);
+      Alert.alert('Error', e.message || 'Failed to send reminders');
+      return false;
+    } finally {
+      setSendingReminders(false);
+    }
+  };
+
   // Quick Navigation Component
   const QuickNavigation = () => {
     const navigationItems = [
@@ -820,9 +916,6 @@ const FeeCollection = ({ navigation }) => {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2196F3" />
           <Text style={styles.loadingText}>{loadingMessage}</Text>
-          {tenantName && (
-            <Text style={styles.tenantInfo}>Connected to: {tenantName}</Text>
-          )}
         </View>
       </View>
     );
@@ -855,12 +948,6 @@ const FeeCollection = ({ navigation }) => {
         {isWeb && <QuickNavigation />}
         
         {/* Tenant Info Banner */}
-        {tenantName && (
-          <View style={styles.tenantBanner}>
-            <Ionicons name="business" size={16} color="#4CAF50" />
-            <Text style={styles.tenantBannerText}>Connected to: {tenantName}</Text>
-          </View>
-        )}
         
         {/* Filters Section */}
         <View style={styles.filtersSection}>
@@ -1168,19 +1255,25 @@ const FeeCollection = ({ navigation }) => {
         <View style={styles.actionsSection}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionButtons}>
-            <TouchableOpacity style={styles.actionButton}>
-              <Ionicons name="add-circle" size={20} color="#4CAF50" />
-              <Text style={styles.actionButtonText}>Record Payment</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.actionButton}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => setShowExportModal(true)}
+              accessibilityLabel="Generate report"
+              accessibilityHint="Opens export options to generate the fee collection report"
+            >
               <Ionicons name="document-text" size={20} color="#2196F3" />
               <Text style={styles.actionButtonText}>Generate Report</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.actionButton}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => setShowReminderModal(true)}
+              disabled={sendingReminders}
+              accessibilityLabel="Send reminders"
+              accessibilityHint="Opens options to send reminders to parents or students"
+            >
               <Ionicons name="mail" size={20} color="#FF9800" />
-              <Text style={styles.actionButtonText}>Send Reminders</Text>
+              <Text style={styles.actionButtonText}>{sendingReminders ? 'Sending...' : 'Send Reminders'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1237,8 +1330,79 @@ const FeeCollection = ({ navigation }) => {
         onClose={() => setShowExportModal(false)}
         onExport={handleExport}
         title="Export Fee Collection Report"
-        availableFormats={[EXPORT_FORMATS.CSV, EXPORT_FORMATS.JSON, EXPORT_FORMATS.CLIPBOARD]}
+        availableFormats={[EXPORT_FORMATS.CSV, EXPORT_FORMATS.PDF, EXPORT_FORMATS.CLIPBOARD]}
       />
+
+      {/* Reminder Modal */}
+      <Modal
+        visible={showReminderModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowReminderModal(false)}
+      >
+        <View style={styles.reminderOverlay}>
+          <View style={styles.reminderModal}>
+            <View style={styles.reminderHeader}>
+              <Text style={styles.reminderTitle}>Send Fee Reminders</Text>
+              <TouchableOpacity style={styles.reminderCloseButton} onPress={() => setShowReminderModal(false)}>
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 16 }}>
+              <Text style={styles.reminderSubtitle}>Audience</Text>
+              <View style={styles.radioRow}>
+                {['Parent','Student','Both'].map(opt => (
+                  <TouchableOpacity key={opt} style={[styles.radioPill, reminderAudience===opt && styles.radioPillActive]} onPress={() => setReminderAudience(opt)}>
+                    <Text style={[styles.radioPillText, reminderAudience===opt && styles.radioPillTextActive]}>{opt}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={[styles.reminderSubtitle, { marginTop: 12 }]}>Scope</Text>
+              <View style={styles.radioRow}>
+                {['all','class'].map(opt => (
+                  <TouchableOpacity key={opt} style={[styles.radioPill, reminderScope===opt && styles.radioPillActive]} onPress={() => setReminderScope(opt)}>
+                    <Text style={[styles.radioPillText, reminderScope===opt && styles.radioPillTextActive]}>{opt === 'all' ? 'All Classes' : 'Specific Class'}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {reminderScope === 'class' && (
+                <View style={{ marginTop: 8 }}>
+                  <View style={styles.pickerContainer}>
+                    <Picker selectedValue={reminderClassId} onValueChange={setReminderClassId} style={styles.picker}>
+                      {classes.map((cls) => (
+                        <Picker.Item key={cls.id} label={`${cls.class_name} ${cls.section}`} value={cls.id} />
+                      ))}
+                    </Picker>
+                  </View>
+                </View>
+              )}
+
+              <Text style={[styles.reminderSubtitle, { marginTop: 12 }]}>Message</Text>
+              <View style={styles.pickerContainer}>
+                <TextInput
+                  style={{ padding: 12, minHeight: 80, textAlignVertical: 'top' }}
+                  multiline
+                  value={reminderMessage}
+                  onChangeText={setReminderMessage}
+                  placeholder="Type reminder message"
+                />
+              </View>
+            </View>
+
+            <View style={styles.reminderActions}>
+              <TouchableOpacity style={[styles.button, styles.cancelButton]} onPress={() => setShowReminderModal(false)} disabled={sendingReminders}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.button, styles.exportButton]} onPress={async()=>{ const ok = await handleSendReminders({ skipConfirm: true }); if (ok !== false) setShowReminderModal(false); }} disabled={sendingReminders}>
+                <Text style={styles.exportButtonText}>{sendingReminders ? 'Sending...' : 'Send'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -1778,6 +1942,78 @@ const styles = StyleSheet.create({
   bottomSpacing: {
     height: 100,
     backgroundColor: 'transparent',
+  },
+
+  // Reminder Modal styles
+  reminderOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  reminderModal: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    width: '100%',
+    maxWidth: 420,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+  },
+  reminderHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  reminderTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  reminderCloseButton: { padding: 4 },
+  reminderSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  radioRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 6,
+  },
+  radioPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 16,
+    backgroundColor: '#f8f9fa',
+  },
+  radioPillActive: {
+    borderColor: '#2196F3',
+    backgroundColor: '#f3f8ff',
+  },
+  radioPillText: {
+    fontSize: 12,
+    color: '#555',
+  },
+  radioPillTextActive: {
+    color: '#1976D2',
+    fontWeight: '600',
+  },
+
+  reminderActions: {
+    flexDirection: 'row',
+    padding: 16,
+    paddingTop: 0,
+    gap: 12,
   },
 });
 

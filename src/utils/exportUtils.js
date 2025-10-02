@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system';
+import { File as ExpoFile, Paths as ExpoPaths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
@@ -149,6 +150,21 @@ export const convertToJSON = (data, pretty = true) => {
   return JSON.stringify(data, null, pretty ? 2 : 0);
 };
 
+// Local currency formatter to avoid external dependencies in this module
+export const formatINRCurrency = (amount) => {
+  try {
+    const num = Number(amount || 0);
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(num);
+  } catch (e) {
+    return `₹${amount ?? 0}`;
+  }
+};
+
 // Convert data to HTML format for PDF generation
 export const convertToHTML = (data, title = 'Report', additionalInfo = null) => {
   if (!data || data.length === 0) {
@@ -291,20 +307,38 @@ export const saveFile = async (content, fileName, mimeType = 'text/plain') => {
       return await saveFileWeb(content, fileName, mimeType);
     }
 
-    // Create file in document directory (no permissions needed)
-    const fileUri = `${FileSystem.documentDirectory}${fileName}`;
-    console.log('📂 saveFile: File URI created', fileUri);
-    
     // Ensure content is a string
     const fileContent = typeof content === 'string' ? content : JSON.stringify(content);
     console.log('📂 saveFile: Content prepared, length:', fileContent.length);
-    
-    // Write file with explicit UTF8 encoding
-    console.log('📂 saveFile: Writing file to device storage...');
-    await FileSystem.writeAsStringAsync(fileUri, fileContent, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
-    console.log('📂 saveFile: File written successfully');
+
+    // Prefer new Expo FS API if available (SDK 54+), otherwise fall back to legacy
+    let fileUri = `${FileSystem.documentDirectory || ''}${fileName}`;
+    try {
+      if (ExpoFile && ExpoPaths && ExpoPaths.document) {
+        console.log('📂 saveFile: Using new Expo File API');
+        const file = new ExpoFile(ExpoPaths.document, fileName);
+        try { file.create(); } catch (e) { /* file may already exist */ }
+        file.write(fileContent);
+        fileUri = file.uri;
+      } else {
+        console.log('📂 saveFile: Using legacy FileSystem API');
+        const writeOptions = (FileSystem.EncodingType && FileSystem.EncodingType.UTF8)
+          ? { encoding: FileSystem.EncodingType.UTF8 }
+          : undefined; // default is UTF-8
+        await FileSystem.writeAsStringAsync(fileUri, fileContent, writeOptions);
+      }
+    } catch (writeErr) {
+      console.error('📂 saveFile: Write error, attempting clipboard fallback:', writeErr);
+      // As a last resort, copy to clipboard to avoid total failure
+      try {
+        await Clipboard.setStringAsync(fileContent);
+        Alert.alert('Copied to Clipboard', `${fileName} content was copied to clipboard as a fallback.`);
+        return true;
+      } catch (_) {}
+      throw writeErr;
+    }
+
+    console.log('📂 saveFile: File written successfully at', fileUri);
 
     // Check if sharing is available
     console.log('📂 saveFile: Checking sharing availability...');
@@ -674,89 +708,66 @@ const showContentInNewWindow = async (content, fileName) => {
 export const copyToClipboard = async (content, title = 'Report Data') => {
   console.log('📋 copyToClipboard: Starting clipboard copy process', { title, contentLength: content?.length });
   try {
-    if (!content) {
+    if (content == null) {
       console.error('📋 copyToClipboard: No content provided to copy');
       throw new Error('No content provided to copy');
     }
-    
+
+    const text = typeof content === 'string' ? content : String(content);
     console.log('📋 copyToClipboard: Platform detected:', Platform.OS);
-    
-    // For web platform, use navigator.clipboard if available
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.navigator?.clipboard) {
-      console.log('📋 copyToClipboard: Using web navigator.clipboard API...');
-      try {
-        // Check if we have permission first
-        if (window.navigator.permissions) {
-          const permission = await window.navigator.permissions.query({ name: 'clipboard-write' });
-          console.log('📋 copyToClipboard: Clipboard permission state:', permission.state);
+
+    // Web: try navigator.clipboard first only when allowed/available
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const secure = (window.isSecureContext === true) || (window.location && window.location.hostname === 'localhost');
+      if (secure && window.navigator?.clipboard?.writeText) {
+        console.log('📋 copyToClipboard: Using web navigator.clipboard.writeText');
+        try {
+          await window.navigator.clipboard.writeText(text);
+          try { Alert.alert('Copied to Clipboard', `${title} has been copied to your clipboard.`, [{ text: 'OK' }]); } catch (_) {}
+          return true;
+        } catch (webClipboardError) {
+          console.warn('📋 copyToClipboard: navigator.clipboard failed -> falling back', webClipboardError?.message || webClipboardError);
         }
-        
-        await window.navigator.clipboard.writeText(content);
-        console.log('📋 copyToClipboard: Web clipboard write successful');
-        
-        Alert.alert(
-          'Copied to Clipboard',
-          `${title} has been copied to your clipboard. You can paste it into Excel, Notepad, or any other application.`,
-          [{ text: 'OK' }]
-        );
-        return true;
-      } catch (webClipboardError) {
-        console.warn('📋 copyToClipboard: Web clipboard failed, trying fallback:', webClipboardError.message);
-        
-        // If it's a permission error, show specific message
-        if (webClipboardError.message?.includes('permission') || webClipboardError.name === 'NotAllowedError') {
-          console.log('📋 copyToClipboard: Permission denied, trying manual fallback...');
+      }
+
+      // Web fallback: hidden textarea
+      if (typeof document !== 'undefined') {
+        try {
+          console.log('📋 copyToClipboard: Trying textarea fallback...');
+          const textarea = document.createElement('textarea');
+          textarea.value = text;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.focus();
+          textarea.select();
+          const ok = document.execCommand('copy');
+          document.body.removeChild(textarea);
+          if (ok) {
+            try { Alert.alert('Copied to Clipboard', `${title} has been copied to your clipboard.`, [{ text: 'OK' }]); } catch (_) {}
+            return true;
+          }
+        } catch (taErr) {
+          console.warn('📋 copyToClipboard: Textarea fallback failed', taErr?.message || taErr);
         }
-        // Fall through to expo-clipboard fallback
       }
     }
-    
-    // Use expo-clipboard as fallback
-    console.log('📋 copyToClipboard: Using expo-clipboard fallback...');
-    await Clipboard.setStringAsync(content);
-    console.log('📋 copyToClipboard: Expo clipboard copy successful');
-    
-    Alert.alert(
-      'Copied to Clipboard',
-      `${title} has been copied to your clipboard. You can paste it into Excel, Notepad, or any other application.`,
-      [{ text: 'OK' }]
-    );
-    return true;
+
+    // Native/mobile or web fallback: expo-clipboard
+    if (Clipboard?.setStringAsync) {
+      console.log('📋 copyToClipboard: Using expo-clipboard');
+      await Clipboard.setStringAsync(text);
+      try { Alert.alert('Copied to Clipboard', `${title} has been copied to your clipboard.`, [{ text: 'OK' }]); } catch (_) {}
+      return true;
+    }
+
+    throw new Error('No clipboard method available');
   } catch (error) {
     console.error('📋 copyToClipboard ERROR:', error);
     console.error('📋 copyToClipboard ERROR stack:', error.stack);
-    
-    // Try one more fallback for web - create a temporary text area
-    if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      console.log('📋 copyToClipboard: Trying web textarea fallback...');
-      try {
-        const textarea = document.createElement('textarea');
-        textarea.value = content;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-        
-        console.log('📋 copyToClipboard: Web textarea fallback successful');
-        Alert.alert(
-          'Copied to Clipboard',
-          `${title} has been copied to your clipboard using a fallback method. You can paste it into Excel, Notepad, or any other application.`,
-          [{ text: 'OK' }]
-        );
-        return true;
-      } catch (textareaError) {
-        console.error('📋 copyToClipboard: Web textarea fallback failed:', textareaError);
-      }
-    }
-    
-    // Enhanced error message with more details
-    Alert.alert(
-      'Copy Error',
-      `Failed to copy data to clipboard: ${error.message || 'Unknown error'}. Please try selecting all content manually and copying it, or try a different export option.`,
-      [{ text: 'OK' }]
-    );
+    try {
+      Alert.alert('Copy Error', `Failed to copy data to clipboard: ${error.message || 'Unknown error'}.`);
+    } catch (_) {}
     return false;
   }
 };
@@ -881,39 +892,16 @@ export const exportIndividualAttendanceRecord = async (recordData, format = EXPO
             }
           } else {
             // Native mobile PDF generation
-            const { uri } = await Print.printToFileAsync({ 
-              html: htmlContent,
-              base64: false
-            });
-            
-            // Create a new filename with .pdf extension
-            fileName = generateFileName(`attendance_${recordData.classes?.class_name}_${recordData.date}`, 'pdf');
-            const newUri = `${FileSystem.documentDirectory}${fileName}`;
-            
-            // Move the file to our desired location
-            await FileSystem.moveAsync({ from: uri, to: newUri });
-            
-            // Share the PDF
-            const canShare = await checkSharingAvailability();
-            if (canShare) {
-              await Sharing.shareAsync(newUri, {
-                mimeType: 'application/pdf',
-                dialogTitle: 'Export Attendance Record',
-                UTI: 'com.adobe.pdf',
-              });
-              Alert.alert(
-                'Export Successful',
-                `Attendance record exported as ${fileName}. You can share it using the options shown.`,
-                [{ text: 'OK' }]
-              );
-            } else {
-              Alert.alert(
-                'Export Successful', 
-                `Attendance record saved as ${fileName} in the app's documents folder.`,
-                [{ text: 'OK' }]
-              );
-            }
-            return true;
+          const { uri } = await Print.printToFileAsync({ 
+            html: htmlContent,
+            base64: false
+          });
+          
+          // Create a new filename with .pdf extension
+          fileName = generateFileName(`attendance_${recordData.classes?.class_name}_${recordData.date}`, 'pdf');
+          
+          // Share or notify without moving the file (Expo SDK 54+ deprecates moveAsync)
+          return await sharePDF(uri, fileName);
           }
         } catch (error) {
           console.error('📝 exportIndividualAttendanceRecord: Error generating PDF:', error);
@@ -1181,39 +1169,16 @@ export const exportAttendanceData = async (data, stats, format = EXPORT_FORMATS.
             }
           } else {
             // Native mobile PDF generation
-            const { uri } = await Print.printToFileAsync({ 
-              html: htmlContent,
-              base64: false
-            });
-            
-            // Create a new filename with .pdf extension
-            fileName = generateFileName('attendance_report', 'pdf');
-            const newUri = `${FileSystem.documentDirectory}${fileName}`;
-            
-            // Move the file to our desired location
-            await FileSystem.moveAsync({ from: uri, to: newUri });
-            
-            // Share the PDF
-            const canShare = await checkSharingAvailability();
-            if (canShare) {
-              await Sharing.shareAsync(newUri, {
-                mimeType: 'application/pdf',
-                dialogTitle: 'Export Attendance Report',
-                UTI: 'com.adobe.pdf',
-              });
-              Alert.alert(
-                'Export Successful',
-                `Attendance report exported as ${fileName}. You can share it using the options shown.`,
-                [{ text: 'OK' }]
-              );
-            } else {
-              Alert.alert(
-                'Export Successful', 
-                `Attendance report saved as ${fileName} in the app's documents folder.`,
-                [{ text: 'OK' }]
-              );
-            }
-            return true;
+          const { uri } = await Print.printToFileAsync({ 
+            html: htmlContent,
+            base64: false
+          });
+          
+          // Create a new filename with .pdf extension
+          fileName = generateFileName('attendance_report', 'pdf');
+          
+          // Share or notify without moving the file (Expo SDK 54+ deprecates moveAsync)
+          return await sharePDF(uri, fileName);
           }
         } catch (error) {
           console.error('📄 exportAttendanceData: PDF generation error:', error);
@@ -1410,9 +1375,9 @@ export const exportFeeData = async (data, stats, format = EXPORT_FORMATS.CSV) =>
 
         // Add collection summary
         const summaryData = [
-          { 'Metric': 'Total Collected', 'Value': formatCurrency(stats.totalCollected || 0) },
-          { 'Metric': 'Total Outstanding', 'Value': formatCurrency(stats.totalOutstanding || 0) },
-          { 'Metric': 'Total Expected', 'Value': formatCurrency(stats.totalExpected || 0) },
+          { 'Metric': 'Total Collected', 'Value': formatINRCurrency(stats.totalCollected || 0) },
+          { 'Metric': 'Total Outstanding', 'Value': formatINRCurrency(stats.totalOutstanding || 0) },
+          { 'Metric': 'Total Expected', 'Value': formatINRCurrency(stats.totalExpected || 0) },
           { 'Metric': 'Collection Rate', 'Value': `${stats.collectionRate || 0}%` }
         ];
 
@@ -1430,6 +1395,63 @@ export const exportFeeData = async (data, stats, format = EXPORT_FORMATS.CSV) =>
         fileName = generateFileName('fee_collection', 'json');
         mimeType = 'application/json';
         break;
+
+      case EXPORT_FORMATS.PDF:
+        // Prepare data for PDF
+        const pdfData = data.map(record => ({
+          'Student Name': record.students?.name || 'N/A',
+          'Admission No': record.students?.admission_no || 'N/A',
+          'Class': `${record.students?.classes?.class_name || ''} ${record.students?.classes?.section || ''}`.trim(),
+          'Fee Component': record.fee_component,
+          'Amount Paid': record.amount_paid,
+          'Payment Date': record.payment_date,
+          'Payment Mode': record.payment_mode,
+          'Receipt No': record.receipt_no || 'N/A',
+        }));
+
+        const pdfAdditionalInfo = {
+          'Total Collected': formatINRCurrency(stats.totalCollected || 0),
+          'Total Outstanding': formatINRCurrency(stats.totalOutstanding || 0),
+          'Total Expected': formatINRCurrency(stats.totalExpected || 0),
+          'Collection Rate': `${stats.collectionRate || 0}%`,
+          'Records': data?.length || 0,
+        };
+
+        // Build HTML once for both branches (also used as fallback on web)
+        const htmlContent = convertToHTML(pdfData, 'Fee Collection Report', pdfAdditionalInfo);
+        if (Platform.OS === 'web') {
+          // Web PDF: try jsPDF first, then graceful HTML fallback
+          try {
+            const success = await generateWebPDF(pdfData, pdfAdditionalInfo, 'Fee Collection Report');
+            return !!success;
+          } catch (webError) {
+            console.error('📄 exportFeeData: Web PDF failed, falling back to HTML download:', webError?.message || webError);
+            try {
+              const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
+              const url = window.URL.createObjectURL(htmlBlob);
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = `fee_collection_${new Date().toISOString().split('T')[0]}.html`;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+              setTimeout(() => window.URL.revokeObjectURL(url), 100);
+              Alert.alert('Export as HTML', 'Could not generate PDF directly. Downloaded as HTML instead. Open it and use Print > Save as PDF to convert.', [{ text: 'OK' }]);
+              return true;
+            } catch (htmlErr) {
+              console.error('📄 exportFeeData: HTML fallback also failed:', htmlErr);
+              throw webError;
+            }
+          }
+        } else {
+          // Native: generate PDF via HTML -> printToFile
+          const { uri } = await Print.printToFileAsync({ html: htmlContent, base64: false });
+          fileName = generateFileName('fee_collection', 'pdf');
+          
+          // Share or notify without moving the file (Expo SDK 54+ deprecates moveAsync)
+          return await sharePDF(uri, fileName);
+        }
+        
 
       case EXPORT_FORMATS.CLIPBOARD:
         const clipboardData = data.map(record => ({
@@ -1671,37 +1693,14 @@ export const exportTopPerformers = async (topPerformers, stats, format = EXPORT_
             }
           } else {
             // Native mobile PDF generation
-            const { uri } = await Print.printToFileAsync({ 
-              html: htmlContent,
-              base64: false
-            });
-            
-            // Create filename and move file
-            fileName = generateFileName('top_performers', 'pdf');
-            const newUri = `${FileSystem.documentDirectory}${fileName}`;
-            await FileSystem.moveAsync({ from: uri, to: newUri });
-            
-            // Share the PDF
-            const canShare = await checkSharingAvailability();
-            if (canShare) {
-              await Sharing.shareAsync(newUri, {
-                mimeType: 'application/pdf',
-                dialogTitle: 'Export Top Performers Report',
-                UTI: 'com.adobe.pdf',
-              });
-              Alert.alert(
-                'Export Successful',
-                `Top performers report exported as ${fileName}. You can share it using the options shown.`,
-                [{ text: 'OK' }]
-              );
-            } else {
-              Alert.alert(
-                'Export Successful', 
-                `Top performers report saved as ${fileName} in the app's documents folder.`,
-                [{ text: 'OK' }]
-              );
-            }
-            return true;
+          const { uri } = await Print.printToFileAsync({ 
+            html: htmlContent,
+            base64: false
+          });
+          
+          // Create filename and share without moving (Expo SDK 54+ deprecates moveAsync)
+          fileName = generateFileName('top_performers', 'pdf');
+          return await sharePDF(uri, fileName);
           }
         } catch (error) {
           console.error('🏆 exportTopPerformers: PDF generation error:', error);
@@ -1829,12 +1828,9 @@ export const generateAcademicPerformancePDF = async (data, stats) => {
           'application/pdf'
         );
 
-        const fileData = await FileSystem.readAsStringAsync(uri, { 
-          encoding: FileSystem.EncodingType.Base64 
-        });
-        await FileSystem.writeAsStringAsync(destUri, fileData, { 
-          encoding: FileSystem.EncodingType.Base64 
-        });
+        const base64Enc = (FileSystem.EncodingType && FileSystem.EncodingType.Base64) ? FileSystem.EncodingType.Base64 : undefined;
+        const fileData = await FileSystem.readAsStringAsync(uri, base64Enc ? { encoding: base64Enc } : undefined);
+        await FileSystem.writeAsStringAsync(destUri, fileData, base64Enc ? { encoding: base64Enc } : undefined);
 
         Alert.alert('PDF Saved Successfully', `Academic performance report saved as ${fileName}`);
         return true;
