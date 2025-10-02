@@ -19,6 +19,7 @@ import Header from '../../components/Header';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import { formatCurrency } from '../../utils/helpers';
 import { useTenant } from '../../contexts/TenantContext';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 // Component load verification
 console.log('💻 DISCOUNT MANAGEMENT - Component loaded on platform:', Platform.OS);
@@ -809,6 +810,15 @@ const DiscountManagement = ({ navigation, route }) => {
       {/* Modals */}
       {renderDiscountModal()}
       {renderDistributionModal()}
+      
+      <FloatingRefreshButton 
+        onRefresh={() => {
+          setRefreshing(true);
+          loadStudentDiscounts().finally(() => setRefreshing(false));
+        }}
+        isRefreshing={loading || refreshing}
+        bottom={80}
+      />
     </View>
   );
 };

@@ -54,6 +54,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import { supabase, TABLES } from '../../utils/supabase';
 import { useTenantAccess, tenantDatabase, createTenantQuery, getCachedTenantId } from '../../utils/tenantHelpers';
@@ -2210,6 +2211,14 @@ const handleDeleteExam = (exam) => {
   return (
     <View style={styles.container}>
 <Header title="Exams & Marks" showBack={true} onBack={safeGoBack} />
+      
+      {/* Floating Refresh Button - Web Only - Positioned to avoid FAB overlap */}
+      <FloatingRefreshButton
+        onPress={onRefresh}
+        refreshing={refreshing}
+        bottom={140}
+        right={30}
+      />
 
       <View style={styles.scrollWrapper}>
         <FlatList

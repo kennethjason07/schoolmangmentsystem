@@ -7,6 +7,7 @@ import { useTenant } from '../../contexts/TenantContext';
 import { getTenantFilteredNotifications, getCurrentTenantId, validateNotificationTenantAccess } from '../../utils/tenantNotificationFilter';
 import universalNotificationService from '../../services/UniversalNotificationService';
 import Header from '../../components/Header';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import { formatToLocalTime } from '../../utils/timeUtils';
 const roles = ['teacher', 'parent', 'student', 'admin'];
@@ -717,6 +718,14 @@ const NotificationManagement = () => {
   return (
     <View style={styles.container}>
       <Header title="Notification Management" showBack={true} />
+      
+      {/* Floating Refresh Button - Web Only - Positioned to avoid FAB overlap */}
+      <FloatingRefreshButton
+        onPress={handleRefresh}
+        refreshing={refreshing}
+        bottom={140}
+        right={30}
+      />
       
       {/* Filter/Search Bar */}
       <View style={styles.filterBarMain}>

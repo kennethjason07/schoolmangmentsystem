@@ -21,6 +21,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import Header from '../../components/Header';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import { supabase } from '../../utils/supabase';
 import { format, parseISO, isAfter, isBefore } from 'date-fns';
 import ModernFilters from '../../components/ui/ModernFilters';
@@ -882,6 +883,12 @@ const LeaveManagement = ({ navigation }) => {
           </View>
         </View>
       
+      {/* Floating Refresh Button - Web Only */}
+      <FloatingRefreshButton
+        onPress={onRefresh}
+        refreshing={refreshing}
+        bottom={80}
+      />
       
       {/* Modern Filters */}
       <ModernFilters

@@ -17,6 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import { supabase } from '../../utils/supabase';
 import ReportCardModal from '../../components/ReportCardModal';
 import { useTenantAccess } from '../../utils/tenantHelpers';
@@ -814,6 +815,14 @@ const ReportCardGeneration = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <Header title="Report Card Generation" showBack={true} />
+      
+      {/* Floating Refresh Button - Web Only - Positioned to avoid scroll button overlap */}
+      <FloatingRefreshButton
+        onPress={onRefresh}
+        refreshing={refreshing}
+        bottom={showScrollToTop ? 150 : 80}
+        right={30}
+      />
       
       {/* Compact Filters Bar */}
       <View style={styles.filtersBar}>

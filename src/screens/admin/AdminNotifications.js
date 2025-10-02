@@ -18,6 +18,7 @@ import { supabase, getUserTenantId } from '../../utils/supabase';
 import universalNotificationService from '../../services/UniversalNotificationService';
 import { validateTenantAccess, createTenantQuery, validateDataTenancy, TENANT_ERROR_MESSAGES } from '../../utils/tenantValidation';
 import { useTenant } from '../../contexts/TenantContext';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 const AdminNotifications = ({ navigation }) => {
   const [notifications, setNotifications] = useState([]);
@@ -647,6 +648,12 @@ const AdminNotifications = ({ navigation }) => {
           </View>
         )}
         showsVerticalScrollIndicator={Platform.OS === 'web'}
+      />
+      
+      <FloatingRefreshButton 
+        onRefresh={onRefresh}
+        isRefreshing={refreshing}
+        bottom={80}
       />
     </View>
   );

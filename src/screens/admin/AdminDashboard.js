@@ -35,6 +35,7 @@ import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificat
 import useNavigateWithStatePreservation from '../../components/ui/SafeNavigate';
 import { useTenantFeatures } from '../../hooks/useTenantFeatures';
 import { getFeatureForQuickAction } from '../../constants/featureMapping';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 const { width } = Dimensions.get('window');
 
@@ -975,6 +976,13 @@ const AdminDashboard = ({ navigation }) => {
         showNotifications={true}
         unreadCount={unreadCount}
         onNotificationsPress={() => navigateSafely('AdminNotifications')}
+      />
+      
+      {/* Floating Refresh Button - Web Only */}
+      <FloatingRefreshButton
+        onPress={onRefresh}
+        refreshing={refreshing}
+        bottom={80}
       />
 
       <ScrollView

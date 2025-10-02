@@ -23,6 +23,7 @@ import Header from '../../components/Header';
 import { supabase } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
 import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 const SchoolDetails = ({ navigation }) => {
   const { user } = useAuth();
@@ -68,6 +69,19 @@ const SchoolDetails = ({ navigation }) => {
     description: '',
     is_primary: false,
   });
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([loadSchoolDetails(), loadUpiSettings()]);
+    } catch (error) {
+      console.error('Error refreshing school details:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     // 🚀 ENHANCED: Only load data when tenant is ready
@@ -919,6 +933,13 @@ const SchoolDetails = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <Header title="School Details" showBack={true} onBack={() => navigation.goBack()} />
+      
+      {/* Floating Refresh Button - Web Only */}
+      <FloatingRefreshButton
+        onPress={handleRefresh}
+        refreshing={refreshing}
+        bottom={80}
+      />
       
       {/* 🚀 ENHANCED: Show tenant context info */}
       <View style={styles.tenantBanner}>

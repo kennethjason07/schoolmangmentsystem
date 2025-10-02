@@ -28,6 +28,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { PieChart } from 'react-native-chart-kit';
 import Header from '../../components/Header';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import StatCard from '../../components/StatCard';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import CrossPlatformPieChart from '../../components/CrossPlatformPieChart';
@@ -1028,6 +1029,13 @@ const ExpenseManagement = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <Header title="Expense Management" navigation={navigation} showBack={true} />
+      
+      {/* Floating Refresh Button - Web Only */}
+      <FloatingRefreshButton
+        onPress={onRefresh}
+        refreshing={refreshing}
+        bottom={80}
+      />
       
       <View style={styles.scrollWrapper}>
         <ScrollView

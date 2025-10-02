@@ -37,6 +37,7 @@ import { supabase, TABLES } from '../../utils/supabase';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 const StationaryManagement = ({ navigation }) => {
   const { user } = useAuth();

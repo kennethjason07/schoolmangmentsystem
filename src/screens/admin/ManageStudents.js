@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import StudentFeeCard from '../../components/StudentFeeCard';
 import { Picker } from '@react-native-picker/picker';
 import { useNavigation } from '@react-navigation/native';
@@ -1751,6 +1752,14 @@ const ManageStudents = () => {
     <View style={styles.container}>
       {/* Use the proper Header component for consistent profile photo loading */}
       <Header title="Manage Students" showBack={true} />
+      
+      {/* Floating Refresh Button - Web Only - Positioned to avoid FAB overlap */}
+      <FloatingRefreshButton
+        onPress={onRefresh}
+        refreshing={refreshing}
+        bottom={140}
+        right={30}
+      />
 
       <View style={styles.scrollWrapper}>
         {/* Filters Section */}

@@ -30,6 +30,7 @@ import { getNextReceiptNumber } from '../../utils/receiptCounter';
 import { loadLogoWithFallbacks, validateImageData } from '../../utils/robustLogoLoader';
 import LogoDisplay from '../../components/LogoDisplay';
 import { useFocusEffect } from '@react-navigation/native';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 const ClassStudentDetails = ({ route, navigation }) => {
   const { classData } = route.params;
@@ -3102,6 +3103,12 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
           transactionData={upiTransactionData}
         />
       )}
+      
+      <FloatingRefreshButton 
+        onRefresh={loadClassStudentDetails}
+        isRefreshing={loading || refreshing}
+        bottom={80}
+      />
     </View>
   );
 };

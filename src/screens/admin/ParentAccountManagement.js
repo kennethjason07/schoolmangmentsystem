@@ -17,6 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useTenantAccess } from '../../utils/tenantHelpers';
 
@@ -640,6 +641,13 @@ ${fullyVerified ? '✅ Both login account and parent record verified' : userVeri
   return (
     <View style={styles.container}>
       <Header title="Parent Account Management" showBack={true} onBack={() => navigation.goBack()} />
+      
+      {/* Floating Refresh Button - Web Only */}
+      <FloatingRefreshButton
+        onPress={onRefresh}
+        refreshing={refreshing}
+        bottom={80}
+      />
       
       <ScrollView
         style={styles.content}

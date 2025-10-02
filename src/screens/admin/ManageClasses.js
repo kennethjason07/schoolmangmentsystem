@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import { Picker } from '@react-native-picker/picker';
 import { supabase, TABLES } from '../../utils/supabase';
 import { useTenantAccess, tenantDatabase, getCachedTenantId } from '../../utils/tenantHelpers';
@@ -1069,6 +1070,13 @@ const ManageClasses = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <Header title="Manage Classes" showBack={true} />
+      
+      {/* Floating Refresh Button - Web Only */}
+      <FloatingRefreshButton
+        onPress={onRefresh}
+        refreshing={refreshing}
+        bottom={80}
+      />
       
       <View style={styles.header}>
         <View style={styles.headerInfo}>

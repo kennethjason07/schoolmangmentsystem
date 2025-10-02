@@ -13,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import UpcomingFeatureBanner from '../../components/UpcomingFeatureBanner';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 const { width } = Dimensions.get('window');
 
@@ -235,6 +236,12 @@ const AutoGrading = ({ navigation }) => {
         <View style={styles.bottomSpacer} />
         </ScrollView>
       </View>
+      
+      <FloatingRefreshButton 
+        onRefresh={onRefresh}
+        isRefreshing={refreshing}
+        bottom={80}
+      />
     </View>
   );
 };

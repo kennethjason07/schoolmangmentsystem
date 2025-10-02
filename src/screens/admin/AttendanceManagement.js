@@ -18,6 +18,7 @@ import {
 import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import { supabase, dbHelpers, TABLES } from '../../utils/supabase';
 import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
 import { format } from 'date-fns';
@@ -1488,6 +1489,13 @@ const AttendanceManagement = () => {
   return (
     <View style={styles.container}>
       <Header title="Attendance Management" showBack={true} />
+
+      {/* Floating Refresh Button - Web Only */}
+      <FloatingRefreshButton
+        onPress={loadAllData}
+        refreshing={loading}
+        bottom={80}
+      />
 
       {/* Tab Navigation at Top */}
       <View style={styles.tabContainer}>

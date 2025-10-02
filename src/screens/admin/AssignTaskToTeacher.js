@@ -19,6 +19,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import DropDownPicker from 'react-native-dropdown-picker';
 import { supabase, dbHelpers, TABLES, getUserTenantId } from '../../utils/supabase';
 import { useTenant } from '../../contexts/TenantContext';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 const { width } = Dimensions.get('window');
 
@@ -871,6 +872,12 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
           </View>
         </View>
       </Modal>
+      
+      <FloatingRefreshButton 
+        onRefresh={loadAllData}
+        isRefreshing={loading}
+        bottom={80}
+      />
     </View>
   );
 };

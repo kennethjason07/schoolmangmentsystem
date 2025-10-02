@@ -14,6 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 const LinkExistingParent = ({ route, navigation }) => {
   const { student } = route.params;
@@ -349,6 +350,12 @@ const LinkExistingParent = ({ route, navigation }) => {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+      
+      <FloatingRefreshButton 
+        onRefresh={searchParentAccounts}
+        isRefreshing={loading || searchLoading}
+        bottom={80}
+      />
     </View>
   );
 };

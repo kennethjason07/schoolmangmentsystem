@@ -55,6 +55,7 @@ import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
 import { useTenantAccess, tenantDatabase, getCachedTenantId } from '../../utils/tenantHelpers';
 import useDataCache from '../../hooks/useDataCache';
 import { batchWithTenant } from '../../utils/batchOperations';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -856,6 +857,12 @@ const AnalyticsReports = ({ navigation }) => {
           </View>
         </View>
       </ScrollView>
+      
+      <FloatingRefreshButton 
+        onRefresh={onRefresh}
+        isRefreshing={refreshing}
+        bottom={80}
+      />
     </View>
   );
 };

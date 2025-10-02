@@ -8,6 +8,7 @@ import { formatCurrency } from '../../utils/helpers';
 import { Ionicons } from '@expo/vector-icons';
 import * as Animatable from 'react-native-animatable';
 import FeeService from '../../services/FeeService';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 export default function FeeClassDetails() {
   const route = useRoute();
@@ -354,6 +355,12 @@ export default function FeeClassDetails() {
           </ScrollView>
         </View>
       )}
+      
+      <FloatingRefreshButton 
+        onRefresh={loadData}
+        isRefreshing={loading}
+        bottom={80}
+      />
     </View>
   );
 }

@@ -16,6 +16,7 @@ import {
   Pressable,
 } from 'react-native';
 import Header from '../../components/Header';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import { useNavigation } from '@react-navigation/native';
 import CrossPlatformDatePicker from '../../components/CrossPlatformDatePicker';
 import { Ionicons } from '@expo/vector-icons';
@@ -1387,6 +1388,13 @@ const FeeManagement = () => {
         rightIcon="pricetags-outline"
         rightIconOnPress={() => navigation.navigate('DiscountManagement')}
         rightIconTitle="Manage Discounts"
+      />
+      
+      {/* Floating Refresh Button - Web Only */}
+      <FloatingRefreshButton
+        onPress={refreshWithCacheClear}
+        refreshing={refreshing}
+        bottom={80}
       />
       
       {loading ? (

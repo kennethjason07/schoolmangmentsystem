@@ -18,6 +18,7 @@ import { supabase, TABLES } from '../../utils/supabase';
 import { createBulkMarksNotifications } from '../../utils/marksNotificationHelpers';
 import { useTenantAccess, tenantDatabase, createTenantQuery, getCachedTenantId } from '../../utils/tenantHelpers';
 import { useAuth } from '../../utils/AuthContext';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 const MarksEntry = () => {
   const navigation = useNavigation();
@@ -855,6 +856,12 @@ const MarksEntry = () => {
           </View>
         </View>
       )}
+      
+      <FloatingRefreshButton 
+        onRefresh={loadData}
+        isRefreshing={loading}
+        bottom={80}
+      />
     </View>
   );
 };

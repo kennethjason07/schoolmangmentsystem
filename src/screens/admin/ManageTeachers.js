@@ -21,6 +21,7 @@ import { supabase, TABLES } from '../../utils/supabase';
 import { ActivityIndicator as PaperActivityIndicator } from 'react-native-paper';
 import { useAuth } from '../../utils/AuthContext';
 import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 // Will be fetched from Supabase
 const ManageTeachers = ({ navigation, route }) => {
@@ -1080,6 +1081,13 @@ const ManageTeachers = ({ navigation, route }) => {
   return (
     <View style={styles.container}>
       <Header title="Manage Teachers" showBack={true} />
+      
+      {/* Floating Refresh Button - Web Only */}
+      <FloatingRefreshButton
+        onPress={onRefresh}
+        refreshing={refreshing}
+        bottom={80}
+      />
       
       {/* 🚀 Enhanced: Tenant Context Banner */}
       {tenantName && (

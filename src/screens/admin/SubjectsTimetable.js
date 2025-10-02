@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, TextInput, Button, Alert, ScrollView, ActivityIndicator, RefreshControl, Platform, Dimensions } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import { format } from 'date-fns';
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -2026,6 +2027,15 @@ const SubjectsTimetable = ({ route }) => {
   return (
     <View style={styles.container}>
       <Header title="Subjects & Timetable" showBack={true} />
+      
+      {/* Floating Refresh Button - Web Only - Positioned to avoid FAB overlap */}
+      <FloatingRefreshButton
+        onPress={onRefresh}
+        refreshing={refreshing}
+        bottom={140}
+        right={30}
+      />
+      
       <View style={styles.tabBar}>
         <TouchableOpacity style={[styles.tab, tab === 'subjects' && styles.activeTab]} onPress={() => setTab('subjects')}>
           <Text style={styles.tabText}>Subjects</Text>

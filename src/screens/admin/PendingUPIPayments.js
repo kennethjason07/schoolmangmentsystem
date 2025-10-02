@@ -22,6 +22,7 @@ import { UPIDBService } from '../../services/UPIDBService';
 import { useAuth } from '../../utils/AuthContext';
 import { useTenantAccess } from '../../utils/tenantHelpers';
 import { formatReferenceNumberForDisplay, validateReferenceNumberFormat } from '../../utils/referenceNumberGenerator';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 const { width } = Dimensions.get('window');
 

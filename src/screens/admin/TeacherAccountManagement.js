@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useTenantAccess } from '../../utils/tenantHelpers';
 
@@ -444,6 +445,13 @@ Please share these credentials with the teacher.`,
   return (
     <View style={styles.container}>
       <Header title="Teacher Accounts" showBack={true} />
+      
+      {/* Floating Refresh Button - Web Only */}
+      <FloatingRefreshButton
+        onPress={onRefresh}
+        refreshing={refreshing}
+        bottom={80}
+      />
       
       <ScrollView
         style={styles.content}
