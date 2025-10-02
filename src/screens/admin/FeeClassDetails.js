@@ -229,6 +229,8 @@ export default function FeeClassDetails() {
                                 sum + (payment.amount_paid || 0), 0
                               );
                               
+                              // Note: This is fallback logic when FeeService fails
+                              // In the fallback, we don't have concession data, so we use payment-based status only
                               let status = 'Unpaid';
                               if (paidAmount >= feeType.amount) {
                                 status = 'Paid';

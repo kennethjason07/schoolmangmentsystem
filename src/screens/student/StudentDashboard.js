@@ -1072,10 +1072,19 @@ const StudentDashboard = ({ navigation }) => {
     },
   ];
 
-  // Get fee status using feeStructure (same as Fee Payment screen)
+  // Get fee status using feeStructure with concession handling
   const getFeeStatus = () => {
     if (!feeStructure) {
       return 'Loading...';
+    }
+    
+    // Check for concession-based status first
+    if (feeStructure.totalConcessions >= feeStructure.totalDue && feeStructure.totalDue > 0) {
+      return 'Free';
+    }
+    
+    if (feeStructure.totalConcessions > 0 && feeStructure.totalConcessions < feeStructure.totalDue) {
+      return 'Concession Applied';
     }
     
     if (feeStructure.totalDue === 0) {
@@ -1086,10 +1095,23 @@ const StudentDashboard = ({ navigation }) => {
     return `₹${feeStructure.outstanding.toLocaleString()}`;
   };
 
-  // Get fee status color for UI
+  // Get fee status color for UI with concession handling
   const getFeeStatusColorForUI = () => {
-    if (!feeStructure || feeStructure.totalDue === 0) {
-      return '#4CAF50'; // Green for no fees or paid
+    if (!feeStructure) {
+      return '#4CAF50'; // Green for loading
+    }
+    
+    // Check for concession-based colors first
+    if (feeStructure.totalConcessions >= feeStructure.totalDue && feeStructure.totalDue > 0) {
+      return '#2196F3'; // Blue for free (full concession)
+    }
+    
+    if (feeStructure.totalConcessions > 0 && feeStructure.totalConcessions < feeStructure.totalDue) {
+      return '#9C27B0'; // Purple for partial concession
+    }
+    
+    if (feeStructure.totalDue === 0) {
+      return '#4CAF50'; // Green for no fees
     }
     
     if (feeStructure.outstanding > 0) {

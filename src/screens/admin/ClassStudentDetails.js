@@ -471,10 +471,12 @@ const ClassStudentDetails = ({ route, navigation }) => {
         const paymentPercentage = adjustedFeeAmount > 0 ? 
           Math.min(100, (totalPaid / adjustedFeeAmount) * 100) : 0;
 
-        // Get payment status - FIXED logic to match mobile
+        // Get payment status - Enhanced logic with concession-based banners for admin
         let paymentStatus;
-        if (adjustedFeeAmount === 0) {
-          paymentStatus = 'Paid'; // No fees required (full concession)
+        if (totalConcessions >= totalBaseFeeStructure && totalBaseFeeStructure > 0) {
+          paymentStatus = 'Free'; // Full concession covers all fees
+        } else if (totalConcessions > 0 && totalConcessions < totalBaseFeeStructure) {
+          paymentStatus = 'Concession'; // Partial concession applied
         } else if (totalPaid >= adjustedFeeAmount) {
           paymentStatus = 'Paid'; // Fully paid against adjusted fee
         } else if (totalPaid > 0) {
@@ -1644,6 +1646,8 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
         styles.studentCard,
         {
           borderLeftColor: student.paymentStatus === 'Paid' ? '#4CAF50' :
+            student.paymentStatus === 'Free' ? '#2196F3' :
+            student.paymentStatus === 'Concession' ? '#9C27B0' :
             student.paymentStatus === 'Partial' ? '#FF9800' : '#F44336'
         }
       ]}
@@ -1662,6 +1666,8 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
           styles.statusBadge,
           {
             backgroundColor: student.paymentStatus === 'Paid' ? '#4CAF50' :
+              student.paymentStatus === 'Free' ? '#2196F3' :
+              student.paymentStatus === 'Concession' ? '#9C27B0' :
               student.paymentStatus === 'Partial' ? '#FF9800' : '#F44336'
           }
         ]}>

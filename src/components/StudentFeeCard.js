@@ -68,19 +68,45 @@ const StudentFeeCard = ({
       case 'paid':
       case 'fully_paid':
         return '#4CAF50'; // Green
+      case 'free':
+      case 'Free':
+        return '#2196F3'; // Blue for free (due to full concession)
+      case 'concession':
+      case 'Concession':
+        return '#9C27B0'; // Purple for partial concession
       case 'partial':
       case 'partially_paid':
+      case 'Partial':
         return '#FF9800'; // Orange
+      case 'pending':
+      case 'Pending':
       case 'unpaid':
       default:
         return '#F44336'; // Red
     }
   };
 
-  const getStatusText = (status, totalOutstanding) => {
+  const getStatusText = (status, totalOutstanding, feeData) => {
+    // Check for concession-based statuses first
+    if (feeData && feeData.fees) {
+      const totalConcessions = feeData.fees.totalDiscounts || 0;
+      const totalBaseFee = feeData.fees.totalBaseFee || (feeData.fees.totalDue + totalConcessions);
+      
+      // If concession equals or exceeds total fees, show "Free"
+      if (totalConcessions >= totalBaseFee && totalBaseFee > 0) {
+        return 'Free';
+      }
+      
+      // If partial concession is applied, show "Concession"
+      if (totalConcessions > 0 && totalConcessions < totalBaseFee) {
+        return 'Concession';
+      }
+    }
+    
+    // Original payment-based logic
     if (totalOutstanding <= 0) return 'Paid';
     if (status === 'partial' || status === 'partially_paid') return 'Partial';
-    return 'Unpaid';
+    return 'Pending';
   };
 
   if (loading) {
@@ -123,8 +149,8 @@ const StudentFeeCard = ({
 
   const { fees, student, discounts } = feeData;
   const hasDiscounts = discounts.hasDiscounts;
-  const statusColor = getStatusColor(fees.status);
-  const statusText = getStatusText(fees.status, fees.totalOutstanding);
+  const statusText = getStatusText(fees.status, fees.totalOutstanding, feeData);
+  const statusColor = getStatusColor(statusText);
 
   return (
     <TouchableOpacity 

@@ -118,6 +118,18 @@ const WebFeeManagement = ({
         // Outstanding = (Total Fees - Concessions) - Total Paid
         const outstanding = Math.max(0, (totalFees - totalConcessions) - totalPaid);
 
+        // Determine payment status based on concessions and payments
+        let paymentStatus;
+        if (totalConcessions >= totalFees && totalFees > 0) {
+          paymentStatus = 'free'; // Full concession
+        } else if (totalConcessions > 0) {
+          paymentStatus = 'concession'; // Partial concession
+        } else if (outstanding > 0) {
+          paymentStatus = 'pending'; // Has outstanding amount
+        } else {
+          paymentStatus = 'paid'; // Fully paid
+        }
+
         return {
           ...student,
           totalFees: totalFees,
@@ -126,7 +138,7 @@ const WebFeeManagement = ({
           outstanding: outstanding,
           payments: studentPayments,
           concessions: studentConcessions,
-          paymentStatus: outstanding > 0 ? 'pending' : 'paid'
+          paymentStatus: paymentStatus
         };
       });
 
@@ -170,6 +182,8 @@ const WebFeeManagement = ({
   const getPaymentStatusColor = (status) => {
     switch (status) {
       case 'paid': return '#4CAF50';
+      case 'free': return '#2196F3';
+      case 'concession': return '#9C27B0';
       case 'pending': return '#FF9800';
       case 'overdue': return '#F44336';
       default: return '#666';
@@ -197,7 +211,9 @@ const WebFeeManagement = ({
             styles.statusText,
             { color: getPaymentStatusColor(student.paymentStatus) }
           ]}>
-            {student.paymentStatus === 'paid' ? 'Paid' : 'Pending'}
+            {student.paymentStatus === 'paid' ? 'Paid' : 
+             student.paymentStatus === 'free' ? 'Free' :
+             student.paymentStatus === 'concession' ? 'Concession' : 'Pending'}
           </Text>
         </View>
       </View>

@@ -2976,17 +2976,30 @@ const ParentDashboard = ({ navigation }) => {
       };
     }
 
-    // EXACT SAME calculation as fee distribution summary "Outstanding" card
+    // Calculate outstanding and check for concessions
     const totalOutstanding = fees.reduce((sum, fee) => sum + (fee.remainingAmount || 0), 0);
     const formattedOutstanding = `₹${totalOutstanding.toLocaleString()}`;
     
-    // Count fees by status (for potential subtitle use)
+    // Check for concession-based fees
+    const totalConcessions = fees.reduce((sum, fee) => sum + (fee.concessionAmount || 0), 0);
+    const totalBaseFee = fees.reduce((sum, fee) => sum + (fee.baseFee || fee.amount || 0), 0);
+    
+    // Count fees by status including new concession statuses
     const paidCount = fees.filter(f => f.status === 'paid').length;
     const partialCount = fees.filter(f => f.status === 'partial').length;
     const unpaidCount = fees.filter(f => f.status === 'unpaid').length;
+    const freeCount = fees.filter(f => f.concessionAmount >= f.baseFee && f.baseFee > 0).length;
+    const concessionCount = fees.filter(f => f.concessionAmount > 0 && f.concessionAmount < f.baseFee).length;
 
-    // Use same color logic as fee distribution summary
-    const color = totalOutstanding > 0 ? '#FF5722' : '#4CAF50';
+    // Use color logic with concession handling
+    let color = '#4CAF50'; // Default green
+    if (freeCount > 0 && totalOutstanding === 0) {
+      color = '#2196F3'; // Blue for free (full concession)
+    } else if (concessionCount > 0) {
+      color = '#9C27B0'; // Purple for partial concession
+    } else if (totalOutstanding > 0) {
+      color = '#FF5722'; // Red for outstanding
+    }
     
     return {
       status: formattedOutstanding,
@@ -2995,6 +3008,8 @@ const ParentDashboard = ({ navigation }) => {
       unpaidCount,
       partialCount,
       paidCount,
+      freeCount,
+      concessionCount,
       outstandingAmount: totalOutstanding,
       formattedOutstanding
     };
