@@ -12,6 +12,9 @@ const AuthContext = createContext({});
 // Debug flag - set to false to disable verbose auth logging
 const DEBUG_AUTH_LOGS = false;
 
+// Global upload state to optimize auth checks during uploads
+let isUploadInProgress = false;
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -19,6 +22,14 @@ export const useAuth = () => {
   }
   return context;
 };
+
+// Upload state management helpers
+export const setUploadInProgress = (inProgress) => {
+  isUploadInProgress = inProgress;
+  console.log(`📸 Upload state changed: ${inProgress ? 'IN PROGRESS' : 'COMPLETED'}`);
+};
+
+export const getUploadInProgress = () => isUploadInProgress;
 
 // Helper function to count tenant resources
 const getTenantResourceCount = async (tenantId, resourceType) => {
@@ -228,30 +239,39 @@ export const AuthProvider = ({ children }) => {
           key: supabase.supabaseKey ? 'Set' : 'Missing'
         });
         
-        // 🚑 CONNECTION HEALTH CHECK: Test basic connectivity first
-        console.log('🎡 Performing connection health check...');
-        try {
+        // Skip health check if upload is in progress to prevent unnecessary timeouts
+        if (isUploadInProgress) {
+          console.log('⚡ Skipping health check - upload in progress');
+        } else {
+          // 🚑 CONNECTION HEALTH CHECK: Test basic connectivity first (with generous timeout)
+          console.log('🎡 Performing connection health check...');
+          try {
+            // Much more generous timeout - 15 seconds for health check
+            const HEALTH_CHECK_TIMEOUT = 15000;
+          
           const healthCheck = await Promise.race([
             supabase.from('users').select('count', { count: 'exact', head: true }).limit(0),
             new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Health check timeout')), 3000)
+              setTimeout(() => reject(new Error('Health check timeout')), HEALTH_CHECK_TIMEOUT)
             )
           ]);
           
           if (healthCheck.error && !healthCheck.error.message?.includes('count')) {
-            throw new Error('Database connectivity issue: ' + healthCheck.error.message);
+            console.warn('⚠️ Health check returned error, but continuing anyway:', healthCheck.error.message);
+            // Don't fail on health check errors - continue with normal auth process
           }
           
           console.log('✅ Connection health check passed');
         } catch (healthError) {
           console.warn('⚠️ Connection health check failed:', healthError.message);
           
-          // If health check fails, immediately go to fallback mode
-          if (healthError.message?.includes('timeout') || 
-              healthError.message?.includes('connectivity') ||
-              healthError.message?.includes('network')) {
+          // Only go to offline mode for severe network issues, not timeouts
+          if (healthError.message?.includes('Network request failed') || 
+              healthError.message?.includes('Unable to connect') ||
+              healthError.message?.includes('ERR_NETWORK') ||
+              healthError.message?.includes('ERR_INTERNET_DISCONNECTED')) {
             
-            console.log('🚨 Database unreachable, using immediate fallback authentication');
+            console.log('🚨 Network completely unavailable, using offline authentication');
             const immediateUserData = {
               id: authUser.id,
               email: authUser.email,
@@ -265,44 +285,34 @@ export const AuthProvider = ({ children }) => {
               offline_mode: true
             };
             
-            console.log('🌐 Setting immediate fallback user (offline mode):', immediateUserData);
+            console.log('🌐 Setting offline user due to network failure:', immediateUserData);
             setUser(immediateUserData);
             setUserType('admin');
             setLoading(false);
             return;
+          } else {
+            // For timeouts or other issues, continue with normal auth process
+            console.log('⚠️ Health check failed but network may be available - continuing with normal auth');
           }
         }
-        
-        // 📶 SMART TIMEOUT: Adjust based on connection speed
-        let baseTimeout = Platform.OS === 'web' ? 5000 : 6000;
-        
-        // Detect connection speed based on health check response time
-        const healthCheckStart = performance.now();
-        const healthCheckEnd = performance.now();
-        const healthCheckDuration = healthCheckEnd - healthCheckStart;
-        
-        console.log(`📶 Health check took ${Math.round(healthCheckDuration)}ms`);
-        
-        // Adjust timeout based on connection speed
-        let DB_TIMEOUT;
-        if (healthCheckDuration < 500) {
-          DB_TIMEOUT = baseTimeout; // Fast connection
-          console.log('🏁 Fast connection detected, using standard timeout');
-        } else if (healthCheckDuration < 1500) {
-          DB_TIMEOUT = baseTimeout * 1.5; // Medium connection
-          console.log('🚶 Medium connection detected, using extended timeout');
-        } else {
-          DB_TIMEOUT = baseTimeout * 2; // Slow connection
-          console.log('🐌 Slow connection detected, using maximum timeout');
         }
+        
+        // 📶 OPTIMIZED TIMEOUT: More aggressive for slow connections
+        let baseTimeout = Platform.OS === 'web' ? 15000 : 20000; // Much more generous timeout for slow networks
+        
+        // Use a fixed reasonable timeout since health check timing isn't reliable
+        // In production, connection speed varies and timing the health check above is problematic
+        const DB_TIMEOUT = baseTimeout; // Use consistent timeout
+        
+        console.log(`📶 Using consistent timeout: ${DB_TIMEOUT}ms`);
         
         // First try with optimized exact email match
         console.log('📧 [AUTH] Starting optimized query for email:', authUser.email);
         
-        // Add aggressive retry mechanism with exponential backoff
+        // Add improved retry mechanism with exponential backoff
         const executeQueryWithRetry = async (query, retryCount = 0) => {
-          const MAX_RETRIES = 1; // Reduce retries to fail faster
-          const RETRY_DELAY = 1000; // 1 second - faster retry
+          const MAX_RETRIES = 3; // More retries for very slow connections
+          const RETRY_DELAY = 2000; // Longer delay for network recovery
           
           try {
             console.log(`📡 Executing query attempt ${retryCount + 1}/${MAX_RETRIES + 1}...`);
@@ -331,11 +341,21 @@ export const AuthProvider = ({ children }) => {
           } catch (error) {
             console.warn(`❌ Query attempt ${retryCount + 1} failed:`, error.message);
             
-            if (retryCount < MAX_RETRIES && 
-                (error.message?.includes('timeout') || 
-                 error.message?.includes('network') ||
-                 error.message?.includes('connection') ||
-                 error.message?.includes('fetch'))) {
+            // More comprehensive retry conditions including Supabase-specific errors
+            const shouldRetry = retryCount < MAX_RETRIES && (
+              error.message?.includes('timeout') || 
+              error.message?.includes('network') ||
+              error.message?.includes('connection') ||
+              error.message?.includes('fetch') ||
+              error.message?.includes('PGRST') || // PostgREST errors
+              error.message?.includes('Failed to fetch') ||
+              error.message?.includes('NetworkError') ||
+              error.message?.includes('AbortError') ||
+              error.code === 'ECONNRESET' ||
+              error.code === 'ETIMEDOUT'
+            );
+            
+            if (shouldRetry) {
               
               console.log(`🔁 Retrying in ${RETRY_DELAY}ms... (${retryCount + 2}/${MAX_RETRIES + 1})`);
               await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
@@ -382,7 +402,7 @@ export const AuthProvider = ({ children }) => {
       if (error) {
         console.error('❌ Error fetching user profile:', error);
         
-        // Enhanced fallback authentication for any query failure
+        // Enhanced fallback authentication for any query failure - more immediate for timeouts
         if (error.message?.includes('timeout') || 
             error.message?.includes('network') || 
             error.message?.includes('connection') ||
@@ -391,6 +411,7 @@ export const AuthProvider = ({ children }) => {
           
           console.log('🔄 Database connection issues detected, using enhanced fallback authentication');
           console.log('🔧 Error details:', { message: error.message, name: error.name });
+          console.log('📝 This is normal for slow networks - app will work with fallback mode');
           
           // Create enhanced fallback user object from auth data
           const fallbackUserData = {
