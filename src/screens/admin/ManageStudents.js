@@ -185,6 +185,7 @@ const ManageStudents = () => {
           gender,
           academic_year,
           class_id,
+          photo_url,
           created_at,
           classes:class_id(
             id,
@@ -1658,14 +1659,16 @@ const ManageStudents = () => {
         <View style={styles.studentInfoRow}>
           <View style={styles.leftSection}>
             <View style={styles.avatarContainer}>
-              {item.profile_url ? (
+              {item.photo_url ? (
                 <Image
-                  source={{ uri: item.profile_url }}
+                  source={{ uri: item.photo_url }}
                   style={styles.avatarImage}
-                  onError={() => console.log('📸 Failed to load profile image for', item.name)}
+                  onError={() => console.log('📸 Failed to load student photo for', item.name)}
                 />
               ) : (
-                <Ionicons name="person" size={24} color="#2196F3" />
+                <View style={styles.avatarPlaceholder}>
+                  <Ionicons name="person" size={24} color="#2196F3" />
+                </View>
               )}
             </View>
 
@@ -2604,6 +2607,14 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 24,
     backgroundColor: '#f0f0f0',
+  },
+  avatarPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#E3F2FD',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   studentDetails: {
     flex: 1,
