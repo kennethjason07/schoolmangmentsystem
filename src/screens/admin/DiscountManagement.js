@@ -812,11 +812,11 @@ const DiscountManagement = ({ navigation, route }) => {
       {renderDistributionModal()}
       
       <FloatingRefreshButton 
-        onRefresh={() => {
+        onPress={() => {
           setRefreshing(true);
           loadStudentDiscounts().finally(() => setRefreshing(false));
         }}
-        isRefreshing={loading || refreshing}
+        refreshing={loading || refreshing}
         bottom={80}
       />
     </View>

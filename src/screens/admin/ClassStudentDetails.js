@@ -22,6 +22,7 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import Header from '../../components/Header';
 import ExportModal from '../../components/ExportModal';
+import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { formatCurrency } from '../../utils/helpers';
 import { format } from 'date-fns';
@@ -3188,8 +3189,8 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
       )}
       
       <FloatingRefreshButton 
-        onRefresh={loadClassStudentDetails}
-        isRefreshing={loading || refreshing}
+        onPress={loadClassStudentDetails}
+        refreshing={loading || refreshing}
         bottom={80}
       />
     </View>

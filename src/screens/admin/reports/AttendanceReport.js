@@ -129,13 +129,17 @@ const AttendanceReport = ({ navigation }) => {
     { key: 'custom', label: 'Custom Range' },
   ];
 
-  // Load initial data when tenant is ready
+  // Ensure initial data loads only once after tenant is ready
+  const initialLoadRef = useRef(false);
+
+  // Load initial data when tenant is ready (once)
   useEffect(() => {
-    if (tenantAccess.isReady && !tenantAccess.isLoading) {
-      console.log('🚀 [AttendanceReport] Tenant ready, loading initial data...');
-      loadInitialData();
-    }
-  }, [tenantAccess.isReady, tenantAccess.isLoading, loadInitialData]);
+    if (!tenantAccess.isReady || tenantAccess.isLoading) return;
+    if (initialLoadRef.current) return;
+    initialLoadRef.current = true;
+    console.log('🚀 [AttendanceReport] Tenant ready, loading initial data...');
+    loadInitialData();
+  }, [tenantAccess.isReady, tenantAccess.isLoading]);
 
   // Optimized filter change handler - only reload attendance data, keep static data cached
   useEffect(() => {
@@ -143,7 +147,7 @@ const AttendanceReport = ({ navigation }) => {
       console.log('🔄 [AttendanceReport] Filter changed, reloading attendance data only...');
       loadAttendanceData(); // Only reload dynamic attendance data
     }
-  }, [selectedClass, selectedSection, selectedDateRange, startDate, endDate, loading, tenantAccess.isReady, loadAttendanceData]);
+  }, [selectedClass, selectedSection, selectedDateRange, startDate, endDate, loading, tenantAccess.isReady]);
 
   // Handle tenant errors
   if (tenantAccess.error) {
@@ -174,7 +178,7 @@ const AttendanceReport = ({ navigation }) => {
     );
   }
 
-  const loadInitialData = useCallback(async () => {
+  async function loadInitialData() {
     setLoading(true);
     try {
       console.log('🚀 [AttendanceReport] Loading initial data with intelligent caching...');
@@ -202,7 +206,7 @@ const AttendanceReport = ({ navigation }) => {
     } finally {
       setLoading(false);
     }
-  }, [tenantAccess.isReady, loadClasses, loadStudents, loadAttendanceData]);
+  }
 
   const loadClasses = useCallback(async () => {
     try {
@@ -327,7 +331,7 @@ const AttendanceReport = ({ navigation }) => {
     return { start, end };
   };
 
-  const loadAttendanceData = useCallback(async () => {
+  async function loadAttendanceData() {
     try {
       const { start, end } = getDateRange();
 
@@ -402,7 +406,7 @@ const AttendanceReport = ({ navigation }) => {
     } catch (error) {
       console.error('❌ Error loading attendance data:', error);
     }
-  }, [selectedClass, selectedDateRange, startDate, endDate, cache, validateTenantReadiness, getDateRange, calculateStatistics]);
+  }
 
   const calculateStatistics = useCallback((data) => {
     const today = new Date().toISOString().split('T')[0];

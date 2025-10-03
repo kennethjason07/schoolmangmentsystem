@@ -402,8 +402,8 @@ export default function FeeClassDetails() {
       )}
       
       <FloatingRefreshButton 
-        onRefresh={loadData}
-        isRefreshing={loading}
+        onPress={loadData}
+        refreshing={loading}
         bottom={80}
       />
     </View>

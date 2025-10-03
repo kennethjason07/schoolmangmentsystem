@@ -859,8 +859,8 @@ const AnalyticsReports = ({ navigation }) => {
       </ScrollView>
       
       <FloatingRefreshButton 
-        onRefresh={onRefresh}
-        isRefreshing={refreshing}
+        onPress={onRefresh}
+        refreshing={refreshing}
         bottom={80}
       />
     </View>

@@ -858,8 +858,8 @@ const MarksEntry = () => {
       )}
       
       <FloatingRefreshButton 
-        onRefresh={loadData}
-        isRefreshing={loading}
+        onPress={loadData}
+        refreshing={loading}
         bottom={80}
       />
     </View>
