@@ -1089,21 +1089,6 @@ const ManageTeachers = ({ navigation, route }) => {
         bottom={80}
       />
       
-      {/* 🚀 Enhanced: Tenant Context Banner */}
-      {tenantName && (
-        <View style={styles.tenantBanner}>
-          <View style={styles.tenantBannerContent}>
-            <Ionicons name="business" size={16} color="#4CAF50" />
-            <Text style={styles.tenantBannerText}>
-              Managing: {tenantName}
-            </Text>
-          </View>
-          {tenantLoading && (
-            <PaperActivityIndicator size={12} color="#4CAF50" />
-          )}
-        </View>
-      )}
-      
       {loading && (
         <View style={styles.loadingOverlay}>
           <PaperActivityIndicator size="large" color="#4CAF50" />
