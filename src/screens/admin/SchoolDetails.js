@@ -941,13 +941,6 @@ const SchoolDetails = ({ navigation }) => {
         bottom={80}
       />
       
-      {/* 🚀 ENHANCED: Show tenant context info */}
-      <View style={styles.tenantBanner}>
-        <Ionicons name="school" size={16} color="#4CAF50" />
-        <Text style={styles.tenantBannerText}>Managing: {tenantName}</Text>
-        <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-      </View>
-      
       <View style={styles.scrollWrapper}>
         <ScrollView
           style={styles.scrollContainer}
