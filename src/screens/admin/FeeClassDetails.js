@@ -229,7 +229,12 @@ export default function FeeClassDetails() {
                 
                     return (
                       <View key={item.id} style={styles.studentRowMulti}>
-                        <Text style={styles.studentNameMulti}>{item.full_name}</Text>
+                        <View style={{ flex: 1, paddingRight: 8 }}>
+                          <Text style={styles.studentNameMulti}>{item.full_name || item.name}</Text>
+                          {item.parents?.name ? (
+                            <Text style={styles.parentName}>Parent: {item.parents.name}</Text>
+                          ) : null}
+                        </View>
                         <View style={{ flex: 1 }}>
                           {loadingFeeData ? (
                             <Text style={styles.loadingText}>Loading fee data...</Text>
@@ -351,7 +356,12 @@ export default function FeeClassDetails() {
                     
                     return (
                       <View key={item.id} style={styles.studentRow}>
-                        <Text style={styles.studentName}>{item.full_name}</Text>
+                        <View style={{ flex: 2, paddingRight: 8 }}>
+                          <Text style={styles.studentName}>{item.full_name || item.name}</Text>
+                          {item.parents?.name ? (
+                            <Text style={styles.parentName}>Parent: {item.parents.name}</Text>
+                          ) : null}
+                        </View>
                         <Text 
                           style={[styles.studentStatus, 
                             status === 'Paid' ? {color: '#4CAF50'} : 
@@ -516,8 +526,14 @@ const styles = StyleSheet.create({
     }),
   },
   studentName: {
-    flex: 2,
     fontSize: 15,
+    color: '#1a237e',
+    fontWeight: '600',
+  },
+  parentName: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
   },
   studentStatus: {
     flex: 1,
@@ -603,9 +619,8 @@ const styles = StyleSheet.create({
     }),
   },
   studentNameMulti: {
-    flex: 1,
     fontSize: 15,
-    fontWeight: 'bold',
+    fontWeight: '700',
     color: '#1a237e',
   },
   feeTypeDueRow: {

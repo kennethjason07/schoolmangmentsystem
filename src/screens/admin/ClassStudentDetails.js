@@ -411,6 +411,35 @@ const ClassStudentDetails = ({ route, navigation }) => {
       // 🎯 GET FEE CONCESSIONS FOR ALL STUDENTS (FIXED AMOUNTS)
       const studentIds = studentsData.map(s => s.id);
       let loadedConcessionsData = [];
+
+      // 👪 Fetch parent names for all students in this class
+      let parentNameMap = {};
+      try {
+        if (studentIds.length > 0) {
+          const { data: parentsRows, error: parentsError } = await supabase
+            .from('parents')
+            .select('student_id, name, relation')
+            .in('student_id', studentIds)
+            .eq('tenant_id', tenantId);
+          if (!parentsError && parentsRows) {
+            // Prefer Father, then Mother, then Guardian/first
+            const grouped = parentsRows.reduce((acc, row) => {
+              if (!acc[row.student_id]) acc[row.student_id] = [];
+              acc[row.student_id].push(row);
+              return acc;
+            }, {});
+            Object.keys(grouped).forEach(studentId => {
+              const rows = grouped[studentId];
+              const father = rows.find(r => r.relation === 'Father');
+              const mother = rows.find(r => r.relation === 'Mother');
+              const guardian = rows.find(r => r.relation === 'Guardian');
+              parentNameMap[studentId] = (father?.name) || (mother?.name) || (guardian?.name) || (rows[0]?.name) || null;
+            });
+          }
+        }
+      } catch (parentErr) {
+        console.warn('⚠️ Failed to load parent names:', parentErr);
+      }
       
       console.log('🎫 Fetching concessions for students:', studentIds);
       console.log('🎫 Academic Year:', academicYear);
@@ -428,7 +457,6 @@ const ClassStudentDetails = ({ route, navigation }) => {
         
         if (!concessionsError && concessions) {
           loadedConcessionsData = concessions;
-          console.log('🎫 Total concessions found:', loadedConcessionsData.length);
         }
       }
       
@@ -508,6 +536,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
         return {
           id: student.id,
           name: student.name,
+          parentName: parentNameMap[student.id] || null,
           admission_no: student.admission_no,
           admissionNo: student.admission_no, // Keep both for compatibility
           roll_no: student.roll_no,
@@ -1725,6 +1754,9 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
           <Text style={styles.studentDetails}>
             Roll: {student.rollNo || 'N/A'} • Admission: {student.admissionNo}
           </Text>
+          {student.parentName ? (
+            <Text style={styles.studentParent}>Parent: {student.parentName}</Text>
+          ) : null}
         </View>
         <View style={[
           styles.statusBadge,
@@ -3497,6 +3529,12 @@ const styles = StyleSheet.create({
   studentDetails: {
     fontSize: 12,
     color: '#666',
+  },
+  studentParent: {
+    fontSize: 14,
+    color: '#777',
+    marginTop: 2,
+    fontWeight: 'bold',
   },
   statusBadge: {
     borderRadius: 12,

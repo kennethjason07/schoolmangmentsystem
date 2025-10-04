@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, Platform, Linking, KeyboardAvoidingView, RefreshControl, Dimensions, Animated } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Alert, Platform, Linking, KeyboardAvoidingView, RefreshControl, Dimensions, Animated, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import Header from '../../components/Header';
@@ -418,12 +418,26 @@ const StudentDetails = ({ route }) => {
           <QuickNavigation />
           {/* Student Info Summary Card */}
           <View style={styles.summaryCard}>
-          <Text style={styles.studentName}>{studentData.name}</Text>
-          <Text style={styles.classInfo}>
-            {studentData.classes ? `${studentData.classes.class_name} - Section ${studentData.classes.section}` : 'Class not assigned'}
-          </Text>
-          <Text style={styles.rollNumber}>Roll No: {studentData.roll_no || 'N/A'}</Text>
-        </View>
+            <View style={styles.profileAvatarContainer}>
+              { (studentData.photo_url || student?.photo_url) ? (
+                <Image
+                  source={{ uri: studentData.photo_url || student?.photo_url }}
+                  style={styles.profileAvatarImage}
+                  accessibilityLabel="Student photo"
+                  onError={() => console.log('📸 Failed to load student photo for', studentData?.id)}
+                />
+              ) : (
+                <View style={styles.profileAvatarPlaceholder}>
+                  <Ionicons name="person" size={40} color="#fff" />
+                </View>
+              )}
+            </View>
+            <Text style={styles.studentName}>{studentData.name}</Text>
+            <Text style={styles.classInfo}>
+              {studentData.classes ? `${studentData.classes.class_name} - Section ${studentData.classes.section}` : 'Class not assigned'}
+            </Text>
+            <Text style={styles.rollNumber}>Roll No: {studentData.roll_no || 'N/A'}</Text>
+          </View>
 
         {/* Information Cards */}
         <View style={styles.infoSection}>
@@ -818,6 +832,25 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     alignItems: 'center',
+  },
+  profileAvatarContainer: {
+    marginBottom: 12,
+  },
+  profileAvatarImage: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#f0f0f0',
+    borderWidth: 2,
+    borderColor: '#E3F2FD',
+  },
+  profileAvatarPlaceholder: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#2196F3',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   
   // Call Button Styles

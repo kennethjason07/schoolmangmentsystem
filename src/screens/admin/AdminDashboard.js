@@ -423,7 +423,6 @@ const AdminDashboard = ({ navigation }) => {
     { title: 'Student Accounts', icon: 'people-circle', color: '#8BC34A', screen: 'StudentAccountManagement' }, // Stack screen
     { title: 'Parent Accounts', icon: 'people', color: '#9C27B0', screen: 'ParentAccountManagement' }, // Stack screen
     { title: 'Photo Upload', icon: 'camera', color: '#2196F3', screen: 'PhotoUpload' }, // Stack screen
-    { title: 'Photo Debug', icon: 'bug', color: '#FF5722', screen: 'PhotoUploadDebug' }, // Debug screen
     { title: 'Leave Management', icon: 'calendar-outline', color: '#4CAF50', screen: 'LeaveManagement' }, // Stack screen
     { title: 'Subjects Timetable', icon: 'calendar', color: '#607D8B', screen: 'SubjectsTimetable' }, // Stack screen
     { title: 'Attendance', icon: 'checkmark-circle', color: '#009688', screen: 'AttendanceManagement' }, // Stack screen
