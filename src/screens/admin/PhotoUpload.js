@@ -14,6 +14,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { File } from 'expo-file-system';
+import { decode as atob } from 'base-64';
 import Header from '../../components/Header';
 import { supabase } from '../../utils/supabase';
 import { useTenantAccess } from '../../utils/tenantHelpers';
@@ -133,7 +135,38 @@ const PhotoUpload = ({ navigation }) => {
     }
   };
 
-  // Auto-map photos to students based on admission number
+  // Helper function to normalize names for comparison
+  const normalizeName = (name) => {
+    if (!name) return '';
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '') // Remove all non-alphanumeric characters
+      .trim();
+  };
+
+  // Helper function to generate name variations for matching
+  const getNameVariations = (name) => {
+    if (!name) return [];
+    const variations = new Set();
+    const normalized = normalizeName(name);
+    
+    // Add the normalized full name
+    variations.add(normalized);
+    
+    // Add individual words (first name, last name, etc.)
+    const words = name.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 1);
+    words.forEach(word => variations.add(word));
+    
+    // Add combinations of first and last names
+    if (words.length >= 2) {
+      variations.add(words[0] + words[words.length - 1]); // first + last
+      variations.add(words[words.length - 1] + words[0]); // last + first
+    }
+    
+    return Array.from(variations);
+  };
+
+  // Auto-map photos to students based on student names
   const autoMapPhotos = () => {
     const mappings = {};
     
@@ -142,31 +175,42 @@ const PhotoUpload = ({ navigation }) => {
     console.log('📷 Photos to map:', selectedPhotos.map(p => p.name));
     
     selectedPhotos.forEach(photo => {
-      const fileName = photo.name.toLowerCase().replace(/\.(jpg|jpeg)$/i, '');
+      const fileName = photo.name.toLowerCase().replace(/\.(jpg|jpeg|png|gif)$/i, '');
+      const normalizedFileName = normalizeName(fileName);
       console.log(`\n📸 Processing photo: "${photo.name}"`);
-      console.log(`🔤 Cleaned filename: "${fileName}"`);
+      console.log(`🔤 Cleaned filename: "${normalizedFileName}"`);
       
-      // Try to find student by admission number in filename
+      // Try to find student by name in filename
       const matchedStudent = students.find(student => {
-        if (!student.admission_no) {
-          console.log(`❌ Student ${student.name} has no admission number`);
+        if (!student.name) {
+          console.log(`❌ Student has no name (ID: ${student.id})`);
           return false;
         }
         
-        const admissionStr = student.admission_no.toString().toLowerCase();
-        const isMatch = fileName.includes(admissionStr);
-        console.log(`🔍 Checking ${student.name} (admission: ${student.admission_no}) -> ${isMatch ? '✅ MATCH!' : '❌ no match'}`);
+        const studentNameVariations = getNameVariations(student.name);
+        console.log(`🔍 Checking ${student.name} (admission: ${student.admission_no || 'N/A'})`);
+        console.log(`   Name variations: [${studentNameVariations.join(', ')}]`);
         
+        // Check if any variation matches the filename
+        const isMatch = studentNameVariations.some(variation => {
+          const matchFound = normalizedFileName.includes(variation) || variation.includes(normalizedFileName);
+          if (matchFound) {
+            console.log(`   ✅ MATCH found with variation: "${variation}"`);
+          }
+          return matchFound;
+        });
+        
+        console.log(`   ${isMatch ? '✅ MATCH!' : '❌ no match'}`);
         return isMatch;
       });
 
       mappings[photo.uri] = matchedStudent || null;
       
       if (matchedStudent) {
-        console.log(`✅ SUCCESS: "${photo.name}" mapped to ${matchedStudent.name} (${matchedStudent.admission_no})`);
+        console.log(`✅ SUCCESS: "${photo.name}" mapped to ${matchedStudent.name} (${matchedStudent.admission_no || 'N/A'})`);
       } else {
         console.log(`❌ NO MATCH: "${photo.name}" could not be mapped`);
-        console.log('💡 TIP: Filename should contain the admission number (e.g., "photo_123.jpg" for admission 123)');
+        console.log('💡 TIP: Filename should contain the student name (e.g., "anuradha.jpg", "areeb_aman.jpeg", "ashwini_photo.png")');
       }
     });
 
@@ -278,22 +322,84 @@ const PhotoUpload = ({ navigation }) => {
           const fileExtension = photo.name.split('.').pop().toLowerCase();
           const fileName = `${getTenantId()}/${student.id}_${student.admission_no}_${timestamp}.${fileExtension}`;
           
-          // Read file as blob for upload
-          const response = await fetch(photo.uri);
-          const blob = await response.blob();
+          // Read file for upload - React Native compatible
+          let fileData;
+          
+          if (Platform.OS === 'web') {
+            // Web platform: use blob
+            const response = await fetch(photo.uri);
+            fileData = await response.blob();
+          } else {
+            // React Native: Use fetch approach as primary method (it's working reliably)
+            try {
+              console.log('🔄 Reading file via fetch (primary method):', photo.uri);
+              const response = await fetch(photo.uri);
+              
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              }
+              
+              const arrayBuffer = await response.arrayBuffer();
+              fileData = new Uint8Array(arrayBuffer);
+              console.log('📦 Photo file data created via fetch, size:', fileData.length);
+              
+            } catch (fetchError) {
+              console.error('❌ Failed to read file via fetch:', fetchError);
+              
+              // Fallback: Try new File class API
+              try {
+                console.log('🔄 Fallback: trying new File class API');
+                
+                const file = new File(photo.uri);
+                
+                if (!file.exists) {
+                  throw new Error(`File does not exist at URI: ${photo.uri}`);
+                }
+                
+                const bytes = await file.bytes();
+                fileData = new Uint8Array(bytes);
+                console.log('📦 Fallback File API successful, file size:', fileData.length);
+                
+              } catch (fileError) {
+                console.error('❌ All file reading methods failed:', { fetchError, fileError });
+                throw new Error(`Failed to read file. Fetch error: ${fetchError.message}, File API error: ${fileError.message}`);
+              }
+            }
+          }
           
           console.log(`📁 Uploading to storage path: ${fileName}`);
+          console.log(`📦 File data info: size=${fileData.length}, type=${photo.type}`);
           
-          // Upload to Supabase Storage
-          const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('student-photos')
-            .upload(fileName, blob, {
-              contentType: photo.type,
-              upsert: false // Don't overwrite existing files
-            });
+          // Upload to Supabase Storage with comprehensive error handling
+          let uploadData = null;
+          let uploadError = null;
+          
+          try {
+            const uploadResult = await supabase.storage
+              .from('student-photos')
+              .upload(fileName, fileData, {
+                contentType: photo.type || 'image/jpeg',
+                cacheControl: '3600',
+                upsert: false // Don't overwrite existing files
+              });
+            
+            uploadData = uploadResult.data;
+            uploadError = uploadResult.error;
+            
+            console.log('🚀 Supabase upload result:', { uploadData, uploadError });
+            
+          } catch (uploadException) {
+            console.error('❌ Supabase upload threw exception:', uploadException);
+            uploadError = uploadException;
+          }
           
           if (uploadError) {
-            throw uploadError;
+            console.error('❌ Upload error details:', uploadError);
+            throw new Error(`Upload failed: ${uploadError.message || uploadError}`);
+          }
+          
+          if (!uploadData) {
+            throw new Error('Upload returned no data');
           }
           
           console.log('✅ Upload successful:', uploadData);
