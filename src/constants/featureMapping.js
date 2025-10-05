@@ -31,7 +31,8 @@ export const FEATURES = {
   REPORT_CARDS: 'report_cards',
   NOTIFICATION_MANAGEMENT: 'notification_management',
   STUDY_CERTIFICATE: 'study_certificate',
-  HALL_TICKET_GENERATION: 'hall_ticket_generation',
+  MARKS_CARD: 'marks_card',
+  HALL_TICKETS: 'hall_tickets',
   AUTO_GRADING: 'auto_grading',
   
   // Additional screen features
@@ -69,7 +70,7 @@ export const SCREEN_FEATURE_MAP = {
   'ExamsMarks': FEATURES.EXAMS_MARKS,
   'ReportCardGeneration': FEATURES.REPORT_CARDS,
   'NotificationManagement': FEATURES.NOTIFICATION_MANAGEMENT,
-  'HallTicketGeneration': FEATURES.HALL_TICKET_GENERATION,
+  'HallTicketGeneration': FEATURES.HALL_TICKETS,
   'AutoGrading': FEATURES.AUTO_GRADING,
   
   // Additional Screens
@@ -116,7 +117,8 @@ export const QUICK_ACTION_FEATURE_MAP = {
   'Report Cards': FEATURES.REPORT_CARDS,
   'Notifications': FEATURES.NOTIFICATION_MANAGEMENT,
   'Study Certificate': FEATURES.STUDY_CERTIFICATE,
-  'Hall Tickets': FEATURES.HALL_TICKET_GENERATION,
+  'Marks Card': FEATURES.MARKS_CARD,
+  'Hall Tickets': FEATURES.HALL_TICKETS,
   'Auto Grading': FEATURES.AUTO_GRADING
 };
 
@@ -141,7 +143,8 @@ export const DEFAULT_FEATURES = {
   [FEATURES.REPORT_CARDS]: false,
   [FEATURES.NOTIFICATION_MANAGEMENT]: false,
   [FEATURES.STUDY_CERTIFICATE]: false,
-  [FEATURES.HALL_TICKET_GENERATION]: false,
+  [FEATURES.MARKS_CARD]: false,
+  [FEATURES.HALL_TICKETS]: false,
   [FEATURES.AUTO_GRADING]: false,
   [FEATURES.DISCOUNT_MANAGEMENT]: false,
   [FEATURES.MARKS_ENTRY]: false,

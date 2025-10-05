@@ -147,6 +147,10 @@ const AdminDashboard = ({ navigation }) => {
       // Handle custom actions
       if (actionFunction === 'openStudyCertificate') {
         openStudyCertificate();
+      } else if (actionFunction === 'openHallTicket') {
+        openHallTicket();
+      } else if (actionFunction === 'openMarksCard') {
+        openMarksCard();
       } else if (typeof actionFunction === 'function') {
         actionFunction();
       }
@@ -195,6 +199,96 @@ const AdminDashboard = ({ navigation }) => {
       Alert.alert(
         'Error',
         'Study Certificate URL not configured. Contact your service provider Maximus Consultancy Services',
+        [{ text: 'OK', style: 'default' }]
+      );
+    }
+  };
+
+  // Hall Tickets URL handler
+  const openHallTicket = async () => {
+    try {
+      const hallTicketUrl = currentTenant?.hallticket_url;
+      
+      if (!hallTicketUrl || hallTicketUrl.trim() === '') {
+        Alert.alert(
+          'Hall Tickets',
+          'Hall Tickets URL not configured. Contact your service provider Maximus Consultancy Services',
+          [{ text: 'OK', style: 'default' }]
+        );
+        return;
+      }
+      
+      // Ensure URL has proper protocol
+      let finalUrl = hallTicketUrl.trim();
+      if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+        finalUrl = 'https://' + finalUrl;
+      }
+      
+      // Open URL in browser
+      if (Platform.OS === 'web') {
+        window.open(finalUrl, '_blank');
+      } else {
+        const supported = await Linking.canOpenURL(finalUrl);
+        if (supported) {
+          await Linking.openURL(finalUrl);
+        } else {
+          Alert.alert(
+            'Error',
+            'Hall Tickets URL not configured. Contact your service provider Maximus Consultancy Services',
+            [{ text: 'OK', style: 'default' }]
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Error opening hall tickets URL:', error);
+      Alert.alert(
+        'Error',
+        'Hall Tickets URL not configured. Contact your service provider Maximus Consultancy Services',
+        [{ text: 'OK', style: 'default' }]
+      );
+    }
+  };
+
+  // Marks Card URL handler
+  const openMarksCard = async () => {
+    try {
+      const marksCardUrl = currentTenant?.markscard_url;
+      
+      if (!marksCardUrl || marksCardUrl.trim() === '') {
+        Alert.alert(
+          'Marks Card',
+          'Marks Card URL not configured. Contact your service provider Maximus Consultancy Services',
+          [{ text: 'OK', style: 'default' }]
+        );
+        return;
+      }
+      
+      // Ensure URL has proper protocol
+      let finalUrl = marksCardUrl.trim();
+      if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+        finalUrl = 'https://' + finalUrl;
+      }
+      
+      // Open URL in browser
+      if (Platform.OS === 'web') {
+        window.open(finalUrl, '_blank');
+      } else {
+        const supported = await Linking.canOpenURL(finalUrl);
+        if (supported) {
+          await Linking.openURL(finalUrl);
+        } else {
+          Alert.alert(
+            'Error',
+            'Marks Card URL not configured. Contact your service provider Maximus Consultancy Services',
+            [{ text: 'OK', style: 'default' }]
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Error opening marks card URL:', error);
+      Alert.alert(
+        'Error',
+        'Marks Card URL not configured. Contact your service provider Maximus Consultancy Services',
         [{ text: 'OK', style: 'default' }]
       );
     }
@@ -488,7 +582,8 @@ const AdminDashboard = ({ navigation }) => {
     { title: 'Report Cards', icon: 'document-text', color: '#E91E63', screen: 'ReportCardGeneration' }, // Stack screen
     { title: 'Notifications', icon: 'notifications', color: '#FF5722', screen: 'NotificationManagement' }, // Stack screen
     { title: 'Study Certificate', icon: 'document-text', color: '#607D8B', action: 'openStudyCertificate' }, // Custom action
-    { title: 'Hall Tickets', icon: 'card-outline', color: '#00BCD4', screen: 'HallTicketGeneration', banner: 'UPCOMING' }, // Stack screen
+    { title: 'Marks Card', icon: 'bar-chart', color: '#2196F3', action: 'openMarksCard' }, // Custom action
+    { title: 'Hall Tickets', icon: 'card-outline', color: '#2196F3', action: 'openHallTicket' }, // Custom action
     { title: 'Auto Grading', icon: 'checkmark-done', color: '#4CAF50', screen: 'AutoGrading', banner: 'UPCOMING' }, // Stack screen
   ];
 
