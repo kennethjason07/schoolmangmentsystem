@@ -30,6 +30,7 @@ export const FEATURES = {
   EXAMS_MARKS: 'exams_marks',
   REPORT_CARDS: 'report_cards',
   NOTIFICATION_MANAGEMENT: 'notification_management',
+  STUDY_CERTIFICATE: 'study_certificate',
   HALL_TICKET_GENERATION: 'hall_ticket_generation',
   AUTO_GRADING: 'auto_grading',
   
@@ -114,6 +115,7 @@ export const QUICK_ACTION_FEATURE_MAP = {
   'Exams & Marks': FEATURES.EXAMS_MARKS,
   'Report Cards': FEATURES.REPORT_CARDS,
   'Notifications': FEATURES.NOTIFICATION_MANAGEMENT,
+  'Study Certificate': FEATURES.STUDY_CERTIFICATE,
   'Hall Tickets': FEATURES.HALL_TICKET_GENERATION,
   'Auto Grading': FEATURES.AUTO_GRADING
 };
@@ -138,6 +140,7 @@ export const DEFAULT_FEATURES = {
   [FEATURES.EXAMS_MARKS]: false,
   [FEATURES.REPORT_CARDS]: false,
   [FEATURES.NOTIFICATION_MANAGEMENT]: false,
+  [FEATURES.STUDY_CERTIFICATE]: false,
   [FEATURES.HALL_TICKET_GENERATION]: false,
   [FEATURES.AUTO_GRADING]: false,
   [FEATURES.DISCOUNT_MANAGEMENT]: false,
