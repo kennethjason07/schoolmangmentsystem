@@ -1,0 +1,116 @@
+/**
+ * Enhanced Logging Patch for Receipt Generation Debugging
+ * 
+ * Apply these changes to your FeePayment components to get detailed logs
+ * about what's happening during receipt generation.
+ */
+
+// FOR BOTH: src/screens/parent/FeePayment.js AND src/screens/student/FeePayment.js
+// Replace the generateReceiptHTML function with this enhanced version:
+
+const generateReceiptHTML = async (receipt) => {
+  try {
+    console.log('🔥 RECEIPT DEBUG - Starting receipt generation...');
+    console.log('🔥 RECEIPT DEBUG - Component type:', 'Parent'); // Change to 'Student' for student component
+    
+    // Log the raw receipt data
+    console.log('🔥 RECEIPT DEBUG - Raw receipt data:', JSON.stringify(receipt, null, 2));
+    console.log('🔥 RECEIPT DEBUG - School details:', JSON.stringify(schoolDetails, null, 2));
+    
+    console.log('📧 Parent - Generating unified receipt HTML...'); // Change to Student for student component
+    
+    // Convert receipt data format to match unified template expectations
+    const unifiedReceiptData = {
+      student_name: receipt.studentName,
+      student_admission_no: receipt.admissionNo,
+      class_name: receipt.className,
+      fee_component: receipt.feeName,
+      payment_date_formatted: formatDateForReceipt(receipt.paymentDate),
+      receipt_no: cleanReceiptNumber(receipt.receiptNumber),
+      payment_mode: receipt.paymentMethod,
+      amount_paid: receipt.amount,
+      fathers_name: receipt.fatherName,
+      uid: receipt.studentUID || receipt.admissionNo,
+      total_paid_till_date: receipt.totalPaidTillDate,
+      amount_remaining: receipt.outstandingAmount
+    };
+    
+    console.log('🔥 RECEIPT DEBUG - Converted unified data:', JSON.stringify(unifiedReceiptData, null, 2));
+    
+    console.log('🏫 Parent - Using unified template for Global\'s Sanmarg format'); // Change to Student for student component
+    
+    // Add timing
+    const startTime = Date.now();
+    console.log('🔥 RECEIPT DEBUG - Calling generateUnifiedReceiptHTML at:', new Date().toISOString());
+    
+    const htmlContent = await generateUnifiedReceiptHTML(unifiedReceiptData, schoolDetails, null);
+    
+    const endTime = Date.now();
+    console.log('🔥 RECEIPT DEBUG - Receipt generation took:', (endTime - startTime) + 'ms');
+    console.log('🔥 RECEIPT DEBUG - HTML content length:', htmlContent.length);
+    console.log('🔥 RECEIPT DEBUG - HTML starts with:', htmlContent.substring(0, 200));
+    
+    // Check for Global's Sanmarg elements
+    const globalSchoolCheck = htmlContent.includes("GLOBAL'S SANMARG PUBLIC SCHOOL");
+    const unifiedFormatCheck = htmlContent.includes('student-info') && htmlContent.includes('fee-table');
+    const signatureCheck = htmlContent.includes('Received with thanks,');
+    
+    console.log('🔥 RECEIPT DEBUG - Format checks:');
+    console.log('  - Contains Global\'s Sanmarg name:', globalSchoolCheck);
+    console.log('  - Contains unified format classes:', unifiedFormatCheck);
+    console.log('  - Contains signature section:', signatureCheck);
+    
+    console.log('✅ Parent - Unified receipt HTML generated successfully'); // Change to Student for student component
+    return htmlContent;
+  } catch (error) {
+    console.error('🔥 RECEIPT DEBUG - ERROR occurred:', error);
+    console.error('🔥 RECEIPT DEBUG - Error stack:', error.stack);
+    console.error('🔥 RECEIPT DEBUG - Falling back to error template');
+    console.error('❌ Parent - Error generating unified receipt:', error); // Change to Student for student component
+    
+    // Create a simple fallback if unified template fails
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Receipt - Error</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; text-align: center; }
+          .error { color: #ff0000; margin: 20px 0; }
+          .debug { background: #f0f0f0; padding: 10px; margin: 10px 0; text-align: left; }
+        </style>
+      </head>
+      <body>
+        <h2>${schoolDetails?.name || 'School'}</h2>
+        <div class="error">Receipt generation encountered an error</div>
+        <div class="debug">
+          <h3>Debug Info:</h3>
+          <p>Error: ${error.message}</p>
+          <p>Student: ${receipt.studentName}</p>
+          <p>Amount: ₹${receipt.amount}</p>
+          <p>Date: ${formatDateForReceipt(receipt.paymentDate)}</p>
+          <p>Receipt No: ${cleanReceiptNumber(receipt.receiptNumber)}</p>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+};
+
+/**
+ * INSTRUCTIONS:
+ * 
+ * 1. Apply this enhanced logging to BOTH FeePayment components
+ * 2. Change "Parent" to "Student" in the student component logs
+ * 3. Try to generate a receipt in your app
+ * 4. Check the browser console (F12 -> Console) for the debug logs
+ * 5. Look for the "🔥 RECEIPT DEBUG" messages
+ * 6. Share the console output to identify the issue
+ * 
+ * The logs will show:
+ * - What data is being passed to the receipt generator
+ * - Whether the unified template is being called successfully  
+ * - What the generated HTML looks like
+ * - Any errors that occur during generation
+ */

@@ -14,8 +14,48 @@ import { format } from 'date-fns';
 const WebReceiptDisplay = ({ visible, receiptData, onClose }) => {
   const printRef = useRef(null);
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (Platform.OS === 'web') {
+      // Try unified two-per-page template first
+      try {
+        const { generateUnifiedReceiptHTML } = require('../utils/unifiedReceiptTemplate');
+        const schoolDetails = {
+          name: receiptData.school_name,
+          address: receiptData.school_address,
+          phone: receiptData.school_phone,
+          email: receiptData.school_email,
+          academic_year: receiptData.academic_year || '2024-25',
+          logo_url: receiptData.school_logo_url,
+        };
+        const unifiedData = {
+          student_name: receiptData.student_name,
+          student_admission_no: receiptData.student_admission_no,
+          class_name: receiptData.class_name,
+          fee_component: receiptData.fee_component,
+          payment_date_formatted: receiptData.payment_date_formatted,
+          receipt_no: receiptData.receipt_no,
+          payment_mode: receiptData.payment_mode,
+          amount_paid: receiptData.amount_paid,
+          amount_remaining: receiptData.amount_remaining,
+          amount_in_words: receiptData.amount_in_words,
+          cashier_name: receiptData.cashier_name,
+          fine_amount: receiptData.fine_amount,
+          total_paid_till_date: receiptData.total_paid_till_date,
+          father_name: receiptData.father_name,
+          uid: receiptData.uid || receiptData.student_uid,
+        };
+        const htmlContent = await generateUnifiedReceiptHTML(unifiedData, schoolDetails);
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        printWindow.focus();
+        printWindow.print();
+        printWindow.close();
+        return;
+      } catch (e) {
+        console.warn('Unified template failed, falling back to simple print:', e);
+      }
+
       const printContent = printRef.current;
       const originalContents = document.body.innerHTML;
       
@@ -132,7 +172,7 @@ const WebReceiptDisplay = ({ visible, receiptData, onClose }) => {
           ${printStyles}
         </head>
         <body>
-          <div class="receipt-container">
+          <div class=\"receipt-container\">
             <div class="receipt-header">
               <div class="school-name">${receiptData.school_name || 'School Name'}</div>
               <div style="font-size: 14px; color: #666; margin: 5px 0;">
@@ -290,104 +330,128 @@ const WebReceiptDisplay = ({ visible, receiptData, onClose }) => {
 
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
           <View ref={printRef} style={styles.receiptContainer}>
-            {/* School Header */}
+            {/* School Header - Global's Sanmarg Format */}
             <View style={styles.schoolHeader}>
-              <Text style={styles.schoolName}>
-                {receiptData.school_name || 'School Management System'}
-              </Text>
-              <Text style={styles.schoolAddress}>
-                {receiptData.school_address || 'School Address'}
-              </Text>
-              <Text style={styles.schoolContact}>
-                Contact: {receiptData.school_phone || 'Phone'} | Email: {receiptData.school_email || 'Email'}
-              </Text>
-              <View style={styles.receiptTitleContainer}>
-                <Text style={styles.receiptTitle}>FEE PAYMENT RECEIPT</Text>
-              </View>
-            </View>
-
-            {/* Receipt Info */}
-            <View style={styles.infoSection}>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Receipt No:</Text>
-                <Text style={styles.infoValue}>{receiptData.receipt_no}</Text>
-              </View>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Date:</Text>
-                <Text style={styles.infoValue}>{receiptData.payment_date_formatted}</Text>
-              </View>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Academic Year:</Text>
-                <Text style={styles.infoValue}>{receiptData.academic_year}</Text>
-              </View>
-            </View>
-
-            {/* Student Info */}
-            <View style={styles.infoSection}>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Student Name:</Text>
-                <Text style={styles.infoValue}>{receiptData.student_name}</Text>
-              </View>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Class:</Text>
-                <Text style={styles.infoValue}>{receiptData.class_name}</Text>
-              </View>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Admission No:</Text>
-                <Text style={styles.infoValue}>{receiptData.student_admission_no || 'N/A'}</Text>
-              </View>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Roll No:</Text>
-                <Text style={styles.infoValue}>{receiptData.student_roll_no || 'N/A'}</Text>
-              </View>
-            </View>
-
-            {/* Payment Details */}
-              <View style={styles.infoSection}>
-                <View style={[styles.infoRow, styles.highlightRow]}>
-                  <Text style={styles.infoLabel}>Fee Component:</Text>
-                  <Text style={styles.infoValue}>{receiptData.fee_component}</Text>
-                </View>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Payment Mode:</Text>
-                  <Text style={styles.infoValue}>{receiptData.payment_mode}</Text>
-                </View>
-                {receiptData.cashier_name && (
-                  <View style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>Cashier:</Text>
-                    <Text style={styles.infoValue}>{receiptData.cashier_name}</Text>
+              <View style={styles.headerRow}>
+                <View style={styles.logoSection}>
+                  <View style={styles.logoPlaceholder}>
+                    <Text style={styles.logoText}>🏦</Text>
                   </View>
-                )}
-                {receiptData.remarks && (
-                  <View style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>Remarks:</Text>
-                    <Text style={styles.infoValue}>{receiptData.remarks}</Text>
-                  </View>
-                )}
-              </View>
-
-            {/* Amount Section */}
-            <View style={styles.amountSection}>
-              <View style={styles.amountRow}>
-                <Text style={styles.amountLabel}>Amount Paid:</Text>
-                <Text style={styles.amountValue}>
-                  {formatCurrency(receiptData.amount_paid)}
-                </Text>
-              </View>
-              {receiptData.amount_remaining !== undefined && receiptData.amount_remaining !== null && (
-                <View style={styles.amountRow}>
-                  <Text style={styles.amountLabel}>Amount Remaining:</Text>
-                  <Text style={styles.amountValue}>
-                    {formatCurrency(receiptData.amount_remaining)}
+                </View>
+                <View style={styles.schoolInfo}>
+                  <Text style={styles.schoolName}>
+                    {receiptData.school_name || "GLOBAL'S SANMARG PUBLIC SCHOOL"}
+                  </Text>
+                  <Text style={styles.schoolAddress}>
+                    {receiptData.school_address || 'Near Fateh Darwaza, Pansal Taleem, Bidar-585401'}
+                  </Text>
+                  <Text style={styles.schoolContact}>
+                    Contact: {receiptData.school_phone || '+91 9341111576'}, Email:{receiptData.school_email || 'global295000@gmail.com'}
                   </Text>
                 </View>
-              )}
-              <View style={styles.wordsRow}>
-                <Text style={styles.wordsLabel}>In Words:</Text>
-                <Text style={styles.wordsValue}>
-                  {receiptData.amount_in_words} rupees only
-                </Text>
               </View>
+            </View>
+
+            {/* Student Information Grid - Exactly like reference */}
+            <View style={styles.studentInfoGrid}>
+              <View style={styles.studentRow}>
+                <View style={styles.studentLeft}>
+                  <Text style={styles.infoLabel}>Student Name: </Text>
+                  <Text style={styles.infoValue}>{receiptData.student_name}</Text>
+                </View>
+                <View style={styles.studentCenter}>
+                  <Text style={styles.infoLabel}>UID: </Text>
+                  <Text style={styles.infoValue}>{receiptData.uid || receiptData.student_admission_no}</Text>
+                </View>
+                <View style={styles.studentRight}>
+                  <Text style={styles.infoLabel}>Receipt No: </Text>
+                  <Text style={styles.infoValue}>{receiptData.receipt_no}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.studentRow}>
+                <View style={styles.studentLeft}>
+                  <Text style={styles.infoLabel}>Fathers Name: </Text>
+                  <Text style={styles.infoValue}>{receiptData.father_name || 'N/A'}</Text>
+                </View>
+                <View style={styles.studentCenter}>
+                  <Text style={styles.infoLabel}>Class: </Text>
+                  <Text style={styles.infoValue}>{receiptData.class_name}</Text>
+                </View>
+                <View style={styles.studentRight}>
+                  <Text style={styles.infoLabel}>Year: </Text>
+                  <Text style={styles.infoValue}>{receiptData.academic_year || '2024/25'}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.studentRow}>
+                <View style={styles.studentLeft}></View>
+                <View style={styles.studentCenter}></View>
+                <View style={styles.studentRight}>
+                  <Text style={styles.infoLabel}>Date: </Text>
+                  <Text style={styles.infoValue}>{receiptData.payment_date_formatted}</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Fee Table - Exactly like reference */}
+            <View style={styles.feeTableContainer}>
+              <View style={styles.feeTableHeader}>
+                <Text style={styles.tableHeaderLeft}>Particulars</Text>
+                <Text style={styles.tableHeaderRight}>Fees Amount</Text>
+              </View>
+              
+              <View style={styles.feeTableBody}>
+                <View style={styles.feeRow}>
+                  <Text style={styles.feeParticular}>{receiptData.fee_component}</Text>
+                  <Text style={styles.feeAmount}>Rs. {Number(receiptData.amount_paid).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+                </View>
+                
+                {receiptData.fine_amount && parseFloat(receiptData.fine_amount) > 0 && (
+                  <View style={styles.feeRow}>
+                    <Text style={styles.feeParticular}>Fine</Text>
+                    <Text style={styles.feeAmount}>Rs. {Number(receiptData.fine_amount).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+                  </View>
+                )}
+                
+                <View style={[styles.feeRow, styles.totalRow]}>
+                  <Text style={styles.feeParticularTotal}>Total:</Text>
+                  <Text style={styles.feeAmountTotal}>Rs. {Number(
+                    (parseFloat(receiptData.amount_paid) || 0) + (parseFloat(receiptData.fine_amount) || 0)
+                  ).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Fee Summary - Exactly like reference */}
+            <View style={styles.feeSummary}>
+              <Text style={styles.summaryText}>Total fees paid : Rs. {Number(
+                receiptData.total_paid_till_date || receiptData.amount_paid
+              ).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+              <Text style={styles.summaryText}>Total fees Due : Rs. {Number(
+                receiptData.amount_remaining || 0
+              ).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+            </View>
+
+            {/* Footer Section - Exactly like reference */}
+            <View style={styles.footerSection}>
+              <Text style={styles.wordsText}>In Words: Rupees {receiptData.amount_in_words || 'Zero'} Only</Text>
+              <Text style={styles.noteText}>Note: Fees once deposited will not be refunded under any Circumstances</Text>
+              
+              <View style={styles.footerDetails}>
+                <Text style={styles.footerText}>Payment Mode: {receiptData.payment_mode}</Text>
+                <Text style={styles.footerText}>Cashier Name:{receiptData.cashier_name || 'System Generated'} &nbsp;&nbsp;&nbsp; Date : {receiptData.payment_date_formatted}</Text>
+              </View>
+              
+              <View style={styles.signatureArea}>
+                <View style={styles.signatureBox}>
+                  <Text style={styles.signatureText}>Received with thanks,</Text>
+                  <View style={styles.signatureLine}>
+                    <Text style={styles.signatureLabel}>Cashier/Accountant</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
             </View>
 
             {/* Signature Section */}
@@ -479,28 +543,56 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#333',
   },
+  // Header styles for Global's Sanmarg format
   schoolHeader: {
-    alignItems: 'center',
     borderBottomWidth: 2,
-    borderBottomColor: '#333',
-    paddingBottom: 20,
-    marginBottom: 20,
+    borderBottomColor: '#000',
+    paddingBottom: 15,
+    marginBottom: 15,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  logoSection: {
+    width: 80,
+    marginRight: 15,
+    alignItems: 'center',
+  },
+  logoPlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 2,
+    borderColor: '#333',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoText: {
+    fontSize: 30,
+  },
+  schoolInfo: {
+    flex: 1,
+    alignItems: 'center',
   },
   schoolName: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#000',
     marginBottom: 5,
+    textAlign: 'center',
+    textTransform: 'uppercase',
   },
   schoolAddress: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 12,
+    color: '#000',
     textAlign: 'center',
-    marginBottom: 5,
+    marginBottom: 2,
   },
   schoolContact: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 12,
+    color: '#000',
     textAlign: 'center',
   },
   receiptTitleContainer: {
@@ -529,17 +621,173 @@ const styles = StyleSheet.create({
     borderLeftColor: '#2196F3',
     fontWeight: 'bold',
   },
+  // Student Information Grid - Global's Sanmarg format
+  studentInfoGrid: {
+    marginVertical: 15,
+  },
+  studentRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#000',
+    paddingBottom: 5,
+  },
+  studentLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  studentCenter: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  studentRight: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
   infoLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    flex: 0.4,
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#000',
   },
   infoValue: {
+    fontSize: 13,
+    color: '#000',
+  },
+
+  // Fee Table - Global's Sanmarg format
+  feeTableContainer: {
+    marginVertical: 20,
+    borderWidth: 2,
+    borderColor: '#000',
+  },
+  feeTableHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#000',
+    paddingVertical: 10,
+  },
+  tableHeaderLeft: {
+    flex: 2,
+    textAlign: 'center',
     fontSize: 14,
-    color: '#555',
-    flex: 0.6,
-    textAlign: 'right',
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  tableHeaderRight: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  feeTableBody: {
+    backgroundColor: '#fff',
+  },
+  feeRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#000',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+  },
+  feeParticular: {
+    flex: 2,
+    fontSize: 13,
+    color: '#000',
+  },
+  feeAmount: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 13,
+    color: '#000',
+  },
+  totalRow: {
+    backgroundColor: '#fff',
+    borderBottomWidth: 0,
+  },
+  feeParticularTotal: {
+    flex: 2,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  feeAmountTotal: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+
+  // Fee Summary - Global's Sanmarg format
+  feeSummary: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#000',
+    paddingVertical: 10,
+    marginVertical: 15,
+  },
+  summaryText: {
+    fontSize: 13,
+    color: '#000',
+  },
+
+  // Footer Section - Global's Sanmarg format
+  footerSection: {
+    marginTop: 15,
+  },
+  wordsText: {
+    fontSize: 12,
+    color: '#000',
+    marginBottom: 3,
+  },
+  noteText: {
+    fontSize: 12,
+    color: '#000',
+    marginBottom: 10,
+  },
+  footerDetails: {
+    marginBottom: 15,
+  },
+  footerText: {
+    fontSize: 12,
+    color: '#000',
+    marginVertical: 2,
+  },
+  signatureArea: {
+    alignItems: 'flex-end',
+    marginTop: 30,
+  },
+  signatureBox: {
+    alignItems: 'center',
+    width: 200,
+  },
+  signatureText: {
+    fontSize: 12,
+    color: '#000',
+    marginBottom: 30,
+  },
+  signatureLine: {
+    borderTopWidth: 1,
+    borderTopColor: '#000',
+    width: '100%',
+    paddingTop: 5,
+    alignItems: 'center',
+  },
+  signatureLabel: {
+    fontSize: 12,
+    color: '#000',
+    textAlign: 'center',
   },
   amountSection: {
     borderWidth: 2,

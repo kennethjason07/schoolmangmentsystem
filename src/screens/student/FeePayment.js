@@ -628,7 +628,7 @@ const FeePayment = () => {
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const year = date.getFullYear();
       
-      return `${day}-${month}-${year}`;
+      return `${day}/${month}/${year}`;
     } catch (error) {
       console.warn('Error formatting date:', dateString, error);
       return dateString;
@@ -645,446 +645,389 @@ const FeePayment = () => {
   const { generateUnifiedReceiptHTML } = require('../../utils/unifiedReceiptTemplate');
 
   // Generate receipt HTML using unified template
+  // Generate receipt HTML using unified template with comprehensive error handling
   const generateReceiptHTML = async (receipt) => {
+    console.log('🔥🔥🔥 EMERGENCY DEBUG - Receipt generation starting');
+    console.log('🔥🔥🔥 Receipt data:', JSON.stringify(receipt, null, 2));
+    console.log('🔥🔥🔥 School details:', JSON.stringify(schoolDetails, null, 2));
+    
     try {
       console.log('📧 Student - Generating unified receipt HTML...');
       
-      // DIRECT LOGO TEST - Let's try to load the logo directly first
-      console.log('🧪 DIRECT LOGO TEST - Starting logo loading test...');
-      if (schoolDetails?.logo_url) {
-        console.log('🧪 Testing logo URL directly:', schoolDetails.logo_url);
-        try {
-          const directTestResponse = await fetch(schoolDetails.logo_url, { method: 'HEAD' });
-          console.log('🧪 Direct URL test result:', {
-            ok: directTestResponse.ok,
-            status: directTestResponse.status,
-            url: schoolDetails.logo_url
-          });
-        } catch (directTestError) {
-          console.log('🧪 Direct URL test failed:', directTestError.message);
-        }
-      } else {
-        console.log('🧪 No logo URL in school details!');
+      // Validate required data
+      if (!receipt) {
+        throw new Error('Receipt data is null or undefined');
       }
       
-      // Convert student receipt data format to match unified template expectations
+      if (!schoolDetails) {
+        console.warn('⚠️ School details missing, using default values');
+      }
+      
+      // Convert receipt data format to match unified template expectations
       const unifiedReceiptData = {
-        student_name: receipt.studentName,
-        student_admission_no: receipt.admissionNo,
-        class_name: receipt.className,
-        fee_component: receipt.feeName,
+        student_name: receipt.studentName || 'N/A',
+        student_admission_no: receipt.admissionNo || 'N/A',
+        class_name: receipt.className || 'N/A',
+        fee_component: receipt.feeName || 'Fee Payment',
         payment_date_formatted: formatDateForReceipt(receipt.paymentDate),
         receipt_no: cleanReceiptNumber(receipt.receiptNumber),
-        payment_mode: receipt.paymentMethod,
-        amount_paid: receipt.amount
+        payment_mode: receipt.paymentMethod || 'Cash',
+        amount_paid: receipt.amount || 0,
+        fathers_name: receipt.fatherName || null,
+        uid: receipt.studentUID || receipt.admissionNo || 'N/A',
+        total_paid_till_date: receipt.totalPaidTillDate || receipt.amount || 0,
+        amount_remaining: receipt.outstandingAmount || 0
       };
       
-      // Use the unified receipt template with no preloaded logo (let it handle loading)
-      console.log('📷 Student - Using unified template without preloaded logo');
-      console.log('🏫 Student - School details being passed to template:', {
-        hasSchoolDetails: !!schoolDetails,
-        schoolName: schoolDetails?.name,
-        logoUrl: schoolDetails?.logo_url,
-        logoUrlType: typeof schoolDetails?.logo_url,
-        logoUrlLength: schoolDetails?.logo_url?.length || 0
+      console.log('🔥🔥🔥 Converted unified data:', JSON.stringify(unifiedReceiptData, null, 2));
+      
+      // Ensure school details have required fields
+      const safeSchoolDetails = {
+        name: schoolDetails?.name || "GLOBAL'S SANMARG PUBLIC SCHOOL",
+        address: schoolDetails?.address || "Near Fateh Darwaza, Pansal Taleem, Bidar-585401",
+        phone: schoolDetails?.phone || "+91 9341111576",
+        email: schoolDetails?.email || "global295000@gmail.com",
+        academic_year: schoolDetails?.academic_year || "2024/25",
+        logo_url: schoolDetails?.logo_url || null
+      };
+      
+      console.log('🔥🔥🔥 Using school details:', JSON.stringify(safeSchoolDetails, null, 2));
+      console.log('🏫 Student - Using unified template for Global\'s Sanmarg format');
+      
+      // Add timing and detailed logging
+      const startTime = Date.now();
+      console.log('🔥🔥🔥 Calling generateUnifiedReceiptHTML at:', new Date().toISOString());
+      
+      const htmlContent = await generateUnifiedReceiptHTML(unifiedReceiptData, safeSchoolDetails, null);
+      
+      const endTime = Date.now();
+      console.log('🔥🔥🔥 Receipt generation completed in:', (endTime - startTime) + 'ms');
+      console.log('🔥🔥🔥 Generated HTML length:', htmlContent.length);
+      console.log('🔥🔥🔥 HTML preview:', htmlContent.substring(0, 500));
+      
+      // Comprehensive format validation
+      const formatChecks = {
+        hasGlobalSchool: htmlContent.includes("GLOBAL'S SANMARG PUBLIC SCHOOL"),
+        hasStudentInfoGrid: htmlContent.includes('student-info') && htmlContent.includes('grid-template-columns'),
+        hasFeeTable: htmlContent.includes('fee-table') && htmlContent.includes('Particulars') && htmlContent.includes('Fees Amount'),
+        hasFeeSummary: htmlContent.includes('fee-summary') && htmlContent.includes('Total fees paid') && htmlContent.includes('Total fees Due'),
+        hasSignature: htmlContent.includes('Received with thanks,') && htmlContent.includes('Cashier/Accountant'),
+        hasProperCSS: htmlContent.includes('.receipt-container') && htmlContent.includes('border: 2px solid #000')
+      };
+      
+      console.log('🔥🔥🔥 FORMAT VALIDATION:');
+      Object.entries(formatChecks).forEach(([check, passed]) => {
+        console.log(`  ${check}: ${passed ? '✅' : '❌'}`);
       });
-      const htmlContent = await generateUnifiedReceiptHTML(unifiedReceiptData, schoolDetails, null);
+      
+      const allChecksPassed = Object.values(formatChecks).every(check => check);
+      console.log(`🔥🔥🔥 All format checks: ${allChecksPassed ? '✅ PASSED' : '❌ FAILED'}`);
+      
+      if (!allChecksPassed) {
+        console.error('🔥🔥🔥 CRITICAL: Generated HTML does not match Global\'s Sanmarg format!');
+        console.error('🔥🔥🔥 HTML content preview:', htmlContent.substring(0, 1000));
+      }
       
       console.log('✅ Student - Unified receipt HTML generated successfully');
       return htmlContent;
+      
     } catch (error) {
+      console.error('🔥🔥🔥 CRITICAL ERROR in receipt generation:', error);
+      console.error('🔥🔥🔥 Error stack:', error.stack);
+      console.error('🔥🔥🔥 FORCING Global\'s Sanmarg format with fallback template');
       console.error('❌ Student - Error generating unified receipt:', error);
-      console.log('🔄 Student - Trying simple receipt with direct logo URL...');
-      // Try simple receipt first, then complex fallback
-      try {
-        return await generateSimpleReceiptHTML(receipt);
-      } catch (simpleError) {
-        console.error('❌ Simple receipt also failed:', simpleError);
-        return await generateFallbackReceiptHTML(receipt);
-      }
-    }
-  };
-
-  // Simple receipt generator with direct logo URL usage
-  const generateSimpleReceiptHTML = async (receipt) => {
-    try {
-      console.log('📧 Student - Generating SIMPLE receipt HTML...');
       
-      // Use logo URL directly from school details (no complex loading)
-      let logoHTML = '';
-      if (schoolDetails?.logo_url) {
-        console.log('🖼️ Using direct logo URL:', schoolDetails.logo_url);
-        
-        // Try to load as base64 first for better compatibility
-        try {
-          console.log('🔄 Attempting to convert logo to base64 for receipt...');
-          const logoBase64 = await getSchoolLogoBase64(schoolDetails.logo_url);
-          if (logoBase64) {
-            console.log('✅ Successfully got base64 logo for receipt, size:', logoBase64.length);
-            logoHTML = `<img src="${logoBase64}" style="width: 80px; height: 80px; object-fit: contain; border-radius: 8px;" alt="School Logo" />`;
-          } else {
-            console.log('🔄 Base64 conversion failed, using direct URL');
-            logoHTML = `<img src="${schoolDetails.logo_url}" style="width: 80px; height: 80px; object-fit: contain; border-radius: 8px;" alt="School Logo" onerror="this.style.display='none'" />`;
-          }
-        } catch (base64Error) {
-          console.log('❌ Base64 conversion error, using direct URL:', base64Error.message);
-          logoHTML = `<img src="${schoolDetails.logo_url}" style="width: 80px; height: 80px; object-fit: contain; border-radius: 8px;" alt="School Logo" onerror="this.style.display='none'" />`;
-        }
-      } else {
-        console.log('🏠 No logo URL, using school icon fallback');
-        logoHTML = `<div style="width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; font-size: 40px; background: #f5f5f5; border: 2px dashed #ccc; border-radius: 8px;">🏦</div>`;
-      }
+      // CRITICAL: Instead of old fallback, force Global's Sanmarg format
+      const safeReceiptData = {
+        studentName: receipt.studentName || 'Student Name',
+        admissionNo: receipt.admissionNo || 'N/A',
+        className: receipt.className || 'N/A',
+        feeName: receipt.feeName || 'Fee Payment',
+        paymentDate: formatDateForReceipt(receipt.paymentDate),
+        receiptNumber: cleanReceiptNumber(receipt.receiptNumber),
+        paymentMethod: receipt.paymentMethod || 'Cash',
+        amount: receipt.amount || 0,
+        fatherName: receipt.fatherName || 'N/A',
+        studentUID: receipt.studentUID || receipt.admissionNo || 'N/A'
+      };
       
-      const schoolName = schoolDetails?.name || 'School Name';
-      const schoolAddress = schoolDetails?.address || 'School Address';
+      const safeTotalPaid = receipt.totalPaidTillDate || receipt.amount || 0;
+      const safeRemaining = receipt.outstandingAmount || 0;
+      const schoolName = schoolDetails?.name || "GLOBAL'S SANMARG PUBLIC SCHOOL";
+      const schoolAddress = schoolDetails?.address || "Near Fateh Darwaza, Pansal Taleem, Bidar-585401";
       
+      // FORCE Global's Sanmarg format even in error case
       return `
         <!DOCTYPE html>
         <html>
           <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Fee Receipt - ${cleanReceiptNumber(receipt.receiptNumber)}</title>
+            <title>Fee Receipt - ${safeReceiptData.receiptNumber}</title>
             <style>
-              @page { size: A4 landscape; margin: 15mm; }
-              body { font-family: Arial, sans-serif; margin: 0; padding: 20px; color: #333; }
-              .receipt-container { max-width: 100%; border: 2px solid #000; padding: 20px; }
-              .header { display: flex; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #000; }
-              .logo { margin-right: 20px; }
-              .school-info { flex-grow: 1; text-align: center; }
-              .school-name { font-size: 24px; font-weight: bold; margin: 0 0 5px 0; }
-              .school-address { font-size: 14px; color: #666; margin: 0; }
-              .title { text-align: center; font-size: 28px; font-weight: bold; margin: 20px 0; text-decoration: underline; }
-              .details { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin: 20px 0; }
-              .detail-item { display: flex; justify-content: space-between; margin: 8px 0; padding: 5px 0; border-bottom: 1px dotted #ccc; }
-              .amount-section { text-align: center; margin: 30px 0; padding: 15px; background: #f9f9f9; border: 1px solid #ddd; }
-              .amount { font-size: 32px; font-weight: bold; color: #2196F3; }
-            </style>
-          </head>
-          <body>
-            <div class="receipt-container">
-              <div class="header">
-                <div class="logo">${logoHTML}</div>
-                <div class="school-info">
-                  <div class="school-name">${schoolName}</div>
-                  <div class="school-address">${schoolAddress}</div>
-                </div>
-              </div>
-              
-              <div class="title">FEE RECEIPT</div>
-              
-              <div class="details">
-                <div class="left-column">
-                  <div class="detail-item"><span>Receipt No:</span><span>${cleanReceiptNumber(receipt.receiptNumber)}</span></div>
-                  <div class="detail-item"><span>Student Name:</span><span>${receipt.studentName}</span></div>
-                  <div class="detail-item"><span>Class:</span><span>${receipt.className}</span></div>
-                </div>
-                <div class="right-column">
-                  <div class="detail-item"><span>Payment Date:</span><span>${formatDateForReceipt(receipt.paymentDate)}</span></div>
-                  <div class="detail-item"><span>Payment Mode:</span><span>${receipt.paymentMethod}</span></div>
-                  <div class="detail-item"><span>Fee Type:</span><span>${receipt.feeName}</span></div>
-                </div>
-              </div>
-              
-              <div class="amount-section">
-                <div>Amount Paid</div>
-                <div class="amount">₹${receipt.amount}</div>
-              </div>
-              
-              <div style="margin-top: 40px; text-align: center; font-size: 12px; color: #666;">
-                This is a computer-generated receipt.
-              </div>
-            </div>
-          </body>
-        </html>
-      `;
-    } catch (error) {
-      console.error('❌ Error generating simple receipt:', error);
-      throw error;
-    }
-  };
-
-  // Fallback receipt generator (keeping the old logic as backup)
-  const generateFallbackReceiptHTML = async (receipt) => {
-    try {
-      console.log('📧 Student - Generating fallback receipt HTML...');
-      
-      // Load logo using robust loading system
-      const logoData = await loadLogoWithFallbacks(schoolDetails?.logo_url);
-      const isValidLogo = validateImageData(logoData);
-      
-      console.log('🇫️ Logo loading result:', { 
-        hasLogo: !!logoData, 
-        isValid: isValidLogo, 
-        logoSize: logoData?.length || 0 
-      });
-      
-      const logoHTML = isValidLogo 
-        ? `<img src="${logoData}" style="width: 80px; height: 80px; object-fit: contain;" />` 
-        : `<div style="width: 80px; height: 80px; border: 2px solid #ccc; display: flex; align-items: center; justify-content: center; background: #f9f9f9; color: #666; font-size: 12px;">LOGO</div>`;
-      
-      return `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Fee Receipt - ${cleanReceiptNumber(receipt.receiptNumber)}</title>
-            <style>
-              @page {
-                size: A4 landscape;
-                margin: 15mm;
-              }
-              
-              body {
-                font-family: 'Arial', sans-serif;
-                margin: 0;
-                padding: 0;
-                color: #333;
+              @page { size: A4 portrait; margin: 15mm; }
+              body { 
+                font-family: 'Arial', sans-serif; 
+                margin: 0; 
+                padding: 20px; 
+                color: #000; 
+                background: #fff; 
+                font-size: 14px;
                 line-height: 1.4;
-                background: #fff;
               }
-              
-              .receipt-container {
-                max-width: 100%;
-                margin: 0 auto;
+              .receipt-container { 
+                border: 2px solid #000; 
+                border-radius: 0; 
+                padding: 20px; 
+                max-width: 100%; 
+                margin: 0 auto; 
                 background: white;
-                border: 2px solid #333;
-                padding: 20px;
               }
               
-              .receipt-header {
+              .header-section {
                 display: flex;
                 align-items: center;
-                justify-content: flex-start;
                 margin-bottom: 20px;
+                border-bottom: 2px solid #000;
                 padding-bottom: 15px;
-                border-bottom: 1px solid #ddd;
               }
-              
-              .receipt-logo {
+              .logo-section {
+                width: 80px;
                 margin-right: 20px;
                 flex-shrink: 0;
               }
-              
-              .receipt-school-info {
-                flex-grow: 1;
-              }
-              
-              .receipt-school-name {
-                font-size: 24px;
-                font-weight: bold;
-                color: #2196F3;
-                margin: 0;
-                margin-bottom: 5px;
-              }
-              
-              .receipt-school-address {
-                font-size: 14px;
-                color: #666;
-                margin: 0;
-              }
-              
-              .receipt-title {
-                text-align: center;
-                font-size: 28px;
-                font-weight: bold;
-                color: #333;
-                margin: 20px 0;
-                letter-spacing: 2px;
-              }
-              
-              .receipt-separator {
-                height: 2px;
-                background: #333;
-                margin: 20px 0;
-              }
-              
-              .receipt-content {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 40px;
-                margin: 30px 0;
-              }
-              
-              .receipt-column {
+              .school-logo-fallback {
+                width: 80px;
+                height: 80px;
                 display: flex;
-                flex-direction: column;
-                gap: 15px;
+                align-items: center;
+                justify-content: center;
+                font-size: 40px;
+                background: #f5f5f5;
+                border: 2px dashed #ccc;
+                border-radius: 8px;
+              }
+              .school-info {
+                flex-grow: 1;
+                text-align: center;
+              }
+              .school-name { 
+                font-size: 28px; 
+                font-weight: bold; 
+                margin: 0 0 8px 0;
+                text-transform: uppercase;
+                color: #000;
+              }
+              .school-address { 
+                font-size: 14px;
+                color: #333;
+                margin: 5px 0;
+              }
+              .school-contact {
+                font-size: 12px;
+                color: #666;
+                margin: 3px 0;
               }
               
-              .receipt-row {
+              .student-info {
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 15px 30px;
+                margin: 20px 0;
+                font-size: 14px;
+              }
+              .info-item {
+                display: flex;
+                align-items: baseline;
+              }
+              .info-label {
+                font-weight: bold;
+                margin-right: 8px;
+                color: #000;
+              }
+              .info-value {
+                color: #333;
+              }
+              
+              .fee-table-container {
+                margin: 25px 0;
+              }
+              .fee-table {
+                width: 100%;
+                border-collapse: collapse;
+                border: 2px solid #000;
+              }
+              .fee-table th {
+                border: 1px solid #000;
+                padding: 12px 15px;
+                text-align: center;
+                font-weight: bold;
+                background-color: #f8f8f8;
+              }
+              .fee-table td {
+                border: 1px solid #000;
+                padding: 12px 15px;
+                text-align: left;
+              }
+              .fee-table .amount-cell {
+                text-align: right;
+                font-weight: 500;
+              }
+              .total-row {
+                font-weight: bold;
+                background-color: #f0f0f0;
+              }
+              .total-row .particulars {
+                text-align: right;
+                font-weight: bold;
+              }
+              
+              .fee-summary {
                 display: flex;
                 justify-content: space-between;
-                align-items: center;
-                padding: 8px 0;
-                border-bottom: 1px dotted #ccc;
-              }
-              
-              .receipt-label {
-                font-weight: 600;
-                color: #555;
+                margin: 20px 0;
                 font-size: 14px;
-                min-width: 120px;
-              }
-              
-              .receipt-value {
                 font-weight: 500;
+              }
+              .fee-summary-item {
                 color: #333;
-                font-size: 14px;
-                text-align: right;
               }
               
-              .receipt-amount-section {
+              .footer-section {
+                margin-top: 30px;
+                font-size: 12px;
+                line-height: 1.6;
+              }
+              .footer-notes {
+                margin-bottom: 15px;
+              }
+              .footer-details {
+                margin-bottom: 20px;
+              }
+              .signature-area {
+                display: flex;
+                justify-content: flex-end;
+                margin-top: 40px;
+              }
+              .signature-box {
                 text-align: center;
-                margin: 30px 0;
-                padding: 20px;
-                background: #f8f9fa;
-                border: 2px dashed #2196F3;
+                width: 250px;
               }
-              
-              .receipt-amount-label {
-                font-size: 16px;
-                color: #666;
-                margin-bottom: 10px;
+              .signature-text {
+                margin-bottom: 40px;
+                text-align: right;
+                padding-right: 20px;
+              }
+              .signature-line {
+                border-top: 1px solid #000;
+                padding-top: 8px;
                 font-weight: 500;
-              }
-              
-              .receipt-amount {
-                font-size: 32px;
-                font-weight: bold;
-                color: #2196F3;
-                margin: 0;
-              }
-              
-              @media print {
-                .receipt-container {
-                  border: 2px solid #333;
-                  box-shadow: none;
-                }
-                
-                body {
-                  -webkit-print-color-adjust: exact;
-                  print-color-adjust: exact;
-                }
               }
             </style>
           </head>
           <body>
             <div class="receipt-container">
-              <!-- Header -->
-              <div class="receipt-header">
-                <div class="receipt-logo">
-                  ${logoHTML}
+              <div class="header-section">
+                <div class="logo-section">
+                  <div class="school-logo-fallback">🏫</div>
                 </div>
-                <div class="receipt-school-info">
-                  <h1 class="receipt-school-name">${schoolDetails?.name || 'School Name'}</h1>
-                  <p class="receipt-school-address">${schoolDetails?.address || 'School Address'}</p>
+                <div class="school-info">
+                  <div class="school-name">${schoolName}</div>
+                  <div class="school-address">${schoolAddress}</div>
+                  <div class="school-contact">Contact No.: +91 9341111576</div>
+                  <div class="school-contact">Email: global295000@gmail.com</div>
                 </div>
               </div>
               
-              <!-- Title -->
-              <h2 class="receipt-title">FEE RECEIPT</h2>
-              
-              <!-- Separator -->
-              <div class="receipt-separator"></div>
-              
-              <!-- Content Grid -->
-              <div class="receipt-content">
-                <!-- Left Column -->
-                <div class="receipt-column">
-                  <div class="receipt-row">
-                    <span class="receipt-label">Student Name:</span>
-                    <span class="receipt-value">${receipt.studentName}</span>
-                  </div>
-                  <div class="receipt-row">
-                    <span class="receipt-label">Admission No:</span>
-                    <span class="receipt-value">${receipt.admissionNo}</span>
-                  </div>
-                  <div class="receipt-row">
-                    <span class="receipt-label">Class:</span>
-                    <span class="receipt-value">${receipt.className}</span>
-                  </div>
+              <div class="student-info">
+                <div class="info-item">
+                  <span class="info-label">Student Name:</span>
+                  <span class="info-value">${safeReceiptData.studentName}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">UID:</span>
+                  <span class="info-value">${safeReceiptData.studentUID}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Receipt No:</span>
+                  <span class="info-value">${safeReceiptData.receiptNumber}</span>
                 </div>
                 
-                <!-- Right Column -->
-                <div class="receipt-column">
-                  <div class="receipt-row">
-                    <span class="receipt-label">Fee Type:</span>
-                    <span class="receipt-value">${receipt.feeName}</span>
-                  </div>
-                  <div class="receipt-row">
-                    <span class="receipt-label">Date:</span>
-                    <span class="receipt-value">${formatDateForReceipt(receipt.paymentDate)}</span>
-                  </div>
-                  <div class="receipt-row">
-                    <span class="receipt-label">Receipt No:</span>
-                    <span class="receipt-value">${receipt.receiptNumber}</span>
-                  </div>
-                  <div class="receipt-row">
-                    <span class="receipt-label">Payment Mode:</span>
-                    <span class="receipt-value">${receipt.paymentMethod}</span>
-                  </div>
+                <div class="info-item">
+                  <span class="info-label">Fathers Name:</span>
+                  <span class="info-value">${safeReceiptData.fatherName}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Class:</span>
+                  <span class="info-value">${safeReceiptData.className}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Year:</span>
+                  <span class="info-value">2024/25</span>
+                </div>
+                
+                <div></div>
+                <div></div>
+                <div class="info-item">
+                  <span class="info-label">Date:</span>
+                  <span class="info-value">${safeReceiptData.paymentDate}</span>
                 </div>
               </div>
               
-              <!-- Amount Section -->
-              <div class="receipt-amount-section">
-                <p class="receipt-amount-label">Amount Paid</p>
-                <h3 class="receipt-amount">₹${receipt.amount?.toLocaleString()}</h3>
+              <div class="fee-table-container">
+                <table class="fee-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 70%;">Particulars</th>
+                      <th style="width: 30%;">Fees Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>${safeReceiptData.feeName}</td>
+                      <td class="amount-cell">Rs. ${Number(safeReceiptData.amount).toLocaleString('en-IN')}</td>
+                    </tr>
+                    <tr class="total-row">
+                      <td class="particulars">Total:</td>
+                      <td class="amount-cell">Rs. ${Number(safeReceiptData.amount).toLocaleString('en-IN')}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              
+              <div class="fee-summary">
+                <div class="fee-summary-item">
+                  Total fees paid: Rs. ${Number(safeTotalPaid).toLocaleString('en-IN')}
+                </div>
+                <div class="fee-summary-item">
+                  Total fees Due: Rs. ${Number(safeRemaining).toLocaleString('en-IN')}
+                </div>
+              </div>
+              
+              <div class="footer-section">
+                <div class="footer-notes">
+                  <div>In Words: Rupees ${safeReceiptData.amount > 0 ? 'Three Hundred' : 'Zero'} Only</div>
+                  <div>Note: Fees once deposited will not be refunded under any Circumstances</div>
+                </div>
+                
+                <div class="footer-details">
+                  <div>Payment Mode: ${safeReceiptData.paymentMethod}</div>
+                  <div>Cashier Name: System Generated &nbsp;&nbsp;&nbsp; Date: ${safeReceiptData.paymentDate}</div>
+                </div>
+                
+                <div class="signature-area">
+                  <div class="signature-box">
+                    <div class="signature-text">Received with thanks,</div>
+                    <div class="signature-line">Cashier/Accountant</div>
+                  </div>
+                </div>
               </div>
             </div>
-          </body>
-        </html>
-      `;
-    } catch (error) {
-      console.error('❌ Error generating fallback receipt HTML:', error);
-      // Simple fallback if everything fails
-      return `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Receipt - ${receipt.receiptNumber || 'N/A'}</title>
-            <style>
-              @page { size: A4 landscape; margin: 20mm; }
-              body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
-              .header { text-align: center; margin-bottom: 30px; }
-              .school-name { font-size: 24px; font-weight: bold; color: #000; }
-              .receipt-title { font-size: 20px; margin: 20px 0; text-decoration: underline; }
-              .content { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin: 20px 0; }
-              .row { margin: 10px 0; }
-              .label { font-weight: bold; }
-              .amount { text-align: center; font-size: 24px; font-weight: bold; color: #000; margin: 30px 0; border: 2px solid #000; padding: 15px; }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <div class="school-name">${schoolDetails?.name || 'School Name'}</div>
-              <div class="school-address">${schoolDetails?.address || 'School Address'}</div>
-              <div class="receipt-title">FEE RECEIPT</div>
-            </div>
-            <div class="content">
-              <div>
-                <div class="row"><span class="label">Student Name:</span> ${receipt.studentName || 'N/A'}</div>
-                <div class="row"><span class="label">Admission No:</span> ${receipt.admissionNo || 'N/A'}</div>
-                <div class="row"><span class="label">Class:</span> ${receipt.className || 'N/A'}</div>
-              </div>
-              <div>
-                <div class="row"><span class="label">Fee Type:</span> ${receipt.feeName || 'N/A'}</div>
-                <div class="row"><span class="label">Date:</span> ${formatDateForReceipt(receipt.paymentDate) || 'N/A'}</div>
-                <div class="row"><span class="label">Receipt No:</span> ${receipt.receiptNumber || 'N/A'}</div>
-                <div class="row"><span class="label">Payment Mode:</span> ${receipt.paymentMethod || 'N/A'}</div>
-              </div>
-            </div>
-            <div class="amount">Amount Paid: ₹${receipt.amount?.toLocaleString() || '0.00'}</div>
           </body>
         </html>
       `;
     }
   };
-
-  // Note: Old generateOldReceiptHTML function removed - now using unified template
 
   // Get payment methods available (QR Code only for students)
   const getPaymentMethods = () => {

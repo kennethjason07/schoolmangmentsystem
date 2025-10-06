@@ -1133,8 +1133,12 @@ const ClassStudentDetails = ({ route, navigation }) => {
 
   // Generate receipt HTML using unified template (copied from student)
   const generateReceiptHTML = async (receiptData) => {
+    console.log('🔥 RECEIPT DEBUG [ADMIN] - Starting receipt generation');
+    console.log('🔥 RECEIPT DEBUG [ADMIN] - Original receipt data:', JSON.stringify(receiptData, null, 2));
+    console.log('🔥 RECEIPT DEBUG [ADMIN] - School details:', JSON.stringify(schoolDetails, null, 2));
+    
     try {
-      console.log('📧 Admin - Generating unified receipt HTML...');
+      console.log('🔥 RECEIPT DEBUG [ADMIN] - Attempting to generate unified receipt HTML...');
       
       // Convert admin receipt data format to match unified template expectations
       const unifiedReceiptData = {
@@ -1150,15 +1154,27 @@ const ClassStudentDetails = ({ route, navigation }) => {
         cashier_name: receiptData.cashier_name
       };
       
+      console.log('🔥 RECEIPT DEBUG [ADMIN] - Unified receipt data:', JSON.stringify(unifiedReceiptData, null, 2));
+      console.log('🔥 RECEIPT DEBUG [ADMIN] - About to call generateUnifiedReceiptHTML...');
+      
       // Use the unified receipt template
       const htmlContent = await generateUnifiedReceiptHTML(unifiedReceiptData, schoolDetails);
       
-      console.log('✅ Admin - Unified receipt HTML generated successfully');
+      console.log('🔥 RECEIPT DEBUG [ADMIN] - Unified receipt HTML generated successfully!');
+      console.log('🔥 RECEIPT DEBUG [ADMIN] - Generated HTML length:', htmlContent?.length || 0);
+      console.log('🔥 RECEIPT DEBUG [ADMIN] - HTML preview (first 500 chars):', htmlContent?.substring(0, 500));
+      
       return htmlContent;
     } catch (error) {
-      console.error('❌ Admin - Error generating unified receipt:', error);
+      console.log('🔥 RECEIPT DEBUG [ADMIN] - ❌ UNIFIED TEMPLATE FAILED!');
+      console.error('🔥 RECEIPT DEBUG [ADMIN] - Error details:', error);
+      console.error('🔥 RECEIPT DEBUG [ADMIN] - Error stack:', error.stack);
+      console.log('🔥 RECEIPT DEBUG [ADMIN] - Falling back to old receipt method...');
+      
       // Fallback to old method if unified template fails
-      return await generateFallbackReceiptHTML(receiptData);
+      const fallbackHTML = await generateFallbackReceiptHTML(receiptData);
+      console.log('🔥 RECEIPT DEBUG [ADMIN] - Fallback HTML generated, length:', fallbackHTML?.length || 0);
+      return fallbackHTML;
     }
   };
 
@@ -2990,97 +3006,126 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
                 showsVerticalScrollIndicator={false}
               >
                 <View style={styles.receiptDocument}>
-                  {/* Header with Logo and School Name */}
+                  {/* Header - Global's Sanmarg Format */}
                   <View style={styles.receiptDocumentHeader}>
                     <View style={styles.receiptLogoContainer}>
                       {schoolLogo ? (
                         <Image 
                           source={{ uri: schoolLogo }} 
-                          style={styles.receiptLogoImage}
+                          style={styles.receiptLogoImageRound}
                           resizeMode="contain"
                         />
                       ) : (
-                        <View style={styles.receiptLogoPlaceholder}>
-                          <Ionicons name="school" size={40} color="#2196F3" />
+                        <View style={styles.receiptLogoPlaceholderRound}>
+                          <Text style={{ fontSize: 30 }}>🏦</Text>
                         </View>
                       )}
                     </View>
-                    <View style={styles.receiptSchoolInfo}>
-                      <Text style={styles.receiptSchoolNameNew}>{schoolDetails?.name || 'School Name'}</Text>
-                      <Text style={styles.receiptSchoolAddressNew}>{schoolDetails?.address || 'School Address'}</Text>
+                    <View style={styles.receiptSchoolInfoCenter}>
+                      <Text style={styles.receiptSchoolNameGlobal}>{schoolDetails?.name || "GLOBAL'S SANMARG PUBLIC SCHOOL"}</Text>
+                      <Text style={styles.receiptSchoolAddressGlobal}>{schoolDetails?.address || 'Near Fateh Darwaza, Pansal Taleem, Bidar-585401'}</Text>
+                      <Text style={styles.receiptSchoolContactGlobal}>Contact: {schoolDetails?.phone || '+91 9341111576'}, Email:{schoolDetails?.email || 'global295000@gmail.com'}</Text>
                     </View>
                   </View>
 
-                  {/* Receipt Title */}
-                  <Text style={styles.receiptDocumentTitle}>FEE RECEIPT</Text>
-                  
-                  {/* Separator Line */}
-                  <View style={styles.receiptSeparatorLine} />
-
-                  {/* Receipt Content - Single Column */}
-                  <View style={styles.receiptContentSingle}>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Student Name:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{lastPaymentRecord.student_name}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Admission No:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{lastPaymentRecord.student_admission_no}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Class:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{lastPaymentRecord.class_name}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Fee Type:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{lastPaymentRecord.fee_component}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Date:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{lastPaymentRecord.payment_date_formatted}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Receipt No:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{lastPaymentRecord.receipt_no}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Payment Mode:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{lastPaymentRecord.payment_mode}</Text>
-                    </View>
-                    {lastPaymentRecord.cashier_name ? (
-                      <View style={styles.receiptInfoRowNew}>
-                        <Text style={styles.receiptInfoLabelNew}>Cashier:</Text>
-                        <Text style={styles.receiptInfoValueNew}>{lastPaymentRecord.cashier_name}</Text>
+                  {/* Student Information Grid - Exactly like reference */}
+                  <View style={styles.studentInfoGridAdmin}>
+                    <View style={styles.studentRowAdmin}>
+                      <View style={styles.studentLeftAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>Student Name: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{lastPaymentRecord.student_name}</Text>
                       </View>
-                    ) : null}
+                      <View style={styles.studentCenterAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>UID: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{lastPaymentRecord.student_uid || lastPaymentRecord.student_admission_no}</Text>
+                      </View>
+                      <View style={styles.studentRightAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>Receipt No: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{lastPaymentRecord.receipt_no}</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.studentRowAdmin}>
+                      <View style={styles.studentLeftAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>Fathers Name: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{lastPaymentRecord.father_name || 'N/A'}</Text>
+                      </View>
+                      <View style={styles.studentCenterAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>Class: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{lastPaymentRecord.class_name}</Text>
+                      </View>
+                      <View style={styles.studentRightAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>Year: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{schoolDetails?.academic_year || '2024/25'}</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.studentRowAdmin}>
+                      <View style={styles.studentLeftAdmin}></View>
+                      <View style={styles.studentCenterAdmin}></View>
+                      <View style={styles.studentRightAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>Date: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{lastPaymentRecord.payment_date_formatted}</Text>
+                      </View>
+                    </View>
                   </View>
 
-                  {/* Separator Line Above Amount */}
-                  <View style={styles.receiptAmountSeparatorLine} />
-                  
-                  {/* Amount Section */}
-                  <View style={styles.receiptAmountSectionNew}>
-                    <Text style={styles.receiptAmountLabelNew}>Amount Paid:</Text>
-                    <Text style={styles.receiptAmountNew}>₹{lastPaymentRecord.amount_paid?.toLocaleString()}</Text>
-                  </View>
-                  {typeof lastPaymentRecord.amount_remaining !== 'undefined' && lastPaymentRecord.amount_remaining !== null ? (
-                    <View style={styles.receiptAmountSectionNew}>
-                      <Text style={styles.receiptAmountLabelNew}>Amount Remaining:</Text>
-                      <Text style={styles.receiptAmountNew}>₹{Number(lastPaymentRecord.amount_remaining).toLocaleString()}</Text>
+                  {/* Fee Table - Exactly like reference */}
+                  <View style={styles.feeTableContainerAdmin}>
+                    <View style={styles.feeTableHeaderAdmin}>
+                      <Text style={styles.tableHeaderLeftAdmin}>Particulars</Text>
+                      <Text style={styles.tableHeaderRightAdmin}>Fees Amount</Text>
                     </View>
-                  ) : null}
-                  {lastPaymentRecord.cashier_name ? (
-                    <Text style={{ textAlign: 'center', marginTop: 8, color: '#666' }}>
-                      This receipt was generated by: {lastPaymentRecord.cashier_name}
-                    </Text>
-                  ) : null}
-                  {/* Cashier signature bottom-right */}
-                  <View style={{ alignItems: 'flex-end', marginTop: 12 }}>
-                    <View style={{ width: 220, alignItems: 'center' }}>
-                      <View style={{ borderTopWidth: 1, borderTopColor: '#333', width: '100%', marginTop: 40 }} />
-                      <Text style={{ fontSize: 12, color: '#666', marginTop: 5 }}>
-                        Cashier Signature{lastPaymentRecord.cashier_name ? ` - ${lastPaymentRecord.cashier_name}` : ''}
-                      </Text>
+                    
+                    <View style={styles.feeTableBodyAdmin}>
+                      <View style={styles.feeRowAdmin}>
+                        <Text style={styles.feeParticularAdmin}>{lastPaymentRecord.fee_component}</Text>
+                        <Text style={styles.feeAmountAdmin}>Rs. {Number(lastPaymentRecord.amount_paid).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+                      </View>
+                      
+                      {lastPaymentRecord.fine_amount && parseFloat(lastPaymentRecord.fine_amount) > 0 && (
+                        <View style={styles.feeRowAdmin}>
+                          <Text style={styles.feeParticularAdmin}>Fine</Text>
+                          <Text style={styles.feeAmountAdmin}>Rs. {Number(lastPaymentRecord.fine_amount).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+                        </View>
+                      )}
+                      
+                      <View style={[styles.feeRowAdmin, styles.totalRowAdmin]}>
+                        <Text style={styles.feeParticularTotalAdmin}>Total:</Text>
+                        <Text style={styles.feeAmountTotalAdmin}>Rs. {Number(
+                          (parseFloat(lastPaymentRecord.amount_paid) || 0) + (parseFloat(lastPaymentRecord.fine_amount) || 0)
+                        ).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Fee Summary - Exactly like reference */}
+                  <View style={styles.feeSummaryAdmin}>
+                    <Text style={styles.summaryTextAdmin}>Total fees paid : Rs. {Number(
+                      lastPaymentRecord.total_paid_till_date || lastPaymentRecord.amount_paid
+                    ).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+                    <Text style={styles.summaryTextAdmin}>Total fees Due : Rs. {Number(
+                      lastPaymentRecord.amount_remaining || 0
+                    ).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+                  </View>
+
+                  {/* Footer Section - Exactly like reference */}
+                  <View style={styles.footerSectionAdmin}>
+                    <Text style={styles.wordsTextAdmin}>In Words: Rupees {lastPaymentRecord.amount_in_words || 'Zero'} Only</Text>
+                    <Text style={styles.noteTextAdmin}>Note: Fees once deposited will not be refunded under any Circumstances</Text>
+                    
+                    <View style={styles.footerDetailsAdmin}>
+                      <Text style={styles.footerTextAdmin}>Payment Mode: {lastPaymentRecord.payment_mode}</Text>
+                      <Text style={styles.footerTextAdmin}>Cashier Name:{lastPaymentRecord.cashier_name || 'System Generated'} &nbsp;&nbsp;&nbsp; Date : {lastPaymentRecord.payment_date_formatted}</Text>
+                    </View>
+                    
+                    <View style={styles.signatureAreaAdmin}>
+                      <View style={styles.signatureBoxAdmin}>
+                        <Text style={styles.signatureTextAdmin}>Received with thanks,</Text>
+                        <View style={styles.signatureLineAdmin}>
+                          <Text style={styles.signatureLabelAdmin}>Cashier/Accountant</Text>
+                        </View>
+                      </View>
                     </View>
                   </View>
                 </View>
@@ -3152,93 +3197,121 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
                 showsVerticalScrollIndicator={false}
               >
                 <View style={styles.receiptDocument}>
-                  {/* Header with Logo and School Name */}
+                  {/* Header - Global's Sanmarg Format */}
                   <View style={styles.receiptDocumentHeader}>
                     <View style={styles.receiptLogoContainer}>
-                      {/* Enhanced Logo Loading using LogoDisplay component */}
                       <LogoDisplay 
                         logoUrl={schoolDetails?.logo_url}
                         size={60}
-                        style={styles.receiptLogo}
+                        style={styles.receiptLogoRound}
                         fallbackIcon="school-outline"
                       />
                     </View>
-                    <View style={styles.receiptSchoolInfo}>
-                      <Text style={styles.receiptSchoolNameNew}>{schoolDetails?.name || 'School Name'}</Text>
-                      <Text style={styles.receiptSchoolAddressNew}>{schoolDetails?.address || 'School Address'}</Text>
+                    <View style={styles.receiptSchoolInfoCenter}>
+                      <Text style={styles.receiptSchoolNameGlobal}>{schoolDetails?.name || "GLOBAL'S SANMARG PUBLIC SCHOOL"}</Text>
+                      <Text style={styles.receiptSchoolAddressGlobal}>{schoolDetails?.address || 'Near Fateh Darwaza, Pansal Taleem, Bidar-585401'}</Text>
+                      <Text style={styles.receiptSchoolContactGlobal}>Contact: {schoolDetails?.phone || '+91 9341111576'}, Email:{schoolDetails?.email || 'global295000@gmail.com'}</Text>
                     </View>
                   </View>
 
-                  {/* Receipt Title */}
-                  <Text style={styles.receiptDocumentTitle}>FEE RECEIPT</Text>
-                  
-                  {/* Separator Line */}
-                  <View style={styles.receiptSeparatorLine} />
-
-                  {/* Receipt Content - Single Column */}
-                  <View style={styles.receiptContentSingle}>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Student Name:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{selectedPaymentForReceipt.student_name}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Admission No:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{selectedPaymentForReceipt.student_admission_no}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Class:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{selectedPaymentForReceipt.class_name}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Fee Type:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{selectedPaymentForReceipt.fee_component}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Date:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{selectedPaymentForReceipt.payment_date_formatted}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Receipt No:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{selectedPaymentForReceipt.receipt_no}</Text>
-                    </View>
-                    <View style={styles.receiptInfoRowNew}>
-                      <Text style={styles.receiptInfoLabelNew}>Payment Mode:</Text>
-                      <Text style={styles.receiptInfoValueNew}>{selectedPaymentForReceipt.payment_mode}</Text>
-                    </View>
-                    {selectedPaymentForReceipt.cashier_name ? (
-                      <View style={styles.receiptInfoRowNew}>
-                        <Text style={styles.receiptInfoLabelNew}>Cashier:</Text>
-                        <Text style={styles.receiptInfoValueNew}>{selectedPaymentForReceipt.cashier_name}</Text>
+                  {/* Student Information Grid - Exactly like reference */}
+                  <View style={styles.studentInfoGridAdmin}>
+                    <View style={styles.studentRowAdmin}>
+                      <View style={styles.studentLeftAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>Student Name: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{selectedPaymentForReceipt.student_name}</Text>
                       </View>
-                    ) : null}
+                      <View style={styles.studentCenterAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>UID: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{selectedPaymentForReceipt.student_uid || selectedPaymentForReceipt.student_admission_no}</Text>
+                      </View>
+                      <View style={styles.studentRightAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>Receipt No: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{selectedPaymentForReceipt.receipt_no}</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.studentRowAdmin}>
+                      <View style={styles.studentLeftAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>Fathers Name: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{selectedPaymentForReceipt.father_name || 'N/A'}</Text>
+                      </View>
+                      <View style={styles.studentCenterAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>Class: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{selectedPaymentForReceipt.class_name}</Text>
+                      </View>
+                      <View style={styles.studentRightAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>Year: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{schoolDetails?.academic_year || '2024/25'}</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.studentRowAdmin}>
+                      <View style={styles.studentLeftAdmin}></View>
+                      <View style={styles.studentCenterAdmin}></View>
+                      <View style={styles.studentRightAdmin}>
+                        <Text style={styles.receiptInfoLabelGlobal}>Date: </Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{selectedPaymentForReceipt.payment_date_formatted}</Text>
+                      </View>
+                    </View>
                   </View>
 
-                  {/* Separator Line Above Amount */}
-                  <View style={styles.receiptAmountSeparatorLine} />
-                  
-                  {/* Amount Section */}
-                  <View style={styles.receiptAmountSectionNew}>
-                    <Text style={styles.receiptAmountLabelNew}>Amount Paid:</Text>
-                    <Text style={styles.receiptAmountNew}>₹{selectedPaymentForReceipt.amount_paid?.toLocaleString()}</Text>
-                  </View>
-                  {typeof selectedPaymentForReceipt.amount_remaining !== 'undefined' && selectedPaymentForReceipt.amount_remaining !== null ? (
-                    <View style={styles.receiptAmountSectionNew}>
-                      <Text style={styles.receiptAmountLabelNew}>Amount Remaining:</Text>
-                      <Text style={styles.receiptAmountNew}>₹{Number(selectedPaymentForReceipt.amount_remaining).toLocaleString()}</Text>
+                  {/* Fee Table - Exactly like reference */}
+                  <View style={styles.feeTableContainerAdmin}>
+                    <View style={styles.feeTableHeaderAdmin}>
+                      <Text style={styles.tableHeaderLeftAdmin}>Particulars</Text>
+                      <Text style={styles.tableHeaderRightAdmin}>Fees Amount</Text>
                     </View>
-                  ) : null}
-                  {selectedPaymentForReceipt.cashier_name ? (
-                    <Text style={{ textAlign: 'center', marginTop: 8, color: '#666' }}>
-                      This receipt was generated by: {selectedPaymentForReceipt.cashier_name}
-                    </Text>
-                  ) : null}
-                  {/* Cashier signature bottom-right */}
-                  <View style={{ alignItems: 'flex-end', marginTop: 12 }}>
-                    <View style={{ width: 220, alignItems: 'center' }}>
-                      <View style={{ borderTopWidth: 1, borderTopColor: '#333', width: '100%', marginTop: 40 }} />
-                      <Text style={{ fontSize: 12, color: '#666', marginTop: 5 }}>
-                        Cashier Signature{selectedPaymentForReceipt.cashier_name ? ` - ${selectedPaymentForReceipt.cashier_name}` : ''}
-                      </Text>
+                    
+                    <View style={styles.feeTableBodyAdmin}>
+                      <View style={styles.feeRowAdmin}>
+                        <Text style={styles.feeParticularAdmin}>{selectedPaymentForReceipt.fee_component}</Text>
+                        <Text style={styles.feeAmountAdmin}>Rs. {Number(selectedPaymentForReceipt.amount_paid).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+                      </View>
+                      
+                      {selectedPaymentForReceipt.fine_amount && parseFloat(selectedPaymentForReceipt.fine_amount) > 0 && (
+                        <View style={styles.feeRowAdmin}>
+                          <Text style={styles.feeParticularAdmin}>Fine</Text>
+                          <Text style={styles.feeAmountAdmin}>Rs. {Number(selectedPaymentForReceipt.fine_amount).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+                        </View>
+                      )}
+                      
+                      <View style={[styles.feeRowAdmin, styles.totalRowAdmin]}>
+                        <Text style={styles.feeParticularTotalAdmin}>Total:</Text>
+                        <Text style={styles.feeAmountTotalAdmin}>Rs. {Number(
+                          (parseFloat(selectedPaymentForReceipt.amount_paid) || 0) + (parseFloat(selectedPaymentForReceipt.fine_amount) || 0)
+                        ).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Fee Summary - Exactly like reference */}
+                  <View style={styles.feeSummaryAdmin}>
+                    <Text style={styles.summaryTextAdmin}>Total fees paid : Rs. {Number(
+                      selectedPaymentForReceipt.total_paid_till_date || selectedPaymentForReceipt.amount_paid
+                    ).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+                    <Text style={styles.summaryTextAdmin}>Total fees Due : Rs. {Number(
+                      selectedPaymentForReceipt.amount_remaining || 0
+                    ).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
+                  </View>
+
+                  {/* Footer Section - Exactly like reference */}
+                  <View style={styles.footerSectionAdmin}>
+                    <Text style={styles.wordsTextAdmin}>In Words: Rupees {selectedPaymentForReceipt.amount_in_words || 'Zero'} Only</Text>
+                    <Text style={styles.noteTextAdmin}>Note: Fees once deposited will not be refunded under any Circumstances</Text>
+                    
+                    <View style={styles.footerDetailsAdmin}>
+                      <Text style={styles.footerTextAdmin}>Payment Mode: {selectedPaymentForReceipt.payment_mode}</Text>
+                      <Text style={styles.footerTextAdmin}>Cashier Name:{selectedPaymentForReceipt.cashier_name || 'System Generated'} &nbsp;&nbsp;&nbsp; Date : {selectedPaymentForReceipt.payment_date_formatted}</Text>
+                    </View>
+                    
+                    <View style={styles.signatureAreaAdmin}>
+                      <View style={styles.signatureBoxAdmin}>
+                        <Text style={styles.signatureTextAdmin}>Received with thanks,</Text>
+                        <View style={styles.signatureLineAdmin}>
+                          <Text style={styles.signatureLabelAdmin}>Cashier/Accountant</Text>
+                        </View>
+                      </View>
                     </View>
                   </View>
                 </View>
@@ -5148,6 +5221,221 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  
+  // Global's Sanmarg Receipt Format Styles
+  receiptLogoImageRound: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+  },
+  receiptLogoPlaceholderRound: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 2,
+    borderColor: '#333',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  receiptLogoRound: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+  },
+  receiptSchoolInfoCenter: {
+    flex: 1,
+    alignItems: 'center',
+    marginLeft: 15,
+  },
+  receiptSchoolNameGlobal: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#000',
+    marginBottom: 5,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  receiptSchoolAddressGlobal: {
+    fontSize: 12,
+    color: '#000',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  receiptSchoolContactGlobal: {
+    fontSize: 12,
+    color: '#000',
+    textAlign: 'center',
+  },
+  
+  // Student Information Grid - Global's Format
+  studentInfoGridAdmin: {
+    marginVertical: 15,
+  },
+  studentRowAdmin: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#000',
+    paddingBottom: 5,
+  },
+  studentLeftAdmin: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  studentCenterAdmin: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  studentRightAdmin: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  receiptInfoLabelGlobal: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  receiptInfoValueGlobal: {
+    fontSize: 13,
+    color: '#000',
+  },
+  
+  // Fee Table - Global's Format
+  feeTableContainerAdmin: {
+    marginVertical: 20,
+    borderWidth: 2,
+    borderColor: '#000',
+  },
+  feeTableHeaderAdmin: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#000',
+    paddingVertical: 10,
+  },
+  tableHeaderLeftAdmin: {
+    flex: 2,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  tableHeaderRightAdmin: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  feeTableBodyAdmin: {
+    backgroundColor: '#fff',
+  },
+  feeRowAdmin: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#000',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+  },
+  feeParticularAdmin: {
+    flex: 2,
+    fontSize: 13,
+    color: '#000',
+  },
+  feeAmountAdmin: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 13,
+    color: '#000',
+  },
+  totalRowAdmin: {
+    backgroundColor: '#fff',
+    borderBottomWidth: 0,
+  },
+  feeParticularTotalAdmin: {
+    flex: 2,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  feeAmountTotalAdmin: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  
+  // Fee Summary - Global's Format
+  feeSummaryAdmin: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#000',
+    paddingVertical: 10,
+    marginVertical: 15,
+  },
+  summaryTextAdmin: {
+    fontSize: 13,
+    color: '#000',
+  },
+  
+  // Footer Section - Global's Format
+  footerSectionAdmin: {
+    marginTop: 15,
+  },
+  wordsTextAdmin: {
+    fontSize: 12,
+    color: '#000',
+    marginBottom: 3,
+  },
+  noteTextAdmin: {
+    fontSize: 12,
+    color: '#000',
+    marginBottom: 10,
+  },
+  footerDetailsAdmin: {
+    marginBottom: 15,
+  },
+  footerTextAdmin: {
+    fontSize: 12,
+    color: '#000',
+    marginVertical: 2,
+  },
+  signatureAreaAdmin: {
+    alignItems: 'flex-end',
+    marginTop: 30,
+  },
+  signatureBoxAdmin: {
+    alignItems: 'center',
+    width: 200,
+  },
+  signatureTextAdmin: {
+    fontSize: 12,
+    color: '#000',
+    marginBottom: 30,
+  },
+  signatureLineAdmin: {
+    borderTopWidth: 1,
+    borderTopColor: '#000',
+    width: '100%',
+    paddingTop: 5,
+    alignItems: 'center',
+  },
+  signatureLabelAdmin: {
+    fontSize: 12,
+    color: '#000',
+    textAlign: 'center',
   },
 });
 

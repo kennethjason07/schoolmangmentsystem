@@ -115,6 +115,32 @@ const WebPaymentModal = ({
     }
   };
 
+  // 🔢 Compute total fees paid till date for a student in an academic year
+  const getTotalPaidTillDate = async (studentId, academicYear) => {
+    try {
+      let query = supabase
+        .from(TABLES.STUDENT_FEES)
+        .select('amount_paid')
+        .eq('tenant_id', user.tenant_id)
+        .eq('student_id', studentId);
+
+      if (academicYear) {
+        query = query.eq('academic_year', academicYear);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.warn('Total paid query error:', error.message);
+        return 0;
+      }
+      const sum = (data || []).reduce((acc, row) => acc + (parseFloat(row.amount_paid) || 0), 0);
+      return sum;
+    } catch (e) {
+      console.warn('Total paid computation failed:', e.message);
+      return 0;
+    }
+  };
+
   // 💳 Handle Cash Payment
   const handleCashPayment = async () => {
     try {
@@ -161,6 +187,9 @@ const WebPaymentModal = ({
       const paidNow = parseFloat(paymentAmount);
       const remainingAfterPayment = Math.max(0, studentOutstanding - paidNow);
 
+      // Compute total paid till date including this payment
+      const totalPaidTillDate = await getTotalPaidTillDate(selectedStudent.id, academicYear);
+
       const receipt = {
         ...paymentData,
         student_name: selectedStudent.name,
@@ -171,7 +200,8 @@ const WebPaymentModal = ({
         payment_date_formatted: format(paymentDate, 'dd MMM yyyy'),
         amount_in_words: numberToWords(paidNow),
         amount_remaining: remainingAfterPayment,
-        cashier_name: (user?.full_name || user?.email || '').toString()
+        cashier_name: (user?.full_name || user?.email || '').toString(),
+        total_paid_till_date: totalPaidTillDate
       };
 
       setReceiptData(receipt);
