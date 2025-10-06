@@ -286,6 +286,15 @@ const PhotoUpload = ({ navigation }) => {
       return;
     }
 
+    // On web, React Native's Alert does not support custom buttons reliably.
+    // Use window.confirm to ensure the confirmation works, then proceed.
+    if (Platform.OS === 'web') {
+      const confirmed = typeof window !== 'undefined' ? window.confirm(`Upload ${mappedPhotoUris.length} photos to students?`) : true;
+      if (!confirmed) return;
+      await performUpload();
+      return;
+    }
+
     Alert.alert(
       'Upload Photos',
       `Upload ${mappedPhotoUris.length} photos to students?`,
@@ -308,134 +317,120 @@ const PhotoUpload = ({ navigation }) => {
       let uploadedCount = 0;
       let failedCount = 0;
       const errors = [];
-      
-      for (let i = 0; i < mappedPhotoUris.length; i++) {
-        const photoUri = mappedPhotoUris[i];
+
+      const startTime = Date.now();
+      const CONCURRENCY = Platform.OS === 'web' ? 3 : 4; // Limit parallel uploads
+
+      const processOne = async (photoUri, index) => {
         const student = photoMappings[photoUri];
         const photo = selectedPhotos.find(p => p.uri === photoUri);
-        
+
         try {
-          console.log(`📸 Uploading photo ${i + 1}/${mappedPhotoUris.length}: ${photo.name} for ${student.name}`);
-          
+          console.log(`📸 Uploading photo ${index + 1}/${mappedPhotoUris.length}: ${photo.name} for ${student.name}`);
+
           // Create unique filename: tenantId/studentId_admissionNo_timestamp.jpg
           const timestamp = Date.now();
           const fileExtension = photo.name.split('.').pop().toLowerCase();
           const fileName = `${getTenantId()}/${student.id}_${student.admission_no}_${timestamp}.${fileExtension}`;
-          
+
           // Read file for upload - React Native compatible
           let fileData;
-          
+
           if (Platform.OS === 'web') {
-            // Web platform: use blob
+            // Web platform: use blob (fast path for supabase upload)
             const response = await fetch(photo.uri);
             fileData = await response.blob();
           } else {
             // React Native: Use fetch approach as primary method (it's working reliably)
             try {
-              console.log('🔄 Reading file via fetch (primary method):', photo.uri);
               const response = await fetch(photo.uri);
-              
               if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
               }
-              
               const arrayBuffer = await response.arrayBuffer();
               fileData = new Uint8Array(arrayBuffer);
-              console.log('📦 Photo file data created via fetch, size:', fileData.length);
-              
             } catch (fetchError) {
               console.error('❌ Failed to read file via fetch:', fetchError);
-              
               // Fallback: Try new File class API
               try {
-                console.log('🔄 Fallback: trying new File class API');
-                
                 const file = new File(photo.uri);
-                
                 if (!file.exists) {
                   throw new Error(`File does not exist at URI: ${photo.uri}`);
                 }
-                
                 const bytes = await file.bytes();
                 fileData = new Uint8Array(bytes);
-                console.log('📦 Fallback File API successful, file size:', fileData.length);
-                
               } catch (fileError) {
                 console.error('❌ All file reading methods failed:', { fetchError, fileError });
                 throw new Error(`Failed to read file. Fetch error: ${fetchError.message}, File API error: ${fileError.message}`);
               }
             }
           }
-          
-          console.log(`📁 Uploading to storage path: ${fileName}`);
-          console.log(`📦 File data info: size=${fileData.length}, type=${photo.type}`);
-          
-          // Upload to Supabase Storage with comprehensive error handling
+
+          // Upload to Supabase Storage
           let uploadData = null;
           let uploadError = null;
-          
           try {
             const uploadResult = await supabase.storage
               .from('student-photos')
               .upload(fileName, fileData, {
                 contentType: photo.type || 'image/jpeg',
                 cacheControl: '3600',
-                upsert: false // Don't overwrite existing files
+                upsert: false
               });
-            
             uploadData = uploadResult.data;
             uploadError = uploadResult.error;
-            
-            console.log('🚀 Supabase upload result:', { uploadData, uploadError });
-            
           } catch (uploadException) {
-            console.error('❌ Supabase upload threw exception:', uploadException);
             uploadError = uploadException;
           }
-          
+
           if (uploadError) {
-            console.error('❌ Upload error details:', uploadError);
             throw new Error(`Upload failed: ${uploadError.message || uploadError}`);
           }
-          
           if (!uploadData) {
             throw new Error('Upload returned no data');
           }
-          
-          console.log('✅ Upload successful:', uploadData);
-          
-          // Get public URL
+
+          // Get public URL (client-side computed, no network)
           const { data: { publicUrl } } = supabase.storage
             .from('student-photos')
             .getPublicUrl(fileName);
-          
-          console.log('🔗 Public URL:', publicUrl);
-          
+
           // Update student record with photo URL
           const { error: updateError } = await supabase
             .from('students')
             .update({ photo_url: publicUrl })
             .eq('id', student.id)
             .eq('tenant_id', getTenantId());
-          
+
           if (updateError) {
-            console.error('❌ Failed to update student record:', updateError);
             errors.push(`Failed to update ${student.name}: ${updateError.message}`);
             failedCount++;
           } else {
-            console.log('✅ Student record updated successfully');
             uploadedCount++;
           }
-          
         } catch (error) {
-          console.error(`❌ Upload failed for ${student.name}:`, error);
-          errors.push(`${student.name}: ${error.message}`);
+          console.error(`❌ Upload failed for ${student?.name || photoUri}:`, error);
+          errors.push(`${student?.name || photoUri}: ${error.message}`);
           failedCount++;
         }
-      }
+      };
+
+      // Run uploads in a limited parallel pool
+      let nextIndex = 0;
+      const runWorker = async () => {
+        while (true) {
+          const current = nextIndex++;
+          if (current >= mappedPhotoUris.length) break;
+          await processOne(mappedPhotoUris[current], current);
+        }
+      };
+      const workers = Array.from({ length: Math.min(CONCURRENCY, mappedPhotoUris.length) }).map(runWorker);
+      await Promise.all(workers);
+
+      const durationSec = Math.max(1, Math.round((Date.now() - startTime) / 1000));
       
       // Show results
-      const successMessage = `Successfully uploaded ${uploadedCount} photos!`;
+      const successMessage = `Successfully uploaded ${uploadedCount} photos in ${durationSec}s!`;
       const errorMessage = failedCount > 0 ? `\n${failedCount} failed.` : '';
       const fullMessage = successMessage + errorMessage;
       
@@ -443,22 +438,36 @@ const PhotoUpload = ({ navigation }) => {
         console.log('❌ Upload errors:', errors);
       }
       
-      Alert.alert(
-        uploadedCount > 0 ? 'Upload Complete' : 'Upload Failed', 
-        fullMessage,
-        [
-          {
-            text: 'OK', 
-            onPress: () => {
-              if (uploadedCount > 0) {
-                setSelectedPhotos([]);
-                setPhotoMappings({});
-                loadStudents(); // Refresh to show new photos
-              }
-            }
+      if (uploadedCount > 0) {
+        // Stay on this screen after showing success popup
+        if (Platform.OS === 'web') {
+          if (typeof window !== 'undefined') {
+            window.alert(`Uploading done. Successfully uploaded ${uploadedCount} photos!${errorMessage}`);
           }
-        ]
-      );
+          // Reset state and refresh students to reflect new photos
+          setSelectedPhotos([]);
+          setPhotoMappings({});
+          loadStudents();
+        } else {
+          // Native: show Alert and remain on the same screen
+          Alert.alert(
+            'Uploading done',
+            fullMessage,
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  setSelectedPhotos([]);
+                  setPhotoMappings({});
+                  loadStudents(); // Refresh to show new photos
+                }
+              }
+            ]
+          );
+        }
+      } else {
+        Alert.alert('Upload Failed', fullMessage);
+      }
       
     } catch (error) {
       console.error('❌ Upload process failed:', error);
@@ -563,7 +572,15 @@ const PhotoUpload = ({ navigation }) => {
     <View style={styles.container}>
       <Header title="Photo Upload" showBack={true} onBack={() => navigation.goBack()} />
       
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={true}
+        persistentScrollbar={true}
+        keyboardShouldPersistTaps="handled"
+        // Improve scroll behavior on web for large lists
+        {...(Platform.OS === 'web' ? { scrollEventThrottle: 16 } : {})}
+      >
         {/* Class Selection */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Select Class</Text>
@@ -666,6 +683,23 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      // Ensure the scroll container is responsive and scrolls within the viewport
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      // Leave room for the header height (approx 64px); adjust if your Header height changes
+      maxHeight: 'calc(100vh - 64px)',
+    }),
+  },
+  contentContainer: {
+    flexGrow: 1,
+    paddingBottom: 80,
+    ...(Platform.OS === 'web' && {
+      width: '100%',
+      maxWidth: 1100,
+      alignSelf: 'center',
+      paddingHorizontal: 8,
+    }),
   },
   loadingContainer: {
     flex: 1,

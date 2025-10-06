@@ -178,6 +178,9 @@ const FeeManagement = () => {
     return tenantId;
   };
 
+  // Utility: consistently sort payments by most recent first
+  const sortPaymentsByDateDesc = (list) => (list || []).slice().sort((a, b) => new Date(b.payment_date) - new Date(a.payment_date));
+
   // Helper function to calculate total fees for a student
   // 🚀 OPTIMIZED fee statistics calculation - Lightning fast
   const calculateFeeStats = async () => {
@@ -358,7 +361,7 @@ const FeeManagement = () => {
                       const isTemp = String(p.id || '').startsWith('temp-');
                       return !(isTemp && p.student_id === newRow.student_id && Number(p.amount_paid) === Number(newRow.amount_paid) && p.payment_date === newRow.payment_date);
                     });
-                    return [enriched, ...next];
+                    return sortPaymentsByDateDesc([enriched, ...next]);
                   });
                   setPaymentSummary(prev => ({
                     ...prev,
@@ -389,7 +392,7 @@ const FeeManagement = () => {
                   const delta = Number(newRow.amount_paid || 0) - Number(oldRow.amount_paid || 0);
                   const studentMeta = students.find(s => s.id === newRow.student_id);
                   const studentClassId = studentMeta?.class_id;
-                  setPayments(prev => (prev || []).map(p => p.id === newRow.id ? { ...p, ...newRow, students: p.students } : p));
+                  setPayments(prev => sortPaymentsByDateDesc((prev || []).map(p => p.id === newRow.id ? { ...p, ...newRow, students: p.students } : p)));
                   if (delta !== 0) {
                     setPaymentSummary(prev => ({
                       ...prev,
@@ -606,7 +609,7 @@ const FeeManagement = () => {
     setClasses(processedData.classes);
     setFeeStructures(processedData.feeStructures);
     setStudents(processedData.students);
-    setPayments(processedData.payments);
+    setPayments(sortPaymentsByDateDesc(processedData.payments));
     setClassPaymentStats(processedData.classStats);
     setPaymentSummary(processedData.summary);
     setFeeStats(processedData.feeStats);
@@ -656,7 +659,7 @@ const FeeManagement = () => {
     setClasses(processedData.classes);
     setFeeStructures(processedData.feeStructures);
     setStudents(processedData.students);
-    setPayments(processedData.payments);
+    setPayments(sortPaymentsByDateDesc(processedData.payments));
     setClassPaymentStats(processedData.classStats);
     setPaymentSummary(processedData.summary);
     setFeeStats(processedData.feeStats);
@@ -1138,16 +1141,23 @@ const FeeManagement = () => {
         Alert.alert('Error', 'Invalid payment record');
         return;
       }
-      const confirmed = await new Promise((resolve) => {
-        Alert.alert(
-          'Delete Payment?',
-          `Student: ${payment.students?.full_name || 'Unknown'}\nAmount: ${formatSafeCurrency(payment.amount_paid)}\nDate: ${formatSafeDate(payment.payment_date)}\n\nThis action cannot be undone.`,
-          [
-            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
-          ]
-        );
-      });
+      let confirmed = true;
+      if (Platform.OS === 'web') {
+        confirmed = typeof window !== 'undefined' ? window.confirm(
+          `Delete this payment?\n\nStudent: ${payment.students?.full_name || 'Unknown'}\nAmount: ${formatSafeCurrency(payment.amount_paid)}\nDate: ${formatSafeDate(payment.payment_date)}\n\nThis action cannot be undone.`
+        ) : true;
+      } else {
+        confirmed = await new Promise((resolve) => {
+          Alert.alert(
+            'Delete Payment?',
+            `Student: ${payment.students?.full_name || 'Unknown'}\nAmount: ${formatSafeCurrency(payment.amount_paid)}\nDate: ${formatSafeDate(payment.payment_date)}\n\nThis action cannot be undone.`,
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+            ]
+          );
+        });
+      }
       if (!confirmed) return;
 
       setPaymentLoading(true);

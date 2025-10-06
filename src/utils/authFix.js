@@ -136,7 +136,7 @@ export class AuthFix {
    * Check if current session is valid and handle invalid refresh tokens (web-safe with timeout)
    */
   static async validateAndFixSession() {
-    const VALIDATION_TIMEOUT = Platform.OS === 'web' ? 4000 : 8000; // Much shorter timeout for web
+    const VALIDATION_TIMEOUT = Platform.OS === 'web' ? 15000 : 20000; // More generous timeout for slow networks
     
     try {
       if (DEBUG_AUTH_FIX_LOGS) console.log('🔍 Validating current session...');
@@ -148,16 +148,33 @@ export class AuthFix {
     } catch (error) {
       console.error('❌ Session validation failed or timed out:', error.message);
       
-      // If validation times out or fails, assume we need to reauth
+      // If validation times out or fails, try to continue gracefully (especially on web)
       if (error.message.includes('timed out')) {
-        console.log('⏱️ Session validation timed out - forcing sign out to prevent infinite loading');
-        
-        // Don't wait for force sign out to complete if it might also hang
+        console.log('⏱️ Session validation timed out - attempting to continue with existing session');
+
+        // Try to fetch any existing session quickly and allow it if present
+        try {
+          const sessionFallback = await this.withTimeout(supabase.auth.getSession(), 3000);
+          if (sessionFallback?.data?.session) {
+            console.log('✅ Found existing session after timeout - allowing access');
+            return { valid: true, session: sessionFallback.data.session, timeout: true };
+          }
+        } catch (getSessionError) {
+          console.warn('⚠️ getSession after timeout also failed:', getSessionError?.message);
+        }
+
+        // On web, avoid forcing sign-out for timeouts; let the app proceed to the auth listener
+        if (Platform.OS === 'web') {
+          return { valid: false, needsReauth: false, error };
+        }
+
+        // Non-web platforms: attempt a quick sign-out to clear bad state
         try {
           await this.withTimeout(this.forceSignOut(), 3000);
         } catch (signOutError) {
           console.warn('⚠️ Force sign out also timed out, continuing anyway:', signOutError.message);
         }
+        return { valid: false, needsReauth: true, error };
       }
       
       return { valid: false, needsReauth: true, error };

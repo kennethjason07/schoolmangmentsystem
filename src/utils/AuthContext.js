@@ -69,13 +69,8 @@ export const AuthProvider = ({ children }) => {
         // Use shorter timeout for web platform to prevent hanging
         const WEB_TIMEOUT = Platform.OS === 'web' ? 5000 : 10000;
         
-        // First, validate and fix any session issues using AuthFix with timeout
-        const sessionResult = await Promise.race([
-          AuthFix.validateAndFixSession(),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Session validation timed out')), WEB_TIMEOUT)
-          )
-        ]);
+        // First, validate and fix any session issues using AuthFix (it has its own timeouts)
+        const sessionResult = await AuthFix.validateAndFixSession();
         
         if (sessionResult.valid && sessionResult.session) {
           // Session is valid, proceed with normal auth handling
@@ -298,7 +293,7 @@ export const AuthProvider = ({ children }) => {
         }
         
         // 📶 OPTIMIZED TIMEOUT: More aggressive for slow connections
-        let baseTimeout = Platform.OS === 'web' ? 15000 : 20000; // Much more generous timeout for slow networks
+        let baseTimeout = Platform.OS === 'web' ? 30000 : 20000; // Increased web timeout to 30s for very slow networks
         
         // Use a fixed reasonable timeout since health check timing isn't reliable
         // In production, connection speed varies and timing the health check above is problematic

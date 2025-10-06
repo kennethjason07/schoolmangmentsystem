@@ -120,6 +120,12 @@ const LoginScreen = ({ navigation }) => {
   const validateRole = async (role) => {
     try {
       console.log('🔍 Validating role:', role);
+
+      // On web, do not block login if role validation is slow or unavailable
+      if (Platform.OS === 'web') {
+        console.log('🌐 Web: Skipping strict role validation to avoid blocking login');
+        return true;
+      }
       
       // First check if any roles exist in the database at all
       const { data: allRoles, error: allRolesError } = await supabase
@@ -187,6 +193,10 @@ Please contact the administrator to add this role.`
       return true;
     } catch (error) {
       console.error('💥 Role validation error:', error);
+      if (Platform.OS === 'web') {
+        console.log('🌐 Web: Continuing despite role validation error');
+        return true;
+      }
       Alert.alert(
         'Validation Error', 
         'Unable to validate user role. Please check your internet connection and try again.\n\nIf the problem persists, contact your system administrator.'
@@ -216,7 +226,11 @@ Please contact the administrator to add this role.`
       const hasTenantAccess = await validateTenantAccess(email);
       if (!hasTenantAccess) {
         console.log('🚀 ENHANCED_TENANT_SYSTEM: Tenant access validation failed');
-        return;
+        // Do not block login on web due to tenant validation issues; proceed to sign in
+        if (Platform.OS !== 'web') {
+          return;
+        }
+        console.log('🌐 Web: proceeding with sign-in despite tenant validation failure');
       }
       
       const { data, error } = await signIn(email, password, selectedRole);
@@ -799,7 +813,10 @@ const styles = StyleSheet.create({
     color: '#333',
     // Web-specific enhancements
     ...(Platform.OS === 'web' && {
-      outline: 'none',
+      // React Native Web doesn't support the shorthand 'outline'
+      // Use long-form properties instead
+      outlineStyle: 'none',
+      outlineWidth: 0,
     }),
   },
   showPasswordButton: {

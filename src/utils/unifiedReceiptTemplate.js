@@ -187,17 +187,31 @@ export const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, pre
     // Clean data extraction with fallbacks
     const schoolName = schoolDetails?.name || 'School Name';
     const schoolAddress = schoolDetails?.address || 'School Address';
+    const schoolPhone = schoolDetails?.phone || schoolDetails?.contact_phone || '';
+    const schoolEmail = schoolDetails?.email || schoolDetails?.contact_email || '';
+
     const studentName = receiptData.student_name || receiptData.studentName || 'Student Name';
     const admissionNo = receiptData.student_admission_no || receiptData.admissionNo || 'N/A';
+    const studentUID = receiptData.student_uid || receiptData.student_uid_no || receiptData.student_id || '';
+    const fatherName = receiptData.father_name || receiptData.parent_name || '';
     const className = receiptData.class_name || receiptData.className || 'N/A';
+    const academicYear = receiptData.academic_year || schoolDetails?.current_academic_year || '';
+
     const feeType = receiptData.fee_component || receiptData.feeName || 'Fee Type';
     const paymentDate = receiptData.payment_date_formatted || receiptData.paymentDate || 'N/A';
     const receiptNo = receiptData.receipt_no || receiptData.receipt_number || receiptData.receiptNumber || 'N/A';
     const paymentMode = receiptData.payment_mode || receiptData.paymentMethod || 'N/A';
-    const amountPaid = parseFloat(receiptData.amount_paid || receiptData.amount || 0).toLocaleString('en-IN', { 
+
+    const amountPaidNumber = parseFloat(receiptData.amount_paid || receiptData.amount || 0);
+    const amountPaid = amountPaidNumber.toLocaleString('en-IN', { 
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
+    const amountInWords = receiptData.amount_in_words || '';
+
+    const totalPaidToDate = receiptData.total_paid_to_date;
+    const totalDue = receiptData.total_due;
+    const cashierName = receiptData.cashier_name || receiptData.received_by || '';
     
     console.log('📝 Processed receipt data:', {
       schoolName, schoolAddress, studentName, admissionNo, className,
@@ -212,8 +226,8 @@ export const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, pre
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Fee Receipt - ${receiptNo}</title>
           <style>
-            @page {
-              size: A4 landscape;
+@page {
+              size: A4;
               margin: 10mm;
             }
             
@@ -305,6 +319,13 @@ export const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, pre
               text-underline-offset: 3px;
               text-align: center;
             }
+
+            .contact-line {
+              font-size: 12px;
+              color: #555;
+              margin-top: 4px;
+              text-align: center;
+            }
             
             /* Content Section - Single Column */
             .receipt-content {
@@ -330,6 +351,39 @@ export const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, pre
               color: #333;
               font-size: 13px;
             }
+
+            /* Details grid to match school format */
+            .details-table {
+              width: 100%;
+              border-collapse: collapse;
+              border: 1px solid #000;
+              margin: 6px 0 10px 0;
+            }
+            .details-table td {
+              border: 1px solid #000;
+              padding: 4px 6px;
+              font-size: 12px;
+            }
+            .details-table .label {
+              font-weight: 600;
+              background: #f7f7f7;
+              white-space: nowrap;
+              width: 12%;
+            }
+            .details-table .value {
+              font-weight: 500;
+            }
+
+            /* One-line totals */
+            .totals-row {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-top: 8px;
+              gap: 12px;
+              font-size: 12px;
+            }
+            .totals-row .receipt-label { font-weight: 600; }
             
             /* Separator Line */
             .amount-separator {
@@ -359,6 +413,27 @@ export const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, pre
               color: #333;
             }
             
+            /* Particulars table */
+            .particulars-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 10px;
+            }
+            .particulars-table th, .particulars-table td {
+              border: 1px solid #000;
+              padding: 6px 8px;
+              text-align: left;
+              font-size: 12px;
+            }
+            .particulars-table th {
+              background: #f2f2f2;
+              font-weight: 700;
+            }
+            .particulars-total {
+              text-align: right;
+              font-weight: 700;
+            }
+
             /* Footer */
             .receipt-footer {
               margin-top: 15px;
@@ -367,6 +442,22 @@ export const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, pre
               color: #666;
               border-top: 1px solid #ddd;
               padding-top: 8px;
+            }
+
+            .signature-row {
+              display: flex;
+              justify-content: space-between;
+              margin-top: 20px;
+            }
+            .signature-box {
+              width: 45%;
+              text-align: center;
+              font-size: 11px;
+            }
+            .signature-line {
+              border-top: 1px solid #000;
+              margin-top: 40px;
+              padding-top: 4px;
             }
             
             @media print {
@@ -394,47 +485,87 @@ export const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, pre
                 </div>
               </div>
               <div class="receipt-title">FEE RECEIPT</div>
+              ${schoolPhone || schoolEmail ? `<div class="contact-line">Contact: ${schoolPhone || 'N/A'}${schoolEmail ? ` | Email: ${schoolEmail}` : ''}</div>` : ''}
             </div>
             
             <!-- Content - Single Column -->
             <div class="receipt-content">
-              <div class="receipt-row">
-                <span class="receipt-label">Student Name:</span>
-                <span class="receipt-value">${studentName}</span>
-              </div>
-              <div class="receipt-row">
-                <span class="receipt-label">Admission No:</span>
-                <span class="receipt-value">${admissionNo}</span>
-              </div>
-              <div class="receipt-row">
-                <span class="receipt-label">Class:</span>
-                <span class="receipt-value">${className}</span>
-              </div>
+              <table class="details-table">
+                <tr>
+                  <td class="label">Student Name:</td>
+                  <td class="value" colspan="3">${studentName}</td>
+                  <td class="label">UID:</td>
+                  <td class="value">${studentUID || 'N/A'}</td>
+                  <td class="label">Receipt No:</td>
+                  <td class="value">${receiptNo}</td>
+                  <td class="label">Year:</td>
+                  <td class="value">${academicYear || 'N/A'}</td>
+                </tr>
+                <tr>
+                  <td class="label">Father's Name:</td>
+                  <td class="value" colspan="3">${fatherName || 'N/A'}</td>
+                  <td class="label">Class:</td>
+                  <td class="value">${className}</td>
+                  <td class="label">Date:</td>
+                  <td class="value">${paymentDate}</td>
+                  <td class="label"></td>
+                  <td class="value"></td>
+                </tr>
+              </table>
               <div class="receipt-row">
                 <span class="receipt-label">Fee Type:</span>
                 <span class="receipt-value">${feeType}</span>
               </div>
-              <div class="receipt-row">
-                <span class="receipt-label">Date:</span>
-                <span class="receipt-value">${paymentDate}</span>
+
+              <!-- Particulars Table -->
+              <table class="particulars-table">
+                <thead>
+                  <tr>
+                    <th style="width:70%">Particulars</th>
+                    <th style="width:30%">Fees Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>${feeType}</td>
+                    <td>₹${amountPaid}</td>
+                  </tr>
+                  <tr>
+                    <td class="particulars-total">Total:</td>
+                    <td><strong>₹${amountPaid}</strong></td>
+                  </tr>
+                </tbody>
+              </table>
+
+              ${typeof totalPaidToDate !== 'undefined' || typeof totalDue !== 'undefined' ? `
+                <div class="totals-row">
+                  <div><span class="receipt-label">Total fees paid :</span> <span class="receipt-value">₹${Number(totalPaidToDate || 0).toLocaleString('en-IN')}</span></div>
+                  <div><span class="receipt-label">Total fees Due :</span> <span class="receipt-value">₹${Number(totalDue || 0).toLocaleString('en-IN')}</span></div>
+                </div>
+              ` : ''}
+
+              ${amountInWords ? `<div class="receipt-row" style="margin-top:8px;"><span class="receipt-label">In Words:</span><span class="receipt-value" style="text-transform:capitalize">${amountInWords} only</span></div>` : ''}
+
+              <div class="receipt-row" style="margin-top:8px; font-size:11px; color:#555;">
+                <span class="receipt-label">Note:</span>
+                <span class="receipt-value">Fees once deposited will not be refunded under any circumstances</span>
               </div>
-              <div class="receipt-row">
-                <span class="receipt-label">Receipt No:</span>
-                <span class="receipt-value">${receiptNo}</span>
-              </div>
-              <div class="receipt-row">
+
+              <div class="receipt-row" style="margin-top:6px;">
                 <span class="receipt-label">Payment Mode:</span>
                 <span class="receipt-value">${paymentMode}</span>
               </div>
-            </div>
-            
-            <!-- Separator Line Above Amount -->
-            <div class="amount-separator"></div>
-            
-            <!-- Amount Section -->
-            <div class="receipt-amount-section">
-              <div class="receipt-amount-label">Amount Paid:</div>
-              <div class="receipt-amount">₹${amountPaid}</div>
+
+              <div class="signature-row">
+                <div class="signature-box">
+                  <div>Date: ${paymentDate}</div>
+                  <div class="signature-line">Received with thanks</div>
+                </div>
+                <div class="signature-box">
+                  ${cashierName ? `<div>Cashier Name: ${cashierName}</div>` : ''}
+                  <div class="signature-line">Cashier/Accountant</div>
+                </div>
+              </div>
             </div>
             
             <!-- Footer -->
