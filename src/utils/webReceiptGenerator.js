@@ -36,7 +36,8 @@ export const generateWebReceiptHTML = async (receiptData) => {
       paymentData,
       outstandingAmount = 0,
       receiptNumber,
-      academicYear = '2024-25'
+      academicYear = '2024-25',
+      cashierName
     } = receiptData;
 
     // Get school logo - try multiple sources
@@ -432,6 +433,7 @@ export const generateWebReceiptHTML = async (receiptData) => {
                   <div class="payment-detail"><strong>Payment Mode:</strong> ${paymentData.mode}</div>
                   <div class="payment-detail"><strong>Transaction ID:</strong> ${paymentData.transactionId}</div>
                   <div class="payment-detail"><strong>Reference:</strong> ${formatReferenceNumberForDisplay(receiptNumber)}</div>
+                  <div class="payment-detail"><strong>Amount Paid:</strong> ₹${feeData.amount}.00</div>
                 </div>
                 <div class="right-info">
                   ${outstandingAmount > 0 ? `
@@ -443,6 +445,9 @@ export const generateWebReceiptHTML = async (receiptData) => {
                       <strong>✓ All Fees Paid</strong>
                     </div>
                   `}
+                  ${cashierName ? `
+                    <div class="payment-detail" style="margin-top:8px;"><strong>Cashier:</strong> ${cashierName}</div>
+                  ` : ''}
                 </div>
               </div>
               
@@ -511,7 +516,8 @@ export const generateFeeReceiptHTML = async (receiptData) => {
     transactionId,
     referenceNumber,
     outstandingAmount = 0,
-    academicYear = '2024-25'
+    academicYear = '2024-25',
+    cashierName
   } = receiptData;
 
   return await generateWebReceiptHTML({
@@ -531,7 +537,8 @@ export const generateFeeReceiptHTML = async (receiptData) => {
     },
     outstandingAmount,
     receiptNumber: referenceNumber,
-    academicYear
+    academicYear,
+    cashierName
   });
 };
 
@@ -544,7 +551,8 @@ export const generateUPIReceiptHTML = async (receiptData) => {
     transactionData,
     paymentDetails,
     upiTransaction,
-    outstandingAmount = 0
+    outstandingAmount = 0,
+    cashierName
   } = receiptData;
 
   return await generateWebReceiptHTML({
@@ -564,7 +572,8 @@ export const generateUPIReceiptHTML = async (receiptData) => {
     },
     outstandingAmount,
     receiptNumber: paymentDetails.referenceNumber,
-    academicYear: transactionData.academicYear || '2024-25'
+    academicYear: transactionData.academicYear || '2024-25',
+    cashierName
   });
 };
 

@@ -157,6 +157,10 @@ const WebPaymentModal = ({
       }
 
       // Prepare receipt data
+      const studentOutstanding = parseFloat(selectedStudent?.outstanding || 0);
+      const paidNow = parseFloat(paymentAmount);
+      const remainingAfterPayment = Math.max(0, studentOutstanding - paidNow);
+
       const receipt = {
         ...paymentData,
         student_name: selectedStudent.name,
@@ -165,7 +169,9 @@ const WebPaymentModal = ({
         class_name: classData.className,
         receipt_no: receiptNumber,
         payment_date_formatted: format(paymentDate, 'dd MMM yyyy'),
-        amount_in_words: numberToWords(parseFloat(paymentAmount))
+        amount_in_words: numberToWords(paidNow),
+        amount_remaining: remainingAfterPayment,
+        cashier_name: (user?.full_name || user?.email || '').toString()
       };
 
       setReceiptData(receipt);
