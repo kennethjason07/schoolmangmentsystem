@@ -206,6 +206,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
             if (logoData?.publicUrl) {
               console.log('✅ School logo URL generated:', logoData.publicUrl);
               console.log('📷 Logo will be used in receipt generation');
+              console.log('🖼️ Logo URL will be passed to LogoDisplay component via schoolDetails.logo_url');
               setSchoolLogo(logoData.publicUrl);
               
               // Test if the image actually loads
@@ -1151,8 +1152,17 @@ const ClassStudentDetails = ({ route, navigation }) => {
         payment_mode: receiptData.payment_mode,
         amount_paid: receiptData.amount_paid,
         amount_remaining: receiptData.amount_remaining,
-        cashier_name: receiptData.cashier_name
+        cashier_name: receiptData.cashier_name,
+        father_name: receiptData.father_name,
+        student_uid: receiptData.student_uid,
+        total_paid_till_date: receiptData.total_paid_till_date
       };
+      
+      console.log('🔥 RECEIPT DEBUG [ADMIN] - Father name check:', {
+        originalFatherName: receiptData.father_name,
+        unifiedFatherName: unifiedReceiptData.father_name,
+        hasParentName: !!receiptData.father_name
+      });
       
       console.log('🔥 RECEIPT DEBUG [ADMIN] - Unified receipt data:', JSON.stringify(unifiedReceiptData, null, 2));
       console.log('🔥 RECEIPT DEBUG [ADMIN] - About to call generateUnifiedReceiptHTML...');
@@ -1682,14 +1692,17 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
       const receiptData = {
         ...paymentData,
         student_name: selectedStudent.name,
-        student_admission_no: selectedStudent.admissionNo,
-        student_roll_no: selectedStudent.rollNo,
+        student_admission_no: selectedStudent.admissionNo || selectedStudent.admission_no,
+        student_roll_no: selectedStudent.rollNo || selectedStudent.roll_no,
         class_name: classData.className,
         receipt_no: receiptNumber,
         payment_date_formatted: formatDateForDisplay(paymentDate),
         amount_in_words: numberToWords(parseFloat(paymentAmount)),
         amount_remaining: Math.max(0, (parseFloat(selectedStudent?.outstanding || 0)) - parseFloat(paymentAmount || 0)),
-        cashier_name: (user?.full_name || user?.email || '').toString()
+        cashier_name: (user?.full_name || user?.email || '').toString(),
+        father_name: selectedStudent.parentName || 'N/A',
+        student_uid: selectedStudent.admission_no || selectedStudent.admissionNo,
+        total_paid_till_date: (selectedStudent.totalPaid || 0) + parseFloat(paymentAmount)
       };
       
       setLastPaymentRecord(receiptData);
@@ -3009,17 +3022,18 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
                   {/* Header - Global's Sanmarg Format */}
                   <View style={styles.receiptDocumentHeader}>
                     <View style={styles.receiptLogoContainer}>
-                      {schoolLogo ? (
-                        <Image 
-                          source={{ uri: schoolLogo }} 
-                          style={styles.receiptLogoImageRound}
-                          resizeMode="contain"
-                        />
-                      ) : (
-                        <View style={styles.receiptLogoPlaceholderRound}>
-                          <Text style={{ fontSize: 30 }}>🏦</Text>
-                        </View>
-                      )}
+                      {console.log('🏦 Receipt Logo Debug:', {
+                        schoolDetails: !!schoolDetails,
+                        logoUrl: schoolDetails?.logo_url,
+                        schoolLogo: schoolLogo,
+                        hasLogoUrl: !!schoolDetails?.logo_url
+                      })}
+                      <LogoDisplay 
+                        logoUrl={schoolDetails?.logo_url}
+                        size={80}
+                        style={styles.receiptLogoRound}
+                        fallbackIcon="school-outline"
+                      />
                     </View>
                     <View style={styles.receiptSchoolInfoCenter}>
                       <Text style={styles.receiptSchoolNameGlobal}>{schoolDetails?.name || "GLOBAL'S SANMARG PUBLIC SCHOOL"}</Text>
@@ -3079,7 +3093,7 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
                     
                     <View style={styles.feeTableBodyAdmin}>
                       <View style={styles.feeRowAdmin}>
-                        <Text style={styles.feeParticularAdmin}>{lastPaymentRecord.fee_component}</Text>
+                        <Text style={styles.feeParticularAdmin}>{lastPaymentRecord.fee_component || 'Fee Payment'}</Text>
                         <Text style={styles.feeAmountAdmin}>Rs. {Number(lastPaymentRecord.amount_paid).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
                       </View>
                       
@@ -3202,7 +3216,7 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
                     <View style={styles.receiptLogoContainer}>
                       <LogoDisplay 
                         logoUrl={schoolDetails?.logo_url}
-                        size={60}
+                        size={80}
                         style={styles.receiptLogoRound}
                         fallbackIcon="school-outline"
                       />
@@ -3265,7 +3279,7 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
                     
                     <View style={styles.feeTableBodyAdmin}>
                       <View style={styles.feeRowAdmin}>
-                        <Text style={styles.feeParticularAdmin}>{selectedPaymentForReceipt.fee_component}</Text>
+                        <Text style={styles.feeParticularAdmin}>{selectedPaymentForReceipt.fee_component || 'Fee Payment'}</Text>
                         <Text style={styles.feeAmountAdmin}>Rs. {Number(selectedPaymentForReceipt.amount_paid).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</Text>
                       </View>
                       
@@ -5324,16 +5338,18 @@ const styles = StyleSheet.create({
   tableHeaderLeftAdmin: {
     flex: 2,
     textAlign: 'center',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: 'bold',
     color: '#000',
+    paddingVertical: 8,
   },
   tableHeaderRightAdmin: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: 'bold',
     color: '#000',
+    paddingVertical: 8,
   },
   feeTableBodyAdmin: {
     backgroundColor: '#fff',
@@ -5347,14 +5363,18 @@ const styles = StyleSheet.create({
   },
   feeParticularAdmin: {
     flex: 2,
-    fontSize: 13,
+    fontSize: 14,
     color: '#000',
+    fontWeight: '500',
+    textAlign: 'center',
+    paddingHorizontal: 4,
   },
   feeAmountAdmin: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 13,
+    fontSize: 14,
     color: '#000',
+    fontWeight: '500',
   },
   totalRowAdmin: {
     backgroundColor: '#fff',
