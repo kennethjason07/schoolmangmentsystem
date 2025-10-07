@@ -62,10 +62,11 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
     });
     console.log('🎯 Unified - Preloaded logo URL provided:', preloadedLogoUrl);
     
-    // If we have a preloaded logo URL (from admin dashboard), use it directly
+    // If we have a preloaded logo URL (from admin dashboard), use it directly with enhanced validation
     if (preloadedLogoUrl && isValidImageUrl(preloadedLogoUrl)) {
-      console.log('✅ Using preloaded logo URL:', preloadedLogoUrl);
-      logoHTML = `<img src="${preloadedLogoUrl}" class="school-logo" alt="School Logo" />`;
+      console.log('✅ Using preloaded logo URL for print/PDF:', preloadedLogoUrl);
+      // For print/PDF contexts, we add additional attributes to ensure the image loads properly
+      logoHTML = `<img src="${preloadedLogoUrl}" class="school-logo" alt="School Logo" crossorigin="anonymous" referrerpolicy="no-referrer" onload="console.log('Logo loaded successfully')" onerror="console.error('Logo failed to load:', this.src); this.style.display='none'; this.parentNode.innerHTML='<div class=\"school-logo-fallback\">🏫</div>';" />`;
     } else if (schoolDetails?.logo_url) {
       console.log('🔍 Unified - Attempting to load logo from:', schoolDetails.logo_url);
       console.log('🔍 Unified - Logo URL type:', typeof schoolDetails.logo_url);
@@ -78,7 +79,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
           try {
             const testResponse = await fetch(schoolDetails.logo_url, { method: 'HEAD' });
             if (testResponse.ok) {
-              logoHTML = `<img src="${schoolDetails.logo_url}" class="school-logo" alt="School Logo" />`;
+              logoHTML = `<img src="${schoolDetails.logo_url}" class="school-logo" alt="School Logo" crossorigin="anonymous" referrerpolicy="no-referrer" onload="console.log('Logo loaded successfully from direct URL')" onerror="console.error('Logo failed to load from direct URL:', this.src); this.style.display='none'; this.parentNode.innerHTML='<div class=\"school-logo-fallback\">🏫</div>';" />`;
               console.log('✅ Unified - Direct logo URL loaded successfully:', schoolDetails.logo_url);
             } else {
               console.log('🔄 Unified - Direct logo URL not accessible, extracting filename for bucket lookup');
@@ -119,7 +120,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
             try {
               const testResponse = await fetch(profilesLogoData.publicUrl, { method: 'HEAD' });
               if (testResponse.ok) {
-                logoHTML = `<img src="${profilesLogoData.publicUrl}" class="school-logo" alt="School Logo" />`;
+                logoHTML = `<img src="${profilesLogoData.publicUrl}" class="school-logo" alt="School Logo" crossorigin="anonymous" referrerpolicy="no-referrer" onload="console.log('Logo loaded successfully from profiles bucket')" onerror="console.error('Logo failed to load from profiles bucket:', this.src); this.style.display='none'; this.parentNode.innerHTML='<div class=\"school-logo-fallback\">🏫</div>';" />`;
                 console.log('✅ Unified - Profiles bucket URL loaded successfully:', profilesLogoData.publicUrl);
               } else {
                 throw new Error('Profiles bucket URL not accessible');
@@ -148,7 +149,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
               try {
                 const testResponse = await fetch(assetsLogoData.publicUrl, { method: 'HEAD' });
                 if (testResponse.ok) {
-                  logoHTML = `<img src="${assetsLogoData.publicUrl}" class="school-logo" alt="School Logo" />`;
+                  logoHTML = `<img src="${assetsLogoData.publicUrl}" class="school-logo" alt="School Logo" crossorigin="anonymous" referrerpolicy="no-referrer" onload="console.log('Logo loaded successfully from school-assets bucket')" onerror="console.error('Logo failed to load from school-assets bucket:', this.src); this.style.display='none'; this.parentNode.innerHTML='<div class=\"school-logo-fallback\">🏫</div>';" />`;
                   console.log('✅ Unified - School-assets bucket URL loaded successfully:', assetsLogoData.publicUrl);
                 } else {
                   throw new Error('School-assets bucket URL not accessible');
@@ -179,7 +180,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
           const isValidLogo = validateLogoData(logoData) && isValidImageUrl(logoData);
           
           if (isValidLogo) {
-            logoHTML = `<img src="${logoData}" class="school-logo" alt="School Logo" />`;
+            logoHTML = `<img src="${logoData}" class="school-logo" alt="School Logo" crossorigin="anonymous" referrerpolicy="no-referrer" onload="console.log('Logo loaded successfully from enhanced loader')" onerror="console.error('Logo failed to load from enhanced loader:', this.src); this.style.display='none'; this.parentNode.innerHTML='<div class=\"school-logo-fallback\">🏫</div>';" />`;
             console.log('✅ Unified - Enhanced logo loaded successfully');
           } else {
             console.log('🔄 Unified - Enhanced loader failed, trying robust loader');
@@ -192,7 +193,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
             const isFallbackValid = validateImageData(fallbackLogoData) && isValidImageUrl(fallbackLogoData);
             
             if (isFallbackValid) {
-              logoHTML = `<img src="${fallbackLogoData}" class="school-logo" alt="School Logo" />`;
+              logoHTML = `<img src="${fallbackLogoData}" class="school-logo" alt="School Logo" crossorigin="anonymous" referrerpolicy="no-referrer" onload="console.log('Logo loaded successfully from fallback loader')" onerror="console.error('Logo failed to load from fallback loader:', this.src); this.style.display='none'; this.parentNode.innerHTML='<div class=\"school-logo-fallback\">🏫</div>';" />`;
               console.log('✅ Unified - Fallback logo loaded successfully');
             } else {
               console.log('❌ Unified - All logo loaders failed, using school icon placeholder (same as dashboard)');
@@ -210,6 +211,12 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
       console.log('⚠️ No logo URL found in school details');
       console.log('📋 Available school details keys:', Object.keys(schoolDetails || {}));
       // Use school icon fallback (same as LogoDisplay component)
+      logoHTML = `<div class="school-logo-fallback">🏫</div>`;
+    }
+    
+    // Ensure we always have some logo content - fallback to emoji if logoHTML is empty
+    if (!logoHTML || logoHTML.trim() === '') {
+      console.log('🚨 Logo HTML is empty, using emergency fallback');
       logoHTML = `<div class="school-logo-fallback">🏫</div>`;
     }
     
@@ -447,15 +454,392 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
               text-align: center;
             }
             
-            /* Print optimization */
+            /* Hide buttons in all contexts - both screen and print */
+            /* Target React Native TouchableOpacity buttons that get converted to web */
+            div[role="button"], 
+            [data-focusable="true"],
+            /* Target common button patterns */
+            .receipt-container button,
+            .receipt-container .button,
+            .receipt-container [role="button"],
+            .receipt-container input[type="button"],
+            .receipt-container input[type="submit"],
+            /* Target specific admin button classes */
+            .receiptActionButtons,
+            .receiptPrintButton,
+            .receiptDownloadButton,
+            /* Target TouchableOpacity elements that might have these characteristics */
+            div[style*="cursor: pointer"],
+            div[style*="user-select: none"],
+            /* Hide any element with these specific background colors (from admin styles) */
+            div[style*="background-color: rgb(76, 175, 80)"], /* Green print button */
+            div[style*="background-color: rgb(33, 150, 243)"], /* Blue download button */
+            /* Target elements with specific text content */
+            div:has(> div:contains("Print")),
+            div:has(> div:contains("Download")),
+            /* Additional patterns for action buttons */
+            .action-buttons,
+            .modal-actions,
+            .receipt-actions {
+              display: none !important;
+              visibility: hidden !important;
+              opacity: 0 !important;
+              height: 0 !important;
+              overflow: hidden !important;
+            }
+            
+            /* Print optimization - Hide UI elements and optimize for printing */
             @media print {
-              body { margin: 0; padding: 0; }
-              .receipt-container { border: 2px solid #000; margin: 0; }
-              @page { margin: 10mm; size: A4 portrait; }
+              /* Hide ALL buttons and interactive elements during print */
+              *, *::before, *::after {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              
+              /* Hide any element that looks like a button or interactive UI */
+              button, .button, [role="button"],
+              .print-button, .share-button, .download-button,
+              .action-button, .close-button, .modal-button,
+              .btn, .btn-primary, .btn-secondary,
+              .header-actions, .modal-header, .modal-footer,
+              .toolbar, .navigation, .nav,
+              .floating-action-button, .fab,
+              input[type="button"], input[type="submit"],
+              .no-print,
+              /* Additional button patterns commonly used */
+              [class*="button"], [class*="btn"], [id*="button"], [id*="btn"],
+              .touchable, .pressable, .clickable,
+              /* React Native Web classes that might be buttons */
+              ._1mqqh, ._19bac, ._1k2vh, ._11jp7, ._1146k,
+              /* Common button container classes */
+              .actions, .button-group, .control-buttons,
+              /* Make sure we catch any missed interactive elements */
+              [onclick], [ontouchstart], [role="menuitem"],
+              .interactive, .clickable-element {
+                display: none !important;
+                visibility: hidden !important;
+                opacity: 0 !important;
+                height: 0 !important;
+                width: 0 !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                border: none !important;
+              }
+              
+              /* Optimize body and container for print */
+              body { 
+                margin: 0 !important; 
+                padding: 0 !important;
+                background: white !important;
+                color: black !important;
+              }
+              
+              .receipt-container { 
+                border: 2px solid #000 !important; 
+                margin: 0 !important;
+                padding: 15px !important;
+                background: white !important;
+                box-shadow: none !important;
+                border-radius: 0 !important;
+              }
+              
+              /* Ensure logo displays properly in print */
+              .school-logo {
+                width: 80px !important;
+                height: 80px !important;
+                object-fit: contain !important;
+                border-radius: 50% !important;
+                display: block !important;
+                margin: 0 auto !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              
+              .school-logo-fallback {
+                width: 80px !important;
+                height: 80px !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                font-size: 30px !important;
+                background: #f5f5f5 !important;
+                border: 2px solid #333 !important;
+                border-radius: 50% !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              
+              /* Ensure all text elements are black for printing */
+              .school-name, .school-address, .school-contact,
+              .info-label, .info-value,
+              .fee-table th, .fee-table td,
+              .fee-summary-item,
+              .footer-notes div, .footer-details div,
+              .signature-text, .signature-line {
+                color: black !important;
+              }
+              
+              /* Ensure borders are visible in print */
+              .header-section,
+              .student-row,
+              .fee-table, .fee-table th, .fee-table td,
+              .fee-summary,
+              .signature-line {
+                border-color: black !important;
+              }
+              
+              /* Page setup */
+              @page { 
+                margin: 10mm !important; 
+                size: A4 portrait !important;
+              }
+              
+              /* Force background colors and borders to print */
+              * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
             }
           </style>
         </head>
         <body>
+          <script>
+            // Ultra-aggressive button hiding with comprehensive debugging
+            function hideButtonElements() {
+              console.log('🚫 Starting aggressive button removal...');
+              var hiddenCount = 0;
+              
+              // PHASE 1: Hide by role attributes
+              var buttonRoles = document.querySelectorAll('[role="button"], [role="menuitem"], [tabindex="0"]');
+              console.log('Found ' + buttonRoles.length + ' elements with button roles');
+              buttonRoles.forEach(function(el) {
+                el.style.display = 'none !important';
+                el.style.visibility = 'hidden !important';
+                el.style.opacity = '0 !important';
+                el.style.height = '0 !important';
+                el.style.width = '0 !important';
+                el.style.overflow = 'hidden !important';
+                hiddenCount++;
+              });
+              
+              // PHASE 2: Hide by class names (more comprehensive)
+              var buttonClasses = [
+                'receiptActionButtons', 'receiptPrintButton', 'receiptDownloadButton',
+                'action-buttons', 'modal-actions', 'receipt-actions',
+                'print-button', 'download-button', 'btn', 'button',
+                'TouchableOpacity', 'RCTTouchableOpacity', 'css-view',
+                'rn-button', 'react-native-button'
+              ];
+              var classBasedCount = 0;
+              buttonClasses.forEach(function(className) {
+                var elements = document.getElementsByClassName(className);
+                classBasedCount += elements.length;
+                Array.from(elements).forEach(function(el) {
+                  el.style.display = 'none !important';
+                  el.style.visibility = 'hidden !important';
+                  el.style.opacity = '0 !important';
+                  el.style.height = '0 !important';
+                  el.style.width = '0 !important';
+                  el.style.overflow = 'hidden !important';
+                  hiddenCount++;
+                });
+              });
+              console.log('Hidden ' + classBasedCount + ' elements by class names');
+              
+              // PHASE 3: Hide ALL elements containing specific text (ultra aggressive)
+              var allElements = document.querySelectorAll('*');
+              console.log('Scanning ' + allElements.length + ' total elements for button text...');
+              var textBasedCount = 0;
+              allElements.forEach(function(element) {
+                if (element.textContent) {
+                  var text = element.textContent.trim().toLowerCase();
+                  var buttonTexts = ['print', 'download', 'share', 'export', 'save', 'pdf'];
+                  
+                  if (buttonTexts.some(function(btnText) { return text === btnText; })) {
+                    // Hide the element and all its ancestors up to 3 levels
+                    var current = element;
+                    for (var i = 0; i < 4 && current; i++) {
+                      current.style.display = 'none !important';
+                      current.style.visibility = 'hidden !important';
+                      current.style.opacity = '0 !important';
+                      current.style.height = '0 !important';
+                      current.style.width = '0 !important';
+                      current.style.overflow = 'hidden !important';
+                      current = current.parentElement;
+                      textBasedCount++;
+                    }
+                    hiddenCount++;
+                  }
+                }
+              });
+              console.log('Hidden ' + textBasedCount + ' elements by text content');
+              
+              // PHASE 4: Hide by computed styles (background colors, cursors)
+              var styleBasedCount = 0;
+              allElements.forEach(function(element) {
+                if (element.tagName === 'DIV' || element.tagName === 'BUTTON') {
+                  var style = window.getComputedStyle(element);
+                  var bgColor = style.backgroundColor;
+                  
+                  // Check for common button colors
+                  var buttonColors = [
+                    'rgb(76, 175, 80)', 'rgb(33, 150, 243)', 'rgb(255, 152, 0)',
+                    'rgb(244, 67, 54)', 'rgb(156, 39, 176)', 'rgb(0, 150, 136)'
+                  ];
+                  
+                  if (buttonColors.includes(bgColor) || 
+                      style.cursor === 'pointer' || 
+                      (style.borderRadius && parseInt(style.borderRadius) > 0 && 
+                       (style.padding || style.backgroundColor !== 'rgba(0, 0, 0, 0)'))) {
+                    element.style.display = 'none !important';
+                    element.style.visibility = 'hidden !important';
+                    element.style.opacity = '0 !important';
+                    element.style.height = '0 !important';
+                    element.style.width = '0 !important';
+                    element.style.overflow = 'hidden !important';
+                    styleBasedCount++;
+                    hiddenCount++;
+                  }
+                }
+              });
+              console.log('Hidden ' + styleBasedCount + ' elements by styles');
+              
+              // PHASE 5: Hide actual HTML button elements
+              var htmlButtons = document.querySelectorAll('button, input[type="button"], input[type="submit"], a[role="button"]');
+              console.log('Found ' + htmlButtons.length + ' HTML button elements');
+              htmlButtons.forEach(function(btn) {
+                btn.style.display = 'none !important';
+                btn.style.visibility = 'hidden !important';
+                btn.style.opacity = '0 !important';
+                btn.style.height = '0 !important';
+                btn.style.width = '0 !important';
+                btn.style.overflow = 'hidden !important';
+                hiddenCount++;
+              });
+              
+              // PHASE 6: Hide positioned elements that look like floating action buttons
+              var positionBasedCount = 0;
+              allElements.forEach(function(element) {
+                var style = window.getComputedStyle(element);
+                if ((style.position === 'fixed' || style.position === 'absolute') && 
+                    (style.bottom === '0px' || parseInt(style.bottom) < 100) &&
+                    (style.right === '0px' || parseInt(style.right) < 100 || 
+                     style.left === '0px' || parseInt(style.left) < 100)) {
+                  element.style.display = 'none !important';
+                  element.style.visibility = 'hidden !important';
+                  element.style.opacity = '0 !important';
+                  element.style.height = '0 !important';
+                  element.style.width = '0 !important';
+                  element.style.overflow = 'hidden !important';
+                  positionBasedCount++;
+                  hiddenCount++;
+                }
+              });
+              console.log('Hidden ' + positionBasedCount + ' positioned elements');
+              
+              // PHASE 7: Nuclear option - hide any remaining clickable elements
+              var clickableCount = 0;
+              allElements.forEach(function(element) {
+                if (element.onclick || element.getAttribute('onclick') || 
+                    element.getAttribute('data-testid') || 
+                    element.className.includes('touchable') ||
+                    element.className.includes('pressable') ||
+                    element.className.includes('clickable')) {
+                  element.style.display = 'none !important';
+                  element.style.visibility = 'hidden !important';
+                  element.style.opacity = '0 !important';
+                  element.style.height = '0 !important';
+                  element.style.width = '0 !important';
+                  element.style.overflow = 'hidden !important';
+                  clickableCount++;
+                  hiddenCount++;
+                }
+              });
+              console.log('Hidden ' + clickableCount + ' clickable elements');
+              
+              console.log('🎯 TOTAL HIDDEN: ' + hiddenCount + ' button-like elements removed');
+              
+              // Debug: List remaining visible elements that might be buttons
+              var remainingElements = document.querySelectorAll('*');
+              var suspiciousElements = [];
+              remainingElements.forEach(function(element) {
+                var style = window.getComputedStyle(element);
+                if (style.display !== 'none' && element.textContent) {
+                  var text = element.textContent.trim().toLowerCase();
+                  if (text === 'print' || text === 'download' || text === 'share') {
+                    suspiciousElements.push({
+                      tag: element.tagName,
+                      text: element.textContent.trim(),
+                      class: element.className,
+                      id: element.id,
+                      styles: {
+                        display: style.display,
+                        position: style.position,
+                        backgroundColor: style.backgroundColor
+                      }
+                    });
+                  }
+                }
+              });
+              
+              if (suspiciousElements.length > 0) {
+                console.warn('⚠️ REMAINING SUSPICIOUS ELEMENTS:', suspiciousElements);
+              } else {
+                console.log('✅ No remaining button-like elements detected');
+              }
+            }
+            
+            // Run the button hiding function multiple times with different strategies
+            console.log('🚀 Button hiding script loaded');
+            
+            // Immediate execution
+            hideButtonElements();
+            
+            // After DOM content loaded
+            document.addEventListener('DOMContentLoaded', function() {
+              console.log('📄 DOM loaded - running button removal');
+              setTimeout(hideButtonElements, 10);
+            });
+            
+            // Multiple delayed executions to catch dynamically added content
+            setTimeout(function() {
+              console.log('⏰ 100ms delay - running button removal');
+              hideButtonElements();
+            }, 100);
+            
+            setTimeout(function() {
+              console.log('⏰ 500ms delay - running button removal');
+              hideButtonElements();
+            }, 500);
+            
+            setTimeout(function() {
+              console.log('⏰ 1000ms delay - final button removal');
+              hideButtonElements();
+            }, 1000);
+            
+            // Monitor for new elements being added
+            if (typeof MutationObserver !== 'undefined') {
+              var observer = new MutationObserver(function(mutations) {
+                var shouldRun = false;
+                mutations.forEach(function(mutation) {
+                  if (mutation.addedNodes.length > 0) {
+                    shouldRun = true;
+                  }
+                });
+                if (shouldRun) {
+                  console.log('🔄 DOM mutation detected - running button removal');
+                  setTimeout(hideButtonElements, 10);
+                }
+              });
+              
+              observer.observe(document.body, {
+                childList: true,
+                subtree: true
+              });
+              
+              console.log('👁️ Mutation observer active');
+            }
+          </script>
           <div class="receipt-container">
             <!-- Header Section -->
             <div class="header-section">
@@ -547,13 +931,13 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
             <!-- Fee Summary -->
             <div class="fee-summary">
               <div class="fee-summary-item">
-                Total fees paid : Rs. ${receiptData.total_paid_till_date ? 
+                Total fees paid: Rs. ${receiptData.total_paid_till_date ? 
                   Number(receiptData.total_paid_till_date).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0}) : 
                   Number(amountPaidNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})
                 }
               </div>
               <div class="fee-summary-item">
-                Total fees Due : Rs. ${amountRemaining !== null ? 
+                Total fees Due: Rs. ${amountRemaining !== null ? 
                   Number(amountRemainingNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0}) : 
                   '0'
                 }

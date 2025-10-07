@@ -1133,10 +1133,11 @@ const ClassStudentDetails = ({ route, navigation }) => {
   const { generateUnifiedReceiptHTML } = require('../../utils/unifiedReceiptTemplate');
 
   // Generate receipt HTML using unified template (copied from student)
-  const generateReceiptHTML = async (receiptData) => {
+  const generateReceiptHTML = async (receiptData, preloadedLogoUrl = null) => {
     console.log('🔥 RECEIPT DEBUG [ADMIN] - Starting receipt generation');
     console.log('🔥 RECEIPT DEBUG [ADMIN] - Original receipt data:', JSON.stringify(receiptData, null, 2));
     console.log('🔥 RECEIPT DEBUG [ADMIN] - School details:', JSON.stringify(schoolDetails, null, 2));
+    console.log('🔥 RECEIPT DEBUG [ADMIN] - Preloaded logo URL for print/PDF:', preloadedLogoUrl);
     
     try {
       console.log('🔥 RECEIPT DEBUG [ADMIN] - Attempting to generate unified receipt HTML...');
@@ -1167,8 +1168,8 @@ const ClassStudentDetails = ({ route, navigation }) => {
       console.log('🔥 RECEIPT DEBUG [ADMIN] - Unified receipt data:', JSON.stringify(unifiedReceiptData, null, 2));
       console.log('🔥 RECEIPT DEBUG [ADMIN] - About to call generateUnifiedReceiptHTML...');
       
-      // Use the unified receipt template
-      const htmlContent = await generateUnifiedReceiptHTML(unifiedReceiptData, schoolDetails);
+      // Use the unified receipt template with preloaded logo URL for print/PDF
+      const htmlContent = await generateUnifiedReceiptHTML(unifiedReceiptData, schoolDetails, preloadedLogoUrl);
       
       console.log('🔥 RECEIPT DEBUG [ADMIN] - Unified receipt HTML generated successfully!');
       console.log('🔥 RECEIPT DEBUG [ADMIN] - Generated HTML length:', htmlContent?.length || 0);
@@ -1471,98 +1472,91 @@ const ClassStudentDetails = ({ route, navigation }) => {
     }
   };
 
-  // Handle print receipt with landscape orientation (copied from student)
+  // Handle print receipt with completely isolated system
   const handlePrintReceipt = async (receiptData) => {
     try {
-      const htmlContent = await generateReceiptHTML(receiptData);
+      // On web, open a clean print window to avoid printing UI buttons
+      if (Platform.OS === 'web') {
+        const { generateUnifiedReceiptHTML } = require('../../utils/unifiedReceiptTemplate');
+
+        const unifiedData = {
+          student_name: receiptData.student_name,
+          student_admission_no: receiptData.student_admission_no,
+          class_name: receiptData.class_name,
+          fee_component: receiptData.fee_component,
+          payment_date_formatted: receiptData.payment_date_formatted,
+          receipt_no: receiptData.receipt_no || receiptData.receipt_number,
+          payment_mode: receiptData.payment_mode,
+          amount_paid: receiptData.amount_paid,
+          amount_remaining: receiptData.amount_remaining,
+          cashier_name: receiptData.cashier_name,
+          fine_amount: receiptData.fine_amount,
+          total_paid_till_date: receiptData.total_paid_till_date,
+          father_name: receiptData.father_name,
+          uid: receiptData.student_uid || receiptData.student_admission_no,
+        };
+
+        const school = {
+          name: schoolDetails?.name,
+          address: schoolDetails?.address,
+          phone: schoolDetails?.phone,
+          email: schoolDetails?.email,
+          academic_year: schoolDetails?.academic_year || '2024/25',
+          logo_url: schoolDetails?.logo_url,
+        };
+
+        let htmlContent = await generateUnifiedReceiptHTML(unifiedData, school);
+
+        const autoPrintScript = `
+          <script>
+            (function(){
+              function waitForImagesAndPrint(){
+                try{
+                  var imgs = Array.from(document.images||[]);
+                  if(imgs.length===0){ setTimeout(function(){ window.print(); },150); return; }
+                  var loaded=0; function done(){ if(++loaded>=imgs.length){ setTimeout(function(){ window.print(); },200); } }
+                  imgs.forEach(function(img){ if(img.complete) return done(); img.addEventListener('load',done); img.addEventListener('error',done); });
+                }catch(e){ setTimeout(function(){ window.print(); },200); }
+              }
+              window.addEventListener('load', function(){ setTimeout(waitForImagesAndPrint, 150); });
+              if('onafterprint' in window){ window.onafterprint=function(){ setTimeout(function(){ window.close(); },300); }; } else { setTimeout(function(){ window.close(); }, 1500); }
+            })();
+          </script>
+        `;
+        htmlContent = htmlContent.replace('</body>', `${autoPrintScript}</body>`);
+
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        printWindow.focus();
+        // Let injected script print and close
+        return;
+      }
+
+      console.log('🖨️ Starting isolated print process');
       
-      // Print directly with landscape orientation
-      await Print.printAsync({
-        html: htmlContent,
-        orientation: Print.Orientation.landscape
-      });
+      const { printIsolatedReceipt } = await import('../../utils/isolatedPrintReceipt');
+      await printIsolatedReceipt(receiptData, schoolDetails);
       
-      console.log('✅ Admin - Print dialog opened successfully');
+      console.log('✅ Admin - Isolated print completed successfully');
     } catch (error) {
-      console.error('❌ Admin - Print error:', error);
+      console.error('❌ Admin - Isolated print error:', error);
       Alert.alert('Print Error', 'Failed to print receipt. Please try again.');
     }
   };
 
-  // Handle share receipt with landscape orientation (copied from student)
+  // Handle share receipt with completely isolated PDF generation
   const handleShareReceipt = async (receiptData) => {
     try {
-      const htmlContent = await generateReceiptHTML(receiptData);
+      console.log('💾 Starting isolated PDF generation');
       
-      // Generate PDF with landscape orientation
-      const { uri } = await Print.printToFileAsync({
-        html: htmlContent,
-        base64: false,
-        orientation: Print.Orientation.landscape
-      });
-
-      const receiptNumber = receiptData.receipt_no || receiptData.receipt_number || 'N_A';
-      const fileName = `receipt_${String(receiptNumber).replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
-
-      // Try Android-specific download, fallback to sharing (copied from student)
-      if (Platform.OS === 'android' && FileSystem.StorageAccessFramework) {
-        try {
-          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-          if (!permissions.granted) {
-            console.log('⚠️ Permission denied, falling back to sharing');
-            // Fallback to sharing instead of failing
-            await Sharing.shareAsync(uri, {
-              mimeType: 'application/pdf',
-              dialogTitle: 'Save Receipt',
-              UTI: 'com.adobe.pdf'
-            });
-            return;
-          }
-
-          const destUri = await FileSystem.StorageAccessFramework.createFileAsync(
-            permissions.directoryUri,
-            fileName,
-            'application/pdf'
-          );
-
-          const fileData = await FileSystem.readAsStringAsync(uri, { 
-            encoding: FileSystem.EncodingType.Base64 
-          });
-          await FileSystem.writeAsStringAsync(destUri, fileData, { 
-            encoding: FileSystem.EncodingType.Base64 
-          });
-
-          Alert.alert('Receipt Downloaded', `Receipt saved as ${fileName}`);
-        } catch (error) {
-          console.error('Android download error, falling back to sharing:', error);
-          // Fallback to sharing if Android-specific method fails
-          try {
-            await Sharing.shareAsync(uri, {
-              mimeType: 'application/pdf',
-              dialogTitle: 'Share Receipt',
-              UTI: 'com.adobe.pdf'
-            });
-          } catch (shareError) {
-            console.error('Share error:', shareError);
-            Alert.alert('Error', 'Failed to save or share receipt. Please try again.');
-          }
-        }
-      } else {
-        // Default sharing for iOS or when StorageAccessFramework is not available
-        try {
-          await Sharing.shareAsync(uri, {
-            mimeType: 'application/pdf',
-            dialogTitle: 'Share Receipt',
-            UTI: 'com.adobe.pdf'
-          });
-        } catch (shareError) {
-          console.error('Share error:', shareError);
-          Alert.alert('Error', 'Failed to share receipt. Please try again.');
-        }
-      }
+      const { generateIsolatedPDF } = await import('../../utils/isolatedPrintReceipt');
+      await generateIsolatedPDF(receiptData, schoolDetails);
+      
+      console.log('✅ Admin - Isolated PDF generated and shared successfully');
     } catch (error) {
-      console.error('Receipt generation error:', error);
-      Alert.alert('Error', 'Failed to generate receipt. Please try again.');
+      console.error('❌ Admin - Isolated PDF generation error:', error);
+      Alert.alert('Error', 'Failed to generate receipt PDF. Please try again.');
     }
   };
 

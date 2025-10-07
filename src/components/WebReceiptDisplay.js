@@ -16,6 +16,46 @@ const WebReceiptDisplay = ({ visible, receiptData, onClose }) => {
 
   const handlePrint = async () => {
     if (Platform.OS === 'web') {
+      // Auto-print script to wait for images and styles before printing, then close window
+      const autoPrintScript = `
+        <script>
+          (function() {
+            function waitForImagesAndPrint() {
+              try {
+                var imgs = Array.from(document.images || []);
+                if (imgs.length === 0) {
+                  setTimeout(function() { window.print(); }, 150);
+                  return;
+                }
+                var loaded = 0;
+                function done() {
+                  loaded++;
+                  if (loaded >= imgs.length) {
+                    setTimeout(function() { window.print(); }, 200);
+                  }
+                }
+                imgs.forEach(function(img) {
+                  if (img.complete) return done();
+                  img.addEventListener('load', done);
+                  img.addEventListener('error', done);
+                });
+              } catch (e) {
+                setTimeout(function() { window.print(); }, 200);
+              }
+            }
+            window.addEventListener('load', function() {
+              setTimeout(waitForImagesAndPrint, 150);
+            });
+            if ('onafterprint' in window) {
+              window.onafterprint = function() { setTimeout(function(){ window.close(); }, 300); };
+            } else {
+              // Fallback: close after a delay
+              setTimeout(function(){ window.close(); }, 1500);
+            }
+          })();
+        </script>
+      `;
+
       // Try unified two-per-page template first
       try {
         const { generateUnifiedReceiptHTML } = require('../utils/unifiedReceiptTemplate');
@@ -44,13 +84,14 @@ const WebReceiptDisplay = ({ visible, receiptData, onClose }) => {
           father_name: receiptData.father_name,
           uid: receiptData.uid || receiptData.student_uid,
         };
-        const htmlContent = await generateUnifiedReceiptHTML(unifiedData, schoolDetails);
+        let htmlContent = await generateUnifiedReceiptHTML(unifiedData, schoolDetails);
+        // Inject auto print script before closing body
+        htmlContent = htmlContent.replace('</body>', `${autoPrintScript}</body>`);
         const printWindow = window.open('', '_blank');
         printWindow.document.write(htmlContent);
         printWindow.document.close();
         printWindow.focus();
-        printWindow.print();
-        printWindow.close();
+        // Do not call print() here; let the injected script handle it
         return;
       } catch (e) {
         console.warn('Unified template failed, falling back to simple print:', e);
@@ -164,7 +205,7 @@ const WebReceiptDisplay = ({ visible, receiptData, onClose }) => {
         </style>
       `;
       
-      const receiptHTML = `
+      let receiptHTML = `
         <!DOCTYPE html>
         <html>
         <head>
@@ -173,129 +214,131 @@ const WebReceiptDisplay = ({ visible, receiptData, onClose }) => {
         </head>
         <body>
           <div class=\"receipt-container\">
-            <div class="receipt-header">
-              <div class="school-name">${receiptData.school_name || 'School Name'}</div>
-              <div style="font-size: 14px; color: #666; margin: 5px 0;">
-                ${receiptData.school_address || 'School Address'}
+            <div class=\"receipt-header\">\
+              <div class=\"school-name\">${receiptData.school_name || 'School Name'}</div>
+              <div style=\"font-size: 14px; color: #666; margin: 5px 0;\">\
+                ${receiptData.school_address || 'School Address'}\
               </div>
-              <div style="font-size: 14px; color: #666;">
-                Contact: ${receiptData.school_phone || 'Phone'} | Email: ${receiptData.school_email || 'Email'}
+              <div style=\"font-size: 14px; color: #666;\">\
+                Contact: ${receiptData.school_phone || 'Phone'} | Email: ${receiptData.school_email || 'Email'}\
               </div>
-              <div class="receipt-title">FEE PAYMENT RECEIPT</div>
+              <div class=\"receipt-title\">FEE PAYMENT RECEIPT</div>
             </div>
             
-            <div class="receipt-info">
-              <div class="info-row">
-                <span class="info-label">Receipt No:</span>
-                <span class="info-value">${receiptData.receipt_no}</span>
+            <div class=\"receipt-info\">\
+              <div class=\"info-row\">\
+                <span class=\"info-label\">Receipt No:</span>\
+                <span class=\"info-value\">${receiptData.receipt_no}</span>\
               </div>
-              <div class="info-row">
-                <span class="info-label">Date:</span>
-                <span class="info-value">${receiptData.payment_date_formatted}</span>
+              <div class=\"info-row\">\
+                <span class=\"info-label\">Date:</span>\
+                <span class=\"info-value\">${receiptData.payment_date_formatted}</span>\
               </div>
-              <div class="info-row">
-                <span class="info-label">Academic Year:</span>
-                <span class="info-value">${receiptData.academic_year}</span>
-              </div>
-            </div>
-            
-            <div class="receipt-info">
-              <div class="info-row">
-                <span class="info-label">Student Name:</span>
-                <span class="info-value">${receiptData.student_name}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Class:</span>
-                <span class="info-value">${receiptData.class_name}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Admission No:</span>
-                <span class="info-value">${receiptData.student_admission_no || 'N/A'}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Roll No:</span>
-                <span class="info-value">${receiptData.student_roll_no || 'N/A'}</span>
+              <div class=\"info-row\">\
+                <span class=\"info-label\">Academic Year:</span>\
+                <span class=\"info-value\">${receiptData.academic_year}</span>\
               </div>
             </div>
             
-            <div class="receipt-info">
-              <div class="info-row highlight">
-                <span class="info-label">Fee Component:</span>
-                <span class="info-value">${receiptData.fee_component}</span>
+            <div class=\"receipt-info\">\
+              <div class=\"info-row\">\
+                <span class=\"info-label\">Student Name:</span>\
+                <span class=\"info-value\">${receiptData.student_name}</span>\
               </div>
-              <div class="info-row">
-                <span class="info-label">Payment Mode:</span>
-                <span class="info-value">${receiptData.payment_mode}</span>
+              <div class=\"info-row\">\
+                <span class=\"info-label\">Class:</span>\
+                <span class=\"info-value\">${receiptData.class_name}</span>\
               </div>
-              ${receiptData.cashier_name ? `
-              <div class="info-row">
-                <span class="info-label">Cashier:</span>
-                <span class="info-value">${receiptData.cashier_name}</span>
+              <div class=\"info-row\">\
+                <span class=\"info-label\">Admission No:</span>\
+                <span class=\"info-value\">${receiptData.student_admission_no || 'N/A'}</span>\
+              </div>
+              <div class=\"info-row\">\
+                <span class=\"info-label\">Roll No:</span>\
+                <span class=\"info-value\">${receiptData.student_roll_no || 'N/A'}</span>\
+              </div>
+            </div>
+            
+            <div class=\"receipt-info\">\
+              <div class=\"info-row highlight\">\
+                <span class=\"info-label\">Fee Component:</span>\
+                <span class=\"info-value\">${receiptData.fee_component}</span>\
+              </div>
+              <div class=\"info-row\">\
+                <span class=\"info-label\">Payment Mode:</span>\
+                <span class=\"info-value\">${receiptData.payment_mode}</span>\
+              </div>
+              ${receiptData.cashier_name ? `\
+              <div class=\"info-row\">\
+                <span class=\"info-label\">Cashier:</span>\
+                <span class=\"info-value\">${receiptData.cashier_name}</span>\
               </div>
               ` : ''}
-              ${receiptData.remarks ? `
-              <div class="info-row">
-                <span class="info-label">Remarks:</span>
-                <span class="info-value">${receiptData.remarks}</span>
+              ${receiptData.remarks ? `\
+              <div class=\"info-row\">\
+                <span class=\"info-label\">Remarks:</span>\
+                <span class=\"info-value\">${receiptData.remarks}</span>\
               </div>
               ` : ''}
             </div>
             
-            <div class="amount-section">
-              <div class="amount-row">
-                <span>Amount Paid:</span>
-                <span>₹${parseFloat(receiptData.amount_paid).toFixed(2)}</span>
+            <div class=\"amount-section\">\
+              <div class=\"amount-row\">\
+                <span>Amount Paid:</span>\
+                <span>₹${parseFloat(receiptData.amount_paid).toFixed(2)}</span>\
               </div>
-              ${receiptData.amount_remaining !== undefined && receiptData.amount_remaining !== null ? `
-              <div class="amount-row">
-                <span>Amount Remaining:</span>
-                <span>₹${parseFloat(receiptData.amount_remaining).toFixed(2)}</span>
+              ${receiptData.amount_remaining !== undefined && receiptData.amount_remaining !== null ? `\
+              <div class=\"amount-row\">\
+                <span>Amount Remaining:</span>\
+                <span>₹${parseFloat(receiptData.amount_remaining).toFixed(2)}</span>\
               </div>
               ` : ''}
-              <div class="words-row">
-                <strong>In Words:</strong> ${receiptData.amount_in_words} rupees only
+              <div class=\"words-row\">\
+                <strong>In Words:</strong> ${receiptData.amount_in_words} rupees only\
               </div>
             </div>
             
-            ${receiptData.cashier_name ? `
-            <div class="signature-section">
-              <div class="signature-box" style="margin-left:auto; width:220px; text-align:center;">
-                <div class="signature-line"></div>
-                <div>Cashier Signature - ${receiptData.cashier_name}</div>
-              </div>
+            ${receiptData.cashier_name ? `\
+            <div class=\"signature-section\">\
+              <div class=\"signature-box\" style=\"margin-left:auto; width:220px; text-align:center;\">\
+                <div class=\"signature-line\"></div>\
+                <div>Cashier Signature - ${receiptData.cashier_name}</div>\
+              </div>\
             </div>
-            ` : `
-            <div class="signature-section">
-              <div class="signature-box">
-                <div class="signature-line">Received By</div>
-              </div>
-              <div class="signature-box">
-                <div class="signature-line">Authorized Signature</div>
-              </div>
+            ` : `\
+            <div class=\"signature-section\">\
+              <div class=\"signature-box\">\
+                <div class=\"signature-line\">Received By</div>\
+              </div>\
+              <div class=\"signature-box\">\
+                <div class=\"signature-line\">Authorized Signature</div>\
+              </div>\
             </div>
             `}
             
-            <div class="footer">
-              ${receiptData.cashier_name ? `<div style="font-size: 12px; color: #666;">This receipt was generated by: ${receiptData.cashier_name}</div>` : ''}
-              <div style="font-size: 12px; color: #666;">
-                This is a computer generated receipt.
-              </div>
-              <div style="font-size: 11px; color: #999; margin-top: 5px;">
-                Generated on: ${format(new Date(), 'dd MMM yyyy, HH:mm')}
-              </div>
+            <div class=\"footer\">\
+              ${receiptData.cashier_name ? `<div style=\"font-size: 12px; color: #666;\">This receipt was generated by: ${receiptData.cashier_name}</div>` : ''}
+              <div style=\"font-size: 12px; color: #666;\">\
+                This is a computer generated receipt.\
+              </div>\
+              <div style=\"font-size: 11px; color: #999; margin-top: 5px;\">\
+                Generated on: ${format(new Date(), 'dd MMM yyyy, HH:mm')}\
+              </div>\
             </div>
           </div>
         </body>
         </html>
       `;
 
+      // Inject auto print script
+      receiptHTML = receiptHTML.replace('</body>', `${autoPrintScript}</body>`);
+
       // Open print dialog
       const printWindow = window.open('', '_blank');
       printWindow.document.write(receiptHTML);
       printWindow.document.close();
       printWindow.focus();
-      printWindow.print();
-      printWindow.close();
+      // Let the injected script call print and close
     }
   };
 

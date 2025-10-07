@@ -10,39 +10,39 @@
             body { 
               font-family: 'Arial', sans-serif; 
               margin: 0; 
-              padding: 20px; 
+              padding: 0;
               color: #000; 
               background: #fff; 
               font-size: 14px;
-              line-height: 1.4;
+              line-height: 1.3;
             }
             .receipt-container { 
               border: 2px solid #000; 
-              border-radius: 0; 
-              padding: 20px; 
+              border-radius: 10px;
+              padding: 15px; 
               max-width: 100%; 
-              margin: 0 auto; 
+              margin: 10px;
               background: white;
             }
             
-            /* Header Section - matches reference layout */
+            /* Header Section - exactly like reference */
             .header-section {
               display: flex;
-              align-items: center;
-              margin-bottom: 20px;
+              align-items: flex-start;
+              margin-bottom: 15px;
               border-bottom: 2px solid #000;
-              padding-bottom: 15px;
+              padding-bottom: 10px;
             }
             .logo-section {
               width: 80px;
-              margin-right: 20px;
+              margin-right: 15px;
               flex-shrink: 0;
             }
             .school-logo { 
               width: 80px; 
               height: 80px; 
               object-fit: contain;
-              border-radius: 8px;
+              border-radius: 50%;
             }
             .school-logo-fallback {
               width: 80px;
@@ -50,57 +50,74 @@
               display: flex;
               align-items: center;
               justify-content: center;
-              font-size: 40px;
+              font-size: 30px;
               background: #f5f5f5;
-              border: 2px dashed #ccc;
-              border-radius: 8px;
+              border: 2px solid #333;
+              border-radius: 50%;
             }
             .school-info {
               flex-grow: 1;
               text-align: center;
             }
             .school-name { 
-              font-size: 28px; 
+              font-size: 24px; 
               font-weight: bold; 
-              margin: 0 0 8px 0;
+              margin: 0 0 5px 0;
               text-transform: uppercase;
               color: #000;
             }
             .school-address { 
-              font-size: 14px;
-              color: #333;
-              margin: 5px 0;
+              font-size: 12px;
+              color: #000;
+              margin: 2px 0;
             }
             .school-contact {
               font-size: 12px;
-              color: #666;
-              margin: 3px 0;
+              color: #000;
+              margin: 2px 0;
             }
             
-            /* Student Information Grid - matches reference */
+            /* Student Information Grid - exactly like reference */
             .student-info {
-              display: grid;
-              grid-template-columns: 1fr 1fr 1fr;
-              gap: 15px 30px;
-              margin: 20px 0;
-              font-size: 14px;
+              margin: 15px 0;
+              font-size: 13px;
             }
-            .info-item {
+            .student-row {
               display: flex;
-              align-items: baseline;
+              justify-content: space-between;
+              margin: 8px 0;
+              border-bottom: 1px solid #000;
+              padding-bottom: 5px;
+            }
+            .student-row:last-child {
+              border-bottom: none;
+            }
+            .student-left {
+              display: flex;
+              flex: 1;
+            }
+            .student-center {
+              display: flex;
+              flex: 1;
+              justify-content: center;
+            }
+            .student-right {
+              display: flex;
+              flex: 1;
+              justify-content: flex-end;
             }
             .info-label {
               font-weight: bold;
-              margin-right: 8px;
+              margin-right: 5px;
               color: #000;
             }
             .info-value {
-              color: #333;
+              color: #000;
             }
             
-            /* Fee Table - matches reference exactly */
+            /* Fee Table - exactly like reference */
             .fee-table-container {
-              margin: 25px 0;
+              margin: 20px 0;
             }
             .fee-table {
               width: 100%;
@@ -109,82 +126,307 @@
             }
             .fee-table th {
               border: 1px solid #000;
-              padding: 12px 15px;
+              padding: 10px;
               text-align: center;
               font-weight: bold;
-              background-color: #f8f8f8;
+              background-color: #fff;
+              font-size: 14px;
             }
             .fee-table td {
               border: 1px solid #000;
-              padding: 12px 15px;
+              padding: 10px;
               text-align: left;
+              font-size: 13px;
             }
             .fee-table .amount-cell {
-              text-align: right;
-              font-weight: 500;
+              text-align: center;
+              font-weight: normal;
             }
             .total-row {
               font-weight: bold;
-              background-color: #f0f0f0;
             }
             .total-row .particulars {
-              text-align: right;
+              text-align: center;
+              font-weight: bold;
+            }
+            .total-row .amount-cell {
+              text-align: center;
               font-weight: bold;
             }
             
-            /* Bottom Summary - matches reference */
+            /* Bottom Summary - exactly like reference */
             .fee-summary {
               display: flex;
               justify-content: space-between;
-              margin: 20px 0;
-              font-size: 14px;
-              font-weight: 500;
+              margin: 15px 0;
+              font-size: 13px;
+              font-weight: normal;
+              border-top: 1px solid #000;
+              border-bottom: 1px solid #000;
+              padding: 10px 0;
             }
             .fee-summary-item {
-              color: #333;
+              color: #000;
             }
             
-            /* Footer Section - matches reference */
+            /* Footer Section - exactly like reference */
             .footer-section {
-              margin-top: 30px;
+              margin-top: 15px;
               font-size: 12px;
-              line-height: 1.6;
+              line-height: 1.4;
             }
             .footer-notes {
-              margin-bottom: 15px;
+              margin-bottom: 10px;
+            }
+            .footer-notes div {
+              margin: 3px 0;
             }
             .footer-details {
-              margin-bottom: 20px;
+              margin-bottom: 15px;
+            }
+            .footer-details div {
+              margin: 5px 0;
             }
             .signature-area {
               display: flex;
               justify-content: flex-end;
-              margin-top: 40px;
+              margin-top: 30px;
             }
             .signature-box {
-              text-align: center;
-              width: 250px;
+              text-align: right;
+              width: 200px;
             }
             .signature-text {
-              margin-bottom: 40px;
-              text-align: right;
-              padding-right: 20px;
+              margin-bottom: 30px;
             }
             .signature-line {
               border-top: 1px solid #000;
-              padding-top: 8px;
-              font-weight: 500;
+              padding-top: 5px;
+              font-weight: normal;
+              text-align: center;
             }
             
-            /* Print optimization */
+            /* Hide buttons in all contexts - both screen and print */
+            /* Target React Native TouchableOpacity buttons that get converted to web */
+            div[role="button"], 
+            [data-focusable="true"],
+            /* Target common button patterns */
+            .receipt-container button,
+            .receipt-container .button,
+            .receipt-container [role="button"],
+            .receipt-container input[type="button"],
+            .receipt-container input[type="submit"],
+            /* Target specific admin button classes */
+            .receiptActionButtons,
+            .receiptPrintButton,
+            .receiptDownloadButton,
+            /* Target TouchableOpacity elements that might have these characteristics */
+            div[style*="cursor: pointer"],
+            div[style*="user-select: none"],
+            /* Hide any element with these specific background colors (from admin styles) */
+            div[style*="background-color: rgb(76, 175, 80)"], /* Green print button */
+            div[style*="background-color: rgb(33, 150, 243)"], /* Blue download button */
+            /* Target elements with specific text content */
+            div:has(> div:contains("Print")),
+            div:has(> div:contains("Download")),
+            /* Additional patterns for action buttons */
+            .action-buttons,
+            .modal-actions,
+            .receipt-actions {
+              display: none !important;
+              visibility: hidden !important;
+              opacity: 0 !important;
+              height: 0 !important;
+              overflow: hidden !important;
+            }
+            
+            /* Print optimization - Hide UI elements and optimize for printing */
             @media print {
-              body { margin: 0; padding: 10px; }
-              .receipt-container { border: 2px solid #000; box-shadow: none; }
-              @page { margin: 10mm; }
+              /* Hide ALL buttons and interactive elements during print */
+              *, *::before, *::after {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              
+              /* Hide any element that looks like a button or interactive UI */
+              button, .button, [role="button"],
+              .print-button, .share-button, .download-button,
+              .action-button, .close-button, .modal-button,
+              .btn, .btn-primary, .btn-secondary,
+              .header-actions, .modal-header, .modal-footer,
+              .toolbar, .navigation, .nav,
+              .floating-action-button, .fab,
+              input[type="button"], input[type="submit"],
+              .no-print,
+              /* Additional button patterns commonly used */
+              [class*="button"], [class*="btn"], [id*="button"], [id*="btn"],
+              .touchable, .pressable, .clickable,
+              /* React Native Web classes that might be buttons */
+              ._1mqqh, ._19bac, ._1k2vh, ._11jp7, ._1146k,
+              /* Common button container classes */
+              .actions, .button-group, .control-buttons,
+              /* Make sure we catch any missed interactive elements */
+              [onclick], [ontouchstart], [role="menuitem"],
+              .interactive, .clickable-element {
+                display: none !important;
+                visibility: hidden !important;
+                opacity: 0 !important;
+                height: 0 !important;
+                width: 0 !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                border: none !important;
+              }
+              
+              /* Optimize body and container for print */
+              body { 
+                margin: 0 !important; 
+                padding: 0 !important;
+                background: white !important;
+                color: black !important;
+              }
+              
+              .receipt-container { 
+                border: 2px solid #000 !important; 
+                margin: 0 !important;
+                padding: 15px !important;
+                background: white !important;
+                box-shadow: none !important;
+                border-radius: 0 !important;
+              }
+              
+              /* Ensure logo displays properly in print */
+              .school-logo {
+                width: 80px !important;
+                height: 80px !important;
+                object-fit: contain !important;
+                border-radius: 50% !important;
+                display: block !important;
+                margin: 0 auto !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              
+              .school-logo-fallback {
+                width: 80px !important;
+                height: 80px !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                font-size: 30px !important;
+                background: #f5f5f5 !important;
+                border: 2px solid #333 !important;
+                border-radius: 50% !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              
+              /* Ensure all text elements are black for printing */
+              .school-name, .school-address, .school-contact,
+              .info-label, .info-value,
+              .fee-table th, .fee-table td,
+              .fee-summary-item,
+              .footer-notes div, .footer-details div,
+              .signature-text, .signature-line {
+                color: black !important;
+              }
+              
+              /* Ensure borders are visible in print */
+              .header-section,
+              .student-row,
+              .fee-table, .fee-table th, .fee-table td,
+              .fee-summary,
+              .signature-line {
+                border-color: black !important;
+              }
+              
+              /* Page setup */
+              @page { 
+                margin: 10mm !important; 
+                size: A4 portrait !important;
+              }
+              
+              /* Force background colors and borders to print */
+              * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
             }
           </style>
         </head>
         <body>
+          <script>
+            // JavaScript to hide any button-like elements that might have been included
+            function hideButtonElements() {
+              // Hide elements by role
+              const buttonRoles = document.querySelectorAll('[role="button"]');
+              buttonRoles.forEach(el => el.style.display = 'none');
+              
+              // Hide elements with specific classes
+              const buttonClasses = [
+                'receiptActionButtons', 'receiptPrintButton', 'receiptDownloadButton',
+                'action-buttons', 'modal-actions', 'receipt-actions',
+                'print-button', 'download-button', 'btn', 'button'
+              ];
+              buttonClasses.forEach(className => {
+                const elements = document.getElementsByClassName(className);
+                Array.from(elements).forEach(el => el.style.display = 'none');
+              });
+              
+              // Hide elements with specific background colors (TouchableOpacity styles)
+              const allDivs = document.querySelectorAll('div');
+              allDivs.forEach(div => {
+                const style = window.getComputedStyle(div);
+                const bgColor = style.backgroundColor;
+                // Hide green and blue buttons (typical for print/download)
+                if (bgColor === 'rgb(76, 175, 80)' || bgColor === 'rgb(33, 150, 243)' ||
+                    bgColor === 'rgb(33, 150, 243)' || bgColor.includes('76, 175, 80') ||
+                    bgColor.includes('33, 150, 243')) {
+                  div.style.display = 'none';
+                }
+                
+                // Hide elements with specific text content
+                if (div.textContent && (div.textContent.trim() === 'Print' || div.textContent.trim() === 'Download')) {
+                  // Hide the parent container too
+                  if (div.parentElement) {
+                    div.parentElement.style.display = 'none';
+                  }
+                  div.style.display = 'none';
+                }
+                
+                // Hide elements with cursor pointer that are likely buttons
+                if (style.cursor === 'pointer' && div.children.length > 0) {
+                  // Check if it contains button-like text
+                  const text = div.textContent.toLowerCase();
+                  if (text.includes('print') || text.includes('download') || text.includes('share')) {
+                    div.style.display = 'none';
+                  }
+                }
+              });
+              
+              // Hide actual button elements
+              const buttons = document.querySelectorAll('button, input[type="button"], input[type="submit"]');
+              buttons.forEach(btn => btn.style.display = 'none');
+              
+              // Hide any element positioned absolutely at the bottom (likely action buttons)
+              allDivs.forEach(div => {
+                const style = window.getComputedStyle(div);
+                if (style.position === 'absolute' && (style.bottom === '0px' || style.bottom === '0')) {
+                  div.style.display = 'none';
+                }
+              });
+            }
+            
+            // Run immediately
+            hideButtonElements();
+            
+            // Run after DOM is fully loaded
+            document.addEventListener('DOMContentLoaded', hideButtonElements);
+            
+            // Run after a short delay to catch dynamically added elements
+            setTimeout(hideButtonElements, 100);
+            setTimeout(hideButtonElements, 500);
+          </script>
           <div class="receipt-container">
             <!-- Header Section -->
             <div class="header-section">
@@ -194,44 +436,49 @@
               <div class="school-info">
                 <div class="school-name">GLOBAL'S SANMARG PUBLIC SCHOOL</div>
                 <div class="school-address">Near Fateh Darwaza, Pansal Taleem, Bidar-585401</div>
-                <div class="school-contact">Contact No.: +91 9341111576</div>
-                <div class="school-contact">Email: global295000@gmail.com</div>
+                <div class="school-contact">Contact: Contact No.: +91 9341111576, Email:global295000@gmail.com</div>
               </div>
             </div>
             
             <!-- Student Information Grid -->
             <div class="student-info">
-              <div class="info-item">
-                <span class="info-label">Student Name:</span>
-                <span class="info-value">MOHAMMED NOMAN</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">UID:</span>
-                <span class="info-value">SPS0214</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">Receipt No:</span>
-                <span class="info-value">1477</span>
-              </div>
-              
-              <div class="info-item">
-                <span class="info-label">Fathers Name:</span>
-                <span class="info-value">MOHAMMED ANWAR</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">Class:</span>
-                <span class="info-value">2nd--</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">Year:</span>
-                <span class="info-value">2024/25</span>
+              <div class="student-row">
+                <div class="student-left">
+                  <span class="info-label">Student Name:</span>
+                  <span class="info-value">MOHAMMED NOMAN</span>
+                </div>
+                <div class="student-center">
+                  <span class="info-label">UID:</span>
+                  <span class="info-value">SPS0214</span>
+                </div>
+                <div class="student-right">
+                  <span class="info-label">Receipt No:</span>
+                  <span class="info-value">1477</span>
+                </div>
               </div>
               
-              <div></div>
-              <div></div>
-              <div class="info-item">
-                <span class="info-label">Date:</span>
-                <span class="info-value">11/08/2025</span>
+              <div class="student-row">
+                <div class="student-left">
+                  <span class="info-label">Fathers Name:</span>
+                  <span class="info-value">MOHAMMED ANWAR</span>
+                </div>
+                <div class="student-center">
+                  <span class="info-label">Class:</span>
+                  <span class="info-value">2nd--</span>
+                </div>
+                <div class="student-right">
+                  <span class="info-label">Year:</span>
+                  <span class="info-value">2024/25</span>
+                </div>
+              </div>
+              
+              <div class="student-row">
+                <div class="student-left"></div>
+                <div class="student-center"></div>
+                <div class="student-right">
+                  <span class="info-label">Date:</span>
+                  <span class="info-value">11/08/2025</span>
+                </div>
               </div>
             </div>
             
@@ -247,7 +494,7 @@
                 <tbody>
                   <tr>
                     <td>Fine</td>
-                    <td class="amount-cell">Rs. 300.00</td>
+                    <td class="amount-cell">Rs. 300</td>
                   </tr>
                   
                   <tr class="total-row">
@@ -277,7 +524,7 @@
               
               <div class="footer-details">
                 <div>Payment Mode: Cash</div>
-                <div>Cashier Name: System Generated &nbsp;&nbsp;&nbsp; Date: 11/08/2025</div>
+                <div>Cashier Name:System Generated &nbsp;&nbsp;&nbsp; Date : 11/08/2025</div>
               </div>
               
               <div class="signature-area">

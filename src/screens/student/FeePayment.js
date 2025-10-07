@@ -497,81 +497,31 @@ const FeePayment = () => {
     if (!selectedReceipt) return;
 
     try {
-      // Generate receipt HTML (now async)
-      const htmlContent = await generateReceiptHTML(selectedReceipt);
+      console.log('💾 Starting isolated PDF generation');
       
-      // Generate PDF with landscape orientation
-      const { uri } = await Print.printToFileAsync({
-        html: htmlContent,
-        base64: false,
-        orientation: Print.Orientation.landscape
-      });
-
-      const fileName = `Receipt_${selectedReceipt.feeName.replace(/\s+/g, '_')}.pdf`;
-
-      // Try Android-specific download, fallback to sharing
-      if (Platform.OS === 'android' && FileSystem.StorageAccessFramework) {
-        try {
-          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-          if (!permissions.granted) {
-            console.log('⚠️ Permission denied, falling back to sharing');
-            // Fallback to sharing instead of failing
-            await Sharing.shareAsync(uri, {
-              mimeType: 'application/pdf',
-              dialogTitle: 'Save Receipt',
-              UTI: 'com.adobe.pdf'
-            });
-            setReceiptModalVisible(false);
-            return;
-          }
-
-          const destUri = await FileSystem.StorageAccessFramework.createFileAsync(
-            permissions.directoryUri,
-            fileName,
-            'application/pdf'
-          );
-
-          const fileData = await FileSystem.readAsStringAsync(uri, { 
-            encoding: FileSystem.EncodingType.Base64 
-          });
-          await FileSystem.writeAsStringAsync(destUri, fileData, { 
-            encoding: FileSystem.EncodingType.Base64 
-          });
-
-          Alert.alert('Receipt Downloaded', `Receipt saved as ${fileName}`);
-          setReceiptModalVisible(false);
-        } catch (error) {
-          console.error('Android download error, falling back to sharing:', error);
-          // Fallback to sharing if Android-specific method fails
-          try {
-            await Sharing.shareAsync(uri, {
-              mimeType: 'application/pdf',
-              dialogTitle: 'Share Receipt',
-              UTI: 'com.adobe.pdf'
-            });
-            setReceiptModalVisible(false);
-          } catch (shareError) {
-            console.error('Share error:', shareError);
-            Alert.alert('Error', 'Failed to save or share receipt. Please try again.');
-          }
-        }
-      } else {
-        // Default sharing for iOS or when StorageAccessFramework is not available
-        try {
-          await Sharing.shareAsync(uri, {
-            mimeType: 'application/pdf',
-            dialogTitle: 'Share Receipt',
-            UTI: 'com.adobe.pdf'
-          });
-          setReceiptModalVisible(false);
-        } catch (shareError) {
-          console.error('Share error:', shareError);
-          Alert.alert('Error', 'Failed to share receipt. Please try again.');
-        }
-      }
+      // Convert selected receipt format to match isolated print expectations
+      const receiptData = {
+        student_name: selectedReceipt.studentName,
+        student_admission_no: selectedReceipt.admissionNo,
+        class_name: selectedReceipt.className,
+        fee_component: selectedReceipt.feeName,
+        payment_date_formatted: formatDateForReceipt(selectedReceipt.paymentDate),
+        receipt_no: cleanReceiptNumber(selectedReceipt.receiptNumber),
+        payment_mode: selectedReceipt.paymentMethod,
+        amount_paid: selectedReceipt.amount,
+        father_name: selectedReceipt.fatherName,
+        total_paid_till_date: selectedReceipt.totalPaidTillDate || selectedReceipt.amount,
+        amount_remaining: selectedReceipt.outstandingAmount || 0
+      };
+      
+      const { generateIsolatedPDF } = await import('../../utils/isolatedPrintReceipt');
+      await generateIsolatedPDF(receiptData, schoolDetails);
+      
+      console.log('✅ Student - Isolated PDF generated and shared successfully');
+      setReceiptModalVisible(false);
     } catch (error) {
-      console.error('Receipt generation error:', error);
-      Alert.alert('Error', 'Failed to generate receipt. Please try again.');
+      console.error('❌ Student - Isolated PDF generation error:', error);
+      Alert.alert('Error', 'Failed to generate receipt PDF. Please try again.');
     }
   };
 
@@ -584,19 +534,89 @@ const FeePayment = () => {
     if (!selectedReceipt) return;
 
     try {
-      // Generate receipt HTML for printing
-      const htmlContent = await generateReceiptHTML(selectedReceipt);
+      // On web, open a clean print window to avoid printing UI buttons
+      if (Platform.OS === 'web') {
+        const { generateUnifiedReceiptHTML } = require('../../utils/unifiedReceiptTemplate');
+
+        const unifiedData = {
+          student_name: selectedReceipt.studentName,
+          student_admission_no: selectedReceipt.admissionNo,
+          class_name: selectedReceipt.className,
+          fee_component: selectedReceipt.feeName,
+          payment_date_formatted: formatDateForReceipt(selectedReceipt.paymentDate),
+          receipt_no: cleanReceiptNumber(selectedReceipt.receiptNumber),
+          payment_mode: selectedReceipt.paymentMethod,
+          amount_paid: selectedReceipt.amount,
+          amount_remaining: selectedReceipt.outstandingAmount || 0,
+          amount_in_words: selectedReceipt.amountInWords,
+          cashier_name: selectedReceipt.cashierName,
+          fine_amount: selectedReceipt.fine_amount,
+          total_paid_till_date: selectedReceipt.totalPaidTillDate || selectedReceipt.amount,
+          father_name: selectedReceipt.fatherName,
+          uid: selectedReceipt.studentUID || selectedReceipt.admissionNo,
+        };
+
+        const school = {
+          name: schoolDetails?.name,
+          address: schoolDetails?.address,
+          phone: schoolDetails?.phone,
+          email: schoolDetails?.email,
+          academic_year: schoolDetails?.academic_year || '2024/25',
+          logo_url: schoolDetails?.logo_url,
+        };
+
+        let htmlContent = await generateUnifiedReceiptHTML(unifiedData, school);
+
+        const autoPrintScript = `
+          <script>
+            (function(){
+              function waitForImagesAndPrint(){
+                try{
+                  var imgs = Array.from(document.images||[]);
+                  if(imgs.length===0){ setTimeout(function(){ window.print(); },150); return; }
+                  var loaded=0; function done(){ if(++loaded>=imgs.length){ setTimeout(function(){ window.print(); },200); } }
+                  imgs.forEach(function(img){ if(img.complete) return done(); img.addEventListener('load',done); img.addEventListener('error',done); });
+                }catch(e){ setTimeout(function(){ window.print(); },200); }
+              }
+              window.addEventListener('load', function(){ setTimeout(waitForImagesAndPrint, 150); });
+              if('onafterprint' in window){ window.onafterprint=function(){ setTimeout(function(){ window.close(); },300); }; } else { setTimeout(function(){ window.close(); }, 1500); }
+            })();
+          </script>
+        `;
+        htmlContent = htmlContent.replace('</body>', `${autoPrintScript}</body>`);
+
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        printWindow.focus();
+        // Let injected script print and close
+        return;
+      }
+
+      console.log('🖨️ Starting isolated print process');
       
-      // Print directly
-      await Print.printAsync({
-        html: htmlContent,
-        orientation: Print.Orientation.landscape
-      });
+      // Convert selected receipt format to match isolated print expectations
+      const receiptData = {
+        student_name: selectedReceipt.studentName,
+        student_admission_no: selectedReceipt.admissionNo,
+        class_name: selectedReceipt.className,
+        fee_component: selectedReceipt.feeName,
+        payment_date_formatted: formatDateForReceipt(selectedReceipt.paymentDate),
+        receipt_no: cleanReceiptNumber(selectedReceipt.receiptNumber),
+        payment_mode: selectedReceipt.paymentMethod,
+        amount_paid: selectedReceipt.amount,
+        father_name: selectedReceipt.fatherName,
+        total_paid_till_date: selectedReceipt.totalPaidTillDate || selectedReceipt.amount,
+        amount_remaining: selectedReceipt.outstandingAmount || 0
+      };
       
-      console.log('✅ Print dialog opened successfully');
+      const { printIsolatedReceipt } = await import('../../utils/isolatedPrintReceipt');
+      await printIsolatedReceipt(receiptData, schoolDetails);
+      
+      console.log('✅ Student - Isolated print completed successfully');
       setReceiptModalVisible(false);
     } catch (error) {
-      console.error('❌ Print error:', error);
+      console.error('❌ Student - Isolated print error:', error);
       Alert.alert('Print Error', 'Failed to print receipt. Please try again.');
     }
   };
