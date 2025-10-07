@@ -50,6 +50,16 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
       return url.startsWith('http://') || url.startsWith('https://');
     };
 
+    // Utility to build robust logo HTML with fallback sibling (avoids brittle quoting)
+    const buildLogo = (src, note) => {
+      return `<div class="logo-wrapper">
+        <img src="${src}" class="school-logo" alt="School Logo" crossorigin="anonymous" referrerpolicy="no-referrer"
+             onload="console.log('${note}')"
+             onerror="this.style.display='none'; var f=this.nextElementSibling; if(f){f.style.display='flex';}" />
+        <div class="school-logo-fallback" style="display:none">🏫</div>
+      </div>`;
+    };
+
     // Load logo with consistent validation - prioritize preloaded logo
     let logoHTML = '';
     console.log('🏢 Unified - School details for logo loading:', {
@@ -66,7 +76,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
     if (preloadedLogoUrl && isValidImageUrl(preloadedLogoUrl)) {
       console.log('✅ Using preloaded logo URL for print/PDF:', preloadedLogoUrl);
       // For print/PDF contexts, we add additional attributes to ensure the image loads properly
-      logoHTML = `<img src="${preloadedLogoUrl}" class="school-logo" alt="School Logo" crossorigin="anonymous" referrerpolicy="no-referrer" onload="console.log('Logo loaded successfully')" onerror="console.error('Logo failed to load:', this.src); this.style.display='none'; this.parentNode.innerHTML='<div class=\"school-logo-fallback\">🏫</div>';" />`;
+      logoHTML = buildLogo(preloadedLogoUrl, 'Logo loaded successfully');
     } else if (schoolDetails?.logo_url) {
       console.log('🔍 Unified - Attempting to load logo from:', schoolDetails.logo_url);
       console.log('🔍 Unified - Logo URL type:', typeof schoolDetails.logo_url);
@@ -79,7 +89,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
           try {
             const testResponse = await fetch(schoolDetails.logo_url, { method: 'HEAD' });
             if (testResponse.ok) {
-              logoHTML = `<img src="${schoolDetails.logo_url}" class="school-logo" alt="School Logo" crossorigin="anonymous" referrerpolicy="no-referrer" onload="console.log('Logo loaded successfully from direct URL')" onerror="console.error('Logo failed to load from direct URL:', this.src); this.style.display='none'; this.parentNode.innerHTML='<div class=\"school-logo-fallback\">🏫</div>';" />`;
+              logoHTML = buildLogo(schoolDetails.logo_url, 'Logo loaded successfully from direct URL');
               console.log('✅ Unified - Direct logo URL loaded successfully:', schoolDetails.logo_url);
             } else {
               console.log('🔄 Unified - Direct logo URL not accessible, extracting filename for bucket lookup');
@@ -120,7 +130,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
             try {
               const testResponse = await fetch(profilesLogoData.publicUrl, { method: 'HEAD' });
               if (testResponse.ok) {
-                logoHTML = `<img src="${profilesLogoData.publicUrl}" class="school-logo" alt="School Logo" crossorigin="anonymous" referrerpolicy="no-referrer" onload="console.log('Logo loaded successfully from profiles bucket')" onerror="console.error('Logo failed to load from profiles bucket:', this.src); this.style.display='none'; this.parentNode.innerHTML='<div class=\"school-logo-fallback\">🏫</div>';" />`;
+                logoHTML = buildLogo(profilesLogoData.publicUrl, 'Logo loaded successfully from profiles bucket');
                 console.log('✅ Unified - Profiles bucket URL loaded successfully:', profilesLogoData.publicUrl);
               } else {
                 throw new Error('Profiles bucket URL not accessible');
@@ -149,7 +159,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
               try {
                 const testResponse = await fetch(assetsLogoData.publicUrl, { method: 'HEAD' });
                 if (testResponse.ok) {
-                  logoHTML = `<img src="${assetsLogoData.publicUrl}" class="school-logo" alt="School Logo" crossorigin="anonymous" referrerpolicy="no-referrer" onload="console.log('Logo loaded successfully from school-assets bucket')" onerror="console.error('Logo failed to load from school-assets bucket:', this.src); this.style.display='none'; this.parentNode.innerHTML='<div class=\"school-logo-fallback\">🏫</div>';" />`;
+                  logoHTML = buildLogo(assetsLogoData.publicUrl, 'Logo loaded successfully from school-assets bucket');
                   console.log('✅ Unified - School-assets bucket URL loaded successfully:', assetsLogoData.publicUrl);
                 } else {
                   throw new Error('School-assets bucket URL not accessible');
@@ -180,7 +190,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
           const isValidLogo = validateLogoData(logoData) && isValidImageUrl(logoData);
           
           if (isValidLogo) {
-            logoHTML = `<img src="${logoData}" class="school-logo" alt="School Logo" crossorigin="anonymous" referrerpolicy="no-referrer" onload="console.log('Logo loaded successfully from enhanced loader')" onerror="console.error('Logo failed to load from enhanced loader:', this.src); this.style.display='none'; this.parentNode.innerHTML='<div class=\"school-logo-fallback\">🏫</div>';" />`;
+            logoHTML = buildLogo(logoData, 'Logo loaded successfully from enhanced loader');
             console.log('✅ Unified - Enhanced logo loaded successfully');
           } else {
             console.log('🔄 Unified - Enhanced loader failed, trying robust loader');
@@ -193,7 +203,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
             const isFallbackValid = validateImageData(fallbackLogoData) && isValidImageUrl(fallbackLogoData);
             
             if (isFallbackValid) {
-              logoHTML = `<img src="${fallbackLogoData}" class="school-logo" alt="School Logo" crossorigin="anonymous" referrerpolicy="no-referrer" onload="console.log('Logo loaded successfully from fallback loader')" onerror="console.error('Logo failed to load from fallback loader:', this.src); this.style.display='none'; this.parentNode.innerHTML='<div class=\"school-logo-fallback\">🏫</div>';" />`;
+              logoHTML = buildLogo(fallbackLogoData, 'Logo loaded successfully from fallback loader');
               console.log('✅ Unified - Fallback logo loaded successfully');
             } else {
               console.log('❌ Unified - All logo loaders failed, using school icon placeholder (same as dashboard)');
@@ -295,7 +305,6 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
             .school-logo-fallback {
               width: 80px;
               height: 80px;
-              display: flex;
               align-items: center;
               justify-content: center;
               font-size: 30px;
@@ -558,7 +567,6 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
               .school-logo-fallback {
                 width: 80px !important;
                 height: 80px !important;
-                display: flex !important;
                 align-items: center !important;
                 justify-content: center !important;
                 font-size: 30px !important;
