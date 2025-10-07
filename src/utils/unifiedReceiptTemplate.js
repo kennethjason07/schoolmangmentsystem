@@ -264,23 +264,31 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Fee Receipt - ${receiptNo}</title>
           <style>
-            @page { size: A4 portrait; margin: 15mm; }
-            body { 
-              font-family: 'Arial', sans-serif; 
-              margin: 0; 
+            @page { size: A4 portrait; margin: 10mm; }
+            html, body {
+              margin: 0;
               padding: 0;
-              color: #000; 
-              background: #fff; 
-              font-size: 14px;
-              line-height: 1.3;
+              background: #fff;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+              font-family: 'Arial', sans-serif;
+            }
+            
+            /* Two-column page for printing */
+            .page {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 10mm;
+              box-sizing: border-box;
             }
             .receipt-container { 
               border: 2px solid #000; 
               border-radius: 10px;
               padding: 15px; 
               max-width: 100%; 
-              margin: 10px;
+              margin: 0;
               background: white;
+              box-sizing: border-box;
             }
             
             /* Header Section - exactly like reference */
@@ -848,126 +856,252 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
               console.log('👁️ Mutation observer active');
             }
           </script>
-          <div class="receipt-container">
-            <!-- Header Section -->
-            <div class="header-section">
-              <div class="logo-section">
-                ${logoHTML}
-              </div>
-              <div class="school-info">
-                <div class="school-name">${schoolName}</div>
-                <div class="school-address">${schoolAddress}</div>
-                ${schoolDetails?.phone || schoolDetails?.email ? 
-                  `<div class="school-contact">Contact: ${schoolDetails?.phone ? 'Contact No.: ' + schoolDetails.phone : ''}${schoolDetails?.phone && schoolDetails?.email ? ', ' : ''}${schoolDetails?.email ? 'Email:' + schoolDetails.email : ''}</div>` : 
-                  ''}
-              </div>
-            </div>
-            
-            <!-- Student Information Grid -->
-            <div class="student-info">
-              <div class="student-row">
-                <div class="student-left">
-                  <span class="info-label">Student Name:</span>
-                  <span class="info-value">${studentName}</span>
+          <div class="page">
+            <div class="receipt-container">
+              <!-- Header Section -->
+              <div class="header-section">
+                <div class="logo-section">
+                  ${logoHTML}
                 </div>
-                <div class="student-center">
-                  <span class="info-label">UID:</span>
-                  <span class="info-value">${studentUID || admissionNo}</span>
-                </div>
-                <div class="student-right">
-                  <span class="info-label">Receipt No:</span>
-                  <span class="info-value">${receiptNo}</span>
+                <div class="school-info">
+                  <div class="school-name">${schoolName}</div>
+                  <div class="school-address">${schoolAddress}</div>
+                  ${schoolDetails?.phone || schoolDetails?.email ? 
+                    `<div class="school-contact">Contact: ${schoolDetails?.phone ? 'Contact No.: ' + schoolDetails.phone : ''}${schoolDetails?.phone && schoolDetails?.email ? ', ' : ''}${schoolDetails?.email ? 'Email:' + schoolDetails.email : ''}</div>` : 
+                    ''}
                 </div>
               </div>
               
-              <div class="student-row">
-                <div class="student-left">
-                  <span class="info-label">Fathers Name:</span>
-                  <span class="info-value">${fatherName || 'N/A'}</span>
+              <!-- Student Information Grid -->
+              <div class="student-info">
+                <div class="student-row">
+                  <div class="student-left">
+                    <span class="info-label">Student Name:</span>
+                    <span class="info-value">${studentName}</span>
+                  </div>
+                  <div class="student-center">
+                    <span class="info-label">UID:</span>
+                    <span class="info-value">${studentUID || admissionNo}</span>
+                  </div>
+                  <div class="student-right">
+                    <span class="info-label">Receipt No:</span>
+                    <span class="info-value">${receiptNo}</span>
+                  </div>
                 </div>
-                <div class="student-center">
-                  <span class="info-label">Class:</span>
-                  <span class="info-value">${className}</span>
+                
+                <div class="student-row">
+                  <div class="student-left">
+                    <span class="info-label">Fathers Name:</span>
+                    <span class="info-value">${fatherName || 'N/A'}</span>
+                  </div>
+                  <div class="student-center">
+                    <span class="info-label">Class:</span>
+                    <span class="info-value">${className}</span>
+                  </div>
+                  <div class="student-right">
+                    <span class="info-label">Year:</span>
+                    <span class="info-value">${schoolDetails?.academic_year || '2024/25'}</span>
+                  </div>
                 </div>
-                <div class="student-right">
-                  <span class="info-label">Year:</span>
-                  <span class="info-value">${schoolDetails?.academic_year || '2024/25'}</span>
+                
+                <div class="student-row">
+                  <div class="student-left"></div>
+                  <div class="student-center"></div>
+                  <div class="student-right">
+                    <span class="info-label">Date:</span>
+                    <span class="info-value">${paymentDate}</span>
+                  </div>
                 </div>
               </div>
               
-              <div class="student-row">
-                <div class="student-left"></div>
-                <div class="student-center"></div>
-                <div class="student-right">
-                  <span class="info-label">Date:</span>
-                  <span class="info-value">${paymentDate}</span>
+              <!-- Fee Table -->
+              <div class="fee-table-container">
+                <table class="fee-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 70%;">Particulars</th>
+                      <th style="width: 30%;">Fees Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>${feeType}</td>
+                      <td class="amount-cell">Rs. ${Number(amountPaidNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</td>
+                    </tr>
+                    ${receiptData.fine_amount && parseFloat(receiptData.fine_amount) > 0 ? `
+                    <tr>
+                      <td>Fine</td>
+                      <td class="amount-cell">Rs. ${Number(receiptData.fine_amount).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</td>
+                    </tr>
+                    ` : ''}
+                    <tr class="total-row">
+                      <td class="particulars">Total:</td>
+                      <td class="amount-cell">Rs. ${(receiptData.fine_amount && parseFloat(receiptData.fine_amount) > 0) ? 
+                        (parseFloat(receiptData.amount_paid || amountPaidNumber) + parseFloat(receiptData.fine_amount || 0)).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0}) : 
+                        Number(amountPaidNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})
+                      }</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              
+              <!-- Fee Summary -->
+              <div class="fee-summary">
+                <div class="fee-summary-item">
+                  Total fees paid: Rs. ${receiptData.total_paid_till_date ? 
+                    Number(receiptData.total_paid_till_date).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0}) : 
+                    Number(amountPaidNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})
+                  }
+                </div>
+                <div class="fee-summary-item">
+                  Total fees Due: Rs. ${amountRemaining !== null ? 
+                    Number(amountRemainingNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0}) : 
+                    '0'
+                  }
+                </div>
+              </div>
+              
+              <!-- Footer Section -->
+              <div class="footer-section">
+                <div class="footer-notes">
+                  <div>In Words: Rupees ${receiptData.amount_in_words || (amountPaidNumber > 0 ? convertNumberToWords(amountPaidNumber) : 'Zero')} Only</div>
+                  <div>Note: Fees once deposited will not be refunded under any Circumstances</div>
+                </div>
+                
+                <div class="footer-details">
+                  <div>Payment Mode: ${paymentMode}</div>
+                  <div>Cashier Name:${cashierName || 'System Generated'} &nbsp;&nbsp;&nbsp; Date : ${paymentDate}</div>
+                </div>
+                
+                <div class="signature-area">
+                  <div class="signature-box">
+                    <div class="signature-text">Received with thanks,</div>
+                    <div class="signature-line">Cashier/Accountant</div>
+                  </div>
                 </div>
               </div>
             </div>
-            
-            <!-- Fee Table -->
-            <div class="fee-table-container">
-              <table class="fee-table">
-                <thead>
-                  <tr>
-                    <th style="width: 70%;">Particulars</th>
-                    <th style="width: 30%;">Fees Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>${feeType}</td>
-                    <td class="amount-cell">Rs. ${Number(amountPaidNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</td>
-                  </tr>
-                  ${receiptData.fine_amount && parseFloat(receiptData.fine_amount) > 0 ? `
-                  <tr>
-                    <td>Fine</td>
-                    <td class="amount-cell">Rs. ${Number(receiptData.fine_amount).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</td>
-                  </tr>
-                  ` : ''}
-                  <tr class="total-row">
-                    <td class="particulars">Total:</td>
-                    <td class="amount-cell">Rs. ${(receiptData.fine_amount && parseFloat(receiptData.fine_amount) > 0) ? 
-                      (parseFloat(receiptData.amount_paid || amountPaidNumber) + parseFloat(receiptData.fine_amount || 0)).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0}) : 
-                      Number(amountPaidNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})
-                    }</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            
-            <!-- Fee Summary -->
-            <div class="fee-summary">
-              <div class="fee-summary-item">
-                Total fees paid: Rs. ${receiptData.total_paid_till_date ? 
-                  Number(receiptData.total_paid_till_date).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0}) : 
-                  Number(amountPaidNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})
-                }
-              </div>
-              <div class="fee-summary-item">
-                Total fees Due: Rs. ${amountRemaining !== null ? 
-                  Number(amountRemainingNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0}) : 
-                  '0'
-                }
-              </div>
-            </div>
-            
-            <!-- Footer Section -->
-            <div class="footer-section">
-              <div class="footer-notes">
-                <div>In Words: Rupees ${receiptData.amount_in_words || (amountPaidNumber > 0 ? convertNumberToWords(amountPaidNumber) : 'Zero')} Only</div>
-                <div>Note: Fees once deposited will not be refunded under any Circumstances</div>
+            <div class="receipt-container">
+              <!-- Header Section -->
+              <div class="header-section">
+                <div class="logo-section">
+                  ${logoHTML}
+                </div>
+                <div class="school-info">
+                  <div class="school-name">${schoolName}</div>
+                  <div class="school-address">${schoolAddress}</div>
+                  ${schoolDetails?.phone || schoolDetails?.email ? 
+                    `<div class="school-contact">Contact: ${schoolDetails?.phone ? 'Contact No.: ' + schoolDetails.phone : ''}${schoolDetails?.phone && schoolDetails?.email ? ', ' : ''}${schoolDetails?.email ? 'Email:' + schoolDetails.email : ''}</div>` : 
+                    ''}
+                </div>
               </div>
               
-              <div class="footer-details">
-                <div>Payment Mode: ${paymentMode}</div>
-                <div>Cashier Name:${cashierName || 'System Generated'} &nbsp;&nbsp;&nbsp; Date : ${paymentDate}</div>
+              <!-- Student Information Grid -->
+              <div class="student-info">
+                <div class="student-row">
+                  <div class="student-left">
+                    <span class="info-label">Student Name:</span>
+                    <span class="info-value">${studentName}</span>
+                  </div>
+                  <div class="student-center">
+                    <span class="info-label">UID:</span>
+                    <span class="info-value">${studentUID || admissionNo}</span>
+                  </div>
+                  <div class="student-right">
+                    <span class="info-label">Receipt No:</span>
+                    <span class="info-value">${receiptNo}</span>
+                  </div>
+                </div>
+                
+                <div class="student-row">
+                  <div class="student-left">
+                    <span class="info-label">Fathers Name:</span>
+                    <span class="info-value">${fatherName || 'N/A'}</span>
+                  </div>
+                  <div class="student-center">
+                    <span class="info-label">Class:</span>
+                    <span class="info-value">${className}</span>
+                  </div>
+                  <div class="student-right">
+                    <span class="info-label">Year:</span>
+                    <span class="info-value">${schoolDetails?.academic_year || '2024/25'}</span>
+                  </div>
+                </div>
+                
+                <div class="student-row">
+                  <div class="student-left"></div>
+                  <div class="student-center"></div>
+                  <div class="student-right">
+                    <span class="info-label">Date:</span>
+                    <span class="info-value">${paymentDate}</span>
+                  </div>
+                </div>
               </div>
               
-              <div class="signature-area">
-                <div class="signature-box">
-                  <div class="signature-text">Received with thanks,</div>
-                  <div class="signature-line">Cashier/Accountant</div>
+              <!-- Fee Table -->
+              <div class="fee-table-container">
+                <table class="fee-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 70%;">Particulars</th>
+                      <th style="width: 30%;">Fees Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>${feeType}</td>
+                      <td class="amount-cell">Rs. ${Number(amountPaidNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</td>
+                    </tr>
+                    ${receiptData.fine_amount && parseFloat(receiptData.fine_amount) > 0 ? `
+                    <tr>
+                      <td>Fine</td>
+                      <td class="amount-cell">Rs. ${Number(receiptData.fine_amount).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</td>
+                    </tr>
+                    ` : ''}
+                    <tr class="total-row">
+                      <td class="particulars">Total:</td>
+                      <td class="amount-cell">Rs. ${(receiptData.fine_amount && parseFloat(receiptData.fine_amount) > 0) ? 
+                        (parseFloat(receiptData.amount_paid || amountPaidNumber) + parseFloat(receiptData.fine_amount || 0)).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0}) : 
+                        Number(amountPaidNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})
+                      }</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              
+              <!-- Fee Summary -->
+              <div class="fee-summary">
+                <div class="fee-summary-item">
+                  Total fees paid: Rs. ${receiptData.total_paid_till_date ? 
+                    Number(receiptData.total_paid_till_date).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0}) : 
+                    Number(amountPaidNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0})
+                  }
+                </div>
+                <div class="fee-summary-item">
+                  Total fees Due: Rs. ${amountRemaining !== null ? 
+                    Number(amountRemainingNumber).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0}) : 
+                    '0'
+                  }
+                </div>
+              </div>
+              
+              <!-- Footer Section -->
+              <div class="footer-section">
+                <div class="footer-notes">
+                  <div>In Words: Rupees ${receiptData.amount_in_words || (amountPaidNumber > 0 ? convertNumberToWords(amountPaidNumber) : 'Zero')} Only</div>
+                  <div>Note: Fees once deposited will not be refunded under any Circumstances</div>
+                </div>
+                
+                <div class="footer-details">
+                  <div>Payment Mode: ${paymentMode}</div>
+                  <div>Cashier Name:${cashierName || 'System Generated'} &nbsp;&nbsp;&nbsp; Date : ${paymentDate}</div>
+                </div>
+                
+                <div class="signature-area">
+                  <div class="signature-box">
+                    <div class="signature-text">Received with thanks,</div>
+                    <div class="signature-line">Cashier/Accountant</div>
+                  </div>
                 </div>
               </div>
             </div>
