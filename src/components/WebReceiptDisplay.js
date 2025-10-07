@@ -81,7 +81,7 @@ const WebReceiptDisplay = ({ visible, receiptData, onClose }) => {
           cashier_name: receiptData.cashier_name,
           fine_amount: receiptData.fine_amount,
           total_paid_till_date: receiptData.total_paid_till_date,
-          father_name: receiptData.father_name,
+          father_name: receiptData.father_name || receiptData.fathers_name || receiptData.parent_name || receiptData.fatherName,
           uid: receiptData.uid || receiptData.student_uid,
         };
         let htmlContent = await generateUnifiedReceiptHTML(unifiedData, schoolDetails);

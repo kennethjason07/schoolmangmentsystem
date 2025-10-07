@@ -1000,7 +1000,10 @@ const ClassStudentDetails = ({ route, navigation }) => {
       payment_date_formatted: formatSafeDate(payment.payment_date),
       amount_in_words: numberToWords(parseFloat(payment.amount_paid)),
       amount_remaining: Math.max(0, (parseFloat(selectedStudent?.outstanding || 0)) - parseFloat(payment.amount_paid || 0)),
-      cashier_name: (user?.full_name || user?.email || '').toString()
+      cashier_name: (user?.full_name || user?.email || '').toString(),
+      // Map according to schema: parents table holds names with relation
+      father_name: selectedStudent.parentName || payment.father_name || payment.parent_name || null,
+      student_uid: selectedStudent.admission_no || selectedStudent.admissionNo,
     };
     
     setSelectedPaymentForReceipt(receiptData);
@@ -1492,7 +1495,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
           cashier_name: receiptData.cashier_name,
           fine_amount: receiptData.fine_amount,
           total_paid_till_date: receiptData.total_paid_till_date,
-          father_name: receiptData.father_name,
+          father_name: receiptData.father_name || receiptData.fathers_name || receiptData.parent_name,
           uid: receiptData.student_uid || receiptData.student_admission_no,
         };
 

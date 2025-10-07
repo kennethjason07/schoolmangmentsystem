@@ -552,7 +552,7 @@ const FeePayment = () => {
           cashier_name: selectedReceipt.cashierName,
           fine_amount: selectedReceipt.fine_amount,
           total_paid_till_date: selectedReceipt.totalPaidTillDate || selectedReceipt.amount,
-          father_name: selectedReceipt.fatherName,
+          father_name: selectedReceipt.fatherName || selectedReceipt.father_name || selectedReceipt.fathers_name || selectedReceipt.parent_name || (studentData && (studentData.father_name || studentData.fatherName)) || null,
           uid: selectedReceipt.studentUID || selectedReceipt.admissionNo,
         };
 
