@@ -264,7 +264,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Fee Receipt - ${receiptNo}</title>
           <style>
-            @page { size: A4 portrait; margin: 10mm; }
+            @page { size: A4 portrait; margin: 7mm; }
             html, body {
               margin: 0;
               padding: 0;
@@ -274,11 +274,11 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
               font-family: 'Arial', sans-serif;
             }
             
-            /* Two-column page for printing */
+            /* Vertical stacking for printing */
             .page {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 10mm;
+              display: flex;
+              flex-direction: column;
+              gap: 4mm;
               box-sizing: border-box;
             }
             .receipt-container { 
@@ -289,6 +289,8 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
               margin: 0;
               background: white;
               box-sizing: border-box;
+              page-break-inside: avoid;
+              break-inside: avoid;
             }
             
             /* Header Section - exactly like reference */
@@ -606,7 +608,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
               
               /* Page setup */
               @page { 
-                margin: 10mm !important; 
+                margin: 7mm !important; 
                 size: A4 portrait !important;
               }
               
@@ -615,6 +617,23 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
               }
+              
+              /* Fit two receipts per A4 page vertically */
+              body { font-size: 12px !important; line-height: 1.2 !important; }
+              .page { gap: 4mm !important; }
+              .receipt-container { padding: 10px !important; }
+              .header-section { margin-bottom: 8px !important; padding-bottom: 6px !important; }
+              .student-info { margin: 8px 0 !important; font-size: 11.5px !important; }
+              .student-row { margin: 4px 0 !important; padding-bottom: 3px !important; }
+              .fee-table th { padding: 7px !important; font-size: 12px !important; }
+              .fee-table td { padding: 7px !important; font-size: 11.5px !important; }
+              .fee-summary { margin: 8px 0 !important; padding: 6px 0 !important; font-size: 11.5px !important; }
+              .footer-section { margin-top: 10px !important; font-size: 10.5px !important; }
+              .signature-area { margin-top: 12px !important; }
+              /* Slightly reduce logo and title sizes in print to save vertical space */
+              .school-logo { width: 70px !important; height: 70px !important; }
+              .school-logo-fallback { width: 70px !important; height: 70px !important; font-size: 26px !important; }
+              .school-name { font-size: 22px !important; }
             }
           </style>
         </head>
