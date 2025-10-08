@@ -45,6 +45,10 @@ const HostelManagement = ({ navigation }) => {
   const [allocations, setAllocations] = useState([]);
   const [maintenanceIssues, setMaintenanceIssues] = useState([]);
   
+  // Allocation prompt control
+  const [allocationPromptShown, setAllocationPromptShown] = useState(false);
+  const [pendingAllocationContext, setPendingAllocationContext] = useState(null);
+  
   // Modal states
   const [addHostelModalVisible, setAddHostelModalVisible] = useState(false);
   const [newHostelData, setNewHostelData] = useState({
@@ -55,13 +59,29 @@ const HostelManagement = ({ navigation }) => {
     contact_phone: ''
   });
 
+  // UI/Filter states
+  const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'boys' | 'girls' | 'mixed'
+
   useEffect(() => {
     // Attempt live data load; fallback to mock data if tables missing
     loadDashboardData();
+
+    // If asked to directly open Add Hostel modal from another screen (initial mount)
+    if (route.params?.openAddHostel) {
+      setAddHostelModalVisible(true);
+    }
     
-    // Check if we have an allocation context from navigation
+    // Capture allocation context, but defer prompt until hostels are loaded
     if (route.params?.allocationContext) {
-      const { student, applicationId } = route.params.allocationContext;
+      setPendingAllocationContext(route.params.allocationContext);
+      setAllocationPromptShown(false);
+    }
+  }, []);
+
+  // When we have a pending allocation and hostels are loaded, prompt user to select hostel
+  useEffect(() => {
+    if (pendingAllocationContext && !allocationPromptShown && hostels && hostels.length > 0) {
+      const { student } = pendingAllocationContext;
       Alert.alert(
         'Student Allocation',
         `Allocate ${student.first_name} ${student.last_name} to a hostel room.`,
@@ -69,23 +89,30 @@ const HostelManagement = ({ navigation }) => {
           {
             text: 'Select Hostel',
             onPress: () => {
-              // Navigate to hostel selection
               navigation.navigate('HostelDetailList', {
                 type: 'hostels',
                 title: 'Select Hostel for Allocation',
-                data: hostels,
+                data: hostels, // latest hostels state
                 icon: 'business',
                 color: '#2196F3',
                 description: `Select a hostel for ${student.first_name} ${student.last_name}`,
-                allocationContext: route.params.allocationContext
+                allocationContext: pendingAllocationContext,
               });
             }
           },
           { text: 'Cancel', style: 'cancel' }
         ]
       );
+      setAllocationPromptShown(true);
     }
-  }, []);
+  }, [pendingAllocationContext, allocationPromptShown, hostels]);
+
+  // Also respond if another screen updates params to open the modal while mounted
+  useEffect(() => {
+    if (route.params?.openAddHostel) {
+      setAddHostelModalVisible(true);
+    }
+  }, [route.params?.openAddHostel]);
 
   // Mock data for frontend demo
   const loadMockData = async () => {
@@ -114,7 +141,8 @@ const HostelManagement = ({ navigation }) => {
           capacity: 120,
           occupied: 95,
           status: 'active',
-          contact_phone: '9876543210'
+          contact_phone: '9876543210',
+          type: 'boys'
         },
         {
           id: '2',
@@ -123,7 +151,8 @@ const HostelManagement = ({ navigation }) => {
           capacity: 80,
           occupied: 61,
           status: 'active',
-          contact_phone: '9876543211'
+          contact_phone: '9876543211',
+          type: 'girls'
         },
         {
           id: '3',
@@ -132,7 +161,8 @@ const HostelManagement = ({ navigation }) => {
           capacity: 40,
           occupied: 30,
           status: 'active',
-          contact_phone: '9876543212'
+          contact_phone: '9876543212',
+          type: 'mixed'
         }
       ]);
 
@@ -368,6 +398,7 @@ const HostelManagement = ({ navigation }) => {
         occupied: 0, // will compute from occupancy
         status: h.is_active ? 'active' : 'inactive',
         contact_phone: h.contact_phone || null,
+        type: (h.hostel_type || h.type || 'mixed')?.toString().toLowerCase(),
       }));
 
       // Occupancy
@@ -623,6 +654,28 @@ const HostelManagement = ({ navigation }) => {
           <Text style={styles.subtitle}>Manage hostels, applications, and bed allocations</Text>
         </View>
 
+        {/* Hostels (Quick Stats) - stat cards under Management Tools */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🏢 Hostels (Quick Stats)</Text>
+
+          {hostels.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="business-outline" size={48} color="#ccc" />
+              <Text style={styles.emptyText}>No hostels found</Text>
+            </View>
+          ) : (
+            <HostelStatCard
+              title="All Hostels"
+              value={String(stats.totalHostels)}
+              icon="business"
+              color="#2196F3"
+              subtitle="Tap to view all hostels"
+              animated={true}
+              onPress={() => navigation.navigate('HostelsOverview', { data: hostels, typeFilter: 'all', hideSummary: true })}
+            />
+          )}
+        </View>
+
         {/* Stats Overview */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📊 Overview</Text>
@@ -806,39 +859,6 @@ onPress={() => navigation.navigate('HostelApplications', {
 
         </View>
 
-        {/* Hostels (Quick Stats) - stat cards under Management Tools */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🏢 Hostels (Quick Stats)</Text>
-          {hostels.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="business-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyText}>No hostels found</Text>
-            </View>
-          ) : (
-            <View>
-              {hostels.slice(0, 4).map((h) => {
-                const capacity = Number(h.capacity || 0);
-                const occupied = Number(h.occupied || 0);
-                const available = Math.max(0, capacity - occupied);
-                const utilization = capacity > 0 ? Math.round((occupied / capacity) * 100) : 0;
-                return (
-                  <HostelStatCard
-                    key={`quick-${h.id}`}
-                    title={h.name}
-                    value={String(capacity)}
-                    icon="business"
-                    color="#2196F3"
-                    subtitle={`Occupied ${occupied} • Available ${available}`}
-                    animated={true}
-                    maxValue={capacity}
-                    progress={utilization}
-                    onPress={() => navigation.navigate('HostelQuickActions', { hostel: h })}
-                  />
-                );
-              })}
-            </View>
-          )}
-        </View>
 
 
 
@@ -997,6 +1017,47 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 20,
     color: '#2c3e50',
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#f0f0f0',
+  },
+  filterChipActive: {
+    backgroundColor: '#2196F3',
+  },
+  filterChipText: {
+    color: '#333',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  filterChipTextActive: {
+    color: '#fff',
+  },
+  quickActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  quickActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  quickActionText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 6,
   },
   actionsGrid: {
     flexDirection: 'row',

@@ -13,6 +13,12 @@ import Header from '../../components/Header';
 const HostelDetailList = ({ navigation, route }) => {
   const { type, title, data, icon, color, description, stats, allocationContext } = route.params;
 
+  const startAllocation = (student) => {
+    navigation.navigate('HostelManagement', {
+      allocationContext: { student, applicationId: null, allocationMode: true }
+    });
+  };
+
   const renderHostelItem = (hostel) => (
     <TouchableOpacity 
       key={hostel.id} 
@@ -266,6 +272,58 @@ const HostelDetailList = ({ navigation, route }) => {
     </View>
   );
 
+  const renderClassItem = (cls) => (
+    <TouchableOpacity key={cls.id} style={styles.card}
+      onPress={() => navigation.navigate('HostelDetailList', {
+        type: 'students',
+        title: `Students - ${cls.name}`,
+        data: Array.isArray(cls.studentsList) ? cls.studentsList : [],
+        icon: 'people',
+        color: '#FF9800',
+        description: `${cls.total} students in ${cls.name}`,
+      })}
+    >
+      <View style={styles.cardHeader}>
+        <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>
+          <Ionicons name="school" size={24} color={color} />
+        </View>
+        <View style={styles.cardContent}>
+          <Text style={styles.cardTitle}>{cls.name}</Text>
+          <Text style={styles.cardDescription}>{cls.total} students</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderStudentItem = (student) => (
+    <View key={student.id} style={styles.card}>
+      <View style={styles.cardHeader}>
+        <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>
+          <Ionicons name="person" size={24} color={color} />
+        </View>
+        <View style={styles.cardContent}>
+          <Text style={styles.cardTitle}>{student.first_name} {student.last_name}</Text>
+          <Text style={styles.cardDescription}>Admission: {student.admission_no}</Text>
+          <Text style={styles.cardDescription}>Class {student.class}-{student.section}</Text>
+        </View>
+        <View style={[styles.statusBadge, { backgroundColor: student.hostel_status === 'allocated' ? '#4CAF50' : '#2196F3' }]}>
+          <Text style={styles.statusText}>{student.hostel_status === 'allocated' ? 'Allocated' : 'Available'}</Text>
+        </View>
+      </View>
+      {student.hostel_status !== 'allocated' && (
+        <View style={{ marginTop: 12 }}>
+          <TouchableOpacity
+            style={[styles.actionButton, { backgroundColor: '#4CAF50', alignSelf: 'flex-start' }]}
+            onPress={() => startAllocation(student)}
+          >
+            <Ionicons name="bed" size={16} color="#fff" />
+            <Text style={styles.actionButtonText}>Assign to Hostel</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+
   const renderItem = (item) => {
     switch (type) {
       case 'hostels':
@@ -282,6 +340,10 @@ const HostelDetailList = ({ navigation, route }) => {
         return renderAllocationItem(item);
       case 'maintenance':
         return renderMaintenanceItem(item);
+      case 'classes':
+        return renderClassItem(item);
+      case 'students':
+        return renderStudentItem(item);
       default:
         return null;
     }
@@ -316,9 +378,21 @@ const HostelDetailList = ({ navigation, route }) => {
       />
       
       <View style={styles.headerSection}>
-        <View style={styles.titleContainer}>
-          <Ionicons name={icon} size={28} color={color} />
-          <Text style={styles.mainTitle}>{title}</Text>
+        <View style={styles.headerTopRow}>
+          <View style={styles.titleContainer}>
+            <Ionicons name={icon} size={28} color={color} />
+            <Text style={styles.mainTitle}>{title}</Text>
+          </View>
+          {/* Add Hostel button */}
+          {type === 'hostels' && (
+            <TouchableOpacity
+              style={styles.addBtn}
+              onPress={() => navigation.navigate('HostelManagement', { openAddHostel: true })}
+            >
+              <Ionicons name="add-circle" size={18} color="#fff" />
+              <Text style={styles.addBtnText}>Add Hostel</Text>
+            </TouchableOpacity>
+          )}
         </View>
         <Text style={styles.subtitle}>{description || `${data.length} items found`}</Text>
         
@@ -438,10 +512,29 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
   },
+  headerTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   titleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 8,
+  },
+  addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  addBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 6,
   },
   mainTitle: {
     fontSize: 24,

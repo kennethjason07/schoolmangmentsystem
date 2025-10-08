@@ -24,6 +24,7 @@ const HostelStatCard = ({
   size = 'medium', // 'small', 'medium', 'large'
   columns = 1, // number of columns to fit into (1 or 2)
   fluid = false, // if true, take full container width without computing
+  quickActions = [], // [{ label, icon, color, onPress }]
 }) => {
   const { userType } = useAuth();
   const [isHovered, setIsHovered] = useState(false);
@@ -233,6 +234,25 @@ const HostelStatCard = ({
               </View>
             )}
           </View>
+
+          {/* Quick actions inside card */}
+          {Array.isArray(quickActions) && quickActions.length > 0 && (
+            <View style={styles.cardActionsRow}>
+              {quickActions.map((a, idx) => (
+                <TouchableOpacity
+                  key={idx}
+                  style={[styles.cardActionBtn, { backgroundColor: a?.color || color }]}
+                  onPress={a?.onPress}
+                  activeOpacity={0.9}
+                >
+                  {a?.icon ? (
+                    <Ionicons name={a.icon} size={12} color="#fff" />
+                  ) : null}
+                  <Text style={styles.cardActionText}>{a?.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           {onPress && (
             <View style={styles.actionIndicator}>
@@ -500,6 +520,26 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     borderRadius: Theme.BorderRadius.xl,
+  },
+  // Inline actions inside the card
+  cardActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: Theme.Spacing.sm,
+  },
+  cardActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: Theme.BorderRadius.lg,
+  },
+  cardActionText: {
+    color: '#fff',
+    fontSize: Theme.Typography.sizes.xs,
+    fontWeight: Theme.Typography.weights.bold,
+    marginLeft: 6,
   },
   // Web-specific styles
   webTouchable: {

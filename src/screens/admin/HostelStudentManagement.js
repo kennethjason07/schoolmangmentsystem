@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
+import HostelStatCard from '../../components/HostelStatCard';
 
 const HostelStudentManagement = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
@@ -288,9 +289,20 @@ const HostelStudentManagement = ({ navigation }) => {
           Student: {item.contact} | Parent: {item.parent_contact}
         </Text>
       </View>
-      <View style={[styles.statusBadge, { backgroundColor: '#2196F3' }]}>
-        <Ionicons name="person-add" size={12} color="#fff" />
-        <Text style={styles.statusText}>Available</Text>
+      <View style={styles.availableActions}>
+        <View style={[styles.statusBadge, { backgroundColor: '#2196F3' }]}>
+          <Ionicons name="person-add" size={12} color="#fff" />
+          <Text style={styles.statusText}>Available</Text>
+        </View>
+        <TouchableOpacity
+          style={[styles.assignBtn, { backgroundColor: '#4CAF50' }]}
+          onPress={() => navigation.navigate('HostelManagement', {
+            allocationContext: { student: item, applicationId: null, allocationMode: true }
+          })}
+        >
+          <Ionicons name="bed" size={14} color="#fff" />
+          <Text style={styles.assignBtnText}>Assign</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -330,6 +342,70 @@ const HostelStudentManagement = ({ navigation }) => {
           style={styles.scrollView}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
+          {/* Summary Stat Cards */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>📚 Student Overview</Text>
+            <View style={{ gap: 12 }}>
+              <HostelStatCard
+                title="All Classes"
+                value={String(new Set([...students, ...hostelStudents].map(s => `${s.class}-${s.section}`)).size)}
+                icon="school"
+                color="#3F51B5"
+                subtitle="Tap to view all classes"
+                animated
+                onPress={() => {
+                  const combined = [...students, ...hostelStudents];
+                  // Build class items with embedded student lists
+                  const classMap = new Map();
+                  combined.forEach(s => {
+                    const key = `${s.class}-${s.section}`;
+                    if (!classMap.has(key)) classMap.set(key, []);
+                    classMap.get(key).push(s);
+                  });
+                  const classes = Array.from(classMap.entries()).map(([key, list]) => {
+                    const [cls, sec] = key.split('-');
+                    return {
+                      id: `class-${key}`,
+                      name: `Class ${cls}-${sec}`,
+                      class: cls,
+                      section: sec,
+                      total: list.length,
+                      studentsList: list,
+                    };
+                  });
+                  navigation.navigate('HostelDetailList', {
+                    type: 'classes',
+                    title: 'All Classes',
+                    data: classes,
+                    icon: 'school',
+                    color: '#3F51B5',
+                    description: 'Browse classes and drill down to students',
+                  });
+                }}
+              />
+
+              <HostelStatCard
+                title="All Students"
+                value={String(students.length + hostelStudents.length)}
+                icon="people"
+                color="#FF9800"
+                subtitle="Tap to view all students"
+                animated
+                onPress={() => {
+                  const combined = [...students, ...hostelStudents].map(s => ({ ...s, full_name: `${s.first_name} ${s.last_name}` }));
+                  navigation.navigate('HostelDetailList', {
+                    type: 'students',
+                    title: 'All Students',
+                    data: combined,
+                    icon: 'people',
+                    color: '#FF9800',
+                    description: 'All students with quick actions',
+                  });
+                }}
+              />
+            </View>
+          </View>
+
           {/* Allocated Students Section */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>🛏️ Allocated Students ({hostelStudents.length})</Text>
@@ -663,6 +739,23 @@ const styles = StyleSheet.create({
   studentItemContact: {
     fontSize: 12,
     color: '#888',
+  },
+  availableActions: {
+    alignItems: 'flex-end',
+  },
+  assignBtn: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  assignBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 4,
   },
   emptyState: {
     alignItems: 'center',
