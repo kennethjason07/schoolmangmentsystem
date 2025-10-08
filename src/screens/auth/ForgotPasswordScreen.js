@@ -73,12 +73,11 @@ const ForgotPasswordScreen = ({ navigation }) => {
     setIsLoading(true);
 
     try {
-      const redirectTo = Platform.OS === 'web' && typeof window !== 'undefined'
-        ? WEB_RESET_URL
-        : undefined;
+      // Always pass the reset redirect URL so Supabase sends users to the reset page (not the Site URL)
+      const redirectTo = WEB_RESET_URL;
       const { error } = await supabase.auth.resetPasswordForEmail(
         email,
-        redirectTo ? { redirectTo } : undefined
+        { redirectTo }
       );
 
       if (error) throw error;

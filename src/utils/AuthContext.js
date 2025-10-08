@@ -820,7 +820,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const signUp = async (email, password, userData, tenantId = null) => {
+const signUp = async (email, password, userData, tenantId = null, emailRedirectTo = undefined) => {
     console.log('📝 Starting signup process for:', email);
     console.log('📁 User data provided:', userData);
     console.log('🏢 Tenant ID provided:', tenantId);
@@ -877,7 +877,7 @@ export const AuthProvider = ({ children }) => {
       console.log('✅ User does not exist, proceeding with signup');
       console.log('🔒 Creating Supabase auth user...');
       // Use Supabase Auth for signup
-      const { data: { user, session }, error: authError } = await authHelpers.signUp(email, password, userData);
+const { data: { user, session }, error: authError } = await authHelpers.signUp(email, password, userData, emailRedirectTo);
       
       console.log('🔒 Auth signup result:', { user: user?.email, session: !!session, authError });
       

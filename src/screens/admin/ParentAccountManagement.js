@@ -307,6 +307,10 @@ const ParentAccountManagement = ({ navigation }) => {
 
       console.log('Parent account created successfully:', accountData);
 
+      // Derive simple verification flags safely
+      const userVerified = !!(accountData?.authUser?.user_metadata?.email_verified === true);
+      const fullyVerified = userVerified && !!accountData?.parentRecord;
+
       // Optimistically update UI
       const optimisticParentRecord = accountData?.parentRecord || {
         id: 'temp',
@@ -356,7 +360,7 @@ const ParentAccountManagement = ({ navigation }) => {
 
 ✨ The parent can now log in with these credentials.
 
-${fullyVerified ? '✅ Both login account and parent record verified' : userVerified ? '✅ Login account verified, ⚠️ Parent record pending' : '⚠️ Verification pending'}`,
+${fullyVerified ? '✅ Email verified and parent record created' : userVerified ? '✅ Email verified (parent record created)' : 'ℹ️ Email verification may still be pending'}`,
         [
           {
             text: 'OK',

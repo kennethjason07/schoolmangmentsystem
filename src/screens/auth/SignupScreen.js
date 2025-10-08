@@ -135,7 +135,10 @@ const SignupScreen = ({ navigation }) => {
     return true;
   };
 
-  const { signUp } = useAuth();
+const { signUp } = useAuth();
+
+  // Verification callback URL for web email confirmations
+  const WEB_EMAIL_VERIFY_URL = 'https://maximus-email-verificatiion.vercel.app';
 
   const handleSignUp = async () => {
     // Validate all inputs
@@ -163,7 +166,14 @@ const SignupScreen = ({ navigation }) => {
         linked_student_id: linkedId,
       };
 
-      const { data, error } = await signUp(email, password, userData);
+const isWeb = Platform.OS === 'web';
+      const { data, error } = await signUp(
+        email,
+        password,
+        userData,
+        null,
+        isWeb ? WEB_EMAIL_VERIFY_URL : undefined
+      );
       
       if (error) {
         Alert.alert('Signup Failed', error.message || 'Could not create account');

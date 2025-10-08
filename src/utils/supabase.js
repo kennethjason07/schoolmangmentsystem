@@ -280,13 +280,14 @@ export const TABLES = {
 // Authentication helper functions
 export const authHelpers = {
   // Sign up a new user
-  async signUp(email, password, userData = {}) {
+  async signUp(email, password, userData = {}, emailRedirectTo) {
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: userData,
+          ...(emailRedirectTo ? { emailRedirectTo } : {}),
         },
       });
       return { data, error };
