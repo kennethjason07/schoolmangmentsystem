@@ -257,6 +257,39 @@ const TeacherChat = () => {
     };
   }, [user?.id]);
 
+  // Realtime contact refresh: update parents/students when phone numbers change in Admin
+  useEffect(() => {
+    let channel;
+    (async () => {
+      if (!user?.id) return;
+      try {
+        // Listen for phone updates to users or parents tables
+        channel = supabase
+          .channel(`teacher-contacts-refresh-${user.id}-${Date.now()}`)
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLES.USERS }, (payload) => {
+            const changed = payload.new;
+            // If a parent user changed (has linked_parent_of), refresh parent contacts
+            if (changed?.linked_parent_of) {
+              console.log('🔁 Users update affecting parent contacts. Refreshing parents...');
+              fetchParents();
+            }
+          })
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLES.PARENTS }, (payload) => {
+            console.log('🔁 Parents record updated. Refreshing parents...');
+            fetchParents();
+          })
+          .subscribe();
+      } catch (e) {
+        console.log('Realtime contact refresh subscription error:', e);
+      }
+    })();
+
+    return () => {
+      try { channel?.unsubscribe(); } catch (e) {}
+      try { supabase.removeChannel?.(channel); } catch (e) {}
+    };
+  }, [user?.id]);
+
   // Reset selection and messages on screen focus
   useFocusEffect(
     React.useCallback(() => {
@@ -407,7 +440,7 @@ const TeacherChat = () => {
             createTenantQuery(
               effectiveTenantId,
               TABLES.USERS,
-              'id, email, full_name, linked_parent_of'
+              'id, email, full_name, phone, linked_parent_of'
             ).in('linked_parent_of', studentIds),
             createTenantQuery(
               effectiveTenantId,
@@ -418,17 +451,55 @@ const TeacherChat = () => {
         : [{ data: [] }, { data: [] }];
 
       // 6) Build maps
+      // Build phone fallbacks from parents table (admin) using studentIds and parent emails
       const parentUserMap = new Map();
+
+      // Map phone by student_id
+      let parentPhoneByStudent = new Map();
+      if (studentIds.length > 0) {
+        const { data: parentRecordsByStudent } = await createTenantQuery(
+          effectiveTenantId,
+          TABLES.PARENTS,
+          'student_id, phone'
+        ).in('student_id', studentIds);
+        parentPhoneByStudent = new Map();
+        (parentRecordsByStudent || []).forEach(p => {
+          if (p.student_id && p.phone && !parentPhoneByStudent.has(p.student_id)) {
+            parentPhoneByStudent.set(p.student_id, p.phone);
+          }
+        });
+      }
+
+      // Map phone by email
+      const parentEmails = (parentUsersRes.data || []).map(u => u.email).filter(Boolean);
+      let parentEmailPhoneMap = new Map();
+      if (parentEmails.length > 0) {
+        const { data: parentRecordsByEmail } = await createTenantQuery(
+          effectiveTenantId,
+          TABLES.PARENTS,
+          'email, phone'
+        ).in('email', parentEmails);
+        parentEmailPhoneMap = new Map();
+        (parentRecordsByEmail || []).forEach(p => {
+          if (p.email && p.phone && !parentEmailPhoneMap.has(p.email)) {
+            parentEmailPhoneMap.set(p.email, p.phone);
+          }
+        });
+      }
+
       (parentUsersRes.data || []).forEach(u => {
         if (u.linked_parent_of) {
           parentUserMap.set(u.linked_parent_of, {
             id: u.id,
             name: u.full_name || u.email,
             email: u.email,
+            // Prefer admin per-student number, then users.phone, then parents-by-email
+            phone: parentPhoneByStudent.get(u.linked_parent_of) || u.phone || parentEmailPhoneMap.get(u.email) || null,
             canMessage: true
           });
         }
       });
+
       const studentUserMap = new Map();
       (studentUsersRes.data || []).forEach(u => {
         if (u.linked_student_id) {
@@ -447,6 +518,7 @@ const TeacherChat = () => {
             id: p.id,
             name: p.name,
             email: p.email,
+            phone: parentPhoneByStudent.get(student.id) || p.phone || null,
             students: [{
               id: student.id,
               name: student.name,
@@ -481,6 +553,7 @@ const TeacherChat = () => {
               id: p.id,
               name: p.name,
               email: p.email,
+              phone: parentPhoneByStudent.get(student.id) || p.phone || null,
               students: [{
                 id: student.id,
                 name: student.name,
@@ -692,12 +765,52 @@ const TeacherChat = () => {
         createTenantQuery(
           effectiveTenantId,
           TABLES.USERS,
-          'id, email, full_name, linked_parent_of'
+          'id, email, full_name, phone, linked_parent_of'
         ).not('linked_parent_of', 'is', null)
       ]);
 
       // Build parent-user mapping for instant lookups
       const parentUserMap = new Map();
+
+      // Build quick phone map by student_id from parents table (matches Admin view)
+      const parentPhoneByStudent = new Map();
+      const allStudentIds = new Set();
+      (classStudentResult.data || []).forEach(s => allStudentIds.add(s.id));
+      (subjectStudentResult.data || []).forEach(ts => {
+        (ts.subjects?.classes?.students || []).forEach(s => allStudentIds.add(s.id));
+      });
+      if (allStudentIds.size > 0) {
+        const { data: parentRecords } = await createTenantQuery(
+          effectiveTenantId,
+          TABLES.PARENTS,
+          'student_id, phone, email'
+        ).in('student_id', Array.from(allStudentIds));
+        (parentRecords || []).forEach(p => {
+          if (p.student_id && p.phone && !parentPhoneByStudent.has(p.student_id)) {
+            parentPhoneByStudent.set(p.student_id, p.phone);
+          }
+        });
+      }
+
+      // Build email->phone as last fallback
+      let parentEmailPhoneMap = new Map();
+      if (!allParentUsersResult.error && allParentUsersResult.data) {
+        const parentEmails = (allParentUsersResult.data || []).map(u => u.email).filter(Boolean);
+        if (parentEmails.length > 0) {
+          const { data: parentRecordsByEmail } = await createTenantQuery(
+            effectiveTenantId,
+            TABLES.PARENTS,
+            'email, phone'
+          ).in('email', parentEmails);
+          parentEmailPhoneMap = new Map();
+          (parentRecordsByEmail || []).forEach(p => {
+            if (p.email && p.phone && !parentEmailPhoneMap.has(p.email)) {
+              parentEmailPhoneMap.set(p.email, p.phone);
+            }
+          });
+        }
+      }
+
       if (!allParentUsersResult.error && allParentUsersResult.data) {
         allParentUsersResult.data.forEach(user => {
           if (user.linked_parent_of) {
@@ -705,6 +818,21 @@ const TeacherChat = () => {
               id: user.id,
               name: user.full_name || user.email,
               email: user.email,
+              // Prefer Admin PARENTS phone for this specific student, then users.phone, then email fallback
+              phone: parentPhoneByStudent.get(user.linked_parent_of) || user.phone || parentEmailPhoneMap.get(user.email) || null,
+              canMessage: true
+            });
+          }
+        });
+      }
+      if (!allParentUsersResult.error && allParentUsersResult.data) {
+        allParentUsersResult.data.forEach(user => {
+          if (user.linked_parent_of) {
+            parentUserMap.set(user.linked_parent_of, {
+              id: user.id,
+              name: user.full_name || user.email,
+              email: user.email,
+              phone: user.phone || null,
               canMessage: true
             });
           }
@@ -720,6 +848,8 @@ const TeacherChat = () => {
               id: parentUser.id,
               name: parentUser.name,
               email: parentUser.email,
+              // Prefer phone tied to this student record, then whatever we have on parentUser
+              phone: parentPhoneByStudent.get(student.id) || parentUser.phone || null,
               students: [{
                 id: student.id,
                 name: student.name,
@@ -752,10 +882,12 @@ const TeacherChat = () => {
             for (const student of teacherSubject.subjects.classes.students) {
               const parentUser = parentUserMap.get(student.id);
               if (parentUser && !seen.has(parentUser.id)) {
-                uniqueParents.push({
+            uniqueParents.push({
                   id: parentUser.id,
                   name: parentUser.name,
                   email: parentUser.email,
+                  // Prefer phone tied to this student record, then whatever we have on parentUser
+                  phone: parentPhoneByStudent.get(student.id) || parentUser.phone || null,
                   students: [{
                     id: student.id,
                     name: student.name,
@@ -789,6 +921,14 @@ const TeacherChat = () => {
       }
 
       setParents(uniqueParents);
+
+      // If a parent contact is currently selected, refresh it so the call icon/number updates immediately
+      if (selectedContact && selectedContact.students) {
+        const updated = uniqueParents.find(p => p.id === (selectedContact.userId || selectedContact.id || selectedContact.id));
+        if (updated) {
+          setSelectedContact(updated);
+        }
+      }
     } catch (err) {
       console.error('Fetch parents error:', err);
       throw err;
@@ -1407,6 +1547,95 @@ const TeacherChat = () => {
     );
   };
 
+  // Handle calling a parent
+  const handleCallParent = async (parent) => {
+    try {
+      let effectiveParent = parent;
+
+      // If phone missing, hydrate on-demand from Admin records
+      if (!effectiveParent?.phone || effectiveParent.phone.trim() === '') {
+        const tenantValidation = await validateTenantReadiness();
+        if (!tenantValidation.success) {
+          Alert.alert('No Phone Number', `${effectiveParent?.name || 'This parent'} does not have a phone number on file.`);
+          return;
+        }
+        const { effectiveTenantId } = tenantValidation;
+
+        // Fetch latest from users table
+        const { data: parentUser } = await createTenantQuery(
+          effectiveTenantId,
+          TABLES.USERS,
+          'id, email, phone, linked_parent_of'
+        ).eq('id', effectiveParent.id);
+        const pUser = Array.isArray(parentUser) ? parentUser?.[0] : parentUser;
+
+        let hydratedPhone = pUser?.phone || null;
+
+        // Try parents table by email
+        if (!hydratedPhone && pUser?.email) {
+          const { data: parentByEmail } = await createTenantQuery(
+            effectiveTenantId,
+            TABLES.PARENTS,
+            'email, phone'
+          ).eq('email', pUser.email);
+          const r = Array.isArray(parentByEmail) ? parentByEmail?.[0] : parentByEmail;
+          if (r?.phone) hydratedPhone = r.phone;
+        }
+
+        // Try parents table by student_id (from contact context)
+        if (!hydratedPhone) {
+          const studentIds = effectiveParent?.students?.map(s => s.id) || (pUser?.linked_parent_of ? [pUser.linked_parent_of] : []);
+          if (studentIds.length > 0) {
+            const { data: parentByStudent } = await createTenantQuery(
+              effectiveTenantId,
+              TABLES.PARENTS,
+              'student_id, phone'
+            ).in('student_id', studentIds);
+            const rec = (parentByStudent || []).find(x => x.phone);
+            if (rec?.phone) hydratedPhone = rec.phone;
+          }
+        }
+
+        if (hydratedPhone) {
+          effectiveParent = { ...effectiveParent, phone: hydratedPhone };
+          // If this is the selected contact, update it so header icon enables
+          if (selectedContact && (selectedContact.id === effectiveParent.id || selectedContact.userId === effectiveParent.id)) {
+            setSelectedContact(prev => ({ ...prev, phone: hydratedPhone }));
+          }
+        }
+      }
+
+      if (!effectiveParent?.phone || effectiveParent.phone.trim() === '') {
+        Alert.alert('No Phone Number', `${effectiveParent?.name || 'This parent'} does not have a phone number on file.`);
+        return;
+      }
+
+      const phoneNumber = effectiveParent.phone.replace(/\D/g, '');
+      const telURL = `tel:${phoneNumber}`;
+
+      Alert.alert(
+        'Call Parent',
+        `Do you want to call ${effectiveParent.name}?\nPhone: ${effectiveParent.phone}`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Call', onPress: () => {
+              Linking.openURL(telURL).catch((err) => {
+                console.error('Failed to open dialer:', err);
+                Alert.alert(
+                  'Cannot Make Call',
+                  'Your device does not support making phone calls or the phone app is not available.',
+                  [{ text: 'OK' }]
+                );
+              });
+            } 
+          }
+        ]
+      );
+    } catch (e) {
+      Alert.alert('Error', 'Unable to prepare the call. Please try again.');
+    }
+  };
+
   // Show attachment menu
   const handleAttach = () => {
     setShowAttachmentMenu(true);
@@ -1847,6 +2076,18 @@ const TeacherChat = () => {
                             </Text>
                           </View>
                           <View style={styles.chatActions}>
+                            {/* Call Parent Button */}
+                            <TouchableOpacity
+                              style={styles.callButton}
+                              onPress={() => handleCallParent(item)}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons 
+                                name="call" 
+                                size={18} 
+                                color={item.phone ? "#4CAF50" : "#ccc"} 
+                              />
+                            </TouchableOpacity>
                             <View style={styles.chatIconContainer}>
                               <Ionicons name="chatbubbles" size={20} color={unreadCounts[item.id] ? "#f44336" : "#9c27b0"} />
                               {(() => {
@@ -2042,6 +2283,19 @@ const TeacherChat = () => {
                 }
               </Text>
             </View>
+            {selectedContact.students && (
+              <TouchableOpacity
+                style={styles.chatHeaderCallButton}
+                onPress={() => handleCallParent(selectedContact)}
+                activeOpacity={0.7}
+              >
+                <Ionicons 
+                  name="call" 
+                  size={20} 
+                  color={selectedContact.phone ? "#4CAF50" : "#ccc"} 
+                />
+              </TouchableOpacity>
+            )}
           </View>
           <View style={{ flex: 1 }}>
             <FlatList
@@ -2619,6 +2873,22 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: 'bold',
     lineHeight: 12,
+  },
+
+  // Call Button Styles
+  callButton: {
+    padding: 8,
+    marginRight: 12,
+    borderRadius: 20,
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+  },
+  chatHeaderCallButton: {
+    padding: 10,
+    marginRight: 8,
+    borderRadius: 25,
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   
   // Attachment Modal Styles
