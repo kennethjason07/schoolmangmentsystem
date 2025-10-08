@@ -389,6 +389,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
             .fee-table {
               width: 100%;
               border-collapse: collapse;
+              border-spacing: 0;
               border: 2px solid #000;
             }
             .fee-table th {
@@ -404,6 +405,11 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
               padding: 10px;
               text-align: left;
               font-size: 13px;
+            }
+            /* Make the first data row sit closer under the header */
+            .fee-table tbody tr:first-child td {
+              padding-top: 6px;
+              border-top: none;
             }
             .fee-table .amount-cell {
               text-align: center;
@@ -627,6 +633,9 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
               .student-row { margin: 4px 0 !important; padding-bottom: 3px !important; }
               .fee-table th { padding: 7px !important; font-size: 12px !important; }
               .fee-table td { padding: 7px !important; font-size: 11.5px !important; }
+              .fee-table { border-spacing: 0 !important; border-collapse: collapse !important; }
+              /* Tighten the first data row under header in print and remove extra border */
+              .fee-table tbody tr:first-child td { padding-top: 4px !important; border-top: none !important; }
               .fee-summary { margin: 8px 0 !important; padding: 6px 0 !important; font-size: 11.5px !important; }
               .footer-section { margin-top: 10px !important; font-size: 10.5px !important; }
               .signature-area { margin-top: 12px !important; }
@@ -898,14 +907,10 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
                     <span class="info-label">Student Name:</span>
                     <span class="info-value">${studentName}</span>
                   </div>
-                  <div class="student-center">
-                    <span class="info-label">UID:</span>
-                    <span class="info-value">${studentUID || admissionNo}</span>
-                  </div>
-                  <div class="student-right">
-                    <span class="info-label">Receipt No:</span>
-                    <span class="info-value">${receiptNo}</span>
-                  </div>
+                <div class="student-right">
+                  <span class="info-label">Receipt No:</span>
+                  <span class="info-value">${receiptNo}</span>
+                </div>
                 </div>
                 
                 <div class="student-row">
@@ -1021,10 +1026,6 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
                   <div class="student-left">
                     <span class="info-label">Student Name:</span>
                     <span class="info-value">${studentName}</span>
-                  </div>
-                  <div class="student-center">
-                    <span class="info-label">UID:</span>
-                    <span class="info-value">${studentUID || admissionNo}</span>
                   </div>
                   <div class="student-right">
                     <span class="info-label">Receipt No:</span>

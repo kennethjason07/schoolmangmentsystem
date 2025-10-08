@@ -11,16 +11,22 @@ import {
   ActivityIndicator,
   ScrollView,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../utils/supabase';
+
+// Hosted reset page URL (single-file). Serve web/reset.html at this URL.
+// Example: https://app.your-domain.com/reset.html
+const WEB_RESET_URL = 'https://passwordresetforvidyasetu.netlify.app';
 import * as Animatable from 'react-native-animatable';
 
 const ForgotPasswordScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [emailError, setEmailError] = useState('');
+  const [showSuccess, setShowSuccess] = useState(false);
 
   // Validate email
   const validateEmail = (email) => {
@@ -67,22 +73,30 @@ const ForgotPasswordScreen = ({ navigation }) => {
     setIsLoading(true);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/reset-password`,
-      });
+      const redirectTo = Platform.OS === 'web' && typeof window !== 'undefined'
+        ? WEB_RESET_URL
+        : undefined;
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        email,
+        redirectTo ? { redirectTo } : undefined
+      );
 
       if (error) throw error;
 
-      Alert.alert(
-        'Success',
-        'Password reset link has been sent to your email address.',
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.goBack(),
-          },
-        ]
-      );
+      if (Platform.OS === 'web') {
+        setShowSuccess(true);
+      } else {
+        Alert.alert(
+          'Email sent',
+          "Check your inbox for the password reset link. If you don't see it, check your spam folder.",
+          [
+            {
+              text: 'OK',
+              onPress: () => navigation.goBack(),
+            },
+          ]
+        );
+      }
     } catch (error) {
       console.error('Password reset error:', error);
       Alert.alert('Error', 'Failed to send reset link. Please try again.');
@@ -170,10 +184,10 @@ const ForgotPasswordScreen = ({ navigation }) => {
               {isLoading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Ionicons name="mail" size={24} color="#fff" />
                   <Text style={styles.resetButtonText}>Send Reset Link</Text>
-                </>
+                </View>
               )}
             </TouchableOpacity>
 
@@ -187,6 +201,33 @@ const ForgotPasswordScreen = ({ navigation }) => {
           </Animatable.View>
         </ScrollView>
       </LinearGradient>
+
+      {/* Web success modal fallback */}
+      <Modal
+        visible={showSuccess}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSuccess(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Ionicons name="mail" size={48} color="#1976d2" />
+            <Text style={styles.modalTitle}>Email sent</Text>
+            <Text style={styles.modalMessage}>
+              Check your inbox for the password reset link. If you don't see it, check your spam folder.
+            </Text>
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => {
+                setShowSuccess(false);
+                navigation.goBack();
+              }}
+            >
+              <Text style={styles.modalButtonText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 };
@@ -295,6 +336,45 @@ const styles = StyleSheet.create({
   backButtonText: {
     color: '#1976d2',
     fontSize: 14,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: '#374151',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  modalButton: {
+    backgroundColor: '#1976d2',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });
 

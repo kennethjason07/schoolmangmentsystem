@@ -202,6 +202,7 @@ const generateCleanReceiptHTML = async (receiptData, schoolDetails) => {
         .fee-table {
             width: 100%;
             border-collapse: collapse;
+            border-spacing: 0;
             margin: 20px 0;
         }
 
@@ -210,6 +211,12 @@ const generateCleanReceiptHTML = async (receiptData, schoolDetails) => {
             border: 1px solid #000;
             padding: 8px;
             text-align: left;
+        }
+
+        /* Tighten first data row under header */
+        .fee-table tbody tr:first-child td {
+            padding-top: 4px;
+            border-top: none;
         }
 
         .fee-table th {

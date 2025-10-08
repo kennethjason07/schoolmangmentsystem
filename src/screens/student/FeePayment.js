@@ -965,10 +965,6 @@ const FeePayment = () => {
                   <span class="info-value">${safeReceiptData.studentName}</span>
                 </div>
                 <div class="info-item">
-                  <span class="info-label">UID:</span>
-                  <span class="info-value">${safeReceiptData.studentUID}</span>
-                </div>
-                <div class="info-item">
                   <span class="info-label">Receipt No:</span>
                   <span class="info-value">${safeReceiptData.receiptNumber}</span>
                 </div>

@@ -259,6 +259,7 @@ const generateIsolatedReceiptHTML = async (receiptData, schoolDetails) => {
         .fee-table {
             width: 100% !important;
             border-collapse: collapse !important;
+            border-spacing: 0 !important;
             margin: 20px 0 !important;
         }
 
@@ -274,6 +275,12 @@ const generateIsolatedReceiptHTML = async (receiptData, schoolDetails) => {
             background-color: #f0f0f0 !important;
             font-weight: bold !important;
             text-align: center !important;
+        }
+
+        /* Tighten first data row under header */
+        .fee-table tbody tr:first-child td {
+            padding-top: 4px !important;
+            border-top: none !important;
         }
 
         .amount-cell {
