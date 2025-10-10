@@ -42,17 +42,6 @@ const HostelsOverview = ({ navigation, route }) => {
       />
 
       <ScrollView contentContainerStyle={styles.content}>
-        {/* Top actions */}
-        <View style={styles.topActionsRow}>
-          <View style={{ flex: 1 }} />
-          <TouchableOpacity
-            style={styles.addBtn}
-            onPress={() => navigation.navigate('HostelManagement', { openAddHostel: true })}
-          >
-            <Ionicons name="add-circle" size={18} color="#fff" />
-            <Text style={styles.addBtnText}>Add Hostel</Text>
-          </TouchableOpacity>
-        </View>
 
         {/* Filter chips */}
         <View style={styles.filterRow}>
@@ -150,12 +139,6 @@ const HostelsOverview = ({ navigation, route }) => {
                       icon: 'bed',
                       color: '#2196F3',
                       onPress: () => navigation.navigate('HostelRoomManagement', { hostel: h }),
-                    },
-                    {
-                      label: 'View Details',
-                      icon: 'eye',
-                      color: '#4CAF50',
-                      onPress: () => navigation.navigate('HostelDetailView', { hostel: h }),
                     },
                   ]}
                 />

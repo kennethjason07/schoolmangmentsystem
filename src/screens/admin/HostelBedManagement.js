@@ -173,7 +173,12 @@ const HostelBedManagement = ({ navigation, route }) => {
       student: null
     };
 
-    setBeds(prev => [...prev, newBed]);
+    setBeds(prev => {
+      const updatedBeds = [...prev, newBed];
+      // Update room capacity to match bed count
+      room.capacity = updatedBeds.length;
+      return updatedBeds;
+    });
     setAddBedModalVisible(false);
     resetBedForm();
     Alert.alert('Success', 'Bed added successfully');
@@ -236,7 +241,12 @@ const HostelBedManagement = ({ navigation, route }) => {
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
-            setBeds(prev => prev.filter(b => b.id !== bed.id));
+            setBeds(prev => {
+              const updatedBeds = prev.filter(b => b.id !== bed.id);
+              // Update room capacity to match bed count
+              room.capacity = updatedBeds.length;
+              return updatedBeds;
+            });
             Alert.alert('Success', 'Bed deleted successfully');
           }
         }

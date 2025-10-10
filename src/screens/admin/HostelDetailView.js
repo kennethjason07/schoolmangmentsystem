@@ -40,14 +40,17 @@ const HostelDetailView = ({ navigation, route }) => {
 
   const generateMockRooms = (hostel) => {
     const rooms = [];
-    const bedsPerRoom = 2; // Assuming double occupancy rooms
-    const totalRooms = Math.ceil(hostel.capacity / bedsPerRoom);
+    // Use 4 beds per room as default, but allow variation to simulate real usage
+    const bedsPerRoomOptions = [4, 4, 4, 5]; // Mostly 4 beds, occasionally 5
+    const totalRooms = Math.ceil(hostel.capacity / 4); // Base calculation on 4 beds average
     
     let occupiedBeds = 0;
     const targetOccupied = hostel.occupied;
     
     for (let i = 1; i <= totalRooms; i++) {
       const roomNumber = `${hostel.name.charAt(0)}${String(i).padStart(3, '0')}`;
+      // Vary bed count per room to simulate real scenarios
+      const bedsPerRoom = bedsPerRoomOptions[i % bedsPerRoomOptions.length];
       const beds = [];
       
       for (let j = 1; j <= bedsPerRoom; j++) {
@@ -67,7 +70,7 @@ const HostelDetailView = ({ navigation, route }) => {
         id: `room-${i}`,
         roomNumber,
         floor: Math.ceil(i / 10),
-        roomType: bedsPerRoom === 1 ? 'Single' : bedsPerRoom === 2 ? 'Double' : 'Triple',
+        roomType: bedsPerRoom === 1 ? 'Single' : bedsPerRoom === 2 ? 'Double' : bedsPerRoom === 3 ? 'Triple' : 'Shared',
         capacity: bedsPerRoom,
         occupied: beds.filter(b => b.status === 'occupied').length,
         beds,
@@ -142,41 +145,37 @@ const HostelDetailView = ({ navigation, route }) => {
 
   const renderBed = (bed, room) => {
     const student = getStudentForBed(bed.id);
-    
+
+    const initials = (s) => {
+      if (!s) return '';
+      const first = (s.firstName || '').charAt(0);
+      const last = (s.lastName || '').charAt(0);
+      return (first + last).toUpperCase();
+    };
+
+    const isOccupied = bed.status === 'occupied';
+
     return (
-      <View key={bed.id} style={styles.bedCard}>
-        <View style={styles.bedHeader}>
-          <View style={[styles.bedIcon, { backgroundColor: `${getBedStatusColor(bed.status)}20` }]}>
-            <Ionicons 
-              name={bed.status === 'occupied' ? 'bed' : 'bed-outline'} 
-              size={20} 
-              color={getBedStatusColor(bed.status)} 
-            />
-          </View>
-          <View style={styles.bedInfo}>
-            <Text style={styles.bedNumber}>{bed.bedNumber}</Text>
-            <View style={[styles.bedStatusBadge, { backgroundColor: getBedStatusColor(bed.status) }]}>
-              <Text style={styles.bedStatusText}>{bed.status}</Text>
-            </View>
-          </View>
+      <View key={bed.id} style={styles.bedTile}>
+        <View style={[styles.bedIconLg, { backgroundColor: `${getBedStatusColor(bed.status)}20` }]}>
+          <Ionicons
+            name={isOccupied ? 'bed' : 'bed-outline'}
+            size={24}
+            color={getBedStatusColor(bed.status)}
+          />
         </View>
-        
-        {student && (
-          <View style={styles.studentInfo}>
-            <Text style={styles.studentName}>{student.firstName} {student.lastName}</Text>
-            <Text style={styles.studentDetails}>
-              Class: {student.class}-{student.section} | {student.admissionNo}
-            </Text>
-            <Text style={styles.studentDetails}>Phone: {student.phone}</Text>
-            <Text style={styles.rentInfo}>Rent: ₹{bed.rentAmount}/month</Text>
+        <Text style={styles.bedLabel}>{bed.bedNumber}</Text>
+
+        <View style={[styles.bedStatusChip, { backgroundColor: getBedStatusColor(bed.status) }]}>
+          <Text style={styles.bedStatusTextSmall}>{isOccupied ? 'Occupied' : 'Available'}</Text>
+        </View>
+
+        {isOccupied ? (
+          <View style={styles.occupantChip}>
+            <Text style={styles.occupantText}>{initials(student)}</Text>
           </View>
-        )}
-        
-        {bed.status === 'available' && (
-          <View style={styles.availableInfo}>
-            <Text style={styles.availableText}>Available for allocation</Text>
-            <Text style={styles.rentInfo}>Rent: ₹{bed.rentAmount}/month</Text>
-          </View>
+        ) : (
+          <Text style={styles.rentInfo}>₹{bed.rentAmount}/month</Text>
         )}
       </View>
     );
@@ -516,82 +515,64 @@ const styles = StyleSheet.create({
   },
   bedsGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
   },
-  bedCard: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
+  bedTile: {
+    width: '48%',
+    backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 16,
-    marginHorizontal: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: '#e0e0e0',
-  },
-  bedHeader: {
-    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
   },
-  bedIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  bedIconLg: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginBottom: 8,
   },
-  bedInfo: {
-    flex: 1,
-  },
-  bedNumber: {
+  bedLabel: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#333',
   },
-  bedStatusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-    marginTop: 4,
+  bedStatusChip: {
+    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
   },
-  bedStatusText: {
+  bedStatusTextSmall: {
     fontSize: 10,
+    fontWeight: 'bold',
     color: '#fff',
-    fontWeight: 'bold',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
-  studentInfo: {
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+  occupantChip: {
+    marginTop: 8,
+    backgroundColor: '#E3F2FD',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
   },
-  studentName: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
-  },
-  studentDetails: {
+  occupantText: {
     fontSize: 12,
-    color: '#666',
-    marginBottom: 2,
+    color: '#2196F3',
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   rentInfo: {
     fontSize: 12,
     color: '#2196F3',
     fontWeight: '600',
-    marginTop: 4,
-  },
-  availableInfo: {
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  availableText: {
-    fontSize: 12,
-    color: '#4CAF50',
-    fontWeight: '600',
-    marginBottom: 4,
+    marginTop: 8,
   },
 });
 

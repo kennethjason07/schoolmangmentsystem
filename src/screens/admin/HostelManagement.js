@@ -61,6 +61,7 @@ const HostelManagement = ({ navigation }) => {
 
   // UI/Filter states
   const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'boys' | 'girls' | 'mixed'
+  const [topSearch, setTopSearch] = useState('');
 
   useEffect(() => {
     // Attempt live data load; fallback to mock data if tables missing
@@ -654,27 +655,16 @@ const HostelManagement = ({ navigation }) => {
           <Text style={styles.subtitle}>Manage hostels, applications, and bed allocations</Text>
         </View>
 
-        {/* Hostels (Quick Stats) - stat cards under Management Tools */}
+        {/* Top Search (below Hostel Management section) */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🏢 Hostels (Quick Stats)</Text>
-
-          {hostels.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="business-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyText}>No hostels found</Text>
-            </View>
-          ) : (
-            <HostelStatCard
-              title="All Hostels"
-              value={String(stats.totalHostels)}
-              icon="business"
-              color="#2196F3"
-              subtitle="Tap to view all hostels"
-              animated={true}
-              onPress={() => navigation.navigate('HostelsOverview', { data: hostels, typeFilter: 'all', hideSummary: true })}
-            />
-          )}
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search hostels, rooms, or students..."
+            value={topSearch}
+            onChangeText={setTopSearch}
+          />
         </View>
+
 
         {/* Stats Overview */}
         <View style={styles.section}>
@@ -810,13 +800,14 @@ const HostelManagement = ({ navigation }) => {
           <View style={styles.actionsGrid}>
             <TouchableOpacity
               style={[styles.actionCard, { backgroundColor: '#E8F5E8' }]}
-              onPress={() => setAddHostelModalVisible(true)}
+              onPress={() => navigation.navigate('HostelsOverview', { data: hostels, typeFilter: 'all', hideSummary: true })}
             >
-              <View style={[styles.actionIconContainer, { backgroundColor: '#4CAF50' }]}>
-                <Ionicons name="add-circle" size={24} color="#fff" />
+              <View style={[styles.actionIconContainer, { backgroundColor: '#2196F3' }]}>
+                <Ionicons name="business" size={24} color="#fff" />
               </View>
-              <Text style={styles.actionText}>Add Hostel</Text>
-              <Text style={styles.actionSubtext}>Create new hostel</Text>
+              <Text style={styles.actionText}>All Hostels</Text>
+              <Text style={styles.actionSubtext}>View all hostels overview</Text>
+
             </TouchableOpacity>
             
             <TouchableOpacity
@@ -1011,6 +1002,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 8,
     alignItems: 'stretch',
+  },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
   },
   sectionTitle: {
     fontSize: 20,

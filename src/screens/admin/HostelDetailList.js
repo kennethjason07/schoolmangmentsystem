@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,17 +6,133 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
+import HostelService from '../../services/HostelService';
 
 const HostelDetailList = ({ navigation, route }) => {
   const { type, title, data, icon, color, description, stats, allocationContext } = route.params;
 
-  const startAllocation = (student) => {
-    navigation.navigate('HostelManagement', {
-      allocationContext: { student, applicationId: null, allocationMode: true }
-    });
+  // Popup allocation state
+  const [assignModalVisible, setAssignModalVisible] = useState(false);
+  const [assigningStudent, setAssigningStudent] = useState(null);
+  const [hostelList, setHostelList] = useState([]);
+  const [selectedHostel, setSelectedHostel] = useState(null);
+  const [roomList, setRoomList] = useState([]);
+  const [selectedRoom, setSelectedRoom] = useState(null);
+  const [bedList, setBedList] = useState([]);
+  const [selectedBed, setSelectedBed] = useState(null);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+
+  const startAllocation = async (student) => {
+    setAssigningStudent(student);
+    setAssignModalVisible(true);
+    setSelectedHostel(null);
+    setSelectedRoom(null);
+    setSelectedBed(null);
+    await loadHostelsForModal();
+  };
+
+  const loadHostelsForModal = async () => {
+    setLoadingOptions(true);
+    try {
+      const res = await HostelService.getHostels();
+      if (res && res.success && Array.isArray(res.data) && res.data.length) {
+        setHostelList(res.data.map(h => ({ id: h.id, name: h.name })));
+      } else {
+        setHostelList([
+          { id: '1', name: 'Main Hostel Block' },
+          { id: '2', name: 'Girls Hostel' },
+          { id: '3', name: 'New Block' },
+        ]);
+      }
+    } catch (e) {
+      setHostelList([
+        { id: '1', name: 'Main Hostel Block' },
+        { id: '2', name: 'Girls Hostel' },
+        { id: '3', name: 'New Block' },
+      ]);
+    } finally {
+      setLoadingOptions(false);
+    }
+  };
+
+  const onSelectHostel = async (hostel) => {
+    setSelectedHostel(hostel);
+    setSelectedRoom(null);
+    setSelectedBed(null);
+    setRoomList([]);
+    setBedList([]);
+    setLoadingOptions(true);
+    try {
+      const res = await HostelService.getRooms(hostel.id, true);
+      if (res && res.success && Array.isArray(res.data) && res.data.length) {
+        setRoomList(res.data.map(r => ({ id: r.id, name: r.room_number || `Room ${r.id}` })));
+      } else {
+        setRoomList([
+          { id: 'r1', name: 'A101' },
+          { id: 'r2', name: 'A102' },
+          { id: 'r3', name: 'A201' },
+        ]);
+      }
+    } catch (e) {
+      setRoomList([
+        { id: 'r1', name: 'A101' },
+        { id: 'r2', name: 'A102' },
+        { id: 'r3', name: 'A201' },
+      ]);
+    } finally {
+      setLoadingOptions(false);
+    }
+  };
+
+  const onSelectRoom = async (room) => {
+    setSelectedRoom(room);
+    setSelectedBed(null);
+    setBedList([]);
+    setLoadingOptions(true);
+    try {
+      const res = await HostelService.getAvailableBeds(selectedHostel?.id || null, null);
+      if (res && res.success && Array.isArray(res.data) && res.data.length) {
+        const beds = res.data
+          .filter(b => !room.id || b.room_id === room.id || b.room?.id === room.id)
+          .map(b => ({ id: b.id, name: b.bed_label || `Bed ${b.id}` }));
+        setBedList(beds.length ? beds : [
+          { id: 'b1', name: 'Bed 1' },
+          { id: 'b2', name: 'Bed 2' },
+          { id: 'b3', name: 'Bed 3' },
+        ]);
+      } else {
+        setBedList([
+          { id: 'b1', name: 'Bed 1' },
+          { id: 'b2', name: 'Bed 2' },
+          { id: 'b3', name: 'Bed 3' },
+        ]);
+      }
+    } catch (e) {
+      setBedList([
+        { id: 'b1', name: 'Bed 1' },
+        { id: 'b2', name: 'Bed 2' },
+        { id: 'b3', name: 'Bed 3' },
+      ]);
+    } finally {
+      setLoadingOptions(false);
+    }
+  };
+
+  const onConfirmAllocation = () => {
+    if (!assigningStudent || !selectedHostel || !selectedRoom || !selectedBed) return;
+    Alert.alert(
+      'Allocation Saved',
+      `${assigningStudent.first_name || assigningStudent.name || 'Student'} assigned to ${selectedHostel.name}, Room ${selectedRoom.name}, ${selectedBed.name} (Demo)`
+    );
+    setAssignModalVisible(false);
+    setAssigningStudent(null);
+    setSelectedHostel(null);
+    setSelectedRoom(null);
+    setSelectedBed(null);
   };
 
   const renderHostelItem = (hostel) => (
@@ -313,11 +429,17 @@ const HostelDetailList = ({ navigation, route }) => {
       {student.hostel_status !== 'allocated' && (
         <View style={{ marginTop: 12 }}>
           <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: '#4CAF50', alignSelf: 'flex-start' }]}
+            style={styles.assignCTA}
             onPress={() => startAllocation(student)}
+            activeOpacity={0.9}
           >
-            <Ionicons name="bed" size={16} color="#fff" />
-            <Text style={styles.actionButtonText}>Assign to Hostel</Text>
+            <View style={styles.assignCTAContent}>
+              <View style={styles.assignIconChip}>
+                <Ionicons name="bed" size={18} color="#fff" />
+              </View>
+              <Text style={styles.assignCTAText}>Assign to Hostel</Text>
+              <Ionicons name="chevron-forward" size={18} color="#fff" style={{ marginLeft: 6 }} />
+            </View>
           </TouchableOpacity>
         </View>
       )}
@@ -489,6 +611,84 @@ const HostelDetailList = ({ navigation, route }) => {
           data.map(renderItem)
         )}
       </ScrollView>
+
+      {/* Single Popup Assign Flow */}
+      {assignModalVisible && (
+        <Modal visible transparent animationType="slide">
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Assign to Hostel</Text>
+
+              {/* Hostel selection */}
+              <Text style={styles.modalSectionTitle}>1) Select Hostel</Text>
+              <ScrollView style={{ maxHeight: 150 }}>
+                {hostelList.map(h => (
+                  <TouchableOpacity
+                    key={h.id}
+                    style={[styles.optionRow, selectedHostel?.id === h.id && styles.optionRowSelected]}
+                    onPress={() => onSelectHostel(h)}
+                  >
+                    <Ionicons name="business" size={18} color={selectedHostel?.id === h.id ? '#fff' : '#2196F3'} />
+                    <Text style={[styles.optionText, selectedHostel?.id === h.id && styles.optionTextSelected]}>{h.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Room selection */}
+              {selectedHostel && (
+                <>
+                  <Text style={[styles.modalSectionTitle, { marginTop: 12 }]}>2) Select Room</Text>
+                  <ScrollView style={{ maxHeight: 150 }}>
+                    {roomList.map(r => (
+                      <TouchableOpacity
+                        key={r.id}
+                        style={[styles.optionRow, selectedRoom?.id === r.id && styles.optionRowSelected]}
+                        onPress={() => onSelectRoom(r)}
+                      >
+                        <Ionicons name="home" size={18} color={selectedRoom?.id === r.id ? '#fff' : '#FF9800'} />
+                        <Text style={[styles.optionText, selectedRoom?.id === r.id && styles.optionTextSelected]}>{r.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </>
+              )}
+
+              {/* Bed selection */}
+              {selectedRoom && (
+                <>
+                  <Text style={[styles.modalSectionTitle, { marginTop: 12 }]}>3) Select Bed</Text>
+                  <ScrollView style={{ maxHeight: 150 }}>
+                    {bedList.map(b => (
+                      <TouchableOpacity
+                        key={b.id}
+                        style={[styles.optionRow, selectedBed?.id === b.id && styles.optionRowSelected]}
+                        onPress={() => setSelectedBed(b)}
+                      >
+                        <Ionicons name="bed" size={18} color={selectedBed?.id === b.id ? '#fff' : '#4CAF50'} />
+                        <Text style={[styles.optionText, selectedBed?.id === b.id && styles.optionTextSelected]}>{b.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </>
+              )}
+
+              {/* Actions */}
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={[styles.modalButton, { backgroundColor: '#f0f0f0' }]} onPress={() => setAssignModalVisible(false)}>
+                  <Text style={[styles.modalButtonText, { color: '#333' }]}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: selectedBed ? '#4CAF50' : '#c8e6c9' }]}
+                  disabled={!selectedBed}
+                  onPress={onConfirmAllocation}
+                >
+                  <Text style={styles.modalButtonText}>Confirm</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 };
@@ -639,6 +839,74 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
   },
+  // Modal styles for assign flow
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    width: '95%',
+    maxWidth: 420,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  modalSectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#2c3e50',
+    marginBottom: 8,
+  },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#e0e0e0',
+  },
+  optionRowSelected: {
+    backgroundColor: '#2196F3',
+    borderLeftColor: '#1976D2',
+  },
+  optionText: {
+    marginLeft: 10,
+    color: '#333',
+    fontWeight: '600',
+  },
+  optionTextSelected: {
+    color: '#fff',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginHorizontal: 8,
+    alignItems: 'center',
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
   // New styles for enhanced views
   statsContainer: {
     marginTop: 16,
@@ -752,6 +1020,39 @@ const styles = StyleSheet.create({
   statusValue: {
     fontSize: 12,
     fontWeight: 'bold',
+  },
+
+  // CTA styles for improved Assign button
+  assignCTA: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 24,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    alignSelf: 'flex-start',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  assignCTAContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  assignIconChip: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  assignCTAText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
 });
 

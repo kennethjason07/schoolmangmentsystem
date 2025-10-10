@@ -138,14 +138,10 @@ class HostelService {
    */
   async getRooms(hostelId, includeInactive = false) {
     try {
+      // Avoid relational selects; fetch only from rooms
       let query = supabase
         .from('rooms')
-        .select(`
-          *,
-          block:blocks(*),
-          beds(id, bed_label, bed_type, status),
-          occupancy:beds(count)
-        `)
+        .select('id, room_number, floor, hostel_id, is_active')
         .eq('hostel_id', hostelId)
         .eq('tenant_id', this.tenantId);
 
@@ -153,7 +149,8 @@ class HostelService {
         query = query.eq('is_active', true);
       }
 
-      const { data, error } = await query.order('floor').order('room_number');
+      // Order by simple columns only
+      const { data, error } = await query.order('room_number', { ascending: true });
 
       if (error) throw error;
       return { success: true, data };
@@ -210,25 +207,40 @@ class HostelService {
    */
   async getAvailableBeds(hostelId, roomType = null) {
     try {
-      let query = supabase
+      // Base bed query without relational selects
+      let bedQuery = supabase
         .from('beds')
-        .select(`
-          *,
-          room:rooms(*),
-          block:rooms(block:blocks(*))
-        `)
+        .select('id, bed_label, status, room_id')
         .eq('status', 'available')
         .eq('tenant_id', this.tenantId);
 
-      if (hostelId) {
-        query = query.eq('rooms.hostel_id', hostelId);
+      let roomIds = null;
+
+      // If hostelId or roomType filters are provided, resolve matching room IDs first
+      if (hostelId || roomType) {
+        let roomQuery = supabase
+          .from('rooms')
+          .select('id, room_type')
+          .eq('tenant_id', this.tenantId);
+
+        if (hostelId) roomQuery = roomQuery.eq('hostel_id', hostelId);
+        if (roomType) roomQuery = roomQuery.eq('room_type', roomType);
+
+        const { data: rooms, error: roomsError } = await roomQuery;
+        if (roomsError) throw roomsError;
+        roomIds = (rooms || []).map(r => r.id);
+
+        if (!roomIds || roomIds.length === 0) {
+          return { success: true, data: [] };
+        }
+
+        bedQuery = bedQuery.in('room_id', roomIds);
       }
 
-      if (roomType) {
-        query = query.eq('rooms.room_type', roomType);
-      }
-
-      const { data, error } = await query.order('rooms.floor').order('rooms.room_number');
+      // Order by simple columns only
+      const { data, error } = await bedQuery
+        .order('bed_label', { ascending: true })
+        .order('id', { ascending: true });
 
       if (error) throw error;
       return { success: true, data };

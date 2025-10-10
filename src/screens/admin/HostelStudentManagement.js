@@ -323,13 +323,6 @@ const HostelStudentManagement = ({ navigation }) => {
             <Text style={styles.subtitle}>Manage student allocations and records</Text>
           </View>
         </View>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => setAddStudentModalVisible(true)}
-        >
-          <Ionicons name="person-add" size={24} color="#fff" />
-          <Text style={styles.addButtonText}>Add Student</Text>
-        </TouchableOpacity>
       </View>
 
       {loading && !refreshing ? (
@@ -384,65 +377,18 @@ const HostelStudentManagement = ({ navigation }) => {
                 }}
               />
 
-              <HostelStatCard
-                title="All Students"
-                value={String(students.length + hostelStudents.length)}
-                icon="people"
-                color="#FF9800"
-                subtitle="Tap to view all students"
-                animated
-                onPress={() => {
-                  const combined = [...students, ...hostelStudents].map(s => ({ ...s, full_name: `${s.first_name} ${s.last_name}` }));
-                  navigation.navigate('HostelDetailList', {
-                    type: 'students',
-                    title: 'All Students',
-                    data: combined,
-                    icon: 'people',
-                    color: '#FF9800',
-                    description: 'All students with quick actions',
-                  });
-                }}
-              />
             </View>
           </View>
 
-          {/* Allocated Students Section */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>🛏️ Allocated Students ({hostelStudents.length})</Text>
-            {hostelStudents.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Ionicons name="bed-outline" size={48} color="#ccc" />
-                <Text style={styles.emptyText}>No students allocated to hostels</Text>
-              </View>
-            ) : (
-              <View style={styles.studentsList}>
-                {hostelStudents.map(renderHostelStudentCard)}
-              </View>
-            )}
-          </View>
 
           {/* Available Students Section */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>👥 Available Students ({students.length})</Text>
             <TextInput
               style={styles.searchInput}
               placeholder="Search students by name or admission number..."
               value={searchQuery}
               onChangeText={setSearchQuery}
             />
-            {filteredStudents.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Ionicons name="people-outline" size={48} color="#ccc" />
-                <Text style={styles.emptyText}>No available students found</Text>
-              </View>
-            ) : (
-              <FlatList
-                data={filteredStudents}
-                keyExtractor={(item) => item.id}
-                renderItem={renderAvailableStudent}
-                scrollEnabled={false}
-              />
-            )}
           </View>
         </ScrollView>
       )}

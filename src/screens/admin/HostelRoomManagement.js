@@ -11,6 +11,8 @@ import {
   RefreshControl,
   ActivityIndicator,
   Dimensions,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,16 +39,8 @@ const HostelRoomManagement = ({ navigation, route }) => {
   const [editRoomModalVisible, setEditRoomModalVisible] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState(null);
   
-  // Form data
-  const [roomData, setRoomData] = useState({
-    room_number: '',
-    floor: '',
-    room_type: 'shared',
-    capacity: '4',
-    rent_per_bed: '',
-    description: '',
-    amenities: ''
-  });
+  // Remove parent-managed room form state to avoid re-renders on each keystroke
+  // Form data will be managed locally inside RoomModal
 
   const roomTypes = [
     { value: 'single', label: 'Single Occupancy' },
@@ -173,64 +167,52 @@ const HostelRoomManagement = ({ navigation, route }) => {
     setRefreshing(false);
   };
 
-  const resetForm = () => {
-    setRoomData({
-      room_number: '',
-      floor: '',
-      room_type: 'shared',
-      capacity: '4',
-      rent_per_bed: '',
-      description: '',
-      amenities: ''
-    });
-  };
 
-  const addRoom = () => {
-    if (!roomData.room_number.trim() || !roomData.floor.trim() || !roomData.rent_per_bed.trim()) {
+  const addRoom = (form) => {
+    const rd = form || {};
+    if (!rd.room_number?.trim() || !rd.floor?.trim() || !rd.rent_per_bed?.toString().trim()) {
       Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
 
     const newRoom = {
       id: Date.now().toString(),
-      room_number: roomData.room_number.trim(),
-      floor: roomData.floor.trim(),
-      room_type: roomData.room_type,
-      capacity: parseInt(roomData.capacity),
-      occupied: 0,
-      rent_per_bed: parseInt(roomData.rent_per_bed),
-      description: roomData.description.trim(),
-      amenities: roomData.amenities.trim(),
+      room_number: rd.room_number.trim(),
+      floor: rd.floor.trim(),
+      room_type: rd.room_type || 'shared',
+      capacity: parseInt(rd.capacity, 10) || 4,
+      rent_per_bed: parseInt(rd.rent_per_bed, 10) || 0,
+      description: (rd.description || '').trim(),
+      amenities: (rd.amenities || '').trim(),
       status: 'active'
     };
 
     setRooms(prev => [...prev, newRoom]);
     setAddRoomModalVisible(false);
-    resetForm();
     Alert.alert('Success', 'Room added successfully');
   };
 
-  const editRoom = () => {
-    if (!selectedRoom || !roomData.room_number.trim() || !roomData.floor.trim() || !roomData.rent_per_bed.trim()) {
+  const editRoom = (form) => {
+    const rd = form || {};
+    if (!selectedRoom || !rd.room_number?.trim() || !rd.floor?.trim() || !rd.rent_per_bed?.toString().trim()) {
       Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
 
     const updatedRoom = {
       ...selectedRoom,
-      room_number: roomData.room_number.trim(),
-      floor: roomData.floor.trim(),
-      room_type: roomData.room_type,
-      capacity: parseInt(roomData.capacity),
-      rent_per_bed: parseInt(roomData.rent_per_bed),
-      description: roomData.description.trim(),
-      amenities: roomData.amenities.trim(),
+      room_number: rd.room_number.trim(),
+      floor: rd.floor.trim(),
+      room_type: rd.room_type || 'shared',
+      capacity: parseInt(rd.capacity, 10) || selectedRoom.capacity,
+      rent_per_bed: parseInt(rd.rent_per_bed, 10) || selectedRoom.rent_per_bed,
+      description: (rd.description || '').trim(),
+      amenities: (rd.amenities || '').trim(),
     };
 
     setRooms(prev => prev.map(room => room.id === selectedRoom.id ? updatedRoom : room));
     setEditRoomModalVisible(false);
     setSelectedRoom(null);
-    resetForm();
     Alert.alert('Success', 'Room updated successfully');
   };
 
@@ -254,15 +236,6 @@ const HostelRoomManagement = ({ navigation, route }) => {
 
   const openEditModal = (room) => {
     setSelectedRoom(room);
-    setRoomData({
-      room_number: room.room_number,
-      floor: room.floor,
-      room_type: room.room_type,
-      capacity: room.capacity.toString(),
-      rent_per_bed: room.rent_per_bed.toString(),
-      description: room.description || '',
-      amenities: room.amenities || ''
-    });
     setEditRoomModalVisible(true);
   };
 
@@ -400,52 +373,66 @@ const HostelRoomManagement = ({ navigation, route }) => {
     </TouchableOpacity>
   );
 
-  const RoomModal = ({ visible, onClose, onSubmit, title, isEdit = false }) => (
-    <Modal 
-      visible={visible} 
-      transparent 
-      animationType="slide"
-      onRequestClose={() => { /* prevent accidental back-closing while typing */ }}
-    >
-      <View style={styles.modalContainer}>
-        <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>{title}</Text>
-          
-          <ScrollView style={styles.modalForm} keyboardShouldPersistTaps="always">
-            <TextInput
-              style={styles.input}
-              placeholder="Room Number *"
-              value={roomData.room_number}
-              onChangeText={(text) => setRoomData(prev => ({ ...prev, room_number: text }))}
-              autoCorrect={false}
-              autoCapitalize="none"
-              blurOnSubmit={false}
-              keyboardType="default"
-              returnKeyType="done"
-            />
+  const RoomModal = ({ visible, onClose, onSubmit, title, isEdit = false, initialData }) => {
+    const defaults = {
+      room_number: '',
+      floor: '',
+      room_type: 'shared',
+      capacity: '4',
+      rent_per_bed: '',
+      description: '',
+      amenities: ''
+    };
+    const [localForm, setLocalForm] = useState(initialData || defaults);
+
+    useEffect(() => {
+      if (visible) {
+        setLocalForm(initialData || defaults);
+      }
+    }, [visible, initialData]);
+
+    const update = (key, val) => setLocalForm(prev => ({ ...prev, [key]: val }));
+
+    return (
+      <Modal 
+        visible={visible} 
+        transparent={true}
+        animationType="fade"
+        presentationStyle="overFullScreen">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>{title}</Text>
+              <ScrollView style={styles.modalForm} keyboardShouldPersistTaps="handled">
+                <TextInput
+                  style={styles.input}
+                  placeholder="Room Number *"
+                  value={localForm.room_number}
+                  onChangeText={(text) => update('room_number', text)}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  blurOnSubmit={false}
+                  keyboardType="default"
+                  returnKeyType="done"
+                />
             
-            <TextInput
-              style={styles.input}
-              placeholder="Floor *"
-              value={roomData.floor}
-              onChangeText={(text) => setRoomData(prev => ({ ...prev, floor: text }))}
-              keyboardType="numeric"
-              autoCorrect={false}
-              blurOnSubmit={false}
-              returnKeyType="next"
-            />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Floor *"
+                  value={localForm.floor}
+                  onChangeText={(text) => update('floor', text)}
+                  keyboardType="numeric"
+                  autoCorrect={false}
+                  blurOnSubmit={false}
+                  returnKeyType="next"
+                />
             <View style={styles.pickerContainer}>
               <Text style={styles.pickerLabel}>Room Type</Text>
               <Picker
-                selectedValue={roomData.room_type}
+                selectedValue={localForm.room_type}
                 onValueChange={(itemValue) => {
-                  setRoomData(prev => ({ 
-                    ...prev, 
-                    room_type: itemValue,
-                    capacity: itemValue === 'single' ? '1' : 
-                             itemValue === 'double' ? '2' : 
-                             itemValue === 'triple' ? '3' : '4'
-                  }));
+                  const capacity = itemValue === 'single' ? '1' : itemValue === 'double' ? '2' : itemValue === 'triple' ? '3' : '4';
+                  setLocalForm(prev => ({ ...prev, room_type: itemValue, capacity }));
                 }}
               >
                 {roomTypes.map((type) => (
@@ -454,70 +441,71 @@ const HostelRoomManagement = ({ navigation, route }) => {
               </Picker>
             </View>
             
-            <TextInput
-              style={styles.input}
-              placeholder="Capacity"
-              value={roomData.capacity}
-              onChangeText={(text) => setRoomData(prev => ({ ...prev, capacity: text }))}
-              keyboardType="numeric"
-              autoCorrect={false}
-              blurOnSubmit={false}
-              returnKeyType="next"
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Rent per Bed *"
-              value={roomData.rent_per_bed}
-              onChangeText={(text) => setRoomData(prev => ({ ...prev, rent_per_bed: text }))}
-              keyboardType="numeric"
-              autoCorrect={false}
-              blurOnSubmit={false}
-              returnKeyType="done"
-            />
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Description"
-              value={roomData.description}
-              onChangeText={(text) => setRoomData(prev => ({ ...prev, description: text }))}
-              multiline
-              numberOfLines={3}
-              autoCorrect={false}
-              blurOnSubmit={false}
-            />
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Amenities (comma separated)"
-              value={roomData.amenities}
-              onChangeText={(text) => setRoomData(prev => ({ ...prev, amenities: text }))}
-              multiline
-              numberOfLines={2}
-              autoCorrect={false}
-              blurOnSubmit={false}
-            />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Capacity"
+                  value={localForm.capacity}
+                  onChangeText={(text) => update('capacity', text)}
+                  keyboardType="numeric"
+                  autoCorrect={false}
+                  blurOnSubmit={false}
+                  returnKeyType="next"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Rent per Bed *"
+                  value={localForm.rent_per_bed}
+                  onChangeText={(text) => update('rent_per_bed', text)}
+                  keyboardType="numeric"
+                  autoCorrect={false}
+                  blurOnSubmit={false}
+                  returnKeyType="done"
+                />
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="Description"
+                  value={localForm.description}
+                  onChangeText={(text) => update('description', text)}
+                  multiline
+                  numberOfLines={3}
+                  autoCorrect={false}
+                  blurOnSubmit={false}
+                />
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="Amenities (comma separated)"
+                  value={localForm.amenities}
+                  onChangeText={(text) => update('amenities', text)}
+                  multiline
+                  numberOfLines={2}
+                  autoCorrect={false}
+                  blurOnSubmit={false}
+                />
 
           </ScrollView>
 
-          <View style={styles.modalActions}>
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: '#f0f0f0' }]}
-              onPress={() => {
-                onClose();
-                resetForm();
-              }}
-            >
-              <Text style={[styles.modalButtonText, { color: '#333' }]}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: '#2196F3' }]}
-              onPress={onSubmit}
-            >
-              <Text style={styles.modalButtonText}>{isEdit ? 'Update' : 'Add'} Room</Text>
-            </TouchableOpacity>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: '#f0f0f0' }]}
+                onPress={() => {
+                  onClose();
+                }}
+              >
+                <Text style={[styles.modalButtonText, { color: '#333' }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: '#2196F3' }]}
+                onPress={() => onSubmit(localForm)}
+              >
+                <Text style={styles.modalButtonText}>{isEdit ? 'Update' : 'Add'} Room</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
+  };
 
   return (
     <View style={styles.container}>
@@ -537,7 +525,7 @@ const HostelRoomManagement = ({ navigation, route }) => {
         </View>
         <TouchableOpacity
           style={styles.addButton}
-          onPress={() => setAddRoomModalVisible(true)}
+          onPress={() => setTimeout(() => setAddRoomModalVisible(true), 0)}
         >
           <Ionicons name="add" size={24} color="#fff" />
           <Text style={styles.addButtonText}>Add Room</Text>
@@ -552,7 +540,9 @@ const HostelRoomManagement = ({ navigation, route }) => {
       ) : (
         <ScrollView
           style={styles.scrollView}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          refreshControl={!addRoomModalVisible && !editRoomModalVisible ? (
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          ) : null}
         >
           {/* Filter Section */}
           <View style={styles.filterSection}>
@@ -724,6 +714,7 @@ const HostelRoomManagement = ({ navigation, route }) => {
         onClose={() => setAddRoomModalVisible(false)}
         onSubmit={addRoom}
         title="Add New Room"
+        initialData={{ room_number: '', floor: '', room_type: 'shared', capacity: '4', rent_per_bed: '', description: '', amenities: '' }}
       />
 
       {/* Edit Room Modal */}
@@ -736,6 +727,15 @@ const HostelRoomManagement = ({ navigation, route }) => {
         onSubmit={editRoom}
         title="Edit Room"
         isEdit={true}
+        initialData={selectedRoom ? {
+          room_number: selectedRoom.room_number || '',
+          floor: selectedRoom.floor || '',
+          room_type: selectedRoom.room_type || 'shared',
+          capacity: selectedRoom.capacity?.toString() || '4',
+          rent_per_bed: selectedRoom.rent_per_bed?.toString() || '',
+          description: selectedRoom.description || '',
+          amenities: selectedRoom.amenities || '',
+        } : undefined}
       />
     </View>
   );
