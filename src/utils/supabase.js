@@ -1516,7 +1516,8 @@ export const dbHelpers = {
         full_name: authData.full_name,
         phone: authData.phone || '',
         role_id: studentRoleId,
-        linked_student_id: studentData.studentId  // ✅ Link to student record
+        linked_student_id: studentData.studentId,  // ✅ Link to student record
+        tenant_id: studentInfoTenant.tenant_id     // ✅ Include tenant context (NOT NULL)
       };
 
       console.log('User profile data:', userProfileData);
