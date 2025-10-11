@@ -1134,41 +1134,97 @@ const FeeManagement = () => {
   // Delete a payment (transaction) from recent list
   const handleDeletePayment = async (payment) => {
     try {
+      console.log('🚀 handleDeletePayment called with:', {
+        paymentId: payment?.id,
+        studentName: payment?.students?.full_name,
+        amount: payment?.amount_paid,
+        platform: Platform.OS
+      });
+      
       if (!payment?.id) {
+        console.error('❌ Invalid payment record - missing ID');
         Alert.alert('Error', 'Invalid payment record');
         return;
       }
+      
+      // Enhanced confirmation dialog for web
       const confirmed = await new Promise((resolve) => {
-        Alert.alert(
-          'Delete Payment?',
-          `Student: ${payment.students?.full_name || 'Unknown'}\nAmount: ${formatSafeCurrency(payment.amount_paid)}\nDate: ${formatSafeDate(payment.payment_date)}\n\nThis action cannot be undone.`,
-          [
-            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
-          ]
-        );
+        const confirmationMessage = `Student: ${payment.students?.full_name || 'Unknown'}\nAmount: ${formatSafeCurrency(payment.amount_paid)}\nDate: ${formatSafeDate(payment.payment_date)}\n\nThis action cannot be undone.`;
+        
+        if (Platform.OS === 'web') {
+          // For web, use native confirm as backup if Alert doesn't work properly
+          const webConfirmed = window.confirm(
+            `Delete Payment?\n\n${confirmationMessage}`
+          );
+          resolve(webConfirmed);
+        } else {
+          Alert.alert(
+            'Delete Payment?',
+            confirmationMessage,
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+            ]
+          );
+        }
       });
-      if (!confirmed) return;
+      
+      if (!confirmed) {
+        console.log('🚫 Delete operation cancelled by user');
+        return;
+      }
 
+      console.log('⏳ Starting delete operation...');
       setPaymentLoading(true);
+      
+      // Check if tenant database is properly initialized
+      const currentTenantId = await getEffectiveTenantId();
+      console.log('🏢 Using tenant ID for delete:', currentTenantId);
+      
       const { error } = await tenantDatabase.delete('student_fees', { id: payment.id });
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Database delete error:', error);
+        throw error;
+      }
 
+      console.log('✅ Payment deleted from database successfully');
+      
       // Optimistic UI update; realtime will also reconcile
-      setPayments(prev => (prev || []).filter(p => p.id !== payment.id));
+      setPayments(prev => {
+        const updated = (prev || []).filter(p => p.id !== payment.id);
+        console.log('🔄 Updated payments array:', updated.length, 'remaining');
+        return updated;
+      });
+      
       setPaymentSummary(prev => ({
         ...prev,
         totalCollected: Math.max(0, (prev?.totalCollected || 0) - Number(payment.amount_paid || 0)),
         totalOutstanding: (prev?.totalOutstanding || 0) + Number(payment.amount_paid || 0),
       }));
 
+      console.log('🔄 Triggering data refresh...');
       debouncedRefreshWithCacheClear();
+      
+      // Platform-specific success message
+      if (Platform.OS === 'web') {
+        // For web, show a brief success message
+        console.log('✅ Payment deleted successfully');
+        // You could add a toast notification here for better UX
+      }
       Alert.alert('Deleted', 'Payment removed successfully.');
+      
     } catch (e) {
-      console.error('Delete payment error:', e);
+      console.error('💥 Delete payment error:', {
+        error: e,
+        message: e.message,
+        stack: e.stack,
+        paymentId: payment?.id,
+        platform: Platform.OS
+      });
       Alert.alert('Error', e.message || 'Failed to delete payment');
     } finally {
       setPaymentLoading(false);
+      console.log('🏁 handleDeletePayment completed');
     }
   };
   
@@ -1509,7 +1565,8 @@ const FeeManagement = () => {
       <FloatingRefreshButton
         onPress={refreshWithCacheClear}
         refreshing={refreshing}
-        bottom={80}
+        bottom={90} // Adjusted to provide better separation from FAB
+        right={20} // Align with FAB for vertical stacking
       />
       
       {loading ? (
@@ -1771,9 +1828,20 @@ const FeeManagement = () => {
               <View style={styles.paymentsContent}>
                 {/* Recent Payments */}
                 <View style={styles.recentPaymentsContainer}>
-                  <Text style={styles.sectionTitle}>Recent Payments</Text>
+                  <View style={styles.sectionHeaderWithDebug}>
+                    <Text style={styles.sectionTitle}>Recent Payments</Text>
+                    {/* Debug info for web */}
+                    {Platform.OS === 'web' && (
+                      <Text style={styles.debugText}>
+                        Loaded: {payments.length} payments | Tab: {tab}
+                      </Text>
+                    )}
+                  </View>
                   {payments.slice(0, 20).map((item, index) => (
-                    <View key={item.id || `payment-${index}`} style={styles.paymentItem}>
+                    <View key={item.id || `payment-${index}`} style={[
+                      styles.paymentItem,
+                      Platform.OS === 'web' && styles.paymentItemWeb
+                    ]}>
                       <View style={styles.paymentItemLeft}>
                         <Text style={styles.paymentStudentName}>{item.students?.full_name || 'Unknown Student'}</Text>
                         <Text style={styles.paymentFeeType}>{item.fee_structure?.fee_component || item.fee_component || 'Unknown Fee'}</Text>
@@ -1791,14 +1859,39 @@ const FeeManagement = () => {
                             {item.status ? item.status.charAt(0).toUpperCase() + item.status.slice(1) : 'Paid'}
                           </Text>
                         </View>
-                        <TouchableOpacity
-                          style={styles.deletePaymentButton}
-                          onPress={() => handleDeletePayment(item)}
-                          accessibilityLabel="Delete payment"
-                          accessibilityHint="Deletes this payment transaction"
-                        >
-                          <Ionicons name="trash" size={16} color="#F44336" />
-                        </TouchableOpacity>
+                        {/* Enhanced delete button with web-specific handling */}
+                        {Platform.OS === 'web' ? (
+                          <Pressable
+                            style={[
+                              styles.deletePaymentButton,
+                              styles.deletePaymentButtonWeb
+                            ]}
+                            onPress={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              console.log('🗑️ Delete button clicked for payment:', item.id);
+                              handleDeletePayment(item);
+                            }}
+                            onHoverIn={() => console.log('🖱️ Hovering over delete button')}
+                            accessibilityLabel="Delete payment"
+                            accessibilityRole="button"
+                          >
+                            <Ionicons name="trash" size={16} color="#F44336" />
+                          </Pressable>
+                        ) : (
+                          <TouchableOpacity
+                            style={styles.deletePaymentButton}
+                            onPress={() => {
+                              console.log('🗑️ Delete button clicked for payment:', item.id);
+                              handleDeletePayment(item);
+                            }}
+                            accessibilityLabel="Delete payment"
+                            accessibilityHint="Deletes this payment transaction"
+                            activeOpacity={0.6}
+                          >
+                            <Ionicons name="trash" size={16} color="#F44336" />
+                          </TouchableOpacity>
+                        )}
                       </View>
                     </View>
                   ))}
@@ -1807,6 +1900,12 @@ const FeeManagement = () => {
                       <Ionicons name="receipt-outline" size={48} color="#ccc" />
                       <Text style={styles.noPaymentsText}>No payments found</Text>
                       <Text style={styles.emptySubtext}>Payment records will appear here when available</Text>
+                      {/* Debug info for web */}
+                      {Platform.OS === 'web' && (
+                        <Text style={styles.debugText}>
+                          Debug: Check if data is loading properly. Current tab: {tab}
+                        </Text>
+                      )}
                     </View>
                   )}
                 </View>
@@ -1818,7 +1917,10 @@ const FeeManagement = () => {
       )}
       {tab === 'structure' && (
         <TouchableOpacity
-          style={styles.fab}
+          style={[
+            styles.fab,
+            Platform.OS === 'web' && styles.fabWeb
+          ]}
           onPress={() => {
             setSelectedClassIds([]); // Reset to empty array
             setNewFeeStructure({
@@ -1830,6 +1932,8 @@ const FeeManagement = () => {
             setFeeStructureModal(true);
           }}
           activeOpacity={0.8}
+          accessibilityLabel="Add new fee structure"
+          accessibilityHint="Opens dialog to add new fee structure for classes"
         >
           <Ionicons name="add" size={28} color="#fff" />
         </TouchableOpacity>
@@ -2433,7 +2537,7 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 20,
-    bottom: 80,
+    bottom: 150, // Moved higher to avoid overlap with refresh button
     backgroundColor: '#1976d2',
     width: 56,
     height: 56,
@@ -2446,6 +2550,19 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     zIndex: 1000,
+  },
+  fabWeb: {
+    cursor: 'pointer',
+    transition: 'all 0.3s ease',
+    ':hover': {
+      backgroundColor: '#1565c0',
+      transform: 'scale(1.1)',
+      elevation: 12,
+    },
+    // Ensure proper spacing from refresh button on web
+    bottom: 160,
+    // Maintain same right alignment as refresh button
+    right: 20,
   },
   bottomSpacer: {
     height: 100,
@@ -2755,6 +2872,33 @@ const styles = StyleSheet.create({
     padding: 6,
     backgroundColor: '#fde7e7',
     borderRadius: 6,
+  },
+  deletePaymentButtonWeb: {
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    border: '1px solid #ffcdd2',
+    ':hover': {
+      backgroundColor: '#ffcdd2',
+      transform: 'scale(1.05)',
+    },
+  },
+  paymentItemWeb: {
+    position: 'relative',
+    zIndex: 1,
+  },
+  sectionHeaderWithDebug: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  debugText: {
+    fontSize: 10,
+    color: '#999',
+    fontStyle: 'italic',
+    backgroundColor: '#f0f0f0',
+    padding: 4,
+    borderRadius: 4,
   },
   noDataText: {
     textAlign: 'center',
