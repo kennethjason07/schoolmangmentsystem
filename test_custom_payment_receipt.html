@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Custom Payment Receipt</title>
+    <style>
+        .receipt {
+            max-width: 600px;
+            margin: 20px auto;
+            padding: 20px;
+            border: 2px solid #000;
+            font-family: Arial, sans-serif;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .school-name {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .school-address {
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+        
+        .receipt-title {
+            font-size: 16px;
+            font-weight: bold;
+            text-decoration: underline;
+            margin-bottom: 15px;
+        }
+        
+        .student-section {
+            margin-bottom: 20px;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .info-item {
+            display: flex;
+            align-items: center;
+        }
+        
+        .info-label {
+            font-weight: bold;
+            margin-right: 5px;
+        }
+        
+        .fee-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        
+        .fee-table th, .fee-table td {
+            border: 1px solid #000;
+            padding: 8px;
+            text-align: left;
+        }
+        
+        .fee-table th {
+            background-color: #f0f0f0;
+            font-weight: bold;
+        }
+        
+        .amount-cell {
+            text-align: right;
+        }
+        
+        .total-row {
+            background-color: #f8f8f8;
+            font-weight: bold;
+        }
+        
+        .summary {
+            margin-bottom: 20px;
+        }
+        
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        
+        .footer {
+            margin-top: 20px;
+        }
+        
+        .words {
+            margin-bottom: 10px;
+            font-style: italic;
+        }
+        
+        .note {
+            font-size: 11px;
+            margin-bottom: 15px;
+        }
+        
+        .payment-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            font-size: 12px;
+        }
+        
+        .signature {
+            text-align: right;
+        }
+        
+        .signature-box {
+            display: inline-block;
+            text-align: center;
+            min-width: 180px;
+        }
+        
+        .signature-line {
+            border-top: 1px solid #000;
+            margin-top: 35px;
+            padding-top: 5px;
+            font-size: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="receipt">
+        <div class="header">
+            <div class="school-name">GLOBAL'S SANMARG PUBLIC SCHOOL</div>
+            <div class="school-address">Near Fateh Darwaza, Pansal Taleem, Bidar-585401</div>
+            <div class="receipt-title">FEE RECEIPT</div>
+        </div>
+
+        <div class="student-section">
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Receipt No:</span>
+                    <span class="info-value">TEST001</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Admission No:</span>
+                    <span class="info-value">ADM123</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Date:</span>
+                    <span class="info-value">11/10/2025</span>
+                </div>
+            </div>
+            
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Student Name:</span>
+                    <span class="info-value">Test Student</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Father's Name:</span>
+                    <span class="info-value">Test Father</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Class:</span>
+                    <span class="info-value">10th A</span>
+                </div>
+            </div>
+            
+            <div class="info-grid">
+                <div class="info-item"></div>
+                <div class="info-item"></div>
+                <div class="info-item">
+                    <span class="info-label">Year:</span>
+                    <span class="info-value">2024/25</span>
+                </div>
+            </div>
+        </div>
+
+        <table class="fee-table">
+            <thead>
+                <tr>
+                    <th style="width: 70%">Particulars</th>
+                    <th style="width: 30%">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Custom payment</td>
+                    <td class="amount-cell">Rs. 1,500</td>
+                </tr>
+                <tr class="total-row">
+                    <td><strong>Total:</strong></td>
+                    <td class="amount-cell"><strong>Rs. 1,500</strong></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="summary">
+            <div class="summary-row">
+                <span>Total fees paid:</span>
+                <span>Rs. 1,500</span>
+            </div>
+            <div class="summary-row">
+                <span>Total fees Due:</span>
+                <span>Rs. 0</span>
+            </div>
+        </div>
+
+        <div class="footer">
+            <div class="words">In Words: Rupees One Thousand Five Hundred Only</div>
+            <div class="note">Note: Fees once deposited will not be refunded under any Circumstances</div>
+            
+            <div class="payment-info">
+                <span>Payment Mode: Cash</span>
+                <span>Cashier: System Generated | Date: 11/10/2025</span>
+            </div>
+            
+            <div class="signature">
+                <div class="signature-box">
+                    <div>Received with thanks,</div>
+                    <div class="signature-line">Cashier/Accountant</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
