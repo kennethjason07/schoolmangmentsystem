@@ -115,7 +115,7 @@ const AdminNotifications = ({ navigation }) => {
       }
 
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user.id, tenantId, 'AdminNotifications - fetchNotifications');
+      const validation = await validateTenantAccess(tenantId, user.id, 'AdminNotifications - fetchNotifications');
       if (!validation.isValid) {
         console.error('❌ AdminNotifications fetchNotifications: Tenant validation failed:', validation.error);
         Alert.alert('Access Denied', validation.error);
@@ -317,7 +317,7 @@ const AdminNotifications = ({ navigation }) => {
       console.log('🔔 [ADMIN_NOTIF] Marking notification as read:', notificationId);
       
       // 🛡️ Validate tenant access first
-      const validation = await validateTenantAccess(user?.id, tenantId, 'AdminNotifications - markAsRead');
+      const validation = await validateTenantAccess(tenantId, user?.id, 'AdminNotifications - markAsRead');
       if (!validation.isValid) {
         Alert.alert('Access Denied', validation.error);
         return;
