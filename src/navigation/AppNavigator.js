@@ -49,6 +49,7 @@ import AutoGrading from '../screens/admin/AutoGrading';
 import PendingUPIPayments from '../screens/admin/PendingUPIPayments';
 import PaymentVerificationScreen from '../screens/PaymentVerificationScreen';
 import TestPaymentVerificationNavigation from '../screens/TestPaymentVerificationNavigation';
+import TestPushNotifications from '../screens/admin/TestPushNotifications';
 
 
 import FeeClassDetails from '../screens/admin/FeeClassDetails';
@@ -453,6 +454,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="ExamsMarks" component={ExamsMarks} />
                 <Stack.Screen name="MarksEntry" component={AdminMarksEntry} />
                 <Stack.Screen name="NotificationManagement" component={NotificationManagement} />
+                <Stack.Screen name="TestPushNotifications" component={TestPushNotifications} />
                 <Stack.Screen name="ExpenseManagement" component={ExpenseManagement} />
                 <Stack.Screen name="StationaryManagement" component={StationaryManagement} />
                 <Stack.Screen name="TeacherDetails" component={TeacherDetails} />

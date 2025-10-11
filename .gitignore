@@ -38,3 +38,12 @@ yarn-error.*
 
 # Local Netlify folder
 .netlify
+
+# Firebase credentials and sensitive files
+*firebase-adminsdk*.json
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!metro.config.js
+!babel.config.js

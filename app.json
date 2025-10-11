@@ -20,6 +20,7 @@
     "android": {
       "package": "com.vidyasetu.app",
       "versionCode": 2,
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -80,8 +81,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "4292160a-508d-4188-83e1-58927769c327"
+        "projectId": "6e456e6b-bd20-4607-8440-637c75b1c864"
       }
-    }
+    },
+    "owner": "abhishek078622"
   }
 }

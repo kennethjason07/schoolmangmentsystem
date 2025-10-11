@@ -581,6 +581,7 @@ const AdminDashboard = ({ navigation }) => {
     { title: 'Exams & Marks', icon: 'document-text', color: '#795548', screen: 'ExamsMarks' }, // Stack screen
     { title: 'Report Cards', icon: 'document-text', color: '#E91E63', screen: 'ReportCardGeneration' }, // Stack screen
     { title: 'Notifications', icon: 'notifications', color: '#FF5722', screen: 'NotificationManagement' }, // Stack screen
+    { title: 'Test Push Notifications', icon: 'notifications-outline', color: '#9C27B0', screen: 'TestPushNotifications' }, // Stack screen
     { title: 'Study Certificate', icon: 'document-text', color: '#607D8B', action: 'openStudyCertificate' }, // Custom action
     { title: 'Marks Card', icon: 'bar-chart', color: '#2196F3', action: 'openMarksCard' }, // Custom action
     { title: 'Hall Tickets', icon: 'card-outline', color: '#2196F3', action: 'openHallTicket' }, // Custom action

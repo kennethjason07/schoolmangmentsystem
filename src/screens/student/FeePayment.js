@@ -473,11 +473,44 @@ const FeePayment = () => {
     }
   };
 
+  // Helper function to calculate cumulative total paid up to a specific date
+  const getCumulativeTotalPaidTillDate = async (studentId, paymentDate) => {
+    try {
+      const { data: payments, error } = await supabase
+        .from('student_fees')
+        .select('amount_paid, payment_date')
+        .eq('student_id', studentId)
+        .lte('payment_date', paymentDate)
+        .order('payment_date', { ascending: true });
+      
+      if (error) {
+        console.warn('Error fetching cumulative payments:', error);
+        return 0;
+      }
+      
+      const totalPaid = (payments || []).reduce((sum, payment) => 
+        sum + (parseFloat(payment.amount_paid) || 0), 0
+      );
+      
+      console.log(`📊 Cumulative total paid up to ${paymentDate}:`, totalPaid);
+      return totalPaid;
+    } catch (error) {
+      console.warn('Error calculating cumulative total:', error);
+      return 0;
+    }
+  };
+
   const handleDownloadReceipt = async (receipt) => {
     console.log('📧 Preparing receipt for:', receipt.feeName);
     
     // Generate new receipt number
     const receiptNumber = await getNextReceiptNumber();
+    
+    // Calculate cumulative total paid up to this payment's date
+    const cumulativeTotalPaid = await getCumulativeTotalPaidTillDate(
+      user.linked_student_id, 
+      receipt.paymentDate
+    );
     
     // Enhance receipt with additional data
     const enhancedReceipt = {
@@ -486,7 +519,8 @@ const FeePayment = () => {
       studentName: feeStructure?.studentName || studentData?.name || 'Student Name',
       admissionNo: studentData?.admission_no || 'N/A',
       className: feeStructure?.class || `${studentData?.classes?.class_name || 'N/A'} ${studentData?.classes?.section || ''}`.trim(),
-      academicYear: feeStructure?.academicYear || '2024-25'
+      academicYear: feeStructure?.academicYear || '2024-25',
+      totalPaidTillDate: cumulativeTotalPaid // Use calculated cumulative total
     };
     
     setSelectedReceipt(enhancedReceipt);
@@ -510,7 +544,7 @@ const FeePayment = () => {
         payment_mode: selectedReceipt.paymentMethod,
         amount_paid: selectedReceipt.amount,
         father_name: selectedReceipt.fatherName,
-        total_paid_till_date: selectedReceipt.totalPaidTillDate || selectedReceipt.amount,
+        total_paid_till_date: selectedReceipt.totalPaidTillDate,
         amount_remaining: selectedReceipt.outstandingAmount || 0
       };
       
@@ -551,7 +585,7 @@ const FeePayment = () => {
           amount_in_words: selectedReceipt.amountInWords,
           cashier_name: selectedReceipt.cashierName,
           fine_amount: selectedReceipt.fine_amount,
-          total_paid_till_date: selectedReceipt.totalPaidTillDate || selectedReceipt.amount,
+          total_paid_till_date: selectedReceipt.totalPaidTillDate,
           father_name: selectedReceipt.fatherName || selectedReceipt.father_name || selectedReceipt.fathers_name || selectedReceipt.parent_name || (studentData && (studentData.father_name || studentData.fatherName)) || null,
           uid: selectedReceipt.studentUID || selectedReceipt.admissionNo,
         };
@@ -606,7 +640,7 @@ const FeePayment = () => {
         payment_mode: selectedReceipt.paymentMethod,
         amount_paid: selectedReceipt.amount,
         father_name: selectedReceipt.fatherName,
-        total_paid_till_date: selectedReceipt.totalPaidTillDate || selectedReceipt.amount,
+        total_paid_till_date: selectedReceipt.totalPaidTillDate,
         amount_remaining: selectedReceipt.outstandingAmount || 0
       };
       
@@ -695,7 +729,7 @@ const FeePayment = () => {
         amount_paid: receipt.amount || 0,
         fathers_name: receipt.fatherName || null,
         uid: receipt.studentUID || receipt.admissionNo || 'N/A',
-        total_paid_till_date: receipt.totalPaidTillDate || receipt.amount || 0,
+        total_paid_till_date: receipt.totalPaidTillDate || 0,
         amount_remaining: receipt.outstandingAmount || 0
       };
       
@@ -771,7 +805,7 @@ const FeePayment = () => {
         studentUID: receipt.studentUID || receipt.admissionNo || 'N/A'
       };
       
-      const safeTotalPaid = receipt.totalPaidTillDate || receipt.amount || 0;
+      const safeTotalPaid = receipt.totalPaidTillDate || 0;
       const safeRemaining = receipt.outstandingAmount || 0;
       const schoolName = schoolDetails?.name || "GLOBAL'S SANMARG PUBLIC SCHOOL";
       const schoolAddress = schoolDetails?.address || "Near Fateh Darwaza, Pansal Taleem, Bidar-585401";
