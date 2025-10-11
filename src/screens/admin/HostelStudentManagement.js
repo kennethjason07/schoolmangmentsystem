@@ -335,53 +335,7 @@ const HostelStudentManagement = ({ navigation }) => {
           style={styles.scrollView}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
-          {/* Summary Stat Cards */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>📚 Student Overview</Text>
-            <View style={{ gap: 12 }}>
-              <HostelStatCard
-                title="All Classes"
-                value={String(new Set([...students, ...hostelStudents].map(s => `${s.class}-${s.section}`)).size)}
-                icon="school"
-                color="#3F51B5"
-                subtitle="Tap to view all classes"
-                animated
-                onPress={() => {
-                  const combined = [...students, ...hostelStudents];
-                  // Build class items with embedded student lists
-                  const classMap = new Map();
-                  combined.forEach(s => {
-                    const key = `${s.class}-${s.section}`;
-                    if (!classMap.has(key)) classMap.set(key, []);
-                    classMap.get(key).push(s);
-                  });
-                  const classes = Array.from(classMap.entries()).map(([key, list]) => {
-                    const [cls, sec] = key.split('-');
-                    return {
-                      id: `class-${key}`,
-                      name: `Class ${cls}-${sec}`,
-                      class: cls,
-                      section: sec,
-                      total: list.length,
-                      studentsList: list,
-                    };
-                  });
-                  navigation.navigate('HostelDetailList', {
-                    type: 'classes',
-                    title: 'All Classes',
-                    data: classes,
-                    icon: 'school',
-                    color: '#3F51B5',
-                    description: 'Browse classes and drill down to students',
-                  });
-                }}
-              />
-
-            </View>
-          </View>
-
-
-          {/* Available Students Section */}
+          {/* Search Section */}
           <View style={styles.section}>
             <TextInput
               style={styles.searchInput}
@@ -389,6 +343,65 @@ const HostelStudentManagement = ({ navigation }) => {
               value={searchQuery}
               onChangeText={setSearchQuery}
             />
+          </View>
+
+          {/* All Classes Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>📚 All Classes</Text>
+            
+            {(() => {
+              const combined = [...students, ...hostelStudents];
+              // Build class items with embedded student lists
+              const classMap = new Map();
+              combined.forEach(s => {
+                const key = `${s.class}-${s.section}`;
+                if (!classMap.has(key)) classMap.set(key, []);
+                classMap.get(key).push(s);
+              });
+              const classes = Array.from(classMap.entries()).map(([key, list]) => {
+                const [cls, sec] = key.split('-');
+                return {
+                  id: `class-${key}`,
+                  name: `Class ${cls}-${sec}`,
+                  class: cls,
+                  section: sec,
+                  total: list.length,
+                  studentsList: list,
+                };
+              });
+              
+              return (
+                <View style={styles.classesContainer}>
+                  {classes.map((classItem) => (
+                    <TouchableOpacity
+                      key={classItem.id}
+                      style={styles.classCard}
+                      onPress={() => {
+                        navigation.navigate('HostelDetailList', {
+                          type: 'students',
+                          title: classItem.name,
+                          data: classItem.studentsList,
+                          icon: 'people',
+                          color: '#3F51B5',
+                          description: `${classItem.total} students in ${classItem.name}`,
+                        });
+                      }}
+                    >
+                      <View style={styles.classCardHeader}>
+                        <View style={[styles.classIconContainer, { backgroundColor: '#3F51B515' }]}>
+                          <Ionicons name="school" size={24} color="#3F51B5" />
+                        </View>
+                        <View style={styles.classCardContent}>
+                          <Text style={styles.classCardTitle}>{classItem.name}</Text>
+                          <Text style={styles.classCardSubtitle}>{classItem.total} students</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={20} color="#666" />
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              );
+            })()}
           </View>
         </ScrollView>
       )}
@@ -765,6 +778,47 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  classesContainer: {
+    gap: 12,
+  },
+  classCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3F51B5',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  classCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  classIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  classCardContent: {
+    flex: 1,
+  },
+  classCardTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  classCardSubtitle: {
+    fontSize: 14,
+    color: '#666',
   },
 });
 

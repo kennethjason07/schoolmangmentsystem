@@ -505,16 +505,6 @@ const HostelDetailList = ({ navigation, route }) => {
             <Ionicons name={icon} size={28} color={color} />
             <Text style={styles.mainTitle}>{title}</Text>
           </View>
-          {/* Add Hostel button */}
-          {type === 'hostels' && (
-            <TouchableOpacity
-              style={styles.addBtn}
-              onPress={() => navigation.navigate('HostelManagement', { openAddHostel: true })}
-            >
-              <Ionicons name="add-circle" size={18} color="#fff" />
-              <Text style={styles.addBtnText}>Add Hostel</Text>
-            </TouchableOpacity>
-          )}
         </View>
         <Text style={styles.subtitle}>{description || `${data.length} items found`}</Text>
         

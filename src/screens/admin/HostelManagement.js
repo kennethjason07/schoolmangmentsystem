@@ -526,7 +526,28 @@ const HostelManagement = ({ navigation }) => {
       if (!res.success) {
         // If table missing or any failure, inform user rather than silently acting like success
         const msg = res.error || 'Failed to add hostel';
-        Alert.alert('Error', msg.includes('42P01') ? 'Backend hostel tables not found. Please run hostel schema migrations.' : msg);
+        
+        if (msg.includes('42P01') || msg.includes('relation') || msg.includes('does not exist')) {
+          Alert.alert(
+            'Database Setup Required',
+            'The hostel tables are not set up in your database. Please:\n\n1. Go to Supabase Dashboard\n2. Open SQL Editor\n3. Execute the hostel schema SQL\n\nContact support if you need help.',
+            [
+              { text: 'OK', style: 'default' },
+              { 
+                text: 'Help', 
+                onPress: () => {
+                  Alert.alert(
+                    'Setup Instructions',
+                    'You need to run the hostel schema SQL script in your Supabase database. Check the project files for EXECUTE_THIS_IN_SUPABASE.sql and run it in your Supabase SQL Editor.',
+                    [{ text: 'Got it', style: 'default' }]
+                  );
+                }
+              }
+            ]
+          );
+        } else {
+          Alert.alert('Error', `Failed to add hostel: ${msg}`);
+        }
         return;
       }
 
@@ -653,16 +674,6 @@ const HostelManagement = ({ navigation }) => {
             <Text style={styles.mainTitle}>Hostel Management</Text>
           </View>
           <Text style={styles.subtitle}>Manage hostels, applications, and bed allocations</Text>
-        </View>
-
-        {/* Top Search (below Hostel Management section) */}
-        <View style={styles.section}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search hostels, rooms, or students..."
-            value={topSearch}
-            onChangeText={setTopSearch}
-          />
         </View>
 
 
@@ -887,6 +898,27 @@ onPress={() => navigation.navigate('HostelApplications', {
               onChangeText={(text) => setNewHostelData(prev => ({ ...prev, capacity: text }))}
               keyboardType="numeric"
             />
+            
+            <Text style={styles.inputLabel}>Hostel Type</Text>
+            <View style={styles.typePickerContainer}>
+              {['mixed', 'boys', 'girls'].map((type) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.typePicker,
+                    newHostelData.type === type && styles.typePickerSelected
+                  ]}
+                  onPress={() => setNewHostelData(prev => ({ ...prev, type }))}
+                >
+                  <Text style={[
+                    styles.typePickerText,
+                    newHostelData.type === type && styles.typePickerTextSelected
+                  ]}>
+                    {type.charAt(0).toUpperCase() + type.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
             
             <TextInput
               style={styles.input}
@@ -1306,6 +1338,41 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 16,
     fontSize: 16,
+  },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+    marginTop: 8,
+  },
+  typePickerContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    gap: 8,
+  },
+  typePicker: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    alignItems: 'center',
+  },
+  typePickerSelected: {
+    backgroundColor: '#2196F3',
+    borderColor: '#2196F3',
+  },
+  typePickerText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  typePickerTextSelected: {
+    color: '#fff',
   },
   modalButtons: {
     flexDirection: 'row',

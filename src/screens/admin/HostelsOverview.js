@@ -1,5 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import HostelStatCard from '../../components/HostelStatCard';
@@ -14,6 +20,7 @@ const HostelsOverview = ({ navigation, route }) => {
   const initialFilterRaw = (route?.params?.typeFilter || 'all').toString().toLowerCase();
   const initialFilter = ['all','boys','girls','mixed'].includes(initialFilterRaw) ? initialFilterRaw : 'all';
   const [typeFilter, setTypeFilter] = useState(initialFilter); // 'all' | 'boys' | 'girls' | 'mixed'
+
 
   const filteredHostels = useMemo(() => (
     typeFilter === 'all' ? hostels : hostels.filter(h => (h.type || 'mixed') === typeFilter)
@@ -33,6 +40,7 @@ const HostelsOverview = ({ navigation, route }) => {
   const totalAvailable = Math.max(0, totals.totalCapacity - totals.totalOccupied);
   const utilization = totals.totalCapacity > 0 ? Math.round((totals.totalOccupied / totals.totalCapacity) * 100) : 0;
 
+
   return (
     <View style={styles.container}>
       <Header
@@ -42,6 +50,21 @@ const HostelsOverview = ({ navigation, route }) => {
       />
 
       <ScrollView contentContainerStyle={styles.content}>
+
+        {/* Header with Add Hostel button */}
+        <View style={styles.headerSection}>
+          <View style={styles.titleContainer}>
+            <Ionicons name="business" size={28} color="#2196F3" />
+            <Text style={styles.mainTitle}>All Hostels</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.addBtn}
+            onPress={() => navigation.navigate('HostelManagement', { openAddHostel: true })}
+          >
+            <Ionicons name="add" size={16} color="#fff" />
+            <Text style={styles.addBtnText}>Add Hostel</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Filter chips */}
         <View style={styles.filterRow}>
@@ -132,15 +155,7 @@ const HostelsOverview = ({ navigation, route }) => {
                   animated={true}
                   maxValue={capacity}
                   progress={utilization}
-                  onPress={() => navigation.navigate('HostelDetailView', { hostel: h })}
-                  quickActions={[
-                    {
-                      label: 'Manage Rooms',
-                      icon: 'bed',
-                      color: '#2196F3',
-                      onPress: () => navigation.navigate('HostelRoomManagement', { hostel: h }),
-                    },
-                  ]}
+                  onPress={() => navigation.navigate('HostelRoomManagement', { hostel: h })}
                 />
               </View>
             );
@@ -159,6 +174,30 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
+  },
+  headerSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: 20,
+    marginBottom: 16,
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  titleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  mainTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginLeft: 12,
   },
   grid: {
     gap: 12,
@@ -180,14 +219,19 @@ const styles = StyleSheet.create({
   addBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#2196F3',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderRadius: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   addBtnText: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '700',
     marginLeft: 6,
   },
