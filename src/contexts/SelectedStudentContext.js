@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase, TABLES, dbHelpers } from '../utils/supabase';
 import { useAuth } from '../utils/AuthContext';
+import { getParentStudents, isUserParent } from '../utils/parentAuthHelper';
 
 const SelectedStudentContext = createContext({});
 
@@ -19,171 +20,112 @@ export const SelectedStudentProvider = ({ children }) => {
   const [hasMultipleStudents, setHasMultipleStudents] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Load available students for the current parent user - SECURE APPROACH
+  // Load available students for the current parent user - ENHANCED APPROACH
   const loadAvailableStudents = async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
     try {
       setLoading(true);
-      console.log('Loading available students for parent user (SECURE):', user.id);
-      console.log('User email:', user.email);
-      console.log('User linked_parent_of:', user.linked_parent_of);
+      console.log('🚀 [SelectedStudentContext] Loading students for parent user:', user.email);
       
-      let allStudents = [];
-
-      // APPROACH 1: Always check linked_parent_of first (this is the primary and ONLY reliable link)
-      if (user.linked_parent_of) {
-        console.log('Step 1: Getting student via linked_parent_of:', user.linked_parent_of);
-        const { data: studentData, error: studentError } = await supabase
-          .from(TABLES.STUDENTS)
-          .select(`
-            id,
-            name,
-            admission_no,
-            roll_no,
-            academic_year,
-            gender,
-            dob,
-            class_id,
-            parent_id,
-            classes(
-              id,
-              class_name,
-              section
-            )
-          `)
-          .eq('id', user.linked_parent_of)
-          .single();
-
-        if (!studentError && studentData) {
-          console.log('✅ Found primary student via linked_parent_of:', studentData.name);
-
-          // Get student's profile photo from users table
-          const { data: studentUserData, error: studentUserError } = await supabase
-            .from(TABLES.USERS)
-            .select('id, profile_url')
-            .eq('linked_student_id', studentData.id)
-            .maybeSingle();
-
-          console.log('📸 Student user data for profile photo:', studentUserData);
-
-          const student = {
-            ...studentData,
-            relationshipType: 'Primary',
-            isPrimaryContact: true,
-            isEmergencyContact: true,
-            fullClassName: studentData.classes
-              ? `${studentData.classes.class_name} ${studentData.classes.section}`
-              : 'N/A',
-            profile_url: studentUserData?.profile_url || null // Add profile photo
-          };
-          allStudents.push(student);
-        } else {
-          console.log('❌ Error getting primary student:', studentError);
-        }
+      // Step 1: Check if user is a parent using the enhanced parent authentication
+      console.log('🚀 [SelectedStudentContext] Step 1: Checking if user is a parent...');
+      const parentCheck = await isUserParent(user.id);
+      
+      if (!parentCheck.success || !parentCheck.isParent) {
+        console.log('🚀 [SelectedStudentContext] User is not a parent or check failed:', parentCheck.error);
+        setAvailableStudents([]);
+        setHasMultipleStudents(false);
+        setSelectedStudent(null);
+        return;
       }
-
-      // APPROACH 2: SECURE - Only look for students that have the SAME parent_id as the primary student
-      // This prevents showing children that don't actually belong to this parent
-      if (allStudents.length > 0) {
-        const primaryStudent = allStudents[0];
+      
+      console.log('🚀 [SelectedStudentContext] ✅ User confirmed as parent with', parentCheck.studentCount, 'students');
+      
+      // Step 2: Get parent's students using the enhanced parent authentication
+      console.log('🚀 [SelectedStudentContext] Step 2: Fetching parent students...');
+      const studentsResult = await getParentStudents(user.id);
+      
+      if (!studentsResult.success) {
+        console.error('🚀 [SelectedStudentContext] Failed to get parent students:', studentsResult.error);
+        setAvailableStudents([]);
+        setHasMultipleStudents(false);
+        setSelectedStudent(null);
+        return;
+      }
+      
+      const parentStudents = studentsResult.students || [];
+      console.log('🚀 [SelectedStudentContext] ✅ Successfully loaded', parentStudents.length, 'students');
+      
+      // Step 3: Format students for the context (ensure they have all required fields)
+      const formattedStudents = parentStudents.map((student, index) => ({
+        id: student.id,
+        name: student.name,
+        admission_no: student.admission_no,
+        roll_no: student.roll_no || student.admission_no, // Fallback to admission_no if roll_no not available
+        academic_year: student.academic_year,
+        gender: student.gender,
+        dob: student.dob,
+        class_id: student.class_id,
+        profile_url: student.profile_url,
         
-        if (primaryStudent.parent_id) {
-          console.log('Step 2: Looking for siblings with same parent_id:', primaryStudent.parent_id);
-          
-          // Get other students with the same parent_id (siblings)
-          const { data: siblingStudents, error: siblingError } = await supabase
-            .from(TABLES.STUDENTS)
-            .select(`
-              id,
-              name,
-              admission_no,
-              roll_no,
-              academic_year,
-              gender,
-              dob,
-              class_id,
-              parent_id,
-              classes(
-                id,
-                class_name,
-                section
-              )
-            `)
-            .eq('parent_id', primaryStudent.parent_id)
-            .neq('id', primaryStudent.id); // Exclude the primary student
-          
-          if (!siblingError && siblingStudents && siblingStudents.length > 0) {
-            console.log('✅ Found sibling students:', siblingStudents.length);
-            
-            // Add each sibling student
-            for (const student of siblingStudents) {
-              // Get student's profile photo from users table
-              const { data: studentUserData, error: studentUserError } = await supabase
-                .from(TABLES.USERS)
-                .select('id, profile_url')
-                .eq('linked_student_id', student.id)
-                .maybeSingle();
-
-              console.log('📸 Student user data for profile photo:', studentUserData);
-
-              const mappedStudent = {
-                ...student,
-                relationshipType: 'Sibling',
-                isPrimaryContact: false, // Only primary student is primary contact
-                isEmergencyContact: true,
-                fullClassName: student.classes
-                  ? `${student.classes.class_name} ${student.classes.section}`
-                  : 'N/A',
-                profile_url: studentUserData?.profile_url || null
-              };
-              allStudents.push(mappedStudent);
-              console.log('✅ Sibling added:', student.name);
-            }
-          } else if (siblingError) {
-            console.log('❌ Error getting sibling students:', siblingError);
-          } else {
-            console.log('ℹ️ No sibling students found');
-          }
-        } else {
-          console.log('ℹ️ Primary student has no parent_id, cannot find siblings');
+        // Class information
+        class_name: student.class_name,
+        section: student.section,
+        fullClassName: student.full_class_name || student.class_name || 'N/A',
+        
+        // Parent relationship info
+        relationshipType: index === 0 ? 'Primary' : 'Sibling',
+        isPrimaryContact: index === 0, // First student is primary contact
+        isEmergencyContact: true,
+        
+        // Additional fields for compatibility
+        classes: {
+          id: student.class_id,
+          class_name: student.class_name,
+          section: student.section
         }
-      }
+      }));
       
-      console.log('🔍 FINAL: Total students found:', allStudents.length, allStudents.map(s => ({ id: s.id, name: s.name })));
-
-      // Remove the potentially problematic APPROACH 3 (classmate search)
-      // This was likely adding students that don't belong to this parent
-
-      // Set the available students
-      if (allStudents.length > 0) {
-        console.log('Total students found for parent:', allStudents.length);
-        setAvailableStudents(allStudents);
-        setHasMultipleStudents(allStudents.length > 1);
+      console.log('🚀 [SelectedStudentContext] Formatted students:', formattedStudents.map(s => ({ 
+        id: s.id, 
+        name: s.name, 
+        class: s.fullClassName 
+      })));
+      
+      // Step 4: Set the available students
+      if (formattedStudents.length > 0) {
+        setAvailableStudents(formattedStudents);
+        setHasMultipleStudents(formattedStudents.length > 1);
         
         // Auto-select first student if no student selected
         if (!selectedStudent) {
-          setSelectedStudent(allStudents[0]);
+          setSelectedStudent(formattedStudents[0]);
+          console.log('🚀 [SelectedStudentContext] Auto-selected first student:', formattedStudents[0].name);
         }
         // If current selected student is not in the list, select the first one
-        else if (!allStudents.some(s => s.id === selectedStudent.id)) {
-          setSelectedStudent(allStudents[0]);
+        else if (!formattedStudents.some(s => s.id === selectedStudent.id)) {
+          setSelectedStudent(formattedStudents[0]);
+          console.log('🚀 [SelectedStudentContext] Selected student not in list, switching to:', formattedStudents[0].name);
         }
       } else {
-        // If no students found, set empty arrays
-        console.log('No students found for this parent');
+        console.log('🚀 [SelectedStudentContext] No students found for this parent');
         setAvailableStudents([]);
         setHasMultipleStudents(false);
         setSelectedStudent(null);
       }
 
     } catch (error) {
-      console.error('Error loading available students:', error);
+      console.error('🚀 [SelectedStudentContext] Error loading available students:', error);
       setAvailableStudents([]);
       setHasMultipleStudents(false);
       setSelectedStudent(null);
     } finally {
       setLoading(false);
+      console.log('🚀 [SelectedStudentContext] Loading complete');
     }
   };
 

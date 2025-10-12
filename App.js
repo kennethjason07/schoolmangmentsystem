@@ -7,6 +7,7 @@ import { TenantProvider } from './src/contexts/TenantContext';
 import { AuthProvider } from './src/utils/AuthContext';
 import { SelectedStudentProvider } from './src/contexts/SelectedStudentContext';
 import { GlobalRefreshProvider } from './src/contexts/GlobalRefreshContext';
+import StartupLoader from './src/components/StartupLoader';
 import AppNavigator from './src/navigation/AppNavigator';
 
 export default function App() {
@@ -22,12 +23,14 @@ export default function App() {
     <SafeAreaProvider>
       <TenantProvider>
         <AuthProvider>
-          <SelectedStudentProvider>
-            <GlobalRefreshProvider>
-              <AppNavigator />
-              <StatusBar style="auto" />
-            </GlobalRefreshProvider>
-          </SelectedStudentProvider>
+          <StartupLoader>
+            <SelectedStudentProvider>
+              <GlobalRefreshProvider>
+                <AppNavigator />
+                <StatusBar style="auto" />
+              </GlobalRefreshProvider>
+            </SelectedStudentProvider>
+          </StartupLoader>
         </AuthProvider>
       </TenantProvider>
     </SafeAreaProvider>

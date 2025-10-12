@@ -26,7 +26,8 @@ const StudentSelectionScreen = ({ navigation }) => {
     switchStudent, 
     hasMultipleStudents,
     getStudentClass,
-    getStudentAdmissionNo 
+    getStudentAdmissionNo,
+    refreshStudents 
   } = useSelectedStudent();
   
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -115,11 +116,21 @@ const StudentSelectionScreen = ({ navigation }) => {
                 style={[styles.contactButton, { backgroundColor: 'rgba(255,255,255,0.25)' }]}
                 onPress={async () => {
                   try {
-                    // Retry fetching students
+                    console.log('🔄 Manual retry requested from StudentSelectionScreen');
+                    // Use the refreshStudents function from SelectedStudentContext
                     if (typeof refreshStudents === 'function') {
-                      refreshStudents();
+                      await refreshStudents();
+                      console.log('🔄 Refresh completed');
+                    } else {
+                      console.warn('🔄 refreshStudents not available, using fallback');
+                      // Fallback: navigate back to force reload
+                      navigation.replace('StudentSelectionScreen');
                     }
-                  } catch (_) {}
+                  } catch (error) {
+                    console.error('🔄 Error during manual retry:', error);
+                    // Last resort: navigate to login
+                    navigation.replace('Login');
+                  }
                 }}
               >
                 <Text style={styles.contactButtonText}>Retry</Text>
