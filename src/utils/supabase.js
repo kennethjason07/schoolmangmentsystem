@@ -470,8 +470,8 @@ export const dbHelpers = {
         const fallbackRoleIds = {
           'admin': 1,
           'teacher': 2,
-          'student': 3,
-          'parent': 4
+          'student': 4, // Student moved to 4
+          'parent': 3   // Parent is role ID 3
         };
         return fallbackRoleIds[roleName.toLowerCase()] || 1;
       }
@@ -482,8 +482,8 @@ export const dbHelpers = {
       const fallbackRoleIds = {
         'admin': 1,
         'teacher': 2,
-        'student': 3,
-        'parent': 4
+        'student': 4, // Student moved to 4
+        'parent': 3   // Parent is role ID 3
       };
       return fallbackRoleIds[roleName.toLowerCase()] || 1;
     }
