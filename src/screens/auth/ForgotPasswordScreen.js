@@ -30,7 +30,8 @@ const ForgotPasswordScreen = ({ navigation }) => {
 
   // Validate email
   const validateEmail = (email) => {
-    const emailRegex = /^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/;
+    // Improved regex to handle more complex email formats including plus signs and dots
+    const emailRegex = /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
     if (!email) {
       setEmailError('Email is required');
       return false;

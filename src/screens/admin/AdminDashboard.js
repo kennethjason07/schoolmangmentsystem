@@ -643,7 +643,6 @@ const AdminDashboard = ({ navigation }) => {
     { title: 'Stationary Management', icon: 'cube-outline', color: '#FF5722', screen: 'StationaryManagement' }, // Stack screen
     { title: 'Expense Management', icon: 'wallet', color: '#F44336', screen: 'ExpenseManagement' }, // Stack screen
     { title: 'Exams & Marks', icon: 'document-text', color: '#795548', screen: 'ExamsMarks' }, // Stack screen
-    { title: 'Report Cards', icon: 'document-text', color: '#E91E63', screen: 'ReportCardGeneration' }, // Stack screen
     { title: 'Notifications', icon: 'notifications', color: '#FF5722', screen: 'NotificationManagement' }, // Stack screen
     { title: 'Test Push Notifications', icon: 'notifications-outline', color: '#9C27B0', screen: 'TestPushNotifications' }, // Stack screen
     { title: 'Study Certificate', icon: 'document-text', color: '#607D8B', action: 'openStudyCertificate' }, // Custom action
