@@ -97,15 +97,14 @@ const LoginScreen = ({ navigation }) => {
       if (!tenantResult.success) {
         console.error('🚀 ENHANCED_TENANT_SYSTEM: Tenant validation failed:', tenantResult.error);
         
-        // Show user-friendly error message
-        if (tenantResult.userFriendlyError) {
-          Alert.alert(
-            tenantResult.userFriendlyError,
-            `${tenantResult.error}\n\n${tenantResult.suggestions ? tenantResult.suggestions.join('\n') : ''}`
-          );
-        } else {
-          Alert.alert('Access Error', tenantResult.error || 'Unable to validate school access');
-        }
+        // Show user-friendly error message via popup
+        const errorMsg = tenantResult.userFriendlyError 
+          ? `${tenantResult.error}\n\n${tenantResult.suggestions ? tenantResult.suggestions.join('\n') : ''}`
+          : (tenantResult.error || 'Unable to validate school access');
+        
+        console.log('🚨 Tenant validation error - showing popup:', errorMsg);
+        setLoginError(errorMsg);
+        setShowErrorPopup(true);
         
         return false;
       }
@@ -117,7 +116,10 @@ const LoginScreen = ({ navigation }) => {
       return true;
     } catch (error) {
       console.error('🚀 ENHANCED_TENANT_SYSTEM: Error validating tenant access:', error);
-      Alert.alert('Error', 'Failed to validate school access. Please try again.');
+      const errorMsg = 'Failed to validate school access. Please try again.';
+      console.log('🚨 Tenant access error - showing popup:', errorMsg);
+      setLoginError(errorMsg);
+      setShowErrorPopup(true);
       return false;
     }
   };
@@ -259,15 +261,43 @@ Please contact the administrator to add this role.`
       const { data, error } = await signIn(email, password, selectedRole);
       
       if (error) {
-        // Handle specific error messages
-        if (error.message && error.message.toLowerCase().includes('invalid credentials')) {
-          setLoginError('Incorrect password. Please try again.');
-        } else if (error.message && error.message.toLowerCase().includes('user not found')) {
-          setLoginError('User not found. Please check your email address.');
-        } else {
-          setLoginError(error.message || 'Login failed. Please try again.');
+        console.log('🚨 Login error details:', error);
+        
+        // Handle specific error messages with better pattern matching
+        let errorMessage = 'Login failed. Please try again.';
+        
+        if (error.message) {
+          const errorMsg = error.message.toLowerCase();
+          
+          if (errorMsg.includes('invalid') && (errorMsg.includes('credentials') || errorMsg.includes('login'))) {
+            errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+          } else if (errorMsg.includes('user not found') || errorMsg.includes('email not confirmed')) {
+            errorMessage = 'User not found. Please check your email address or contact your administrator.';
+          } else if (errorMsg.includes('password') && errorMsg.includes('incorrect')) {
+            errorMessage = 'Incorrect password. Please try again.';
+          } else if (errorMsg.includes('email') && errorMsg.includes('invalid')) {
+            errorMessage = 'Invalid email format. Please enter a valid email address.';
+          } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
+            errorMessage = 'Network error. Please check your internet connection and try again.';
+          } else if (errorMsg.includes('rate limit') || errorMsg.includes('too many')) {
+            errorMessage = 'Too many login attempts. Please wait a moment and try again.';
+          } else {
+            // Use the original error message if it's user-friendly
+            errorMessage = error.message.length > 100 ? 'Login failed. Please try again.' : error.message;
+          }
         }
+        
+        console.log('🚨 Formatted error message:', errorMessage);
+        console.log('🚨 Setting popup state - showErrorPopup will be:', true);
+        
+        setLoginError(errorMessage);
         setShowErrorPopup(true); // Show the popup error
+        
+        // Force re-render to ensure popup shows
+        setTimeout(() => {
+          console.log('🚨 Popup state after timeout:', { loginError: errorMessage, showErrorPopup: true });
+        }, 100);
+        
         return;
       }
 
@@ -282,9 +312,19 @@ Please contact the administrator to add this role.`
       // Navigation will be handled automatically by AuthContext based on user type
       
     } catch (error) {
-      console.error('Login error:', error);
-      setLoginError('An unexpected error occurred. Please try again.');
+      console.error('🔥 Unexpected login error:', error);
+      console.log('🔥 Error type:', typeof error, 'Error message:', error?.message);
+      
+      const unexpectedError = 'An unexpected error occurred. Please check your internet connection and try again.';
+      console.log('🔥 Setting unexpected error popup:', unexpectedError);
+      
+      setLoginError(unexpectedError);
       setShowErrorPopup(true); // Show the popup error
+      
+      // Additional debug log
+      setTimeout(() => {
+        console.log('🔥 Unexpected error popup state:', { loginError: unexpectedError, showErrorPopup: true });
+      }, 100);
     } finally {
       setIsLoading(false);
     }
@@ -381,11 +421,13 @@ Please contact the administrator to add this role.`
   return (
     <View style={styles.mainContainer}>
       {/* Error Popup Modal */}
+      {console.log('📱 Modal render - showErrorPopup:', showErrorPopup, 'loginError:', loginError)}
       <Modal
         animationType="fade"
         transparent={true}
         visible={showErrorPopup}
         onRequestClose={closeErrorPopup}
+        statusBarTranslucent={true}
       >
         <View style={styles.popupOverlay}>
           <Animatable.View 
@@ -1027,36 +1069,46 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textDecorationLine: 'underline',
   },
-  // Popup Styles
+  // Popup Styles - Enhanced for better cross-platform visibility
   popupOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 9999,
     // Web-specific enhancements
     ...(Platform.OS === 'web' && {
-      cursor: 'pointer',
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      width: '100vw',
+      height: '100vh',
+      cursor: 'default',
     }),
   },
   popupContainer: {
     backgroundColor: 'white',
     borderRadius: 15,
-    padding: 20,
-    width: '80%',
-    maxWidth: 400,
+    padding: 25,
+    width: '85%',
+    maxWidth: 420,
     alignItems: 'center',
-    elevation: 20,
+    elevation: 25,
+    zIndex: 10000,
     ...(Platform.OS === 'web' ? {
-      boxShadow: '0 10px 25px rgba(0, 0, 0, 0.2)',
+      boxShadow: '0 15px 35px rgba(0, 0, 0, 0.3)',
       cursor: 'default',
+      animation: 'modalFadeIn 0.3s ease-out',
     } : {
       shadowColor: '#000',
       shadowOffset: {
         width: 0,
-        height: 10,
+        height: 12,
       },
-      shadowOpacity: 0.25,
-      shadowRadius: 14,
+      shadowOpacity: 0.35,
+      shadowRadius: 16,
     }),
   },
   popupHeader: {
