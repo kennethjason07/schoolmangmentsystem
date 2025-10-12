@@ -448,28 +448,92 @@ const AdminDashboard = ({ navigation }) => {
         setEvents([]);
       }
 
-      // Recent activities
+      // Recent activities - with proper timezone handling
       const recentActivities = [];
+      
+      // Helper function to format dates with timezone awareness
+      const formatActivityDate = (dateString) => {
+        try {
+          if (!dateString) return 'Unknown time';
+          
+          // Parse the date from database (usually UTC)
+          const date = new Date(dateString);
+          
+          // Check if date is valid
+          if (isNaN(date.getTime())) {
+            console.warn('Invalid date received:', dateString);
+            return 'Invalid date';
+          }
+          
+          // Get current time for relative formatting
+          const now = new Date();
+          const diffInSeconds = Math.floor((now - date) / 1000);
+          const diffInMinutes = Math.floor(diffInSeconds / 60);
+          const diffInHours = Math.floor(diffInMinutes / 60);
+          const diffInDays = Math.floor(diffInHours / 24);
+          
+          // Format as relative time for recent activities
+          if (diffInSeconds < 60) {
+            return 'Just now';
+          } else if (diffInMinutes < 60) {
+            return `${diffInMinutes} minute${diffInMinutes === 1 ? '' : 's'} ago`;
+          } else if (diffInHours < 24) {
+            return `${diffInHours} hour${diffInHours === 1 ? '' : 's'} ago`;
+          } else if (diffInDays < 7) {
+            return `${diffInDays} day${diffInDays === 1 ? '' : 's'} ago`;
+          } else {
+            // For older dates, show full date in user's timezone
+            return date.toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true
+            });
+          }
+        } catch (error) {
+          console.error('Error formatting activity date:', error, dateString);
+          return 'Unknown time';
+        }
+      };
+      
       if (recentStudentsRes.data && !recentStudentsRes.error) {
         recentStudentsRes.data.forEach(student => {
-          recentActivities.push({
-            text: `New student registered: ${student.name}`,
-            time: format(new Date(student.created_at), 'PPp'),
-            icon: 'person-add',
-          });
+          if (student.created_at && student.name) {
+            recentActivities.push({
+              text: `New student registered: ${student.name}`,
+              time: formatActivityDate(student.created_at),
+              rawDate: student.created_at, // Keep raw date for sorting
+              icon: 'person-add',
+            });
+          }
         });
       }
+      
       if (recentFeesRes.data && !recentFeesRes.error) {
         recentFeesRes.data.forEach(fee => {
-          recentActivities.push({
-            text: `Fee payment received: ₹${fee.amount_paid} from ${fee.students?.name}`,
-            time: format(new Date(fee.payment_date), 'PPp'),
-            icon: 'card',
-          });
+          if (fee.payment_date && fee.amount_paid && fee.students?.name) {
+            recentActivities.push({
+              text: `Fee payment received: ₹${fee.amount_paid} from ${fee.students.name}`,
+              time: formatActivityDate(fee.payment_date),
+              rawDate: fee.payment_date, // Keep raw date for sorting
+              icon: 'card',
+            });
+          }
         });
       }
-      recentActivities.sort((a, b) => new Date(b.time) - new Date(a.time));
-      setActivities(recentActivities.slice(0, 5));
+      
+      // Sort by actual date objects for accurate chronological ordering
+      recentActivities.sort((a, b) => {
+        const dateA = new Date(a.rawDate);
+        const dateB = new Date(b.rawDate);
+        return dateB - dateA; // Most recent first
+      });
+      
+      // Remove rawDate before setting state (not needed in UI)
+      const cleanedActivities = recentActivities.slice(0, 5).map(({ rawDate, ...activity }) => activity);
+      setActivities(cleanedActivities);
     } catch (error) {
       console.error('🏠 [AdminDashboard] Error loading dashboard data:', error);
       let errorMessage = 'Failed to load dashboard data';
@@ -1010,13 +1074,8 @@ const AdminDashboard = ({ navigation }) => {
     }
   };
 
-  // Recent Activities state
-  const [activities, setActivities] = useState([
-    { text: 'New student registered: John Doe (Class 3A)', time: '2 hours ago', icon: 'person-add' },
-    { text: 'Fee payment received: ₹15,000 from Class 5B', time: '4 hours ago', icon: 'card' },
-    { text: 'Attendance marked for Class 2A (95% present)', time: '6 hours ago', icon: 'checkmark-circle' },
-    { text: 'Exam scheduled: Mathematics for Class 4A', time: '1 day ago', icon: 'calendar' },
-  ]);
+  // Recent Activities state - Initialize with empty array, will be populated from database
+  const [activities, setActivities] = useState([]);
 
   // Use universal notification system for consistent, real-time badge updates
   const { totalCount, notificationCount, messageCount } = useUniversalNotificationCount({
@@ -1382,31 +1441,41 @@ const AdminDashboard = ({ navigation }) => {
         <View style={[styles.section, styles.recentActivitiesSection]}>
           <Text style={styles.sectionTitle}>Recent Activities</Text>
           <View style={styles.activitiesList}>
-            {activities.map((activity, index) => (
-              <View key={index} style={styles.activityItem}>
-                <View style={styles.activityIcon}>
-                  <Ionicons name={activity.icon} size={16} color="#2196F3" />
+            {activities.length > 0 ? (
+              activities.map((activity, index) => (
+                <View key={index} style={styles.activityItem}>
+                  <View style={styles.activityIcon}>
+                    <Ionicons name={activity.icon} size={16} color="#2196F3" />
+                  </View>
+                  <View style={styles.activityContent}>
+                    <Text style={styles.activityText}>{activity.text}</Text>
+                    <Text style={styles.activityTime}>{activity.time}</Text>
+                  </View>
+                  <TouchableOpacity 
+                    onPress={(e) => {
+                      if (e && e.stopPropagation) e.stopPropagation();
+                      if (e && e.preventDefault) e.preventDefault();
+                      deleteActivity(index);
+                    }}
+                    style={[
+                      { marginRight: 8 },
+                      Platform.OS === 'web' && { cursor: 'pointer' }
+                    ]}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="trash" size={20} color="#F44336" />
+                  </TouchableOpacity>
                 </View>
-                <View style={styles.activityContent}>
-                  <Text style={styles.activityText}>{activity.text}</Text>
-                  <Text style={styles.activityTime}>{activity.time}</Text>
-                </View>
-                <TouchableOpacity 
-                  onPress={(e) => {
-                    if (e && e.stopPropagation) e.stopPropagation();
-                    if (e && e.preventDefault) e.preventDefault();
-                    deleteActivity(index);
-                  }}
-                  style={[
-                    { marginRight: 8 },
-                    Platform.OS === 'web' && { cursor: 'pointer' }
-                  ]}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="trash" size={20} color="#F44336" />
-                </TouchableOpacity>
+              ))
+            ) : (
+              <View style={styles.emptyActivitiesContainer}>
+                <Ionicons name="time-outline" size={48} color="#ddd" />
+                <Text style={styles.emptyActivitiesText}>No recent activities</Text>
+                <Text style={styles.emptyActivitiesSubtext}>
+                  Activities will appear here when students register or make payments
+                </Text>
               </View>
-            ))}
+            )}
           </View>
         </View>
       </ScrollView>
@@ -2704,6 +2773,28 @@ const styles = StyleSheet.create({
   },
   actionTitleDisabled: {
     color: '#999999',
+  },
+  
+  // Empty activities state styles
+  emptyActivitiesContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+  },
+  emptyActivitiesText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#999',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  emptyActivitiesSubtext: {
+    fontSize: 14,
+    color: '#bbb',
+    marginTop: 6,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 
 });
