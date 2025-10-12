@@ -48,7 +48,7 @@ const ChatBadge = ({
     debugLog('Message count changed', messageCount);
   }, [messageCount]);
 
-  // Fetch ONLY message counts
+  // Fetch ONLY message counts with enhanced tenant filtering and debugging
   const fetchMessageCount = useCallback(async (force = false) => {
     if (!user?.id || !userType) {
       debugLog('No user or userType, resetting count');
@@ -64,29 +64,59 @@ const ChatBadge = ({
       setIsLoading(true);
       debugLog('Fetching message count for user (tenant-aware)', { userId: user.id, userType });
 
-      // Prefer a direct tenant-aware query to avoid stale or cross-tenant counts
+      // Enhanced tenant filtering with better error handling
       let tenantId = null;
       try {
         const { getCachedTenantId } = await import('../utils/tenantHelpers');
         tenantId = getCachedTenantId();
-      } catch (e) {}
+        debugLog('Using tenant filter', tenantId);
+      } catch (e) {
+        debugLog('No tenant filter available');
+      }
 
+      // Build query with proper tenant filtering
       let query = supabase
         .from(TABLES.MESSAGES)
-        .select('id')
+        .select('id, sender_id, tenant_id, sent_at')
         .eq('receiver_id', user.id)
         .eq('is_read', false);
-      if (tenantId) query = query.eq('tenant_id', tenantId);
+      
+      // Apply tenant filter if available
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+        debugLog('Applied tenant filter');
+      } else {
+        debugLog('⚠️ No tenant filter - may show cross-tenant messages');
+      }
 
       const { data, error } = await query;
+      
       if (error) {
+        debugLog('Direct query failed, using fallback service', error);
         // Fallback to service if direct query fails
         const fallback = await universalNotificationService.getUnreadMessageCount(user.id);
         const safeCount = Math.max(0, Number(fallback) || 0);
+        debugLog('Fallback service returned count', safeCount);
         setMessageCount(safeCount);
         if (onCountChange) onCountChange(safeCount);
       } else {
         const safeCount = Math.max(0, data?.length || 0);
+        
+        // Check for potential tenant mismatches (important for data integrity)
+        if (data && data.length > 0 && tenantId) {
+          const crossTenantMessages = data.filter(msg => 
+            msg.tenant_id && msg.tenant_id !== tenantId
+          );
+          
+          if (crossTenantMessages.length > 0) {
+            debugLog('❌ Cross-tenant messages detected', {
+              count: crossTenantMessages.length,
+              totalMessages: data.length
+            });
+          }
+        }
+        
+        debugLog('Message count updated', safeCount);
         setMessageCount(safeCount);
         if (onCountChange) onCountChange(safeCount);
       }
@@ -97,7 +127,7 @@ const ChatBadge = ({
     } finally {
       setIsLoading(false);
     }
-  }, [user?.id, userType, onCountChange]);
+  }, [user?.id, userType, onCountChange, messageCount]);
 
   // Set up real-time subscription for messages only
   useEffect(() => {
@@ -129,12 +159,29 @@ const ChatBadge = ({
     );
 
     // 2) Direct messages channel for instant badge math without a fetch
+    // Enhanced with tenant filtering to prevent cross-tenant updates
     const directChannel = supabase
       .channel(`chat-badge-direct-${user.id}-${Date.now()}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLES.MESSAGES, filter: `receiver_id=eq.${user.id}` }, (payload) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLES.MESSAGES, filter: `receiver_id=eq.${user.id}` }, async (payload) => {
         debugLog('Direct INSERT for messages', payload.new?.id);
-        // Only count as unread if the new row is actually unread (is_read === false)
-        if (payload.new?.is_read === false) {
+        
+        // Enhanced tenant validation for real-time updates
+        let shouldProcess = true;
+        if (payload.new?.tenant_id) {
+          try {
+            const { getCachedTenantId } = await import('../utils/tenantHelpers');
+            const currentTenantId = getCachedTenantId();
+            if (currentTenantId && payload.new.tenant_id !== currentTenantId) {
+              debugLog('❌ Ignoring INSERT - cross-tenant message');
+              shouldProcess = false;
+            }
+          } catch (e) {
+            debugLog('Could not validate tenant for INSERT, processing anyway');
+          }
+        }
+        
+        // Only count as unread if the new row is actually unread (is_read === false) and passes tenant check
+        if (shouldProcess && payload.new?.is_read === false) {
           setMessageCount((prev) => {
             const next = Math.max(0, (prev || 0) + 1);
             if (onCountChange) onCountChange(next);
@@ -142,9 +189,24 @@ const ChatBadge = ({
           });
         }
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLES.MESSAGES, filter: `receiver_id=eq.${user.id}` }, (payload) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLES.MESSAGES, filter: `receiver_id=eq.${user.id}` }, async (payload) => {
+        // Enhanced tenant validation for updates
+        let shouldProcess = true;
+        if (payload.new?.tenant_id) {
+          try {
+            const { getCachedTenantId } = await import('../utils/tenantHelpers');
+            const currentTenantId = getCachedTenantId();
+            if (currentTenantId && payload.new.tenant_id !== currentTenantId) {
+              debugLog('❌ Ignoring UPDATE - cross-tenant message');
+              shouldProcess = false;
+            }
+          } catch (e) {
+            debugLog('Could not validate tenant for UPDATE, processing anyway');
+          }
+        }
+        
         // If a message for me changed from unread->read, decrement
-        if (payload.old?.is_read === false && payload.new?.is_read === true) {
+        if (shouldProcess && payload.old?.is_read === false && payload.new?.is_read === true) {
           debugLog('Direct UPDATE is_read flip -> decrement');
           setMessageCount((prev) => {
             const next = Math.max(0, (prev || 0) - 1);
@@ -153,8 +215,23 @@ const ChatBadge = ({
           });
         }
       })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: TABLES.MESSAGES }, (payload) => {
-        if (payload.old?.receiver_id === user.id && payload.old?.is_read === false) {
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: TABLES.MESSAGES }, async (payload) => {
+        // Enhanced tenant validation for deletes
+        let shouldProcess = true;
+        if (payload.old?.tenant_id) {
+          try {
+            const { getCachedTenantId } = await import('../utils/tenantHelpers');
+            const currentTenantId = getCachedTenantId();
+            if (currentTenantId && payload.old.tenant_id !== currentTenantId) {
+              debugLog('❌ Ignoring DELETE - cross-tenant message');
+              shouldProcess = false;
+            }
+          } catch (e) {
+            debugLog('Could not validate tenant for DELETE, processing anyway');
+          }
+        }
+        
+        if (shouldProcess && payload.old?.receiver_id === user.id && payload.old?.is_read === false) {
           debugLog('Direct DELETE of unread -> decrement');
           setMessageCount((prev) => {
             const next = Math.max(0, (prev || 0) - 1);
