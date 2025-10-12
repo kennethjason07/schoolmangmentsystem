@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -289,6 +289,81 @@ Please contact the administrator to add this role.`
     }, 1000);
   };
 
+  // Disable body scrolling on web
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      // Store original styles
+      const originalBodyStyle = window.getComputedStyle(document.body).overflow;
+      const originalHtmlStyle = window.getComputedStyle(document.documentElement).overflow;
+      
+      // Create and inject CSS to prevent double scrollbars
+      const styleElement = document.createElement('style');
+      styleElement.id = 'login-scroll-fix';
+      styleElement.textContent = `
+        html, body {
+          overflow: hidden !important;
+          height: 100vh !important;
+          max-height: 100vh !important;
+        }
+        
+        #root {
+          overflow: hidden !important;
+          height: 100vh !important;
+          max-height: 100vh !important;
+        }
+        
+        /* Hide all potential scrollbars except our main ScrollView */
+        .css-175oi2r {
+          overflow: hidden !important;
+        }
+        
+        /* Ensure React Native Web containers don't scroll */
+        div[data-focusable="true"] {
+          overflow: visible !important;
+        }
+      `;
+      document.head.appendChild(styleElement);
+      
+      // Disable body scrolling completely
+      document.body.style.overflow = 'hidden';
+      document.body.style.height = '100vh';
+      document.body.style.maxHeight = '100vh';
+      document.documentElement.style.overflow = 'hidden';
+      document.documentElement.style.height = '100vh';
+      document.documentElement.style.maxHeight = '100vh';
+      
+      // Also disable scrolling on the React root container
+      const reactRoot = document.getElementById('root');
+      if (reactRoot) {
+        reactRoot.style.overflow = 'hidden';
+        reactRoot.style.height = '100vh';
+        reactRoot.style.maxHeight = '100vh';
+      }
+      
+      // Re-enable body scrolling when component unmounts
+      return () => {
+        // Remove the injected CSS
+        const styleEl = document.getElementById('login-scroll-fix');
+        if (styleEl) {
+          styleEl.remove();
+        }
+        
+        document.body.style.overflow = originalBodyStyle;
+        document.body.style.height = 'auto';
+        document.body.style.maxHeight = 'none';
+        document.documentElement.style.overflow = originalHtmlStyle;
+        document.documentElement.style.height = 'auto';
+        document.documentElement.style.maxHeight = 'none';
+        
+        if (reactRoot) {
+          reactRoot.style.overflow = 'visible';
+          reactRoot.style.height = 'auto';
+          reactRoot.style.maxHeight = 'none';
+        }
+      };
+    }
+  }, []);
+
   return (
     <View style={styles.mainContainer}>
       {/* Error Popup Modal */}
@@ -334,31 +409,25 @@ Please contact the administrator to add this role.`
         </View>
       </Modal>
 
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <KeyboardAvoidingView 
-          style={styles.container} 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      <LinearGradient
+        colors={['#667eea', '#764ba2']}
+        style={styles.gradient}
+      >
+        <ScrollView 
+          ref={scrollViewRef}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={Platform.OS !== 'web'}
+          scrollEventThrottle={16}
+          onScroll={handleScroll}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#2196F3']}
+            />
+          }
         >
-          <LinearGradient
-            colors={['#667eea', '#764ba2']}
-            style={styles.gradient}
-          >
-            <View style={styles.scrollableContainer}>
-              <ScrollView 
-                ref={scrollViewRef}
-                style={styles.scrollView}
-                contentContainerStyle={styles.scrollContent}
-                showsVerticalScrollIndicator={true}
-                scrollEventThrottle={16}
-                onScroll={handleScroll}
-                refreshControl={
-                  <RefreshControl
-                    refreshing={refreshing}
-                    onRefresh={onRefresh}
-                    colors={['#2196F3']}
-                  />
-                }
-              >
           <Animatable.View 
             style={styles.logoContainer}
             animation="fadeInDown"
@@ -638,10 +707,7 @@ Please contact the administrator to add this role.`
           {/* Extra bottom space for better scrolling */}
           <View style={styles.bottomSpacing} />
         </ScrollView>
-      </View>
       </LinearGradient>
-    </KeyboardAvoidingView>
-  </SafeAreaView>
   
   {/* Scroll to Top Button - Web Only */}
   {Platform.OS === 'web' && (
@@ -666,26 +732,30 @@ const styles = StyleSheet.create({
       height: '100vh',           // ✅ CRITICAL: Fixed viewport height
       maxHeight: '100vh',        // ✅ CRITICAL: Prevent expansion
       overflow: 'hidden',        // ✅ CRITICAL: Hide overflow on main container
-      position: 'relative',      // ✅ CRITICAL: For absolute positioning
+      position: 'fixed',         // ✅ CRITICAL: Fixed positioning to prevent body scroll
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      width: '100vw',            // ✅ CRITICAL: Full viewport width
     }),
   },
   safeArea: {
     flex: 1,
     backgroundColor: '#667eea',
+    ...(Platform.OS === 'web' && {
+      width: '100%',
+      height: '100%',
+    }),
   },
   container: {
     flex: 1,
   },
   gradient: {
     flex: 1,
-  },
-  // 🎯 CRITICAL: Scrollable area with calculated height
-  scrollableContainer: {
-    flex: 1,
     ...(Platform.OS === 'web' && {
-      height: '100%',                    // ✅ CRITICAL: Full available height
-      maxHeight: '100%',                 // ✅ CRITICAL: Prevent expansion
-      overflow: 'hidden',                // ✅ CRITICAL: Control overflow
+      width: '100%',
+      height: '100%',
     }),
   },
   // 🎯 CRITICAL: ScrollView with explicit overflow
@@ -700,6 +770,9 @@ const styles = StyleSheet.create({
       scrollBehavior: 'smooth',         // ✅ GOOD: Smooth animations
       scrollbarWidth: 'thin',           // ✅ GOOD: Thin scrollbars
       scrollbarColor: '#2196F3 #f5f5f7', // ✅ GOOD: Custom scrollbar colors
+      // Ensure we're the only scrolling container
+      position: 'relative',
+      zIndex: 1,
     }),
   },
   // 🎯 CRITICAL: Content container properties
