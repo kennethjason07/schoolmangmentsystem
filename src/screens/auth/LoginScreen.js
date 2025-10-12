@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   Image,
   Modal,
   Animated,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -44,6 +45,11 @@ const LoginScreen = ({ navigation }) => {
   const [loginError, setLoginError] = useState(''); // New state for login errors
   const [showErrorPopup, setShowErrorPopup] = useState(false); // State for popup visibility
   const [logoError, setLogoError] = useState(false); // Try to load PNG logo first
+  // Scroll-related state
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const scrollViewRef = useRef(null);
+  const scrollTopOpacity = useRef(new Animated.Value(0)).current;
   const { signIn } = useAuth();
   // 🚀 ENHANCED_TENANT_SYSTEM: Use tenant access hook
   const { isReady, isLoading: tenantLoading, error: tenantError } = useTenantAccess();
@@ -252,8 +258,39 @@ Please contact the administrator to add this role.`
     setLoginError('');
   };
 
+  // Scroll event handler
+  const handleScroll = (event) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    const shouldShow = offsetY > 150;
+    
+    if (shouldShow !== showScrollTop) {
+      setShowScrollTop(shouldShow);
+      Animated.timing(scrollTopOpacity, {
+        toValue: shouldShow ? 1 : 0,
+        duration: 300,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    }
+  };
+
+  // Scroll to top function
+  const scrollToTop = () => {
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({ y: 0, animated: true });
+    }
+  };
+
+  // Pull to refresh handler
+  const onRefresh = () => {
+    setRefreshing(true);
+    // Simulate refresh delay
+    setTimeout(() => {
+      setRefreshing(false);
+    }, 1000);
+  };
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <View style={styles.mainContainer}>
       {/* Error Popup Modal */}
       <Modal
         animationType="fade"
@@ -297,20 +334,31 @@ Please contact the administrator to add this role.`
         </View>
       </Modal>
 
-      <KeyboardAvoidingView 
-        style={styles.container} 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <LinearGradient
-          colors={['#667eea', '#764ba2']}
-          style={styles.gradient}
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <KeyboardAvoidingView 
+          style={styles.container} 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
-        <ScrollView 
-          contentContainerStyle={styles.scrollContent}
-          refreshControl={
-            <RefreshControl refreshing={isLoading} onRefresh={() => {}} />
-          }
-        >
+          <LinearGradient
+            colors={['#667eea', '#764ba2']}
+            style={styles.gradient}
+          >
+            <View style={styles.scrollableContainer}>
+              <ScrollView 
+                ref={scrollViewRef}
+                style={styles.scrollView}
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={true}
+                scrollEventThrottle={16}
+                onScroll={handleScroll}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    colors={['#2196F3']}
+                  />
+                }
+              >
           <Animatable.View 
             style={styles.logoContainer}
             animation="fadeInDown"
@@ -586,14 +634,41 @@ Please contact the administrator to add this role.`
               </View>
             </View>
           </Animatable.View>
+          
+          {/* Extra bottom space for better scrolling */}
+          <View style={styles.bottomSpacing} />
         </ScrollView>
-        </LinearGradient>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </View>
+      </LinearGradient>
+    </KeyboardAvoidingView>
+  </SafeAreaView>
+  
+  {/* Scroll to Top Button - Web Only */}
+  {Platform.OS === 'web' && (
+    <Animated.View 
+      style={[styles.scrollToTopButton, { opacity: scrollTopOpacity }]}
+    >
+      <TouchableOpacity style={styles.scrollToTopInner} onPress={scrollToTop}>
+        <Ionicons name="chevron-up" size={24} color="#fff" />
+      </TouchableOpacity>
+    </Animated.View>
+  )}
+</View>
   );
 };
 
 const styles = StyleSheet.create({
+  // 🎯 CRITICAL: Main container with fixed viewport height
+  mainContainer: {
+    flex: 1,
+    backgroundColor: '#667eea',
+    ...(Platform.OS === 'web' && {
+      height: '100vh',           // ✅ CRITICAL: Fixed viewport height
+      maxHeight: '100vh',        // ✅ CRITICAL: Prevent expansion
+      overflow: 'hidden',        // ✅ CRITICAL: Hide overflow on main container
+      position: 'relative',      // ✅ CRITICAL: For absolute positioning
+    }),
+  },
   safeArea: {
     flex: 1,
     backgroundColor: '#667eea',
@@ -604,10 +679,35 @@ const styles = StyleSheet.create({
   gradient: {
     flex: 1,
   },
+  // 🎯 CRITICAL: Scrollable area with calculated height
+  scrollableContainer: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: '100%',                    // ✅ CRITICAL: Full available height
+      maxHeight: '100%',                 // ✅ CRITICAL: Prevent expansion
+      overflow: 'hidden',                // ✅ CRITICAL: Control overflow
+    }),
+  },
+  // 🎯 CRITICAL: ScrollView with explicit overflow
+  scrollView: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: '100%',                    // ✅ CRITICAL: Full height
+      maxHeight: '100%',                 // ✅ CRITICAL: Prevent expansion
+      overflowY: 'scroll',              // ✅ CRITICAL: Enable vertical scroll
+      overflowX: 'hidden',              // ✅ CRITICAL: Disable horizontal scroll
+      WebkitOverflowScrolling: 'touch', // ✅ GOOD: Smooth iOS scrolling
+      scrollBehavior: 'smooth',         // ✅ GOOD: Smooth animations
+      scrollbarWidth: 'thin',           // ✅ GOOD: Thin scrollbars
+      scrollbarColor: '#2196F3 #f5f5f7', // ✅ GOOD: Custom scrollbar colors
+    }),
+  },
+  // 🎯 CRITICAL: Content container properties
   scrollContent: {
-    flexGrow: 1,
+    flexGrow: 1,                    // ✅ CRITICAL: Allow content to grow
     justifyContent: 'center',
     padding: 20,
+    paddingBottom: 100,             // ✅ IMPORTANT: Extra bottom padding
   },
   logoContainer: {
     alignItems: 'center',
@@ -948,6 +1048,49 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  // 🎯 GOOD TO HAVE: Bottom spacing for better scroll experience
+  bottomSpacing: {
+    height: 100,                    // ✅ IMPORTANT: Extra space at bottom
+  },
+  // 🎯 Scroll-to-top button styles
+  scrollToTopButton: {
+    position: 'absolute',
+    bottom: 30,
+    right: 30,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#1976d2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 8,
+    zIndex: 1000,
+    ...(Platform.OS === 'web' ? {
+      cursor: 'pointer',
+      boxShadow: '0 4px 12px rgba(25, 118, 210, 0.4)',
+      transition: 'all 0.3s ease-in-out',
+      '&:hover': {
+        backgroundColor: '#1565c0',
+        transform: 'translateY(-2px)',
+        boxShadow: '0 6px 16px rgba(25, 118, 210, 0.5)',
+      },
+    } : {
+      shadowColor: '#000',
+      shadowOffset: {
+        width: 0,
+        height: 4,
+      },
+      shadowOpacity: 0.3,
+      shadowRadius: 6,
+    }),
+  },
+  scrollToTopInner: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 25,
   },
 });
 
