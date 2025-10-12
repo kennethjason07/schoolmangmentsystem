@@ -1472,18 +1472,26 @@ const TeacherChat = () => {
           
           // 📱 Send push notification after message is confirmed
           try {
-            const recipientType = selectedContact.students ? 'parent' : 'student';
-            chatPushNotificationService.sendTeacherMessageNotification({
-              teacherId: user.id,
-              recipientId: contactUserId,
-              recipientType: recipientType,
-              message: messageText,
-              messageType: 'text',
-              studentId: studentId
-            }).catch(error => {
-              console.warn('Failed to send push notification:', error);
-              // Don't throw error - message was already sent successfully
-            });
+            if (selectedContact && user?.id && contactUserId) {
+              const recipientType = selectedContact.students ? 'parent' : 'student';
+              chatPushNotificationService.sendTeacherMessageNotification({
+                teacherId: user.id,
+                recipientId: contactUserId,
+                recipientType: recipientType,
+                message: messageText,
+                messageType: 'text',
+                studentId: studentId
+              }).catch(error => {
+                console.warn('Failed to send push notification:', error);
+                // Don't throw error - message was already sent successfully
+              });
+            } else {
+              console.warn('Skipping push notification - missing required data', {
+                selectedContact: !!selectedContact,
+                userId: !!user?.id,
+                contactUserId: !!contactUserId
+              });
+            }
           } catch (error) {
             console.warn('Error in push notification setup:', error);
           }

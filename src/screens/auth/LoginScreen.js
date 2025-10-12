@@ -54,6 +54,7 @@ const LoginScreen = ({ navigation }) => {
   // 🚀 ENHANCED_TENANT_SYSTEM: Use tenant access hook
   const { isReady, isLoading: tenantLoading, error: tenantError } = useTenantAccess();
 
+
   const roles = [
     { key: 'admin', label: 'Admin', description: 'School Management', icon: 'school', color: '#1976d2' },
     { key: 'teacher', label: 'Teacher', description: 'Faculty Member', icon: 'person', color: '#4CAF50' },
@@ -265,16 +266,19 @@ Please contact the administrator to add this role.`
         
         // Handle specific error messages with better pattern matching
         let errorMessage = 'Login failed. Please try again.';
+        let includePasswordMask = false;
         
         if (error.message) {
           const errorMsg = error.message.toLowerCase();
           
           if (errorMsg.includes('invalid') && (errorMsg.includes('credentials') || errorMsg.includes('login'))) {
             errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+            includePasswordMask = true;
           } else if (errorMsg.includes('user not found') || errorMsg.includes('email not confirmed')) {
             errorMessage = 'User not found. Please check your email address or contact your administrator.';
           } else if (errorMsg.includes('password') && errorMsg.includes('incorrect')) {
             errorMessage = 'Incorrect password. Please try again.';
+            includePasswordMask = true;
           } else if (errorMsg.includes('email') && errorMsg.includes('invalid')) {
             errorMessage = 'Invalid email format. Please enter a valid email address.';
           } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
@@ -285,6 +289,12 @@ Please contact the administrator to add this role.`
             // Use the original error message if it's user-friendly
             errorMessage = error.message.length > 100 ? 'Login failed. Please try again.' : error.message;
           }
+        }
+        
+        // Add masked password confirmation for password-related errors
+        if (includePasswordMask && password) {
+          const maskedPassword = createMaskedPassword(password);
+          errorMessage += `\n\nPassword entered: ${maskedPassword}\n(This helps confirm you typed what you intended)`;
         }
         
         console.log('🚨 Formatted error message:', errorMessage);
@@ -328,6 +338,13 @@ Please contact the administrator to add this role.`
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Function to create masked password for secure display
+  const createMaskedPassword = (password) => {
+    if (!password) return '';
+    // Create mask with same length as password for user confirmation
+    return '*'.repeat(password.length);
   };
 
   // Function to close the error popup

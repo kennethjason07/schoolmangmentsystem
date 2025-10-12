@@ -39,7 +39,10 @@ class ChatPushNotificationService {
    */
   async getUserInfo(userId, tenantId) {
     try {
-      if (!userId || !tenantId) return null;
+      if (!userId || !tenantId) {
+        console.warn('Missing userId or tenantId for getUserInfo');
+        return null;
+      }
 
       const { data: userInfo, error } = await createTenantQuery(
         tenantId,
@@ -54,11 +57,18 @@ class ChatPushNotificationService {
 
       const userRecord = Array.isArray(userInfo) ? userInfo[0] : userInfo;
       
-      // Determine user type and name
+      // Safety check for userRecord
+      if (!userRecord) {
+        console.warn(`User record is null for ${userId}`);
+        return null;
+      }
+      
+      // Determine user type and name with null safety
       let userType = 'user';
-      let displayName = userRecord.full_name || userRecord.email;
+      let displayName = userRecord.full_name || userRecord.email || 'Unknown User';
 
-      if (userRecord.roles?.role_name) {
+      // Safe check for roles with null safety
+      if (userRecord.roles && userRecord.roles.role_name) {
         userType = userRecord.roles.role_name.toLowerCase();
       } else if (userRecord.linked_teacher_id) {
         userType = 'teacher';
@@ -68,7 +78,7 @@ class ChatPushNotificationService {
         userType = 'student';
       }
 
-      // If parent, get student name for better context
+      // If parent, get student name for better context with null safety
       if (userType === 'parent' && userRecord.linked_parent_of) {
         try {
           const { data: studentInfo } = await createTenantQuery(
@@ -79,19 +89,22 @@ class ChatPushNotificationService {
           
           if (studentInfo) {
             const student = Array.isArray(studentInfo) ? studentInfo[0] : studentInfo;
-            displayName = `${displayName} (${student.name}'s parent)`;
+            if (student && student.name) {
+              displayName = `${displayName} (${student.name}'s parent)`;
+            }
           }
         } catch (err) {
           // Ignore error and use regular name
+          console.warn('Could not fetch student name for parent context:', err);
         }
       }
 
       return {
         id: userId,
         name: displayName,
-        email: userRecord.email,
+        email: userRecord.email || 'no-email@example.com',
         type: userType,
-        rawRole: userRecord.roles?.role_name
+        rawRole: userRecord.roles?.role_name || null
       };
     } catch (error) {
       console.error('Error getting user info:', error);
@@ -174,7 +187,21 @@ class ChatPushNotificationService {
       ]);
 
       if (!senderInfo || !receiverInfo) {
-        console.warn('Could not get sender or receiver information');
+        console.warn('Could not get sender or receiver information', {
+          senderInfo: senderInfo ? 'found' : 'null',
+          receiverInfo: receiverInfo ? 'found' : 'null',
+          senderId,
+          receiverId
+        });
+        return false;
+      }
+
+      // Additional safety checks
+      if (!senderInfo.name || !receiverInfo.type) {
+        console.warn('Sender or receiver missing required properties', {
+          senderName: senderInfo.name,
+          receiverType: receiverInfo.type
+        });
         return false;
       }
 
@@ -187,7 +214,7 @@ class ChatPushNotificationService {
 
       // Prepare notification title and body
       const title = `New message from ${senderInfo.name}`;
-      let body = message;
+      let body = message || '';
 
       // Handle different message types
       if (messageType === 'image') {
