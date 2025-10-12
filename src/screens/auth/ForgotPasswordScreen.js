@@ -24,7 +24,8 @@ const ForgotPasswordScreen = ({ navigation }) => {
 
   // Validate email
   const validateEmail = (email) => {
-    const emailRegex = /^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/;
+    // Improved regex to handle more complex email formats including plus signs and dots
+    const emailRegex = /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
     if (!email) {
       setEmailError('Email is required');
       return false;
@@ -68,7 +69,9 @@ const ForgotPasswordScreen = ({ navigation }) => {
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/reset-password`,
+        redirectTo: Platform.OS === 'web' 
+          ? `${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'}/auth/reset-password`
+          : 'schoolmanagement://reset-password', // Deep link for mobile app
       });
 
       if (error) throw error;

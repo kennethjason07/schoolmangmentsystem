@@ -69,7 +69,7 @@ const ManageStudents = () => {
     nationality: 'Indian',
     gender: 'Male',
     religion: '',
-    caste: 'OC',
+    caste: 'GENERAL',
     address: '',
     pin_code: '',
     blood_group: '',
@@ -655,7 +655,7 @@ const ManageStudents = () => {
       nationality: 'Indian',
       gender: 'Male',
       religion: '',
-      caste: 'OC',
+      caste: 'GENERAL',
       address: '',
       pin_code: '',
       blood_group: '',
@@ -810,7 +810,7 @@ const ManageStudents = () => {
         nationality: form.nationality,
         gender: form.gender,
         religion: form.religion || null,
-        caste: form.caste,
+        caste: mapCasteForDatabase(form.caste),
         address: form.address || null,
         pin_code: form.pin_code || null,
         blood_group: form.blood_group || null,
@@ -1230,7 +1230,7 @@ const ManageStudents = () => {
       nationality: student.nationality || 'Indian',
       gender: student.gender || 'Male',
       religion: student.religion || '',
-      caste: student.caste || 'OC',
+      caste: mapCasteFromDatabase(student.caste) || 'GENERAL',
       address: student.address || '',
       pin_code: student.pin_code || '',
       blood_group: student.blood_group || '',
@@ -1335,7 +1335,7 @@ const ManageStudents = () => {
           nationality: form.nationality,
           gender: form.gender,
           religion: form.religion || null,
-          caste: form.caste,
+          caste: mapCasteForDatabase(form.caste),
           address: form.address || null,
           pin_code: form.pin_code || null,
           blood_group: form.blood_group || null,
@@ -1616,8 +1616,31 @@ const ManageStudents = () => {
   // Gender options
   const genderOptions = ['All', 'Male', 'Female'];
 
-  // Caste options
-  const casteOptions = ['OC', 'BC', 'SC', 'ST', 'Other'];
+  // Caste options for frontend display
+  const casteOptions = ['SC', 'ST', 'OBC', 'GENERAL'];
+  
+  // Map frontend caste values to database values (to match current DB constraint)
+  const mapCasteForDatabase = (frontendCaste) => {
+    const mapping = {
+      'GENERAL': 'Other',  // GENERAL maps to 'Other' (allowed in current DB)
+      'OBC': 'OC',         // OBC maps to 'OC' (allowed in current DB)
+      'SC': 'SC',          // SC stays the same
+      'ST': 'ST'           // ST stays the same
+    };
+    return mapping[frontendCaste] || frontendCaste;
+  };
+  
+  // Map database caste values to frontend values
+  const mapCasteFromDatabase = (dbCaste) => {
+    const mapping = {
+      'OC': 'OBC',         // DB 'OC' shows as 'OBC' in frontend
+      'BC': 'OBC',         // DB 'BC' shows as 'OBC' in frontend
+      'Other': 'GENERAL',  // DB 'Other' shows as 'GENERAL' in frontend
+      'SC': 'SC',          // SC stays the same
+      'ST': 'ST'           // ST stays the same
+    };
+    return mapping[dbCaste] || dbCaste;
+  };
 
   // Behaviour options
   const behaviourOptions = ['Mild', 'Normal', 'Hyperactive'];

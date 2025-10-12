@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,9 @@ import {
   ActivityIndicator,
   Image,
   Dimensions,
-  Platform
+  Platform,
+  RefreshControl,
+  Animated
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -24,6 +26,9 @@ import { setUploadInProgress } from '../../utils/AuthContext';
 const { width } = Dimensions.get('window');
 
 const PhotoUpload = ({ navigation }) => {
+  // Refs for scroll functionality
+  const scrollViewRef = useRef(null);
+  
   // States
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
@@ -32,9 +37,48 @@ const PhotoUpload = ({ navigation }) => {
   const [photoMappings, setPhotoMappings] = useState({});
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  
+  // Scroll to top button states
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const scrollTopOpacity = useRef(new Animated.Value(0)).current;
 
   // Tenant access
   const { getTenantId, isReady, tenantName } = useTenantAccess();
+  
+  // Scroll functionality
+  const handleScroll = (event) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    const shouldShow = offsetY > 150;
+    
+    if (shouldShow !== showScrollTop) {
+      setShowScrollTop(shouldShow);
+      Animated.timing(scrollTopOpacity, {
+        toValue: shouldShow ? 1 : 0,
+        duration: 300,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    }
+  };
+  
+  const scrollToTop = () => {
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({ y: 0, animated: true });
+    }
+  };
+  
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      if (selectedClass) {
+        await loadStudents();
+      }
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   // Statistics
   const totalPhotos = selectedPhotos.length;
@@ -110,12 +154,34 @@ const PhotoUpload = ({ navigation }) => {
       });
 
       if (!result.canceled && result.assets) {
-        const newPhotos = result.assets.map(asset => ({
-          uri: asset.uri,
-          name: asset.name,
-          size: asset.size,
-          type: asset.mimeType || 'image/jpeg'
-        }));
+        const newPhotos = result.assets.map(asset => {
+          console.log('📦 [WEB DEBUG] Processing asset:', { name: asset.name, uri: typeof asset.uri, hasFile: !!asset.file });
+          
+          let fileUri, fileSize, fileType, fileObject = null;
+          
+          if (Platform.OS === 'web' && asset.file) {
+            // For web, create a blob URL for consistent string-based mapping
+            fileUri = URL.createObjectURL(asset.file);
+            fileSize = asset.file.size;
+            fileType = asset.file.type;
+            fileObject = asset.file; // Store the actual file object for upload
+            console.log('📦 [WEB DEBUG] Created blob URL for', asset.name, '- uri:', fileUri, 'size:', fileSize, 'type:', fileType);
+          } else {
+            // Mobile or web fallback - use the provided URI
+            fileUri = asset.uri;
+            fileSize = asset.size;
+            fileType = asset.mimeType || 'image/jpeg';
+            console.log('📦 [MOBILE DEBUG] Using provided URI for', asset.name, '- uri:', fileUri);
+          }
+          
+          return {
+            uri: fileUri,        // String URI for mapping and display
+            name: asset.name,
+            size: fileSize,
+            type: fileType,
+            webFileObject: fileObject // Store original File object for web uploads
+          };
+        });
 
         // Filter out files that are too large (max 5MB)
         const validPhotos = newPhotos.filter(photo => {
@@ -233,6 +299,12 @@ const PhotoUpload = ({ navigation }) => {
 
   // Remove photo
   const removePhoto = (photoUri) => {
+    // Clean up blob URL if it's a web blob URL
+    if (Platform.OS === 'web' && photoUri.startsWith('blob:')) {
+      URL.revokeObjectURL(photoUri);
+      console.log('🧹 Cleaned up blob URL:', photoUri);
+    }
+    
     setSelectedPhotos(prev => prev.filter(photo => photo.uri !== photoUri));
     setPhotoMappings(prev => {
       const newMappings = { ...prev };
@@ -241,41 +313,6 @@ const PhotoUpload = ({ navigation }) => {
     });
   };
 
-  // Test bucket access (for debugging)
-  const testBucketAccess = async () => {
-    try {
-      console.log('🧪 Testing bucket access...');
-      
-      // Create a small test file
-      const testData = new Blob(['test'], { type: 'text/plain' });
-      const testFileName = `test-${Date.now()}.txt`;
-      
-      // Try to upload
-      const { data, error } = await supabase.storage
-        .from('student-photos')
-        .upload(testFileName, testData);
-      
-      if (error) {
-        console.error('❌ Bucket test failed:', error);
-        Alert.alert('Bucket Test Failed', error.message);
-        return;
-      }
-      
-      console.log('✅ Bucket upload successful:', data);
-      
-      // Clean up test file
-      await supabase.storage
-        .from('student-photos')
-        .remove([testFileName]);
-      
-      console.log('✅ Test file cleaned up');
-      Alert.alert('Bucket Test Passed', 'Storage bucket is accessible and working correctly!');
-      
-    } catch (error) {
-      console.error('❌ Bucket test exception:', error);
-      Alert.alert('Bucket Test Error', error.message || 'Unknown error occurred');
-    }
-  };
 
   // Upload all mapped photos
   const uploadPhotos = async () => {
@@ -285,15 +322,29 @@ const PhotoUpload = ({ navigation }) => {
       Alert.alert('No Photos Mapped', 'Please map at least one photo to a student before uploading.');
       return;
     }
-
-    Alert.alert(
-      'Upload Photos',
-      `Upload ${mappedPhotoUris.length} photos to students?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Upload', onPress: performUpload }
-      ]
-    );
+    
+    // For web, use confirm() which is more reliable, for mobile use Alert.alert
+    if (Platform.OS === 'web') {
+      const confirmed = confirm(`Upload ${mappedPhotoUris.length} photos to students?`);
+      if (confirmed) {
+        performUpload();
+      }
+    } else {
+      Alert.alert(
+        'Upload Photos',
+        `Upload ${mappedPhotoUris.length} photos to students?`,
+        [
+          { 
+            text: 'Cancel', 
+            style: 'cancel'
+          },
+          { 
+            text: 'Upload', 
+            onPress: () => performUpload()
+          }
+        ]
+      );
+    }
   };
 
   // Perform the actual upload
@@ -302,8 +353,13 @@ const PhotoUpload = ({ navigation }) => {
     setUploadInProgress(true); // Notify auth system that upload is starting
     
     try {
+      // Validate tenant access before starting upload
+      const tenantId = getTenantId();
+      if (!tenantId) {
+        throw new Error('Unable to determine tenant ID. Please refresh the page and try again.');
+      }
+      
       const mappedPhotoUris = Object.keys(photoMappings).filter(uri => photoMappings[uri] !== null);
-      console.log('🚀 Starting upload for', mappedPhotoUris.length, 'photos');
       
       let uploadedCount = 0;
       let failedCount = 0;
@@ -315,8 +371,6 @@ const PhotoUpload = ({ navigation }) => {
         const photo = selectedPhotos.find(p => p.uri === photoUri);
         
         try {
-          console.log(`📸 Uploading photo ${i + 1}/${mappedPhotoUris.length}: ${photo.name} for ${student.name}`);
-          
           // Create unique filename: tenantId/studentId_admissionNo_timestamp.jpg
           const timestamp = Date.now();
           const fileExtension = photo.name.split('.').pop().toLowerCase();
@@ -326,9 +380,20 @@ const PhotoUpload = ({ navigation }) => {
           let fileData;
           
           if (Platform.OS === 'web') {
-            // Web platform: use blob
-            const response = await fetch(photo.uri);
-            fileData = await response.blob();
+            // Web platform: Optimized file processing
+            if (photo.webFileObject) {
+              // Use the original File object stored during selection (fastest)
+              fileData = photo.webFileObject;
+            } else if (typeof photo.uri === 'string') {
+              // Fallback: fetch the blob URL
+              const response = await fetch(photo.uri);
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              }
+              fileData = await response.blob();
+            } else {
+              throw new Error('No valid file data available for web upload');
+            }
           } else {
             // React Native: Use fetch approach as primary method (it's working reliably)
             try {
@@ -367,26 +432,32 @@ const PhotoUpload = ({ navigation }) => {
             }
           }
           
-          console.log(`📁 Uploading to storage path: ${fileName}`);
-          console.log(`📦 File data info: size=${fileData.length}, type=${photo.type}`);
-          
-          // Upload to Supabase Storage with comprehensive error handling
+          // Upload to Supabase Storage
           let uploadData = null;
           let uploadError = null;
           
           try {
+            // Determine the correct content type for upload
+            let contentType;
+            if (Platform.OS === 'web') {
+              // For web, prioritize the File/Blob type, then fall back to photo.type
+              contentType = (fileData instanceof File || fileData instanceof Blob) ? 
+                           fileData.type || photo.type || 'image/jpeg' : 
+                           photo.type || 'image/jpeg';
+            } else {
+              contentType = photo.type || 'image/jpeg';
+            }
+            
             const uploadResult = await supabase.storage
               .from('student-photos')
               .upload(fileName, fileData, {
-                contentType: photo.type || 'image/jpeg',
+                contentType: contentType,
                 cacheControl: '3600',
                 upsert: false // Don't overwrite existing files
               });
             
             uploadData = uploadResult.data;
             uploadError = uploadResult.error;
-            
-            console.log('🚀 Supabase upload result:', { uploadData, uploadError });
             
           } catch (uploadException) {
             console.error('❌ Supabase upload threw exception:', uploadException);
@@ -402,29 +473,37 @@ const PhotoUpload = ({ navigation }) => {
             throw new Error('Upload returned no data');
           }
           
-          console.log('✅ Upload successful:', uploadData);
-          
           // Get public URL
           const { data: { publicUrl } } = supabase.storage
             .from('student-photos')
             .getPublicUrl(fileName);
           
-          console.log('🔗 Public URL:', publicUrl);
-          
           // Update student record with photo URL
-          const { error: updateError } = await supabase
-            .from('students')
-            .update({ photo_url: publicUrl })
-            .eq('id', student.id)
-            .eq('tenant_id', getTenantId());
-          
-          if (updateError) {
-            console.error('❌ Failed to update student record:', updateError);
-            errors.push(`Failed to update ${student.name}: ${updateError.message}`);
+          try {
+            const { error: updateError } = await supabase
+              .from('students')
+              .update({ photo_url: publicUrl })
+              .eq('id', student.id)
+              .eq('tenant_id', getTenantId());
+            
+            if (updateError) {
+              console.error('❌ Failed to update student record:', updateError);
+              
+              // Handle specific timeout errors
+              if (updateError.message && updateError.message.includes('timeout')) {
+                errors.push(`${student.name}: Database timeout - photo uploaded but record update failed`);
+                console.log('⚠️ Photo uploaded successfully but database update timed out for', student.name);
+              } else {
+                errors.push(`Failed to update ${student.name}: ${updateError.message}`);
+              }
+              failedCount++;
+            } else {
+              uploadedCount++;
+            }
+          } catch (dbError) {
+            console.error('❌ Database operation failed:', dbError);
+            errors.push(`${student.name}: Database error - ${dbError.message}`);
             failedCount++;
-          } else {
-            console.log('✅ Student record updated successfully');
-            uploadedCount++;
           }
           
         } catch (error) {
@@ -440,25 +519,49 @@ const PhotoUpload = ({ navigation }) => {
       const fullMessage = successMessage + errorMessage;
       
       if (errors.length > 0) {
-        console.log('❌ Upload errors:', errors);
+        console.log('Upload errors:', errors);
       }
       
-      Alert.alert(
-        uploadedCount > 0 ? 'Upload Complete' : 'Upload Failed', 
-        fullMessage,
-        [
-          {
-            text: 'OK', 
-            onPress: () => {
-              if (uploadedCount > 0) {
-                setSelectedPhotos([]);
-                setPhotoMappings({});
-                loadStudents(); // Refresh to show new photos
+      // Auto-cleanup and refresh (like mobile version)
+      const performCleanupAndRefresh = () => {
+        if (uploadedCount > 0) {
+          // Clean up blob URLs before clearing photos
+          if (Platform.OS === 'web') {
+            selectedPhotos.forEach(photo => {
+              if (photo.uri && photo.uri.startsWith('blob:')) {
+                URL.revokeObjectURL(photo.uri);
+              }
+            });
+          }
+          
+          setSelectedPhotos([]);
+          setPhotoMappings({});
+          loadStudents(); // Refresh to show new photos
+        }
+      };
+      
+      // Show result dialog and perform cleanup immediately
+      if (Platform.OS === 'web') {
+        // For web, use alert() for faster response
+        alert(fullMessage);
+        // Immediate cleanup and refresh for web
+        performCleanupAndRefresh();
+      } else {
+        // For mobile, use Alert.alert as before
+        Alert.alert(
+          uploadedCount > 0 ? '\u2705 Upload Complete' : '\u274c Upload Failed', 
+          fullMessage,
+          [
+            {
+              text: 'OK', 
+              onPress: () => {
+                console.log('\ud83c\udf86 [RESULT] User clicked OK on result dialog');
+                performCleanupAndRefresh();
               }
             }
-          }
-        ]
-      );
+          ]
+        );
+      }
       
     } catch (error) {
       console.error('❌ Upload process failed:', error);
@@ -549,7 +652,7 @@ const PhotoUpload = ({ navigation }) => {
 
   if (loading && classes.length === 0) {
     return (
-      <View style={styles.container}>
+      <View style={styles.mainContainer}>
         <Header title="Photo Upload" showBack={true} onBack={() => navigation.goBack()} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2196F3" />
@@ -560,10 +663,26 @@ const PhotoUpload = ({ navigation }) => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={styles.mainContainer}>
       <Header title="Photo Upload" showBack={true} onBack={() => navigation.goBack()} />
       
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <View style={styles.scrollableContainer}>
+        <ScrollView 
+          ref={scrollViewRef}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={true}
+          scrollEventThrottle={16}
+          onScroll={handleScroll}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#2196F3']}
+              tintColor={"#2196F3"}
+            />
+          }
+        >
         {/* Class Selection */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Select Class</Text>
@@ -590,17 +709,10 @@ const PhotoUpload = ({ navigation }) => {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Upload Photos</Text>
             
-            <View style={styles.buttonRow}>
-              <TouchableOpacity style={styles.uploadButton} onPress={selectPhotos}>
-                <Ionicons name="camera" size={24} color="#2196F3" />
-                <Text style={styles.uploadButtonText}>Select JPEG Photos</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.testButton} onPress={testBucketAccess}>
-                <Ionicons name="flask" size={20} color="#FF9800" />
-                <Text style={styles.testButtonText}>Test Bucket</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity style={styles.uploadButton} onPress={selectPhotos}>
+              <Ionicons name="camera" size={24} color="#2196F3" />
+              <Text style={styles.uploadButtonText}>Select JPEG Photos</Text>
+            </TouchableOpacity>
 
             {/* Statistics */}
             <View style={styles.statsContainer}>
@@ -653,20 +765,75 @@ const PhotoUpload = ({ navigation }) => {
           </View>
         )}
 
-        <View style={styles.bottomSpacer} />
-      </ScrollView>
+          {/* Extra bottom space for better scrolling */}
+          <View style={styles.bottomSpacing} />
+        </ScrollView>
+        
+        {/* Scroll to Top Button (Web only) */}
+        {Platform.OS === 'web' && (
+          <Animated.View 
+            style={[styles.scrollToTopButton, { opacity: scrollTopOpacity }]}
+            pointerEvents={showScrollTop ? 'auto' : 'none'}
+          >
+            <TouchableOpacity style={styles.scrollToTopInner} onPress={scrollToTop}>
+              <Ionicons name="chevron-up" size={24} color="#fff" />
+            </TouchableOpacity>
+          </Animated.View>
+        )}
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  // 🎯 CRITICAL: Main container with fixed viewport height
+  mainContainer: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f5f5f7',
+    ...(Platform.OS === 'web' && {
+      height: '100vh',           // ✅ CRITICAL: Fixed viewport height
+      maxHeight: '100vh',        // ✅ CRITICAL: Prevent expansion
+      overflow: 'hidden',        // ✅ CRITICAL: Hide overflow on main container
+      position: 'relative',      // ✅ CRITICAL: For absolute positioning
+    }),
   },
-  content: {
+  
+  // 🎯 CRITICAL: Scrollable area with calculated height
+  scrollableContainer: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: 'calc(100vh - 60px)',      // ✅ CRITICAL: Account for header (60px)
+      maxHeight: 'calc(100vh - 60px)',   // ✅ CRITICAL: Prevent expansion
+      overflow: 'hidden',                // ✅ CRITICAL: Control overflow
+    }),
   },
+  
+  // 🎯 CRITICAL: ScrollView with explicit overflow
+  scrollView: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: '100%',                    // ✅ CRITICAL: Full height
+      maxHeight: '100%',                 // ✅ CRITICAL: Prevent expansion
+      overflowY: 'scroll',              // ✅ CRITICAL: Enable vertical scroll
+      overflowX: 'hidden',              // ✅ CRITICAL: Disable horizontal scroll
+      WebkitOverflowScrolling: 'touch', // ✅ GOOD: Smooth iOS scrolling
+      scrollBehavior: 'smooth',         // ✅ GOOD: Smooth animations
+      scrollbarWidth: 'thin',           // ✅ GOOD: Thin scrollbars
+      scrollbarColor: '#2196F3 #f5f5f7', // ✅ GOOD: Custom scrollbar colors
+    }),
+  },
+  
+  // 🎯 CRITICAL: Content container properties
+  scrollContent: {
+    flexGrow: 1,                    // ✅ CRITICAL: Allow content to grow
+    paddingBottom: 100,             // ✅ IMPORTANT: Extra bottom padding
+  },
+  
+  // 🎯 GOOD TO HAVE: Bottom spacing for better scroll experience
+  bottomSpacing: {
+    height: 100,                    // ✅ IMPORTANT: Extra space at bottom
+  },
+  
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -678,7 +845,8 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   section: {
-    margin: 16,
+    marginHorizontal: 16,
+    marginVertical: 8,
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
@@ -710,14 +878,7 @@ const styles = StyleSheet.create({
     height: 50,
     width: '100%',
   },
-  buttonRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-    gap: 12,
-  },
   uploadButton: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -725,22 +886,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     backgroundColor: '#E3F2FD',
     borderRadius: 8,
-  },
-  testButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#FFF3E0',
-    borderRadius: 8,
-    minWidth: 100,
-  },
-  testButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#FF9800',
-    marginLeft: 6,
+    marginBottom: 16,
   },
   uploadButtonText: {
     fontSize: 16,
@@ -882,8 +1028,28 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginLeft: 4,
   },
-  bottomSpacer: {
-    height: 50,
+  // Scroll to Top Button (Web only)
+  scrollToTopButton: {
+    position: 'absolute',
+    right: 24,
+    bottom: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#2196F3',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    zIndex: 1000,
+  },
+  scrollToTopInner: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 
