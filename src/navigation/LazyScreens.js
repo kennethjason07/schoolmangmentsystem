@@ -52,7 +52,6 @@ export const AttendanceReport = React.lazy(() => import('../screens/admin/report
 export const AttendanceRecordDetail = React.lazy(() => import('../screens/admin/reports/AttendanceRecordDetail'));
 export const AcademicPerformance = React.lazy(() => import('../screens/admin/reports/AcademicPerformance'));
 export const FeeCollection = React.lazy(() => import('../screens/admin/reports/FeeCollection'));
-export const ReportCardGeneration = React.lazy(() => import('../screens/admin/ReportCardGeneration'));
 
 // Lazy-loaded Teacher screens
 export const TeacherDashboard = React.lazy(() => import('../screens/teacher/TeacherDashboard'));

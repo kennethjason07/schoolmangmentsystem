@@ -220,8 +220,6 @@ const ExamsMarks = () => {
   const [marksModalVisible, setMarksModalVisible] = useState(false);
   const [classSelectionModalVisible, setClassSelectionModalVisible] = useState(false);
   const [selectedClassForMarks, setSelectedClassForMarks] = useState(null);
-  const [allReportCardsModalVisible, setAllReportCardsModalVisible] = useState(false);
-  const [reportCardsData, setReportCardsData] = useState([]);
 
   // Form states
   const [examForm, setExamForm] = useState({
@@ -1663,30 +1661,6 @@ const handleDeleteExam = (exam) => {
     }
   };
 
-  // Generate report cards (schema.txt: marks table)
-  const handleGenerateReportCards = async () => {
-    try {
-      console.log('📝 handleGenerateReportCards called');
-      
-      // Validate tenant readiness
-      const tenantValidation = await validateTenantReadiness();
-      if (!tenantValidation.success) {
-        console.log('⚠️ [ExamsMarks] Tenant not ready for report card generation:', tenantValidation.reason);
-        Alert.alert('Error', 'System not ready. Please try again.');
-        return;
-      }
-      
-      const { effectiveTenantId } = tenantValidation;
-      console.log('✅ [ExamsMarks] Using effective tenant ID for report card generation:', effectiveTenantId);
-      
-      // Generate report cards logic will be implemented here
-      Alert.alert('Info', 'Report card generation feature is under development.');
-      
-    } catch (error) {
-      console.error('❌ Error in handleGenerateReportCards:', error);
-      Alert.alert('Error', `Failed to generate report cards: ${error.message || 'Unknown error'}`);
-    }
-  };
 
   // Note: UI helper functions (openEditExamModal, openMarksModal, selectClassForMarks) moved before early returns
 
@@ -1997,101 +1971,6 @@ const handleDeleteExam = (exam) => {
     );
   };
 
-  // View all report cards
-  const handleViewAllReportCards = () => {
-    if (!selectedExam) {
-      Alert.alert('Error', 'Please select an exam first');
-      return;
-    }
-
-    const allClasses = [...new Set(students.map(s => s.class_id))];
-    const reportData = [];
-
-    allClasses.forEach(classId => {
-      const classStudents = getStudentsForClass(classId);
-      const className = classes.find(c => c.id === classId)?.class_name || `Class ${classId}`;
-      const classSubjects = subjects.filter(subject => subject.class_id === classId);
-
-      if (classStudents.length === 0) return;
-
-      const classData = {
-        classId,
-        className,
-        students: []
-      };
-
-      classStudents.forEach(student => {
-        const studentMarks = marksForm[student.id] || {};
-        const studentData = {
-          id: student.id,
-          name: student.name,
-          rollNumber: student.roll_number || student.id,
-          subjects: [],
-          totalMarks: 0,
-          maxMarks: 0,
-          percentage: 0,
-          grade: 'N/A'
-        };
-
-        let totalObtained = 0;
-        let totalMax = 0;
-        let subjectCount = 0;
-
-        classSubjects.forEach(subject => {
-          const mark = studentMarks[subject.id];
-          const obtainedMarks = mark && !isNaN(mark) ? parseInt(mark) : 0;
-          const maxMarks = 100; // Default max marks per subject
-
-          studentData.subjects.push({
-            id: subject.id,
-            name: subject.name,
-            obtainedMarks: mark || 'N/A',
-            maxMarks,
-            percentage: mark && !isNaN(mark) ? ((obtainedMarks / maxMarks) * 100).toFixed(1) : 'N/A'
-          });
-
-          if (mark && !isNaN(mark)) {
-            totalObtained += obtainedMarks;
-            totalMax += maxMarks;
-            subjectCount++;
-          }
-        });
-
-        if (subjectCount > 0) {
-          studentData.totalMarks = totalObtained;
-          studentData.maxMarks = totalMax;
-          studentData.percentage = ((totalObtained / totalMax) * 100).toFixed(1);
-
-          // Calculate grade based on percentage
-          const percentage = parseFloat(studentData.percentage);
-          if (percentage >= 90) studentData.grade = 'A+';
-          else if (percentage >= 80) studentData.grade = 'A';
-          else if (percentage >= 70) studentData.grade = 'B+';
-          else if (percentage >= 60) studentData.grade = 'B';
-          else if (percentage >= 50) studentData.grade = 'C';
-          else if (percentage >= 40) studentData.grade = 'D';
-          else studentData.grade = 'F';
-        }
-
-        classData.students.push(studentData);
-      });
-
-      // Sort students by roll number
-      classData.students.sort((a, b) => {
-        const rollA = parseInt(a.rollNumber) || 0;
-        const rollB = parseInt(b.rollNumber) || 0;
-        return rollA - rollB;
-      });
-
-      reportData.push(classData);
-    });
-
-    // Sort classes by name
-    reportData.sort((a, b) => a.className.localeCompare(b.className));
-
-    setReportCardsData(reportData);
-    setAllReportCardsModalVisible(true);
-  };
 
   // Add class to marks entry
   const handleAddClassToMarks = () => {
@@ -2671,11 +2550,6 @@ const handleDeleteExam = (exam) => {
               Marks for {selectedExam?.name}
             </Text>
 
-            {/* View All Report Cards Button */}
-            <TouchableOpacity style={styles.viewReportCardsButton} onPress={handleViewAllReportCards}>
-              <Ionicons name="list" size={16} color="#fff" />
-              <Text style={styles.viewReportCardsButtonText}>View All Report Cards</Text>
-            </TouchableOpacity>
 
             {selectedClassForMarks ? (
               <>
@@ -2910,11 +2784,6 @@ const handleDeleteExam = (exam) => {
               Marks for {selectedExam?.name}
             </Text>
 
-            {/* View All Report Cards Button */}
-            <TouchableOpacity style={styles.viewReportCardsButton} onPress={handleViewAllReportCards}>
-              <Ionicons name="list" size={16} color="#fff" />
-              <Text style={styles.viewReportCardsButtonText}>View All Report Cards</Text>
-            </TouchableOpacity>
 
             {/* Add Class Button */}
             <TouchableOpacity style={styles.addClassButtonLarge} onPress={handleAddClass}>
@@ -3209,90 +3078,6 @@ const handleDeleteExam = (exam) => {
         </View>
       </Modal>
 
-      {/* All Report Cards Modal */}
-      <Modal
-        visible={allReportCardsModalVisible}
-        animationType="slide"
-        transparent={false}
-      >
-        <View style={styles.reportCardsContainer}>
-          <View style={styles.reportCardsHeader}>
-            <Text style={styles.reportCardsTitle}>
-              All Report Cards - {selectedExam?.name}
-            </Text>
-            <TouchableOpacity
-              style={styles.closeReportCardsButton}
-              onPress={() => setAllReportCardsModalVisible(false)}
-            >
-              <Ionicons name="close" size={24} color="#666" />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.reportCardsScrollView}>
-            {reportCardsData.map((classData, classIndex) => (
-              <View key={classData.classId} style={styles.classReportCard}>
-                <View style={styles.classReportHeader}>
-                  <Ionicons name="school" size={20} color="#2196F3" />
-                  <Text style={styles.classReportTitle}>{classData.className}</Text>
-                  <Text style={styles.studentCount}>
-                    {classData.students.length} Students
-                  </Text>
-                </View>
-
-                {classData.students.map((student, studentIndex) => (
-                  <View key={student.id} style={styles.studentReportCard}>
-                    <View style={styles.studentReportHeader}>
-                      <View style={styles.studentInfo}>
-                        <Text style={styles.studentReportName}>{student.name}</Text>
-                        <Text style={styles.studentReportRoll}>Roll #{student.rollNumber}</Text>
-                      </View>
-                      <View style={styles.studentGrade}>
-                        <Text style={[styles.gradeText, { color: getGradeColor(student.grade) }]}>
-                          {student.grade}
-                        </Text>
-                        <Text style={styles.percentageText}>{student.percentage}%</Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.subjectsGrid}>
-                      {student.subjects.map((subject, subjectIndex) => (
-                        <View key={subject.id} style={styles.subjectCard}>
-                          <Text style={styles.subjectName}>{subject.name}</Text>
-                          <View style={styles.marksContainer}>
-                            <Text style={styles.obtainedMarks}>
-                              {subject.obtainedMarks}
-                            </Text>
-                            <Text style={styles.maxMarks}>/{subject.maxMarks}</Text>
-                          </View>
-                          <Text style={styles.subjectPercentage}>
-                            {subject.percentage}%
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-
-                    <View style={styles.studentSummary}>
-                      <Text style={styles.totalMarksText}>
-                        Total: {student.totalMarks}/{student.maxMarks}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            ))}
-
-            {reportCardsData.length === 0 && (
-              <View style={styles.noReportCardsContainer}>
-                <Ionicons name="document-text" size={64} color="#ccc" />
-                <Text style={styles.noReportCardsText}>No report cards available</Text>
-                <Text style={styles.noReportCardsSubText}>
-                  Add some marks to generate report cards
-                </Text>
-              </View>
-            )}
-          </ScrollView>
-        </View>
-      </Modal>
     </View>
   );
 };
@@ -4253,22 +4038,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
-  viewReportCardsButton: {
-    backgroundColor: '#2196F3',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginBottom: 20,
-    gap: 8,
-  },
-  viewReportCardsButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
-  },
   classesScrollView: {
     maxHeight: 400,
     marginBottom: 20,
@@ -4696,180 +4465,6 @@ const styles = StyleSheet.create({
     color: '#666',
     fontWeight: '600',
     fontSize: 16,
-  },
-  // Report Cards Modal Styles
-  reportCardsContainer: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  reportCardsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  reportCardsTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    flex: 1,
-  },
-  closeReportCardsButton: {
-    padding: 8,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
-  },
-  reportCardsScrollView: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  classReportCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 20,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    overflow: 'hidden',
-  },
-  classReportHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#2196F3',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-  },
-  classReportTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    flex: 1,
-  },
-  studentCount: {
-    fontSize: 14,
-    color: '#fff',
-    opacity: 0.9,
-  },
-  studentReportCard: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  studentReportHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  studentInfo: {
-    flex: 1,
-  },
-  studentReportName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 2,
-  },
-  studentReportRoll: {
-    fontSize: 14,
-    color: '#666',
-  },
-  studentGrade: {
-    alignItems: 'center',
-  },
-  gradeText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  percentageText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  subjectsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 12,
-  },
-  subjectCard: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    minWidth: 100,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-  },
-  subjectName: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#495057',
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  marksContainer: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: 2,
-  },
-  obtainedMarks: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  maxMarks: {
-    fontSize: 12,
-    color: '#666',
-  },
-  subjectPercentage: {
-    fontSize: 11,
-    color: '#666',
-  },
-  studentSummary: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    alignItems: 'center',
-  },
-  totalMarksText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#495057',
-  },
-  noReportCardsContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-  },
-  noReportCardsText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#666',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  noReportCardsSubText: {
-    fontSize: 14,
-    color: '#999',
-    textAlign: 'center',
   },
   // Class selection grid styles
   classSelectionGrid: {

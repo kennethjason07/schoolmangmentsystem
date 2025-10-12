@@ -467,10 +467,6 @@ export default function AppNavigator() {
                   name="FeeCollection" 
                   component={LazyScreens.withLazyLoading(LazyScreens.FeeCollection, 'Fee Collection')} 
                 />
-                <Stack.Screen 
-                  name="ReportCardGeneration" 
-                  component={LazyScreens.withLazyLoading(LazyScreens.ReportCardGeneration, 'Report Card Generation')} 
-                />
               </>
             )}
 
