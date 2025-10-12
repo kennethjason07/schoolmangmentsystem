@@ -23,6 +23,7 @@ import usePullToRefresh from '../../hooks/usePullToRefresh';
 import { getGlobalMessageHandler } from '../../utils/realtimeMessageHandler';
 import TypingDots from '../../components/TypingDots';
 import { getCachedTenantId } from '../../utils/tenantHelpers';
+import chatPushNotificationService from '../../services/ChatPushNotificationService';
 
 const StudentChatWithTeacher = () => {
   const { user } = useAuth();
@@ -1128,6 +1129,22 @@ const StudentChatWithTeacher = () => {
         return merged;
       });
       
+      // 📱 Send push notification to teacher after message is confirmed
+      try {
+        chatPushNotificationService.sendStudentMessageNotification({
+          studentUserId: user.id,
+          teacherId: teacherUserId,
+          message: messageText,
+          messageType: 'text',
+          studentId: student.id
+        }).catch(error => {
+          console.warn('Failed to send push notification to teacher:', error);
+          // Don't throw error - message was already sent successfully
+        });
+      } catch (error) {
+        console.warn('Error in student push notification setup:', error);
+      }
+      
     } catch (error) {
       console.error('Failed to send message:', error);
       // Restore input text on failure
@@ -1466,6 +1483,21 @@ const StudentChatWithTeacher = () => {
                 flatListRef.current.scrollToEnd({ animated: true });
               }
             }, 100);
+            
+            // 📱 Send push notification for image message
+            try {
+              chatPushNotificationService.sendStudentMessageNotification({
+                studentUserId: user.id,
+                teacherId: teacherUserId,
+                message: 'Image',
+                messageType: 'image',
+                studentId: studentUserData?.linked_student_id
+              }).catch(error => {
+                console.warn('Failed to send push notification for image:', error);
+              });
+            } catch (error) {
+              console.warn('Error in image push notification setup:', error);
+            }
           } else {
             throw new Error('Failed to save message to database');
           }
@@ -1592,6 +1624,21 @@ const StudentChatWithTeacher = () => {
                 flatListRef.current.scrollToEnd({ animated: true });
               }
             }, 100);
+            
+            // 📱 Send push notification for document message
+            try {
+              chatPushNotificationService.sendStudentMessageNotification({
+                studentUserId: user.id,
+                teacherId: teacherUserId,
+                message: file.name,
+                messageType: 'file',
+                studentId: studentUserData?.linked_student_id
+              }).catch(error => {
+                console.warn('Failed to send push notification for document:', error);
+              });
+            } catch (error) {
+              console.warn('Error in document push notification setup:', error);
+            }
           } else {
             throw new Error('Failed to save message to database');
           }

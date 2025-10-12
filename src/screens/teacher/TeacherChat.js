@@ -17,6 +17,7 @@ import ImageViewer from '../../components/ImageViewer';
 import TypingDots from '../../components/TypingDots';
 import { getGlobalMessageHandler } from '../../utils/realtimeMessageHandler';
 import universalNotificationService from '../../services/UniversalNotificationService';
+import chatPushNotificationService from '../../services/ChatPushNotificationService';
 
 // Debug mode configuration
 const DEBUG_MODE = __DEV__ && true; // Enable debug logging and UI elements
@@ -1468,6 +1469,24 @@ const TeacherChat = () => {
             );
             return merged;
           });
+          
+          // 📱 Send push notification after message is confirmed
+          try {
+            const recipientType = selectedContact.students ? 'parent' : 'student';
+            chatPushNotificationService.sendTeacherMessageNotification({
+              teacherId: user.id,
+              recipientId: contactUserId,
+              recipientType: recipientType,
+              message: messageText,
+              messageType: 'text',
+              studentId: studentId
+            }).catch(error => {
+              console.warn('Failed to send push notification:', error);
+              // Don't throw error - message was already sent successfully
+            });
+          } catch (error) {
+            console.warn('Error in push notification setup:', error);
+          }
         },
         // Error callback
         (tempId, failedMessage, error) => {
@@ -1739,6 +1758,23 @@ const TeacherChat = () => {
                 flatListRef.current.scrollToEnd({ animated: true });
               }
             }, 100);
+            
+            // 📱 Send push notification for image message
+            try {
+              const recipientType = selectedContact.students ? 'parent' : 'student';
+              chatPushNotificationService.sendTeacherMessageNotification({
+                teacherId: user.id,
+                recipientId: selectedContact.userId || selectedContact.id,
+                recipientType: recipientType,
+                message: 'Image',
+                messageType: 'image',
+                studentId: studentId
+              }).catch(error => {
+                console.warn('Failed to send push notification for image:', error);
+              });
+            } catch (error) {
+              console.warn('Error in image push notification setup:', error);
+            }
           } else {
             throw new Error('Failed to save message to database');
           }
@@ -1851,6 +1887,23 @@ const TeacherChat = () => {
                 flatListRef.current.scrollToEnd({ animated: true });
               }
             }, 100);
+            
+            // 📱 Send push notification for document message
+            try {
+              const recipientType = selectedContact.students ? 'parent' : 'student';
+              chatPushNotificationService.sendTeacherMessageNotification({
+                teacherId: user.id,
+                recipientId: selectedContact.userId || selectedContact.id,
+                recipientType: recipientType,
+                message: file.name,
+                messageType: 'file',
+                studentId: studentId
+              }).catch(error => {
+                console.warn('Failed to send push notification for document:', error);
+              });
+            } catch (error) {
+              console.warn('Error in document push notification setup:', error);
+            }
           } else {
             throw new Error('Failed to save message to database');
           }

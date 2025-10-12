@@ -21,6 +21,7 @@ import TypingDots from '../../components/TypingDots';
 import { useParentAuth } from '../../hooks/useParentAuth'; // Import parent auth hook
 import { getTeacherUserId } from './teacherUserIdHelper'; // Import teacher user ID helper
 import ChatBadgeDebugger from '../../utils/chatBadgeDebugger'; // Import chat badge debugger
+import chatPushNotificationService from '../../services/ChatPushNotificationService'; // Import chat push notification service
 
 // Debug mode constant for parent chat
 const DEBUG_MODE = __DEV__ && true; // Enable debug logging in development
@@ -753,6 +754,22 @@ const ChatWithTeacher = () => {
           
           // Notify badge system that a new message was sent (for the receiver)
           badgeNotifier.notifyNewMessage(teacherUserId, user.id);
+          
+          // 📱 Send push notification to teacher after message is confirmed
+          try {
+            chatPushNotificationService.sendParentMessageNotification({
+              parentId: user.id,
+              teacherId: teacherUserId,
+              message: messageText,
+              messageType: 'text',
+              studentId: parentStudent.id
+            }).catch(error => {
+              console.warn('Failed to send push notification to teacher:', error);
+              // Don't throw error - message was already sent successfully
+            });
+          } catch (error) {
+            console.warn('Error in parent push notification setup:', error);
+          }
         },
         // Error callback
         (tempId, failedMessage, error) => {
@@ -908,6 +925,21 @@ const ChatWithTeacher = () => {
                 flatListRef.current.scrollToEnd({ animated: true });
               }
             }, 100);
+            
+            // 📱 Send push notification for image message
+            try {
+              chatPushNotificationService.sendParentMessageNotification({
+                parentId: user.id,
+                teacherId: selectedTeacher.userId,
+                message: 'Image',
+                messageType: 'image',
+                studentId: parentStudent.id
+              }).catch(error => {
+                console.warn('Failed to send push notification for image:', error);
+              });
+            } catch (error) {
+              console.warn('Error in image push notification setup:', error);
+            }
           } else {
             throw new Error('Failed to save message to database');
           }
@@ -1025,6 +1057,22 @@ const ChatWithTeacher = () => {
                 flatListRef.current.scrollToEnd({ animated: true });
               }
             }, 100);
+            
+            // 📱 Send push notification for document message
+            try {
+              const parentStudent = parentStudents[0]; // Get the student context again
+              chatPushNotificationService.sendParentMessageNotification({
+                parentId: user.id,
+                teacherId: selectedTeacher.userId,
+                message: file.name,
+                messageType: 'file',
+                studentId: parentStudent.id
+              }).catch(error => {
+                console.warn('Failed to send push notification for document:', error);
+              });
+            } catch (error) {
+              console.warn('Error in document push notification setup:', error);
+            }
           } else {
             throw new Error('Failed to save message to database');
           }
