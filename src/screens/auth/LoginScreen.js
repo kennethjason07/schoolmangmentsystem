@@ -201,6 +201,37 @@ Please contact the administrator to add this role.`
     }
   };
 
+  // Function to restore normal page styles
+  const restorePageStyles = () => {
+    if (Platform.OS === 'web') {
+      // Remove the injected CSS immediately
+      const styleEl = document.getElementById('login-scroll-fix');
+      if (styleEl) {
+        styleEl.remove();
+      }
+      
+      // Remove the login screen classes
+      document.body.classList.remove('login-screen-active');
+      document.documentElement.classList.remove('login-screen-active');
+      
+      // Also clear any inline styles as fallback
+      document.body.style.overflow = '';
+      document.body.style.height = '';
+      document.body.style.maxHeight = '';
+      document.documentElement.style.overflow = '';
+      document.documentElement.style.height = '';
+      document.documentElement.style.maxHeight = '';
+      
+      // Restore root container
+      const reactRoot = document.getElementById('root');
+      if (reactRoot) {
+        reactRoot.style.overflow = '';
+        reactRoot.style.height = '';
+        reactRoot.style.maxHeight = '';
+      }
+    }
+  };
+
   const handleLogin = async () => {
     // Clear previous errors
     setLoginError('');
@@ -240,8 +271,15 @@ Please contact the administrator to add this role.`
         return;
       }
 
+      // ✅ SUCCESS: Restore page styles before navigation
+      restorePageStyles();
+      
+      // Add a small delay to ensure styles are restored before navigation
+      setTimeout(() => {
+        console.log('Login successful - styles restored:', data);
+      }, 100);
+      
       // Navigation will be handled automatically by AuthContext based on user type
-      console.log('Login successful:', data);
       
     } catch (error) {
       console.error('Login error:', error);
@@ -296,51 +334,36 @@ Please contact the administrator to add this role.`
       const originalBodyStyle = window.getComputedStyle(document.body).overflow;
       const originalHtmlStyle = window.getComputedStyle(document.documentElement).overflow;
       
-      // Create and inject CSS to prevent double scrollbars
+      // Create and inject CSS to prevent double scrollbars - more specific
       const styleElement = document.createElement('style');
       styleElement.id = 'login-scroll-fix';
       styleElement.textContent = `
-        html, body {
+        /* Only apply to login screen - more specific selectors */
+        body.login-screen-active {
           overflow: hidden !important;
           height: 100vh !important;
           max-height: 100vh !important;
         }
         
-        #root {
+        html.login-screen-active {
           overflow: hidden !important;
           height: 100vh !important;
           max-height: 100vh !important;
         }
         
-        /* Hide all potential scrollbars except our main ScrollView */
-        .css-175oi2r {
+        body.login-screen-active #root {
           overflow: hidden !important;
-        }
-        
-        /* Ensure React Native Web containers don't scroll */
-        div[data-focusable="true"] {
-          overflow: visible !important;
+          height: 100vh !important;
+          max-height: 100vh !important;
         }
       `;
       document.head.appendChild(styleElement);
       
-      // Disable body scrolling completely
-      document.body.style.overflow = 'hidden';
-      document.body.style.height = '100vh';
-      document.body.style.maxHeight = '100vh';
-      document.documentElement.style.overflow = 'hidden';
-      document.documentElement.style.height = '100vh';
-      document.documentElement.style.maxHeight = '100vh';
+      // Add classes to activate the login screen styles
+      document.body.classList.add('login-screen-active');
+      document.documentElement.classList.add('login-screen-active');
       
-      // Also disable scrolling on the React root container
-      const reactRoot = document.getElementById('root');
-      if (reactRoot) {
-        reactRoot.style.overflow = 'hidden';
-        reactRoot.style.height = '100vh';
-        reactRoot.style.maxHeight = '100vh';
-      }
-      
-      // Re-enable body scrolling when component unmounts
+      // Re-enable normal scrolling when component unmounts
       return () => {
         // Remove the injected CSS
         const styleEl = document.getElementById('login-scroll-fix');
@@ -348,18 +371,9 @@ Please contact the administrator to add this role.`
           styleEl.remove();
         }
         
-        document.body.style.overflow = originalBodyStyle;
-        document.body.style.height = 'auto';
-        document.body.style.maxHeight = 'none';
-        document.documentElement.style.overflow = originalHtmlStyle;
-        document.documentElement.style.height = 'auto';
-        document.documentElement.style.maxHeight = 'none';
-        
-        if (reactRoot) {
-          reactRoot.style.overflow = 'visible';
-          reactRoot.style.height = 'auto';
-          reactRoot.style.maxHeight = 'none';
-        }
+        // Remove the classes
+        document.body.classList.remove('login-screen-active');
+        document.documentElement.classList.remove('login-screen-active');
       };
     }
   }, []);
