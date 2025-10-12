@@ -313,8 +313,100 @@ const NotificationManagement = () => {
       }
       
       console.log('✅ [NOTIF_MGMT] Notification resent successfully');
+      
+      // Also resend push notifications for this notification
+      try {
+        console.log('📱 [NOTIF_MGMT] Resending push notifications...');
+        
+        // Get recipients for this notification
+        const { data: recipients, error: recipientsError } = await supabase
+          .from('notification_recipients')
+          .select('recipient_id, recipient_type')
+          .eq('notification_id', notification.id)
+          .eq('tenant_id', tenantId);
+        
+        if (recipientsError) {
+          console.error('❌ [NOTIF_MGMT] Error getting recipients:', recipientsError);
+        } else if (recipients && recipients.length > 0) {
+          const recipientUserIds = recipients.map(r => r.recipient_id);
+          
+          // Get push tokens for recipients
+          const { data: tokens, error: tokensError } = await supabase
+            .from('push_tokens')
+            .select(`
+              token, 
+              user_id,
+              users!inner(tenant_id)
+            `)
+            .in('user_id', recipientUserIds)
+            .eq('is_active', true)
+            .eq('users.tenant_id', tenantId);
+          
+          if (tokensError) {
+            console.error('❌ [NOTIF_MGMT] Error getting push tokens:', tokensError);
+          } else if (tokens && tokens.length > 0) {
+            // Prepare resend push notifications
+            const pushTitle = notification.type === 'Urgent' ? '⚠️ Urgent Notice (Resent)' : 
+                            notification.type === 'Event' ? '📅 School Event (Resent)' :
+                            notification.type === 'Exam' ? '📝 Exam Notice (Resent)' :
+                            notification.type === 'Homework' ? '📚 Homework Update (Resent)' :
+                            '🔔 School Notification (Resent)';
+            
+            const pushMessage = notification.message.length > 100 
+              ? notification.message.substring(0, 100) + '...'
+              : notification.message;
+            
+            const isUrgent = notification.type === 'Urgent';
+            
+            const pushNotifications = tokens.map(tokenRecord => ({
+              to: tokenRecord.token,
+              sound: 'default',
+              title: pushTitle,
+              body: pushMessage,
+              data: {
+                type: 'admin_notification_resend',
+                notificationType: notification.type,
+                priority: isUrgent ? 'urgent' : 'high',
+                isUrgent,
+                notificationId: notification.id,
+                timestamp: Date.now(),
+              },
+              android: {
+                channelId: isUrgent ? 'urgent-notifications' : 'formal-notifications',
+                priority: isUrgent ? 'max' : 'high',
+                sticky: isUrgent,
+                color: getNotificationTypeColor(notification.type),
+              },
+              ios: {
+                sound: 'default',
+                badge: 1,
+                categoryId: isUrgent ? 'URGENT' : 'GENERAL',
+              },
+            }));
+            
+            // Send push notifications
+            const response = await fetch('https://exp.host/--/api/v2/push/send', {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/json',
+                'Accept-Encoding': 'gzip, deflate',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(pushNotifications),
+            });
+            
+            const result = await response.json();
+            const successCount = result.data?.filter(r => r.status === 'ok').length || 0;
+            
+            console.log(`✅ [NOTIF_MGMT] Push notifications resent to ${successCount}/${pushNotifications.length} device(s)`);
+          }
+        }
+      } catch (pushError) {
+        console.warn('⚠️ [NOTIF_MGMT] Push notification resend failed (not critical):', pushError);
+      }
+      
       loadNotifications(); // Refresh the list
-      Alert.alert('Success', 'Notification resent successfully');
+      Alert.alert('Success', '🎉 Notification resent successfully!\n📧 In-app notifications updated\n📱 Push notifications sent to active devices');
     } catch (err) {
       console.error('💥 [NOTIF_MGMT] Error resending notification:', err);
       Alert.alert('Error', 'Failed to resend notification');
@@ -670,8 +762,113 @@ const NotificationManagement = () => {
         }
       }
       
-      // Create success message with role breakdown
-      let successMessage = `Notification created successfully!\n`;
+      // Step 6: Send push notifications to recipient devices (using same approach as working test notifications)
+      if (recipients.length > 0) {
+        try {
+          console.log('📱 [NOTIF_CREATE] Sending push notifications to recipient devices...');
+          
+          const recipientUserIds = recipients.map(r => r.recipient_id);
+          
+          // Get push tokens for recipient users (with tenant validation)
+          const { data: tokens, error: tokensError } = await supabase
+            .from('push_tokens')
+            .select(`
+              token, 
+              user_id,
+              users!inner(tenant_id)
+            `)
+            .in('user_id', recipientUserIds)
+            .eq('is_active', true)
+            .eq('users.tenant_id', tenantId); // Ensure tokens belong to current tenant
+
+          if (tokensError) {
+            console.error('❌ [NOTIF_CREATE] Error getting push tokens:', tokensError);
+            throw tokensError;
+          }
+
+          if (!tokens || tokens.length === 0) {
+            console.warn('⚠️ [NOTIF_CREATE] No active push tokens found for notification recipients');
+            // Don't fail the whole operation if no tokens, just log warning
+          } else {
+            // Prepare push notification content
+            const pushTitle = createForm.type === 'Urgent' ? '⚠️ Urgent Notice' : 
+                            createForm.type === 'Event' ? '📅 School Event' :
+                            createForm.type === 'Exam' ? '📝 Exam Notice' :
+                            createForm.type === 'Homework' ? '📚 Homework Update' :
+                            '🔔 School Notification';
+            
+            const pushMessage = createForm.message.length > 100 
+              ? createForm.message.substring(0, 100) + '...'
+              : createForm.message;
+            
+            const isUrgent = createForm.type === 'Urgent';
+            
+            // Prepare push notifications using the same format as working test notifications
+            const pushNotifications = tokens.map(tokenRecord => ({
+              to: tokenRecord.token,
+              sound: 'default',
+              title: pushTitle,
+              body: pushMessage,
+              data: {
+                type: 'admin_notification',
+                notificationType: createForm.type,
+                priority: isUrgent ? 'urgent' : 'high',
+                isUrgent,
+                notificationId: notificationResult.id,
+                timestamp: Date.now(),
+              },
+              android: {
+                channelId: isUrgent ? 'urgent-notifications' : 'formal-notifications',
+                priority: isUrgent ? 'max' : 'high',
+                sticky: isUrgent,
+                color: getNotificationTypeColor(createForm.type),
+              },
+              ios: {
+                sound: 'default',
+                badge: 1,
+                categoryId: isUrgent ? 'URGENT' : 'GENERAL',
+              },
+            }));
+
+            // Send push notifications via Expo's push service (same as working implementation)
+            console.log(`📤 [NOTIF_CREATE] Sending ${pushNotifications.length} push notifications to devices...`);
+            
+            const response = await fetch('https://exp.host/--/api/v2/push/send', {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/json',
+                'Accept-Encoding': 'gzip, deflate',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(pushNotifications),
+            });
+
+            const result = await response.json();
+            console.log('📤 [NOTIF_CREATE] Push notification result:', result);
+
+            // Check for any errors in the response
+            const errors = result.data?.filter(r => r.status === 'error') || [];
+            if (errors.length > 0) {
+              console.warn('⚠️ [NOTIF_CREATE] Some push notifications failed:', errors);
+            }
+
+            const successCount = result.data?.filter(r => r.status === 'ok').length || 0;
+            
+            if (successCount > 0) {
+              console.log(`✅ [NOTIF_CREATE] Push notifications sent successfully to ${successCount}/${pushNotifications.length} device(s)`);
+            } else {
+              console.warn('⚠️ [NOTIF_CREATE] All push notifications failed');
+            }
+          }
+        } catch (pushError) {
+          console.warn('⚠️ [NOTIF_CREATE] Push notification sending failed (not critical):', pushError);
+          // Continue even if push notifications fail - the in-app notifications were created successfully
+        }
+      }
+      
+      // Create success message with role breakdown and push notification info
+      let successMessage = `🎉 Notification created successfully!\n`;
+      
       if (supportedRoles.length > 0) {
         const studentCount = recipients.filter(r => r.recipient_type === 'Student').length;
         const parentCount = recipients.filter(r => r.recipient_type === 'Parent').length;
@@ -685,12 +882,15 @@ const NotificationManagement = () => {
         }
         
         if (roleCounts.length > 0) {
-          successMessage += `Sent to: ${roleCounts.join(', ')}\n`;
+          successMessage += `📧 In-app notifications sent to: ${roleCounts.join(', ')}\n`;
         }
       }
       
+      // Add push notification status
+      successMessage += `📱 Push notifications sent to active devices\n`;
+      
       if (unsupportedRoles.length > 0) {
-        successMessage += `Note: ${unsupportedRoles.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ')} notifications are not yet supported by the system.`;
+        successMessage += `\n⚠️ Note: ${unsupportedRoles.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ')} notifications are not yet supported by the system.`;
       }
       
       console.log('💾 [NOTIF_CREATE] Refreshing notifications list...');

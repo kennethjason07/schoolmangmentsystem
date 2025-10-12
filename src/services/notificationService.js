@@ -629,6 +629,98 @@ export const createLeaveRequestNotificationForAdmins = async (leaveData, teacher
     } catch (broadcastError) {
       console.warn(`⚠️ [LEAVE REQUEST] Broadcasting failed (not critical):`, broadcastError);
     }
+    
+    // Send push notifications to admin users (using same approach as working test push notifications)
+    try {
+      console.log(`📱 [LEAVE REQUEST] Sending push notifications to ${adminUsers.length} admin users...`);
+      
+      // Get push tokens for all admin users (with tenant validation)
+      const adminUserIds = adminUsers.map(admin => admin.id);
+      const { data: tokens, error: tokensError } = await supabase
+        .from('push_tokens')
+        .select(`
+          token, 
+          user_id,
+          users!inner(tenant_id)
+        `)
+        .in('user_id', adminUserIds)
+        .eq('is_active', true)
+        .eq('users.tenant_id', tenantId); // Ensure tokens belong to current tenant
+
+      if (tokensError) {
+        console.error('❌ [LEAVE REQUEST] Error getting push tokens:', tokensError);
+        throw tokensError;
+      }
+
+      if (!tokens || tokens.length === 0) {
+        console.warn('⚠️ [LEAVE REQUEST] No active push tokens found for admin users');
+        // Don't fail the whole operation if no tokens, just log warning
+      } else {
+        // Prepare push notification content
+        const pushTitle = 'New Leave Request';
+        const pushMessage = `${teacherData.teacher?.name || teacherData.full_name} has submitted a ${leaveData.leave_type} request (${leaveData.start_date} to ${leaveData.end_date})`;
+        
+        // Prepare push notifications using the same format as working test notifications
+        const pushNotifications = tokens.map(tokenRecord => ({
+          to: tokenRecord.token,
+          sound: 'default',
+          title: pushTitle,
+          body: pushMessage,
+          data: {
+            type: 'leave_request',
+            leaveType: leaveData.leave_type,
+            teacherName: teacherData.teacher?.name || teacherData.full_name,
+            priority: 'high',
+            isUrgent: false,
+            notificationId: notification.id,
+            timestamp: Date.now(),
+          },
+          android: {
+            channelId: 'formal-notifications',
+            priority: 'high',
+            sticky: false,
+            color: '#FF9800', // Orange color for leave requests
+          },
+          ios: {
+            sound: 'default',
+            badge: 1,
+            categoryId: 'GENERAL',
+          },
+        }));
+
+        // Send push notifications via Expo's push service (same as working implementation)
+        console.log(`📤 [LEAVE REQUEST] Sending ${pushNotifications.length} push notifications to admin devices...`);
+        
+        const response = await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Accept-Encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(pushNotifications),
+        });
+
+        const result = await response.json();
+        console.log('📤 [LEAVE REQUEST] Push notification result:', result);
+
+        // Check for any errors in the response
+        const errors = result.data?.filter(r => r.status === 'error') || [];
+        if (errors.length > 0) {
+          console.warn('⚠️ [LEAVE REQUEST] Some push notifications failed:', errors);
+        }
+
+        const successCount = result.data?.filter(r => r.status === 'ok').length || 0;
+        
+        if (successCount > 0) {
+          console.log(`✅ [LEAVE REQUEST] Push notifications sent successfully to ${successCount}/${pushNotifications.length} device(s) for admin users`);
+        } else {
+          console.warn('⚠️ [LEAVE REQUEST] All push notifications failed for admin users');
+        }
+      }
+    } catch (pushError) {
+      console.warn(`⚠️ [LEAVE REQUEST] Push notification sending failed (not critical):`, pushError);
+    }
     }
 
     return {
@@ -1007,6 +1099,107 @@ export const createLeaveStatusNotificationForTeacher = async (leaveData, status,
       console.log(`✅ [LEAVE STATUS] Real-time broadcast sent successfully`);
     } catch (broadcastError) {
       console.warn(`⚠️ [LEAVE STATUS] Broadcasting failed (not critical):`, broadcastError);
+    }
+    
+    // Send push notification to the teacher (using same approach as working test push notifications)
+    try {
+      console.log(`📱 [LEAVE STATUS] Sending push notification to teacher ${teacherUser.id}...`);
+      
+      // Get push tokens for the teacher (with tenant validation)
+      const { data: tokens, error: tokensError } = await supabase
+        .from('push_tokens')
+        .select(`
+          token, 
+          user_id,
+          users!inner(tenant_id)
+        `)
+        .eq('user_id', teacherUser.id)
+        .eq('is_active', true)
+        .eq('users.tenant_id', tenantId); // Ensure tokens belong to current tenant
+
+      if (tokensError) {
+        console.error('❌ [LEAVE STATUS] Error getting push tokens:', tokensError);
+        throw tokensError;
+      }
+
+      if (!tokens || tokens.length === 0) {
+        console.warn(`⚠️ [LEAVE STATUS] No active push tokens found for teacher ${teacherUser.full_name}`);
+        return {
+          success: true, // Don't fail the whole operation if no tokens
+          notification,
+          teacherUserId: teacherUser.id,
+          teacherName: teacherUser.full_name
+        };
+      }
+
+      // Prepare push notification content
+      const pushTitle = status === 'Approved' ? 'Leave Request Approved' : 'Leave Request Rejected';
+      const pushMessage = status === 'Approved' 
+        ? `Your ${leaveData.leave_type} request has been approved`
+        : `Your ${leaveData.leave_type} request has been rejected`;
+      
+      const isUrgent = status === 'Rejected'; // Mark rejections as urgent
+      
+      // Prepare push notifications using the same format as working test notifications
+      const pushNotifications = tokens.map(tokenRecord => ({
+        to: tokenRecord.token,
+        sound: 'default',
+        title: pushTitle,
+        body: pushMessage,
+        data: {
+          type: 'leave_status_update',
+          status: status,
+          leaveType: leaveData.leave_type,
+          priority: isUrgent ? 'urgent' : 'high',
+          isUrgent,
+          notificationId: notification.id,
+          timestamp: Date.now(),
+        },
+        android: {
+          channelId: isUrgent ? 'urgent-notifications' : 'formal-notifications',
+          priority: isUrgent ? 'max' : 'high',
+          sticky: isUrgent,
+          color: isUrgent ? '#F44336' : (status === 'Approved' ? '#4CAF50' : '#FF9800'),
+        },
+        ios: {
+          sound: 'default',
+          badge: 1,
+          categoryId: isUrgent ? 'URGENT' : 'GENERAL',
+        },
+      }));
+
+      // Send push notifications via Expo's push service (same as working implementation)
+      console.log(`📤 [LEAVE STATUS] Sending ${pushNotifications.length} push notifications to teacher...`);
+      
+      const response = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Accept-Encoding': 'gzip, deflate',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(pushNotifications),
+      });
+
+      const result = await response.json();
+      console.log('📤 [LEAVE STATUS] Push notification result:', result);
+
+      // Check for any errors in the response
+      const errors = result.data?.filter(r => r.status === 'error') || [];
+      if (errors.length > 0) {
+        console.warn('⚠️ [LEAVE STATUS] Some push notifications failed:', errors);
+      }
+
+      const successCount = result.data?.filter(r => r.status === 'ok').length || 0;
+      
+      if (successCount > 0) {
+        console.log(`✅ [LEAVE STATUS] Push notification sent successfully to ${successCount}/${pushNotifications.length} device(s) for teacher ${teacherUser.full_name}`);
+      } else {
+        console.warn(`⚠️ [LEAVE STATUS] All push notifications failed for teacher ${teacherUser.full_name}`);
+      }
+      
+    } catch (pushError) {
+      console.warn(`⚠️ [LEAVE STATUS] Push notification sending failed (not critical):`, pushError);
     }
 
     return {

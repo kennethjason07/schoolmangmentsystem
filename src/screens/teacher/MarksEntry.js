@@ -462,17 +462,31 @@ export default function MarksEntry({ navigation }) {
 
       console.log('✅ Marks saved successfully, triggering parent notifications...');
       
-      // Send notifications to parents silently in background
+      // Send notifications to parents and students silently in background (with push notifications)
       try {
         const studentIds = studentsWithMarks.map(student => student.id);
         
-        await createGradeNotification({
+        const result = await createGradeNotification({
           classId: selectedClass,
           subjectId: selectedSubject,
           examId: selectedExam,
           teacherId: user.id, // Use user.id directly instead of teacherData
-          studentIds: studentIds
+          studentIds: studentIds,
+          tenantId: tenantId // Pass tenant ID for proper filtering and push notifications
         });
+        
+        // Log enhanced results including push notifications
+        if (result.success) {
+          console.log('✅ Grade notifications sent successfully:');
+          console.log(`  - Total users notified: ${result.recipientCount}`);
+          console.log(`  - Parents: ${result.notifiedUsers?.parents?.length || 0}`);
+          console.log(`  - Students: ${result.notifiedUsers?.students?.length || 0}`);
+          
+          if (result.pushNotificationResults) {
+            console.log(`  - Push notifications: ${result.pushNotificationResults.successfulPushCount}/${result.pushNotificationResults.totalUsers} successful`);
+          }
+        }
+        
       } catch (notificationError) {
         // Log error but don't show to user - notifications are secondary
         console.error('⚠️ Notification error:', notificationError);

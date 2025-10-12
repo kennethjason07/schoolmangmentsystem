@@ -1,12 +1,56 @@
 import { supabase, TABLES } from './supabase';
 import universalNotificationService from '../services/UniversalNotificationService';
+import { sendPushNotification } from './pushNotificationUtils';
+
+/**
+ * Find student user account linked to a student
+ * @param {string} studentId - The student ID
+ * @param {string} tenantId - The tenant ID for filtering
+ * @returns {Object|null} Student user object or null if not found
+ */
+export const findStudentUserForStudent = async (studentId, tenantId) => {
+  try {
+    console.log('🔍 Finding student user account for student:', studentId, 'tenant:', tenantId);
+    
+    // Look for users where linked_student_id matches the student ID and tenant matches
+    const { data: studentUsers, error: studentError } = await supabase
+      .from(TABLES.USERS)
+      .select('id, email, linked_student_id, tenant_id')
+      .eq('linked_student_id', studentId)
+      .eq('tenant_id', tenantId);
+    
+    if (studentError) {
+      console.error('Error fetching student user:', studentError);
+      return null;
+    }
+    
+    if (!studentUsers || studentUsers.length === 0) {
+      console.log('⚠️ No user account found for student:', studentId);
+      return null;
+    }
+    
+    const studentUser = studentUsers[0]; // Take the first matching user
+    console.log(`✅ Found student user account: ${studentUser.email} for student: ${studentId}`);
+    
+    return {
+      userId: studentUser.id,
+      userEmail: studentUser.email,
+      studentId: studentId
+    };
+    
+  } catch (error) {
+    console.error('Error in findStudentUserForStudent:', error);
+    return null;
+  }
+};
 
 /**
  * Find parent user accounts linked to a student
  * @param {string} studentId - The student ID
+ * @param {string} tenantId - The tenant ID for filtering
  * @returns {Array} Array of parent user objects with linking information
  */
-export const findParentUsersForStudent = async (studentId) => {
+export const findParentUsersForStudent = async (studentId, tenantId = null) => {
   try {
     console.log('🔍 Finding parent users for student:', studentId);
     
@@ -30,11 +74,18 @@ export const findParentUsersForStudent = async (studentId) => {
     
     // Find users linked to these parents via linked_parent_of field
     const parentUserPromises = parentRecords.map(async (parentRecord) => {
-      // Look for users where linked_parent_of matches the student_id
-      const { data: linkedUsers, error: userError } = await supabase
+      // Look for users where linked_parent_of matches the student_id and tenant matches
+      let query = supabase
         .from(TABLES.USERS)
-        .select('id, email, linked_parent_of')
+        .select('id, email, linked_parent_of, tenant_id')
         .eq('linked_parent_of', studentId);
+      
+      // Add tenant filtering if tenantId is provided
+      if (tenantId) {
+        query = query.eq('tenant_id', tenantId);
+      }
+      
+      const { data: linkedUsers, error: userError } = await query;
       
       if (userError) {
         console.error(`Error finding linked users for parent ${parentRecord.name}:`, userError);
@@ -67,6 +118,84 @@ export const findParentUsersForStudent = async (studentId) => {
   } catch (error) {
     console.error('Error in findParentUsersForStudent:', error);
     return [];
+  }
+};
+
+/**
+ * Get active push tokens for a user
+ * @param {string} userId - The user ID
+ * @param {string} tenantId - The tenant ID for filtering
+ * @returns {Array} Array of active push tokens
+ */
+export const getActivePushTokensForUser = async (userId, tenantId) => {
+  try {
+    console.log('📱 Getting active push tokens for user:', userId, 'tenant:', tenantId);
+    
+    const { data: tokens, error } = await supabase
+      .from('user_push_tokens')
+      .select('push_token')
+      .eq('user_id', userId)
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true);
+    
+    if (error) {
+      console.error('Error fetching push tokens:', error);
+      return [];
+    }
+    
+    const validTokens = (tokens || []).filter(t => t.push_token).map(t => t.push_token);
+    console.log(`📱 Found ${validTokens.length} active push tokens for user ${userId}`);
+    
+    return validTokens;
+  } catch (error) {
+    console.error('Error in getActivePushTokensForUser:', error);
+    return [];
+  }
+};
+
+/**
+ * Send push notifications to a user with multiple tokens
+ * @param {Array} pushTokens - Array of push tokens
+ * @param {string} title - Notification title
+ * @param {string} body - Notification body
+ * @param {Object} data - Additional notification data
+ * @returns {Object} Results of push notification sending
+ */
+export const sendPushNotificationsToUser = async (pushTokens, title, body, data = {}) => {
+  try {
+    if (!pushTokens || pushTokens.length === 0) {
+      console.log('⚠️ No push tokens provided for notification');
+      return { successCount: 0, failureCount: 0 };
+    }
+    
+    console.log(`📤 Sending push notifications to ${pushTokens.length} tokens`);
+    
+    const results = await Promise.all(
+      pushTokens.map(async (token) => {
+        try {
+          const success = await sendPushNotification(token, title, body, data);
+          return { success, token };
+        } catch (error) {
+          console.error('Error sending push notification to token:', token, error);
+          return { success: false, token, error: error.message };
+        }
+      })
+    );
+    
+    const successCount = results.filter(r => r.success).length;
+    const failureCount = results.filter(r => !r.success).length;
+    
+    console.log(`📤 Push notifications sent: ${successCount} successful, ${failureCount} failed`);
+    
+    return {
+      successCount,
+      failureCount,
+      results
+    };
+    
+  } catch (error) {
+    console.error('Error in sendPushNotificationsToUser:', error);
+    return { successCount: 0, failureCount: pushTokens?.length || 0 };
   }
 };
 
@@ -180,17 +309,29 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
       tenantId = teacherUser.tenant_id;
     }
     
-    // Find parent users for this student
-    const parentUsers = await findParentUsersForStudent(studentId);
+    // Find parent users for this student (with tenant filtering)
+    const parentUsers = await findParentUsersForStudent(studentId, tenantId);
     
-    if (parentUsers.length === 0) {
-      console.log('⚠️ No parent users found for student, skipping notification');
+    // Find student user account for direct notifications
+    const studentUser = await findStudentUserForStudent(studentId, tenantId);
+    
+    // Check if we have any users to notify (parent or student)
+    if (parentUsers.length === 0 && !studentUser) {
+      console.log('⚠️ No parent or student users found, skipping notification');
       return {
         success: false,
-        error: 'No parent users found for this student',
+        error: 'No parent or student users found for this student',
         recipientCount: 0
       };
     }
+    
+    console.log(`📋 Found ${parentUsers.length} parent users and ${studentUser ? '1' : '0'} student user for notifications`);
+    
+    // Collect all users to notify (combine parents and student)
+    const allUsersToNotify = [
+      ...parentUsers.map(pu => ({ ...pu, userType: 'parent' })),
+      ...(studentUser ? [{ ...studentUser, userType: 'student' }] : [])
+    ];
     
     // Get context for the notification
     const context = await getAttendanceNotificationContext(studentId, attendanceDate);
@@ -204,15 +345,23 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
       };
     }
     
-    // Create notification message
-    const message = `Your child ${context.student.name} from ${context.class.name} - ${context.class.section} was marked absent on ${context.date.formatted}.`;
+    // Create notification messages for different user types
+    const parentMessage = `Your child ${context.student.name} from ${context.class.name} - ${context.class.section} was marked absent on ${context.date.formatted}.`;
+    const studentMessage = `You were marked absent from ${context.class.name} - ${context.class.section} on ${context.date.formatted}.`;
     
-    // Create the main notification record
+    // Push notification titles and bodies
+    const parentPushTitle = '🚨 Student Absence Alert';
+    const parentPushBody = `${context.student.name} was absent from ${context.class.name} today`;
+    
+    const studentPushTitle = '📋 Attendance Update';
+    const studentPushBody = `You were marked absent from ${context.class.name} today`;
+    
+    // Create the main notification record (using parent message as default)
     const { data: notificationData, error: notificationError } = await supabase
       .from(TABLES.NOTIFICATIONS)
       .insert([{
         type: 'Absentee', // Using correct enum value for attendance notifications
-        message: message,
+        message: parentMessage,
         delivery_mode: 'InApp',
         delivery_status: 'Sent',
         sent_by: markedBy,
@@ -233,22 +382,22 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
     
     console.log('✅ Created notification:', notificationData.id);
     
-    // Deduplicate parent users by userId to avoid duplicate constraint violations
+    // Deduplicate all users by userId to avoid duplicate constraint violations
     console.log('🔍 [NOTIFICATION] Creating recipients for new notification...');
     
-    const uniqueParentUsers = parentUsers.filter((parentUser, index, array) => 
-      array.findIndex(p => p.userId === parentUser.userId) === index
+    const uniqueUsers = allUsersToNotify.filter((user, index, array) => 
+      array.findIndex(u => u.userId === user.userId) === index
     );
     
-    if (uniqueParentUsers.length !== parentUsers.length) {
-      console.log(`⚠️ [NOTIFICATION] Removed ${parentUsers.length - uniqueParentUsers.length} duplicate parent users`);
+    if (uniqueUsers.length !== allUsersToNotify.length) {
+      console.log(`⚠️ [NOTIFICATION] Removed ${allUsersToNotify.length - uniqueUsers.length} duplicate users`);
     }
     
-    // Create notification recipients for unique parent users
-    const recipientRecords = uniqueParentUsers.map(parentUser => ({
+    // Create notification recipients for all unique users (parents and student)
+    const recipientRecords = uniqueUsers.map(user => ({
       notification_id: notificationData.id,
-      recipient_id: parentUser.userId,
-      recipient_type: 'Parent',
+      recipient_id: user.userId,
+      recipient_type: user.userType === 'parent' ? 'Parent' : 'Student',
       delivery_status: 'Sent',
       is_read: false,
       sent_at: new Date().toISOString(),
@@ -256,6 +405,69 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
     }));
     
     console.log(`📝 [NOTIFICATION] Creating ${recipientRecords.length} recipient records`);
+    
+    // Send push notifications to all users in parallel
+    console.log(`📤 [PUSH] Sending push notifications to ${uniqueUsers.length} users...`);
+    
+    const pushNotificationResults = await Promise.allSettled(
+      uniqueUsers.map(async (user) => {
+        try {
+          // Get push tokens for the user
+          const pushTokens = await getActivePushTokensForUser(user.userId, tenantId);
+          
+          if (pushTokens.length === 0) {
+            console.log(`⚠️ No push tokens found for user: ${user.userEmail}`);
+            return { userId: user.userId, success: false, reason: 'no_tokens' };
+          }
+          
+          // Select appropriate push notification content based on user type
+          const pushTitle = user.userType === 'parent' ? parentPushTitle : studentPushTitle;
+          const pushBody = user.userType === 'parent' ? parentPushBody : studentPushBody;
+          
+          // Send push notifications
+          const result = await sendPushNotificationsToUser(
+            pushTokens,
+            pushTitle,
+            pushBody,
+            {
+              type: 'attendance_absence',
+              studentId: studentId,
+              attendanceDate: attendanceDate,
+              userType: user.userType
+            }
+          );
+          
+          console.log(`📤 Push notifications for ${user.userEmail} (${user.userType}): ${result.successCount} successful, ${result.failureCount} failed`);
+          
+          return {
+            userId: user.userId,
+            userEmail: user.userEmail,
+            userType: user.userType,
+            success: result.successCount > 0,
+            successCount: result.successCount,
+            failureCount: result.failureCount
+          };
+          
+        } catch (error) {
+          console.error(`Error sending push notification to user ${user.userEmail}:`, error);
+          return {
+            userId: user.userId,
+            userEmail: user.userEmail,
+            userType: user.userType,
+            success: false,
+            error: error.message
+          };
+        }
+      })
+    );
+    
+    // Process push notification results
+    const pushResults = pushNotificationResults.map(result => 
+      result.status === 'fulfilled' ? result.value : { success: false, error: result.reason }
+    );
+    
+    const successfulPushCount = pushResults.filter(r => r.success).length;
+    console.log(`📤 [PUSH] Push notifications completed: ${successfulPushCount}/${uniqueUsers.length} successful`);
     
     // Use simple INSERT since we've deduplicated and this is a new notification
     const { data: recipientData, error: recipientError } = await supabase
@@ -274,12 +486,12 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
     
     console.log(`✅ Created ${recipientData.length} notification recipients`);
     
-    // Broadcast real-time notification updates to all parent users for instant badge refresh
+    // Broadcast real-time notification updates to all users for instant badge refresh
     try {
-      console.log(`📡 [ATTENDANCE NOTIFICATION] Broadcasting real-time updates to ${uniqueParentUsers.length} parents...`);
-      const parentUserIds = uniqueParentUsers.map(pu => pu.userId);
+      console.log(`📡 [ATTENDANCE NOTIFICATION] Broadcasting real-time updates to ${uniqueUsers.length} users...`);
+      const allUserIds = uniqueUsers.map(u => u.userId);
       await universalNotificationService.broadcastNewNotificationToUsers(
-        parentUserIds,
+        allUserIds,
         notificationData.id,
         'Absentee'
       );
@@ -292,11 +504,22 @@ export const createAttendanceNotification = async ({ studentId, attendanceDate, 
       success: true,
       notificationId: notificationData.id,
       recipientCount: recipientData.length,
-      parentUsers: parentUsers.map(pu => ({
-        email: pu.userEmail,
-        parentName: pu.parentInfo.name,
-        relation: pu.parentInfo.relation
-      }))
+      pushNotificationResults: {
+        totalUsers: uniqueUsers.length,
+        successfulPushCount: successfulPushCount,
+        results: pushResults
+      },
+      notifiedUsers: {
+        parents: parentUsers.map(pu => ({
+          email: pu.userEmail,
+          parentName: pu.parentInfo?.name || 'Unknown',
+          relation: pu.parentInfo?.relation || 'Unknown'
+        })),
+        student: studentUser ? {
+          email: studentUser.userEmail,
+          studentId: studentUser.studentId
+        } : null
+      }
     };
     
   } catch (error) {

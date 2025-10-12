@@ -617,7 +617,34 @@ const TakeAttendance = () => {
       const absentStudents = attendanceRecords.filter(record => record.status === 'Absent');
       if (absentStudents.length > 0) {
         if (__DEV__) console.log(`📧 Sending absence notifications for ${absentStudents.length} students`);
-        // TODO: Add notification sending logic here
+        
+        // Send push notifications and in-app notifications asynchronously
+        setTimeout(async () => {
+          try {
+            const result = await createBulkAttendanceNotifications(absentStudents, user.id, tenantId);
+            
+            if (__DEV__) {
+              console.log(`✅ Absence notifications completed:`);
+              console.log(`  - Total students: ${result.totalStudents}`);
+              console.log(`  - Successful notifications: ${result.successfulNotifications}`);
+              console.log(`  - Total recipients: ${result.totalRecipients}`);
+              
+              // Log push notification results if available
+              if (result.results && result.results.length > 0) {
+                const pushResults = result.results
+                  .map(r => r.pushNotificationResults)
+                  .filter(p => p);
+                
+                const totalPushUsers = pushResults.reduce((sum, p) => sum + (p.totalUsers || 0), 0);
+                const totalSuccessfulPush = pushResults.reduce((sum, p) => sum + (p.successfulPushCount || 0), 0);
+                
+                console.log(`  - Push notifications: ${totalSuccessfulPush}/${totalPushUsers} successful`);
+              }
+            }
+          } catch (error) {
+            console.error('❌ Error sending absence notifications:', error);
+          }
+        }, 100); // Small delay to not block the UI
       }
       
     } catch (error) {

@@ -328,6 +328,108 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
         }
       }
 
+      // Send push notification to assigned teacher (using same approach as working notifications)
+      if (form.teacher_ids) {
+        try {
+          console.log('📱 [TASK ASSIGNMENT] Sending push notification to teacher...');
+          
+          // Find the teacher's user account
+          const { data: teacherUser, error: teacherError } = await supabase
+            .from('users')
+            .select('id, full_name')
+            .eq('linked_teacher_id', form.teacher_ids)
+            .eq('tenant_id', finalTenantId)
+            .single();
+          
+          if (teacherError) {
+            console.warn('⚠️ [TASK ASSIGNMENT] Could not find teacher user account:', teacherError);
+          } else if (teacherUser) {
+            // Get push tokens for the teacher
+            const { data: tokens, error: tokensError } = await supabase
+              .from('push_tokens')
+              .select(`
+                token, 
+                user_id,
+                users!inner(tenant_id)
+              `)
+              .eq('user_id', teacherUser.id)
+              .eq('is_active', true)
+              .eq('users.tenant_id', finalTenantId);
+
+            if (tokensError) {
+              console.warn('⚠️ [TASK ASSIGNMENT] Error getting push tokens:', tokensError);
+            } else if (tokens && tokens.length > 0) {
+              // Prepare push notification content
+              const isHighPriority = form.priority === 'High';
+              const pushTitle = isHighPriority ? '⚠️ High Priority Task Assigned' : '📝 New Task Assigned';
+              const pushMessage = `Task: "${form.title}" - Due: ${formatDateDMY(form.dueDate)}`;
+              
+              // Prepare push notifications using the same format as working notifications
+              const pushNotifications = tokens.map(tokenRecord => ({
+                to: tokenRecord.token,
+                sound: 'default',
+                title: pushTitle,
+                body: pushMessage,
+                data: {
+                  type: 'task_assignment',
+                  taskTitle: form.title,
+                  priority: form.priority,
+                  dueDate: form.dueDate,
+                  priority_level: isHighPriority ? 'urgent' : 'high',
+                  isUrgent: isHighPriority,
+                  timestamp: Date.now(),
+                },
+                android: {
+                  channelId: isHighPriority ? 'urgent-notifications' : 'formal-notifications',
+                  priority: isHighPriority ? 'max' : 'high',
+                  sticky: isHighPriority,
+                  color: isHighPriority ? '#F44336' : '#2196F3',
+                },
+                ios: {
+                  sound: 'default',
+                  badge: 1,
+                  categoryId: isHighPriority ? 'URGENT' : 'GENERAL',
+                },
+              }));
+
+              // Send push notifications via Expo's push service (same as working implementation)
+              console.log(`📤 [TASK ASSIGNMENT] Sending ${pushNotifications.length} push notifications to teacher...`);
+              
+              const response = await fetch('https://exp.host/--/api/v2/push/send', {
+                method: 'POST',
+                headers: {
+                  'Accept': 'application/json',
+                  'Accept-Encoding': 'gzip, deflate',
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(pushNotifications),
+              });
+
+              const result = await response.json();
+              console.log('📤 [TASK ASSIGNMENT] Push notification result:', result);
+
+              // Check for any errors in the response
+              const errors = result.data?.filter(r => r.status === 'error') || [];
+              if (errors.length > 0) {
+                console.warn('⚠️ [TASK ASSIGNMENT] Some push notifications failed:', errors);
+              }
+
+              const successCount = result.data?.filter(r => r.status === 'ok').length || 0;
+              
+              if (successCount > 0) {
+                console.log(`✅ [TASK ASSIGNMENT] Push notification sent successfully to teacher ${teacherUser.full_name}`);
+              } else {
+                console.warn(`⚠️ [TASK ASSIGNMENT] Push notification failed for teacher ${teacherUser.full_name}`);
+              }
+            } else {
+              console.warn('⚠️ [TASK ASSIGNMENT] No active push tokens found for teacher');
+            }
+          }
+        } catch (pushError) {
+          console.warn('⚠️ [TASK ASSIGNMENT] Push notification sending failed (not critical):', pushError);
+        }
+      }
+      
       // Refresh data
       await loadAllData();
       setModalVisible(false);
@@ -341,7 +443,8 @@ const AssignTaskToTeacher = ({ navigation, route }) => {
         teacher_ids: null
       });
 
-      Alert.alert('Success', editTask ? 'Task updated successfully!' : 'Task created successfully!');
+      const successMessage = editTask ? 'Task updated successfully!' : '🎉 Task assigned successfully!\n📱 Push notification sent to teacher';
+      Alert.alert('Success', successMessage);
     } catch (error) {
       console.error('Error saving task:', error);
       Alert.alert('Error', 'Failed to save task. Please try again.');

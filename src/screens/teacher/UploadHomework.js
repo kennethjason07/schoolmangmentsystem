@@ -12,6 +12,7 @@ import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useTenantAccess, tenantDatabase, createTenantQuery, getCachedTenantId } from '../../utils/tenantHelpers';
 import { uploadMultipleHomeworkFiles, deleteHomeworkFile } from '../../utils/homeworkFileUpload';
+import { createHomeworkNotification } from '../../utils/homeworkNotificationHelpers';
 import { format } from 'date-fns';
 import ImageViewer from '../../components/ImageViewer';
 
@@ -570,6 +571,41 @@ const UploadHomework = () => {
         : `Homework ${editingHomework ? 'updated' : 'assigned'} successfully!`;
       
       Alert.alert('Success', successMessage);
+      
+      // Send push notifications to students and parents in the background (non-blocking)
+      if (upsertData && !editingHomework) {
+        // Only send notifications for new homework, not updates
+        setTimeout(async () => {
+          try {
+            console.log('📤 Sending homework notifications...');
+            
+            const result = await createHomeworkNotification({
+              homeworkId: upsertData.id,
+              classId: selectedClassData.id,
+              subjectId: selectedSubject,
+              teacherId: teacherData.id,
+              assignedStudents: selectedStudents,
+              tenantId: effectiveTenantId
+            });
+            
+            if (result.success) {
+              console.log('✅ Homework notifications sent successfully:');
+              console.log(`  - Total users notified: ${result.recipientCount}`);
+              console.log(`  - Parents: ${result.notifiedUsers?.parents?.length || 0}`);
+              console.log(`  - Students: ${result.notifiedUsers?.students?.length || 0}`);
+              
+              if (result.pushNotificationResults) {
+                console.log(`  - Push notifications: ${result.pushNotificationResults.successfulPushCount}/${result.pushNotificationResults.totalUsers} successful`);
+              }
+            } else {
+              console.warn('⚠️ Homework notification failed:', result.error);
+            }
+            
+          } catch (notificationError) {
+            console.error('❌ Error sending homework notifications:', notificationError);
+          }
+        }, 100); // Small delay to not block the UI
+      }
 
       // Optimistically update local list
       if (upsertData) {
