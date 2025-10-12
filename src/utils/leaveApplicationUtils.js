@@ -1,6 +1,7 @@
 // 🚀 ENHANCED: Updated imports for enhanced tenant system
 import { supabase } from './supabase';
-import { tenantDatabase, createTenantQuery, getCachedTenantId, useTenantAccess } from './tenantHelpers';
+import { useTenantAccess } from '../contexts/TenantContext';
+import { tenantDatabase, createTenantQuery, getCachedTenantId } from './tenantHelpers';
 import { validateTenantAccess } from './tenantValidation';
 
 /**

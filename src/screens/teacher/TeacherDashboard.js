@@ -15,8 +15,8 @@ import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import MessageBadge from '../../components/MessageBadge';
 import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificationCount';
 // 🚀 ENHANCED TENANT SYSTEM IMPORTS
+import { useTenantAccess } from '../../contexts/TenantContext';
 import { 
-  useTenantAccess, 
   tenantDatabase, 
   createTenantQuery,
   getCachedTenantId 
@@ -2940,12 +2940,6 @@ const fetchDashboardDataWithDirectAuth = async () => {
               <Ionicons name="calendar-outline" size={20} color="#1976d2" />
             </View>
             <Text style={styles.sectionTitle}>Upcoming Events</Text>
-            <TouchableOpacity
-              style={styles.addEventButton}
-              onPress={() => Alert.alert('Add Event', 'Event management feature coming soon!')}
-            >
-              <Ionicons name="add-circle" size={24} color="#1976d2" />
-            </TouchableOpacity>
           </View>
 
           {upcomingEvents.length === 0 ? (
@@ -3939,9 +3933,6 @@ const styles = StyleSheet.create({
   },
 
   // Events Section Styles
-  addEventButton: {
-    padding: 4,
-  },
   emptyEventsContainer: {
     alignItems: 'center',
     paddingVertical: 40,

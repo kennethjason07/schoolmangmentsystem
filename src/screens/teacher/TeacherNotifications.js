@@ -15,7 +15,7 @@ import Header from '../../components/Header';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, getUserTenantId } from '../../utils/supabase';
 import universalNotificationService from '../../services/UniversalNotificationService';
-import { useTenantAccess } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
 import {
   getResponsiveScrollProps,
   getResponsiveContentStyle,

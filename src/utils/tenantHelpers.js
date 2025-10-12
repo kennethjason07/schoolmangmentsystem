@@ -16,55 +16,10 @@
  * - Enhanced caching behavior may affect existing code
  */
 
-import React, { useContext } from 'react';
-import TenantContext from '../contexts/TenantContext';
 import { supabase } from './supabase';
 
-/**
- * 🚀 BREAKING CHANGE: Enhanced tenant access with mandatory validation
- * Use this instead of directly calling getCurrentUserTenantByEmail()
- * Now includes performance monitoring and health checks
- */
-export const useTenantAccess = () => {
-  const context = useContext(TenantContext);
-  
-  if (!context) {
-    throw new Error('🚨 ENHANCED TENANT SYSTEM: useTenantAccess must be used within a TenantProvider');
-  }
-
-  // Enhanced validation
-  if (!context.tenantId && context.isReady) {
-    console.warn('⚠️ ENHANCED TENANT SYSTEM: Tenant ID not available but context is ready. This may indicate a configuration issue.');
-  }
-
-  return {
-    // Reliable tenant ID access
-    getTenantId: context.getTenantId,
-    tenantId: context.tenantId,
-    
-    // State checks
-    isReady: context.isReady,
-    isLoading: context.loading,
-    tenantInitialized: context.tenantInitialized,
-    
-    // Tenant info
-    tenant: context.currentTenant,
-    tenantName: context.tenantName,
-    
-    // Error handling
-    error: context.error,
-    
-    // Initialization control
-    initializeTenant: context.initializeTenant,
-    
-    // 🚀 BREAKING CHANGE: New health monitoring features
-    healthStatus: {
-      isHealthy: context.isReady && !context.error && context.tenantId,
-      lastCheck: Date.now(),
-      issues: context.error ? [context.error] : []
-    }
-  };
-};
+// 🚀 FIX: useTenantAccess hook moved to TenantContext to prevent circular dependency
+// Import and use useTenant from '../contexts/TenantContext' instead
 
 /**
  * 🚀 BREAKING CHANGE: Enhanced tenant ID caching with monitoring
@@ -581,8 +536,7 @@ export const getEnhancedTenantHealth = async () => {
  * 🚀 BREAKING CHANGE: Enhanced default export with new features
  */
 export default {
-  // Core tenant access
-  useTenantAccess,
+  // Core tenant access (useTenantAccess moved to TenantContext)
   getCachedTenantId,
   setCachedTenantId,
   clearCachedTenantId,

@@ -29,7 +29,8 @@ import Colors from '../../constants/Colors';
 import { useAuth } from '../../utils/AuthContext';
 import { createLeaveStatusNotificationForTeacher } from '../../services/notificationService';
 import LogViewer from '../../components/debug/LogViewer';
-import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
+import { tenantDatabase } from '../../utils/tenantHelpers';
 
 const { width } = Dimensions.get('window');
 

@@ -18,7 +18,8 @@ import Header from '../../components/Header';
 import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import { Picker } from '@react-native-picker/picker';
 import { supabase, TABLES } from '../../utils/supabase';
-import { useTenantAccess, tenantDatabase, getCachedTenantId } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
+import { tenantDatabase, getCachedTenantId } from '../../utils/tenantHelpers';
 import { useAuth } from '../../utils/AuthContext';
 import { validateTenantAccess } from '../../utils/tenantValidation';
 

@@ -26,7 +26,7 @@ import {
   validateDataTenancy,
   TENANT_ERROR_MESSAGES 
 } from '../../utils/tenantValidation';
-import { useTenantAccess } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
 import { 
   getParentStudents, 
   getStudentForParent, 

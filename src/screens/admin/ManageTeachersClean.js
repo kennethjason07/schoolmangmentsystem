@@ -20,7 +20,8 @@ import Header from '../../components/Header';
 import { supabase, TABLES } from '../../utils/supabase';
 import { ActivityIndicator as PaperActivityIndicator } from 'react-native-paper';
 import { useAuth } from '../../utils/AuthContext';
-import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
+import { tenantDatabase } from '../../utils/tenantHelpers';
 
 // Will be fetched from Supabase
 const ManageTeachers = ({ navigation, route }) => {

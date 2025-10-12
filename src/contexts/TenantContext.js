@@ -3,7 +3,8 @@ import { supabase } from '../utils/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentUserTenantByEmail } from '../utils/getTenantByEmail';
 import { validateTenantAccess, createTenantQuery } from '../utils/tenantValidation';
-import { initializeTenantHelpers, resetTenantHelpers } from '../utils/tenantHelpers';
+// REMOVED: Circular dependency fix - import tenant helpers dynamically when needed
+// import { initializeTenantHelpers, resetTenantHelpers } from '../utils/tenantHelpers';
 // DISABLED: Auto-importing test utilities that run database queries before login
 // import { runAllProductionTests } from '../utils/supabaseProductionTest';
 // import { testTenantQueryHelper, createTenantQuery, executeTenantQuery } from '../utils/tenantQueryHelper';
@@ -22,6 +23,49 @@ export const useTenant = () => {
 
 // Alias for backward compatibility
 export const useTenantContext = useTenant;
+
+/**
+ * 🚀 ENHANCED TENANT ACCESS HOOK
+ * Enhanced tenant access with mandatory validation
+ * Now includes performance monitoring and health checks
+ */
+export const useTenantAccess = () => {
+  const context = useTenant();
+  
+  // Enhanced validation
+  if (!context.tenantId && context.isReady) {
+    console.warn('⚠️ ENHANCED TENANT SYSTEM: Tenant ID not available but context is ready. This may indicate a configuration issue.');
+  }
+
+  return {
+    // Reliable tenant ID access
+    getTenantId: context.getTenantId,
+    tenantId: context.tenantId,
+    
+    // State checks
+    isReady: context.isReady,
+    isLoading: context.loading,
+    tenantInitialized: context.tenantInitialized,
+    tenantFullyLoaded: context.tenantFullyLoaded,  // 🚀 FIX: Export fully loaded state
+    
+    // Tenant info - only show when fully loaded
+    tenant: context.tenantFullyLoaded ? context.currentTenant : null,
+    tenantName: context.tenantFullyLoaded ? context.tenantName : null,  // 🚀 FIX: Only show name when fully loaded
+    
+    // Error handling
+    error: context.error,
+    
+    // Initialization control
+    initializeTenant: context.initializeTenant,
+    
+    // 🚀 BREAKING CHANGE: New health monitoring features
+    healthStatus: {
+      isHealthy: context.isReady && !context.error && context.tenantId && context.tenantFullyLoaded,  // 🚀 FIX: Include fully loaded check
+      lastCheck: Date.now(),
+      issues: context.error ? [context.error] : []
+    }
+  };
+};
 
 export const TenantProvider = ({ children }) => {
   console.log('🏗️ TenantProvider: Component initialized');
@@ -50,6 +94,9 @@ export const TenantProvider = ({ children }) => {
   const [availableTenants, setAvailableTenants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // 🚀 FIX: Prevent flash of incorrect tenant name during loading
+  const [tenantFullyLoaded, setTenantFullyLoaded] = useState(false);
   
   // 🚀 ENHANCED: Cached tenant ID for reliable access
   const [cachedTenantId, setCachedTenantId] = useState(null);
@@ -131,6 +178,9 @@ export const TenantProvider = ({ children }) => {
       } else if (event === 'SIGNED_OUT') {
         console.log('🚀 TenantContext: User signed out, clearing tenant data');
         await clearTenant();
+      } else if (event === 'SIGNED_IN') {
+        // 🚀 FIX: Clear fully loaded state on new sign in to prevent stale data
+        setTenantFullyLoaded(false);
       }
     });
     
@@ -236,7 +286,14 @@ export const TenantProvider = ({ children }) => {
       setTenantInitialized(true);
       
       // 🚀 ENHANCED: Initialize tenant helpers for global access
-      initializeTenantHelpers(tenantId);
+      try {
+        // 🚀 FIX: Use dynamic import to prevent circular dependency
+        const { initializeTenantHelpers } = await import('../utils/tenantHelpers');
+        initializeTenantHelpers(tenantId);
+        console.log('🚀 TenantContext: Tenant helpers initialized successfully (initializeTenant)');
+      } catch (helperError) {
+        console.warn('⚠️ TenantContext: Error initializing tenant helpers (initializeTenant):', helperError);
+      }
       
       // Persist to storage (non-blocking on web)
       if (typeof window === 'undefined') {
@@ -325,15 +382,16 @@ export const TenantProvider = ({ children }) => {
             status: result.data.tenant.status
           });
           
-          // Set the tenant in context
+          // 🚀 FIX: Set tenant data atomically to prevent race condition
           setCurrentTenant(result.data.tenant);
-          
-          // 🚀 ENHANCED: Mark tenant as initialized and cache the ID
           setCachedTenantId(result.data.tenant.id);
           setTenantInitialized(true);
+          setTenantFullyLoaded(true);  // 🚀 NEW: Mark as fully loaded
           
           // 🚀 ENHANCED: Initialize tenant helpers for global access
           try {
+            // 🚀 FIX: Use dynamic import to prevent circular dependency
+            const { initializeTenantHelpers } = await import('../utils/tenantHelpers');
             initializeTenantHelpers(result.data.tenant.id);
             console.log('🚀 TenantContext: Tenant helpers initialized successfully');
           } catch (helperError) {
@@ -883,11 +941,18 @@ export const TenantProvider = ({ children }) => {
       setAvailableTenants([]);
       setCachedTenantId(null);
       setTenantInitialized(false);
+      setTenantFullyLoaded(false);  // 🚀 FIX: Reset fully loaded state
       setError(null);
       setLoading(true); // Reset to loading state
       
       // 🚀 ENHANCED: Reset tenant helpers
-      resetTenantHelpers();
+      try {
+        // 🚀 FIX: Use dynamic import to prevent circular dependency
+        const { resetTenantHelpers } = await import('../utils/tenantHelpers');
+        resetTenantHelpers();
+      } catch (helperError) {
+        console.warn('⚠️ TenantContext: Error resetting tenant helpers:', helperError);
+      }
       
       console.log('✅ TenantContext: All tenant data cleared successfully');
     } catch (error) {
@@ -916,10 +981,11 @@ export const TenantProvider = ({ children }) => {
     tenantId: getCachedTenantId(), // Always use cached version
     cachedTenantId,
     tenantInitialized,
+    tenantFullyLoaded,  // 🚀 FIX: Export fully loaded state
     
     // 🚀 ENHANCED: Reliable tenant access methods
     getTenantId: getCachedTenantId,
-    isReady: tenantInitialized && !loading && cachedTenantId,
+    isReady: tenantInitialized && !loading && cachedTenantId && tenantFullyLoaded,  // 🚀 FIX: Include fully loaded check
     initializeTenant,
     
     // Tenant management
@@ -940,7 +1006,7 @@ export const TenantProvider = ({ children }) => {
     
     // Helper methods
     isMultiTenant: availableTenants.length > 1,
-    tenantName: currentTenant?.name || 'Unknown School',
+    tenantName: (tenantFullyLoaded && currentTenant?.name) || null,  // 🚀 FIX: Only show name when fully loaded
     tenantSubdomain: currentTenant?.subdomain || null,
     
     // 🚀 ENHANCED: Tenant-aware query helpers with cached tenant ID

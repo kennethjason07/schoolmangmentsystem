@@ -16,7 +16,8 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import Header from '../../components/Header';
 import { supabase, TABLES } from '../../utils/supabase';
 import { createBulkMarksNotifications } from '../../utils/marksNotificationHelpers';
-import { useTenantAccess, tenantDatabase, createTenantQuery, getCachedTenantId } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
+import { tenantDatabase, createTenantQuery, getCachedTenantId } from '../../utils/tenantHelpers';
 import { useAuth } from '../../utils/AuthContext';
 import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 

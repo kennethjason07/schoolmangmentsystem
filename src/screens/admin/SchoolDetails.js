@@ -22,7 +22,8 @@ import { decode as atob } from 'base-64';
 import Header from '../../components/Header';
 import { supabase } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
-import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
+import { tenantDatabase } from '../../utils/tenantHelpers';
 import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
 const SchoolDetails = ({ navigation }) => {

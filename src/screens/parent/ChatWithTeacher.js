@@ -21,6 +21,7 @@ import TypingDots from '../../components/TypingDots';
 import { useParentAuth } from '../../hooks/useParentAuth'; // Import parent auth hook
 import { getTeacherUserId } from './teacherUserIdHelper'; // Import teacher user ID helper
 import ChatBadgeDebugger from '../../utils/chatBadgeDebugger'; // Import chat badge debugger
+import ParentChatBadgeDebugger from '../../components/ParentChatBadgeDebugger'; // Import parent chat badge debugger
 
 // Debug mode constant for parent chat
 const DEBUG_MODE = __DEV__ && true; // Enable debug logging in development
@@ -1283,6 +1284,7 @@ const ChatWithTeacher = () => {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.container}>
         <Header title="Chat With Teacher" showBack={true} />
+        {__DEV__ && <ParentChatBadgeDebugger collapsed={true} />}
       {!selectedTeacher ? (
         <View style={styles.teacherListContainer}>
           <View style={styles.headerSection}>
@@ -1501,6 +1503,7 @@ const ChatWithTeacher = () => {
               />
             </TouchableOpacity>
           </View>
+          {__DEV__ && <ParentChatBadgeDebugger collapsed={true} />}
           
           <FlatList
             ref={flatListRef}

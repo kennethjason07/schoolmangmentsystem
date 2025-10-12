@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { getCachedTenantId } from '../utils/tenantHelpers';
 import { useAuth } from '../utils/AuthContext';
-import { useTenantAccess } from '../utils/tenantHelpers';
+import { useTenantAccess } from '../contexts/TenantContext';
 
 const WebDebugOverlay = () => {
   const [isVisible, setIsVisible] = useState(false);

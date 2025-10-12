@@ -22,7 +22,8 @@ import { useAuth } from '../../utils/AuthContext';
 import { supabase } from '../../utils/supabase';
 import * as Animatable from 'react-native-animatable';
 // 🚀 ENHANCED_TENANT_SYSTEM: Import tenant access hook and helpers
-import { useTenantAccess, initializeTenantHelpers } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
+import { initializeTenantHelpers } from '../../utils/tenantHelpers';
 import { getTenantIdByEmail } from '../../utils/getTenantByEmail';
 
 // Import VidyaSetu logo with fallback

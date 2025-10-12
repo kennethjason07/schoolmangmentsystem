@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-import { useTenantAccess } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
 
 const TeacherAccountManagement = ({ navigation }) => {
   const { 

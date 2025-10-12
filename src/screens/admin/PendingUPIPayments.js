@@ -20,7 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import Header from '../../components/Header';
 import { UPIDBService } from '../../services/UPIDBService';
 import { useAuth } from '../../utils/AuthContext';
-import { useTenantAccess } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
 import { formatReferenceNumberForDisplay, validateReferenceNumberFormat } from '../../utils/referenceNumberGenerator';
 import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 

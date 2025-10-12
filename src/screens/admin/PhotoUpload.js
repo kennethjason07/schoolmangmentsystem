@@ -20,7 +20,7 @@ import { File } from 'expo-file-system';
 import { decode as atob } from 'base-64';
 import Header from '../../components/Header';
 import { supabase } from '../../utils/supabase';
-import { useTenantAccess } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
 import { setUploadInProgress } from '../../utils/AuthContext';
 
 const { width } = Dimensions.get('window');

@@ -52,7 +52,8 @@ import { ActivityIndicator as PaperActivityIndicator } from 'react-native-paper'
 import Header from '../../components/Header';
 import { supabase, TABLES } from '../../utils/supabase';
 import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
-import { useTenantAccess, tenantDatabase, getCachedTenantId } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
+import { tenantDatabase, getCachedTenantId } from '../../utils/tenantHelpers';
 import useDataCache from '../../hooks/useDataCache';
 import { batchWithTenant } from '../../utils/batchOperations';
 import FloatingRefreshButton from '../../components/FloatingRefreshButton';

@@ -19,7 +19,7 @@ import { Picker } from '@react-native-picker/picker';
 import Header from '../../components/Header';
 import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
-import { useTenantAccess } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
 
 const StudentAccountManagement = ({ navigation }) => {
   const { 

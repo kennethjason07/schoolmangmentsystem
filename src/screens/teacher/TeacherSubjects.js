@@ -15,7 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useAuth } from '../../utils/AuthContext';
-import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
+import { useTenantAccess } from '../../contexts/TenantContext';
+import { tenantDatabase } from '../../utils/tenantHelpers';
 
 const TeacherSubjects = ({ navigation }) => {
   const { user } = useAuth();

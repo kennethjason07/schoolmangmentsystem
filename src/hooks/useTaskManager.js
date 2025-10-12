@@ -6,7 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Alert } from 'react-native';
 import { useAuth } from '../utils/AuthContext';
-import { useTenantAccess } from '../utils/tenantHelpers';
+import { useTenantAccess } from '../contexts/TenantContext';
 import { 
   validateTenantAccess, 
   createTenantQuery, 

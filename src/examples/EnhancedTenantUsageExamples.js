@@ -7,7 +7,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, Button, Alert } from 'react-native';
-import { useTenantAccess, tenantDatabase } from '../utils/tenantHelpers';
+import { useTenantAccess } from '../contexts/TenantContext';
+import { tenantDatabase, getCachedTenantId, createTenantQuery } from '../utils/tenantHelpers';
 
 /**
  * Example 1: Using the enhanced tenant hook in components
@@ -193,8 +194,6 @@ export const AttendanceService = {
 
   async getStudentAttendance(studentId, startDate, endDate) {
     // For complex queries, you can still use the raw query builder
-    const { getCachedTenantId, createTenantQuery } = require('../utils/tenantHelpers');
-    
     const tenantId = getCachedTenantId();
     if (!tenantId) {
       throw new Error('No tenant context available');
