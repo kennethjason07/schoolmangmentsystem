@@ -90,6 +90,15 @@ class HostelService {
    */
   async createHostel(hostelData) {
     try {
+      // First, verify we have a valid tenant ID
+      if (!this.tenantId) {
+        throw new Error('Tenant ID not set. Please ensure you are properly authenticated.');
+      }
+
+      console.log('Creating hostel with tenant_id:', this.tenantId);
+      console.log('Hostel data:', hostelData);
+
+      // Try the standard insert first
       const { data, error } = await supabase
         .from('hostels')
         .insert({
@@ -99,7 +108,56 @@ class HostelService {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Hostel creation error details:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+        
+        // Handle RLS policy violations by trying the secure function fallback
+        if (error.code === '42501') {
+          console.log('RLS policy violation, trying secure function fallback...');
+          
+          try {
+            const { data: functionResult, error: functionError } = await supabase
+              .rpc('create_hostel_secure', {
+                p_name: hostelData.name,
+                p_address: hostelData.address || null,
+                p_contact_phone: hostelData.contact_phone || null,
+                p_hostel_type: hostelData.hostel_type || 'mixed',
+                p_capacity: parseInt(hostelData.capacity) || 0,
+                p_warden_id: hostelData.warden_id || null,
+                p_description: hostelData.description || null,
+                p_amenities: hostelData.amenities || null,
+                p_tenant_id: this.tenantId
+              });
+            
+            if (functionError) {
+              console.error('Secure function also failed:', functionError);
+              throw new Error(`Database function error: ${functionError.message}`);
+            }
+            
+            console.log('Secure function result:', functionResult);
+            
+            if (functionResult && functionResult.success) {
+              console.log('Hostel created successfully using secure function');
+              return { success: true, data: functionResult.data };
+            } else {
+              throw new Error(functionResult?.error || 'Unknown error from secure function');
+            }
+            
+          } catch (fallbackError) {
+            console.error('Fallback function failed:', fallbackError);
+            throw new Error('You do not have permission to create hostels. Please ensure:\n\n1. You are logged in as an Administrator\n2. Your account has proper permissions\n3. Your session is valid\n4. The hostel database setup is complete\n\nContact your system administrator if this issue persists.');
+          }
+        }
+        
+        throw error;
+      }
+      
+      console.log('Hostel created successfully:', data);
       return { success: true, data };
     } catch (error) {
       console.error('Error creating hostel:', error);

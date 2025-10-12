@@ -11,6 +11,8 @@ import {
   Modal,
   TextInput,
   Dimensions,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRoute } from '@react-navigation/native';
@@ -115,362 +117,133 @@ const HostelManagement = ({ navigation }) => {
     }
   }, [route.params?.openAddHostel]);
 
-  // Mock data for frontend demo
-  const loadMockData = async () => {
-    setLoading(true);
-    
-    // Simulate loading delay
-    setTimeout(() => {
-      // Set mock stats
-      setStats({
-        totalHostels: 3,
-        totalCapacity: 240,
-        totalOccupied: 186,
-        availableBeds: 54,
-        pendingApplications: 12,
-        approvedApplications: 8,
-        waitlistedApplications: 5,
-        maintenanceIssues: 3
-      });
-
-      // Set mock hostels
-      setHostels([
-        {
-          id: '1',
-          name: 'Main Hostel Block',
-          description: 'Primary residential facility for students',
-          capacity: 120,
-          occupied: 95,
-          status: 'active',
-          contact_phone: '9876543210',
-          type: 'boys'
-        },
-        {
-          id: '2',
-          name: 'Girls Hostel',
-          description: 'Dedicated hostel for female students',
-          capacity: 80,
-          occupied: 61,
-          status: 'active',
-          contact_phone: '9876543211',
-          type: 'girls'
-        },
-        {
-          id: '3',
-          name: 'New Block',
-          description: 'Recently constructed hostel building',
-          capacity: 40,
-          occupied: 30,
-          status: 'active',
-          contact_phone: '9876543212',
-          type: 'mixed'
-        }
-      ]);
-
-      // Set mock applications
-      setApplications([
-        {
-          id: '1',
-          status: 'pending',
-          application_date: '2025-09-25',
-          students: {
-            first_name: 'Rahul',
-            last_name: 'Sharma',
-            class: '10',
-            section: 'A',
-            admission_no: 'ST001'
-          }
-        },
-        {
-          id: '2',
-          status: 'approved',
-          application_date: '2025-09-24',
-          students: {
-            first_name: 'Priya',
-            last_name: 'Patel',
-            class: '11',
-            section: 'B',
-            admission_no: 'ST002'
-          }
-        },
-        {
-          id: '3',
-          status: 'pending',
-          application_date: '2025-09-23',
-          students: {
-            first_name: 'Amit',
-            last_name: 'Kumar',
-            class: '12',
-            section: 'A',
-            admission_no: 'ST003'
-          }
-        },
-        {
-          id: '4',
-          status: 'waitlisted',
-          application_date: '2025-09-22',
-          students: {
-            first_name: 'Sneha',
-            last_name: 'Singh',
-            class: '10',
-            section: 'C',
-            admission_no: 'ST004'
-          }
-        },
-        {
-          id: '5',
-          status: 'pending',
-          application_date: '2025-09-21',
-          students: {
-            first_name: 'Vikash',
-            last_name: 'Yadav',
-            class: '11',
-            section: 'A',
-            admission_no: 'ST005'
-          }
-        }
-      ]);
-
-      // Set mock allocations
-      setAllocations([
-        {
-          id: '1',
-          allocation_date: '2025-09-15',
-          monthly_rent: 5000,
-          students: {
-            first_name: 'Aarav',
-            last_name: 'Gupta',
-            class: '12',
-            section: 'B',
-            admission_no: 'ST010'
-          },
-          hostels: { name: 'Main Hostel Block' },
-          hostel_rooms: { room_number: 'A101' },
-          hostel_beds: { bed_number: 'Bed 1' }
-        },
-        {
-          id: '2',
-          allocation_date: '2025-09-14',
-          monthly_rent: 4500,
-          students: {
-            first_name: 'Riya',
-            last_name: 'Mehta',
-            class: '11',
-            section: 'C',
-            admission_no: 'ST011'
-          },
-          hostels: { name: 'Girls Hostel' },
-          hostel_rooms: { room_number: 'G201' },
-          hostel_beds: { bed_number: 'Bed 2' }
-        },
-        {
-          id: '3',
-          allocation_date: '2025-09-13',
-          monthly_rent: 5200,
-          students: {
-            first_name: 'Arjun',
-            last_name: 'Verma',
-            class: '10',
-            section: 'A',
-            admission_no: 'ST012'
-          },
-          hostels: { name: 'New Block' },
-          hostel_rooms: { room_number: 'N301' },
-          hostel_beds: { bed_number: 'Bed 1' }
-        }
-      ]);
-
-      // Set mock maintenance issues
-      setMaintenanceIssues([
-        {
-          id: '1',
-          issue_type: 'Electrical',
-          description: 'AC not working properly in room A101',
-          priority: 'high',
-          status: 'reported',
-          reported_date: '2025-09-26',
-          estimated_cost: 2500,
-          hostels: { name: 'Main Hostel Block' }
-        },
-        {
-          id: '2',
-          issue_type: 'Plumbing',
-          description: 'Bathroom tap needs repair',
-          priority: 'medium',
-          status: 'assigned',
-          reported_date: '2025-09-24',
-          estimated_cost: 500,
-          hostels: { name: 'Girls Hostel' }
-        },
-        {
-          id: '3',
-          issue_type: 'Furniture',
-          description: 'Study table broken in room N301',
-          priority: 'low',
-          status: 'in_progress',
-          reported_date: '2025-09-23',
-          estimated_cost: 800,
-          hostels: { name: 'New Block' }
-        }
-      ]);
-
-      setLoading(false);
-    }, 1000); // 1 second delay to show loading
-  };
+  // Removed mock data - now using real database data only
 
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      // Derive tenant
+      // Get tenant
       const tenantResult = await getCurrentUserTenantByEmail();
-      if (!tenantResult.success) throw new Error(`Failed to resolve tenant: ${tenantResult.error || 'unknown'}`);
+      if (!tenantResult.success) {
+        throw new Error(`Failed to resolve tenant: ${tenantResult.error || 'unknown'}`);
+      }
       const tenantId = tenantResult.data.tenant.id;
 
       // Configure service
       HostelService.setTenantId(tenantId);
 
-      // Parallel load: hostels, occupancy, applications, allocations, maintenance
-      const hostelsQ = HostelService.getHostels();
-      const occupancyQ = HostelService.getOccupancyReport(null);
-      const appsQ = HostelService.getApplications({});
-
-      // Direct allocation query (service does not expose a list method)
-      const allocationsQ = supabase
+      // Load hostels from database
+      const hostelsRes = await HostelService.getHostels();
+      
+      // Load applications from database
+      const appsRes = await HostelService.getApplications({});
+      
+      // Load bed allocations
+      const { data: allocationsData = [], error: allocationsError } = await supabase
         .from('bed_allocations')
         .select(`
-          id, created_at, monthly_rent, status,
-          student:students(id, name, class_id),
+          id, created_at, monthly_rent, status, academic_year,
+          student:students(id, name),
           bed:beds(
             id, bed_label,
             room:rooms(id, room_number, hostel:hostels(id, name))
           )
         `)
         .eq('tenant_id', tenantId)
-        .in('status', ['pending_acceptance','active']);
+        .in('status', ['pending_acceptance', 'active', 'checked_in']);
 
-      const maintenanceQ = HostelService.getMaintenanceLogs(null);
+      // Load maintenance logs
+      const maintRes = await HostelService.getMaintenanceLogs(null);
 
-      const [hostelsRes, occRes, appsRes, allocationsRes, maintRes] = await Promise.all([
-        hostelsQ, occupancyQ, appsQ, allocationsQ, maintenanceQ
-      ]);
-
-      // If occupancy view failed, compute fallback from beds/rooms
-      let occ = occRes.success ? (occRes.data || []) : [];
-      if (!occRes.success) {
-        try {
-          const { data: allBeds = [] } = await supabase
-            .from('beds')
-            .select('id, status, room_id')
-            .eq('tenant_id', tenantId);
-          const roomIds = [...new Set(allBeds.map(b => b.room_id).filter(Boolean))];
-          let roomsMap = new Map();
-          if (roomIds.length) {
-            const { data: rooms = [] } = await supabase
-              .from('rooms')
-              .select('id, hostel_id')
-              .in('id', roomIds);
-            roomsMap = new Map(rooms.map(r => [r.id, r]));
-          }
-          const occByHostelId = new Map();
-          for (const b of allBeds) {
-            const room = roomsMap.get(b.room_id);
-            const hId = room?.hostel_id;
-            if (!hId) continue;
-            if (!occByHostelId.has(hId)) occByHostelId.set(hId, 0);
-            if (b.status === 'occupied') occByHostelId.set(hId, occByHostelId.get(hId) + 1);
-          }
-          occ = Array.from(occByHostelId.entries()).map(([hostel_id, total_occupied]) => ({
-            tenant_id: tenantId,
-            hostel_id,
-            total_occupied
-          }));
-        } catch (e) {
-          console.warn('[HostelManagement] Occupancy fallback failed:', e?.message);
-          occ = [];
-        }
-      }
-
-      // Hostels
+      // Process hostels data
       const liveHostels = (hostelsRes.success ? (hostelsRes.data || []) : []).map(h => ({
         id: h.id,
         name: h.name,
         description: h.description,
         capacity: Number(h.capacity || 0),
-        occupied: 0, // will compute from occupancy
+        occupied: 0, // will compute from beds
         status: h.is_active ? 'active' : 'inactive',
         contact_phone: h.contact_phone || null,
         type: (h.hostel_type || h.type || 'mixed')?.toString().toLowerCase(),
       }));
 
-      // Occupancy
-      const occByHostel = new Map(occ.map(o => [o.hostel_id, o]));
-      const withOcc = liveHostels.map(h => {
-        const o = occByHostel.get(h.id);
+      // Calculate occupancy from beds table
+      const { data: allBeds = [] } = await supabase
+        .from('beds')
+        .select('id, status, room_id')
+        .eq('tenant_id', tenantId);
+
+      // Get room-to-hostel mapping
+      const roomIds = [...new Set(allBeds.map(b => b.room_id).filter(Boolean))];
+      let roomsMap = new Map();
+      if (roomIds.length) {
+        const { data: rooms = [] } = await supabase
+          .from('rooms')
+          .select('id, hostel_id')
+          .in('id', roomIds);
+        roomsMap = new Map(rooms.map(r => [r.id, r]));
+      }
+
+      // Count occupied beds per hostel
+      const occByHostelId = new Map();
+      for (const bed of allBeds) {
+        const room = roomsMap.get(bed.room_id);
+        const hostelId = room?.hostel_id;
+        if (!hostelId) continue;
+        if (!occByHostelId.has(hostelId)) {
+          occByHostelId.set(hostelId, { total: 0, occupied: 0 });
+        }
+        const counts = occByHostelId.get(hostelId);
+        counts.total++;
+        if (bed.status === 'occupied') {
+          counts.occupied++;
+        }
+        occByHostelId.set(hostelId, counts);
+      }
+
+      // Update hostels with occupancy data
+      const hostelsWithOccupancy = liveHostels.map(h => {
+        const counts = occByHostelId.get(h.id) || { total: 0, occupied: 0 };
         return {
           ...h,
-          occupied: Number(o?.total_occupied || 0)
+          occupied: counts.occupied,
+          // Update capacity from actual bed count if different
+          capacity: Math.max(h.capacity, counts.total)
         };
       });
 
-      // Applications
+      // Process applications data
       const liveApplications = appsRes.success ? (appsRes.data || []) : [];
 
-      // Allocations
-      const allocationsData = allocationsRes.error ? [] : (allocationsRes.data || []);
+      // Process allocations data
+      const liveAllocations = allocationsData.map(a => ({
+        id: a.id,
+        allocation_date: a.created_at,
+        monthly_rent: a.monthly_rent || 0,
+        status: a.status,
+        academic_year: a.academic_year,
+        students: { 
+          name: a.student?.name || 'Student',
+          id: a.student?.id 
+        },
+        hostels: { 
+          name: a.bed?.room?.hostel?.name || 'Unknown Hostel' 
+        },
+        hostel_rooms: { 
+          room_number: a.bed?.room?.room_number || 'N/A' 
+        },
+        hostel_beds: { 
+          bed_number: a.bed?.bed_label || 'N/A' 
+        }
+      }));
 
-      // Manual enrichment without relying on FK relationships
-      const bedIds = [...new Set(allocationsData.map(a => a.bed?.id || a.bed_id).filter(Boolean))];
-      let bedsMap = new Map();
-      if (bedIds.length) {
-        const { data: bedsRows = [] } = await supabase
-          .from('beds')
-          .select('id, bed_label, room_id')
-          .in('id', bedIds);
-        bedsMap = new Map(bedsRows.map(b => [b.id, b]));
-      }
-      const roomIds2 = [...new Set(Array.from(bedsMap.values()).map(b => b.room_id).filter(Boolean))];
-      let roomsMap2 = new Map();
-      if (roomIds2.length) {
-        const { data: roomRows = [] } = await supabase
-          .from('rooms')
-          .select('id, room_number, hostel_id')
-          .in('id', roomIds2);
-        roomsMap2 = new Map(roomRows.map(r => [r.id, r]));
-      }
-      const hostelIds = [...new Set(Array.from(roomsMap2.values()).map(r => r.hostel_id).filter(Boolean))];
-      let hostelsMap2 = new Map();
-      if (hostelIds.length) {
-        const { data: hostelRows = [] } = await supabase
-          .from('hostels')
-          .select('id, name')
-          .in('id', hostelIds);
-        hostelsMap2 = new Map(hostelRows.map(h => [h.id, h]));
-      }
-
-      const liveAllocations = allocationsData.map(a => {
-        // Try nested value, otherwise use manual map
-        const bedId = a.bed?.id || a.bed_id;
-        const bed = a.bed || bedsMap.get(bedId);
-        const room = (a.bed?.room) || (bed ? roomsMap2.get(bed.room_id) : null);
-        const hostel = (a.bed?.room?.hostel) || (room ? hostelsMap2.get(room.hostel_id) : null);
-        return {
-          id: a.id,
-          allocation_date: a.created_at,
-          monthly_rent: a.monthly_rent || 0,
-          students: { name: a.student?.name || 'Student' },
-          hostels: { name: hostel?.name || 'Hostel' },
-          hostel_rooms: { room_number: room?.room_number || '-' },
-          hostel_beds: { bed_number: bed?.bed_label || '-' }
-        };
-      });
-
-      // Maintenance
+      // Process maintenance data
       const liveMaintenance = maintRes.success ? (maintRes.data || []) : [];
 
-      // Stats
-      const totalHostels = withOcc.length;
-      const totalCapacity = withOcc.reduce((s, h) => s + (h.capacity || 0), 0);
-      const totalOccupied = withOcc.reduce((s, h) => s + (h.occupied || 0), 0);
+      // Calculate statistics
+      const totalHostels = hostelsWithOccupancy.length;
+      const totalCapacity = hostelsWithOccupancy.reduce((sum, h) => sum + (h.capacity || 0), 0);
+      const totalOccupied = hostelsWithOccupancy.reduce((sum, h) => sum + (h.occupied || 0), 0);
       const availableBeds = Math.max(totalCapacity - totalOccupied, 0);
 
       const statsComputed = {
@@ -484,15 +257,25 @@ const HostelManagement = ({ navigation }) => {
         maintenanceIssues: liveMaintenance.length,
       };
 
-      setHostels(withOcc);
+      // Update state with real data
+      setHostels(hostelsWithOccupancy);
       setApplications(liveApplications);
       setAllocations(liveAllocations);
       setMaintenanceIssues(liveMaintenance);
       setStats(statsComputed);
       setLoading(false);
+
     } catch (err) {
-      console.warn('[HostelManagement] Live load failed, falling back to demo:', err?.message);
-      await loadMockData();
+      console.error('[HostelManagement] Failed to load data:', err);
+      Alert.alert(
+        'Loading Error',
+        `Failed to load hostel data: ${err.message}\n\nPlease check:\n1. Database connection\n2. Hostel tables are set up\n3. User permissions`,
+        [
+          { text: 'Retry', onPress: () => loadDashboardData() },
+          { text: 'OK', style: 'cancel' }
+        ]
+      );
+      setLoading(false);
     }
   };
 
@@ -681,126 +464,134 @@ const HostelManagement = ({ navigation }) => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📊 Overview</Text>
           <View style={styles.statsGrid}>
-            <View style={styles.twoCol}><HostelStatCard
-              title="Hostels"
-              value={stats.totalHostels.toString()}
-              icon="business"
-              color="#2196F3"
-              subtitle="Active hostels"
-              animated={true}
-              size="small"
-              fluid
-              columns={1}
-              onPress={() => navigation.navigate('HostelDetailList', {
-                type: 'hostels',
-                title: 'All Hostels Overview',
-                data: hostels,
-                icon: 'business',
-                color: '#2196F3',
-                description: 'Complete list of all hostel facilities',
-                stats: {
-                  total: stats.totalHostels,
-                  active: hostels.filter(h => h.status === 'active').length,
-                  totalCapacity: stats.totalCapacity,
-                  totalOccupied: stats.totalOccupied
-                }
-              })}
-            /></View>
-            <View style={styles.twoCol}><HostelStatCard
-              title="Capacity"
-              fluid
-              value={stats.totalCapacity.toString()}
-              icon="people"
-              color="#4CAF50"
-              subtitle="Total beds"
-              animated={true}
-              size="small"
-              columns={1}
-              onPress={() => navigation.navigate('HostelDetailList', {
-                type: 'capacity',
-                title: 'Capacity Analysis',
-                data: hostels.map(hostel => ({
-                  ...hostel,
-                  utilizationRate: ((hostel.occupied / hostel.capacity) * 100).toFixed(1),
-                  availableSpace: hostel.capacity - hostel.occupied
-                })),
-                icon: 'people',
-                color: '#4CAF50',
-                description: 'Detailed capacity utilization across all hostels',
-                stats: {
-                  totalCapacity: stats.totalCapacity,
-                  totalOccupied: stats.totalOccupied,
-                  totalAvailable: stats.availableBeds,
-                  utilizationRate: ((stats.totalOccupied / stats.totalCapacity) * 100).toFixed(1)
-                }
-              })}
-            /></View>
-            <View style={styles.twoCol}><HostelStatCard
-              title="Occupied"
-              fluid
-              value={stats.totalOccupied.toString()}
-              icon="bed"
-              color="#FF9800"
-              subtitle="Currently occupied"
-              animated={true}
-              maxValue={stats.totalCapacity}
-              progress={(stats.totalOccupied / stats.totalCapacity) * 100}
-              size="small"
-              columns={1}
-              onPress={() => navigation.navigate('HostelDetailList', {
-                type: 'occupied',
-                title: 'Occupied Beds Details',
-                data: allocations.map(allocation => ({
-                  ...allocation,
-                  occupancyDate: allocation.allocation_date,
-                  studentInfo: `${allocation.students?.first_name} ${allocation.students?.last_name}`,
-                  locationInfo: `${allocation.hostels?.name} - ${allocation.hostel_rooms?.room_number}`,
-                  bedInfo: allocation.hostel_beds?.bed_number
-                })),
-                icon: 'bed',
-                color: '#FF9800',
-                description: 'Currently occupied beds and resident details',
-                stats: {
-                  totalOccupied: stats.totalOccupied,
-                  totalCapacity: stats.totalCapacity,
-                  occupancyRate: ((stats.totalOccupied / stats.totalCapacity) * 100).toFixed(1),
-                  totalRevenue: allocations.reduce((sum, a) => sum + (a.monthly_rent || 0), 0)
-                }
-              })}
-            />
-            <View style={styles.twoCol}><HostelStatCard
-              title="Available"
-              fluid
-              value={stats.availableBeds.toString()}
-              icon="home"
-              color="#9C27B0"
-              subtitle="Available beds"
-              animated={true}
-              maxValue={stats.totalCapacity}
-              progress={(stats.availableBeds / stats.totalCapacity) * 100}
-              size="small"
-              columns={1}
-              onPress={() => navigation.navigate('HostelDetailList', {
-                type: 'available',
-                title: 'Available Beds',
-                data: hostels
-                  .filter(h => h.capacity - h.occupied > 0)
-                  .map(hostel => ({
+            <View style={styles.twoCol}>
+              <HostelStatCard
+                title="Hostels"
+                value={stats.totalHostels.toString()}
+                icon="business"
+                color="#2196F3"
+                subtitle="Active hostels"
+                animated={true}
+                size="small"
+                fluid
+                columns={1}
+                onPress={() => navigation.navigate('HostelDetailList', {
+                  type: 'hostels',
+                  title: 'All Hostels Overview',
+                  data: hostels,
+                  icon: 'business',
+                  color: '#2196F3',
+                  description: 'Complete list of all hostel facilities',
+                  stats: {
+                    total: stats.totalHostels,
+                    active: hostels.filter(h => h.status === 'active').length,
+                    totalCapacity: stats.totalCapacity,
+                    totalOccupied: stats.totalOccupied
+                  }
+                })}
+              />
+            </View>
+            <View style={styles.twoCol}>
+              <HostelStatCard
+                title="Capacity"
+                fluid
+                value={stats.totalCapacity.toString()}
+                icon="people"
+                color="#4CAF50"
+                subtitle="Total beds"
+                animated={true}
+                size="small"
+                columns={1}
+                onPress={() => navigation.navigate('HostelDetailList', {
+                  type: 'capacity',
+                  title: 'Capacity Analysis',
+                  data: hostels.map(hostel => ({
                     ...hostel,
-                    availableBeds: hostel.capacity - hostel.occupied,
-                    availabilityRate: (((hostel.capacity - hostel.occupied) / hostel.capacity) * 100).toFixed(1)
+                    utilizationRate: ((hostel.occupied / hostel.capacity) * 100).toFixed(1),
+                    availableSpace: hostel.capacity - hostel.occupied
                   })),
-                icon: 'home',
-                color: '#9C27B0',
-                description: 'Available beds across all hostels',
-                stats: {
-                  totalAvailable: stats.availableBeds,
-                  totalCapacity: stats.totalCapacity,
-                  availabilityRate: ((stats.availableBeds / stats.totalCapacity) * 100).toFixed(1),
-                  hostelsWithAvailability: hostels.filter(h => h.capacity - h.occupied > 0).length
-                }
-              })}
-            /></View></View>
+                  icon: 'people',
+                  color: '#4CAF50',
+                  description: 'Detailed capacity utilization across all hostels',
+                  stats: {
+                    totalCapacity: stats.totalCapacity,
+                    totalOccupied: stats.totalOccupied,
+                    totalAvailable: stats.availableBeds,
+                    utilizationRate: ((stats.totalOccupied / stats.totalCapacity) * 100).toFixed(1)
+                  }
+                })}
+              />
+            </View>
+            <View style={styles.twoCol}>
+              <HostelStatCard
+                title="Occupied"
+                fluid
+                value={stats.totalOccupied.toString()}
+                icon="bed"
+                color="#FF9800"
+                subtitle="Currently occupied"
+                animated={true}
+                maxValue={stats.totalCapacity}
+                progress={(stats.totalOccupied / stats.totalCapacity) * 100}
+                size="small"
+                columns={1}
+                onPress={() => navigation.navigate('HostelDetailList', {
+                  type: 'occupied',
+                  title: 'Occupied Beds Details',
+                  data: allocations.map(allocation => ({
+                    ...allocation,
+                    occupancyDate: allocation.allocation_date,
+                    studentInfo: `${allocation.students?.first_name} ${allocation.students?.last_name}`,
+                    locationInfo: `${allocation.hostels?.name} - ${allocation.hostel_rooms?.room_number}`,
+                    bedInfo: allocation.hostel_beds?.bed_number
+                  })),
+                  icon: 'bed',
+                  color: '#FF9800',
+                  description: 'Currently occupied beds and resident details',
+                  stats: {
+                    totalOccupied: stats.totalOccupied,
+                    totalCapacity: stats.totalCapacity,
+                    occupancyRate: ((stats.totalOccupied / stats.totalCapacity) * 100).toFixed(1),
+                    totalRevenue: allocations.reduce((sum, a) => sum + (a.monthly_rent || 0), 0)
+                  }
+                })}
+              />
+            </View>
+            <View style={styles.twoCol}>
+              <HostelStatCard
+                title="Available"
+                fluid
+                value={stats.availableBeds.toString()}
+                icon="home"
+                color="#9C27B0"
+                subtitle="Available beds"
+                animated={true}
+                maxValue={stats.totalCapacity}
+                progress={(stats.availableBeds / stats.totalCapacity) * 100}
+                size="small"
+                columns={1}
+                onPress={() => navigation.navigate('HostelDetailList', {
+                  type: 'available',
+                  title: 'Available Beds',
+                  data: hostels
+                    .filter(h => h.capacity - h.occupied > 0)
+                    .map(hostel => ({
+                      ...hostel,
+                      availableBeds: hostel.capacity - hostel.occupied,
+                      availabilityRate: (((hostel.capacity - hostel.occupied) / hostel.capacity) * 100).toFixed(1)
+                    })),
+                  icon: 'home',
+                  color: '#9C27B0',
+                  description: 'Available beds across all hostels',
+                  stats: {
+                    totalAvailable: stats.availableBeds,
+                    totalCapacity: stats.totalCapacity,
+                    availabilityRate: ((stats.availableBeds / stats.totalCapacity) * 100).toFixed(1),
+                    hostelsWithAvailability: hostels.filter(h => h.capacity - h.occupied > 0).length
+                  }
+                })}
+              />
+            </View>
           </View>
         </View>
 
@@ -872,61 +663,99 @@ onPress={() => navigation.navigate('HostelApplications', {
         transparent={true}
         animationType="slide"
       >
-        <View style={styles.modalContainer}>
+        <KeyboardAvoidingView 
+          style={styles.modalContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        >
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Add New Hostel</Text>
             
-            <TextInput
-              style={styles.input}
-              placeholder="Hostel Name *"
-              value={newHostelData.name}
-              onChangeText={(text) => setNewHostelData(prev => ({ ...prev, name: text }))}
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Description"
-              value={newHostelData.description}
-              onChangeText={(text) => setNewHostelData(prev => ({ ...prev, description: text }))}
-              multiline
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Capacity *"
-              value={newHostelData.capacity}
-              onChangeText={(text) => setNewHostelData(prev => ({ ...prev, capacity: text }))}
-              keyboardType="numeric"
-            />
-            
-            <Text style={styles.inputLabel}>Hostel Type</Text>
-            <View style={styles.typePickerContainer}>
-              {['mixed', 'boys', 'girls'].map((type) => (
-                <TouchableOpacity
-                  key={type}
-                  style={[
-                    styles.typePicker,
-                    newHostelData.type === type && styles.typePickerSelected
-                  ]}
-                  onPress={() => setNewHostelData(prev => ({ ...prev, type }))}
-                >
-                  <Text style={[
-                    styles.typePickerText,
-                    newHostelData.type === type && styles.typePickerTextSelected
-                  ]}>
-                    {type.charAt(0).toUpperCase() + type.slice(1)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Contact Phone"
-              value={newHostelData.contact_phone}
-              onChangeText={(text) => setNewHostelData(prev => ({ ...prev, contact_phone: text }))}
-              keyboardType="phone-pad"
-            />
+            <ScrollView 
+              style={styles.modalScrollView}
+              contentContainerStyle={styles.modalScrollContent}
+              showsVerticalScrollIndicator={true}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled={true}
+              bounces={true}
+            >
+              <TextInput
+                style={styles.input}
+                placeholder="Hostel Name *"
+                value={newHostelData.name}
+                onChangeText={(text) => setNewHostelData(prev => ({ ...prev, name: text }))}
+              />
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Description"
+                value={newHostelData.description}
+                onChangeText={(text) => setNewHostelData(prev => ({ ...prev, description: text }))}
+                multiline
+                numberOfLines={3}
+              />
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Capacity *"
+                value={newHostelData.capacity}
+                onChangeText={(text) => setNewHostelData(prev => ({ ...prev, capacity: text }))}
+                keyboardType="numeric"
+              />
+              
+              <Text style={styles.inputLabel}>Hostel Type</Text>
+              <View style={styles.typePickerContainer}>
+                {['mixed', 'boys', 'girls'].map((type) => (
+                  <TouchableOpacity
+                    key={type}
+                    style={[
+                      styles.typePicker,
+                      newHostelData.type === type && styles.typePickerSelected
+                    ]}
+                    onPress={() => setNewHostelData(prev => ({ ...prev, type }))}
+                  >
+                    <Text style={[
+                      styles.typePickerText,
+                      newHostelData.type === type && styles.typePickerTextSelected
+                    ]}>
+                      {type.charAt(0).toUpperCase() + type.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Contact Phone"
+                value={newHostelData.contact_phone}
+                onChangeText={(text) => setNewHostelData(prev => ({ ...prev, contact_phone: text }))}
+                keyboardType="phone-pad"
+              />
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Address (Optional)"
+                value={newHostelData.address || ''}
+                onChangeText={(text) => setNewHostelData(prev => ({ ...prev, address: text }))}
+                multiline
+                numberOfLines={2}
+              />
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Warden Name (Optional)"
+                value={newHostelData.warden_name || ''}
+                onChangeText={(text) => setNewHostelData(prev => ({ ...prev, warden_name: text }))}
+              />
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Monthly Fee (Optional)"
+                value={newHostelData.monthly_fee || ''}
+                onChangeText={(text) => setNewHostelData(prev => ({ ...prev, monthly_fee: text }))}
+                keyboardType="numeric"
+              />
+            </ScrollView>
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -944,7 +773,7 @@ onPress={() => navigation.navigate('HostelApplications', {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -1316,13 +1145,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 20,
   },
   modalContent: {
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 24,
-    width: '90%',
+    width: '100%',
     maxWidth: 400,
+    maxHeight: '85%',
+    minHeight: 300,
+  },
+  modalScrollView: {
+    flex: 1,
+    marginBottom: 20,
+  },
+  modalScrollContent: {
+    paddingBottom: 20,
+    flexGrow: 1,
   },
   modalTitle: {
     fontSize: 20,
