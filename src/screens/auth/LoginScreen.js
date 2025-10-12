@@ -683,24 +683,6 @@ Please contact the administrator to add this role.`
               >
                 <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
               </TouchableOpacity>
-              
-              <View style={styles.signupContainer}>
-                <Text style={styles.signupText}>Don't have an account? </Text>
-                <TouchableOpacity 
-                  onPress={() => navigation.navigate('Signup')}
-                  // Web-specific enhancement for hover effect
-                  {...(Platform.OS === 'web' && {
-                    onMouseEnter: (e) => {
-                      e.currentTarget.style.opacity = 0.8;
-                    },
-                    onMouseLeave: (e) => {
-                      e.currentTarget.style.opacity = 1;
-                    }
-                  })}
-                >
-                  <Text style={styles.signupLink}>Sign Up</Text>
-                </TouchableOpacity>
-              </View>
             </View>
           </Animatable.View>
           
@@ -1030,26 +1012,6 @@ const styles = StyleSheet.create({
     color: '#1976d2',
     fontSize: 14,
     textDecorationLine: 'underline',
-  },
-  signupContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 20,
-  },
-  signupText: {
-    color: '#666',
-    fontSize: 14,
-  },
-  signupLink: {
-    color: '#1976d2',
-    fontSize: 14,
-    fontWeight: '600',
-    // Web-specific enhancements
-    ...(Platform.OS === 'web' && {
-      cursor: 'pointer',
-      transition: 'opacity 0.2s ease-in-out',
-    }),
   },
   // Popup Styles
   popupOverlay: {
