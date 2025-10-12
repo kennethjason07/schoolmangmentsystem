@@ -10,7 +10,7 @@
 
 import { enhancedTenantDB } from './EnhancedTenantService';
 import { TABLES } from '../utils/supabase';
-import { getCachedTenantId } from '../utils/tenantHelpers';
+import { getCachedTenantId } from '../utils/sharedTenantUtils';
 
 /**
  * 🚀 ENHANCED FEE MANAGEMENT SERVICE CLASS

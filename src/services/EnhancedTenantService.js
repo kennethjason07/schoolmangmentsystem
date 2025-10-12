@@ -9,7 +9,8 @@
  */
 
 import { supabase, TABLES } from '../utils/supabase';
-import { getCachedTenantId, setCachedTenantId, createTenantQuery } from '../utils/tenantHelpers';
+import { getCachedTenantId } from '../utils/sharedTenantUtils';
+import { createTenantQuery } from '../utils/tenantHelpers';
 import { validateTenantAccess } from '../utils/tenantValidation';
 
 /**

@@ -3,7 +3,7 @@ import { supabase } from '../utils/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentUserTenantByEmail } from '../utils/getTenantByEmail';
 import { validateTenantAccess, createTenantQuery } from '../utils/tenantValidation';
-import { initializeTenantHelpers, resetTenantHelpers } from '../utils/tenantHelpers';
+import { initializeTenantHelpers, resetTenantHelpers } from '../utils/sharedTenantUtils';
 // DISABLED: Auto-importing test utilities that run database queries before login
 // import { runAllProductionTests } from '../utils/supabaseProductionTest';
 // import { testTenantQueryHelper, createTenantQuery, executeTenantQuery } from '../utils/tenantQueryHelper';

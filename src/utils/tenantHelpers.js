@@ -68,62 +68,23 @@ export const useTenantAccess = () => {
 
 /**
  * 🚀 BREAKING CHANGE: Enhanced tenant ID caching with monitoring
- * This should be used carefully - make sure tenant is initialized first
- * Now includes performance tracking and automatic validation
+ * Now uses shared utilities to prevent circular dependencies
  */
-let _cachedTenantId = null;
-let _tenantInitialized = false;
-let _lastAccessTime = null;
-let _accessCount = 0;
+import { 
+  getCachedTenantId, 
+  setCachedTenantId, 
+  clearCachedTenantId, 
+  getTenantCacheStats,
+  initializeTenantHelpers as sharedInitializeTenantHelpers,
+  resetTenantHelpers as sharedResetTenantHelpers
+} from './sharedTenantUtils';
 
-export const setCachedTenantId = (tenantId) => {
-  if (!tenantId) {
-    throw new Error('🚨 ENHANCED TENANT SYSTEM: Cannot set null or undefined tenant ID');
-  }
-  
-  _cachedTenantId = tenantId;
-  _tenantInitialized = true;
-  _lastAccessTime = Date.now();
-  _accessCount = 0;
-  
-  console.log('🚀 Enhanced TenantHelpers: Cached tenant ID set:', tenantId);
-};
-
-export const getCachedTenantId = () => {
-  _accessCount++;
-  _lastAccessTime = Date.now();
-  
-  if (!_tenantInitialized || !_cachedTenantId) {
-    console.warn('⚠️ Enhanced TenantHelpers: Tenant not initialized yet. Make sure to initialize tenant before using database services.');
-    console.warn('📊 Access Count:', _accessCount, 'Last Access:', new Date(_lastAccessTime || 0).toISOString());
-    return null;
-  }
-  
-  return _cachedTenantId;
-};
-
-export const clearCachedTenantId = () => {
-  console.log('🧹 Enhanced TenantHelpers: Clearing tenant cache. Stats - Access Count:', _accessCount, 'Last Access:', new Date(_lastAccessTime || 0).toISOString());
-  
-  _cachedTenantId = null;
-  _tenantInitialized = false;
-  _lastAccessTime = null;
-  _accessCount = 0;
-  
-  console.log('🧹 Enhanced TenantHelpers: Cached tenant ID cleared');
-};
-
-/**
- * 🚀 BREAKING CHANGE: New tenant cache monitoring function
- */
-export const getTenantCacheStats = () => {
-  return {
-    tenantId: _cachedTenantId,
-    initialized: _tenantInitialized,
-    accessCount: _accessCount,
-    lastAccess: _lastAccessTime ? new Date(_lastAccessTime).toISOString() : null,
-    isHealthy: _tenantInitialized && _cachedTenantId && _lastAccessTime
-  };
+// Re-export shared functions for backward compatibility
+export { 
+  getCachedTenantId, 
+  setCachedTenantId, 
+  clearCachedTenantId, 
+  getTenantCacheStats 
 };
 
 /**
@@ -511,30 +472,24 @@ export const tenantDatabase = {
  * 🚀 Initialize tenant helpers with context data
  * Call this when tenant context is ready
  */
-export const initializeTenantHelpers = (tenantId) => {
-  setCachedTenantId(tenantId);
-  // console.log('🚀 TenantHelpers: Initialized with tenant ID:', tenantId);
-};
+export const initializeTenantHelpers = sharedInitializeTenantHelpers;
 
 /**
  * 🚀 Reset tenant helpers (on logout)
  */
-export const resetTenantHelpers = () => {
-  clearCachedTenantId();
-  console.log('🧹 TenantHelpers: Reset completed');
-};
+export const resetTenantHelpers = sharedResetTenantHelpers;
 
 // Export legacy compatibility function
 export const getCurrentTenantId = getCachedTenantId;
 
 /**
  * 🚀 BREAKING CHANGE: Enhanced service integrations
- * Import enhanced services for better performance and features
+ * NOTE: Service re-exports removed to prevent circular dependencies
+ * Import enhanced services directly where needed:
+ * - import { enhancedTenantDB } from '../services/EnhancedTenantService'
+ * - import { enhancedFeeService } from '../services/EnhancedFeeService'
+ * - import { enhancedAttendanceService } from '../services/EnhancedAttendanceService'
  */
-// Re-export enhanced services for convenience
-export { enhancedTenantDB } from '../services/EnhancedTenantService';
-export { enhancedFeeService } from '../services/EnhancedFeeService';
-export { enhancedAttendanceService } from '../services/EnhancedAttendanceService';
 
 /**
  * 🚀 Enhanced feature checking functionality
@@ -558,7 +513,8 @@ export const checkTenantFeature = (featureKey) => {
 export const getEnhancedTenantHealth = async () => {
   try {
     const cacheStats = getTenantCacheStats();
-    const tenantAccess = _cachedTenantId ? { tenantId: _cachedTenantId, available: true } : { available: false };
+    const cachedTenantId = getCachedTenantId();
+    const tenantAccess = cachedTenantId ? { tenantId: cachedTenantId, available: true } : { available: false };
     
     return {
       status: 'healthy',
