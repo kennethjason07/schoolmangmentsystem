@@ -2940,12 +2940,6 @@ const fetchDashboardDataWithDirectAuth = async () => {
               <Ionicons name="calendar-outline" size={20} color="#1976d2" />
             </View>
             <Text style={styles.sectionTitle}>Upcoming Events</Text>
-            <TouchableOpacity
-              style={styles.addEventButton}
-              onPress={() => Alert.alert('Add Event', 'Event management feature coming soon!')}
-            >
-              <Ionicons name="add-circle" size={24} color="#1976d2" />
-            </TouchableOpacity>
           </View>
 
           {upcomingEvents.length === 0 ? (
