@@ -129,12 +129,12 @@ export async function storePushToken(pushToken, userId, userType) {
     // Example Supabase implementation:
     /*
     const { error } = await supabase
-      .from('user_push_tokens')
+      .from('push_tokens')
       .upsert({
         user_id: userId,
-        push_token: pushToken,
-        user_type: userType,
+        token: pushToken,
         device_type: Platform.OS,
+        is_active: true,
         updated_at: new Date().toISOString()
       });
 

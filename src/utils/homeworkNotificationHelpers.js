@@ -153,8 +153,8 @@ export async function getActivePushTokensForUser(userId, tenantId) {
     console.log('📱 Getting active push tokens for user:', userId, 'tenant:', tenantId);
     
     let query = supabase
-      .from('user_push_tokens')
-      .select('push_token')
+      .from('push_tokens')
+      .select('token, user_id, is_active, created_at')
       .eq('user_id', userId)
       .eq('is_active', true);
     
@@ -170,7 +170,11 @@ export async function getActivePushTokensForUser(userId, tenantId) {
       return [];
     }
     
-    const validTokens = (tokens || []).filter(t => t.push_token).map(t => t.push_token);
+    // Extract tokens manually to avoid SQL alias issues
+    const validTokens = (tokens || [])
+      .filter(t => t.token && typeof t.token === 'string' && t.token.trim() !== '')
+      .map(t => t.token);
+    
     console.log(`📱 Found ${validTokens.length} active push tokens for user ${userId}`);
     
     return validTokens;
