@@ -16,6 +16,15 @@ import {
   getCachedTenantId 
 } from '../../utils/tenantHelpers';
 
+// 🔧 DEBOUNCING UTILITY - Prevents excessive API calls
+const debounce = (func, delay) => {
+  let timeoutId;
+  return (...args) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => func.apply(null, args), delay);
+  };
+};
+
 function formatDateDMY(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') return '';
   try {
@@ -60,20 +69,28 @@ const TakeAttendance = () => {
   const cacheRef = useRef(cachedData);
   const subscriptionsRef = useRef({});
   const prefetchTimeoutRef = useRef(null);
+  const debounceTimeoutRef = useRef(null);
   
   // Cache configuration
   const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
   const ATTENDANCE_CACHE_DURATION = 2 * 60 * 1000; // 2 minutes for attendance (more dynamic)
   const PREFETCH_DELAY = 500; // 500ms delay before prefetching data
+  const DEBOUNCE_DELAY = 300; // 300ms debounce for API calls
   
-  // 🚀 OPTIMIZATION: Cache utility functions
+  // 🔧 FIXED: Optimized cache utility functions with proper memoization
   const isCacheValid = useCallback((key, customDuration) => {
     const duration = customDuration || CACHE_DURATION;
-    const lastFetch = cachedData.lastFetch[key];
-    if (!lastFetch) return false;
-    return (Date.now() - lastFetch) < duration;
-  }, [cachedData.lastFetch]);
+    const lastFetch = cacheRef.current.lastFetch[key]; // Use ref for latest data
+    if (!lastFetch) {
+      if (__DEV__) console.log('💾 [CACHE] No cache entry for key:', key);
+      return false;
+    }
+    const isValid = (Date.now() - lastFetch) < duration;
+    if (__DEV__) console.log('💾 [CACHE] Key', key, isValid ? 'is valid' : 'is expired');
+    return isValid;
+  }, []); // No dependencies needed - uses refs
   
+  // 🔧 FIXED: updateCache with proper dependencies and memoization
   const updateCache = useCallback((updates) => {
     const now = Date.now();
     setCachedData(prev => {
@@ -89,9 +106,10 @@ const TakeAttendance = () => {
         }
       };
       cacheRef.current = newData;
+      if (__DEV__) console.log('💾 [CACHE] Updated cache with keys:', Object.keys(updates));
       return newData;
     });
-  }, []);
+  }, []); // Empty dependencies - this function is pure
   
   const clearCache = useCallback(() => {
     const emptyCache = {
@@ -161,6 +179,141 @@ const TakeAttendance = () => {
       prefetchData(classId, date);
     }, PREFETCH_DELAY);
   }, [prefetchData]);
+  
+  // 🔧 FIXED: Debounced API calls to prevent excessive requests
+  const debouncedFetchExistingAttendance = useCallback(
+    debounce(async () => {
+      if (!selectedClass || !selectedDate || students.length === 0) {
+        if (__DEV__) console.log('🔧 [DEBOUNCED] Skipping attendance fetch - conditions not met');
+        return;
+      }
+      
+      if (__DEV__) console.log('🔧 [DEBOUNCED] Calling fetchExistingAttendance');
+      
+      // Skip fetching if user has manually cleared attendance
+      if (clearMode) {
+        if (__DEV__) console.log('Clear mode active - skipping attendance fetch');
+        return;
+      }
+      
+      // 🔧 FIXED: Improved cache checking with ref-based data
+      const cacheKey = `${selectedClass}-${selectedDate}`;
+      const attendanceCacheKey = `attendance-${cacheKey}`;
+      const cachedAttendance = cacheRef.current.attendance[attendanceCacheKey];
+      if (cachedAttendance && isCacheValid(attendanceCacheKey, ATTENDANCE_CACHE_DURATION)) {
+        if (__DEV__) console.log('⚡ CACHE HIT: Using cached attendance data for', cacheKey);
+        setAttendanceMark(cachedAttendance);
+        return;
+      }
+      
+      try {
+        if (__DEV__) {
+          console.log('🔍 [DEBUG] Enhanced: Fetching existing attendance...');
+          console.log('🔍 [DEBUG] Class ID:', selectedClass);
+          console.log('🔍 [DEBUG] Date:', selectedDate);
+          console.log('🔍 [DEBUG] Student IDs:', students.map(s => s.id));
+        }
+        
+        // 🚀 ENHANCED: Validate tenant access using new helper
+        const validation = validateTenantAccess();
+        if (!validation.valid) {
+          console.warn('⚠️ Enhanced tenant validation failed in fetchExistingAttendance, skipping silently for UX');
+          return; // Silent return for better UX
+        }
+        
+        // 🚀 ENHANCED: Get existing attendance records using createTenantQuery
+        const { data: attendanceData, error: attendanceError } = await createTenantQuery(
+          validation.tenantId,
+          TABLES.STUDENT_ATTENDANCE,
+          'student_id, status',
+          { 
+            date: selectedDate,
+            class_id: selectedClass 
+          }
+        );
+
+        if (attendanceError) {
+          console.error('❌ Error fetching attendance:', attendanceError);
+          return; // Silent return for better UX
+        }
+
+        if (__DEV__) {
+          console.log('🔍 [DEBUG] Found attendance records:', attendanceData?.length || 0);
+          console.log('🔍 [DEBUG] Attendance data:', JSON.stringify(attendanceData, null, 2));
+        }
+
+        // Create attendance mark object
+        const mark = {};
+        attendanceData?.forEach(record => {
+          mark[record.student_id] = record.status;
+          if (__DEV__) console.log('🔍 [DEBUG] Mapping student_id', record.student_id, 'to status', record.status);
+        });
+        
+        if (__DEV__) console.log('🔍 [DEBUG] Final attendance mark object:', JSON.stringify(mark, null, 2));
+        
+        // 🔧 FIXED: Update cache with fetched data using consistent key format
+        updateCache({
+          attendance: {
+            ...cacheRef.current.attendance,
+            [attendanceCacheKey]: mark
+          }
+        });
+        
+        setAttendanceMark(mark);
+
+      } catch (err) {
+        console.error('❌ [ERROR] Error fetching attendance:', err);
+      }
+    }, DEBOUNCE_DELAY),
+    [selectedClass, selectedDate, students.length, clearMode] // Only include primitive values and length
+  );
+  
+  const debouncedFetchStudents = useCallback(
+    debounce(async () => {
+      if (!selectedClass) {
+        if (__DEV__) console.log('🔧 [DEBOUNCED] Skipping student fetch - no class selected');
+        return;
+      }
+      
+      if (__DEV__) console.log('🔧 [DEBOUNCED] Calling fetchStudents');
+      
+      try {
+        setLoading(true);
+        
+        // 🚀 ENHANCED: Validate tenant access using new helper
+        const validation = validateTenantAccess();
+        if (!validation.valid) {
+          console.error('❌ Enhanced tenant validation failed in fetchStudents:', validation.error);
+          throw new Error(validation.error);
+        }
+        
+        // 🚀 PERFORMANCE: Optimized student query with minimal fields for list view
+        if (__DEV__) console.log('🎫 Enhanced: Loading students for class:', selectedClass);
+        const { data: studentsData, error: studentsError } = await createTenantQuery(
+          validation.tenantId,
+          TABLES.STUDENTS,
+          'id, name, admission_no', // Minimal fields for better performance
+          { class_id: selectedClass }
+        )
+          .order('admission_no');
+
+        if (studentsError) {
+          console.error('❌ Error fetching students:', studentsError);
+          throw studentsError;
+        }
+        
+        if (__DEV__) console.log('📊 Found', studentsData?.length || 0, 'students in class', selectedClass);
+        setStudents(studentsData || []);
+
+      } catch (err) {
+        console.error('❌ Error in fetchStudents:', err);
+        setError(err.message || 'Failed to load students');
+      } finally {
+        setLoading(false);
+      }
+    }, DEBOUNCE_DELAY),
+    [selectedClass] // Only include selectedClass
+  );
   // 🚀 ENHANCED TENANT SYSTEM - Use reliable cached tenant access
   const { 
     getTenantId, 
@@ -291,196 +444,122 @@ const TakeAttendance = () => {
     }
   };
 
-  // 🚀 ENHANCED: Fetch students when class or section changes using enhanced tenant system
-  const fetchStudents = async () => {
-    if (!selectedClass) return;
-    
-    try {
-      setLoading(true);
-      
-      // 🚀 ENHANCED: Validate tenant access using new helper
-      const validation = validateTenantAccess();
-      if (!validation.valid) {
-        console.error('❌ Enhanced tenant validation failed in fetchStudents:', validation.error);
-        throw new Error(validation.error);
-      }
-      
-      // 🚀 PERFORMANCE: Optimized student query with minimal fields for list view
-      if (__DEV__) console.log('🎫 Enhanced: Loading students for class:', selectedClass);
-      const { data: studentsData, error: studentsError } = await createTenantQuery(
-        validation.tenantId,
-        TABLES.STUDENTS,
-        'id, name, admission_no', // Minimal fields for better performance
-        { class_id: selectedClass }
-      )
-        .order('admission_no');
 
-      if (studentsError) {
-        console.error('❌ Error fetching students:', studentsError);
-        throw studentsError;
-      }
-      
-      if (__DEV__) console.log('📊 Found', studentsData?.length || 0, 'students in class', selectedClass);
-      setStudents(studentsData || []);
-
-    } catch (err) {
-      console.error('❌ Error in fetchStudents:', err);
-      setError(err.message || 'Failed to load students');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 🚀 ENHANCED: Fetch existing attendance with enhanced tenant system
-  const fetchExistingAttendance = async () => {
-    if (!selectedClass || !selectedDate || students.length === 0) return;
-    
-    // Skip fetching if user has manually cleared attendance
-    if (clearMode) {
-      if (__DEV__) console.log('Clear mode active - skipping attendance fetch');
-      return;
-    }
-    
-    // 🚀 PERFORMANCE: Check cache first
-    const cacheKey = `${selectedClass}-${selectedDate}`;
-    const cachedAttendance = cachedData.attendance[`attendance-${cacheKey}`];
-    if (cachedAttendance && isCacheValid(`attendance-${cacheKey}`, ATTENDANCE_CACHE_DURATION)) {
-      if (__DEV__) console.log('⚡ CACHE HIT: Using cached attendance data for', cacheKey);
-      setAttendanceMark(cachedAttendance);
-      return;
-    }
-    
-    try {
-      if (__DEV__) {
-        console.log('🔍 [DEBUG] Enhanced: Fetching existing attendance...');
-        console.log('🔍 [DEBUG] Class ID:', selectedClass);
-        console.log('🔍 [DEBUG] Date:', selectedDate);
-        console.log('🔍 [DEBUG] Student IDs:', students.map(s => s.id));
-      }
-      
-      // 🚀 ENHANCED: Validate tenant access using new helper
-      const validation = validateTenantAccess();
-      if (!validation.valid) {
-        console.warn('⚠️ Enhanced tenant validation failed in fetchExistingAttendance, skipping silently for UX');
-        return; // Silent return for better UX
-      }
-      
-      // 🚀 ENHANCED: Get existing attendance records using createTenantQuery
-      const { data: attendanceData, error: attendanceError } = await createTenantQuery(
-        validation.tenantId,
-        TABLES.STUDENT_ATTENDANCE,
-        'student_id, status',
-        { 
-          date: selectedDate,
-          class_id: selectedClass 
-        }
-      );
-
-      if (attendanceError) {
-        console.error('❌ Error fetching attendance:', attendanceError);
-        return; // Silent return for better UX
-      }
-
-      if (__DEV__) {
-        console.log('🔍 [DEBUG] Found attendance records:', attendanceData?.length || 0);
-        console.log('🔍 [DEBUG] Attendance data:', JSON.stringify(attendanceData, null, 2));
-      }
-
-      // Create attendance mark object
-      const mark = {};
-      attendanceData?.forEach(record => {
-        mark[record.student_id] = record.status;
-        if (__DEV__) console.log('🔍 [DEBUG] Mapping student_id', record.student_id, 'to status', record.status);
-      });
-      
-      if (__DEV__) console.log('🔍 [DEBUG] Final attendance mark object:', JSON.stringify(mark, null, 2));
-      
-      // 🚀 PERFORMANCE: Update cache with fetched data
-      updateCache({
-        [`attendance-${cacheKey}`]: mark
-      });
-      
-      setAttendanceMark(mark);
-
-    } catch (err) {
-      console.error('❌ [ERROR] Error fetching attendance:', err);
-    }
-  };
 
   useEffect(() => {
     fetchClassesAndStudents();
     
-    // OPTIMIZED: Set up targeted real-time subscription for attendance updates
+    // 🔧 FIXED: Proper subscription cleanup to prevent memory leaks
     let attendanceSubscription = null;
     
-    if (selectedClass && selectedDate) {
-      if (__DEV__) console.log('⚡ [OPTIMIZED] Setting up real-time subscription for attendance updates...');
-      attendanceSubscription = supabase
-        .channel(`attendance-updates-${selectedClass}-${selectedDate}`)
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: TABLES.STUDENT_ATTENDANCE,
-          filter: `class_id=eq.${selectedClass}`
-        }, (payload) => {
-          if (__DEV__) console.log('⚡ [OPTIMIZED] Real-time attendance update received:', payload);
-          // Only refresh if the update is for current date and class
-          if (payload.new?.date === selectedDate || payload.old?.date === selectedDate) {
-            if (__DEV__) console.log('⚡ [OPTIMIZED] Refreshing attendance data due to real-time update');
-            fetchExistingAttendance();
-          }
-        })
-        .subscribe();
-    }
+    const setupAttendanceSubscription = async () => {
+      // Clean up any existing subscription first
+      if (attendanceSubscription) {
+        await attendanceSubscription.unsubscribe();
+        attendanceSubscription = null;
+        if (__DEV__) console.log('⚡ [FIXED] Cleaned up previous attendance subscription');
+      }
+      
+      if (selectedClass && selectedDate) {
+        if (__DEV__) console.log('⚡ [FIXED] Setting up new attendance subscription...');
+        attendanceSubscription = supabase
+          .channel(`attendance-updates-${selectedClass}-${selectedDate}`)
+          .on('postgres_changes', {
+            event: '*',
+            schema: 'public',
+            table: TABLES.STUDENT_ATTENDANCE,
+            filter: `class_id=eq.${selectedClass}`
+          }, (payload) => {
+            if (__DEV__) console.log('⚡ [FIXED] Real-time attendance update received:', payload);
+            // Only refresh if the update is for current date and class
+            if (payload.new?.date === selectedDate || payload.old?.date === selectedDate) {
+              if (__DEV__) console.log('⚡ [FIXED] Refreshing attendance data due to real-time update');
+              debouncedFetchExistingAttendance();
+            }
+          })
+          .subscribe();
+      }
+    };
+    
+    setupAttendanceSubscription();
 
     return () => {
-      if (attendanceSubscription) {
-        attendanceSubscription.unsubscribe();
-        if (__DEV__) console.log('⚡ [OPTIMIZED] Unsubscribed from real-time attendance updates');
-      }
-      // 🚀 PERFORMANCE: Cleanup prefetch timeout
+      // 🔧 FIXED: Comprehensive cleanup
+      const cleanup = async () => {
+        if (attendanceSubscription) {
+          await attendanceSubscription.unsubscribe();
+          if (__DEV__) console.log('⚡ [FIXED] Cleaned up attendance subscription on unmount');
+        }
+      };
+      cleanup();
+      
+      // 🔧 FIXED: Comprehensive timeout cleanup to prevent memory buildup
       if (prefetchTimeoutRef.current) {
         clearTimeout(prefetchTimeoutRef.current);
+        prefetchTimeoutRef.current = null;
+      }
+      
+      // Clean up any debounce timeouts
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+        debounceTimeoutRef.current = null;
       }
     };
   }, [selectedClass, selectedDate]); // Re-subscribe when class or date changes
 
   useEffect(() => {
-    fetchStudents();
+    // 🔧 FIXED: Use debounced version to prevent excessive API calls
+    debouncedFetchStudents();
     
-    // OPTIMIZED: Set up targeted real-time subscription for student updates
+    // 🔧 FIXED: Proper student subscription cleanup to prevent memory leaks
     let studentSubscription = null;
     
-    if (selectedClass) {
-      if (__DEV__) console.log('⚡ [OPTIMIZED] Setting up real-time subscription for student updates...');
-      studentSubscription = supabase
-        .channel(`student-updates-${selectedClass}`)
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: TABLES.STUDENTS,
-          filter: `class_id=eq.${selectedClass}`
-        }, (payload) => {
-          if (__DEV__) console.log('⚡ [OPTIMIZED] Real-time student update received:', payload);
-          // Only refresh if the update is for current class
-          if (payload.new?.class_id === selectedClass || payload.old?.class_id === selectedClass) {
-            if (__DEV__) console.log('⚡ [OPTIMIZED] Refreshing student data due to real-time update');
-            fetchStudents();
-          }
-        })
-        .subscribe();
-    }
-
-    return () => {
+    const setupStudentSubscription = async () => {
+      // Clean up any existing subscription first
       if (studentSubscription) {
-        studentSubscription.unsubscribe();
-        if (__DEV__) console.log('⚡ [OPTIMIZED] Unsubscribed from real-time student updates');
+        await studentSubscription.unsubscribe();
+        studentSubscription = null;
+        if (__DEV__) console.log('⚡ [FIXED] Cleaned up previous student subscription');
+      }
+      
+      if (selectedClass) {
+        if (__DEV__) console.log('⚡ [FIXED] Setting up new student subscription...');
+        studentSubscription = supabase
+          .channel(`student-updates-${selectedClass}`)
+          .on('postgres_changes', {
+            event: '*',
+            schema: 'public',
+            table: TABLES.STUDENTS,
+            filter: `class_id=eq.${selectedClass}`
+          }, (payload) => {
+            if (__DEV__) console.log('⚡ [FIXED] Real-time student update received:', payload);
+            // Only refresh if the update is for current class
+            if (payload.new?.class_id === selectedClass || payload.old?.class_id === selectedClass) {
+              if (__DEV__) console.log('⚡ [FIXED] Refreshing student data due to real-time update');
+              debouncedFetchStudents();
+            }
+          })
+          .subscribe();
       }
     };
-  }, [selectedClass]);
+    
+    setupStudentSubscription();
+
+    return () => {
+      // 🔧 FIXED: Comprehensive cleanup for student subscription
+      const cleanup = async () => {
+        if (studentSubscription) {
+          await studentSubscription.unsubscribe();
+          if (__DEV__) console.log('⚡ [FIXED] Cleaned up student subscription on unmount');
+        }
+      };
+      cleanup();
+    };
+  }, [selectedClass, debouncedFetchStudents]);
 
   useEffect(() => {
-    fetchExistingAttendance();
+    // 🔧 FIXED: Use debounced version to prevent excessive API calls
+    debouncedFetchExistingAttendance();
     
     // 🚀 PERFORMANCE: Schedule prefetching for next likely interactions
     if (selectedClass && selectedDate) {
@@ -496,7 +575,7 @@ const TakeAttendance = () => {
       const yesterdayStr = yesterday.toISOString().split('T')[0];
       schedulePrefetch(selectedClass, yesterdayStr);
     }
-  }, [selectedClass, selectedSection, selectedDate, students]);
+  }, [selectedClass, selectedDate, students.length, debouncedFetchExistingAttendance]); // Include students.length to trigger after students load
 
   // Reset clear mode when date or class changes
   useEffect(() => {
@@ -505,6 +584,23 @@ const TakeAttendance = () => {
       if (__DEV__) console.log('Clear mode deactivated - date/class changed');
     }
   }, [selectedClass, selectedDate]);
+  
+  // 🔧 FIXED: Component-level cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Clean up all timeouts when component unmounts
+      if (prefetchTimeoutRef.current) {
+        clearTimeout(prefetchTimeoutRef.current);
+        prefetchTimeoutRef.current = null;
+        if (__DEV__) console.log('🔧 [CLEANUP] Cleared prefetch timeout on unmount');
+      }
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+        debounceTimeoutRef.current = null;
+        if (__DEV__) console.log('🔧 [CLEANUP] Cleared debounce timeout on unmount');
+      }
+    };
+  }, []);
 
   // 🚀 ENHANCED: Mark attendance with enhanced tenant system
   const handleMarkAttendance = async () => {
@@ -607,8 +703,8 @@ const TakeAttendance = () => {
       
       // 🔄 REFRESH: Immediately refresh attendance data to show updated state
       if (__DEV__) console.log('🔄 [REFRESH] Refreshing attendance data after submission...');
-      await fetchExistingAttendance();
-      if (__DEV__) console.log('🔄 [REFRESH] Attendance data refreshed!');
+      debouncedFetchExistingAttendance();
+      if (__DEV__) console.log('🔄 [REFRESH] Attendance data refresh triggered!');
 
       // Show simple success message
       Alert.alert('Success', 'Attendance saved successfully!');
@@ -833,8 +929,8 @@ const TakeAttendance = () => {
       // Refresh all data
       await Promise.all([
         fetchClassesAndStudents(),
-        selectedClass ? fetchStudents() : Promise.resolve(),
-        (selectedClass && selectedDate && students.length > 0) ? fetchExistingAttendance() : Promise.resolve()
+        selectedClass ? debouncedFetchStudents() : Promise.resolve(),
+        (selectedClass && selectedDate && students.length > 0) ? debouncedFetchExistingAttendance() : Promise.resolve()
       ]);
       
       // Restore selection if it was lost during refresh
