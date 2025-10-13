@@ -1306,7 +1306,7 @@ const AdminDashboard = ({ navigation }) => {
             </View>
           ) : (
             <View style={styles.quickActionsGrid}>
-              {quickActions.map((action, index) => {
+              {quickActions.filter(action => action.title !== 'Test Push Notifications').map((action, index) => {
                 const featureKey = getFeatureForQuickAction(action.title);
                 const hasAccess = !featureKey || hasFeature(featureKey);
                 

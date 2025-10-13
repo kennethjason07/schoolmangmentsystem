@@ -22,6 +22,7 @@ import ExportModal from '../../../components/ExportModal';
 import { supabase, TABLES } from '../../../utils/supabase';
 import { exportFeeData, EXPORT_FORMATS } from '../../../utils/exportUtils';
 import enhancedNotificationService from '../../../services/enhancedNotificationService';
+import { sendEnhancedFeeReminders, generateDefaultFeeReminderMessage, validateFeeReminderOptions } from '../../../utils/enhancedFeeReminders';
 import { useTenantAccess, getCachedTenantId, tenantDatabase, createTenantQuery } from '../../../utils/tenantHelpers';
 import { PieChart, BarChart } from 'react-native-chart-kit';
 import FeeService from '../../../services/FeeService';
@@ -784,23 +785,46 @@ const FeeCollection = ({ navigation }) => {
 
   // Prepare default reminder message when stats or selection changes
   useEffect(() => {
-    const defaultMsg = `Fee payment reminder:\nOutstanding: ${formatCurrency(stats.totalOutstanding)}. Please clear dues at the earliest. Thank you.`;
+    const defaultMsg = generateDefaultFeeReminderMessage({
+      totalOutstanding: stats.totalOutstanding,
+      academicYear: selectedAcademicYear,
+      dueDate: null // Can be enhanced to include actual due dates
+    });
     setReminderMessage(defaultMsg);
     setReminderClassId(selectedClass !== 'All' ? selectedClass : (classes[0]?.id || null));
-  }, [stats.totalOutstanding, selectedClass, classes]);
+  }, [stats.totalOutstanding, selectedClass, classes, selectedAcademicYear]);
 
-  // Send fee reminders to parents and students
+  // Send enhanced fee reminders with push notifications
   const handleSendReminders = async (options = { skipConfirm: false }) => {
     try {
       if (sendingReminders) return;
 
+      console.log('💰 [FEE_COLLECTION] Starting enhanced fee reminder process...');
+
+      // Validate reminder options before proceeding
+      const validationResult = validateFeeReminderOptions({
+        message: reminderMessage,
+        recipientTypes: reminderAudience === 'Both' ? ['Both'] : [reminderAudience],
+        scope: reminderScope,
+        classId: reminderClassId,
+        classes
+      });
+
+      if (!validationResult.isValid) {
+        Alert.alert('Invalid Options', validationResult.error);
+        return false;
+      }
+
       // Confirm only if not invoked from modal
       if (!options.skipConfirm) {
-        const scopeText = selectedClass === 'All' ? 'all classes' : 'the selected class';
+        const scopeText = reminderScope === 'all' ? 'all classes' : 'the selected class';
+        const audienceText = reminderAudience === 'Both' ? 'parents and students' : 
+                           reminderAudience === 'Parent' ? 'parents' : 'students';
+        
         const confirmed = await new Promise((resolve) => {
           Alert.alert(
             'Send Fee Reminders',
-            `This will send a reminder to parents and students for ${scopeText}. Continue?`,
+            `This will send fee reminders with push notifications to ${audienceText} for ${scopeText}. Continue?`,
             [
               { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
               { text: 'Send', onPress: () => resolve(true) }
@@ -812,56 +836,45 @@ const FeeCollection = ({ navigation }) => {
 
       setSendingReminders(true);
 
-      const message = reminderMessage?.trim() ? reminderMessage : `Fee payment reminder. Outstanding: ${formatCurrency(stats.totalOutstanding)}`;
-      const recipientTypes = reminderAudience === 'Both' ? ['Parent', 'Student'] : [reminderAudience];
+      // Use enhanced fee reminder service with push notifications
+      const reminderOptions = {
+        message: reminderMessage?.trim() || generateDefaultFeeReminderMessage({
+          totalOutstanding: stats.totalOutstanding,
+          academicYear: selectedAcademicYear
+        }),
+        recipientTypes: reminderAudience === 'Both' ? ['Both'] : [reminderAudience],
+        scope: reminderScope,
+        classId: reminderClassId,
+        feeInfo: {
+          totalOutstanding: stats.totalOutstanding,
+          academicYear: selectedAcademicYear,
+          dueDate: null // Can be enhanced to include actual due dates
+        },
+        classes,
+        selectedClass
+      };
 
-      // Determine target classes
-      let targetClassIds = [];
-      if (reminderScope === 'class') {
-        const cid = reminderClassId || (selectedClass !== 'All' ? selectedClass : null);
-        if (cid) targetClassIds = [cid];
-      } else {
-        // all classes
-        if (selectedClass !== 'All') targetClassIds = [selectedClass];
-        else targetClassIds = classes.map(c => c.id).filter(Boolean);
-      }
+      console.log('💰 [FEE_COLLECTION] Sending enhanced fee reminders with options:', {
+        scope: reminderScope,
+        audience: reminderAudience,
+        classId: reminderClassId,
+        messageLength: reminderOptions.message.length
+      });
 
-      // If no class id found, attempt single call with null (some backends allow global)
-      if (targetClassIds.length === 0) {
-        const result = await enhancedNotificationService.createBulkNotification({
-          type: 'GRADE_ENTERED',
-          message,
-          classId: null,
-          recipientTypes,
-          deliveryMode: 'InApp'
-        });
-        if (!result?.success) throw new Error(result?.error || 'Could not send reminders');
-        Alert.alert('Reminders Sent', 'Fee reminders have been queued for delivery.');
-        return true;
-      }
+      const result = await sendEnhancedFeeReminders(reminderOptions);
 
-      // Send per-class; count successes
-      let successCount = 0;
-      for (const cid of targetClassIds) {
-        const res = await enhancedNotificationService.createBulkNotification({
-          type: 'GRADE_ENTERED',
-          message,
-          classId: cid,
-          recipientTypes,
-          deliveryMode: 'InApp'
-        });
-        if (res?.success) successCount += 1;
-      }
-
-      if (successCount > 0) {
-        Alert.alert('Reminders Sent', `Fee reminders queued for ${successCount} class(es).`);
+      if (result.success) {
+        console.log('✅ [FEE_COLLECTION] Enhanced fee reminders sent successfully:', result.details);
+        Alert.alert('Success! 🎉', result.message);
         return true;
       } else {
-        throw new Error('No reminders could be queued');
+        console.error('❌ [FEE_COLLECTION] Enhanced fee reminders failed:', result.error);
+        throw new Error(result.error || 'Failed to send enhanced fee reminders');
       }
+      
     } catch (e) {
-      console.error('Send reminders error:', e);
-      Alert.alert('Error', e.message || 'Failed to send reminders');
+      console.error('❌ [FEE_COLLECTION] Send reminders error:', e);
+      Alert.alert('Error', e.message || 'Failed to send fee reminders');
       return false;
     } finally {
       setSendingReminders(false);
@@ -1381,10 +1394,15 @@ const FeeCollection = ({ navigation }) => {
         <View style={styles.reminderOverlay}>
           <View style={styles.reminderModal}>
             <View style={styles.reminderHeader}>
-              <Text style={styles.reminderTitle}>Send Fee Reminders</Text>
-              <TouchableOpacity style={styles.reminderCloseButton} onPress={() => setShowReminderModal(false)}>
-                <Ionicons name="close" size={24} color="#666" />
-              </TouchableOpacity>
+              <View style={styles.reminderTitleRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.reminderTitle}>Send Fee Reminders</Text>
+                  <Text style={styles.reminderSubheader}>📱 Includes push notifications to mobile devices</Text>
+                </View>
+                <TouchableOpacity style={styles.reminderCloseButton} onPress={() => setShowReminderModal(false)}>
+                  <Ionicons name="close" size={24} color="#666" />
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={{ padding: 16 }}>
@@ -1435,7 +1453,7 @@ const FeeCollection = ({ navigation }) => {
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.button, styles.exportButton]} onPress={async()=>{ const ok = await handleSendReminders({ skipConfirm: true }); if (ok !== false) setShowReminderModal(false); }} disabled={sendingReminders}>
-                <Text style={styles.exportButtonText}>{sendingReminders ? 'Sending...' : 'Send'}</Text>
+                <Text style={styles.exportButtonText}>{sendingReminders ? 'Sending Reminders...' : 'Send Reminders'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2002,17 +2020,26 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
   },
   reminderHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: 'column',
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+  },
+  reminderTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
   },
   reminderTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#333',
+    marginBottom: 4,
+  },
+  reminderSubheader: {
+    fontSize: 14,
+    color: '#666',
+    fontStyle: 'italic',
   },
   reminderCloseButton: { padding: 4 },
   reminderSubtitle: {
