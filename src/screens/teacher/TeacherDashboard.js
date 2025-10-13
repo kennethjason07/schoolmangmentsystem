@@ -65,7 +65,9 @@ const TeacherDashboard = ({ navigation }) => {
 const [teacherProfile, setTeacherProfile] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [schoolDetails, setSchoolDetails] = useState(null);
+  const [schoolDetailsLoading, setSchoolDetailsLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date()); // Add current time state
+  const schoolDetailsTimeoutRef = useRef(null);
   
   // 👨‍🏫 TEACHER DUAL AUTHENTICATION STATE
   const [useDirectTeacherAuth, setUseDirectTeacherAuth] = useState(false);
@@ -424,6 +426,16 @@ function groupAndSortSchedule(schedule) {
 const fetchDashboardDataWithDirectAuth = async () => {
   try {
     const DEBUG_TEACHER_AUTH_DETAILED = false; // Set to true to see detailed teacher auth logs
+    setSchoolDetailsLoading(true); // Start with loading state
+    
+    // Set timeout to prevent indefinite loading state
+    if (schoolDetailsTimeoutRef.current) {
+      clearTimeout(schoolDetailsTimeoutRef.current);
+    }
+    schoolDetailsTimeoutRef.current = setTimeout(() => {
+      console.log('⏰ [TEACHER AUTH DEBUG] School details loading timeout - forcing loading state to false');
+      setSchoolDetailsLoading(false);
+    }, 10000); // 10 second timeout
     
     if (DEBUG_TEACHER_AUTH_DETAILED) {
       console.log('📊 [TEACHER AUTH] Fetching dashboard data with direct teacher auth (NO TENANT)');
@@ -453,20 +465,76 @@ const fetchDashboardDataWithDirectAuth = async () => {
     }
     
     // Try to fetch school details if tenant context is available (for banner)
+    let fetchedSchoolDetails = null;
     try {
       const tenantIdForSchool = getCachedTenantId();
+      console.log('🏢 [TEACHER AUTH DEBUG] School details fetch attempt:', {
+        tenantIdForSchool,
+        isReady,
+        tenantName: tenantName || 'None'
+      });
+      
       if (tenantIdForSchool) {
+        console.log('🏢 [TEACHER AUTH DEBUG] Attempting school details fetch with tenant:', tenantIdForSchool);
         const schoolRes = await createTenantQuery(
           tenantIdForSchool,
           TABLES.SCHOOL_DETAILS,
           'id, name, type, logo_url'
         ).limit(1);
+        
+        console.log('🏢 [TEACHER AUTH DEBUG] School details query result:', {
+          success: !!schoolRes?.data,
+          dataLength: schoolRes?.data?.length || 0,
+          error: schoolRes?.error?.message
+        });
+        
         if (schoolRes?.data && schoolRes.data.length > 0) {
-          setSchoolDetails(schoolRes.data[0]);
+          fetchedSchoolDetails = schoolRes.data[0];
+          setSchoolDetails(fetchedSchoolDetails);
+          setSchoolDetailsLoading(false);
+          // Clear timeout on successful load
+          if (schoolDetailsTimeoutRef.current) {
+            clearTimeout(schoolDetailsTimeoutRef.current);
+            schoolDetailsTimeoutRef.current = null;
+          }
+          console.log('✅ [TEACHER AUTH DEBUG] School details loaded:', fetchedSchoolDetails.name);
+        } else {
+          console.log('⚠️ [TEACHER AUTH DEBUG] No school details found in query result');
+          setSchoolDetailsLoading(false);
+        }
+      } else {
+        console.log('⚠️ [TEACHER AUTH DEBUG] No tenant ID available for school details fetch');
+        
+        // Try alternative approach: Use dbHelpers.getSchoolDetails() as fallback
+        console.log('🔄 [TEACHER AUTH DEBUG] Attempting fallback school details fetch...');
+        try {
+          const fallbackSchoolRes = await dbHelpers.getSchoolDetails();
+          if (fallbackSchoolRes?.data) {
+            fetchedSchoolDetails = fallbackSchoolRes.data;
+            setSchoolDetails(fetchedSchoolDetails);
+            console.log('✅ [TEACHER AUTH DEBUG] Fallback school details loaded:', fetchedSchoolDetails.name);
+          } else {
+            console.log('⚠️ [TEACHER AUTH DEBUG] Fallback school details also failed');
+          }
+        } catch (fallbackError) {
+          console.log('❗ [TEACHER AUTH DEBUG] Fallback school details error:', fallbackError?.message);
+        }
+        
+        setSchoolDetailsLoading(false);
+        // Clear timeout when loading completes (success or failure)
+        if (schoolDetailsTimeoutRef.current) {
+          clearTimeout(schoolDetailsTimeoutRef.current);
+          schoolDetailsTimeoutRef.current = null;
         }
       }
     } catch (e) {
-      console.log('⚠️ [TEACHER AUTH] Failed to fetch school details for banner:', e?.message);
+      console.log('❗ [TEACHER AUTH DEBUG] School details fetch error:', e?.message);
+      setSchoolDetailsLoading(false);
+      // Clear timeout on error
+      if (schoolDetailsTimeoutRef.current) {
+        clearTimeout(schoolDetailsTimeoutRef.current);
+        schoolDetailsTimeoutRef.current = null;
+      }
     }
     
     // Get teacher assignments (classes and subjects) - declare variables outside
@@ -645,7 +713,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
       upcomingEvents: [],
       announcements: [],
       recentActivities: [],
-      schoolDetails: schoolDetails,
+      schoolDetails: fetchedSchoolDetails,
       teacherProfile: profileResult.profile,
       analytics: { attendanceRate, marksDistribution: [] }
     };
@@ -709,6 +777,10 @@ const fetchDashboardDataWithDirectAuth = async () => {
     try {
       if (!suppressLoading) setLoading(true);
       setError(null);
+      // Only set school details loading if not suppressing loading or if school details is null
+      if (!suppressLoading || !schoolDetails) {
+        setSchoolDetailsLoading(true);
+      }
       
       // 👨‍🏫 Check if we should use direct teacher authentication (BYPASS TENANT SYSTEM)
       if (useDirectTeacherAuth && teacherAuthChecked) {
@@ -732,6 +804,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
           // For teachers, we don't fall back to tenant auth - direct auth is the only way
           setError('Failed to load teacher data: ' + directAuthError.message);
           setLoading(false);
+          setSchoolDetailsLoading(false);
           return;
         }
       }
@@ -740,6 +813,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
       if (!teacherAuthChecked) {
         console.log('🔄 [TEACHER AUTH] Teacher auth check still pending, waiting...');
         setLoading(false);
+        setSchoolDetailsLoading(false);
         return;
       }
       
@@ -781,6 +855,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
         Alert.alert('Access Denied', errorMsg);
         setError(errorMsg);
         setLoading(false);
+        setSchoolDetailsLoading(false);
         return;
       }
       
@@ -816,6 +891,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
       const teacherError = teacherResponse.error;
       
       setSchoolDetails(schoolData);
+      setSchoolDetailsLoading(false);
 
       if (teacherError || !teacherData) {
         throw new Error('Teacher profile not found. Please contact administrator.');
@@ -827,6 +903,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
         Alert.alert('Data Error', 'Teacher data belongs to different tenant');
         setError('Data validation failed');
         setLoading(false);
+        setSchoolDetailsLoading(false);
         return;
       }
 
@@ -1474,6 +1551,7 @@ const fetchDashboardDataWithDirectAuth = async () => {
       }
 
       setLoading(false);
+      setSchoolDetailsLoading(false); // Ensure school details loading state is reset on any error
       console.error('Error fetching dashboard data:', err);
     }
   };
@@ -1629,7 +1707,10 @@ const fetchDashboardDataWithDirectAuth = async () => {
           snapshot.upcomingEvents && setUpcomingEvents(snapshot.upcomingEvents);
           snapshot.announcements && setAnnouncements(snapshot.announcements);
           snapshot.recentActivities && setRecentActivities(snapshot.recentActivities);
-          snapshot.schoolDetails && setSchoolDetails(snapshot.schoolDetails);
+          if (snapshot.schoolDetails) {
+            setSchoolDetails(snapshot.schoolDetails);
+            setSchoolDetailsLoading(false);
+          }
           snapshot.teacherProfile && setTeacherProfile(snapshot.teacherProfile);
           snapshot.analytics && setAnalytics(snapshot.analytics);
 
@@ -2305,10 +2386,21 @@ const fetchDashboardDataWithDirectAuth = async () => {
               />
               <View style={styles.schoolInfo}>
                 <Text style={styles.schoolName}>
-                  {schoolDetails?.name || tenantName || 'Your School'}
+                  {(() => {
+                    const result = schoolDetailsLoading ? 'Loading...' : (schoolDetails?.name || tenantName || 'Your School');
+                    if (__DEV__) {
+                      console.log('🏢 [UI DEBUG] School name display logic:', {
+                        schoolDetailsLoading,
+                        schoolDetailsName: schoolDetails?.name || 'null',
+                        tenantName: tenantName || 'null',
+                        result
+                      });
+                    }
+                    return result;
+                  })()}
                 </Text>
                 <Text style={styles.schoolType}>
-                  {schoolDetails?.type || 'Educational Institution'}
+                  {schoolDetailsLoading ? 'Loading school details...' : (schoolDetails?.type || 'Educational Institution')}
                 </Text>
               </View>
             </View>
