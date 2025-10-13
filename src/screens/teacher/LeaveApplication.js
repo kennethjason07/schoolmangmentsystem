@@ -12,6 +12,9 @@ import {
   FlatList,
   Dimensions,
   Platform,
+  Modal,
+  Animated,
+  Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
@@ -66,6 +69,12 @@ const LeaveApplication = ({ navigation }) => {
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [showLeaveTypeDropdown, setShowLeaveTypeDropdown] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [showLoadingAnimation, setShowLoadingAnimation] = useState(false);
+  const [loadingStage, setLoadingStage] = useState('submitting'); // submitting, notifying, completing
+  
+  // Animation values
+  const spinValue = new Animated.Value(0);
+  const pulseValue = new Animated.Value(1);
 
   const leaveTypes = [
     'Sick Leave', 'Casual Leave', 'Earned Leave', 'Maternity Leave',
@@ -73,6 +82,42 @@ const LeaveApplication = ({ navigation }) => {
   ];
 
   // Enhanced tenant validation helper
+  // Animation functions
+  const startSpinAnimation = () => {
+    spinValue.setValue(0);
+    Animated.loop(
+      Animated.timing(spinValue, {
+        toValue: 1,
+        duration: 2000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    ).start();
+  };
+
+  const startPulseAnimation = () => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseValue, {
+          toValue: 1.2,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseValue, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  };
+
+  const showLoadingWithStage = (stage, delay = 0) => {
+    setTimeout(() => {
+      setLoadingStage(stage);
+    }, delay);
+  };
+
   const validateTenant = async () => {
     const cachedTenantId = await getCachedTenantId();
     if (!cachedTenantId) {
@@ -236,6 +281,10 @@ const LeaveApplication = ({ navigation }) => {
   const submitApplication = async (totalDays) => {
     try {
       setSubmitting(true);
+      setShowLoadingAnimation(true);
+      setLoadingStage('submitting');
+      startSpinAnimation();
+      startPulseAnimation();
       console.log('🚀 Enhanced tenant system: Starting submitApplication...');
 
       if (!user) {
@@ -270,6 +319,9 @@ const LeaveApplication = ({ navigation }) => {
       }
       
       console.log('✅ Enhanced tenant system: Leave application submitted successfully');
+      
+      // Change to notifying stage
+      showLoadingWithStage('notifying', 500);
 
       // Create notification for admins about the new leave request
       try {
@@ -298,13 +350,21 @@ const LeaveApplication = ({ navigation }) => {
         // Don't fail the entire operation if notification fails
       }
 
-      Alert.alert('Success', 'Leave application submitted successfully. Administrators have been notified and you will be notified once it is reviewed.');
-      setShowApplicationForm(false);
-      resetApplicationForm();
-      await loadMyLeaves();
+      // Change to completing stage
+      showLoadingWithStage('completing', 1000);
+      
+      // Close loading animation after a short delay
+      setTimeout(() => {
+        setShowLoadingAnimation(false);
+        Alert.alert('Success', 'Leave application submitted successfully. Administrators have been notified and you will be notified once it is reviewed.');
+        setShowApplicationForm(false);
+        resetApplicationForm();
+        loadMyLeaves(); // Don't await here to avoid blocking the UI
+      }, 2000);
       
     } catch (error) {
       console.error('Error submitting leave application:', error);
+      setShowLoadingAnimation(false);
       Alert.alert('Error', 'Failed to submit leave application: ' + (error.message || 'Unknown error'));
     } finally {
       setSubmitting(false);
@@ -539,6 +599,70 @@ const LeaveApplication = ({ navigation }) => {
           )}
         </View>
       </ScrollView>
+
+      {/* Enhanced Loading Animation Modal */}
+      <Modal
+        visible={showLoadingAnimation}
+        transparent={true}
+        animationType="fade"
+      >
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingModal}>
+            <Animated.View 
+              style={[
+                styles.loadingIconContainer,
+                {
+                  transform: [
+                    {
+                      rotate: spinValue.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['0deg', '360deg'],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <Ionicons name="sync" size={48} color="#4CAF50" />
+            </Animated.View>
+            
+            <Animated.View
+              style={[
+                styles.loadingTextContainer,
+                {
+                  transform: [{ scale: pulseValue }],
+                },
+              ]}
+            >
+              <Text style={styles.loadingModalTitle}>
+                {loadingStage === 'submitting' && '📝 Submitting Application...'}
+                {loadingStage === 'notifying' && '📧 Notifying Administrators...'}
+                {loadingStage === 'completing' && '✅ All Done!'}
+              </Text>
+              <Text style={styles.loadingModalSubtitle}>
+                {loadingStage === 'submitting' && 'Processing your leave request'}
+                {loadingStage === 'notifying' && 'Sending notifications to admins'}
+                {loadingStage === 'completing' && 'Application submitted successfully'}
+              </Text>
+            </Animated.View>
+            
+            <View style={styles.loadingStageIndicator}>
+              <View style={[
+                styles.stageIndicatorDot, 
+                loadingStage === 'submitting' && styles.activeStageIndicator
+              ]} />
+              <View style={[
+                styles.stageIndicatorDot, 
+                loadingStage === 'notifying' && styles.activeStageIndicator
+              ]} />
+              <View style={[
+                styles.stageIndicatorDot, 
+                loadingStage === 'completing' && styles.activeStageIndicator
+              ]} />
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Application Form Modal */}
       {showApplicationForm && (
@@ -1287,6 +1411,63 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#2E7D32',
     marginLeft: 6,
+  },
+  // Loading Animation Modal Styles
+  loadingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingModal: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    paddingVertical: 40,
+    paddingHorizontal: 30,
+    alignItems: 'center',
+    minWidth: 280,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+  },
+  loadingIconContainer: {
+    marginBottom: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingTextContainer: {
+    alignItems: 'center',
+    marginBottom: 25,
+  },
+  loadingModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  loadingModalSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  loadingStageIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  stageIndicatorDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#E0E0E0',
+  },
+  activeStageIndicator: {
+    backgroundColor: '#4CAF50',
+    transform: [{ scale: 1.2 }],
   },
 });
 
