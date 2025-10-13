@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "152761457159",
+    "project_id": "vidyasetu-948d2",
+    "storage_bucket": "vidyasetu-948d2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:152761457159:android:5c8136f371f14ed946e8a2",
+        "android_client_info": {
+          "package_name": "com.vidyasetu.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCbbEXwL6prI64K8wRpTsNpvS4NPXEqNP8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

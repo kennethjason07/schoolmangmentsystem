@@ -47,3 +47,6 @@ yarn-error.*
 !tsconfig.json
 !metro.config.js
 !babel.config.js
+!google-services.json
+!app.json
+!eas.json
