@@ -94,19 +94,39 @@ const Header = ({ title, showBack = false, onBack, showProfile = true, showNotif
         ) : (
           <>
             {showNotifications && (
-              <NotificationPopup 
-                userType={userType === 'Parent' ? 'Parent' : userType || 'Student'}
-                onNotificationPress={(notification) => {
-                  // Handle notification press - optionally navigate to specific screen
-                  console.log('Notification clicked:', notification);
-                  if (onNotificationsPress) {
-                    onNotificationsPress(notification);
-                  }
-                }}
-                customStyle={styles.notificationButton}
-                iconSize={24}
-                iconColor="#333"
-              />
+              onNotificationsPress ? (
+                // Custom bell icon with custom handler (like Dashboard's Quick Modal)
+                <TouchableOpacity
+                  style={[styles.notificationButton, styles.customBellButton]}
+                  onPress={() => onNotificationsPress()}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons 
+                    name="notifications" 
+                    size={24} 
+                    color="#333"
+                  />
+                  {unreadCount > 0 && (
+                    <View style={styles.notificationBadge}>
+                      <Text style={styles.notificationBadgeText}>
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ) : (
+                // Default NotificationPopup component with its own modal
+                <NotificationPopup 
+                  userType={userType === 'Parent' ? 'Parent' : userType || 'Student'}
+                  onNotificationPress={(notification) => {
+                    // Handle notification press - optionally navigate to specific screen
+                    console.log('Notification clicked:', notification);
+                  }}
+                  customStyle={styles.notificationButton}
+                  iconSize={24}
+                  iconColor="#333"
+                />
+              )
             )}
             {showProfile && authUser && userType && (
               <TouchableOpacity 
@@ -199,24 +219,35 @@ const styles = StyleSheet.create({
     marginRight: 12,
     padding: 4,
   },
+  customBellButton: {
+    position: 'relative',
+    marginRight: 12,
+    padding: 4,
+  },
   notificationBadge: {
     position: 'absolute',
-    top: -5,
-    right: -5,
-    backgroundColor: '#f44336',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
+    top: -6,
+    right: -6,
+    backgroundColor: '#ff4757',
+    borderRadius: 12,
+    minWidth: 22,
+    height: 22,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1,
     borderWidth: 2,
     borderColor: '#fff',
+    elevation: 3,
+    shadowColor: '#ff4757',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
   notificationBadgeText: {
     color: 'white',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
+    letterSpacing: 0.5,
   },
 });
 

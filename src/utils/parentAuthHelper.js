@@ -270,13 +270,34 @@ export const getStudentNotificationsForParent = async (parentUserId, studentId) 
       return accessCheck;
     }
 
-    // Fetch notifications for the student
+    // First, let's debug what notification recipients exist
+    console.log('🔍 [PARENT AUTH] Debugging notification recipients for student:', studentId, 'and parent:', parentUserId);
+    
+    // Check what recipients exist for this student
+    const { data: studentRecipients, error: studentError } = await supabase
+      .from('notification_recipients')
+      .select('id, recipient_id, recipient_type, is_read')
+      .eq('recipient_id', studentId);
+    
+    console.log('📊 [PARENT AUTH] Student recipients found:', studentRecipients?.length || 0, studentRecipients);
+    
+    // Check what recipients exist for this parent
+    const { data: parentRecipients, error: parentError } = await supabase
+      .from('notification_recipients')
+      .select('id, recipient_id, recipient_type, is_read')
+      .eq('recipient_id', parentUserId);
+    
+    console.log('📊 [PARENT AUTH] Parent recipients found:', parentRecipients?.length || 0, parentRecipients);
+    
+    // Try fetching notifications for the student first
     const { data: notificationsData, error: notificationsError } = await supabase
       .from('notification_recipients')
       .select(`
         id,
         is_read,
         sent_at,
+        recipient_id,
+        recipient_type,
         notifications (
           id,
           message,
@@ -292,26 +313,70 @@ export const getStudentNotificationsForParent = async (parentUserId, studentId) 
       .eq('recipient_type', 'Student')
       .order('sent_at', { ascending: false })
       .limit(20);
+      
+    console.log('📊 [PARENT AUTH] Student notifications query result:', notificationsData?.length || 0, notificationsError);
 
     if (notificationsError) {
-      console.error('❌ [PARENT AUTH] Error fetching notifications:', notificationsError);
-      return {
-        success: false,
-        error: `Failed to fetch notifications: ${notificationsError.message}`
-      };
+      console.error('❌ [PARENT AUTH] Error fetching student notifications:', notificationsError);
+    }
+    
+    // If no student notifications found, try fetching parent notifications
+    let finalNotificationsData = notificationsData;
+    
+    if (!notificationsData || notificationsData.length === 0) {
+      console.log('🔍 [PARENT AUTH] No student notifications found, trying parent notifications...');
+      
+      const { data: parentNotificationsData, error: parentNotificationsError } = await supabase
+        .from('notification_recipients')
+        .select(`
+          id,
+          is_read,
+          sent_at,
+          recipient_id,
+          recipient_type,
+          notifications (
+            id,
+            message,
+            type,
+            created_at,
+            sent_by,
+            users!sent_by (
+              full_name
+            )
+          )
+        `)
+        .eq('recipient_id', parentUserId)
+        .eq('recipient_type', 'Parent')
+        .order('sent_at', { ascending: false })
+        .limit(20);
+        
+      console.log('📊 [PARENT AUTH] Parent notifications query result:', parentNotificationsData?.length || 0, parentNotificationsError);
+      
+      if (parentNotificationsError) {
+        console.error('❌ [PARENT AUTH] Error fetching parent notifications:', parentNotificationsError);
+        return {
+          success: false,
+          error: `Failed to fetch notifications: ${parentNotificationsError.message}`
+        };
+      }
+      
+      finalNotificationsData = parentNotificationsData;
     }
 
     // Transform the data to match expected format
     // Note: notifications table doesn't have a title column, using type as title
-    const formattedNotifications = (notificationsData || []).map(item => ({
+    const formattedNotifications = (finalNotificationsData || []).map(item => ({
       id: item.notifications.id,
       title: item.notifications.type || 'Notification',
       message: item.notifications.message,
       type: item.notifications.type,
       created_at: item.notifications.created_at,
       sender_name: item.notifications.users?.full_name || 'System',
-      read: item.is_read
+      is_read: item.is_read, // Fix: use is_read instead of read
+      recipientId: item.id // Add recipientId for marking as read
     }));
+    
+    console.log('📊 [PARENT AUTH] Formatted notifications:', formattedNotifications.map(n => ({ id: n.id, title: n.title, type: n.type, is_read: n.is_read })));
 
     console.log('📬 [PARENT AUTH] Successfully fetched notifications:', formattedNotifications.length);
 

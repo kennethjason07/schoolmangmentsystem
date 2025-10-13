@@ -3200,19 +3200,16 @@ const ParentDashboard = ({ navigation }) => {
           read_at: new Date().toISOString()
         })
         .eq('id', notificationRecipientId)
-        .eq('recipient_id', user.id)
-        .eq('recipient_type', 'Parent');
+        .select();
       
       if (error) {
-        
-        return;
+        console.error('❌ Error updating recipient:', error);
+        throw error;
       }
       
-      
-      
-      // Update local state to reflect the change immediately
-      setNotifications(prevNotifications => 
-        prevNotifications.map(notification => {
+      // Update local notification state
+      setNotifications(prev => 
+        prev.map(notification => {
           if (notification.recipientId === notificationRecipientId || notification.id === notificationId) {
             return { ...notification, is_read: true, read_at: new Date().toISOString() };
           }
@@ -3225,6 +3222,227 @@ const ParentDashboard = ({ navigation }) => {
       
     } catch (error) {
       
+    }
+  };
+
+  // Fetch notifications specifically for Quick Notifications Modal
+  const fetchQuickNotifications = async () => {
+    try {
+      console.log('📎 [QUICK MODAL] Fetching notifications...');
+      console.log('📎 [QUICK MODAL] User:', user?.id, 'Email:', user?.email);
+      console.log('📎 [QUICK MODAL] Parent Auth:', { useDirectParentAuth, selectedStudent: selectedStudent?.id, parentAuthChecked });
+      
+      if (!user?.id) {
+        console.log('❌ [QUICK MODAL] No user ID available');
+        return [];
+      }
+      
+      // Try the direct parent approach first if we're using it
+      if (useDirectParentAuth && selectedStudent?.id) {
+        console.log('📎 [QUICK MODAL] Using direct parent auth for student:', selectedStudent.id);
+        const result = await getStudentNotificationsForParent(user.id, selectedStudent.id);
+        
+        if (result.success && result.notifications) {
+          console.log('✅ [QUICK MODAL] Direct parent auth success:', result.notifications.length, 'notifications');
+          return result.notifications;
+        } else {
+          console.log('⚠️ [QUICK MODAL] Direct parent auth failed:', result.error);
+        }
+      }
+      
+      // Fallback: Try to fetch notifications using the notification_recipients table
+      console.log('📎 [QUICK MODAL] Using fallback notification fetch...');
+      
+      // First, try to get notifications where the parent is the direct recipient
+      const { data: parentNotifications, error: parentError } = await supabase
+        .from('notification_recipients')
+        .select(`
+          id,
+          is_read,
+          sent_at,
+          read_at,
+          recipient_id,
+          notifications!inner (
+            id,
+            type,
+            message,
+            created_at,
+            sent_by
+          )
+        `)
+        .eq('recipient_id', user.id)
+        .eq('recipient_type', 'Parent')
+        .order('sent_at', { ascending: false })
+        .limit(20);
+      
+      if (parentError) {
+        console.log('❌ [QUICK MODAL] Error fetching parent notifications:', parentError);
+      } else if (parentNotifications && parentNotifications.length > 0) {
+        console.log('✅ [QUICK MODAL] Found', parentNotifications.length, 'parent notifications');
+        
+        const formatted = parentNotifications.map(item => ({
+          id: item.notifications.id,
+          title: item.notifications.type || 'Notification',
+          message: item.notifications.message || 'No message',
+          type: item.notifications.type || 'general',
+          created_at: item.notifications.created_at,
+          is_read: item.is_read || false,
+          recipientId: item.id // Important for marking as read
+        }));
+        
+        return formatted;
+      }
+      
+      // If no direct parent notifications, try to get the parent's linked student info
+      console.log('📎 [QUICK MODAL] No direct parent notifications, checking linked student...');
+      
+      const { data: parentData, error: parentDataError } = await supabase
+        .from('users')
+        .select('linked_parent_of')
+        .eq('id', user.id)
+        .single();
+      
+      if (parentDataError || !parentData?.linked_parent_of) {
+        console.log('⚠️ [QUICK MODAL] No linked student found for parent:', parentDataError);
+        return [];
+      }
+      
+      console.log('📎 [QUICK MODAL] Parent linked to student:', parentData.linked_parent_of);
+      
+      // Get notifications for the linked student
+      const { data: studentNotifications, error: studentError } = await supabase
+        .from('notification_recipients')
+        .select(`
+          id,
+          is_read,
+          sent_at,
+          read_at,
+          notifications!inner (
+            id,
+            type,
+            message,
+            created_at
+          )
+        `)
+        .eq('recipient_id', parentData.linked_parent_of)
+        .eq('recipient_type', 'Student')
+        .order('sent_at', { ascending: false })
+        .limit(20);
+      
+      if (studentError) {
+        console.log('❌ [QUICK MODAL] Error fetching student notifications:', studentError);
+        return [];
+      }
+      
+      if (!studentNotifications || studentNotifications.length === 0) {
+        console.log('⚠️ [QUICK MODAL] No notifications found for student');
+        return [];
+      }
+      
+      console.log('✅ [QUICK MODAL] Found', studentNotifications.length, 'student notifications');
+      
+      const formatted = studentNotifications.map(item => ({
+        id: item.notifications.id,
+        title: item.notifications.type || 'Notification',
+        message: item.notifications.message || 'No message',
+        type: item.notifications.type || 'general',
+        created_at: item.notifications.created_at,
+        is_read: item.is_read || false,
+        recipientId: item.id
+      }));
+      
+      return formatted;
+      
+    } catch (error) {
+      console.error('❌ [QUICK MODAL] Error in fetchQuickNotifications:', error);
+      return [];
+    }
+  };
+  
+  // Handle opening Quick Notifications Modal
+  const handleQuickNotificationsModalOpen = async () => {
+    console.log('📎 [QUICK MODAL] Opening modal...');
+    setShowQuickNotificationsModal(true);
+    
+    // Fetch fresh notifications when modal opens
+    try {
+      const freshNotifications = await fetchQuickNotifications();
+      console.log('📎 [QUICK MODAL] Setting fresh notifications:', freshNotifications.length);
+      setNotifications(freshNotifications);
+    } catch (error) {
+      console.error('❌ [QUICK MODAL] Error fetching fresh notifications:', error);
+    }
+  };
+
+  // Handle notification press in Quick Notifications Modal
+  const handleQuickNotificationPress = async (notification) => {
+    try {
+      console.log('📱 [QUICK NOTIFICATION] Clicked:', notification);
+      
+      // Mark notification as read if it's unread
+      if (!notification.is_read && notification.recipientId) {
+        await markNotificationAsRead(notification.recipientId, notification.id);
+      }
+      
+      // Close the Quick Notifications Modal first
+      setShowQuickNotificationsModal(false);
+      
+      // Navigate to appropriate screen based on notification type
+      const notificationType = notification.type?.toLowerCase();
+      
+      switch (notificationType) {
+        case 'grade_entered':
+        case 'marks':
+        case 'exam':
+          console.log('🎯 Navigating to Marks screen');
+          navigation.jumpTo('Marks');
+          break;
+          
+        case 'attendance':
+        case 'absentee':
+          console.log('🎯 Navigating to Attendance screen');
+          navigation.jumpTo('Attendance');
+          break;
+          
+        case 'homework_uploaded':
+        case 'homework':
+        case 'assignment':
+          console.log('🎯 Navigating to ParentViewHomework screen');
+          navigation.navigate('ParentViewHomework');
+          break;
+          
+        case 'fee':
+        case 'payment':
+          console.log('🎯 Navigating to Fees screen');
+          navigation.jumpTo('Fees');
+          break;
+          
+        case 'message':
+        case 'chat':
+          console.log('🎯 Navigating to Chat screen');
+          navigation.jumpTo('Chat');
+          break;
+          
+        case 'event':
+        case 'announcement':
+          console.log('🎯 Staying on dashboard for event/announcement');
+          // Show event details or stay on dashboard
+          break;
+          
+        default:
+          console.log('🎯 Navigating to full Notifications screen for unknown type:', notificationType);
+          navigation.navigate('ParentNotifications');
+          break;
+      }
+      
+      // Optional: Show a brief success message
+      // Alert.alert('Notification', 'Navigating to relevant section...', [], { cancelable: true });
+      
+    } catch (error) {
+      console.error('❌ Error handling notification press:', error);
+      // Fallback: navigate to main notifications screen
+      setShowQuickNotificationsModal(false);
+      navigation.navigate('ParentNotifications');
     }
   };
 
@@ -3315,6 +3533,7 @@ const ParentDashboard = ({ navigation }) => {
           showBack={false} 
           showNotifications={true}
           unreadCount={unreadCount}
+          onNotificationsPress={handleQuickNotificationsModalOpen}
         />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#FF9800" />
@@ -3339,6 +3558,7 @@ const ParentDashboard = ({ navigation }) => {
           showBack={false} 
           showNotifications={true}
           unreadCount={unreadCount}
+          onNotificationsPress={handleQuickNotificationsModalOpen}
         />
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle" size={48} color="#F44336" />
@@ -3365,7 +3585,7 @@ const ParentDashboard = ({ navigation }) => {
           showBack={false} 
           showNotifications={true}
           unreadCount={unreadCount}
-          onNotificationsPress={() => setShowQuickNotificationsModal(true)}
+          onNotificationsPress={handleQuickNotificationsModalOpen}
         />
       
       {/* Student Switch Banner - Show when parent has multiple children */}
@@ -3790,33 +4010,51 @@ const ParentDashboard = ({ navigation }) => {
                 contentContainerStyle={styles.notificationScrollContent}
                 keyboardShouldPersistTaps="handled"
               >
-                {notifications.length > 0 ? (
-                  notifications.map((item, idx) => (
-                    <View key={idx} style={[styles.notificationModalItem, { borderLeftWidth: 4, borderLeftColor: getNotificationColor(item.type) }]}>
-                      <View style={styles.notificationIcon}>
-                        <Ionicons name={getNotificationIcon(item.type)} size={20} color={getNotificationColor(item.type)} />
-                      </View>
-                      <View style={styles.notificationContent}>
-                        <View style={styles.notificationHeader}>
-                          <Text style={styles.notificationTitle}>{item.title}</Text>
-                          {!item.is_read && (
-                            <View style={styles.unreadBadge}>
-                              <Text style={styles.unreadBadgeText}>NEW</Text>
+                {(() => {
+                  console.log('🎨 [QUICK MODAL] Rendering notifications:', notifications.length, 'items');
+                  console.log('🎨 [QUICK MODAL] Notification items:', notifications.map(n => ({ id: n.id, title: n.title, type: n.type })));
+                  
+                  return notifications.length > 0 ? (
+                    notifications.map((item, idx) => {
+                      console.log(`🎨 [QUICK MODAL] Rendering notification ${idx + 1}:`, { id: item.id, title: item.title, type: item.type });
+                      return (
+                        <TouchableOpacity 
+                          key={idx} 
+                          style={[styles.notificationModalItem, { borderLeftWidth: 4, borderLeftColor: getNotificationColor(item.type) }]}
+                          onPress={() => handleQuickNotificationPress(item)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.notificationIcon}>
+                            <Ionicons name={getNotificationIcon(item.type)} size={20} color={getNotificationColor(item.type)} />
+                          </View>
+                          <View style={styles.notificationContent}>
+                            <View style={styles.notificationHeader}>
+                              <Text style={styles.notificationTitle}>{item.title}</Text>
+                              {!item.is_read && (
+                                <View style={styles.unreadBadge}>
+                                  <Text style={styles.unreadBadgeText}>NEW</Text>
+                                </View>
+                              )}
                             </View>
-                          )}
+                            <Text style={styles.notificationMessage}>{item.message}</Text>
+                            <Text style={styles.notificationTime}>{formatDateToDDMMYYYY(item.created_at)}</Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })
+                  ) : (
+                    (() => {
+                      console.log('🎨 [QUICK MODAL] Showing empty state - no notifications');
+                      return (
+                        <View style={styles.emptyNotifications}>
+                          <Ionicons name="notifications-outline" size={48} color="#ccc" />
+                          <Text style={styles.emptyNotificationsText}>No notifications yet</Text>
+                          <Text style={styles.emptyNotificationsSubtext}>You'll see important updates here</Text>
                         </View>
-                        <Text style={styles.notificationMessage}>{item.message}</Text>
-                        <Text style={styles.notificationTime}>{formatDateToDDMMYYYY(item.created_at)}</Text>
-                      </View>
-                    </View>
-                  ))
-                ) : (
-                  <View style={styles.emptyNotifications}>
-                    <Ionicons name="notifications-outline" size={48} color="#ccc" />
-                    <Text style={styles.emptyNotificationsText}>No notifications yet</Text>
-                    <Text style={styles.emptyNotificationsSubtext}>You'll see important updates here</Text>
-                  </View>
-                )}
+                      );
+                    })()
+                  );
+                })()}
               </ScrollView>
             </View>
           </View>
@@ -4121,14 +4359,21 @@ const styles = StyleSheet.create({
   notificationItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
     borderLeftWidth: 4,
     borderLeftColor: '#ddd',
     backgroundColor: '#fff',
-    marginBottom: 2,
+    marginBottom: 3,
+    borderRadius: 8,
+    marginHorizontal: 2,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
   },
   notificationIcon: {
     width: 32,
@@ -4175,8 +4420,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 24,
     width: '100%',
-    maxWidth: 500,
-    maxHeight: '70%',
+    maxWidth: 600,
+    maxHeight: '80%',
     elevation: 5,
     shadowColor: '#000',
     shadowOffset: {
@@ -4191,12 +4436,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
+    letterSpacing: 0.3,
   },
   attendanceTableHeader: {
     flexDirection: 'row',
@@ -4791,8 +5040,8 @@ const styles = StyleSheet.create({
 
   // Web-optimized Notification Modal Styles
   notificationScrollContainer: {
-    height: 450,
-    maxHeight: 450,
+    height: 520,
+    maxHeight: 520,
     overflow: 'hidden',
     borderRadius: 8,
     backgroundColor: '#f8f9fa',
@@ -4800,13 +5049,13 @@ const styles = StyleSheet.create({
   notificationScrollView: {
     flex: 1,
     height: '100%',
-    maxHeight: 450,
+    maxHeight: 520,
   },
   notificationScrollContent: {
     paddingBottom: 20,
     paddingTop: 8,
     paddingHorizontal: 4,
-    minHeight: 450,
+    minHeight: 520,
   },
   notificationModalItem: {
     flexDirection: 'row',
