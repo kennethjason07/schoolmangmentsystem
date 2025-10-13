@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -30,6 +30,13 @@ import { useAuth } from '../../utils/AuthContext';
 import { createLeaveStatusNotificationForTeacher } from '../../services/notificationService';
 import LogViewer from '../../components/debug/LogViewer';
 import { useTenantAccess, tenantDatabase } from '../../utils/tenantHelpers';
+import {
+  createDebouncedProcessor,
+  processRealtimeUpdateOptimized,
+  createTeacherCache,
+  cleanupRealtimeProcessor,
+  withPerformanceMonitoring
+} from '../../utils/leaveRealtimeOptimizer';
 
 const { width } = Dimensions.get('window');
 
@@ -86,6 +93,15 @@ const LeaveManagement = ({ navigation }) => {
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [showTeacherPicker, setShowTeacherPicker] = useState(false);
   const [showReplacementTeacherPicker, setShowReplacementTeacherPicker] = useState(false);
+  
+  // 🚀 OPTIMIZATION: Teacher cache and real-time processing refs
+  const teachersRef = useRef([]);
+  const teacherCacheRef = useRef(new Map());
+  const realtimeProcessorRef = useRef(null);
+  
+  // 🚀 OPTIMIZATION: Request deduplication and loading states
+  const [processingLeaveIds, setProcessingLeaveIds] = useState(new Set());
+  const reviewRequestsRef = useRef(new Map());
 
   const statusFilters = ['All', 'Pending', 'Approved', 'Rejected'];
   const leaveTypes = [
@@ -98,12 +114,30 @@ const LeaveManagement = ({ navigation }) => {
     // Automatic debug info logging
     logDebugInfo();
   }, []);
+  
+  // 🚀 OPTIMIZATION: Update teacher cache when teachers change
+  useEffect(() => {
+    teachersRef.current = teachers;
+    teacherCacheRef.current = createTeacherCache(teachers);
+    console.log(`📚 Teacher cache updated: ${teachers.length} teachers`);
+  }, [teachers]);
 
-  // Realtime subscription for leave applications filtered by tenant_id
+  // 🚀 OPTIMIZED: Realtime subscription with debounced processing
   useEffect(() => {
     if (!isReady || !tenantId) return;
 
-    console.log('📡 Subscribing to realtime leave_applications for tenant:', tenantId);
+    console.log('📡 [OPTIMIZED] Subscribing to realtime leave_applications for tenant:', tenantId);
+    
+    // Create debounced processor for real-time updates
+    const processRealtimeUpdate = createDebouncedProcessor((payload) => {
+      setLeaveApplications(prev => 
+        processRealtimeUpdateOptimized(prev, payload, teacherCacheRef.current)
+      );
+    }, 100);
+    
+    // Store reference for cleanup
+    realtimeProcessorRef.current = processRealtimeUpdate;
+
     const channel = supabase
       .channel(`admin-leave-applications-${tenantId}`)
       .on(
@@ -112,63 +146,28 @@ const LeaveManagement = ({ navigation }) => {
         (payload) => {
           try {
             const { eventType, new: newRow, old: oldRow } = payload;
-            console.log('📡 Realtime event:', eventType, newRow?.id || oldRow?.id);
-
-            setLeaveApplications((prev) => {
-              let list = Array.isArray(prev) ? [...prev] : [];
-              if (eventType === 'INSERT' && newRow) {
-                const teacherObj = teachers.find(t => t.id === newRow.teacher_id) || null;
-                const replacementObj = teachers.find(t => t.id === newRow.replacement_teacher_id) || null;
-                const start = newRow.start_date ? new Date(newRow.start_date) : null;
-                const end = newRow.end_date ? new Date(newRow.end_date) : null;
-                const totalDays = newRow.total_days ?? (start && end ? (Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1) : undefined);
-
-                const enriched = {
-                  ...newRow,
-                  total_days: totalDays,
-                  teacher: teacherObj ? { id: teacherObj.id, name: teacherObj.name } : undefined,
-                  replacement_teacher: replacementObj ? { id: replacementObj.id, name: replacementObj.name } : undefined,
-                };
-                list = list.filter(a => a.id !== newRow.id);
-                return [enriched, ...list];
-              }
-
-              if (eventType === 'UPDATE' && newRow) {
-                const idx = list.findIndex(a => a.id === newRow.id);
-                const teacherObj = teachers.find(t => t.id === newRow.teacher_id) || null;
-                const replacementObj = teachers.find(t => t.id === newRow.replacement_teacher_id) || null;
-                const merged = {
-                  ...(idx >= 0 ? list[idx] : {}),
-                  ...newRow,
-                  teacher: teacherObj ? { id: teacherObj.id, name: teacherObj.name } : (idx >= 0 ? list[idx].teacher : undefined),
-                  replacement_teacher: replacementObj ? { id: replacementObj.id, name: replacementObj.name } : (idx >= 0 ? list[idx].replacement_teacher : undefined),
-                };
-                if (idx >= 0) {
-                  list[idx] = merged;
-                } else {
-                  list.unshift(merged);
-                }
-                return [...list];
-              }
-
-              if (eventType === 'DELETE' && oldRow) {
-                return list.filter(a => a.id !== oldRow.id);
-              }
-
-              return list;
-            });
+            console.log('📡 [OPTIMIZED] Realtime event:', eventType, newRow?.id || oldRow?.id);
+            
+            // Process update with optimized debounced handler
+            processRealtimeUpdate(payload);
           } catch (err) {
-            console.error('Realtime update error:', err);
+            console.error('🚨 [OPTIMIZED] Realtime update error:', err);
           }
         }
       )
       .subscribe();
 
     return () => {
-      console.log('📡 Unsubscribing realtime leave_applications channel for tenant:', tenantId);
+      console.log('📡 [OPTIMIZED] Unsubscribing and cleaning up realtime channel for tenant:', tenantId);
+      
+      // Cleanup debounced processor
+      cleanupRealtimeProcessor(processRealtimeUpdate);
+      realtimeProcessorRef.current = null;
+      
+      // Remove channel
       supabase.removeChannel(channel);
     };
-  }, [isReady, tenantId, teachers]);
+  }, [isReady, tenantId]); // 🚀 OPTIMIZATION: Removed teachers dependency
   
   const logDebugInfo = async () => {
     try {
@@ -608,18 +607,54 @@ const LeaveManagement = ({ navigation }) => {
     }
   };
 
+  // 🚀 OPTIMIZED: Single RPC call with batch operations and request deduplication
   const handleReviewLeave = async () => {
+    const leaveId = selectedLeave?.id;
+    if (!leaveId) {
+      Alert.alert('Error', 'No leave application selected');
+      return;
+    }
+
+    // 🚀 OPTIMIZATION: Request deduplication
+    if (processingLeaveIds.has(leaveId)) {
+      console.log('⚠️ [DEDUPLICATION] Leave review already in progress for:', leaveId);
+      return;
+    }
+
+    // Check for existing request
+    const existingRequest = reviewRequestsRef.current.get(leaveId);
+    if (existingRequest) {
+      console.log('⚠️ [DEDUPLICATION] Returning existing request for:', leaveId);
+      return existingRequest;
+    }
+
+    // Create and store the request promise
+    const requestPromise = performLeaveReview(leaveId);
+    reviewRequestsRef.current.set(leaveId, requestPromise);
+
     try {
-      console.log('🚀 LeaveManagement: Starting handleReviewLeave with enhanced tenant system...');
+      await requestPromise;
+    } finally {
+      // Cleanup after completion
+      reviewRequestsRef.current.delete(leaveId);
+    }
+  };
+
+  const performLeaveReview = async (leaveId) => {
+    try {
+      console.log('🚀 [OPTIMIZED] Starting optimized leave review for:', leaveId);
       
-      // Wait for tenant context
+      // Mark as processing
+      setProcessingLeaveIds(prev => new Set([...prev, leaveId]));
+      
+      // Pre-flight validation
       if (!isReady) {
-        Alert.alert('Error', 'Tenant context not ready for reviewing leave');
+        Alert.alert('Error', 'System not ready. Please try again.');
         return;
       }
       
       if (tenantError) {
-        Alert.alert('Error', 'Tenant error: ' + tenantError);
+        Alert.alert('Error', 'System error: ' + tenantError);
         return;
       }
 
@@ -628,92 +663,106 @@ const LeaveManagement = ({ navigation }) => {
         return;
       }
 
-      // Check authentication using AuthContext
       if (!isAuthenticated || !user) {
-        Alert.alert('Authentication Error', 'You must be logged in to review leave applications.');
+        Alert.alert('Authentication Error', 'Please log in and try again.');
         navigation.navigate('Login');
         return;
       }
       
-      // More flexible user type checking for leave review
       const normalizedUserType = userType?.toLowerCase();
       if (normalizedUserType !== 'admin') {
-        console.log('⚠️ LeaveManagement Review: Access denied for userType:', userType, 'normalized:', normalizedUserType);
         Alert.alert('Authorization Error', 'Only administrators can review leave applications.');
         return;
       }
 
-      const updateData = {
-        status: reviewForm.status,
-        reviewed_by: user.id,
-        reviewed_at: new Date().toISOString(),
-        admin_remarks: reviewForm.admin_remarks.trim(),
-        replacement_teacher_id: reviewForm.replacement_teacher_id || null,
-        replacement_notes: reviewForm.replacement_notes.trim() || null,
-      };
-
-      console.log('✏️ LeaveManagement: Updating leave application with enhanced tenant system...');
+      // 🚀 OPTIMIZATION: Single RPC call replacing 4+ database operations
+      console.log('🔄 [OPTIMIZED] Calling batch RPC function...');
       
-      // 🚀 Use enhanced tenant database helper for update
-      const { error } = await tenantDatabase.update(
-        'leave_applications',
-        selectedLeave.id,
-        updateData
-      );
+      const result = await withPerformanceMonitoring('leave-review-rpc', async () => {
+        const { data, error } = await supabase.rpc('process_leave_review', {
+          p_leave_id: leaveId,
+          p_new_status: reviewForm.status,
+          p_admin_remarks: reviewForm.admin_remarks.trim(),
+          p_reviewed_by: user.id,
+          p_tenant_id: tenantId,
+          p_replacement_teacher_id: reviewForm.replacement_teacher_id || null,
+          p_replacement_notes: reviewForm.replacement_notes.trim() || null
+        });
+        
+        if (error) {
+          console.error('❌ [OPTIMIZED] RPC call failed:', error);
+          throw error;
+        }
+        
+        return data;
+      });
 
-      if (error) {
-        console.error('❌ Enhanced tenant leave review update failed:', error);
-        throw error;
+      if (!result.success) {
+        console.error('❌ [OPTIMIZED] Batch operation failed:', result.error);
+        Alert.alert('Error', result.error || 'Failed to process leave review');
+        return;
       }
-      
-      console.log('✅ Leave application reviewed successfully with enhanced tenant system');
 
-      // Send notification to teacher using notification service
-      if (selectedLeave?.teacher_id) {
+      console.log('✅ [OPTIMIZED] Leave review completed successfully');
+
+      // 🚀 OPTIMIZATION: Handle push notifications separately (if needed)
+      if (result.push_tokens && result.push_tokens.length > 0) {
         try {
-          const notificationResult = await createLeaveStatusNotificationForTeacher(
-            selectedLeave,
-            reviewForm.status,
-            reviewForm.admin_remarks.trim(),
-            user.id
-          );
+          console.log('📱 [OPTIMIZED] Sending push notifications...');
           
-          if (notificationResult.success) {
-            console.log('✅ Leave status notification sent to teacher successfully');
-          } else {
-            console.error('❌ Failed to send leave status notification:', notificationResult.error);
-          }
-        } catch (notificationError) {
-          // Log error but don't show to user - notifications are secondary
-          console.error('Notification error:', notificationError);
+          const pushTitle = reviewForm.status === 'Approved' ? 'Leave Request Approved' : 'Leave Request Rejected';
+          const pushMessage = `Your ${result.updated_leave.leave_type} request has been ${reviewForm.status.toLowerCase()}`;
+          
+          const pushNotifications = result.push_tokens.map(tokenData => ({
+            to: tokenData.token,
+            sound: 'default',
+            title: pushTitle,
+            body: pushMessage,
+            data: {
+              type: 'leave_status_update',
+              status: reviewForm.status,
+              leaveType: result.updated_leave.leave_type,
+              priority: reviewForm.status === 'Rejected' ? 'urgent' : 'high',
+              timestamp: Date.now()
+            }
+          }));
+          
+          fetch('https://exp.host/--/api/v2/push/send', {
+            method: 'POST',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(pushNotifications),
+          }).catch(pushError => {
+            console.warn('⚠️ [OPTIMIZED] Push notification failed (non-critical):', pushError);
+          });
+        } catch (pushError) {
+          console.warn('⚠️ [OPTIMIZED] Push notification error (non-critical):', pushError);
         }
       }
 
       Alert.alert('Success', `Leave application ${reviewForm.status.toLowerCase()} successfully`);
 
-      // Optimistically update UI without reloading
-      setLeaveApplications(prev => (prev || []).map(app => {
-        if (app.id !== selectedLeave.id) return app;
-        const replacementObj = teachers.find(t => t.id === reviewForm.replacement_teacher_id) || null;
-        return {
-          ...app,
-          status: reviewForm.status,
-          reviewed_by: user.id,
-          reviewed_at: new Date().toISOString(),
-          admin_remarks: reviewForm.admin_remarks.trim(),
-          replacement_teacher_id: reviewForm.replacement_teacher_id || null,
-          replacement_notes: reviewForm.replacement_notes.trim() || null,
-          reviewed_by_user: { id: user.id, full_name: user.email },
-          replacement_teacher: replacementObj ? { id: replacementObj.id, name: replacementObj.name } : null,
-        };
-      }));
+      // 🚀 OPTIMIZATION: Optimistic UI update with server data
+      setLeaveApplications(prev => (prev || []).map(app => 
+        app.id === leaveId ? { ...app, ...result.updated_leave } : app
+      ));
 
       setShowReviewModal(false);
       setSelectedLeave(null);
       resetReviewForm();
+      
     } catch (error) {
-      console.error('Error reviewing leave:', error);
-      Alert.alert('Error', 'Failed to review leave application');
+      console.error('🚨 [OPTIMIZED] Error in leave review:', error);
+      Alert.alert('Error', 'Failed to review leave application: ' + (error.message || 'Unknown error'));
+    } finally {
+      // Always cleanup processing state
+      setProcessingLeaveIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(leaveId);
+        return newSet;
+      });
     }
   };
 
@@ -824,11 +873,22 @@ const LeaveManagement = ({ navigation }) => {
         {item.status === 'Pending' && (
           <View style={styles.actionButtons}>
             <TouchableOpacity
-              style={[styles.actionButton, styles.approveButton]}
+              style={[
+                styles.actionButton, 
+                styles.approveButton,
+                processingLeaveIds.has(item.id) && styles.processingButton
+              ]}
               onPress={() => openReviewModal(item)}
+              disabled={processingLeaveIds.has(item.id)}
             >
-              <Ionicons name="checkmark" size={16} color="#FFFFFF" />
-              <Text style={styles.actionButtonText}>Review</Text>
+              {processingLeaveIds.has(item.id) ? (
+                <ActivityIndicator size={16} color="#FFFFFF" />
+              ) : (
+                <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+              )}
+              <Text style={styles.actionButtonText}>
+                {processingLeaveIds.has(item.id) ? 'Processing...' : 'Review'}
+              </Text>
             </TouchableOpacity>
           </View>
         )}
@@ -1504,11 +1564,24 @@ const LeaveManagement = ({ navigation }) => {
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.saveButton, { backgroundColor: getStatusColor(reviewForm.status) }]}
+              style={[
+                styles.saveButton, 
+                { backgroundColor: getStatusColor(reviewForm.status) },
+                selectedLeave && processingLeaveIds.has(selectedLeave.id) && styles.processingButton
+              ]}
               onPress={handleReviewLeave}
+              disabled={selectedLeave && processingLeaveIds.has(selectedLeave.id)}
             >
-              <Text style={styles.saveButtonText}>
-                {reviewForm.status === 'Approved' ? 'Approve' : 'Reject'}
+              {selectedLeave && processingLeaveIds.has(selectedLeave.id) ? (
+                <ActivityIndicator size={16} color="#FFFFFF" />
+              ) : null}
+              <Text style={[
+                styles.saveButtonText,
+                selectedLeave && processingLeaveIds.has(selectedLeave.id) && { marginLeft: 8 }
+              ]}>
+                {selectedLeave && processingLeaveIds.has(selectedLeave.id) 
+                  ? 'Processing...' 
+                  : (reviewForm.status === 'Approved' ? 'Approve' : 'Reject')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1718,6 +1791,10 @@ const styles = StyleSheet.create({
   },
   approveButton: {
     backgroundColor: '#4CAF50',
+  },
+  processingButton: {
+    opacity: 0.7,
+    backgroundColor: '#9E9E9E',
   },
   actionButtonText: {
     fontSize: 14,

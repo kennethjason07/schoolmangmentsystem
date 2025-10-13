@@ -169,6 +169,28 @@ class PushNotificationService {
     try {
       if (!this.expoPushToken) return;
 
+      // Get tenant_id from current user context
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.error('❌ User not authenticated, cannot store push token');
+        return;
+      }
+
+      // Get user's tenant_id
+      const { data: userData } = await supabase
+        .from('users')
+        .select('tenant_id')
+        .eq('id', userId)
+        .single();
+
+      const tenantId = userData?.tenant_id;
+      if (!tenantId) {
+        console.error('❌ No tenant_id found for user, cannot store push token');
+        return;
+      }
+
+      console.log('📱 Storing push token for user:', userId, 'tenant:', tenantId);
+
       // Check if token already exists for this user
       const { data: existingTokens } = await supabase
         .from('push_tokens')
@@ -184,13 +206,9 @@ class PushNotificationService {
           .update({
             updated_at: new Date().toISOString(),
             is_active: true,
-            user_type: userType,
-            device_info: {
-              platform: Platform.OS,
-              deviceName: Device.deviceName || 'Unknown',
-              modelName: Device.modelName || 'Unknown',
-              osVersion: Device.osVersion || 'Unknown',
-            }
+            device_type: Platform.OS,
+            device_name: Device.deviceName || `${Platform.OS} Device`,
+            tenant_id: tenantId, // ✅ Include tenant_id
           })
           .eq('id', existingTokens.id);
       } else {
@@ -199,16 +217,11 @@ class PushNotificationService {
           .from('push_tokens')
           .insert({
             user_id: userId,
-            user_type: userType,
             token: this.expoPushToken,
-            platform: Platform.OS,
-            device_info: {
-              platform: Platform.OS,
-              deviceName: Device.deviceName || 'Unknown',
-              modelName: Device.modelName || 'Unknown',
-              osVersion: Device.osVersion || 'Unknown',
-            },
+            device_type: Platform.OS,
+            device_name: Device.deviceName || `${Platform.OS} Device`,
             is_active: true,
+            tenant_id: tenantId, // ✅ Include tenant_id
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           });

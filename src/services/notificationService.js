@@ -1,4 +1,5 @@
 import { supabase, TABLES, getUserTenantId } from '../utils/supabase';
+import { getCachedTenantId } from '../utils/sharedTenantUtils';
 import universalNotificationService from './UniversalNotificationService';
 
 /**
@@ -539,22 +540,41 @@ export const hasAbsenceNotificationBeenSent = async (studentId, date) => {
  * @param {Object} leaveData - Leave application data
  * @param {Object} teacherData - Teacher profile data
  * @param {string} sent_by - User ID who sent the notification
+ * @param {string} tenantId - Tenant ID (optional, will use enhanced tenant system if not provided)
  * @returns {Promise<Object>} Result with success status
  */
-export const createLeaveRequestNotificationForAdmins = async (leaveData, teacherData, sent_by) => {
+export const createLeaveRequestNotificationForAdmins = async (leaveData, teacherData, sent_by, tenantId = null) => {
   try {
     console.log('📧 [LEAVE REQUEST] Creating notification for admins...');
     
-    // Get tenant_id for the notification
-    const tenantId = await getUserTenantId();
-    if (!tenantId) {
+    // Get tenant_id for the notification - use provided tenantId or enhanced tenant system
+    let effectiveTenantId = tenantId;
+    if (!effectiveTenantId) {
+      try {
+        // Try enhanced tenant system first (cached tenant ID)
+        effectiveTenantId = getCachedTenantId();
+        if (effectiveTenantId) {
+          console.log('📧 [LEAVE REQUEST] Using enhanced tenant system tenant_id:', effectiveTenantId);
+        } else {
+          // Fallback to old method
+          effectiveTenantId = await getUserTenantId();
+          console.log('📧 [LEAVE REQUEST] Using fallback tenant_id:', effectiveTenantId);
+        }
+      } catch (error) {
+        console.error('❌ [LEAVE REQUEST] Error getting tenant from enhanced system:', error);
+        // Last resort fallback to old method
+        effectiveTenantId = await getUserTenantId();
+      }
+    }
+    
+    if (!effectiveTenantId) {
       console.error('❌ [LEAVE REQUEST] No tenant_id found for notification creation');
       return {
         success: false,
-        error: 'Tenant information not found'
+        error: 'Tenant information not found. Enhanced tenant system may not be initialized.'
       };
     }
-    console.log('📧 [LEAVE REQUEST] Using tenant_id:', tenantId);
+    console.log('📧 [LEAVE REQUEST] Using tenant_id:', effectiveTenantId);
     
     const notificationMessage = `[LEAVE_REQUEST] ${teacherData.teacher?.name || teacherData.full_name} has submitted a ${leaveData.leave_type} request from ${leaveData.start_date} to ${leaveData.end_date}. Reason: ${leaveData.reason}`;
     
@@ -567,7 +587,7 @@ export const createLeaveRequestNotificationForAdmins = async (leaveData, teacher
         sent_by,
         delivery_mode: 'InApp',
         delivery_status: 'Sent',
-        tenant_id: tenantId // Include tenant_id
+        tenant_id: effectiveTenantId // Include tenant_id
       })
       .select()
       .single();
@@ -579,18 +599,19 @@ export const createLeaveRequestNotificationForAdmins = async (leaveData, teacher
 
     console.log('✅ [LEAVE REQUEST] Notification created:', notification.id);
 
-    // Step 2: Get all admin users (role_id = 1)
+    // Step 2: Get admin users from the SAME TENANT only (role_id = 1 AND tenant_id matches)
     const { data: adminUsers, error: adminError } = await supabase
       .from(TABLES.USERS)
       .select('id')
-      .eq('role_id', 1);
+      .eq('role_id', 1)
+      .eq('tenant_id', effectiveTenantId); // 🚀 CRITICAL FIX: Only get admins from the same tenant
     
     if (adminError) {
       console.error('❌ [LEAVE REQUEST] Error fetching admin users:', adminError);
       throw adminError;
     }
 
-    console.log(`📧 [LEAVE REQUEST] Found ${adminUsers?.length || 0} admin users`);
+    console.log(`📧 [LEAVE REQUEST] Found ${adminUsers?.length || 0} admin users for tenant: ${effectiveTenantId}`);
 
     // Step 3: Create notification recipients for all admins
     if (adminUsers && adminUsers.length > 0) {
@@ -602,7 +623,7 @@ export const createLeaveRequestNotificationForAdmins = async (leaveData, teacher
         delivery_status: 'Sent',
         sent_at: new Date().toISOString(),
         is_read: false,
-        tenant_id: tenantId // Include tenant_id for notification recipients
+        tenant_id: effectiveTenantId // Include tenant_id for notification recipients
       }));
       
       const { error: recipientsError } = await supabase
@@ -614,11 +635,11 @@ export const createLeaveRequestNotificationForAdmins = async (leaveData, teacher
         throw recipientsError;
       }
 
-    console.log(`✅ [LEAVE REQUEST] Created notification recipients for ${adminUsers.length} admin users`);
+    console.log(`✅ [LEAVE REQUEST] Created notification recipients for ${adminUsers.length} admin users from tenant: ${effectiveTenantId}`);
     
     // Broadcast real-time notification updates to all admin users
     try {
-      console.log(`📡 [LEAVE REQUEST] Broadcasting real-time updates to ${adminUsers.length} admin users...`);
+      console.log(`📡 [LEAVE REQUEST] Broadcasting real-time updates to ${adminUsers.length} admin users from tenant: ${effectiveTenantId}...`);
       const adminUserIds = adminUsers.map(admin => admin.id);
       await universalNotificationService.broadcastNewNotificationToUsers(
         adminUserIds,
@@ -632,27 +653,39 @@ export const createLeaveRequestNotificationForAdmins = async (leaveData, teacher
     
     // Send push notifications to admin users (using same approach as working test push notifications)
     try {
-      console.log(`📱 [LEAVE REQUEST] Sending push notifications to ${adminUsers.length} admin users...`);
+      console.log(`📱 [LEAVE REQUEST] Sending push notifications to ${adminUsers.length} admin users from tenant: ${effectiveTenantId}...`);
       
-      // Get push tokens for all admin users (with tenant validation)
+      // Get push tokens for all admin users (with manual tenant validation)
       const adminUserIds = adminUsers.map(admin => admin.id);
+      console.log(`🔍 [LEAVE REQUEST] Fetching push tokens for admin users...`);
+      
+      // 🚀 FIXED: Use direct query without joins to avoid relationship errors
       const { data: tokens, error: tokensError } = await supabase
         .from('push_tokens')
-        .select(`
-          token, 
-          user_id,
-          users!inner(tenant_id)
-        `)
+        .select('token, user_id')
         .in('user_id', adminUserIds)
-        .eq('is_active', true)
-        .eq('users.tenant_id', tenantId); // Ensure tokens belong to current tenant
+        .eq('is_active', true);
+      
+      // Manual tenant validation for tokens
+      let validTokens = [];
+      if (tokens && tokens.length > 0) {
+        const { data: validUsers } = await supabase
+          .from('users')
+          .select('id')
+          .in('id', tokens.map(t => t.user_id))
+          .eq('tenant_id', effectiveTenantId);
+          
+        const validUserIds = new Set(validUsers?.map(u => u.id) || []);
+        validTokens = tokens.filter(t => validUserIds.has(t.user_id));
+        console.log(`🔍 [LEAVE REQUEST] Validated ${validTokens.length}/${tokens.length} tokens for tenant`);
+      }
 
       if (tokensError) {
         console.error('❌ [LEAVE REQUEST] Error getting push tokens:', tokensError);
         throw tokensError;
       }
 
-      if (!tokens || tokens.length === 0) {
+      if (!validTokens || validTokens.length === 0) {
         console.warn('⚠️ [LEAVE REQUEST] No active push tokens found for admin users');
         // Don't fail the whole operation if no tokens, just log warning
       } else {
@@ -661,7 +694,7 @@ export const createLeaveRequestNotificationForAdmins = async (leaveData, teacher
         const pushMessage = `${teacherData.teacher?.name || teacherData.full_name} has submitted a ${leaveData.leave_type} request (${leaveData.start_date} to ${leaveData.end_date})`;
         
         // Prepare push notifications using the same format as working test notifications
-        const pushNotifications = tokens.map(tokenRecord => ({
+        const pushNotifications = validTokens.map(tokenRecord => ({
           to: tokenRecord.token,
           sound: 'default',
           title: pushTitle,
@@ -726,7 +759,8 @@ export const createLeaveRequestNotificationForAdmins = async (leaveData, teacher
     return {
       success: true,
       notification,
-      recipientCount: adminUsers?.length || 0
+      recipientCount: adminUsers?.length || 0,
+      tenantId: effectiveTenantId // Include tenant ID for debugging
     };
 
   } catch (error) {
@@ -1105,24 +1139,38 @@ export const createLeaveStatusNotificationForTeacher = async (leaveData, status,
     try {
       console.log(`📱 [LEAVE STATUS] Sending push notification to teacher ${teacherUser.id}...`);
       
-      // Get push tokens for the teacher (with tenant validation)
+      // Get push tokens for the teacher (with manual tenant validation)
+      console.log(`🔍 [LEAVE STATUS] Fetching push tokens for teacher...`);
+      
+      // 🚀 FIXED: Use direct query without joins to avoid relationship errors
       const { data: tokens, error: tokensError } = await supabase
         .from('push_tokens')
-        .select(`
-          token, 
-          user_id,
-          users!inner(tenant_id)
-        `)
+        .select('token, user_id')
         .eq('user_id', teacherUser.id)
-        .eq('is_active', true)
-        .eq('users.tenant_id', tenantId); // Ensure tokens belong to current tenant
+        .eq('is_active', true);
+      
+      // Manual tenant validation for tokens
+      let validTokens = [];
+      if (tokens && tokens.length > 0) {
+        const { data: validUser } = await supabase
+          .from('users')
+          .select('id')
+          .eq('id', teacherUser.id)
+          .eq('tenant_id', tenantId)
+          .single();
+          
+        if (validUser) {
+          validTokens = tokens;
+          console.log(`🔍 [LEAVE STATUS] Validated ${validTokens.length} tokens for teacher`);
+        }
+      }
 
       if (tokensError) {
         console.error('❌ [LEAVE STATUS] Error getting push tokens:', tokensError);
         throw tokensError;
       }
 
-      if (!tokens || tokens.length === 0) {
+      if (!validTokens || validTokens.length === 0) {
         console.warn(`⚠️ [LEAVE STATUS] No active push tokens found for teacher ${teacherUser.full_name}`);
         return {
           success: true, // Don't fail the whole operation if no tokens
@@ -1141,7 +1189,7 @@ export const createLeaveStatusNotificationForTeacher = async (leaveData, status,
       const isUrgent = status === 'Rejected'; // Mark rejections as urgent
       
       // Prepare push notifications using the same format as working test notifications
-      const pushNotifications = tokens.map(tokenRecord => ({
+      const pushNotifications = validTokens.map(tokenRecord => ({
         to: tokenRecord.token,
         sound: 'default',
         title: pushTitle,

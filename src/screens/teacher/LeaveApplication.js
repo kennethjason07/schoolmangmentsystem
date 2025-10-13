@@ -284,11 +284,12 @@ const LeaveApplication = ({ navigation }) => {
             total_days: totalDays
           },
           teacherProfile,
-          user.id
+          user.id,
+          effectiveTenantId // Pass tenant ID from enhanced tenant system
         );
 
         if (notificationResult.success) {
-          console.log(`✅ Admin notification created successfully for ${notificationResult.recipientCount} admin users`);
+          console.log(`✅ Admin notification created successfully for ${notificationResult.recipientCount} admin users from tenant: ${notificationResult.tenantId}`);
         } else {
           console.error('❌ Failed to create admin notification:', notificationResult.error);
         }

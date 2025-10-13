@@ -183,26 +183,89 @@ export const submitLeaveApplication = async (applicationData, user) => {
       applied_date: new Date().toISOString().split('T')[0]
     };
     
-    console.log('💾 Enhanced LeaveUtils: Creating leave application via tenantDatabase...');
+    console.log('💾 [OPTIMIZED] LeaveUtils: Creating leave application...');
     
-    // 🚀 ENHANCED: Use tenantDatabase.create for automatic tenant isolation
-    const { data, error } = await tenantDatabase.create(
-      'leave_applications',
-      leaveData
-    );
+    let data, error;
+    
+    // 🚀 TRY OPTIMIZED: Use RPC if available, fallback to direct insert
+    try {
+      console.log('🔄 [OPTIMIZED] Attempting RPC call...');
+      const result = await supabase.rpc('create_leave_application_optimized', {
+        p_teacher_id: teacherId,
+        p_leave_type: applicationData.leave_type,
+        p_start_date: applicationData.start_date,
+        p_end_date: applicationData.end_date,
+        p_reason: applicationData.reason.trim(),
+        p_applied_by: user.id,
+        p_tenant_id: tenantId,
+        p_attachment_url: applicationData.attachment_url || null
+      });
+      
+      data = result.data;
+      error = result.error;
+      
+      if (!error && data?.success) {
+        console.log('✅ [OPTIMIZED] RPC call successful');
+      } else {
+        throw new Error(data?.error || 'RPC call failed');
+      }
+    } catch (rpcError) {
+      console.warn('⚠️ [FALLBACK] RPC failed, using direct insert:', rpcError.message);
+      
+      // 🔄 FALLBACK: Use direct database insert with optimized structure
+      const startDate = new Date(applicationData.start_date);
+      const endDate = new Date(applicationData.end_date);
+      const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+      
+      const directResult = await supabase
+        .from('leave_applications')
+        .insert({
+          teacher_id: teacherId,
+          leave_type: applicationData.leave_type,
+          start_date: applicationData.start_date,
+          end_date: applicationData.end_date,
+          reason: applicationData.reason.trim(),
+          applied_by: user.id,
+          attachment_url: applicationData.attachment_url || null,
+          status: 'Pending',
+          applied_date: new Date().toISOString().split('T')[0],
+          total_days: totalDays,
+          academic_year: new Date().getFullYear().toString(),
+          tenant_id: tenantId
+        })
+        .select(`
+          id, teacher_id, leave_type, start_date, end_date, reason,
+          applied_by, attachment_url, status, applied_date, total_days
+        `)
+        .single();
+      
+      data = directResult.data;
+      error = directResult.error;
+      
+      if (!error) {
+        console.log('✅ [FALLBACK] Direct insert successful');
+        // Format data to match RPC response structure
+        data = {
+          success: true,
+          application: data
+        };
+      }
+    }
     
     if (error) {
-      console.error('❌ Enhanced LeaveUtils: Error creating leave application:', error);
+      console.error('❌ [OPTIMIZED] LeaveUtils: RPC call failed:', error);
       return {
         success: false,
         error: error.message || 'Failed to submit leave application. Please try again.'
       };
     }
     
-    if (!data) {
+    // Handle RPC response format
+    if (!data || !data.success) {
+      console.error('❌ [OPTIMIZED] LeaveUtils: RPC returned error:', data?.error);
       return {
         success: false,
-        error: 'Failed to submit leave application. Please try again.'
+        error: data?.error || 'Failed to submit leave application. Please try again.'
       };
     }
     
@@ -211,7 +274,7 @@ export const submitLeaveApplication = async (applicationData, user) => {
     
     return {
       success: true,
-      data
+      data: data.application // Extract the application data from RPC response
     };
     
   } catch (error) {
@@ -245,14 +308,23 @@ export const loadLeaveApplications = async (user, filters = {}) => {
     
     console.log('📊 Enhanced LeaveUtils: Querying leave applications...');
     
-    // 🚀 ENHANCED: Use createTenantQuery for automatic tenant filtering
-    let query = createTenantQuery(tenantId, 'leave_applications', `
-      *,
-      teacher:teachers!leave_applications_teacher_id_fkey(id, name),
-      applied_by_user:users!leave_applications_applied_by_fkey(id, full_name),
-      reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name),
-      replacement_teacher:teachers!leave_applications_replacement_teacher_id_fkey(id, name)
-    `);
+    // 🚀 OPTIMIZED: Use streamlined query with timeout handling
+    console.log('📊 [OPTIMIZED] LeaveUtils: Using optimized query...');
+    
+    // Add timeout to prevent hanging queries
+    const queryPromise = supabase
+      .from('leave_applications')
+      .select(`
+        id, teacher_id, leave_type, start_date, end_date, reason, status,
+        applied_date, reviewed_at, admin_remarks, attachment_url,
+        teacher:teachers!leave_applications_teacher_id_fkey(id, name),
+        applied_by_user:users!leave_applications_applied_by_fkey(id, full_name),
+        reviewed_by_user:users!leave_applications_reviewed_by_fkey(id, full_name)
+      `)
+      .eq('tenant_id', tenantId);
+    
+    // Apply filters if provided
+    let query = queryPromise;
     
     // Apply filters if provided
     if (filters.teacherId) {
@@ -263,10 +335,15 @@ export const loadLeaveApplications = async (user, filters = {}) => {
       query = query.eq('status', filters.status);
     }
     
-    // Order by most recent first
+    // Order by most recent first  
     query = query.order('applied_date', { ascending: false });
     
-    const { data, error } = await query;
+    // 🚀 OPTIMIZED: Add timeout to prevent hanging queries
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Query timeout after 10 seconds')), 10000);
+    });
+    
+    const { data, error } = await Promise.race([query, timeoutPromise]);
     
     if (error) {
       console.error('❌ Enhanced LeaveUtils: Query error:', error);

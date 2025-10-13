@@ -563,10 +563,19 @@ export const AuthProvider = ({ children }) => {
       // Initialize push notifications (Android channels + token) for admin and teacher
       try {
         if (roleName === 'admin' || roleName === 'teacher') {
-          await pushNotificationService.initialize(userData.id, roleName);
+          console.log('📱 [AUTH] Initializing push notifications for:', roleName, 'user:', userData.id);
+          const initResult = await pushNotificationService.initialize(userData.id, roleName);
+          if (initResult) {
+            console.log('✅ [AUTH] Push notification initialization successful');
+          } else {
+            console.warn('⚠️ [AUTH] Push notification initialization failed or not supported');
+          }
+        } else {
+          console.log('📱 [AUTH] Skipping push notifications for role:', roleName);
         }
       } catch (e) {
-        console.warn('⚠️ Push notification init failed:', e?.message);
+        console.error('❌ [AUTH] Push notification init error:', e?.message);
+        console.error('🔍 [AUTH] Error details:', e);
       }
 
       setLoading(false); // Ensure loading is false after successful auth state update
