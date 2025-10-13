@@ -12,7 +12,8 @@ import {
   Platform, 
   Animated, 
   RefreshControl,
-  Dimensions
+  Dimensions,
+  Image
 } from 'react-native';
 import Header from '../../components/Header';
 import { Ionicons } from '@expo/vector-icons';
@@ -66,6 +67,7 @@ const StudentList = ({ route, navigation }) => {
           name,
           roll_no,
           class_id,
+          photo_url,
           classes(class_name, section),
           parents:parent_id(name, phone)
         `)
@@ -176,11 +178,21 @@ const StudentList = ({ route, navigation }) => {
     >
       <View style={styles.studentCardContent}>
         <View style={styles.avatarContainer}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {item.name ? item.name.charAt(0).toUpperCase() : '?'}
-            </Text>
-          </View>
+          {item.photo_url ? (
+            <Image
+              source={{ uri: item.photo_url }}
+              style={styles.avatarImage}
+              onError={() => {
+                console.log('📸 Failed to load student photo for', item.name);
+              }}
+            />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {item.name ? item.name.charAt(0).toUpperCase() : '?'}
+              </Text>
+            </View>
+          )}
         </View>
         
         <View style={styles.studentInfo}>
@@ -548,6 +560,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#2196F3',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  avatarImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#f0f0f0',
   },
   avatarText: {
     fontSize: 18,
