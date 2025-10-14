@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,21 +10,40 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Animated,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Header from '../../components/Header';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 
+// Import CSS for web animations
+if (Platform.OS === 'web') {
+  require('./LinkExistingParent.css');
+}
+
 const LinkExistingParent = ({ route, navigation }) => {
   const { student } = route.params;
   
+  // Existing state
   const [loading, setLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [parentSearchResults, setParentSearchResults] = useState([]);
   const [parentSearchQuery, setParentSearchQuery] = useState('');
   const [selectedParentAccount, setSelectedParentAccount] = useState(null);
   const [linkingRelation, setLinkingRelation] = useState('Guardian');
+  
+  // Success state for enhanced success message
+  const [linkSuccess, setLinkSuccess] = useState(false);
+  const [successData, setSuccessData] = useState(null);
+  const successOpacity = useRef(new Animated.Value(0)).current;
+  
+  // Web scrolling state and refs
+  const scrollViewRef = useRef(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const scrollTopOpacity = useRef(new Animated.Value(0)).current;
 
   // Search for existing parent accounts
   const searchParentAccounts = async () => {
@@ -74,19 +93,26 @@ const LinkExistingParent = ({ route, navigation }) => {
         return;
       }
       
-      // Show success alert and navigate back
-      Alert.alert(
-        'Success',
-        `✅ Successfully linked ${selectedParentAccount.full_name} to ${student.name}!\n\n📧 Parent Email: ${selectedParentAccount.email}\n👤 Relation: ${linkingRelation}\n\n✨ The parent can now access this student's information.`,
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              navigation.goBack(); // Go back to Parent Account Management
-            }
-          }
-        ]
-      );
+      // Show enhanced success message
+      setSuccessData({
+        parentName: selectedParentAccount.full_name,
+        parentEmail: selectedParentAccount.email,
+        studentName: student.name,
+        relation: linkingRelation
+      });
+      setLinkSuccess(true);
+      
+      // Animate success message in
+      Animated.timing(successOpacity, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+      
+      // Auto-hide after 4 seconds and navigate back
+      setTimeout(() => {
+        hideSuccessMessage();
+      }, 4000);
       
     } catch (error) {
       console.error('Error linking parent:', error);
@@ -94,6 +120,19 @@ const LinkExistingParent = ({ route, navigation }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Hide success message and navigate back
+  const hideSuccessMessage = () => {
+    Animated.timing(successOpacity, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: Platform.OS !== 'web',
+    }).start(() => {
+      setLinkSuccess(false);
+      setSuccessData(null);
+      navigation.goBack(); // Go back to Parent Account Management
+    });
   };
 
   // Clear search when query is empty
@@ -104,23 +143,70 @@ const LinkExistingParent = ({ route, navigation }) => {
     }
   }, [parentSearchQuery]);
 
+  // Web scrolling functions
+  const handleScroll = (event) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    const shouldShow = offsetY > 150;
+    
+    if (shouldShow !== showScrollTop) {
+      setShowScrollTop(shouldShow);
+      Animated.timing(scrollTopOpacity, {
+        toValue: shouldShow ? 1 : 0,
+        duration: 300,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    }
+  };
+
+  const scrollToTop = () => {
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({ y: 0, animated: true });
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      // Re-run the search if there's a query
+      if (parentSearchQuery.trim()) {
+        await searchParentAccounts();
+      }
+    } catch (error) {
+      console.error('Error refreshing:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
-    <View style={styles.container}>
+    <View style={styles.mainContainer}>
       <Header 
         title="Link Existing Parent" 
         showBack={true} 
         onBack={() => navigation.goBack()} 
       />
       
-      <KeyboardAvoidingView 
-        style={styles.content}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <ScrollView 
-          style={styles.scrollView}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
+      <View style={styles.scrollableContainer}>
+        <KeyboardAvoidingView 
+          style={styles.keyboardContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
+          <ScrollView 
+            ref={scrollViewRef}
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={true}
+            scrollEventThrottle={16}
+            keyboardShouldPersistTaps="handled"
+            onScroll={handleScroll}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={['#2196F3']}
+              />
+            }
+          >
           {/* Student Info Card */}
           <View style={styles.studentCard}>
             <View style={styles.studentHeader}>
@@ -317,60 +403,167 @@ const LinkExistingParent = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* Add some bottom padding */}
-          <View style={{ height: 100 }} />
-        </ScrollView>
+            {/* Bottom spacing for better scroll experience */}
+            <View style={styles.bottomSpacing} />
+          </ScrollView>
 
-        {/* Action Buttons */}
-        <View style={styles.actionContainer}>
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="close" size={16} color="#666" />
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[
-              styles.linkButton,
-              (!selectedParentAccount || loading) && styles.linkButtonDisabled
-            ]}
-            onPress={handleLinkSelectedParent}
-            disabled={loading || !selectedParentAccount}
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <>
-                <Ionicons name="link" size={16} color="#fff" />
-                <Text style={styles.linkButtonText}>Link Parent Account</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
+          {/* Action Buttons */}
+          <View style={styles.actionContainer}>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => navigation.goBack()}
+            >
+              <Ionicons name="close" size={16} color="#666" />
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[
+                styles.linkButton,
+                (!selectedParentAccount || loading) && styles.linkButtonDisabled
+              ]}
+              onPress={handleLinkSelectedParent}
+              disabled={loading || !selectedParentAccount}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="link" size={16} color="#fff" />
+                  <Text style={styles.linkButtonText}>Link Parent Account</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
       
+      {/* Floating Refresh Button */}
       <FloatingRefreshButton 
         onRefresh={searchParentAccounts}
         isRefreshing={loading || searchLoading}
         bottom={80}
       />
+      
+      {/* Scroll to Top Button (Web Only) */}
+      {Platform.OS === 'web' && (
+        <Animated.View 
+          style={[styles.scrollToTopButton, { opacity: scrollTopOpacity }]}
+        >
+          <TouchableOpacity style={styles.scrollToTopInner} onPress={scrollToTop}>
+            <Ionicons name="chevron-up" size={24} color="#fff" />
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+      
+      {/* Enhanced Success Message Overlay */}
+      {linkSuccess && successData && (
+        <Animated.View style={[styles.successOverlay, { opacity: successOpacity }]} className={Platform.OS === 'web' ? 'success-overlay' : undefined}>
+          <View style={styles.successCard} className={Platform.OS === 'web' ? 'success-card' : undefined}>
+            <View style={styles.successHeader}>
+              <View style={styles.successIconContainer}>
+                <Ionicons name="checkmark-circle" size={48} color="#4CAF50" className={Platform.OS === 'web' ? 'success-icon' : undefined} />
+              </View>
+              <Text style={styles.successTitle}>Parent Account Linked!</Text>
+            </View>
+            
+            <View style={styles.successContent}>
+              <View style={styles.successDetailRow} className={Platform.OS === 'web' ? 'success-detail-row' : undefined}>
+                <Ionicons name="person" size={20} color="#666" />
+                <Text style={styles.successDetailLabel}>Parent:</Text>
+                <Text style={styles.successDetailValue}>{successData.parentName}</Text>
+              </View>
+              
+              <View style={styles.successDetailRow} className={Platform.OS === 'web' ? 'success-detail-row' : undefined}>
+                <Ionicons name="mail" size={20} color="#666" />
+                <Text style={styles.successDetailLabel}>Email:</Text>
+                <Text style={styles.successDetailValue}>{successData.parentEmail}</Text>
+              </View>
+              
+              <View style={styles.successDetailRow} className={Platform.OS === 'web' ? 'success-detail-row' : undefined}>
+                <Ionicons name="school" size={20} color="#666" />
+                <Text style={styles.successDetailLabel}>Student:</Text>
+                <Text style={styles.successDetailValue}>{successData.studentName}</Text>
+              </View>
+              
+              <View style={styles.successDetailRow} className={Platform.OS === 'web' ? 'success-detail-row' : undefined}>
+                <Ionicons name="heart" size={20} color="#666" />
+                <Text style={styles.successDetailLabel}>Relation:</Text>
+                <Text style={styles.successDetailValue}>{successData.relation}</Text>
+              </View>
+            </View>
+            
+            <Text style={styles.successMessage}>
+              ✨ The parent can now access this student's information
+            </Text>
+            
+            <TouchableOpacity 
+              style={styles.successButton}
+              className={Platform.OS === 'web' ? 'success-button' : undefined}
+              onPress={hideSuccessMessage}
+            >
+              <Text style={styles.successButtonText}>Continue</Text>
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  // 🎯 CRITICAL: Main container with fixed viewport height
+  mainContainer: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f5f5f7',
+    ...(Platform.OS === 'web' && {
+      height: '100vh',           // ✅ CRITICAL: Fixed viewport height
+      maxHeight: '100vh',        // ✅ CRITICAL: Prevent expansion
+      overflow: 'hidden',        // ✅ CRITICAL: Hide overflow on main container
+      position: 'relative',      // ✅ CRITICAL: For absolute positioning
+    }),
   },
-  content: {
+  
+  // 🎯 CRITICAL: Scrollable area with calculated height
+  scrollableContainer: {
+    flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: 'calc(100vh - 60px)',      // ✅ CRITICAL: Account for header (adjust 60px)
+      maxHeight: 'calc(100vh - 60px)',   // ✅ CRITICAL: Prevent expansion
+      overflow: 'hidden',                // ✅ CRITICAL: Control overflow
+    }),
+  },
+  
+  // KeyboardAvoidingView container
+  keyboardContainer: {
     flex: 1,
   },
+  
+  // 🎯 CRITICAL: ScrollView with explicit overflow
   scrollView: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: '100%',                    // ✅ CRITICAL: Full height
+      maxHeight: '100%',                 // ✅ CRITICAL: Prevent expansion
+      overflowY: 'scroll',              // ✅ CRITICAL: Enable vertical scroll
+      overflowX: 'hidden',              // ✅ CRITICAL: Disable horizontal scroll
+      WebkitOverflowScrolling: 'touch', // ✅ GOOD: Smooth iOS scrolling
+      scrollBehavior: 'smooth',         // ✅ GOOD: Smooth animations
+      scrollbarWidth: 'thin',           // ✅ GOOD: Thin scrollbars
+      scrollbarColor: '#2196F3 #f5f5f7', // ✅ GOOD: Custom scrollbar colors
+    }),
+  },
+  
+  // 🎯 CRITICAL: Content container properties
+  scrollContent: {
+    flexGrow: 1,                    // ✅ CRITICAL: Allow content to grow
     padding: 16,
+    paddingBottom: 120,             // ✅ IMPORTANT: Extra bottom padding for action buttons
+  },
+  
+  // 🎯 GOOD TO HAVE: Bottom spacing for better scroll experience
+  bottomSpacing: {
+    height: 100,                    // ✅ IMPORTANT: Extra space at bottom
   },
   
   // Card Styles
@@ -686,6 +879,145 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  
+  // Scroll to Top Button (Web Only)
+  scrollToTopButton: {
+    position: 'absolute',
+    bottom: 140,
+    right: 20,
+    zIndex: 1000,
+    ...Platform.select({
+      web: {
+        position: 'fixed',
+        bottom: 140,
+        right: 20,
+      },
+    }),
+  },
+  scrollToTopInner: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#2196F3',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.15)',
+        cursor: 'pointer',
+        transition: 'all 0.3s ease',
+      },
+    }),
+  },
+  
+  // 🎉 Enhanced Success Message Styles
+  successOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+    ...Platform.select({
+      web: {
+        position: 'fixed',
+        backdropFilter: 'blur(4px)',
+      },
+    }),
+  },
+  successCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+    marginHorizontal: 20,
+    maxWidth: 400,
+    width: '100%',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 8px 32px rgba(0, 0, 0, 0.2)',
+        animation: 'slideInFromBottom 0.5s ease-out',
+      },
+    }),
+  },
+  successHeader: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  successIconContainer: {
+    marginBottom: 12,
+  },
+  successTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#2E7D32',
+    textAlign: 'center',
+  },
+  successContent: {
+    marginBottom: 20,
+  },
+  successDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 8,
+  },
+  successDetailLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    marginLeft: 8,
+    minWidth: 60,
+  },
+  successDetailValue: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1,
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  successMessage: {
+    fontSize: 16,
+    color: '#4CAF50',
+    textAlign: 'center',
+    fontWeight: '500',
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  successButton: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    alignItems: 'center',
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+        '&:hover': {
+          backgroundColor: '#45A049',
+          transform: 'translateY(-1px)',
+        },
+      },
+    }),
+  },
+  successButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

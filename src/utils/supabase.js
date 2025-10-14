@@ -1735,7 +1735,7 @@ export const dbHelpers = {
       // 1. Find the existing parent user account
       const { data: existingParentUser, error: userError } = await supabase
         .from(TABLES.USERS)
-        .select('id, email, full_name, phone, role_id, linked_parent_of')
+        .select('id, email, full_name, phone, role_id, linked_parent_of, tenant_id')
         .eq('email', parentEmail)
         .eq('role_id', (await this.getParentRoleId()))
         .single();
@@ -1765,13 +1765,22 @@ export const dbHelpers = {
       // Also check if student already has this parent_id in students table
       const { data: currentStudent, error: currentStudentError } = await supabase
         .from(TABLES.STUDENTS)
-        .select('parent_id')
+        .select('parent_id, tenant_id')
         .eq('id', studentId)
         .single();
       
       if (currentStudentError) {
         console.error('Error getting current student:', currentStudentError);
         throw new Error('Student not found');
+      }
+      
+      // 🔧 CRITICAL FIX: Validate tenant compatibility
+      if (existingParentUser.tenant_id !== currentStudent.tenant_id) {
+        console.error('❌ Tenant mismatch:', {
+          parentTenant: existingParentUser.tenant_id,
+          studentTenant: currentStudent.tenant_id
+        });
+        throw new Error(`Cannot link parent and student from different tenants. Parent tenant: ${existingParentUser.tenant_id}, Student tenant: ${currentStudent.tenant_id}`);
       }
       
       // 3. Create new parent record linking this parent to the additional student
@@ -1781,7 +1790,8 @@ export const dbHelpers = {
         relation: relation,
         phone: existingParentUser.phone || '',
         email: existingParentUser.email,
-        student_id: studentId
+        student_id: studentId,
+        tenant_id: currentStudent.tenant_id  // 🔧 CRITICAL FIX: Include tenant_id
       };
       
       const { data: newParentRecord, error: parentRecordError } = await supabase
@@ -1859,43 +1869,75 @@ export const dbHelpers = {
 
   // Helper function to get parent role ID
   async getParentRoleId() {
-    const { data: parentRole, error: roleError } = await supabase
+    // Get all parent roles and use the first one found
+    // Since there might be multiple parent roles for different tenants
+    const { data: parentRoles, error: roleError } = await supabase
       .from(TABLES.ROLES)
       .select('id')
-      .eq('role_name', 'parent')
-      .single();
+      .eq('role_name', 'Parent')
+      .limit(1);
     
-    if (roleError) {
+    if (roleError || !parentRoles || parentRoles.length === 0) {
       throw new Error('Parent role not found');
     }
     
-    return parentRole.id;
+    return parentRoles[0].id;
   },
 
   // Search for existing parent accounts by email or name
   async searchParentAccounts(searchTerm) {
     try {
-      const { data: parentUsers, error: userError } = await supabase
+      console.log('🔍 searchParentAccounts: Searching for:', searchTerm);
+      
+      // Get all parent role IDs since there might be multiple for different tenants
+      const { data: parentRoles, error: roleError } = await supabase
+        .from(TABLES.ROLES)
+        .select('id')
+        .eq('role_name', 'Parent');
+      
+      if (roleError || !parentRoles || parentRoles.length === 0) {
+        console.error('❌ No parent roles found:', roleError);
+        throw new Error('Parent role not found');
+      }
+      
+      const parentRoleIds = parentRoles.map(role => role.id);
+      console.log('✅ Found parent role IDs:', parentRoleIds);
+      
+      // Build query to find parent users
+      let query = supabase
         .from(TABLES.USERS)
         .select('id, email, full_name, phone')
-        .eq('role_id', (await this.getParentRoleId()))
-        .or(`email.ilike.%${searchTerm}%,full_name.ilike.%${searchTerm}%`);
+        .in('role_id', parentRoleIds);
+      
+      // Add search filter if search term is provided
+      if (searchTerm && searchTerm.trim()) {
+        const trimmedTerm = searchTerm.trim();
+        query = query.or(`email.ilike.%${trimmedTerm}%,full_name.ilike.%${trimmedTerm}%`);
+      }
+      
+      const { data: parentUsers, error: userError } = await query;
       
       if (userError) {
-        console.error('Error searching parent accounts:', userError);
+        console.error('❌ Error searching parent accounts:', userError);
         throw userError;
       }
+      
+      console.log(`✅ Found ${parentUsers?.length || 0} parent users`);
       
       // For each parent, get their associated students
       const parentsWithStudents = await Promise.all(
         (parentUsers || []).map(async (parent) => {
+          console.log(`🔍 Getting students for parent: ${parent.email}`);
+          
           const { data: parentRecords, error: recordError } = await supabase
             .from(TABLES.PARENTS)
             .select(`
               id, relation, student_id,
-              students(id, name, admission_no, classes(class_name, section))
+              students!parents_student_id_fkey(id, name, admission_no, class_id, classes(class_name, section))
             `)
             .eq('email', parent.email);
+          
+          console.log(`📊 Parent ${parent.email} has ${parentRecords?.length || 0} student record(s)`);
           
           return {
             ...parent,
@@ -1907,9 +1949,10 @@ export const dbHelpers = {
         })
       );
       
+      console.log('✅ searchParentAccounts completed successfully');
       return { data: parentsWithStudents, error: null };
     } catch (error) {
-      console.error('Error in searchParentAccounts:', error);
+      console.error('❌ Error in searchParentAccounts:', error);
       return { data: null, error };
     }
   },

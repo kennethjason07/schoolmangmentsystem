@@ -15,28 +15,20 @@ import { supabase, TABLES } from './supabase';
  */
 export const getParentStudents = async (parentUserId) => {
   try {
-    const DEBUG_PARENT_AUTH = false; // Set to true to see detailed parent auth logs
+    const DEBUG_PARENT_AUTH = true; // Enable debugging to troubleshoot issues
     
     if (DEBUG_PARENT_AUTH) {
       console.log('🔍 [PARENT AUTH] Fetching students for parent user ID:', parentUserId);
     }
 
-    // Method 1: Check if user has linked_parent_of (new structure)
+    // Method 1: Check if user has linked_parent_of (primary method for this schema)
     const { data: userData, error: userError } = await supabase
       .from(TABLES.USERS)
       .select(`
         id,
         email,
         full_name,
-        linked_parent_of,
-        students!users_linked_parent_of_fkey(
-          id,
-          name,
-          admission_no,
-          class_id,
-          academic_year,
-          classes(id, class_name, section)
-        )
+        linked_parent_of
       `)
       .eq('id', parentUserId)
       .single();
@@ -48,59 +40,47 @@ export const getParentStudents = async (parentUserId) => {
 
     let students = [];
 
-    // If linked_parent_of exists, use the direct relationship
-    if (userData.linked_parent_of && userData.students) {
-      console.log('✅ [PARENT AUTH] Found linked student via users.linked_parent_of');
-      students = [userData.students];
-    }
-
-    // Method 2: Use parent_student_relationships junction table
-    if (students.length === 0) {
+    // If linked_parent_of exists, get the student directly
+    if (userData.linked_parent_of) {
       if (DEBUG_PARENT_AUTH) {
-        console.log('🔍 [PARENT AUTH] Checking parent_student_relationships table...');
+        console.log('✅ [PARENT AUTH] Found linked_parent_of:', userData.linked_parent_of);
       }
       
-      const { data: relationshipData, error: relationshipError } = await supabase
-        .from('parent_student_relationships')
+      // Get the student details
+      const { data: studentData, error: studentError } = await supabase
+        .from(TABLES.STUDENTS)
         .select(`
-          student_id,
-          relationship_type,
-          is_primary_contact,
-          students!parent_student_relationships_student_id_fkey(
-            id,
-            name,
-            admission_no,
-            class_id,
-            academic_year,
-            classes(id, class_name, section)
-          ),
-          parents!parent_student_relationships_parent_id_fkey(
-            id,
-            user_id
-          )
+          id,
+          name,
+          admission_no,
+          class_id,
+          academic_year,
+          classes(id, class_name, section)
         `)
-        .eq('parents.user_id', parentUserId);
+        .eq('id', userData.linked_parent_of)
+        .single();
 
-      if (!relationshipError && relationshipData && relationshipData.length > 0) {
-        console.log('✅ [PARENT AUTH] Found students via parent_student_relationships');
-        students = relationshipData
-          .filter(rel => rel.students) // Only include valid student records
-          .map(rel => rel.students);
+      if (!studentError && studentData) {
+        console.log('✅ [PARENT AUTH] Found linked student via users.linked_parent_of:', studentData.name);
+        students = [studentData];
+      } else {
+        console.error('❌ [PARENT AUTH] Error fetching linked student:', studentError);
       }
     }
 
-    // Method 3: Direct parent table lookup (fallback)
+    // Method 2: Fallback - search for parent records that might reference this user via email matching
     if (students.length === 0) {
       if (DEBUG_PARENT_AUTH) {
-        console.log('🔍 [PARENT AUTH] Checking direct parents table...');
+        console.log('🔍 [PARENT AUTH] No linked_parent_of found, trying email match fallback...');
       }
       
-      const { data: parentData, error: parentError } = await supabase
+      // Try to find parent records that match by email
+      const { data: parentRecords, error: parentError } = await supabase
         .from('parents')
         .select(`
           id,
           student_id,
-          user_id,
+          email,
           students!parents_student_id_fkey(
             id,
             name,
@@ -110,13 +90,15 @@ export const getParentStudents = async (parentUserId) => {
             classes(id, class_name, section)
           )
         `)
-        .eq('user_id', parentUserId);
+        .eq('email', userData.email);
 
-      if (!parentError && parentData && parentData.length > 0) {
-        console.log('✅ [PARENT AUTH] Found students via parents table');
-        students = parentData
+      if (!parentError && parentRecords && parentRecords.length > 0) {
+        console.log('✅ [PARENT AUTH] Found students via email matching in parents table');
+        students = parentRecords
           .filter(parent => parent.students) // Only include valid student records
           .map(parent => parent.students);
+      } else if (DEBUG_PARENT_AUTH) {
+        console.log('⚠️ [PARENT AUTH] No parent records found matching email:', userData.email);
       }
     }
 

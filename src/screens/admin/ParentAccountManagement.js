@@ -138,10 +138,8 @@ const ParentAccountManagement = ({ navigation }) => {
       setClasses(classesData);
 
       const studentsWithParentAccountStatus = studentsData.map(student => {
-        const hasParentAccount = existingAccounts.some(account => account.linked_parent_of === student.id);
-        const parentAccountInfo = existingAccounts.find(account => account.linked_parent_of === student.id);
-
-        const allParentRecords = parentRecords.filter(parent => 
+        // Get parent records for this student
+        const studentParentRecords = parentRecords.filter(parent => 
           parent.student_id === student.id && 
           parent.name &&
           parent.name.trim() !== '' &&
@@ -151,6 +149,23 @@ const ParentAccountManagement = ({ navigation }) => {
           !parent.name.toLowerCase().includes('test') &&
           !parent.name.toLowerCase().includes('sample')
         ) || [];
+        
+        // Check if this student has a parent account in two ways:
+        // 1. Direct link via linked_parent_of (original parent)
+        // 2. Indirect link via parent records with email matching existing parent users
+        const directParentAccount = existingAccounts.find(account => account.linked_parent_of === student.id);
+        const indirectParentAccounts = existingAccounts.filter(account => 
+          studentParentRecords.some(parentRecord => 
+            parentRecord.email && 
+            parentRecord.email.toLowerCase() === account.email.toLowerCase()
+          )
+        );
+        
+        const hasParentAccount = !!(directParentAccount || indirectParentAccounts.length > 0);
+        const parentAccountInfo = directParentAccount || indirectParentAccounts[0];
+
+        // Use the already filtered studentParentRecords
+        const allParentRecords = studentParentRecords;
 
         const hasParentRecord = allParentRecords.length > 0;
         const parentRecordInfo = allParentRecords[0];
