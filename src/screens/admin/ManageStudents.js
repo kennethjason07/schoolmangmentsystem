@@ -26,6 +26,7 @@ import ResponsiveCalendar from '../../components/ResponsiveCalendar';
 import * as Print from 'expo-print';
 import { formatDate } from '../../utils/helpers';
 import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
+import { formatDateToYYYYMMDD, parseYYYYMMDDToDate } from '../../utils/dateUtils';
 
 const ManageStudents = () => {
   const navigation = useNavigation();
@@ -686,12 +687,18 @@ const ManageStudents = () => {
     setForm({ ...form, [field]: value });
   };
 
-  // Date picker handler
+  // Date picker handler - Fixed timezone issue
   const handleDateChange = (event, selectedDate) => {
     setShowDatePicker(false);
     if (selectedDate && datePickerField) {
-      const formattedDate = selectedDate.toISOString().split('T')[0];
+      // Use utility function for timezone-safe date formatting
+      const formattedDate = formatDateToYYYYMMDD(selectedDate);
       setForm({ ...form, [datePickerField]: formattedDate });
+      console.log('📅 Date selected:', { 
+        originalDate: selectedDate, 
+        formattedDate, 
+        field: datePickerField 
+      });
     }
     setDatePickerField('');
   };
@@ -2008,11 +2015,16 @@ const ManageStudents = () => {
                   </TouchableOpacity>
                   
                   <ResponsiveCalendar
-                    value={form.dob}
+                    value={form.dob ? (parseYYYYMMDDToDate(form.dob) || undefined) : undefined}
                     onDateChange={(date) => {
-                      const formattedDate = date.toISOString().split('T')[0];
+                      // Use utility function for timezone-safe date formatting
+                      const formattedDate = formatDateToYYYYMMDD(date);
                       handleFormChange('dob', formattedDate);
                       setShowResponsiveCalendar(false);
+                      console.log('📅 Web calendar date selected:', { 
+                        originalDate: date, 
+                        formattedDate 
+                      });
                     }}
                     minimumDate={new Date(new Date().getFullYear() - 25, 0, 1)} // 25 years ago
                     maximumDate={new Date()} // Today
@@ -2269,7 +2281,7 @@ const ManageStudents = () => {
             {/* Date Picker */}
             {showDatePicker && (
               <DateTimePicker
-                value={form.dob ? new Date(form.dob) : new Date()}
+                value={form.dob ? (parseYYYYMMDDToDate(form.dob) || new Date()) : new Date()}
                 mode="date"
                 display="default"
                 onChange={handleDateChange}
