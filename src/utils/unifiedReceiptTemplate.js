@@ -1,6 +1,9 @@
 // Conditional imports for logo loading (only in React Native environment)
 let loadSchoolLogoEnhanced, validateLogoData, loadLogoWithFallbacks, validateImageData, supabase;
 
+// Import academic year utility function
+const { getCurrentAcademicYear } = require('./academicYearUtils');
+
 try {
   // Only load these in React Native environment
   if (typeof global !== 'undefined' && global.expo) {
@@ -250,6 +253,16 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
     const cashierName = receiptData.cashier_name || receiptData.cashierName || null;
     const fatherName = receiptData.father_name || receiptData.fathers_name || receiptData.parent_name || null;
     const studentUID = receiptData.uid || receiptData.student_uid || null;
+    
+    // Prioritize student's database academic year, then school's academic year, then calculated current year
+    const currentAcademicYear = getCurrentAcademicYear();
+    const academicYear = receiptData.student_academic_year || schoolDetails?.academic_year || currentAcademicYear;
+    
+    console.log('📅 Academic year selection:');
+    console.log('   Student academic year from DB:', receiptData.student_academic_year);
+    console.log('   School academic year:', schoolDetails?.academic_year);
+    console.log('   Calculated current year:', currentAcademicYear);
+    console.log('   Final selected year:', academicYear);
     
     console.log('📝 Processed receipt data:', {
       schoolName, schoolAddress, studentName, admissionNo, className,
@@ -924,7 +937,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
                   </div>
                   <div class="student-right">
                     <span class="info-label">Year:</span>
-                    <span class="info-value">${schoolDetails?.academic_year || '2024/25'}</span>
+                    <span class="info-value">${academicYear}</span>
                   </div>
                 </div>
                 
@@ -1044,7 +1057,7 @@ const generateUnifiedReceiptHTML = async (receiptData, schoolDetails, preloadedL
                   </div>
                   <div class="student-right">
                     <span class="info-label">Year:</span>
-                    <span class="info-value">${schoolDetails?.academic_year || '2024/25'}</span>
+                    <span class="info-value">${academicYear}</span>
                   </div>
                 </div>
                 

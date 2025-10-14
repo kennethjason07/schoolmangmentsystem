@@ -35,6 +35,7 @@ import FeeService from '../../services/FeeService';
 import { validateFeeConsistency, syncFeeAfterPayment } from '../../services/feeSync';
 import { generateMockReferenceNumber } from '../../utils/referenceNumberGenerator';
 import { getNextReceiptNumber } from '../../utils/receiptCounter';
+import { getCurrentAcademicYear } from '../../utils/academicYearUtils';
 import { loadLogoWithFallbacks, validateImageData } from '../../utils/robustLogoLoader';
 import { Image } from 'react-native';
 import LogoDisplay from '../../components/LogoDisplay';
@@ -152,7 +153,7 @@ const FeePayment = ({ route }) => {
             setFeeStructure({
               studentName: studentDetails.name,
               class: `${studentDetails.classes?.class_name || 'N/A'} ${studentDetails.classes?.section || ''}`.trim(),
-              academicYear: studentDetails.academic_year || '2024-2025',
+              academicYear: studentDetails.academic_year,
               totalDue: 0,
               totalPaid: 0,
               outstanding: 0,
@@ -238,7 +239,7 @@ const FeePayment = ({ route }) => {
         setFeeStructure({
           studentName: feeData.student_name,
           class: `${feeData.class_name || 'N/A'} ${feeData.section || ''}`.trim(),
-          academicYear: feeData.academic_year || '2024-2025',
+          academicYear: feeData.academic_year,
           admissionNo: feeData.admission_no,
           rollNo: feeData.roll_no,
           // Fee totals from view
@@ -500,7 +501,7 @@ const FeePayment = ({ route }) => {
       studentName: feeStructure?.studentName || studentData?.name || 'Student Name',
       admissionNo: studentData?.admission_no || 'N/A',
       className: feeStructure?.class || `${studentData?.classes?.class_name || 'N/A'} ${studentData?.classes?.section || ''}`.trim(),
-      academicYear: feeStructure?.academicYear || '2024-25'
+      academicYear: studentData?.academic_year || feeStructure?.academicYear // Prioritize student's database academic year
     };
     
     setSelectedReceipt(enhancedReceipt);
@@ -568,6 +569,7 @@ const FeePayment = ({ route }) => {
           total_paid_till_date: selectedReceipt.totalPaidTillDate || selectedReceipt.amount,
           father_name: selectedReceipt.fatherName || selectedReceipt.father_name || selectedReceipt.fathers_name || selectedReceipt.parent_name || (studentData && (studentData.father_name || studentData.fatherName)) || null,
           uid: selectedReceipt.studentUID || selectedReceipt.admissionNo,
+          student_academic_year: selectedReceipt.academicYear || studentData?.academic_year || '', // Use student's DB academic year
         };
 
         const school = {
@@ -575,7 +577,7 @@ const FeePayment = ({ route }) => {
           address: schoolDetails?.address,
           phone: schoolDetails?.phone,
           email: schoolDetails?.email,
-          academic_year: schoolDetails?.academic_year || '2024/25',
+          academic_year: schoolDetails?.academic_year, // Remove fallback to avoid hardcoded values
           logo_url: schoolDetails?.logo_url,
         };
 
@@ -710,7 +712,8 @@ const FeePayment = ({ route }) => {
         fathers_name: receipt.fatherName || null,
         uid: receipt.studentUID || receipt.admissionNo || 'N/A',
         total_paid_till_date: receipt.totalPaidTillDate || receipt.amount || 0,
-        amount_remaining: receipt.outstandingAmount || 0
+        amount_remaining: receipt.outstandingAmount || 0,
+        student_academic_year: receipt.academicYear || studentData?.academic_year || '' // Use student's DB academic year
       };
       
       console.log('🔥🔥🔥 Converted unified data:', JSON.stringify(unifiedReceiptData, null, 2));
@@ -721,7 +724,7 @@ const FeePayment = ({ route }) => {
         address: schoolDetails?.address || "Near Fateh Darwaza, Pansal Taleem, Bidar-585401",
         phone: schoolDetails?.phone || "+91 9341111576",
         email: schoolDetails?.email || "global295000@gmail.com",
-        academic_year: schoolDetails?.academic_year || "2024/25",
+        academic_year: schoolDetails?.academic_year,
         logo_url: schoolDetails?.logo_url || null
       };
       
@@ -993,7 +996,7 @@ const FeePayment = ({ route }) => {
                 </div>
                 <div class="info-item">
                   <span class="info-label">Year:</span>
-                  <span class="info-value">2024/25</span>
+                  <span class="info-value"></span>
                 </div>
                 
                 <div></div>

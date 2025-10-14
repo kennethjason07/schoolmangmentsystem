@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
+import { getReceiptAcademicYear } from '../utils/academicYearUtils';
 
 const WebReceiptDisplay = ({ visible, receiptData, onClose }) => {
   const printRef = useRef(null);
@@ -64,9 +65,10 @@ const WebReceiptDisplay = ({ visible, receiptData, onClose }) => {
           address: receiptData.school_address,
           phone: receiptData.school_phone,
           email: receiptData.school_email,
-          academic_year: receiptData.academic_year || '2024-25',
+          academic_year: receiptData.academic_year,
           logo_url: receiptData.school_logo_url,
         };
+        // No fallback for academic year - leave empty if not provided
         const unifiedData = {
           student_name: receiptData.student_name,
           student_admission_no: receiptData.student_admission_no,
@@ -423,7 +425,7 @@ const WebReceiptDisplay = ({ visible, receiptData, onClose }) => {
                 </View>
                 <View style={styles.studentRight}>
                   <Text style={styles.infoLabel}>Year: </Text>
-                  <Text style={styles.infoValue}>{receiptData.academic_year || '2024/25'}</Text>
+                  <Text style={styles.infoValue}>{receiptData.academic_year || ''}</Text>
                 </View>
               </View>
               

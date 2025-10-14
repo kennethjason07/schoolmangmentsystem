@@ -22,6 +22,7 @@ import { useAuth } from '../utils/AuthContext';
 import { supabase } from '../utils/supabase';
 import { getSchoolLogoBase64, getLogoHTML, getReceiptHeaderCSS } from '../utils/logoUtils';
 import { formatReferenceNumberForDisplay } from '../utils/referenceNumberGenerator';
+import { getCurrentAcademicYear } from '../utils/academicYearUtils';
 import * as Print from 'expo-print';
 import * as FileSystem from 'expo-file-system';
 
@@ -460,7 +461,7 @@ const UPIQRModal = ({
                 <span><strong>Payment Method:</strong> UPI</span>
               </div>
               <div class="info-row">
-                <span><strong>Academic Year:</strong> ${transactionData.academicYear || '2024-2025'}</span>
+                <span><strong>Academic Year:</strong> ${transactionData.academicYear || ''}</span>
               </div>
             </div>
 
@@ -507,7 +508,8 @@ const UPIQRModal = ({
         studentData: {
           name: transactionData.studentName,
           admissionNo: transactionData.admissionNo,
-          className: transactionData.className || 'N/A'
+          className: transactionData.className || 'N/A',
+          academicYear: transactionData.academicYear  // Only use student academic year, no fallback
         },
         feeData: {
           component: transactionData.feeComponent || 'Fee Payment',
@@ -519,7 +521,7 @@ const UPIQRModal = ({
         },
         outstandingAmount,
         receiptNumber: paymentDetails.referenceNumber,
-        academicYear: transactionData.academicYear || '2024-25'
+        academicYear: transactionData.academicYear
       });
       
       // Return receipt data for web display

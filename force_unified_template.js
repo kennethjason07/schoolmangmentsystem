@@ -47,12 +47,15 @@ const enhancedGenerateReceiptHTML = `
       console.log('🔥🔥🔥 Converted unified data:', JSON.stringify(unifiedReceiptData, null, 2));
       
       // Ensure school details have required fields
+      const { getCurrentAcademicYear } = require('./src/utils/academicYearUtils');
+      const currentAcademicYear = getCurrentAcademicYear();
+      
       const safeSchoolDetails = {
         name: schoolDetails?.name || "GLOBAL'S SANMARG PUBLIC SCHOOL",
         address: schoolDetails?.address || "Near Fateh Darwaza, Pansal Taleem, Bidar-585401",
         phone: schoolDetails?.phone || "+91 9341111576",
         email: schoolDetails?.email || "global295000@gmail.com",
-        academic_year: schoolDetails?.academic_year || "2024/25",
+        academic_year: schoolDetails?.academic_year || currentAcademicYear,
         logo_url: schoolDetails?.logo_url || null
       };
       
@@ -328,7 +331,7 @@ const enhancedGenerateReceiptHTML = `
                 </div>
                 <div class="info-item">
                   <span class="info-label">Year:</span>
-                  <span class="info-value">2024/25</span>
+                  <span class="info-value">\${currentAcademicYear}</span>
                 </div>
                 
                 <div></div>

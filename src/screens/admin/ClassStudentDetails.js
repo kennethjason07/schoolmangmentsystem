@@ -336,6 +336,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
           name,
           admission_no,
           roll_no,
+          academic_year,
           student_fees:${TABLES.STUDENT_FEES}(
             id,
             fee_component,
@@ -542,6 +543,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
           admissionNo: student.admission_no, // Keep both for compatibility
           roll_no: student.roll_no,
           rollNo: student.roll_no, // Keep both for compatibility
+          academic_year: student.academic_year, // Include academic year from database
           totalFeeStructure: totalBaseFeeStructure, // Original base fee
           totalPaid,
           outstanding,
@@ -930,7 +932,8 @@ const ClassStudentDetails = ({ route, navigation }) => {
         payment_date_formatted: formatDateForDisplay(paymentDate),
         amount_in_words: numberToWords(upiTransactionData.amount),
         amount_remaining: Math.max(0, (parseFloat(selectedStudent?.outstanding || 0)) - parseFloat(upiTransactionData.amount || 0)),
-        cashier_name: (user?.full_name || user?.email || '').toString()
+        cashier_name: (user?.full_name || user?.email || '').toString(),
+        academic_year: selectedStudent?.academic_year || upiTransactionData.academicYear
       };
       
       setLastPaymentRecord(receiptData);
@@ -1004,6 +1007,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
       // Map according to schema: parents table holds names with relation
       father_name: selectedStudent.parentName || payment.father_name || payment.parent_name || null,
       student_uid: selectedStudent.admission_no || selectedStudent.admissionNo,
+      academic_year: selectedStudent.academic_year || payment.academic_year
     };
     
     setSelectedPaymentForReceipt(receiptData);
@@ -1159,7 +1163,8 @@ const ClassStudentDetails = ({ route, navigation }) => {
         cashier_name: receiptData.cashier_name,
         father_name: receiptData.father_name,
         student_uid: receiptData.student_uid,
-        total_paid_till_date: receiptData.total_paid_till_date
+        total_paid_till_date: receiptData.total_paid_till_date,
+        student_academic_year: receiptData.academic_year || selectedStudent?.academic_year
       };
       
       console.log('🔥 RECEIPT DEBUG [ADMIN] - Father name check:', {
@@ -1497,6 +1502,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
           total_paid_till_date: receiptData.total_paid_till_date,
           father_name: receiptData.father_name || receiptData.fathers_name || receiptData.parent_name,
           uid: receiptData.student_uid || receiptData.student_admission_no,
+          student_academic_year: receiptData.academic_year || selectedStudent?.academic_year,
         };
 
         const school = {
@@ -1504,7 +1510,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
           address: schoolDetails?.address,
           phone: schoolDetails?.phone,
           email: schoolDetails?.email,
-          academic_year: schoolDetails?.academic_year || '2024/25',
+          academic_year: selectedStudent?.academic_year || schoolDetails?.academic_year,
           logo_url: schoolDetails?.logo_url,
         };
 
@@ -1699,7 +1705,8 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
         cashier_name: (user?.full_name || user?.email || '').toString(),
         father_name: selectedStudent.parentName || 'N/A',
         student_uid: selectedStudent.admission_no || selectedStudent.admissionNo,
-        total_paid_till_date: (selectedStudent.totalPaid || 0) + parseFloat(paymentAmount)
+        total_paid_till_date: (selectedStudent.totalPaid || 0) + parseFloat(paymentAmount),
+        academic_year: selectedStudent.academic_year || academicYear
       };
       
       setLastPaymentRecord(receiptData);
@@ -3067,7 +3074,7 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
                       </View>
                       <View style={styles.studentRightAdmin}>
                         <Text style={styles.receiptInfoLabelGlobal}>Year: </Text>
-                        <Text style={styles.receiptInfoValueGlobal}>{schoolDetails?.academic_year || '2024/25'}</Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{selectedStudent?.academic_year || schoolDetails?.academic_year || '2024/25'}</Text>
                       </View>
                     </View>
                     
@@ -3253,7 +3260,7 @@ This prevents duplicate or overpayments to maintain fee accuracy.`,
                       </View>
                       <View style={styles.studentRightAdmin}>
                         <Text style={styles.receiptInfoLabelGlobal}>Year: </Text>
-                        <Text style={styles.receiptInfoValueGlobal}>{schoolDetails?.academic_year || '2024/25'}</Text>
+                        <Text style={styles.receiptInfoValueGlobal}>{selectedStudent?.academic_year || selectedPaymentForReceipt?.academic_year || schoolDetails?.academic_year || '2024/25'}</Text>
                       </View>
                     </View>
                     

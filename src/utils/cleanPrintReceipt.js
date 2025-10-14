@@ -379,10 +379,10 @@ const generateCleanReceiptHTML = async (receiptData, schoolDetails) => {
             <div class="info-row">
                 <div class="info-left"></div>
                 <div class="info-center"></div>
-                <div class="info-right">
+                  <div class="student-right">
                     <span class="info-label">Year:</span>
-                    <span class="info-value">${schoolDetails?.academic_year || new Date().getFullYear()}</span>
-                </div>
+                    <span class="info-value">${receiptData.student_academic_year || ''}</span>
+                  </div>
             </div>
         </div>
 

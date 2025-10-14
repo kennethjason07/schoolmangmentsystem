@@ -1,6 +1,7 @@
 const { getSchoolLogoBase64, getLogoHTML } = require('./logoUtils');
 const { formatReferenceNumberForDisplay } = require('./referenceNumberGenerator');
 const { generateUnifiedReceiptHTML } = require('./unifiedReceiptTemplate');
+const { getReceiptAcademicYear } = require('./academicYearUtils');
 
 /**
  * Web Receipt Generator with Demo Bill Format
@@ -43,7 +44,7 @@ const generateWebReceiptHTML = async (receiptData) => {
       paymentData,
       outstandingAmount = 0,
       receiptNumber,
-      academicYear = '2024-25',
+      academicYear = getReceiptAcademicYear(schoolDetails),
       cashierName,
       fatherName,
       totalPaidTillDate
@@ -63,7 +64,9 @@ const generateWebReceiptHTML = async (receiptData) => {
       total_paid_till_date: totalPaidTillDate,
       cashier_name: cashierName,
       fathers_name: fatherName,
-      uid: studentData.studentUID
+      uid: studentData.studentUID,
+      // Pass student's academic year - this is crucial for proper receipt display
+      student_academic_year: studentData.academicYear || academicYear
     };
 
     // Use the unified template for consistent formatting
@@ -102,7 +105,7 @@ const generateFeeReceiptHTML = async (receiptData) => {
     transactionId,
     referenceNumber,
     outstandingAmount = 0,
-    academicYear = '2024-25',
+    academicYear = getReceiptAcademicYear(schoolDetails),
     cashierName
   } = receiptData;
 
@@ -111,7 +114,8 @@ const generateFeeReceiptHTML = async (receiptData) => {
     studentData: {
       name: studentName,
       admissionNo,
-      className
+      className,
+      academicYear: academicYear  // Ensure student academic year is passed
     },
     feeData: {
       component: feeComponent,
@@ -146,7 +150,8 @@ const generateUPIReceiptHTML = async (receiptData) => {
     studentData: {
       name: transactionData.studentName,
       admissionNo: transactionData.admissionNo,
-      className: transactionData.className || 'N/A'
+      className: transactionData.className || 'N/A',
+      academicYear: transactionData.academicYear || getReceiptAcademicYear(schoolDetails)  // Ensure student academic year is passed
     },
     feeData: {
       component: transactionData.feeComponent,
@@ -158,7 +163,7 @@ const generateUPIReceiptHTML = async (receiptData) => {
     },
     outstandingAmount,
     receiptNumber: paymentDetails.referenceNumber,
-    academicYear: transactionData.academicYear || '2024-25',
+    academicYear: transactionData.academicYear || getReceiptAcademicYear(schoolDetails),
     cashierName
   });
 };
