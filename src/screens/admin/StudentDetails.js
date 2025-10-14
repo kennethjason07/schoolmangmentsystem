@@ -4,6 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import Header from '../../components/Header';
 import { dbHelpers, supabase } from '../../utils/supabase';
+import ConfirmationDialog from '../../components/ConfirmationDialog';
+import { useTenantAccess } from '../../utils/tenantHelpers';
 
 const { width } = Dimensions.get('window');
 
@@ -17,6 +19,9 @@ const StudentDetails = ({ route }) => {
   const [feeStatus, setFeeStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // Tenant access
+  const { getTenantId, isReady } = useTenantAccess();
   
   // Enhanced scroll functionality
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -247,6 +252,73 @@ const StudentDetails = ({ route }) => {
     }
   };
 
+  // Delete profile picture functionality
+  const deleteProfilePicture = async () => {
+    if (!studentData || !studentData.photo_url) {
+      Alert.alert('Error', 'No profile picture found to delete');
+      return;
+    }
+
+    ConfirmationDialog.showPhotoDeleteConfirmation(
+      studentData.name,
+      async () => {
+        try {
+          setLoading(true);
+          
+          // Extract the file path from the Supabase storage URL
+          const urlParts = studentData.photo_url.split('/student-photos/');
+          if (urlParts.length !== 2) {
+            Alert.alert('Error', 'Invalid photo URL format');
+            return;
+          }
+          
+          const filePath = urlParts[1];
+          console.log('🗑️ Deleting file:', filePath);
+          
+          // Delete from Supabase storage
+          const { error: deleteError } = await supabase.storage
+            .from('student-photos')
+            .remove([filePath]);
+          
+          if (deleteError) {
+            console.error('❌ Storage deletion error:', deleteError);
+            throw new Error(`Failed to delete photo from storage: ${deleteError.message}`);
+          }
+          
+          // Update student record to remove photo URL
+          const { error: updateError } = await supabase
+            .from('students')
+            .update({ photo_url: null })
+            .eq('id', studentData.id)
+            .eq('tenant_id', getTenantId());
+          
+          if (updateError) {
+            console.error('❌ Database update error:', updateError);
+            throw new Error(`Failed to update student record: ${updateError.message}`);
+          }
+          
+          // Refresh the student data
+          await fetchStudentDetails();
+          
+          // Show success message
+          if (Platform.OS === 'web') {
+            alert(`✅ Profile picture deleted successfully for ${studentData.name}`);
+          } else {
+            Alert.alert('Success', `Profile picture deleted successfully for ${studentData.name}`);
+          }
+          
+          console.log('✅ Profile picture deleted successfully for', studentData.name);
+          
+        } catch (error) {
+          console.error('❌ Error deleting profile picture:', error);
+          Alert.alert('Delete Failed', error.message || 'Failed to delete profile picture');
+        } finally {
+          setLoading(false);
+        }
+      }
+    );
+  };
+
   // Helper function to format date
   const formatDate = (dateStr) => {
     if (!dateStr) return 'Not provided';
@@ -420,12 +492,21 @@ const StudentDetails = ({ route }) => {
           <View style={styles.summaryCard}>
             <View style={styles.profileAvatarContainer}>
               { (studentData.photo_url || student?.photo_url) ? (
-                <Image
-                  source={{ uri: studentData.photo_url || student?.photo_url }}
-                  style={styles.profileAvatarImage}
-                  accessibilityLabel="Student photo"
-                  onError={() => console.log('📸 Failed to load student photo for', studentData?.id)}
-                />
+                <View style={styles.profilePhotoWrapper}>
+                  <Image
+                    source={{ uri: studentData.photo_url || student?.photo_url }}
+                    style={styles.profileAvatarImage}
+                    accessibilityLabel="Student photo"
+                    onError={() => console.log('📸 Failed to load student photo for', studentData?.id)}
+                  />
+                  <TouchableOpacity
+                    style={styles.deleteProfileButton}
+                    onPress={deleteProfilePicture}
+                    accessibilityLabel={`Delete profile picture for ${studentData.name}`}
+                  >
+                    <Ionicons name="trash" size={16} color="#fff" />
+                  </TouchableOpacity>
+                </View>
               ) : (
                 <View style={styles.profileAvatarPlaceholder}>
                   <Ionicons name="person" size={40} color="#fff" />
@@ -836,6 +917,9 @@ const styles = StyleSheet.create({
   profileAvatarContainer: {
     marginBottom: 12,
   },
+  profilePhotoWrapper: {
+    position: 'relative',
+  },
   profileAvatarImage: {
     width: 96,
     height: 96,
@@ -851,6 +935,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#2196F3',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  deleteProfileButton: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#f44336',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
   },
   
   // Call Button Styles

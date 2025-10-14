@@ -22,6 +22,7 @@ import Header from '../../components/Header';
 import { supabase } from '../../utils/supabase';
 import { useTenantAccess } from '../../utils/tenantHelpers';
 import { setUploadInProgress } from '../../utils/AuthContext';
+import ConfirmationDialog from '../../components/ConfirmationDialog';
 
 const { width } = Dimensions.get('window');
 
@@ -210,82 +211,201 @@ const PhotoUpload = ({ navigation }) => {
       .trim();
   };
 
-  // Helper function to generate name variations for matching
+  // Improved helper function to generate name variations for matching
   const getNameVariations = (name) => {
     if (!name) return [];
     const variations = new Set();
-    const normalized = normalizeName(name);
     
-    // Add the normalized full name
-    variations.add(normalized);
+    // Split the name into words and filter out short words
+    const words = name.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length >= 2);
     
-    // Add individual words (first name, last name, etc.)
-    const words = name.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 1);
-    words.forEach(word => variations.add(word));
+    if (words.length === 0) return [];
     
-    // Add combinations of first and last names
+    // Add full name (normalized)
+    const fullNameNormalized = normalizeName(name);
+    if (fullNameNormalized.length >= 3) {
+      variations.add(fullNameNormalized);
+    }
+    
+    // Add individual words (minimum 3 characters to avoid false matches)
+    words.forEach(word => {
+      if (word.length >= 3) {
+        variations.add(word);
+      }
+    });
+    
+    // Add combinations only for names with 2 or more words
     if (words.length >= 2) {
-      variations.add(words[0] + words[words.length - 1]); // first + last
-      variations.add(words[words.length - 1] + words[0]); // last + first
+      // First name + last name (minimum 4 characters total)
+      const firstLast = words[0] + words[words.length - 1];
+      if (firstLast.length >= 4) {
+        variations.add(firstLast);
+      }
+      
+      // Last name + first name (minimum 4 characters total)
+      const lastFirst = words[words.length - 1] + words[0];
+      if (lastFirst.length >= 4) {
+        variations.add(lastFirst);
+      }
     }
     
     return Array.from(variations);
   };
+  
+  // Calculate match confidence score
+  const calculateMatchScore = (filename, studentName) => {
+    const normalizedFilename = normalizeName(filename);
+    const variations = getNameVariations(studentName);
+    
+    let maxScore = 0;
+    let bestMatch = '';
+    
+    variations.forEach(variation => {
+      let score = 0;
+      
+      // Exact match gets highest score
+      if (normalizedFilename === variation) {
+        score = 100;
+      }
+      // Check if variation is contained in filename
+      else if (normalizedFilename.includes(variation)) {
+        // Score based on how much of the filename the variation covers
+        score = (variation.length / normalizedFilename.length) * 80;
+        
+        // Bonus for exact word boundaries
+        const filenameWords = normalizedFilename.split(/[^a-z0-9]+/);
+        if (filenameWords.includes(variation)) {
+          score += 10;
+        }
+      }
+      // Check if filename is contained in variation (less confident)
+      else if (variation.includes(normalizedFilename) && normalizedFilename.length >= 3) {
+        score = (normalizedFilename.length / variation.length) * 60;
+      }
+      
+      if (score > maxScore) {
+        maxScore = score;
+        bestMatch = variation;
+      }
+    });
+    
+    return { score: maxScore, matchedVariation: bestMatch };
+  };
 
-  // Auto-map photos to students based on student names
+  // Improved auto-map photos to students based on student names with confidence scoring
   const autoMapPhotos = () => {
     const mappings = {};
+    const usedStudents = new Set(); // Track which students are already mapped
+    const MIN_CONFIDENCE_SCORE = 30; // Minimum score required for auto-mapping
     
-    console.log('🔍 AUTO-MAPPING DEBUG:');
+    console.log('🔍 IMPROVED AUTO-MAPPING DEBUG:');
     console.log('📚 Available students:', students.map(s => ({ name: s.name, admission_no: s.admission_no })));
     console.log('📷 Photos to map:', selectedPhotos.map(p => p.name));
     
+    // First, calculate match scores for all photo-student combinations
+    const allMatches = [];
+    
     selectedPhotos.forEach(photo => {
       const fileName = photo.name.toLowerCase().replace(/\.(jpg|jpeg|png|gif)$/i, '');
-      const normalizedFileName = normalizeName(fileName);
       console.log(`\n📸 Processing photo: "${photo.name}"`);
-      console.log(`🔤 Cleaned filename: "${normalizedFileName}"`);
       
-      // Try to find student by name in filename
-      const matchedStudent = students.find(student => {
-        if (!student.name) {
-          console.log(`❌ Student has no name (ID: ${student.id})`);
-          return false;
+      students.forEach(student => {
+        if (!student.name) return;
+        
+        const matchResult = calculateMatchScore(fileName, student.name);
+        if (matchResult.score >= MIN_CONFIDENCE_SCORE) {
+          allMatches.push({
+            photo,
+            student,
+            score: matchResult.score,
+            matchedVariation: matchResult.matchedVariation
+          });
         }
-        
-        const studentNameVariations = getNameVariations(student.name);
-        console.log(`🔍 Checking ${student.name} (admission: ${student.admission_no || 'N/A'})`);
-        console.log(`   Name variations: [${studentNameVariations.join(', ')}]`);
-        
-        // Check if any variation matches the filename
-        const isMatch = studentNameVariations.some(variation => {
-          const matchFound = normalizedFileName.includes(variation) || variation.includes(normalizedFileName);
-          if (matchFound) {
-            console.log(`   ✅ MATCH found with variation: "${variation}"`);
-          }
-          return matchFound;
-        });
-        
-        console.log(`   ${isMatch ? '✅ MATCH!' : '❌ no match'}`);
-        return isMatch;
       });
-
-      mappings[photo.uri] = matchedStudent || null;
+    });
+    
+    // Sort matches by confidence score (highest first)
+    allMatches.sort((a, b) => b.score - a.score);
+    
+    console.log('\n🎯 All potential matches (sorted by confidence):');
+    allMatches.forEach(match => {
+      console.log(`   ${match.score.toFixed(1)}% - "${match.photo.name}" → ${match.student.name} (via "${match.matchedVariation}")`);
+    });
+    
+    // Apply matches in order of confidence, avoiding conflicts
+    const conflicts = [];
+    
+    allMatches.forEach(match => {
+      const photoAlreadyMapped = mappings[match.photo.uri] !== undefined;
+      const studentAlreadyUsed = usedStudents.has(match.student.id);
       
-      if (matchedStudent) {
-        console.log(`✅ SUCCESS: "${photo.name}" mapped to ${matchedStudent.name} (${matchedStudent.admission_no || 'N/A'})`);
+      if (!photoAlreadyMapped && !studentAlreadyUsed) {
+        // This is a good match
+        mappings[match.photo.uri] = match.student;
+        usedStudents.add(match.student.id);
+        console.log(`✅ MAPPED: "${match.photo.name}" → ${match.student.name} (confidence: ${match.score.toFixed(1)}%)`);
       } else {
-        console.log(`❌ NO MATCH: "${photo.name}" could not be mapped`);
-        console.log('💡 TIP: Filename should contain the student name (e.g., "anuradha.jpg", "areeb_aman.jpeg", "ashwini_photo.png")');
+        // This is a conflict
+        if (photoAlreadyMapped) {
+          const currentMapping = mappings[match.photo.uri];
+          conflicts.push({
+            type: 'photo_conflict',
+            photo: match.photo.name,
+            current: currentMapping.name,
+            proposed: match.student.name,
+            currentScore: 'unknown', // We don't store the previous score
+            proposedScore: match.score
+          });
+        }
+        if (studentAlreadyUsed) {
+          conflicts.push({
+            type: 'student_conflict',
+            student: match.student.name,
+            photo: match.photo.name,
+            score: match.score
+          });
+        }
       }
     });
+    
+    // Map unmapped photos to null
+    selectedPhotos.forEach(photo => {
+      if (mappings[photo.uri] === undefined) {
+        mappings[photo.uri] = null;
+        console.log(`❌ NO CONFIDENT MATCH: "${photo.name}" (no match above ${MIN_CONFIDENCE_SCORE}% confidence)`);
+      }
+    });
+    
+    // Report conflicts
+    if (conflicts.length > 0) {
+      console.log('\n⚠️ MAPPING CONFLICTS DETECTED:');
+      conflicts.forEach(conflict => {
+        if (conflict.type === 'photo_conflict') {
+          console.log(`   Photo "${conflict.photo}" could match both ${conflict.current} and ${conflict.proposed} (${conflict.proposedScore.toFixed(1)}%)`);
+        } else {
+          console.log(`   Student "${conflict.student}" already mapped, but also matches "${conflict.photo}" (${conflict.score.toFixed(1)}%)`);
+        }
+      });
+    }
 
     setPhotoMappings(mappings);
-    console.log('\n📊 Auto-mapping complete:', {
+    
+    const mapped = Object.values(mappings).filter(s => s !== null).length;
+    const unmapped = selectedPhotos.length - mapped;
+    
+    console.log('\n📊 Improved auto-mapping complete:', {
       totalPhotos: selectedPhotos.length,
-      mapped: Object.values(mappings).filter(s => s !== null).length,
-      unmapped: Object.values(mappings).filter(s => s === null).length
+      mapped: mapped,
+      unmapped: unmapped,
+      conflicts: conflicts.length,
+      minConfidenceThreshold: MIN_CONFIDENCE_SCORE + '%'
     });
+    
+    // Show user-friendly feedback
+    if (mapped > 0 && Platform.OS === 'web') {
+      const message = `Auto-mapped ${mapped} photos with ${MIN_CONFIDENCE_SCORE}%+ confidence. ${conflicts.length > 0 ? conflicts.length + ' conflicts avoided.' : ''}`;
+      console.log('💡 User feedback:', message);
+    }
   };
 
   // Manual mapping of photo to student
@@ -297,20 +417,97 @@ const PhotoUpload = ({ navigation }) => {
     }));
   };
 
-  // Remove photo
+  // Remove photo from upload list with confirmation
   const removePhoto = (photoUri) => {
-    // Clean up blob URL if it's a web blob URL
-    if (Platform.OS === 'web' && photoUri.startsWith('blob:')) {
-      URL.revokeObjectURL(photoUri);
-      console.log('🧹 Cleaned up blob URL:', photoUri);
-    }
+    const photo = selectedPhotos.find(p => p.uri === photoUri);
+    if (!photo) return;
     
-    setSelectedPhotos(prev => prev.filter(photo => photo.uri !== photoUri));
-    setPhotoMappings(prev => {
-      const newMappings = { ...prev };
-      delete newMappings[photoUri];
-      return newMappings;
-    });
+    ConfirmationDialog.showRemovePhotoConfirmation(
+      photo.name,
+      () => {
+        // Clean up blob URL if it's a web blob URL
+        if (Platform.OS === 'web' && photoUri.startsWith('blob:')) {
+          URL.revokeObjectURL(photoUri);
+          console.log('🧹 Cleaned up blob URL:', photoUri);
+        }
+        
+        setSelectedPhotos(prev => prev.filter(photo => photo.uri !== photoUri));
+        setPhotoMappings(prev => {
+          const newMappings = { ...prev };
+          delete newMappings[photoUri];
+          return newMappings;
+        });
+      }
+    );
+  };
+
+  // Delete profile picture from storage and update student record
+  const deleteProfilePicture = async (student) => {
+    ConfirmationDialog.showPhotoDeleteConfirmation(
+      student.name,
+      async () => {
+        try {
+          setLoading(true);
+          
+          // Extract filename from photo URL
+          const photoUrl = student.photo_url;
+          if (!photoUrl) {
+            Alert.alert('Error', 'No profile picture found to delete');
+            return;
+          }
+          
+          // Extract the file path from the Supabase storage URL
+          const urlParts = photoUrl.split('/student-photos/');
+          if (urlParts.length !== 2) {
+            Alert.alert('Error', 'Invalid photo URL format');
+            return;
+          }
+          
+          const filePath = urlParts[1];
+          console.log('🗑️ Deleting file:', filePath);
+          
+          // Delete from Supabase storage
+          const { error: deleteError } = await supabase.storage
+            .from('student-photos')
+            .remove([filePath]);
+          
+          if (deleteError) {
+            console.error('❌ Storage deletion error:', deleteError);
+            throw new Error(`Failed to delete photo from storage: ${deleteError.message}`);
+          }
+          
+          // Update student record to remove photo URL
+          const { error: updateError } = await supabase
+            .from('students')
+            .update({ photo_url: null })
+            .eq('id', student.id)
+            .eq('tenant_id', getTenantId());
+          
+          if (updateError) {
+            console.error('❌ Database update error:', updateError);
+            throw new Error(`Failed to update student record: ${updateError.message}`);
+          }
+          
+          // Refresh the students list
+          await loadStudents();
+          
+          // Show success message
+          if (Platform.OS === 'web') {
+            alert(`✅ Profile picture deleted successfully for ${student.name}`);
+          } else {
+            Alert.alert('Success', `Profile picture deleted successfully for ${student.name}`);
+          }
+          
+          console.log('✅ Profile picture deleted successfully for', student.name);
+          
+        } catch (error) {
+          console.error('❌ Error deleting profile picture:', error);
+          Alert.alert('Delete Failed', error.message || 'Failed to delete profile picture');
+        } finally {
+          setLoading(false);
+        }
+      }
+    );
   };
 
 
@@ -614,8 +811,9 @@ const PhotoUpload = ({ navigation }) => {
         <TouchableOpacity
           style={styles.removeButton}
           onPress={() => removePhoto(photo.uri)}
+          accessibilityLabel={`Remove ${photo.name} from upload list`}
         >
-          <Ionicons name="close-circle" size={24} color="#f44336" />
+          <Ionicons name="trash" size={20} color="#f44336" />
         </TouchableOpacity>
       </View>
     );
@@ -646,6 +844,16 @@ const PhotoUpload = ({ navigation }) => {
             {student.photo_url ? 'Has Photo' : 'No Photo'}
           </Text>
         </View>
+        {/* Delete button for students with existing photos */}
+        {student.photo_url && (
+          <TouchableOpacity
+            style={styles.deletePhotoButton}
+            onPress={() => deleteProfilePicture(student)}
+            accessibilityLabel={`Delete profile picture for ${student.name}`}
+          >
+            <Ionicons name="trash" size={16} color="#f44336" />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -709,10 +917,22 @@ const PhotoUpload = ({ navigation }) => {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Upload Photos</Text>
             
-            <TouchableOpacity style={styles.uploadButton} onPress={selectPhotos}>
-              <Ionicons name="camera" size={24} color="#2196F3" />
-              <Text style={styles.uploadButtonText}>Select JPEG Photos</Text>
-            </TouchableOpacity>
+            <View style={styles.uploadButtonsContainer}>
+              <TouchableOpacity style={styles.uploadButton} onPress={selectPhotos}>
+                <Ionicons name="camera" size={24} color="#2196F3" />
+                <Text style={styles.uploadButtonText}>Select JPEG Photos</Text>
+              </TouchableOpacity>
+              
+              {selectedPhotos.length > 0 && (
+                <TouchableOpacity 
+                  style={styles.remapButton} 
+                  onPress={() => autoMapPhotos()}
+                >
+                  <Ionicons name="refresh" size={20} color="#FF9800" />
+                  <Text style={styles.remapButtonText}>Re-map Photos</Text>
+                </TouchableOpacity>
+              )}
+            </View>
 
             {/* Statistics */}
             <View style={styles.statsContainer}>
@@ -878,6 +1098,9 @@ const styles = StyleSheet.create({
     height: 50,
     width: '100%',
   },
+  uploadButtonsContainer: {
+    marginBottom: 16,
+  },
   uploadButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -886,13 +1109,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     backgroundColor: '#E3F2FD',
     borderRadius: 8,
-    marginBottom: 16,
+    marginBottom: 8,
   },
   uploadButtonText: {
     fontSize: 16,
     fontWeight: '500',
     color: '#2196F3',
     marginLeft: 8,
+  },
+  remapButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: '#FFF3E0',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFCC02',
+  },
+  remapButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#FF9800',
+    marginLeft: 6,
   },
   statsContainer: {
     flexDirection: 'row',
@@ -960,7 +1200,21 @@ const styles = StyleSheet.create({
   },
   removeButton: {
     marginLeft: 8,
-    padding: 4,
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: '#FFEBEE',
+    borderWidth: 1,
+    borderColor: '#FFCDD2',
+  },
+  deletePhotoButton: {
+    marginLeft: 8,
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: '#FFEBEE',
+    borderWidth: 1,
+    borderColor: '#FFCDD2',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   uploadAllButton: {
     flexDirection: 'row',
