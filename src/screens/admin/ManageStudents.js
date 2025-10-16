@@ -1618,7 +1618,7 @@ const ManageStudents = () => {
 
 
   // Academic year options
-  const academicYearOptions = ['All', '2024-25', '2023-24', '2022-23'];
+  const academicYearOptions = ['All', '2025-26', '2024-25', '2023-24', '2022-23'];
 
   // Gender options
   const genderOptions = ['All', 'Male', 'Female'];
