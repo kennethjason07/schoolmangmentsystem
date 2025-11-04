@@ -57,7 +57,7 @@ import Header from '../../components/Header';
 import FloatingRefreshButton from '../../components/FloatingRefreshButton';
 import CrossPlatformDatePicker, { DatePickerButton } from '../../components/CrossPlatformDatePicker';
 import { supabase, TABLES } from '../../utils/supabase';
-import { useTenantAccess, tenantDatabase, createTenantQuery, getCachedTenantId } from '../../utils/tenantHelpers';
+import { useTenantAccess, tenantDatabase, createTenantQuery, createTenantDeleteQuery, getCachedTenantId } from '../../utils/tenantHelpers';
 import { useAuth } from '../../utils/AuthContext';
 import { useFocusEffect } from '@react-navigation/native';
 import useDataCache from '../../hooks/useDataCache';
@@ -818,13 +818,9 @@ const handleDeleteExam = (exam) => {
             return;
           }
           const { effectiveTenantId } = tenantValidation;
-          const { error: marksError } = await createTenantQuery(effectiveTenantId, 'marks', '*')
-            .delete()
-            .eq('exam_id', exam.id);
+          const { error: marksError } = await createTenantDeleteQuery(effectiveTenantId, 'marks', { exam_id: exam.id });
           if (marksError) throw new Error(`Failed to delete marks: ${marksError.message}`);
-          const { error: examError } = await createTenantQuery(effectiveTenantId, 'exams', '*')
-            .delete()
-            .eq('id', exam.id);
+          const { error: examError } = await createTenantDeleteQuery(effectiveTenantId, 'exams', { id: exam.id });
           if (examError) throw new Error(`Failed to delete exam: ${examError.message}`);
           setExams(prev => prev.filter(e => e.id !== exam.id));
           setMarks(prev => prev.filter(m => m.exam_id !== exam.id));
@@ -873,11 +869,7 @@ const handleDeleteExam = (exam) => {
 
               // Step 1: Delete associated marks first
               console.log('🔄 Deleting marks for exam ID:', exam.id);
-              const marksQuery = createTenantQuery(effectiveTenantId, 'marks', '*')
-                .delete()
-                .eq('exam_id', exam.id);
-
-              const { error: marksError } = await marksQuery;
+              const { error: marksError } = await createTenantDeleteQuery(effectiveTenantId, 'marks', { exam_id: exam.id });
 
               if (marksError) {
                 console.error('❌ Error deleting marks:', marksError);
@@ -887,11 +879,7 @@ const handleDeleteExam = (exam) => {
 
               // Step 2: Delete the exam
               console.log('🔄 Deleting exam with ID:', exam.id);
-              const examQuery = createTenantQuery(effectiveTenantId, 'exams', '*')
-                .delete()
-                .eq('id', exam.id);
-
-              const { error: examError } = await examQuery;
+              const { error: examError } = await createTenantDeleteQuery(effectiveTenantId, 'exams', { id: exam.id });
 
               if (examError) {
                 console.error('❌ Error deleting exam:', examError);

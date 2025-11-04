@@ -10,9 +10,9 @@
  * - Uses getCachedTenantId for fast tenant ID access
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, ScrollView, ActivityIndicator, FlatList, Keyboard } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, ScrollView, ActivityIndicator, FlatList, Keyboard, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import Header from '../../components/Header';
 import { supabase, TABLES } from '../../utils/supabase';
 import { createBulkMarksNotifications } from '../../utils/marksNotificationHelpers';
@@ -73,6 +73,7 @@ const MarksEntry = () => {
   const [students, setStudents] = useState([]);
   const [marks, setMarks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   
   // Form states
   const [marksForm, setMarksForm] = useState({});
@@ -139,17 +140,37 @@ const MarksEntry = () => {
       
       // Set validated data
       let processedSubjects = subjectsData || [];
-      
-      // If no subjects exist, create default ones
+
+      // If no subjects exist, create default ones and save them to the database
       if (processedSubjects.length === 0) {
+        console.log('📚 [MarksEntry] No subjects found, creating and saving default subjects...');
         const defaultSubjects = ['Mathematics', 'English', 'Science', 'Social Studies', 'Hindi'];
-        processedSubjects = defaultSubjects.map((subjectName, index) => ({
-          id: `temp-${Date.now()}-${index}`,
-          name: subjectName,
-          class_id: examClass.id,
-          academic_year: '2024-25',
-          is_optional: false
-        }));
+
+        // Save each default subject to the database
+        const savedSubjects = [];
+        for (const subjectName of defaultSubjects) {
+          const subjectData = {
+            name: subjectName,
+            class_id: examClass.id,
+            academic_year: '2024-25',
+            is_optional: false
+          };
+
+          const { data: savedSubject, error: saveError } = await tenantDatabase.create('subjects', subjectData);
+
+          if (saveError) {
+            console.error('❌ [MarksEntry] Error saving default subject:', subjectName, saveError);
+            continue; // Skip this subject and continue with others
+          }
+
+          if (savedSubject) {
+            console.log('✅ [MarksEntry] Saved default subject:', subjectName, 'with ID:', savedSubject.id);
+            savedSubjects.push(savedSubject);
+          }
+        }
+
+        processedSubjects = savedSubjects;
+        console.log('✅ [MarksEntry] All default subjects saved:', savedSubjects.length);
       }
 
       setSubjects(processedSubjects);
@@ -184,17 +205,31 @@ const MarksEntry = () => {
     }
   }, [exam, examClass, tenantAccess.isReady, tenantAccess.isLoading, loadData]);
 
+  // Reload data when screen comes into focus (e.g., when navigating back)
+  useFocusEffect(
+    useCallback(() => {
+      if (exam && examClass && tenantAccess.isReady && !tenantAccess.isLoading) {
+        console.log('🔄 [MarksEntry] Screen focused, reloading data to show saved marks...');
+        loadData();
+      }
+    }, [exam, examClass, tenantAccess.isReady, tenantAccess.isLoading, loadData])
+  );
+
   // Handle marks change with validation
   const handleMarksChange = (studentId, subjectId, value) => {
     // Get exam max marks for validation
     const maxMarks = exam?.max_marks || 100;
-    
-    // Allow empty string (user is typing) or valid numbers 0 to exam max_marks (inclusive)
-    if (value !== '' && (isNaN(value) || parseFloat(value) < 0 || parseFloat(value) > maxMarks)) {
-      Alert.alert('Error', `Please enter valid marks (0-${maxMarks})`);
-      return;
+
+    // Allow empty string (user is typing), or valid numbers/decimals 0 to exam max_marks (inclusive)
+    // Also allow single decimal point for typing (e.g., "22.")
+    if (value !== '' && value !== '.') {
+      const numValue = parseFloat(value);
+      if (isNaN(numValue) || numValue < 0 || numValue > maxMarks) {
+        Alert.alert('Error', `Please enter valid marks (0-${maxMarks})`);
+        return;
+      }
     }
-    
+
     setMarksForm(prev => ({
       ...prev,
       [studentId]: {
@@ -207,13 +242,15 @@ const MarksEntry = () => {
   // Save all marks with enhanced tenant system
   const handleBulkSaveMarks = async () => {
     try {
+      setSaving(true);
       console.log('🚀 [MarksEntry] Starting handleBulkSaveMarks...');
-      
+
       // Validate tenant readiness
       const tenantValidation = await validateTenantReadiness();
       if (!tenantValidation.success) {
         console.log('⚠️ [MarksEntry] Tenant not ready for marks saving:', tenantValidation.reason);
         Alert.alert('Error', 'System not ready. Please try again.');
+        setSaving(false);
         return;
       }
       
@@ -243,8 +280,22 @@ const MarksEntry = () => {
 
       Object.entries(marksForm).forEach(([studentId, subjectMarks]) => {
         console.log('📝 [MarksEntry] Processing student:', studentId, 'subjects:', subjectMarks);
+
+        // Skip temporary student IDs that haven't been saved to the database yet
+        if (studentId.startsWith('temp-')) {
+          console.log('⚠️ [MarksEntry] Skipping temporary student ID:', studentId);
+          return;
+        }
+
         Object.entries(subjectMarks).forEach(([subjectId, marksObtained]) => {
           console.log('📝 [MarksEntry] Processing subject:', subjectId, 'marks:', marksObtained);
+
+          // Skip temporary subject IDs that haven't been saved to the database yet
+          if (subjectId.startsWith('temp-')) {
+            console.log('⚠️ [MarksEntry] Skipping temporary subject ID:', subjectId);
+            return;
+          }
+
           if (marksObtained && !isNaN(parseFloat(marksObtained))) {
             const marksValue = parseFloat(marksObtained);
             const maxMarks = exam.max_marks || 100; // Use exam's max_marks
@@ -265,7 +316,7 @@ const MarksEntry = () => {
               max_marks: maxMarks, // Store exam's max_marks
               remarks: exam.name || 'Exam' // Store exam name as remarks
             };
-            
+
             console.log('📝 [MarksEntry] Adding mark record:', markRecord);
             marksToSave.push(markRecord);
           } else {
@@ -278,61 +329,107 @@ const MarksEntry = () => {
         count: marksToSave.length,
         data: marksToSave
       });
-      
-      if (marksToSave.length > 0) {
-        // Delete existing marks for this exam first using enhanced tenant system
-        console.log('🗚 [MarksEntry] Deleting existing marks for exam:', exam.id);
-        const deleteResult = await tenantDatabase.delete('marks', { exam_id: exam.id });
-        
-        console.log('🗚 [MarksEntry] Delete result:', deleteResult);
-        if (deleteResult.error) {
-          console.error('❌ [MarksEntry] Delete error:', deleteResult.error);
-          throw deleteResult.error;
-        }
 
-        // Insert new marks using enhanced tenant database
-        console.log('💾 [MarksEntry] Inserting new marks:', marksToSave.length, 'records');
-        const insertedMarks = [];
-        for (const markRecord of marksToSave) {
-          const { data, error } = await tenantDatabase.create('marks', markRecord);
-          
-          if (error) {
-            console.error('❌ [MarksEntry] Insert error:', error);
-            throw error;
-          }
-          
-          if (data) insertedMarks.push(data);
-        }
-        
-        console.log('💾 [MarksEntry] Insert result:', {
-          recordsInserted: insertedMarks.length
-        });
+      // Check if any marks were skipped due to temporary IDs
+      const hasTemporaryData = Object.entries(marksForm).some(([studentId, subjectMarks]) => {
+        return studentId.startsWith('temp-') || Object.keys(subjectMarks).some(subjectId => subjectId.startsWith('temp-'));
+      });
 
-        // Send marks notifications to parents silently in background
-        try {
-          // Use the new bulk marks notification system
-          await createBulkMarksNotifications(
-            marksToSave,
-            exam,
-            user?.id // Pass the current user ID as admin user ID
-          );
-        } catch (notificationError) {
-          // Log error but don't show to user - notifications are secondary
-          console.error('❌ [MarksEntry] Error sending bulk marks notifications:', notificationError);
-        }
-
-        // Show simple success message
+      if (hasTemporaryData && marksToSave.length === 0) {
         Alert.alert(
-          'Success',
-          'Marks added successfully!',
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
+          'Cannot Save Marks',
+          'All students or subjects have temporary IDs. Please ensure students and subjects are properly saved in the database before entering marks.',
+          [{ text: 'OK' }]
         );
+        setSaving(false);
+        return;
+      }
+
+      if (hasTemporaryData && marksToSave.length > 0) {
+        Alert.alert(
+          'Note',
+          'Some marks were skipped because they belong to temporary students or subjects that haven\'t been saved to the database yet. Only marks for existing students and subjects will be saved.',
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => setSaving(false) },
+            { text: 'Continue', onPress: async () => {
+              await saveFinalMarks(marksToSave);
+              setSaving(false);
+            }}
+          ]
+        );
+        return;
+      }
+
+      if (marksToSave.length > 0) {
+        await saveFinalMarks(marksToSave);
       } else {
         Alert.alert('Info', 'No marks to save');
       }
 
     } catch (error) {
       console.error('❌ [MarksEntry] Error saving marks:', error);
+      Alert.alert('Error', `Failed to save marks: ${error.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Separate function to handle the actual saving logic
+  const saveFinalMarks = async (marksToSave) => {
+    try {
+      // Delete existing marks for this exam first using enhanced tenant system
+      console.log('🗚 [MarksEntry] Deleting existing marks for exam:', exam.id);
+      const deleteResult = await tenantDatabase.delete('marks', { exam_id: exam.id });
+
+      console.log('🗚 [MarksEntry] Delete result:', deleteResult);
+      if (deleteResult.error) {
+        console.error('❌ [MarksEntry] Delete error:', deleteResult.error);
+        throw deleteResult.error;
+      }
+
+      // Insert new marks using enhanced tenant database
+      console.log('💾 [MarksEntry] Inserting new marks:', marksToSave.length, 'records');
+      const insertedMarks = [];
+      for (const markRecord of marksToSave) {
+        const { data, error } = await tenantDatabase.create('marks', markRecord);
+
+        if (error) {
+          console.error('❌ [MarksEntry] Insert error:', error);
+          throw error;
+        }
+
+        if (data) insertedMarks.push(data);
+      }
+
+      console.log('💾 [MarksEntry] Insert result:', {
+        recordsInserted: insertedMarks.length
+      });
+
+      // Send marks notifications to parents silently in background
+      try {
+        // Use the new bulk marks notification system
+        await createBulkMarksNotifications(
+          marksToSave,
+          exam,
+          user?.id // Pass the current user ID as admin user ID
+        );
+      } catch (notificationError) {
+        // Log error but don't show to user - notifications are secondary
+        console.error('❌ [MarksEntry] Error sending bulk marks notifications:', notificationError);
+      }
+
+      // Show success message with details
+      Alert.alert(
+        '✓ Success',
+        `Marks saved successfully!\n\n${insertedMarks.length} student${insertedMarks.length !== 1 ? 's' : ''} updated.`,
+        [{ text: 'OK' }]
+      );
+
+      // Clear unsaved changes indicator
+      setHasUnsavedChanges(false);
+      setChangedCells(new Set());
+    } catch (error) {
+      console.error('❌ [MarksEntry] Error saving marks in saveFinalMarks:', error);
       Alert.alert('Error', `Failed to save marks: ${error.message}`);
     }
   };
@@ -343,24 +440,41 @@ const MarksEntry = () => {
     setAddSubjectModalVisible(true);
   };
 
-  const handleSaveNewSubject = () => {
+  const handleSaveNewSubject = async () => {
     if (!newSubjectName?.trim()) {
       Alert.alert('Error', 'Please enter a subject name');
       return;
     }
 
-    const newSubject = {
-      id: `temp-${Date.now()}`,
-      name: newSubjectName.trim(),
-      class_id: examClass.id,
-      academic_year: '2024-25',
-      is_optional: false
-    };
+    try {
+      console.log('💾 [MarksEntry] Saving new subject to database:', newSubjectName.trim());
 
-    setSubjects(prev => [...prev, newSubject]);
-    setAddSubjectModalVisible(false);
-    setNewSubjectName('');
-    Alert.alert('Success', `Subject "${newSubjectName}" added successfully!`);
+      const subjectData = {
+        name: newSubjectName.trim(),
+        class_id: examClass.id,
+        academic_year: '2024-25',
+        is_optional: false
+      };
+
+      const { data: savedSubject, error: saveError } = await tenantDatabase.create('subjects', subjectData);
+
+      if (saveError) {
+        console.error('❌ [MarksEntry] Error saving new subject:', saveError);
+        Alert.alert('Error', `Failed to save subject: ${saveError.message}`);
+        return;
+      }
+
+      if (savedSubject) {
+        console.log('✅ [MarksEntry] Saved new subject with ID:', savedSubject.id);
+        setSubjects(prev => [...prev, savedSubject]);
+        setAddSubjectModalVisible(false);
+        setNewSubjectName('');
+        Alert.alert('Success', `Subject "${newSubjectName}" added successfully!`);
+      }
+    } catch (error) {
+      console.error('❌ [MarksEntry] Error in handleSaveNewSubject:', error);
+      Alert.alert('Error', `Failed to save subject: ${error.message}`);
+    }
   };
 
   // Add new student
@@ -369,29 +483,47 @@ const MarksEntry = () => {
     setAddStudentModalVisible(true);
   };
 
-  const handleSaveNewStudent = () => {
+  const handleSaveNewStudent = async () => {
     if (!newStudentName?.trim()) {
       Alert.alert('Error', 'Please enter a student name');
       return;
     }
 
-    const newStudent = {
-      id: `temp-${Date.now()}`,
-      name: newStudentName.trim(),
-      class_id: examClass.id,
-      roll_no: students.length + 1,
-      date_of_birth: null,
-      gender: null,
-      address: null,
-      phone: null,
-      email: null,
-      admission_date: new Date().toISOString().split('T')[0]
-    };
+    try {
+      console.log('💾 [MarksEntry] Saving new student to database:', newStudentName.trim());
 
-    setStudents(prev => [...prev, newStudent]);
-    setAddStudentModalVisible(false);
-    setNewStudentName('');
-    Alert.alert('Success', `Student "${newStudentName}" added successfully!`);
+      const studentData = {
+        name: newStudentName.trim(),
+        class_id: examClass.id,
+        roll_no: students.length + 1,
+        date_of_birth: null,
+        gender: null,
+        address: null,
+        phone: null,
+        email: null,
+        admission_date: new Date().toISOString().split('T')[0],
+        academic_year: '2024-25'
+      };
+
+      const { data: savedStudent, error: saveError } = await tenantDatabase.create('students', studentData);
+
+      if (saveError) {
+        console.error('❌ [MarksEntry] Error saving new student:', saveError);
+        Alert.alert('Error', `Failed to save student: ${saveError.message}`);
+        return;
+      }
+
+      if (savedStudent) {
+        console.log('✅ [MarksEntry] Saved new student with ID:', savedStudent.id);
+        setStudents(prev => [...prev, savedStudent]);
+        setAddStudentModalVisible(false);
+        setNewStudentName('');
+        Alert.alert('Success', `Student "${newStudentName}" added successfully!`);
+      }
+    } catch (error) {
+      console.error('❌ [MarksEntry] Error in handleSaveNewStudent:', error);
+      Alert.alert('Error', `Failed to save student: ${error.message}`);
+    }
   };
 
   // Delete subject
@@ -489,6 +621,19 @@ const MarksEntry = () => {
   };
 
   const handleMarksChangeImproved = (studentId, subjectId, value) => {
+    // Get exam max marks for validation
+    const maxMarks = exam?.max_marks || 100;
+
+    // Allow empty string (user is typing), or valid numbers/decimals 0 to exam max_marks (inclusive)
+    // Also allow single decimal point for typing (e.g., "22.")
+    if (value !== '' && value !== '.') {
+      const numValue = parseFloat(value);
+      if (isNaN(numValue) || numValue < 0 || numValue > maxMarks) {
+        Alert.alert('Error', `Please enter valid marks (0-${maxMarks})`);
+        return;
+      }
+    }
+
     // Update marks form
     setMarksForm(prev => ({
       ...prev,
@@ -497,7 +642,7 @@ const MarksEntry = () => {
         [subjectId]: value
       }
     }));
-    
+
     // Track changed cells
     const cellKey = `${studentId}-${subjectId}`;
     setChangedCells(prev => new Set(prev).add(cellKey));
@@ -689,8 +834,9 @@ const MarksEntry = () => {
                         placeholder=""
                         value={value}
                         onChangeText={(newValue) => handleMarksChangeImproved(student.id, subject.id, newValue)}
-                        keyboardType="numeric"
-                        maxLength={3}
+                        keyboardType={Platform.OS === 'web' ? 'numeric' : 'decimal-pad'}
+                        inputMode={Platform.OS === 'web' ? 'decimal' : undefined}
+                        maxLength={6}
                         returnKeyType="next"
                         onSubmitEditing={() => focusNextInput(studentIndex, subjectIndex)}
                         selectTextOnFocus
@@ -732,12 +878,27 @@ const MarksEntry = () => {
       {/* Save Button */}
       <View style={styles.saveButtonContainer}>
         <TouchableOpacity
-          style={[styles.saveButton, hasUnsavedChanges && styles.saveButtonHighlight]}
+          style={[
+            styles.saveButton,
+            hasUnsavedChanges && styles.saveButtonHighlight,
+            saving && styles.saveButtonDisabled
+          ]}
           onPress={handleBulkSaveMarks}
+          disabled={saving}
         >
-          <Text style={styles.saveButtonText}>
-            {hasUnsavedChanges ? "Save Changes" : "Save Changes"}
-          </Text>
+          {saving ? (
+            <>
+              <ActivityIndicator size="small" color="#fff" />
+              <Text style={styles.saveButtonText}>Saving...</Text>
+            </>
+          ) : (
+            <>
+              <Ionicons name="checkmark-circle" size={20} color="#fff" />
+              <Text style={styles.saveButtonText}>
+                {hasUnsavedChanges ? "Save Changes" : "Save Changes"}
+              </Text>
+            </>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -827,11 +988,12 @@ const MarksEntry = () => {
             <Text style={styles.addLabel}>Marks (0-100)</Text>
             <TextInput
               style={styles.addInput}
-              placeholder="e.g., 75, 80, 90"
+              placeholder="e.g., 75, 80.5, 90.25"
               value={bulkFillValue}
               onChangeText={setBulkFillValue}
-              keyboardType="numeric"
-              maxLength={3}
+              keyboardType={Platform.OS === 'web' ? 'numeric' : 'decimal-pad'}
+              inputMode={Platform.OS === 'web' ? 'decimal' : undefined}
+              maxLength={6}
               autoFocus={true}
             />
 
@@ -946,6 +1108,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 8,
     gap: 8,
+    // Web-specific styles
+    ...(Platform.OS === 'web' && {
+      cursor: 'pointer',
+    }),
+  },
+  saveButtonDisabled: {
+    backgroundColor: '#9E9E9E',
+    opacity: 0.7,
+    // Web-specific styles
+    ...(Platform.OS === 'web' && {
+      cursor: 'not-allowed',
+    }),
   },
   saveButtonText: {
     color: '#fff',
@@ -1628,11 +1802,20 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#333',
     overflow: 'hidden',
+    // Web-specific improvements
+    ...(Platform.OS === 'web' && {
+      maxHeight: '70vh',
+    }),
   },
   
   // Main horizontal scroll container with optimizations
   mainHorizontalScroll: {
     flex: 1,
+    // Web-specific scroll improvements
+    ...(Platform.OS === 'web' && {
+      overflowX: 'auto',
+      overflowY: 'hidden',
+    }),
   },
   mainHorizontalContent: {
     flexGrow: 1,
@@ -1685,6 +1868,11 @@ const styles = StyleSheet.create({
     // Enable hardware acceleration
     shouldRasterizeIOS: true,
     renderToHardwareTextureAndroid: true,
+    // Web-specific scroll improvements
+    ...(Platform.OS === 'web' && {
+      overflowY: 'auto',
+      overflowX: 'hidden',
+    }),
   },
   tableRow: {
     flexDirection: 'row',
@@ -1739,6 +1927,11 @@ const styles = StyleSheet.create({
     textAlignVertical: 'center',
     shouldRasterizeIOS: true,
     renderToHardwareTextureAndroid: true,
+    // Web-specific styles
+    ...(Platform.OS === 'web' && {
+      outlineStyle: 'none',
+      cursor: 'text',
+    }),
   },
   
   // Cell States
@@ -1784,9 +1977,22 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
+    // Web-specific styles
+    ...(Platform.OS === 'web' && {
+      cursor: 'pointer',
+      transition: 'all 0.2s ease',
+    }),
   },
   saveButtonHighlight: {
     backgroundColor: '#1976d2',
+  },
+  saveButtonDisabled: {
+    backgroundColor: '#9E9E9E',
+    opacity: 0.7,
+    // Web-specific styles
+    ...(Platform.OS === 'web' && {
+      cursor: 'not-allowed',
+    }),
   },
   saveButtonText: {
     color: '#fff',

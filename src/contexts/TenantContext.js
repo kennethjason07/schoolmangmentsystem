@@ -239,9 +239,29 @@ export const TenantProvider = ({ children }) => {
         return { success: false, isAuthError: true, error: 'No active session' };
       }
       
-      // Fetch tenant via email lookup (one-time initialization)
-      const result = await getCurrentUserTenantByEmail();
-      
+      // Fetch tenant via email lookup (one-time initialization) with timeout
+      console.log('⏱️ TenantContext (init): Starting tenant lookup with 5 second timeout...');
+
+      const INIT_TENANT_TIMEOUT = 5000;
+      const initTimeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Tenant init timeout')), INIT_TENANT_TIMEOUT);
+      });
+
+      let result;
+      try {
+        result = await Promise.race([
+          getCurrentUserTenantByEmail(),
+          initTimeoutPromise
+        ]);
+      } catch (timeoutError) {
+        console.warn('⏰ TenantContext (init): Tenant lookup timed out, using fallback');
+        result = {
+          success: false,
+          error: 'Tenant initialization timed out - using fallback mode',
+          isTimeout: true
+        };
+      }
+
       if (!result.success) {
         // Handle authentication errors gracefully
         const authErrorMessages = [
@@ -323,14 +343,38 @@ export const TenantProvider = ({ children }) => {
         error: error || 'none'
       });
       
-      // Use the email-based lookup function
+      // Use the email-based lookup function with timeout
       console.log('🔍 TenantContext: Calling getCurrentUserTenantByEmail()...');
-      const result = await getCurrentUserTenantByEmail();
+
+      // Add timeout to prevent hanging
+      const TENANT_LOOKUP_TIMEOUT = 5000; // 5 seconds timeout
+      console.log('⏱️ TenantContext: Starting tenant lookup with 5 second timeout...');
+
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Tenant lookup timeout')), TENANT_LOOKUP_TIMEOUT);
+      });
+
+      let result;
+      try {
+        result = await Promise.race([
+          getCurrentUserTenantByEmail(),
+          timeoutPromise
+        ]);
+      } catch (timeoutError) {
+        console.warn('⏰ TenantContext: Tenant lookup timed out, using fallback mode');
+        result = {
+          success: false,
+          error: 'Tenant lookup timed out - using fallback mode',
+          isTimeout: true
+        };
+      }
+
       console.log('🔍 TenantContext: getCurrentUserTenantByEmail result:', {
         success: result.success,
         hasData: !!result.data,
         error: result.error || 'none',
         isAuthError: result.isAuthError || false,
+        isTimeout: result.isTimeout || false,
         code: result.code || 'none'
       });
       
@@ -891,8 +935,7 @@ export const TenantProvider = ({ children }) => {
       
       // Step 2: Test tenant lookup directly
       console.log('📝 Step 2: Testing tenant lookup directly...');
-      const { getTenantIdByEmail } = await import('../utils/getTenantByEmail');
-      const directResult = await getTenantIdByEmail(user.email);
+      const directResult = await getCurrentUserTenantByEmail(user.email);
       console.log('📝 Direct tenant lookup result:', {
         success: directResult.success,
         error: directResult.error || 'none',

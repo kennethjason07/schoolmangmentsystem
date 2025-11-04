@@ -8,7 +8,7 @@ import { format } from 'date-fns';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import { useTenant } from '../../contexts/TenantContext';
-import { tenantDatabase, initializeTenantHelpers, getCachedTenantId } from '../../utils/tenantHelpers';
+import { tenantDatabase, initializeTenantHelpers, getCachedTenantId, createTenantDeleteQuery } from '../../utils/tenantHelpers';
 import { getCurrentUserTenantByEmail } from '../../utils/getTenantByEmail';
 import { useAuth } from '../../utils/AuthContext';
 
@@ -813,45 +813,225 @@ const SubjectsTimetable = ({ route }) => {
   };
 
   const handleDeleteSubject = async (id) => {
-    Alert.alert('Delete Subject', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
+    // Web platform handling
+    if (Platform.OS === 'web') {
+      const subject = subjects.find(s => s.id === id);
+      const confirmed = window.confirm(`Are you sure you want to delete "${subject?.name || 'this subject'}"?\n\nThis will also delete all related timetable entries, teacher assignments, marks, assignments, and homeworks.`);
+      if (!confirmed) return;
+
+      (async () => {
         try {
           setLoading(true);
           console.log('🗑️ SubjectsTimetable.handleDeleteSubject: Starting delete operation for:', id);
-          
+
           // 🔍 Enhanced tenant system check
           if (!isTenantReady()) {
             console.log('⚠️ handleDeleteSubject: Tenant context not ready');
-            Alert.alert('Error', 'Tenant context not ready. Please try again.');
+            if (window && window.alert) window.alert('Error: Tenant context not ready. Please try again.');
             setLoading(false);
             return;
           }
-          
+
           console.log('🅿️ handleDeleteSubject: Using enhanced tenant system with ID:', tenantId);
-          
-          // 🚀 Use enhanced tenant database for delete
+
+          // Delete related records in correct order (respecting foreign key constraints)
+
+          // 1. Delete timetable entries
+          console.log('🗑️ Deleting timetable entries for subject:', id);
+          const { error: timetableError } = await createTenantDeleteQuery(tenantId, 'timetable_entries', { subject_id: id });
+          if (timetableError) {
+            console.error('❌ Error deleting timetable entries:', timetableError);
+            throw new Error(`Failed to delete timetable entries: ${timetableError.message}`);
+          }
+
+          // 2. Delete teacher_subjects assignments
+          console.log('🗑️ Deleting teacher assignments for subject:', id);
+          const { error: teacherSubjectsError } = await createTenantDeleteQuery(tenantId, 'teacher_subjects', { subject_id: id });
+          if (teacherSubjectsError) {
+            console.error('❌ Error deleting teacher assignments:', teacherSubjectsError);
+            throw new Error(`Failed to delete teacher assignments: ${teacherSubjectsError.message}`);
+          }
+
+          // 3. Delete marks
+          console.log('🗑️ Deleting marks for subject:', id);
+          const { error: marksError } = await createTenantDeleteQuery(tenantId, 'marks', { subject_id: id });
+          if (marksError) {
+            console.error('❌ Error deleting marks:', marksError);
+            throw new Error(`Failed to delete marks: ${marksError.message}`);
+          }
+
+          // 4. Delete assignment_submissions (must be deleted before assignments)
+          console.log('🗑️ Deleting assignment submissions for subject:', id);
+          const { data: assignmentsData } = await supabase
+            .from('assignments')
+            .select('id')
+            .eq('subject_id', id)
+            .eq('tenant_id', tenantId);
+
+          if (assignmentsData && assignmentsData.length > 0) {
+            const assignmentIds = assignmentsData.map(a => a.id);
+            const { error: submissionsError } = await supabase
+              .from('assignment_submissions')
+              .delete()
+              .in('assignment_id', assignmentIds)
+              .eq('tenant_id', tenantId);
+
+            if (submissionsError) {
+              console.error('❌ Error deleting assignment submissions:', submissionsError);
+              throw new Error(`Failed to delete assignment submissions: ${submissionsError.message}`);
+            }
+          }
+
+          // 5. Delete assignments
+          console.log('🗑️ Deleting assignments for subject:', id);
+          const { error: assignmentsError } = await createTenantDeleteQuery(tenantId, 'assignments', { subject_id: id });
+          if (assignmentsError) {
+            console.error('❌ Error deleting assignments:', assignmentsError);
+            throw new Error(`Failed to delete assignments: ${assignmentsError.message}`);
+          }
+
+          // 6. Delete homeworks
+          console.log('🗑️ Deleting homeworks for subject:', id);
+          const { error: homeworksError } = await createTenantDeleteQuery(tenantId, 'homeworks', { subject_id: id });
+          if (homeworksError) {
+            console.error('❌ Error deleting homeworks:', homeworksError);
+            throw new Error(`Failed to delete homeworks: ${homeworksError.message}`);
+          }
+
+          // 7. Finally, delete the subject itself
+          console.log('🗑️ Deleting subject:', id);
           const { error } = await tenantDatabase.delete('subjects', id);
 
           if (error) {
             console.error('❌ handleDeleteSubject: Delete error:', error);
             throw error;
           }
-          
-          console.log('✅ handleDeleteSubject: Subject deleted successfully');
+
+          console.log('✅ handleDeleteSubject: Subject and all related data deleted successfully');
 
           setSubjects(subjects.filter(s => s.id !== id));
-          Alert.alert('Success', 'Subject deleted successfully');
-          
+          if (window && window.alert) window.alert('Success: Subject and all related data deleted successfully');
+
         } catch (error) {
           console.error('❌ handleDeleteSubject: Error deleting subject:', error);
           const errorMessage = error.message || 'Failed to delete subject';
-          Alert.alert('Error', errorMessage);
+          if (window && window.alert) window.alert(`Error: ${errorMessage}`);
         } finally {
           setLoading(false);
         }
-      }},
-    ]);
+      })();
+      return;
+    }
+
+    // Mobile platform handling
+    Alert.alert(
+      'Delete Subject',
+      'Are you sure you want to delete this subject?\n\nThis will also delete all related timetable entries, teacher assignments, marks, assignments, and homeworks.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            setLoading(true);
+            console.log('🗑️ SubjectsTimetable.handleDeleteSubject: Starting delete operation for:', id);
+
+            // 🔍 Enhanced tenant system check
+            if (!isTenantReady()) {
+              console.log('⚠️ handleDeleteSubject: Tenant context not ready');
+              Alert.alert('Error', 'Tenant context not ready. Please try again.');
+              setLoading(false);
+              return;
+            }
+
+            console.log('🅿️ handleDeleteSubject: Using enhanced tenant system with ID:', tenantId);
+
+            // Delete related records in correct order (respecting foreign key constraints)
+
+            // 1. Delete timetable entries
+            console.log('🗑️ Deleting timetable entries for subject:', id);
+            const { error: timetableError } = await createTenantDeleteQuery(tenantId, 'timetable_entries', { subject_id: id });
+            if (timetableError) {
+              console.error('❌ Error deleting timetable entries:', timetableError);
+              throw new Error(`Failed to delete timetable entries: ${timetableError.message}`);
+            }
+
+            // 2. Delete teacher_subjects assignments
+            console.log('🗑️ Deleting teacher assignments for subject:', id);
+            const { error: teacherSubjectsError } = await createTenantDeleteQuery(tenantId, 'teacher_subjects', { subject_id: id });
+            if (teacherSubjectsError) {
+              console.error('❌ Error deleting teacher assignments:', teacherSubjectsError);
+              throw new Error(`Failed to delete teacher assignments: ${teacherSubjectsError.message}`);
+            }
+
+            // 3. Delete marks
+            console.log('🗑️ Deleting marks for subject:', id);
+            const { error: marksError } = await createTenantDeleteQuery(tenantId, 'marks', { subject_id: id });
+            if (marksError) {
+              console.error('❌ Error deleting marks:', marksError);
+              throw new Error(`Failed to delete marks: ${marksError.message}`);
+            }
+
+            // 4. Delete assignment_submissions (must be deleted before assignments)
+            console.log('🗑️ Deleting assignment submissions for subject:', id);
+            const { data: assignmentsData } = await supabase
+              .from('assignments')
+              .select('id')
+              .eq('subject_id', id)
+              .eq('tenant_id', tenantId);
+
+            if (assignmentsData && assignmentsData.length > 0) {
+              const assignmentIds = assignmentsData.map(a => a.id);
+              const { error: submissionsError } = await supabase
+                .from('assignment_submissions')
+                .delete()
+                .in('assignment_id', assignmentIds)
+                .eq('tenant_id', tenantId);
+
+              if (submissionsError) {
+                console.error('❌ Error deleting assignment submissions:', submissionsError);
+                throw new Error(`Failed to delete assignment submissions: ${submissionsError.message}`);
+              }
+            }
+
+            // 5. Delete assignments
+            console.log('🗑️ Deleting assignments for subject:', id);
+            const { error: assignmentsError } = await createTenantDeleteQuery(tenantId, 'assignments', { subject_id: id });
+            if (assignmentsError) {
+              console.error('❌ Error deleting assignments:', assignmentsError);
+              throw new Error(`Failed to delete assignments: ${assignmentsError.message}`);
+            }
+
+            // 6. Delete homeworks
+            console.log('🗑️ Deleting homeworks for subject:', id);
+            const { error: homeworksError } = await createTenantDeleteQuery(tenantId, 'homeworks', { subject_id: id });
+            if (homeworksError) {
+              console.error('❌ Error deleting homeworks:', homeworksError);
+              throw new Error(`Failed to delete homeworks: ${homeworksError.message}`);
+            }
+
+            // 7. Finally, delete the subject itself
+            console.log('🗑️ Deleting subject:', id);
+            const { error } = await tenantDatabase.delete('subjects', id);
+
+            if (error) {
+              console.error('❌ handleDeleteSubject: Delete error:', error);
+              throw error;
+            }
+
+            console.log('✅ handleDeleteSubject: Subject and all related data deleted successfully');
+
+            setSubjects(subjects.filter(s => s.id !== id));
+            Alert.alert('Success', 'Subject and all related data deleted successfully');
+
+          } catch (error) {
+            console.error('❌ handleDeleteSubject: Error deleting subject:', error);
+            const errorMessage = error.message || 'Failed to delete subject';
+            Alert.alert('Error', errorMessage);
+          } finally {
+            setLoading(false);
+          }
+        }},
+      ]
+    );
   };
 
   // Timetable helpers
@@ -1146,30 +1326,76 @@ const SubjectsTimetable = ({ route }) => {
   };
 
   const handleDeletePeriod = async (day, id) => {
+    // Web platform handling
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('Are you sure you want to delete this period?');
+      if (!confirmed) return;
+
+      (async () => {
+        try {
+          setLoading(true);
+          console.log('🗑️ SubjectsTimetable.handleDeletePeriod: Starting delete operation for:', id);
+
+          // 🔍 Enhanced tenant system check
+          if (!isTenantReady()) {
+            if (window && window.alert) window.alert('Error: Tenant context not ready. Please try again.');
+            setLoading(false);
+            return;
+          }
+
+          console.log('🏷️ handleDeletePeriod: Using tenant ID:', tenantId);
+
+          // 🚀 Use enhanced tenant database for delete
+          const { error } = await tenantDatabase.delete('timetable_entries', id);
+
+          if (error) {
+            console.error('❌ handleDeletePeriod: Delete error:', error);
+            throw error;
+          }
+
+          console.log('✅ handleDeletePeriod: Period deleted successfully');
+
+          // 🔄 Refresh timetable data from database to ensure consistency
+          console.log('🔄 handleDeletePeriod: Refreshing timetable data to ensure consistency...');
+          await fetchTimetableForClass(selectedClass);
+
+          if (window && window.alert) window.alert('Success: Period deleted successfully');
+        } catch (error) {
+          console.error('❌ handleDeletePeriod: Error deleting period:', error);
+          const errorMessage = error.message || 'Failed to delete period';
+          if (window && window.alert) window.alert(`Error: ${errorMessage}`);
+        } finally {
+          setLoading(false);
+        }
+      })();
+      return;
+    }
+
+    // Mobile platform handling
     Alert.alert('Delete Period', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try {
           setLoading(true);
           console.log('🗑️ SubjectsTimetable.handleDeletePeriod: Starting delete operation for:', id);
-          
+
           // 🔍 Enhanced tenant system check
           if (!isTenantReady()) {
             Alert.alert('Error', 'Tenant context not ready. Please try again.');
             setLoading(false);
             return;
           }
-          
+
           console.log('🏷️ handleDeletePeriod: Using tenant ID:', tenantId);
-          
+
           // 🚀 Use enhanced tenant database for delete
           const { error } = await tenantDatabase.delete('timetable_entries', id);
-          
+
           if (error) {
             console.error('❌ handleDeletePeriod: Delete error:', error);
             throw error;
           }
-          
+
           console.log('✅ handleDeletePeriod: Period deleted successfully');
 
           // 🔄 Refresh timetable data from database to ensure consistency
