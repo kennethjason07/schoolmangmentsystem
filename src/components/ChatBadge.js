@@ -5,6 +5,7 @@ import { AppState } from 'react-native';
 import { useAuth } from '../utils/AuthContext';
 import universalNotificationService from '../services/UniversalNotificationService';
 import { supabase, TABLES } from '../utils/supabase';
+import { getCachedTenantId } from '../utils/tenantHelpers';
 
 /**
  * ChatBadge - A specialized badge component that ONLY shows unread message counts
@@ -67,7 +68,6 @@ const ChatBadge = ({
       // Enhanced tenant filtering with better error handling
       let tenantId = null;
       try {
-        const { getCachedTenantId } = await import('../utils/tenantHelpers');
         tenantId = getCachedTenantId();
         debugLog('Using tenant filter', tenantId);
       } catch (e) {
@@ -169,7 +169,6 @@ const ChatBadge = ({
         let shouldProcess = true;
         if (payload.new?.tenant_id) {
           try {
-            const { getCachedTenantId } = await import('../utils/tenantHelpers');
             const currentTenantId = getCachedTenantId();
             if (currentTenantId && payload.new.tenant_id !== currentTenantId) {
               debugLog('❌ Ignoring INSERT - cross-tenant message');
@@ -194,7 +193,6 @@ const ChatBadge = ({
         let shouldProcess = true;
         if (payload.new?.tenant_id) {
           try {
-            const { getCachedTenantId } = await import('../utils/tenantHelpers');
             const currentTenantId = getCachedTenantId();
             if (currentTenantId && payload.new.tenant_id !== currentTenantId) {
               debugLog('❌ Ignoring UPDATE - cross-tenant message');
@@ -220,7 +218,6 @@ const ChatBadge = ({
         let shouldProcess = true;
         if (payload.old?.tenant_id) {
           try {
-            const { getCachedTenantId } = await import('../utils/tenantHelpers');
             const currentTenantId = getCachedTenantId();
             if (currentTenantId && payload.old.tenant_id !== currentTenantId) {
               debugLog('❌ Ignoring DELETE - cross-tenant message');
