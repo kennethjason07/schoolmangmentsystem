@@ -135,7 +135,8 @@ const CrossPlatformDatePicker = ({
             style={{
               flex: 1,
               border: 'none',
-              outline: 'none',
+              outlineWidth: 0,
+              outlineStyle: 'none',
               fontSize: 16,
               color: disabled ? '#ccc' : '#333',
               backgroundColor: 'transparent',

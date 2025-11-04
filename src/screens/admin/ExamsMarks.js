@@ -139,6 +139,44 @@ const getGradeColor = (grade) => {
   }
 };
 
+// Memoized class selection item to prevent unnecessary re-renders
+const ClassSelectionItem = React.memo(({ classItem, isSelected, onToggle }) => (
+  <TouchableOpacity
+    style={[
+      styles.classSelectionItem,
+      isSelected && styles.classSelectionItemSelected
+    ]}
+    onPress={onToggle}
+  >
+    <View style={styles.classItemContent}>
+      <View style={styles.classItemInfo}>
+        <Text style={[
+          styles.classItemName,
+          isSelected && styles.classItemNameSelected
+        ]}>
+          {classItem.class_name}
+        </Text>
+        <Text style={[
+          styles.classItemSection,
+          isSelected && styles.classItemSectionSelected
+        ]}>
+          Section: {classItem.section}
+        </Text>
+      </View>
+      <View style={[
+        styles.classSelectionIndicator,
+        isSelected && styles.classSelectionIndicatorSelected
+      ]}>
+        <Ionicons 
+          name={isSelected ? "checkmark-circle" : "add-circle-outline"} 
+          size={24} 
+          color={isSelected ? "#fff" : "#2196F3"} 
+        />
+      </View>
+    </View>
+  </TouchableOpacity>
+));
+
 const ExamsMarks = () => {
   const navigation = useNavigation();
   const { user } = useAuth();
@@ -233,6 +271,7 @@ const ExamsMarks = () => {
   const [marksForm, setMarksForm] = useState({});
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [datePickerType, setDatePickerType] = useState('start'); // 'start' or 'end'
+  const [examFormErrors, setExamFormErrors] = useState({});
 
   // Additional modal states that were scattered throughout the file
   const [selectedClassesForMarks, setSelectedClassesForMarks] = useState([]);
@@ -975,6 +1014,21 @@ const handleDeleteExam = (exam) => {
     );
   }, [memoizedExamStats, classes, openMarksModal, openEditExamModal, handleDeleteExam]);
 
+  // Memoized toggle handler for class selection
+  const handleToggleClassSelection = useCallback((classId) => {
+    setExamForm(prev => {
+      const currentSelection = prev.selected_classes || [];
+      const isSelected = currentSelection.includes(classId);
+      
+      return {
+        ...prev,
+        selected_classes: isSelected
+          ? currentSelection.filter(id => id !== classId)
+          : [...currentSelection, classId]
+      };
+    });
+  }, []);
+
   // Load data when enhanced tenant system is ready
   useFocusEffect(
     useCallback(() => {
@@ -984,16 +1038,16 @@ const handleDeleteExam = (exam) => {
           await loadAllData();
         }
       }
-      
+
       fetchData();
-    }, [tenantAccess.isReady, tenantAccess.isLoading, loadAllData])
+    }, [tenantAccess.isReady, tenantAccess.isLoading])
   );
   
   // Handle tenant errors
   if (tenantAccess.error) {
     return (
       <View style={styles.container}>
-<Header title="Exams & Marks" navigation={navigation} showBack={true} onBack={safeGoBack} />
+        <Header title="Exams & Marks" navigation={navigation} showBack={true} onBack={safeGoBack} />
         <View style={styles.loading}>
           <Text style={styles.loadingText}>Access Error: {tenantAccess.error}</Text>
         </View>
@@ -1005,7 +1059,7 @@ const handleDeleteExam = (exam) => {
   if (tenantAccess.isLoading || loading) {
     return (
       <View style={styles.container}>
-<Header title="Exams & Marks" navigation={navigation} showBack={true} onBack={safeGoBack} />
+        <Header title="Exams & Marks" navigation={navigation} showBack={true} onBack={safeGoBack} />
         <View style={styles.loading}>
           <ActivityIndicator size="large" color="#2196F3" />
           <Text style={styles.loadingText}>Initializing tenant access...</Text>
@@ -1021,7 +1075,10 @@ const handleDeleteExam = (exam) => {
   const handleAddExam = async () => {
     try {
       console.log('📝 handleAddExam called with form:', examForm);
-      
+
+      // Clear previous errors
+      setExamFormErrors({});
+
       // Validate tenant readiness
       const tenantValidation = await validateTenantReadiness();
       if (!tenantValidation.success) {
@@ -1029,31 +1086,42 @@ const handleDeleteExam = (exam) => {
         Alert.alert('Error', 'System not ready. Please try again.');
         return;
       }
-      
+
       const { effectiveTenantId } = tenantValidation;
       console.log('✅ [ExamsMarks] Using effective tenant ID for exam creation:', effectiveTenantId);
-      
+
       // Validate required fields
+      const errors = {};
+
       if (!examForm.name || !examForm.name.trim()) {
-        Alert.alert('Validation Error', 'Please enter an exam name');
-        return;
+        errors.name = 'Please enter an exam name';
       }
-      
+
       if (examForm.selected_classes.length === 0) {
-        Alert.alert('Validation Error', 'Please select at least one class');
-        return;
+        errors.classes = 'Please select at least one class';
       }
-      
+
       if (!examForm.start_date) {
-        Alert.alert('Validation Error', 'Please select a start date');
-        return;
+        errors.start_date = 'Please select a start date';
       }
-      
+
       if (!examForm.end_date) {
-        Alert.alert('Validation Error', 'Please select an end date');
+        errors.end_date = 'Please select an end date';
+      }
+
+      // Validate date range
+      if (examForm.start_date && examForm.end_date && new Date(examForm.end_date) < new Date(examForm.start_date)) {
+        errors.end_date = 'End date cannot be before start date';
+      }
+
+      // If there are errors, show them and return
+      if (Object.keys(errors).length > 0) {
+        setExamFormErrors(errors);
+        const firstError = Object.values(errors)[0];
+        Alert.alert('Validation Error', firstError);
         return;
       }
-      
+
       console.log('📝 Using validated tenant_id for exam creation:', effectiveTenantId);
 
       // Create exam records for each selected class
@@ -1116,6 +1184,9 @@ const handleDeleteExam = (exam) => {
   // Edit exam (using schema: exams table)
   const handleEditExam = async () => {
     try {
+      // Clear previous errors
+      setExamFormErrors({});
+
       // Validate tenant readiness
       const tenantValidation = await validateTenantReadiness();
       if (!tenantValidation.success) {
@@ -1123,15 +1194,42 @@ const handleDeleteExam = (exam) => {
         Alert.alert('Error', 'System not ready. Please try again.');
         return;
       }
-      
+
       const { effectiveTenantId } = tenantValidation;
       console.log('✅ [ExamsMarks] Using effective tenant ID for exam edit:', effectiveTenantId);
-      
-      if (!selectedExam || !examForm.name || !examForm.start_date || examForm.selected_classes.length === 0) {
-        Alert.alert('Error', 'Please fill in all required fields and select at least one class');
+
+      // Validate required fields
+      const errors = {};
+
+      if (!examForm.name || !examForm.name.trim()) {
+        errors.name = 'Please enter an exam name';
+      }
+
+      if (examForm.selected_classes.length === 0) {
+        errors.classes = 'Please select at least one class';
+      }
+
+      if (!examForm.start_date) {
+        errors.start_date = 'Please select a start date';
+      }
+
+      if (!examForm.end_date) {
+        errors.end_date = 'Please select an end date';
+      }
+
+      // Validate date range
+      if (examForm.start_date && examForm.end_date && new Date(examForm.end_date) < new Date(examForm.start_date)) {
+        errors.end_date = 'End date cannot be before start date';
+      }
+
+      // If there are errors, show them and return
+      if (Object.keys(errors).length > 0) {
+        setExamFormErrors(errors);
+        const firstError = Object.values(errors)[0];
+        Alert.alert('Validation Error', firstError);
         return;
       }
-      
+
       console.log('🔧 Using validated tenant_id for exam edit:', effectiveTenantId);
 
       // First, delete the existing exam record with Enhanced Tenant System
@@ -2070,7 +2168,7 @@ const handleDeleteExam = (exam) => {
   if (loading) {
     return (
       <View style={styles.container}>
-<Header title="Exams & Marks" showBack={true} onBack={safeGoBack} />
+        <Header title="Exams & Marks" showBack={true} onBack={safeGoBack} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2196F3" />
           <Text style={styles.loadingText}>
@@ -2089,7 +2187,7 @@ const handleDeleteExam = (exam) => {
   // ✅ Main component render
   return (
     <View style={styles.container}>
-<Header title="Exams & Marks" showBack={true} onBack={safeGoBack} />
+      <Header title="Exams & Marks" showBack={true} onBack={safeGoBack} />
       
       {/* Floating Refresh Button - Web Only - Positioned to avoid FAB overlap */}
       <FloatingRefreshButton
@@ -2117,7 +2215,10 @@ const handleDeleteExam = (exam) => {
             <Text style={styles.emptySubtext}>Create your first exam to get started</Text>
             <TouchableOpacity
               style={styles.emptyActionButton}
-              onPress={() => setAddExamModalVisible(true)}
+              onPress={() => {
+                setExamFormErrors({});
+                setAddExamModalVisible(true);
+              }}
             >
               <Ionicons name="add-circle" size={20} color="#fff" />
               <Text style={styles.emptyActionText}>Create First Exam</Text>
@@ -2132,14 +2233,29 @@ const handleDeleteExam = (exam) => {
         style={styles.fab}
         onPress={() => {
           console.log('➕ FAB (Add Exam) button pressed');
-          setAddExamModalVisible(true);
+          // Reset form to ensure selected_classes is always an array
+          setExamForm({
+            name: '',
+            start_date: '',
+            end_date: '',
+            selected_classes: [],
+            description: '',
+            max_marks: '100'
+          });
+          // Clear any previous validation errors
+          setExamFormErrors({});
+          // Use setTimeout to ensure smooth UI transition
+          setTimeout(() => {
+            setAddExamModalVisible(true);
+          }, 50);
         }}
       >
         <Ionicons name="add" size={32} color="#fff" />
       </TouchableOpacity>
-      {/* Add Exam Modal */}
+      {/* Add Exam Modal - Only render when visible */}
+      {addExamModalVisible && (
       <Modal
-        visible={addExamModalVisible}
+        visible={true}
         animationType="slide"
         transparent={true}
         onRequestClose={() => setAddExamModalVisible(false)}
@@ -2147,78 +2263,51 @@ const handleDeleteExam = (exam) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Add New Exam</Text>
+            {!classes || classes.length === 0 ? (
+              <View style={styles.modalLoadingContainer}>
+                <ActivityIndicator size="large" color="#2196F3" />
+                <Text style={styles.loadingText}>Loading classes...</Text>
+              </View>
+            ) : (
             <ScrollView>
-              <Text style={styles.inputLabel}>Exam Name *</Text>
+              <Text style={[styles.inputLabel, examFormErrors.name && styles.errorLabel]}>Exam Name *</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, examFormErrors.name && styles.errorInput]}
                 placeholder="Enter exam name"
                 value={examForm.name}
-                onChangeText={text => setExamForm(prev => ({ ...prev, name: text }))}
+                onChangeText={text => {
+                  setExamForm(prev => ({ ...prev, name: text }));
+                  if (examFormErrors.name) {
+                    setExamFormErrors(prev => ({ ...prev, name: null }));
+                  }
+                }}
               />
+              {examFormErrors.name && (
+                <Text style={styles.errorText}>{examFormErrors.name}</Text>
+              )}
 
-              <Text style={styles.inputLabel}>Classes * (Select multiple)</Text>
+              <Text style={[styles.inputLabel, examFormErrors.classes && styles.errorLabel]}>Classes * (Select multiple)</Text>
               <View style={styles.classSelectionGrid}>
-                {classes.map(classItem => {
-                  const isSelected = (examForm.selected_classes || []).includes(classItem.id);
+                {Array.isArray(classes) && classes.length > 0 ? classes.map(classItem => {
+                  const isSelected = Array.isArray(examForm.selected_classes) && examForm.selected_classes.includes(classItem.id);
                   return (
-                    <TouchableOpacity
+                    <ClassSelectionItem
                       key={classItem.id}
-                      style={[
-                        styles.classSelectionItem,
-                        isSelected && styles.classSelectionItemSelected
-                      ]}
-                      onPress={() => {
-                        if (isSelected) {
-                          // Remove class from selection
-                          setExamForm(prev => ({
-                            ...prev,
-                            selected_classes: prev.selected_classes.filter(id => id !== classItem.id)
-                          }));
-                        } else {
-                          // Add class to selection
-                          setExamForm(prev => ({
-                            ...prev,
-                            selected_classes: [...prev.selected_classes, classItem.id]
-                          }));
-                        }
-                      }}
-                    >
-                      <View style={styles.classItemContent}>
-                        <View style={styles.classItemInfo}>
-                          <Text style={[
-                            styles.classItemName,
-                            isSelected && styles.classItemNameSelected
-                          ]}>
-                            {classItem.class_name}
-                          </Text>
-                          <Text style={[
-                            styles.classItemSection,
-                            isSelected && styles.classItemSectionSelected
-                          ]}>
-                            Section: {classItem.section}
-                          </Text>
-                        </View>
-                        <View style={[
-                          styles.classSelectionIndicator,
-                          isSelected && styles.classSelectionIndicatorSelected
-                        ]}>
-                          <Ionicons 
-                            name={isSelected ? "checkmark-circle" : "add-circle-outline"} 
-                            size={24} 
-                            color={isSelected ? "#fff" : "#2196F3"} 
-                          />
-                        </View>
-                      </View>
-                    </TouchableOpacity>
+                      classItem={classItem}
+                      isSelected={isSelected}
+                      onToggle={() => handleToggleClassSelection(classItem.id)}
+                    />
                   );
-                })}
-                {classes.length === 0 && (
+                }) : (
                   <View style={styles.noClassesAvailable}>
                     <Text style={styles.noClassesText}>No classes available</Text>
                     <Text style={styles.noClassesSubText}>Please add classes first</Text>
                   </View>
                 )}
               </View>
+              {examFormErrors.classes && (
+                <Text style={styles.errorText}>{examFormErrors.classes}</Text>
+              )}
 
               {Platform.OS === 'web' ? (
                 <>
@@ -2230,28 +2319,42 @@ const handleDeleteExam = (exam) => {
                       if (date) {
                         const formattedDate = formatDateForDb(date);
                         setExamForm(prev => ({ ...prev, start_date: formattedDate }));
+                        if (examFormErrors.start_date) {
+                          setExamFormErrors(prev => ({ ...prev, start_date: null }));
+                        }
                       }
                     }}
                     mode="date"
                     placeholder="Select Start Date"
                     maximumDate={new Date(2030, 11, 31)}
                     minimumDate={new Date(2020, 0, 1)}
+                    error={examFormErrors.start_date}
                   />
+                  {examFormErrors.start_date && (
+                    <Text style={styles.errorText}>{examFormErrors.start_date}</Text>
+                  )}
                   <CrossPlatformDatePicker
-                    label="End Date"
+                    label="End Date *"
                     value={examForm.end_date ? new Date(examForm.end_date) : null}
                     onChange={(event, date) => {
                       console.log('End date changed (web):', date);
                       if (date) {
                         const formattedDate = formatDateForDb(date);
                         setExamForm(prev => ({ ...prev, end_date: formattedDate }));
+                        if (examFormErrors.end_date) {
+                          setExamFormErrors(prev => ({ ...prev, end_date: null }));
+                        }
                       }
                     }}
                     mode="date"
                     placeholder="Select End Date"
                     maximumDate={new Date(2030, 11, 31)}
                     minimumDate={new Date(2020, 0, 1)}
+                    error={examFormErrors.end_date}
                   />
+                  {examFormErrors.end_date && (
+                    <Text style={styles.errorText}>{examFormErrors.end_date}</Text>
+                  )}
                 </>
               ) : (
                 <>
@@ -2262,21 +2365,35 @@ const handleDeleteExam = (exam) => {
                       console.log('Start date button pressed');
                       setDatePickerType('start');
                       setShowDatePicker(true);
+                      if (examFormErrors.start_date) {
+                        setExamFormErrors(prev => ({ ...prev, start_date: null }));
+                      }
                     }}
                     placeholder="Select Start Date"
                     mode="date"
+                    error={examFormErrors.start_date}
                   />
+                  {examFormErrors.start_date && (
+                    <Text style={styles.errorText}>{examFormErrors.start_date}</Text>
+                  )}
                   <DatePickerButton
-                    label="End Date"
+                    label="End Date *"
                     value={examForm.end_date ? new Date(examForm.end_date) : null}
                     onPress={() => {
                       console.log('End date button pressed');
                       setDatePickerType('end');
                       setShowDatePicker(true);
+                      if (examFormErrors.end_date) {
+                        setExamFormErrors(prev => ({ ...prev, end_date: null }));
+                      }
                     }}
                     placeholder="Select End Date"
                     mode="date"
+                    error={examFormErrors.end_date}
                   />
+                  {examFormErrors.end_date && (
+                    <Text style={styles.errorText}>{examFormErrors.end_date}</Text>
+                  )}
                 </>
               )}
 
@@ -2301,6 +2418,7 @@ const handleDeleteExam = (exam) => {
               />
 
             </ScrollView>
+            )}
             
             {/* Date Picker - Only show on mobile platforms */}
             {Platform.OS !== 'web' && showDatePicker && (
@@ -2322,6 +2440,7 @@ const handleDeleteExam = (exam) => {
                 style={[styles.modalButton, { backgroundColor: '#aaa' }]}
                 onPress={() => {
                   setAddExamModalVisible(false);
+                  setExamFormErrors({});
                   setExamForm({
                     name: '',
                     start_date: '',
@@ -2338,9 +2457,11 @@ const handleDeleteExam = (exam) => {
           </View>
         </View>
       </Modal>
-      {/* Edit Exam Modal */}
+      )}
+      {/* Edit Exam Modal - Only render when visible */}
+      {editExamModalVisible && (
       <Modal
-        visible={editExamModalVisible}
+        visible={true}
         animationType="slide"
         transparent={true}
         onRequestClose={() => setEditExamModalVisible(false)}
@@ -2359,61 +2480,17 @@ const handleDeleteExam = (exam) => {
 
               <Text style={styles.inputLabel}>Classes * (Select multiple)</Text>
               <View style={styles.classSelectionGrid}>
-                {classes.map(classItem => {
-                  const isSelected = (examForm.selected_classes || []).includes(classItem.id);
+                {Array.isArray(classes) && classes.length > 0 ? classes.map(classItem => {
+                  const isSelected = Array.isArray(examForm.selected_classes) && examForm.selected_classes.includes(classItem.id);
                   return (
-                    <TouchableOpacity
+                    <ClassSelectionItem
                       key={classItem.id}
-                      style={[
-                        styles.classSelectionItem,
-                        isSelected && styles.classSelectionItemSelected
-                      ]}
-                      onPress={() => {
-                        if (isSelected) {
-                          // Remove class from selection
-                          setExamForm(prev => ({
-                            ...prev,
-                            selected_classes: prev.selected_classes.filter(id => id !== classItem.id)
-                          }));
-                        } else {
-                          // Add class to selection
-                          setExamForm(prev => ({
-                            ...prev,
-                            selected_classes: [...prev.selected_classes, classItem.id]
-                          }));
-                        }
-                      }}
-                    >
-                      <View style={styles.classItemContent}>
-                        <View style={styles.classItemInfo}>
-                          <Text style={[
-                            styles.classItemName,
-                            isSelected && styles.classItemNameSelected
-                          ]}>
-                            {classItem.class_name}
-                          </Text>
-                          <Text style={[
-                            styles.classItemSection,
-                            isSelected && styles.classItemSectionSelected
-                          ]}>
-                            Section: {classItem.section}
-                          </Text>
-                        </View>
-                        <View style={[
-                          styles.classSelectionIndicator,
-                          isSelected && styles.classSelectionIndicatorSelected
-                        ]}>
-                          <Ionicons 
-                            name={isSelected ? "checkmark-circle" : "add-circle-outline"} 
-                            size={24} 
-                            color={isSelected ? "#fff" : "#2196F3"} 
-                          />
-                        </View>
-                      </View>
-                    </TouchableOpacity>
+                      classItem={classItem}
+                      isSelected={isSelected}
+                      onToggle={() => handleToggleClassSelection(classItem.id)}
+                    />
                   );
-                })}
-                {classes.length === 0 && (
+                }) : (
                   <View style={styles.noClassesAvailable}>
                     <Text style={styles.noClassesText}>No classes available</Text>
                     <Text style={styles.noClassesSubText}>Please add classes first</Text>
@@ -2532,14 +2609,12 @@ const handleDeleteExam = (exam) => {
           </View>
         </View>
       </Modal>
+      )}
 
-
-
-
-
-      {/* Marks Entry Modal */}
+      {/* Marks Entry Modal - Only render when visible */}
+      {marksModalVisible && (
       <Modal
-        visible={marksModalVisible}
+        visible={true}
         animationType="slide"
         transparent={true}
         onRequestClose={() => setMarksModalVisible(false)}
@@ -2609,7 +2684,7 @@ const handleDeleteExam = (exam) => {
                     <View style={styles.tableHeader}>
                       <View style={styles.studentHeaderCell}>
                         <Text style={styles.tableHeaderText}>Student</Text>
-                        <TouchableOpacity style={styles.addStudentButton} onPress={handleAddStudent}>
+                        <TouchableOpacity style={styles.addStudentButton} onPress={handleOpenAddStudentModal}>
                           <Ionicons name="add" size={16} color="#4CAF50" />
                         </TouchableOpacity>
                       </View>
@@ -2770,10 +2845,12 @@ const handleDeleteExam = (exam) => {
           </View>
         </View>
       </Modal>
+      )}
 
-      {/* Class Selection Modal */}
+      {/* Class Selection Modal - Only render when visible */}
+      {classSelectionModalVisible && (
       <Modal
-        visible={classSelectionModalVisible}
+        visible={true}
         animationType="slide"
         transparent={true}
         onRequestClose={() => setClassSelectionModalVisible(false)}
@@ -2833,10 +2910,12 @@ const handleDeleteExam = (exam) => {
           </View>
         </View>
       </Modal>
+      )}
 
-      {/* Add Class Modal */}
+      {/* Add Class Modal - Only render when visible */}
+      {addClassModalVisible && (
       <Modal
-        visible={addClassModalVisible}
+        visible={true}
         animationType="slide"
         transparent={true}
       >
@@ -2874,10 +2953,12 @@ const handleDeleteExam = (exam) => {
           </View>
         </View>
       </Modal>
+      )}
 
-      {/* Add Student Modal - Enhanced */}
+      {/* Add Student Modal - Enhanced - Only render when visible */}
+      {addStudentModalVisible && (
       <Modal
-        visible={addStudentModalVisible}
+        visible={true}
         animationType="slide"
         transparent={true}
         onRequestClose={() => {
@@ -3036,10 +3117,12 @@ const handleDeleteExam = (exam) => {
           </View>
         </View>
       </Modal>
+      )}
 
-      {/* Add Subject Modal */}
+      {/* Add Subject Modal - Only render when visible */}
+      {addSubjectModalVisible && (
       <Modal
-        visible={addSubjectModalVisible}
+        visible={true}
         animationType="slide"
         transparent={true}
       >
@@ -3077,6 +3160,7 @@ const handleDeleteExam = (exam) => {
           </View>
         </View>
       </Modal>
+      )}
 
     </View>
   );

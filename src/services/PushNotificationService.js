@@ -48,6 +48,12 @@ class PushNotificationService {
       this.currentUserId = userId;
       this.currentUserType = userType;
 
+      // Skip push notifications on web (requires VAPID configuration)
+      if (Platform.OS === 'web') {
+        console.log('ℹ️ Push notifications skipped on web platform');
+        return false;
+      }
+
       // Check if device supports push notifications
       if (!Device.isDevice) {
         console.warn('Push notifications only work on physical devices');
