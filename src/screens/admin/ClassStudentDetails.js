@@ -33,6 +33,7 @@ import { loadLogoWithFallbacks, validateImageData } from '../../utils/robustLogo
 import LogoDisplay from '../../components/LogoDisplay';
 import { useFocusEffect } from '@react-navigation/native';
 import { exportStudentFeeSummaryAdvanced, exportTableDataPDF, EXPORT_FORMATS } from '../../utils/exportUtils';
+import { printIsolatedReceipt, generateIsolatedPDF } from '../../utils/isolatedPrintReceipt';
 
 const ClassStudentDetails = ({ route, navigation }) => {
   const { classData } = route.params;
@@ -1544,7 +1545,6 @@ const ClassStudentDetails = ({ route, navigation }) => {
 
       console.log('🖨️ Starting isolated print process');
       
-      const { printIsolatedReceipt } = await import('../../utils/isolatedPrintReceipt');
       await printIsolatedReceipt(receiptData, schoolDetails);
       
       console.log('✅ Admin - Isolated print completed successfully');
@@ -1558,8 +1558,7 @@ const ClassStudentDetails = ({ route, navigation }) => {
   const handleShareReceipt = async (receiptData) => {
     try {
       console.log('💾 Starting isolated PDF generation');
-      
-      const { generateIsolatedPDF } = await import('../../utils/isolatedPrintReceipt');
+
       await generateIsolatedPDF(receiptData, schoolDetails);
       
       console.log('✅ Admin - Isolated PDF generated and shared successfully');

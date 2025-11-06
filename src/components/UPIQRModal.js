@@ -25,6 +25,7 @@ import { formatReferenceNumberForDisplay } from '../utils/referenceNumberGenerat
 import { getCurrentAcademicYear } from '../utils/academicYearUtils';
 import * as Print from 'expo-print';
 import * as FileSystem from 'expo-file-system';
+import { generateWebReceiptHTML, openReceiptInNewWindow } from '../utils/webReceiptGenerator';
 
 const UPIQRModal = ({ 
   visible, 
@@ -501,8 +502,6 @@ const UPIQRModal = ({
   const generateInstantReceipt = async (feeRecord, outstandingAmount = 0) => {
     try {
       // Use the new web receipt generator for consistent format
-      const { generateWebReceiptHTML } = await import('../utils/webReceiptGenerator');
-      
       const receiptHTML = await generateWebReceiptHTML({
         schoolDetails,
         studentData: {
@@ -674,7 +673,6 @@ const UPIQRModal = ({
       // Check if running in web environment
       if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
         // Web environment - open in new window
-        const { openReceiptInNewWindow } = await import('../utils/webReceiptGenerator');
         openReceiptInNewWindow(receiptData.html, `Receipt - ${receiptData.studentName}`);
       } else {
         // Mobile environment - generate PDF and share

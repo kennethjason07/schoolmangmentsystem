@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useMemo } from 'react';
 
 // Simple generic cache hook with TTL
 // get(key, maxAgeMs?), set(key, data), invalidate(key), clear(), stats()
@@ -41,5 +41,6 @@ export default function useDataCache(defaultTtlMs = 5 * 60 * 1000) {
 
   const stats = useCallback(() => ({ size: ref.current.size }), []);
 
-  return { get, set, invalidate, clear, stats };
+  // Return a stable reference to prevent infinite re-renders
+  return useMemo(() => ({ get, set, invalidate, clear, stats }), [get, set, invalidate, clear, stats]);
 }

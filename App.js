@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { runNetworkDiagnostics } from './src/utils/networkDiagnostics';
+// import { runNetworkDiagnostics } from './src/utils/networkDiagnostics';
 import { enableRoleIdInterceptor } from './src/utils/roleIdInterceptor';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -12,9 +12,9 @@ import AppNavigator from './src/navigation/AppNavigator';
 
 export default function App() {
   useEffect(() => {
-    // Run network diagnostics
-    runNetworkDiagnostics();
-    
+    // Run network diagnostics (disabled for web build compatibility)
+    // runNetworkDiagnostics();
+
     // Enable universal role_id validation interceptor
     enableRoleIdInterceptor();
   }, []);

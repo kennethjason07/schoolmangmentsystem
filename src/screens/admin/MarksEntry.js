@@ -94,6 +94,12 @@ const MarksEntry = () => {
   const [subjectMenuVisible, setSubjectMenuVisible] = useState(null);
   const [showAdmissionNumbers, setShowAdmissionNumbers] = useState(false);
 
+  // Subject-specific max marks overrides
+  const [subjectMaxMarks, setSubjectMaxMarks] = useState({}); // { subjectId: maxMarks }
+  const [maxMarksModalVisible, setMaxMarksModalVisible] = useState(false);
+  const [selectedSubjectForMaxMarks, setSelectedSubjectForMaxMarks] = useState(null);
+  const [tempMaxMarks, setTempMaxMarks] = useState('');
+
   // Load data with enhanced tenant system
   const loadData = useCallback(async () => {
     try {
@@ -126,17 +132,71 @@ const MarksEntry = () => {
 
       if (studentsError) throw studentsError;
 
-      // Load existing marks for this exam using enhanced tenant database
+      // Load existing marks for this exam - use direct query to ensure no limits
       console.log('🔍 Loading marks via enhanced tenant database for exam:', exam.id);
-      const { data: marksData, error: marksError } = await tenantDatabase.read('marks', { exam_id: exam.id }, 'id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks');
+      console.log('🔍 Query params:', {
+        tenant_id: effectiveTenantId,
+        exam_id: exam.id
+      });
 
-      if (marksError) throw marksError;
-      
+      // Use direct Supabase query with explicit range to get ALL marks
+      let { data: marksData, error: marksError, count } = await supabase
+        .from('marks')
+        .select('id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks', { count: 'exact' })
+        .eq('tenant_id', effectiveTenantId)
+        .eq('exam_id', exam.id)
+        .order('student_id');
+
+      console.log('📊 Marks query result:', {
+        data: marksData,
+        error: marksError,
+        count: count,
+        dataLength: marksData?.length || 0
+      });
+
+      // If no marks found with tenant filter, try without tenant filter to diagnose
+      if ((!marksData || marksData.length === 0) && !marksError) {
+        console.log('⚠️ No marks found with tenant filter. Checking if marks exist without tenant filter...');
+        const { data: allExamMarks, count: allCount } = await supabase
+          .from('marks')
+          .select('id, student_id, exam_id, subject_id, marks_obtained, grade, max_marks, remarks, tenant_id', { count: 'exact' })
+          .eq('exam_id', exam.id);
+
+        console.log('📊 All marks for this exam (no tenant filter):', {
+          count: allCount,
+          dataLength: allExamMarks?.length || 0,
+          sampleMarks: allExamMarks?.slice(0, 3),
+          tenantIds: allExamMarks ? [...new Set(allExamMarks.map(m => m.tenant_id))] : []
+        });
+
+        // Use all marks if they exist (backward compatibility for marks saved without tenant_id)
+        if (allExamMarks && allExamMarks.length > 0) {
+          console.log('✅ Using marks without tenant filter for backward compatibility');
+          marksData = allExamMarks;
+        }
+      }
+
+      if (marksError) {
+        console.error('❌ Error loading marks:', marksError);
+        throw marksError;
+      }
+
       console.log('📬 Loaded data:', {
         subjects: subjectsData?.length || 0,
         students: studentsData?.length || 0,
-        marks: marksData?.length || 0
+        marks: marksData?.length || 0,
+        expectedMarks: (studentsData?.length || 0) * (subjectsData?.length || 0)
       });
+
+      // Log details about loaded marks
+      if (marksData && marksData.length > 0) {
+        console.log('📊 Marks distribution:', {
+          totalMarks: marksData.length,
+          uniqueStudents: new Set(marksData.map(m => m.student_id)).size,
+          uniqueSubjects: new Set(marksData.map(m => m.subject_id)).size,
+          sampleMarks: marksData.slice(0, 3)
+        });
+      }
       
       // Set validated data
       let processedSubjects = subjectsData || [];
@@ -173,6 +233,12 @@ const MarksEntry = () => {
         console.log('✅ [MarksEntry] All default subjects saved:', savedSubjects.length);
       }
 
+      // Sort subjects alphabetically by name
+      processedSubjects = processedSubjects.sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+      );
+      console.log('📋 [MarksEntry] Subjects sorted alphabetically:', processedSubjects.map(s => s.name));
+
       setSubjects(processedSubjects);
       setStudents(studentsData || []);
       setMarks(marksData || []);
@@ -183,9 +249,51 @@ const MarksEntry = () => {
         if (!formData[mark.student_id]) {
           formData[mark.student_id] = {};
         }
-        formData[mark.student_id][mark.subject_id] = mark.marks_obtained.toString();
+        // Convert -1 (absent) to 'AB', -2 (not applicable) to 'NA' for display, otherwise show the marks
+        if (mark.marks_obtained === -1) {
+          formData[mark.student_id][mark.subject_id] = 'AB';
+        } else if (mark.marks_obtained === -2) {
+          formData[mark.student_id][mark.subject_id] = 'NA';
+        } else {
+          formData[mark.student_id][mark.subject_id] = mark.marks_obtained.toString();
+        }
       });
       setMarksForm(formData);
+
+      // Detect subject-specific max marks overrides from existing marks
+      const overridesFromMarks = {};
+      const examDefaultMaxMarks = exam?.max_marks || 100;
+
+      (marksData || []).forEach(mark => {
+        // If this mark has a different max_marks than the exam default, it's an override
+        if (mark.max_marks && mark.max_marks !== examDefaultMaxMarks) {
+          // Only set if we haven't already set it or if it's consistent
+          if (!overridesFromMarks[mark.subject_id]) {
+            overridesFromMarks[mark.subject_id] = mark.max_marks;
+          }
+        }
+      });
+
+      // Load overrides from localStorage (for overrides set before marks are saved)
+      const localStorageKey = `subject_max_marks_${exam.id}`;
+      let overridesFromStorage = {};
+      try {
+        const stored = localStorage.getItem(localStorageKey);
+        if (stored) {
+          overridesFromStorage = JSON.parse(stored);
+          console.log('📦 [MarksEntry] Loaded overrides from localStorage:', overridesFromStorage);
+        }
+      } catch (error) {
+        console.warn('⚠️ [MarksEntry] Failed to load overrides from localStorage:', error);
+      }
+
+      // Merge overrides: marks take precedence over localStorage
+      const mergedOverrides = { ...overridesFromStorage, ...overridesFromMarks };
+
+      if (Object.keys(mergedOverrides).length > 0) {
+        console.log('📊 [MarksEntry] Final merged max marks overrides:', mergedOverrides);
+        setSubjectMaxMarks(mergedOverrides);
+      }
       
       console.log('✅ [MarksEntry] Data loaded successfully');
 
@@ -217,10 +325,10 @@ const MarksEntry = () => {
 
   // Handle marks change with validation
   const handleMarksChange = (studentId, subjectId, value) => {
-    // Get exam max marks for validation
-    const maxMarks = exam?.max_marks || 100;
+    // Get max marks: use subject-specific override if exists, otherwise use exam default
+    const maxMarks = subjectMaxMarks[subjectId] || exam?.max_marks || 100;
 
-    // Allow empty string (user is typing), or valid numbers/decimals 0 to exam max_marks (inclusive)
+    // Allow empty string (user is typing), or valid numbers/decimals 0 to max_marks (inclusive)
     // Also allow single decimal point for typing (e.g., "22.")
     if (value !== '' && value !== '.') {
       const numValue = parseFloat(value);
@@ -275,7 +383,8 @@ const MarksEntry = () => {
       const marksToSave = [];
       console.log('📝 [MarksEntry] Processing marks form data...', {
         marksForm: marksForm,
-        examMaxMarks: exam.max_marks || 100
+        examMaxMarks: exam.max_marks || 100,
+        subjectMaxMarksOverrides: subjectMaxMarks
       });
 
       Object.entries(marksForm).forEach(([studentId, subjectMarks]) => {
@@ -296,9 +405,56 @@ const MarksEntry = () => {
             return;
           }
 
-          if (marksObtained && !isNaN(parseFloat(marksObtained))) {
+          // Check if marks is 'AB' (absent) or 'NA' (not applicable)
+          const upperMarks = marksObtained?.toString().toUpperCase();
+          const isAbsent = upperMarks && (upperMarks === 'AB' || upperMarks === 'A');
+          const isNotApplicable = upperMarks && (upperMarks === 'NA' || upperMarks === 'N');
+
+          if (isAbsent) {
+            // Handle absent student
+            const maxMarks = subjectMaxMarks[subjectId] || exam.max_marks || 100;
+
+            const markRecord = {
+              student_id: studentId,
+              exam_id: exam.id,
+              subject_id: subjectId,
+              marks_obtained: -1, // Use -1 to indicate absent
+              grade: 'AB', // Absent grade
+              max_marks: maxMarks,
+              remarks: 'Absent' // Mark as absent in remarks
+            };
+
+            console.log('📝 [MarksEntry] Adding absent mark record:', markRecord);
+            marksToSave.push(markRecord);
+          } else if (isNotApplicable) {
+            // Handle not applicable (for optional subjects, etc.)
+            const maxMarks = subjectMaxMarks[subjectId] || exam.max_marks || 100;
+
+            const markRecord = {
+              student_id: studentId,
+              exam_id: exam.id,
+              subject_id: subjectId,
+              marks_obtained: -2, // Use -2 to indicate not applicable
+              grade: 'NA', // Not applicable grade
+              max_marks: maxMarks,
+              remarks: 'Not Applicable' // Mark as not applicable in remarks
+            };
+
+            console.log('📝 [MarksEntry] Adding not applicable mark record:', markRecord);
+            marksToSave.push(markRecord);
+          } else if (marksObtained && !isNaN(parseFloat(marksObtained))) {
             const marksValue = parseFloat(marksObtained);
-            const maxMarks = exam.max_marks || 100; // Use exam's max_marks
+            // Use subject-specific max marks if exists, otherwise use exam's default max_marks
+            const maxMarks = subjectMaxMarks[subjectId] || exam.max_marks || 100;
+            const hasOverride = subjectMaxMarks[subjectId] !== undefined;
+
+            console.log(`📊 [MarksEntry] Subject ${subjectId} max marks:`, {
+              override: subjectMaxMarks[subjectId],
+              examDefault: exam.max_marks,
+              using: maxMarks,
+              hasOverride
+            });
+
             const percentage = (marksValue / maxMarks) * 100;
             let grade = 'F';
             if (percentage >= 90) grade = 'A+';
@@ -313,7 +469,7 @@ const MarksEntry = () => {
               subject_id: subjectId,
               marks_obtained: marksValue,
               grade: grade,
-              max_marks: maxMarks, // Store exam's max_marks
+              max_marks: maxMarks, // Store subject-specific or exam's default max_marks
               remarks: exam.name || 'Exam' // Store exam name as remarks
             };
 
@@ -377,33 +533,72 @@ const MarksEntry = () => {
   // Separate function to handle the actual saving logic
   const saveFinalMarks = async (marksToSave) => {
     try {
-      // Delete existing marks for this exam first using enhanced tenant system
-      console.log('🗚 [MarksEntry] Deleting existing marks for exam:', exam.id);
-      const deleteResult = await tenantDatabase.delete('marks', { exam_id: exam.id });
-
-      console.log('🗚 [MarksEntry] Delete result:', deleteResult);
-      if (deleteResult.error) {
-        console.error('❌ [MarksEntry] Delete error:', deleteResult.error);
-        throw deleteResult.error;
+      // Validate tenant readiness before saving
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        throw new Error('Tenant validation failed: ' + tenantValidation.reason);
       }
 
-      // Insert new marks using enhanced tenant database
-      console.log('💾 [MarksEntry] Inserting new marks:', marksToSave.length, 'records');
-      const insertedMarks = [];
-      for (const markRecord of marksToSave) {
-        const { data, error } = await tenantDatabase.create('marks', markRecord);
+      const { effectiveTenantId } = tenantValidation;
 
-        if (error) {
-          console.error('❌ [MarksEntry] Insert error:', error);
-          throw error;
-        }
+      // Use UPSERT instead of DELETE + INSERT to handle duplicates gracefully
+      console.log('💾 [MarksEntry] Upserting marks:', marksToSave.length, 'records');
+      console.log('📊 [MarksEntry] Sample mark to save:', marksToSave[0]);
 
-        if (data) insertedMarks.push(data);
+      // Add tenant_id to all marks
+      const marksWithTenant = marksToSave.map(mark => ({
+        ...mark,
+        tenant_id: effectiveTenantId
+      }));
+
+      // First, delete all existing marks for this exam to handle removed entries
+      // Then use UPSERT which will handle both INSERT and UPDATE gracefully
+      console.log('🗑️ [MarksEntry] Deleting existing marks for exam:', exam.id);
+      const { error: deleteError } = await supabase
+        .from('marks')
+        .delete()
+        .eq('tenant_id', effectiveTenantId)
+        .eq('exam_id', exam.id);
+
+      if (deleteError) {
+        console.error('❌ [MarksEntry] Delete error:', deleteError);
+        // Don't throw - try upsert anyway as it might still work
       }
 
-      console.log('💾 [MarksEntry] Insert result:', {
-        recordsInserted: insertedMarks.length
+      // Use Supabase's upsert method which handles INSERT OR UPDATE automatically
+      // This will create new records or update existing ones
+      const { data: upsertedMarks, error: upsertError } = await supabase
+        .from('marks')
+        .upsert(marksWithTenant, {
+          onConflict: 'student_id,exam_id,subject_id',
+          ignoreDuplicates: false // Update on conflict instead of ignoring
+        })
+        .select();
+
+      if (upsertError) {
+        console.error('❌ [MarksEntry] Upsert error:', upsertError);
+        throw upsertError;
+      }
+
+      const insertedMarks = upsertedMarks || [];
+
+      console.log('💾 [MarksEntry] Upsert result:', {
+        recordsUpserted: insertedMarks.length,
+        sampleTenantIds: [...new Set(insertedMarks.map(m => m.tenant_id))],
+        examId: insertedMarks[0]?.exam_id
       });
+
+      // Log first upserted mark to verify
+      if (insertedMarks.length > 0) {
+        console.log('✅ [MarksEntry] First mark upserted successfully:', {
+          id: insertedMarks[0].id,
+          student_id: insertedMarks[0].student_id,
+          exam_id: insertedMarks[0].exam_id,
+          subject_id: insertedMarks[0].subject_id,
+          marks_obtained: insertedMarks[0].marks_obtained,
+          tenant_id: insertedMarks[0].tenant_id
+        });
+      }
 
       // Send marks notifications to parents silently in background
       try {
@@ -418,6 +613,31 @@ const MarksEntry = () => {
         console.error('❌ [MarksEntry] Error sending bulk marks notifications:', notificationError);
       }
 
+      // Sync localStorage with database (marks now contain the truth)
+      // Keep localStorage overrides only for subjects that have no marks saved
+      const localStorageKey = `subject_max_marks_${exam.id}`;
+      try {
+        const savedSubjectIds = new Set(insertedMarks.map(m => m.subject_id));
+        const updatedStorage = {};
+
+        // Keep only overrides for subjects without saved marks
+        Object.entries(subjectMaxMarks).forEach(([subjectId, maxMarks]) => {
+          if (!savedSubjectIds.has(subjectId)) {
+            updatedStorage[subjectId] = maxMarks;
+          }
+        });
+
+        if (Object.keys(updatedStorage).length > 0) {
+          localStorage.setItem(localStorageKey, JSON.stringify(updatedStorage));
+          console.log('💾 [MarksEntry] Updated localStorage after save:', updatedStorage);
+        } else {
+          localStorage.removeItem(localStorageKey);
+          console.log('🗑️ [MarksEntry] Cleared localStorage (all overrides now in database)');
+        }
+      } catch (error) {
+        console.warn('⚠️ [MarksEntry] Failed to sync localStorage:', error);
+      }
+
       // Show success message with details
       Alert.alert(
         '✓ Success',
@@ -428,6 +648,11 @@ const MarksEntry = () => {
       // Clear unsaved changes indicator
       setHasUnsavedChanges(false);
       setChangedCells(new Set());
+
+      // Reload data to verify marks were saved correctly
+      console.log('🔄 [MarksEntry] Reloading data to verify marks were saved...');
+      await loadData();
+      console.log('✅ [MarksEntry] Data reload completed after save');
     } catch (error) {
       console.error('❌ [MarksEntry] Error saving marks in saveFinalMarks:', error);
       Alert.alert('Error', `Failed to save marks: ${error.message}`);
@@ -617,19 +842,62 @@ const MarksEntry = () => {
   };
 
   const isMarkInvalid = (value) => {
+    // Allow 'AB' for absent and 'NA' for not applicable
+    const upperValue = value?.toString().toUpperCase();
+    if (upperValue && (upperValue === 'AB' || upperValue === 'A' || upperValue === 'NA' || upperValue === 'N')) {
+      return false;
+    }
     return value && (isNaN(parseFloat(value)) || parseFloat(value) > 100 || parseFloat(value) < 0);
   };
 
   const handleMarksChangeImproved = (studentId, subjectId, value) => {
-    // Get exam max marks for validation
-    const maxMarks = exam?.max_marks || 100;
+    // Get max marks: use subject-specific override if exists, otherwise use exam default
+    const maxMarks = subjectMaxMarks[subjectId] || exam?.max_marks || 100;
 
-    // Allow empty string (user is typing), or valid numbers/decimals 0 to exam max_marks (inclusive)
-    // Also allow single decimal point for typing (e.g., "22.")
+    // Convert to uppercase for consistent handling
+    const upperValue = value.toUpperCase();
+
+    // Allow empty string (user is typing), single decimal point, 'AB' for absent, or 'NA' for not applicable
+    // Also allow 'A' or 'N' while typing
     if (value !== '' && value !== '.') {
+      // Check if it's 'AB' (absent) or partial entry 'A'
+      if (upperValue === 'AB' || upperValue === 'A') {
+        // Store as 'AB' for absent
+        const absentValue = upperValue === 'A' ? 'A' : 'AB';
+        setMarksForm(prev => ({
+          ...prev,
+          [studentId]: {
+            ...prev[studentId],
+            [subjectId]: absentValue
+          }
+        }));
+        const cellKey = `${studentId}-${subjectId}`;
+        setChangedCells(prev => new Set(prev).add(cellKey));
+        setHasUnsavedChanges(true);
+        return;
+      }
+
+      // Check if it's 'NA' (not applicable) or partial entry 'N'
+      if (upperValue === 'NA' || upperValue === 'N') {
+        // Store as 'NA' for not applicable
+        const naValue = upperValue === 'N' ? 'N' : 'NA';
+        setMarksForm(prev => ({
+          ...prev,
+          [studentId]: {
+            ...prev[studentId],
+            [subjectId]: naValue
+          }
+        }));
+        const cellKey = `${studentId}-${subjectId}`;
+        setChangedCells(prev => new Set(prev).add(cellKey));
+        setHasUnsavedChanges(true);
+        return;
+      }
+
+      // Otherwise validate as number
       const numValue = parseFloat(value);
       if (isNaN(numValue) || numValue < 0 || numValue > maxMarks) {
-        Alert.alert('Error', `Please enter valid marks (0-${maxMarks})`);
+        Alert.alert('Error', `Please enter valid marks (0-${maxMarks}), 'AB' for absent, or 'NA' for not applicable`);
         return;
       }
     }
@@ -735,6 +1003,120 @@ const MarksEntry = () => {
     return `Roll: ${student.roll_no || 'N/A'}`;
   };
 
+  // Handle setting max marks for a specific subject
+  const handleSetSubjectMaxMarks = (subject) => {
+    setSelectedSubjectForMaxMarks(subject);
+    // Set current value: override if exists, otherwise exam default
+    const currentMaxMarks = subjectMaxMarks[subject.id] || exam?.max_marks || 100;
+    setTempMaxMarks(currentMaxMarks.toString());
+    setMaxMarksModalVisible(true);
+  };
+
+  // Save subject-specific max marks
+  const handleSaveSubjectMaxMarks = () => {
+    if (!selectedSubjectForMaxMarks) return;
+
+    const maxMarksValue = parseInt(tempMaxMarks);
+
+    // Validate input
+    if (!tempMaxMarks || isNaN(maxMarksValue) || maxMarksValue <= 0) {
+      Alert.alert('Error', 'Please enter a valid positive number for max marks');
+      return;
+    }
+
+    const examDefaultMaxMarks = exam?.max_marks || 100;
+
+    console.log('💾 [MarksEntry] Saving subject max marks:', {
+      subjectId: selectedSubjectForMaxMarks.id,
+      subjectName: selectedSubjectForMaxMarks.name,
+      newMaxMarks: maxMarksValue,
+      examDefault: examDefaultMaxMarks
+    });
+
+    // Update subject max marks
+    setSubjectMaxMarks(prev => {
+      const updated = { ...prev };
+
+      // If it's the same as exam default, remove the override
+      if (maxMarksValue === examDefaultMaxMarks) {
+        delete updated[selectedSubjectForMaxMarks.id];
+        console.log('🔄 [MarksEntry] Removed override, using exam default');
+        Alert.alert(
+          'Success',
+          `Max marks for "${selectedSubjectForMaxMarks.name}" reset to exam default (${examDefaultMaxMarks})`
+        );
+      } else {
+        updated[selectedSubjectForMaxMarks.id] = maxMarksValue;
+        console.log('✅ [MarksEntry] Override set:', updated);
+        Alert.alert(
+          'Success',
+          `Max marks for "${selectedSubjectForMaxMarks.name}" set to ${maxMarksValue}`
+        );
+      }
+
+      // Save to localStorage for persistence across page reloads
+      const localStorageKey = `subject_max_marks_${exam.id}`;
+      try {
+        if (Object.keys(updated).length > 0) {
+          localStorage.setItem(localStorageKey, JSON.stringify(updated));
+          console.log('💾 [MarksEntry] Saved overrides to localStorage:', updated);
+        } else {
+          localStorage.removeItem(localStorageKey);
+          console.log('🗑️ [MarksEntry] Removed overrides from localStorage (all reset)');
+        }
+      } catch (error) {
+        console.warn('⚠️ [MarksEntry] Failed to save overrides to localStorage:', error);
+      }
+
+      return updated;
+    });
+
+    // Mark as having unsaved changes
+    setHasUnsavedChanges(true);
+
+    // Close modal
+    setMaxMarksModalVisible(false);
+    setSelectedSubjectForMaxMarks(null);
+    setTempMaxMarks('');
+  };
+
+  // Reset subject max marks to exam default
+  const handleResetSubjectMaxMarks = () => {
+    if (!selectedSubjectForMaxMarks) return;
+
+    setSubjectMaxMarks(prev => {
+      const updated = { ...prev };
+      delete updated[selectedSubjectForMaxMarks.id];
+
+      // Save to localStorage
+      const localStorageKey = `subject_max_marks_${exam.id}`;
+      try {
+        if (Object.keys(updated).length > 0) {
+          localStorage.setItem(localStorageKey, JSON.stringify(updated));
+          console.log('💾 [MarksEntry] Saved overrides to localStorage after reset:', updated);
+        } else {
+          localStorage.removeItem(localStorageKey);
+          console.log('🗑️ [MarksEntry] Removed all overrides from localStorage');
+        }
+      } catch (error) {
+        console.warn('⚠️ [MarksEntry] Failed to update localStorage:', error);
+      }
+
+      return updated;
+    });
+
+    const examDefaultMaxMarks = exam?.max_marks || 100;
+    Alert.alert(
+      'Reset',
+      `Max marks for "${selectedSubjectForMaxMarks.name}" reset to exam default (${examDefaultMaxMarks})`
+    );
+
+    setMaxMarksModalVisible(false);
+    setSelectedSubjectForMaxMarks(null);
+    setTempMaxMarks('');
+    setHasUnsavedChanges(true);
+  };
+
 
   if (!exam || !examClass) {
     return (
@@ -779,13 +1161,33 @@ const MarksEntry = () => {
             <View style={styles.studentNameColumn}>
               <Text style={styles.headerText}>Student Name</Text>
             </View>
-            {subjects.map((subject) => (
-              <View key={subject.id} style={styles.subjectColumn}>
-                <Text style={styles.headerText} numberOfLines={2}>
-                  {subject.name}
-                </Text>
-              </View>
-            ))}
+            {subjects.map((subject) => {
+              const subjectMaxMarksValue = subjectMaxMarks[subject.id] || exam?.max_marks || 100;
+              const hasOverride = subjectMaxMarks[subject.id] !== undefined;
+
+              return (
+                <View key={subject.id} style={styles.subjectColumn}>
+                  <Text style={styles.headerText} numberOfLines={2}>
+                    {subject.name}
+                  </Text>
+                  <View style={styles.maxMarksContainer}>
+                    <Text style={[styles.maxMarksText, hasOverride && styles.maxMarksOverride]}>
+                      Max: {subjectMaxMarksValue}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => handleSetSubjectMaxMarks(subject)}
+                      style={styles.maxMarksButton}
+                    >
+                      <Ionicons
+                        name={hasOverride ? "create" : "add-circle-outline"}
+                        size={16}
+                        color={hasOverride ? "#FF9800" : "#2196F3"}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
           </View>
           
           {/* Table Body with vertical scroll */}
@@ -834,8 +1236,7 @@ const MarksEntry = () => {
                         placeholder=""
                         value={value}
                         onChangeText={(newValue) => handleMarksChangeImproved(student.id, subject.id, newValue)}
-                        keyboardType={Platform.OS === 'web' ? 'numeric' : 'decimal-pad'}
-                        inputMode={Platform.OS === 'web' ? 'decimal' : undefined}
+                        keyboardType="default"
                         maxLength={6}
                         returnKeyType="next"
                         onSubmitEditing={() => focusNextInput(studentIndex, subjectIndex)}
@@ -843,7 +1244,7 @@ const MarksEntry = () => {
                         // TextInput performance optimizations
                         autoCorrect={false}
                         spellCheck={false}
-                        autoCapitalize="none"
+                        autoCapitalize="characters"
                         blurOnSubmit={false}
                         underlineColorAndroid="transparent"
                       />
@@ -1018,7 +1419,61 @@ const MarksEntry = () => {
           </View>
         </View>
       )}
-      
+
+      {/* Set Subject Max Marks Modal */}
+      {maxMarksModalVisible && selectedSubjectForMaxMarks && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.addModal}>
+            <Text style={styles.addModalTitle}>Set Max Marks</Text>
+            <Text style={styles.bulkFillDescription}>
+              Set maximum marks for "{selectedSubjectForMaxMarks.name}"
+              {'\n'}Exam default: {exam?.max_marks || 100}
+            </Text>
+
+            <Text style={styles.addLabel}>Maximum Marks</Text>
+            <TextInput
+              style={styles.addInput}
+              placeholder="e.g., 50, 75, 100"
+              value={tempMaxMarks}
+              onChangeText={setTempMaxMarks}
+              keyboardType={Platform.OS === 'web' ? 'numeric' : 'number-pad'}
+              inputMode={Platform.OS === 'web' ? 'numeric' : undefined}
+              maxLength={4}
+              autoFocus={true}
+            />
+
+            <View style={styles.addModalButtons}>
+              <TouchableOpacity
+                style={[styles.addModalButton, styles.cancelButton]}
+                onPress={() => {
+                  setMaxMarksModalVisible(false);
+                  setSelectedSubjectForMaxMarks(null);
+                  setTempMaxMarks('');
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              {subjectMaxMarks[selectedSubjectForMaxMarks.id] && (
+                <TouchableOpacity
+                  style={[styles.addModalButton, { backgroundColor: '#FF5722' }]}
+                  onPress={handleResetSubjectMaxMarks}
+                >
+                  <Text style={styles.saveButtonText}>Reset</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[styles.addModalButton, styles.saveButton]}
+                onPress={handleSaveSubjectMaxMarks}
+              >
+                <Text style={styles.saveButtonText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
       <FloatingRefreshButton 
         onPress={loadData}
         refreshing={loading}
@@ -2069,6 +2524,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
+  },
+
+  // Max marks container and styles
+  maxMarksContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    gap: 4,
+  },
+  maxMarksText: {
+    fontSize: 11,
+    color: '#666',
+    fontWeight: '500',
+  },
+  maxMarksOverride: {
+    color: '#FF9800',
+    fontWeight: '700',
+  },
+  maxMarksButton: {
+    padding: 2,
+    borderRadius: 10,
+    backgroundColor: 'rgba(33, 150, 243, 0.1)',
   },
 });
 

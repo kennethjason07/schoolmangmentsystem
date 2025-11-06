@@ -38,6 +38,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import FloatingRefreshButton from '../../components/FloatingRefreshButton';
+import { generateWebReceiptHTML } from '../../utils/webReceiptGenerator';
 
 const StationaryManagement = ({ navigation }) => {
   const { user } = useAuth();
@@ -644,8 +645,6 @@ const StationaryManagement = ({ navigation }) => {
   const generateReceiptHTML = async (receipt) => {
     try {
       // Use the new web receipt generator for demo bill format
-      const { generateWebReceiptHTML } = await import('../../utils/webReceiptGenerator');
-      
       return await generateWebReceiptHTML({
         schoolDetails,
         studentData: {

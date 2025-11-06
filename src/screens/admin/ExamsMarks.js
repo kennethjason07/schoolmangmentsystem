@@ -62,6 +62,7 @@ import { useAuth } from '../../utils/AuthContext';
 import { useFocusEffect } from '@react-navigation/native';
 import useDataCache from '../../hooks/useDataCache';
 import { batchInsert, batchUpsert, batchReplace, batchWithTenant } from '../../utils/batchOperations';
+import { convertToCSV, saveFile, generateFileName } from '../../utils/exportUtils';
 // import { runTenantDataDiagnostics } from '../../utils/tenantDataDiagnostic';
 
 // Simple debounce utility
@@ -475,17 +476,34 @@ const ExamsMarks = () => {
       
       const { effectiveTenantId } = tenantValidation;
       console.log('✅ [ExamsMarks] Using effective tenant ID for marks:', effectiveTenantId);
-      
+
       console.log('🔍 MARKS LOAD DEBUG - Loading marks via enhanced tenant database');
-      const { data: marksData, error } = await tenantDatabase.read('marks', {}, '*');
-      
+      let { data: marksData, error } = await tenantDatabase.read('marks', {}, '*');
+
       if (error) {
         console.error('❌ MARKS LOAD ERROR - Database error:', error);
         throw error;
       }
-      
+
       console.log('📦 MARKS LOAD DEBUG - Loaded marks:', marksData?.length, 'items');
       console.log('📊 MARKS LOAD DEBUG - Sample marks data:', marksData?.slice(0, 3));
+
+      // Fallback: If no marks found with tenant filter, try without tenant filter
+      if (!marksData || marksData.length === 0) {
+        console.log('⚠️ MARKS LOAD DEBUG - No marks found with tenant filter. Checking without tenant filter...');
+        const { data: allMarks, error: allMarksError } = await supabase
+          .from('marks')
+          .select('*');
+
+        if (!allMarksError && allMarks && allMarks.length > 0) {
+          console.log('📦 MARKS LOAD DEBUG - Found marks without tenant filter:', allMarks.length, 'items');
+          console.log('📊 MARKS LOAD DEBUG - Tenant IDs in marks:', [...new Set(allMarks.map(m => m.tenant_id))]);
+          console.log('✅ MARKS LOAD DEBUG - Using marks without tenant filter for backward compatibility');
+          marksData = allMarks;
+        } else {
+          console.log('📦 MARKS LOAD DEBUG - No marks found even without tenant filter');
+        }
+      }
       
       // Log marks by exam for debugging
       if (marksData && marksData.length > 0) {
@@ -932,6 +950,210 @@ const handleDeleteExam = (exam) => {
     );
   };
 
+  // Export marks to CSV for a specific exam
+  const handleExportExamMarks = async (exam) => {
+    try {
+      console.log('📊 [ExamsMarks] Starting CSV export for exam:', exam.name);
+
+      // Validate tenant readiness
+      const tenantValidation = await validateTenantReadiness();
+      if (!tenantValidation.success) {
+        const errorMsg = 'System not ready. Please try again.';
+        if (Platform.OS === 'web' && window && window.alert) {
+          window.alert(`Error: ${errorMsg}`);
+        } else {
+          Alert.alert('Error', errorMsg);
+        }
+        return;
+      }
+
+      const { effectiveTenantId } = tenantValidation;
+
+      // Get class information
+      const classInfo = exam.classes || classes.find(c => c.id === exam.class_id);
+      if (!classInfo) {
+        const errorMsg = 'Class information not found for this exam';
+        if (Platform.OS === 'web' && window && window.alert) {
+          window.alert(`Error: ${errorMsg}`);
+        } else {
+          Alert.alert('Error', errorMsg);
+        }
+        return;
+      }
+
+      // Load students for this class
+      const { data: studentsData, error: studentsError } = await tenantDatabase.read(
+        'students',
+        { class_id: classInfo.id },
+        'id, admission_no, name, roll_no'
+      );
+
+      if (studentsError) throw studentsError;
+
+      if (!studentsData || studentsData.length === 0) {
+        const errorMsg = 'No students found for this class';
+        if (Platform.OS === 'web' && window && window.alert) {
+          window.alert(`Error: ${errorMsg}`);
+        } else {
+          Alert.alert('Error', errorMsg);
+        }
+        return;
+      }
+
+      // Load subjects for this class
+      const { data: subjectsData, error: subjectsError } = await tenantDatabase.read(
+        'subjects',
+        { class_id: classInfo.id },
+        'id, name'
+      );
+
+      if (subjectsError) throw subjectsError;
+
+      if (!subjectsData || subjectsData.length === 0) {
+        const errorMsg = 'No subjects found for this class';
+        if (Platform.OS === 'web' && window && window.alert) {
+          window.alert(`Error: ${errorMsg}`);
+        } else {
+          Alert.alert('Error', errorMsg);
+        }
+        return;
+      }
+
+      // Sort subjects alphabetically
+      const sortedSubjects = [...subjectsData].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+      );
+
+      // Load marks for this exam
+      const { data: marksData, error: marksError } = await supabase
+        .from('marks')
+        .select('student_id, subject_id, marks_obtained, max_marks, grade')
+        .eq('tenant_id', effectiveTenantId)
+        .eq('exam_id', exam.id);
+
+      if (marksError) throw marksError;
+
+      console.log('📊 [ExamsMarks] Loaded data:', {
+        students: studentsData.length,
+        subjects: sortedSubjects.length,
+        marks: marksData?.length || 0
+      });
+
+      // Create a map for quick mark lookup
+      const marksMap = {};
+      (marksData || []).forEach(mark => {
+        if (!marksMap[mark.student_id]) {
+          marksMap[mark.student_id] = {};
+        }
+        marksMap[mark.student_id][mark.subject_id] = {
+          marks: mark.marks_obtained,
+          maxMarks: mark.max_marks || exam.max_marks || 100
+        };
+      });
+
+      // Prepare CSV data
+      const csvData = studentsData.map(student => {
+        const row = {
+          'Student Name': student.name,
+          'Roll No': student.roll_no || 'N/A',
+          'Admission No': student.admission_no || 'N/A',
+        };
+
+        let totalObtained = 0;
+        let totalMaxMarks = 0;
+
+        // Add each subject's marks as a column
+        sortedSubjects.forEach(subject => {
+          const markInfo = marksMap[student.id]?.[subject.id];
+          let displayValue = '';
+          const maxMarks = markInfo?.maxMarks || exam.max_marks || 100;
+
+          if (markInfo) {
+            if (markInfo.marks === -1) {
+              // AB (Absent) - count as 0 for total, but include max marks
+              displayValue = 'AB';
+              totalObtained += 0;
+              totalMaxMarks += maxMarks;
+            } else if (markInfo.marks === -2) {
+              // NA (Not Applicable) - don't count in total or percentage
+              displayValue = 'NA';
+              // Do not add to totalObtained or totalMaxMarks
+            } else {
+              // Regular marks
+              displayValue = markInfo.marks.toString();
+              totalObtained += markInfo.marks;
+              totalMaxMarks += maxMarks;
+            }
+          } else {
+            // No marks entered - treat as empty, include in total calculation with 0
+            displayValue = '';
+            totalObtained += 0;
+            totalMaxMarks += maxMarks;
+          }
+
+          row[`${subject.name} (Max: ${maxMarks})`] = displayValue;
+        });
+
+        // Calculate percentage
+        const percentage = totalMaxMarks > 0 ? ((totalObtained / totalMaxMarks) * 100).toFixed(2) : '0.00';
+
+        // Add Total and Percentage columns
+        row['Total'] = `${totalObtained}/${totalMaxMarks}`;
+        row['Percentage'] = `${percentage}%`;
+
+        return row;
+      });
+
+      console.log('📊 [ExamsMarks] CSV data prepared:', csvData.length, 'rows');
+
+      // Convert to CSV format
+      const csvContent = convertToCSV(csvData);
+
+      // Add header information
+      const headerInfo = `Exam: ${exam.name}\nClass: ${classInfo.class_name}${classInfo.section ? `-${classInfo.section}` : ''}\nDate: ${new Date().toLocaleString('en-IN')}\n\n`;
+      const fullContent = headerInfo + csvContent;
+
+      // Generate filename
+      const fileName = generateFileName(
+        `marks_${classInfo.class_name}_${exam.name}`.replace(/[^a-zA-Z0-9_-]/g, '_'),
+        'csv',
+        true
+      );
+
+      console.log('📊 [ExamsMarks] Saving file:', fileName);
+
+      // Save the file
+      const success = await saveFile(fullContent, fileName, 'text/csv');
+
+      if (success) {
+        const successMsg = `Marks exported successfully as ${fileName}`;
+        if (Platform.OS === 'web' && window && window.alert) {
+          window.alert(`Success: ${successMsg}`);
+        } else {
+          Alert.alert('Success', successMsg);
+        }
+        console.log('✅ [ExamsMarks] CSV export successful');
+      } else {
+        const errorMsg = 'Unable to export marks. Please try again.';
+        if (Platform.OS === 'web' && window && window.alert) {
+          window.alert(`Export Failed: ${errorMsg}`);
+        } else {
+          Alert.alert('Export Failed', errorMsg);
+        }
+        console.error('❌ [ExamsMarks] CSV export failed');
+      }
+
+    } catch (error) {
+      console.error('❌ [ExamsMarks] Error exporting to CSV:', error);
+      const errorMsg = `Failed to export marks: ${error.message}`;
+      if (Platform.OS === 'web' && window && window.alert) {
+        window.alert(`Error: ${errorMsg}`);
+      } else {
+        Alert.alert('Error', errorMsg);
+      }
+    }
+  };
+
   // Render exam item with memoized performance optimizations
   const renderExamItem = useCallback(({ item: exam }) => {
     // Use memoized stats for better performance
@@ -953,7 +1175,7 @@ const handleDeleteExam = (exam) => {
               Class: {className}{classSection ? `-${classSection}` : ''}
             </Text>
             <Text style={styles.examDate}>
-              {formatDateText(exam.start_date)} - {formatDateText(exam.end_date)}
+              {`${formatDateText(exam.start_date) || 'N/A'} - ${formatDateText(exam.end_date) || 'N/A'}`}
             </Text>
             {exam.remarks && (
               <Text style={styles.examDescription}>{exam.remarks}</Text>
@@ -968,6 +1190,20 @@ const handleDeleteExam = (exam) => {
                 {isUpcoming ? 'Upcoming' : isCompleted ? 'Completed' : 'Ongoing'}
               </Text>
             </View>
+          </View>
+        </View>
+
+        {/* Marks Statistics Section */}
+        <View style={styles.marksStatsContainer}>
+          <View style={styles.statItem}>
+            <Text style={styles.statLabel}>Marks Entered</Text>
+            <Text style={styles.statValue}>{marksEntered} / {totalStudents}</Text>
+          </View>
+          <View style={styles.statItem}>
+            <Text style={styles.statLabel}>Completion</Text>
+            <Text style={[styles.statValue, completionPercentage === 100 && styles.statComplete]}>
+              {completionPercentage}%
+            </Text>
           </View>
         </View>
 
@@ -991,6 +1227,14 @@ const handleDeleteExam = (exam) => {
           </TouchableOpacity>
 
           <TouchableOpacity
+            style={[styles.actionButton, styles.exportButton]}
+            onPress={() => handleExportExamMarks(exam)}
+          >
+            <Ionicons name="download-outline" size={16} color="#2196F3" />
+            <Text style={styles.exportButtonText}>Export CSV</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
             style={[styles.actionButton, styles.deleteButton]}
             onPress={() => handleDeleteExam(exam)}
           >
@@ -1000,7 +1244,7 @@ const handleDeleteExam = (exam) => {
         </View>
       </View>
     );
-  }, [memoizedExamStats, classes, openMarksModal, openEditExamModal, handleDeleteExam]);
+  }, [memoizedExamStats, classes, openMarksModal, openEditExamModal, handleExportExamMarks, handleDeleteExam]);
 
   // Memoized toggle handler for class selection
   const handleToggleClassSelection = useCallback((classId) => {
@@ -1022,13 +1266,15 @@ const handleDeleteExam = (exam) => {
     useCallback(() => {
       async function fetchData() {
         if (tenantAccess.isReady && !tenantAccess.isLoading) {
-          console.log('🚀 ExamsMarks: Enhanced tenant system ready, loading data...');
+          console.log('🚀 ExamsMarks: Screen focused, invalidating marks cache and loading fresh data...');
+          // Invalidate marks cache to ensure fresh data is loaded
+          cache.invalidate('marks');
           await loadAllData();
         }
       }
 
       fetchData();
-    }, [tenantAccess.isReady, tenantAccess.isLoading])
+    }, [tenantAccess.isReady, tenantAccess.isLoading, cache, loadAllData])
   );
   
   // Handle tenant errors
@@ -2196,7 +2442,7 @@ const handleDeleteExam = (exam) => {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
           keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={
+          ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="document-text" size={64} color="#ccc" />
             <Text style={styles.emptyText}>No exams found</Text>
@@ -3625,6 +3871,35 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
   },
+  // Marks statistics styles
+  marksStatsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  statItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statLabel: {
+    fontSize: 11,
+    color: '#666',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    fontWeight: '500',
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2196F3',
+  },
+  statComplete: {
+    color: '#4CAF50',
+  },
   marksProgress: {
     fontSize: 12,
     color: '#666',
@@ -3661,6 +3936,15 @@ const styles = StyleSheet.create({
   },
   editButtonText: {
     color: '#FF9800',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  exportButton: {
+    backgroundColor: '#e3f2fd',
+  },
+  exportButtonText: {
+    color: '#2196F3',
     fontSize: 12,
     fontWeight: '600',
     marginLeft: 4,

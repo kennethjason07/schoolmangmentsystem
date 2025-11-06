@@ -4,12 +4,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../utils/AuthContext';
 import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 // 🚀 ENHANCED TENANT SYSTEM IMPORTS
-import { 
-  useTenantAccess, 
-  tenantDatabase, 
+import {
+  useTenantAccess,
+  tenantDatabase,
   createTenantQuery,
-  getCachedTenantId 
+  getCachedTenantId
 } from '../../utils/tenantHelpers';
+import { getTenantIdByEmail } from '../../utils/getTenantByEmail';
 // Legacy imports - can be removed after full migration
 import { 
   validateTenantAccess, 
@@ -278,7 +279,6 @@ const StudentDashboard = ({ navigation }) => {
         console.log('🔍 Student Dashboard - No tenant context, attempting to resolve from user email...');
         
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
           const emailTenantResult = await getTenantIdByEmail(user.email);
           
           if (emailTenantResult.success) {
@@ -402,7 +402,6 @@ const StudentDashboard = ({ navigation }) => {
         console.log('🔍 Student Dashboard - No tenant context for notifications, attempting to resolve from user email...');
         
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
           const emailTenantResult = await getTenantIdByEmail(user.email);
           
           if (emailTenantResult.success) {
@@ -592,7 +591,6 @@ const StudentDashboard = ({ navigation }) => {
         console.log('🔍 Student Dashboard - No tenant context for main data fetch, attempting to resolve from user email...');
         
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
           const emailTenantResult = await getTenantIdByEmail(user.email);
           
           if (emailTenantResult.success) {

@@ -38,6 +38,7 @@ import { getNextReceiptNumber } from '../../utils/receiptCounter';
 import { getCurrentAcademicYear } from '../../utils/academicYearUtils';
 import { loadLogoWithFallbacks, validateImageData } from '../../utils/robustLogoLoader';
 import { Image } from 'react-native';
+import { generateIsolatedPDF } from '../../utils/isolatedPrintReceipt';
 import LogoDisplay from '../../components/LogoDisplay';
 
 const { width } = Dimensions.get('window');
@@ -528,8 +529,7 @@ const FeePayment = ({ route }) => {
         total_paid_till_date: selectedReceipt.totalPaidTillDate || selectedReceipt.amount,
         amount_remaining: selectedReceipt.outstandingAmount || 0
       };
-      
-      const { generateIsolatedPDF } = await import('../../utils/isolatedPrintReceipt');
+
       await generateIsolatedPDF(receiptData, schoolDetails);
       
       console.log('✅ Parent - Isolated PDF generated and shared successfully');

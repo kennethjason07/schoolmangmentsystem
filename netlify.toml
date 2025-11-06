@@ -1,0 +1,4 @@
+[build]
+  # Skip build - use pre-built files from dist
+  command = "echo 'Using pre-built files'"
+  publish = "dist"

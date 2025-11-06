@@ -15,12 +15,13 @@ import { supabase, TABLES, dbHelpers } from '../../utils/supabase';
 import MessageBadge from '../../components/MessageBadge';
 import { useUniversalNotificationCount } from '../../hooks/useUniversalNotificationCount';
 // 🚀 ENHANCED TENANT SYSTEM IMPORTS
-import { 
-  useTenantAccess, 
-  tenantDatabase, 
+import {
+  useTenantAccess,
+  tenantDatabase,
   createTenantQuery,
-  getCachedTenantId 
+  getCachedTenantId
 } from '../../utils/tenantHelpers';
+import { getTenantIdByEmail } from '../../utils/getTenantByEmail';
 import { useGlobalRefresh } from '../../contexts/GlobalRefreshContext';
 // 👨‍🏫 TEACHER DUAL AUTHENTICATION IMPORTS
 import {
@@ -439,9 +440,8 @@ const fetchDashboardDataWithDirectAuth = async () => {
     
     if (DEBUG_TEACHER_AUTH_DETAILED) {
       console.log('📊 [TEACHER AUTH] Fetching dashboard data with direct teacher auth (NO TENANT)');
-      
+
       // 🔍 DEBUG: Check tenant context availability
-      const { getCachedTenantId } = await import('../../utils/tenantHelpers');
       const currentTenantId = getCachedTenantId();
       console.log('🏢 [TEACHER AUTH DEBUG] Tenant context check:', {
         tenantReady: isReady,

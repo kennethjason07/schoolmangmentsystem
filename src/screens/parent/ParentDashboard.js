@@ -38,6 +38,7 @@ import { testParentAuth, quickParentAuthTest } from '../../utils/testParentAuth'
 import { useSelectedStudent } from '../../contexts/SelectedStudentContext';
 import { useFocusEffect } from '@react-navigation/native';
 import usePullToRefresh from '../../hooks/usePullToRefresh';
+import { getTenantIdByEmail } from '../../utils/getTenantByEmail';
 import { useUnreadMessageCount } from '../../hooks/useUnreadMessageCount';
 import { badgeNotifier } from '../../utils/badgeNotifier';
 import DebugBadge from '../../components/DebugBadge';
@@ -225,7 +226,6 @@ const ParentDashboard = ({ navigation }) => {
         
         // Try to get tenant information using email lookup for parents
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {
@@ -348,7 +348,6 @@ const ParentDashboard = ({ navigation }) => {
         
         // Try to get tenant information using email lookup for parents
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {
@@ -477,7 +476,6 @@ const ParentDashboard = ({ navigation }) => {
         
         // Try to get tenant information using email lookup for parents
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {
@@ -605,7 +603,6 @@ const ParentDashboard = ({ navigation }) => {
         
         // Try to get tenant information using email lookup for parents
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {
@@ -729,7 +726,6 @@ const ParentDashboard = ({ navigation }) => {
         
         // Try to get tenant information using email lookup for parents
         try {
-          const { getTenantIdByEmail } = await import('../../utils/getTenantByEmail');
           const tenantResult = await getTenantIdByEmail(user.email);
           
           if (tenantResult.success) {

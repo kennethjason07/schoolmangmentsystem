@@ -2,11 +2,18 @@ const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
 
+// Enable dynamic import support for Supabase and other libraries
+config.transformer.unstable_allowRequireContext = true;
+config.transformer.asyncRequireModulePath = require.resolve(
+  'metro-runtime/src/modules/asyncRequire'
+);
+
 // Add resolver configuration for Node.js polyfills
 config.resolver.alias = {
   stream: 'readable-stream',
   buffer: '@craftzdog/react-native-buffer',
   'buffer/': '@craftzdog/react-native-buffer',
+  '@expo/metro-config/build/async-require': require.resolve('metro-runtime/src/modules/asyncRequire'),
 };
 
 // Add platforms in correct order (web first for optimization)

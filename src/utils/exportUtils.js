@@ -4,6 +4,10 @@ import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
 import { Alert, Platform } from 'react-native';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+// import * as XLSX from 'xlsx'; // Not installed, will use fallback
+const XLSX = null;
 
 // Console logger for export operations
 const logExport = (component, message, data) => {
@@ -20,11 +24,9 @@ export const testPDFExport = async () => {
   }
   
   try {
-    console.log('🧪 testPDFExport: Attempting to import jsPDF...');
-    
-    const { jsPDF } = await import('jspdf');
-    
-    console.log('🧪 testPDFExport: jsPDF imported, creating document...');
+    console.log('🧪 testPDFExport: Attempting to use jsPDF...');
+
+    console.log('🧪 testPDFExport: jsPDF available, creating document...');
     
     const doc = new jsPDF();
     doc.text('Test PDF Export', 20, 20);
@@ -493,17 +495,9 @@ const generateWebPDF = async (data, additionalInfo, title) => {
     let jsPDF, autoTable;
     
     try {
-      // Method 1: Direct dynamic import
-      const jsPDFModule = await import('jspdf');
-      jsPDF = jsPDFModule.jsPDF || jsPDFModule.default;
-      
-      console.log('📁 generateWebPDF: jsPDF loaded, type:', typeof jsPDF);
-      
-      // Load autoTable
-      const autoTableModule = await import('jspdf-autotable');
-      autoTable = autoTableModule.default || autoTableModule;
-      
-      console.log('📁 generateWebPDF: autoTable loaded, type:', typeof autoTable);
+      // Use statically imported modules
+      console.log('📁 generateWebPDF: Using jsPDF, type:', typeof jsPDF);
+      console.log('📁 generateWebPDF: Using autoTable, type:', typeof autoTable);
     } catch (importError) {
       console.error('📁 generateWebPDF: Import failed:', importError);
       
@@ -1589,10 +1583,7 @@ export const exportStudentFeeSummaryExcelMultiSheet = async (
 
     // Try to generate a real Excel workbook on web using SheetJS
     try {
-      const { Platform } = await import('react-native');
       const isWeb = Platform.OS === 'web';
-      const XLSXModule = await import('xlsx');
-      const XLSX = XLSXModule.default || XLSXModule;
 
       const wb = XLSX.utils.book_new();
 

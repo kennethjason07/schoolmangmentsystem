@@ -38,6 +38,7 @@ import { getCurrentAcademicYear } from '../../utils/academicYearUtils';
 import { loadLogoWithFallbacks, validateImageData } from '../../utils/robustLogoLoader';
 import { Image } from 'react-native';
 import LogoDisplay from '../../components/LogoDisplay';
+import { generateIsolatedPDF, printIsolatedReceipt } from '../../utils/isolatedPrintReceipt';
 
 const { width } = Dimensions.get('window');
 
@@ -549,7 +550,6 @@ const FeePayment = () => {
         amount_remaining: selectedReceipt.outstandingAmount || 0
       };
       
-      const { generateIsolatedPDF } = await import('../../utils/isolatedPrintReceipt');
       await generateIsolatedPDF(receiptData, schoolDetails);
       
       console.log('✅ Student - Isolated PDF generated and shared successfully');
@@ -651,7 +651,6 @@ const FeePayment = () => {
         amount_remaining: selectedReceipt.outstandingAmount || 0
       };
       
-      const { printIsolatedReceipt } = await import('../../utils/isolatedPrintReceipt');
       await printIsolatedReceipt(receiptData, schoolDetails);
       
       console.log('✅ Student - Isolated print completed successfully');

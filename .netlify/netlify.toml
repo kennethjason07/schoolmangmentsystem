@@ -7,10 +7,10 @@ redirects = []
 [functions."*"]
 
 [build]
-publish = "C:\\Users\\kened\\Desktop\\school_xyz\\schoolmangmentsystem\\dist"
-publishOrigin = "ui"
-commandOrigin = "ui"
-command = "expo export -p web"
+publish = "c:\\Users\\kened\\Desktop\\school_xyz\\schoolmangmentsystem\\dist"
+publishOrigin = "config"
+commandOrigin = "config"
+command = "echo 'Using pre-built files'"
 
 [build.environment]
 
